@@ -141,6 +141,40 @@ async def _probe_llm_anthropic(v: dict[str, Any]) -> ProbeResult:
     return ProbeResult(True, _ms(t0), f"{len(models)} models listed; {model!r} configured", models)
 
 
+def _ollama_agent_models(v: dict[str, Any]) -> dict[str, str]:
+    """Every ``llm.agents`` entry that would be served by Ollama, name to tag.
+
+    An entry names its own provider; one that leaves it empty inherits the
+    global ``llm.provider``. Entries are dicts when they arrive staged from
+    the UI and ``AgentLLMConfig`` objects when they come from the effective
+    settings, so both are read here.
+
+    ``run_probe`` always resolves ``core.llm.provider`` into the inputs, so the
+    fallback below is only reached by a direct call; it reads the field's own
+    default rather than naming a provider here, so an inheriting entry cannot
+    be skipped because two places disagree about what the default is.
+    """
+    from maljan.core.config import LLMConfig
+
+    raw = v.get("agents")
+    if not isinstance(raw, dict):
+        return {}
+    global_provider = str(v.get("provider") or LLMConfig.model_fields["provider"].default)
+    out: dict[str, str] = {}
+    for name, entry in raw.items():
+        if isinstance(entry, dict):
+            data: dict[str, Any] = entry
+        elif hasattr(entry, "model_dump"):
+            data = entry.model_dump(mode="json")
+        else:
+            continue
+        provider = str(data.get("provider") or "") or global_provider
+        model = str(data.get("model") or "")
+        if model and provider == "ollama":
+            out[str(name)] = model
+    return out
+
+
 async def _probe_llm_ollama(v: dict[str, Any]) -> ProbeResult:
     t0 = time.perf_counter()
     base = str(v.get("ollama_base_url") or "http://localhost:11434").rstrip("/")
@@ -154,6 +188,21 @@ async def _probe_llm_ollama(v: dict[str, Any]) -> ProbeResult:
     if missing:
         return ProbeResult(
             False, _ms(t0), f"{len(models)} models available; missing {missing}", models
+        )
+    # A per-agent override is a model name nothing else validates: a typo in
+    # it used to surface only when the job reached that agent, minutes in.
+    missing_agents = [
+        f"{name}={model}"
+        for name, model in sorted(_ollama_agent_models(v).items())
+        if model not in models
+    ]
+    if missing_agents:
+        return ProbeResult(
+            False,
+            _ms(t0),
+            f"{len(models)} models available; "
+            f"missing per-agent model(s): {', '.join(missing_agents)}",
+            models,
         )
     return ProbeResult(
         True, _ms(t0), f"{len(models)} models available; expert/judge present", models
@@ -185,6 +234,27 @@ async def probe_llm(v: dict[str, Any]) -> ProbeResult:
     if probe is None:
         return ProbeResult(False, 0, f"unknown provider: {provider!r}")
     return await probe(v)
+
+
+async def _ollama_tag_is_absent(base_url: str, model: str) -> bool:
+    """True only when the Ollama server answered and does not serve ``model``.
+
+    One GET. A server that cannot be reached says nothing about the tag — that
+    is the LLM probe's finding to report, not this one's — so an unreachable
+    server, an error status or an unexpected body all answer False.
+    """
+    ok, _detail, response = await _get(f"{base_url.rstrip('/')}/api/tags")
+    if not ok or response is None:
+        return False
+    try:
+        body = response.json()
+    except ValueError:
+        return False
+    listed = body.get("models") if isinstance(body, dict) else None
+    if not isinstance(listed, list):
+        return False
+    names = [str(m.get("name") or "") for m in listed if isinstance(m, dict)]
+    return model not in names
 
 
 async def probe_ghidra(v: dict[str, Any]) -> ProbeResult:
@@ -528,11 +598,26 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
                 }
             )
         agent_llm = settings.llm.agents.get(name)
+        llm_provider = agent_llm.provider if agent_llm else settings.llm.provider
+        # No per-agent override means the agent inherits the global expert
+        # model; reporting "" left the operator to work out which provider
+        # block that came from. ``expert_model`` already picks the leaf the
+        # selected provider uses.
+        llm_model = agent_llm.model if agent_llm else settings.llm.expert_model
         listed = ", ".join(tools[:8]) + ("…" if len(tools) > 8 else "")
+        detail = f"{len(tools)} tools: {listed}" if tools else "resolved; no tools"
+        ok = True
+        # A model name is the one thing resolution cannot check for itself:
+        # Ollama serves what it has pulled, and a typo there fails the job at
+        # the agent rather than here (BUG 8).
+        if llm_provider == "ollama" and llm_model:
+            if await _ollama_tag_is_absent(settings.llm.ollama.base_url, llm_model):
+                ok = False
+                detail = f"model {llm_model!r} is not present on the Ollama server"
         return ProbeResult(
-            True,
+            ok,
             _ms(t0),
-            f"{len(tools)} tools: {listed}" if tools else "resolved; no tools",
+            detail,
             None,
             tools,
             {
@@ -543,14 +628,7 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
                 # built-in's resolved prompt read-only, and a clone seeds its
                 # copy from this text rather than guessing it.
                 "prompt": resolved.prompt,
-                "llm": {
-                    "provider": agent_llm.provider if agent_llm else settings.llm.provider,
-                    # No per-agent override means the agent inherits the global
-                    # expert model; reporting "" left the operator to work out
-                    # which provider block that came from. ``expert_model``
-                    # already picks the leaf the selected provider uses.
-                    "model": agent_llm.model if agent_llm else settings.llm.expert_model,
-                },
+                "llm": {"provider": llm_provider, "model": llm_model},
                 "static_provider": resolved.static_provider_id,
                 "servers": servers,
             },
@@ -816,6 +894,7 @@ _INPUTS: dict[str, dict[str, str]] = {
         "core.llm.gemini.api_key": "gemini_api_key",
         "core.llm.gemini.expert_model": "gemini_expert_model",
         "core.llm.gemini.judge_model": "gemini_judge_model",
+        "core.llm.agents": "agents",
     },
     "ghidra": {
         "core.static.ghidra.url": "url",

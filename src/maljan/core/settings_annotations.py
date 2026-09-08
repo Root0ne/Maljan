@@ -155,8 +155,12 @@ ANNOTATIONS: dict[str, Annotation] = {
             "(LLM__AGENTS__<AGENT>__PROVIDER/MODEL/TEMPERATURE), letting different "
             "analysts (static, dynamic, network) run on different providers/models "
             "instead of sharing one global expert LLM. Empty by default, meaning every "
-            "agent uses the global expert LLM."
+            "agent uses the global expert LLM. The judge reads this map too; an entry "
+            "that sets only provider and model runs at the per-agent default "
+            "temperature of 0.1, not the judge role's 0.0, so set temperature "
+            "explicitly to keep the verdict call deterministic."
         ),
+        "probe": "llm",
     },
     "llm.anthropic.api_key": {
         "title": "Anthropic API key",

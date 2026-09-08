@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import weakref
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -117,6 +118,55 @@ def _run_async(coro: Any, label: str) -> None:
     _run_coro_blocking(coro, hard_timeout=120.0, label=label)
 
 
+# Every handle that still exists, so a retired agent loop can be told which of
+# them it took with it. Weak, so a handle nobody holds is simply gone.
+_LIVE_HANDLES: weakref.WeakSet[ServerHandle] = weakref.WeakSet()
+_HOOK_REGISTERED = threading.Event()
+
+
+def _abandon_handles_on(loop: asyncio.AbstractEventLoop) -> None:
+    """Drop every handle bound to a retired loop and reap its child.
+
+    An exit stack can only be unwound on the loop that wound it, so a handle
+    whose loop has been retired can never be closed properly again — which is
+    exactly the case ``_close_on_owner`` already refuses to enter, and the same
+    answer applies here: forget the toolkit and take the child directly. Doing
+    it at retirement rather than at the next ``aclose`` means the sidecar goes
+    away even when nothing ever closes that handle again, and it means the next
+    user of the server re-attaches on the fresh loop instead of parking on a
+    future the retired loop will never complete.
+
+    Runs on the watchdog thread. The reap is the only slow part and is bounded
+    by ``CHILD_TERM_GRACE``.
+    """
+    for handle in list(_LIVE_HANDLES):
+        if handle._owner_loop is not loop:
+            continue
+        logger.error(
+            "mcp server %r was attached to the agent loop that has just been retired; "
+            "abandoning its toolkit and reaping its child.",
+            handle.name,
+        )
+        handle._toolkit = None
+        handle._all_tools = []
+        handle._opened_async = False
+        try:
+            handle._reap_children()
+        except Exception as exc:  # noqa: BLE001 — teardown never propagates
+            logger.warning("mcp server %r child reap failed (non-fatal): %s", handle.name, exc)
+        handle._forget_attachment()
+
+
+def _register_retirement_hook() -> None:
+    """Subscribe once to agent-loop retirements. Imported late to avoid a cycle."""
+    if _HOOK_REGISTERED.is_set():
+        return
+    from maljan.agents.base_agent import on_agent_loop_retired
+
+    on_agent_loop_retired(_abandon_handles_on)
+    _HOOK_REGISTERED.set()
+
+
 class ServerHandle:
     """One configured MCP server, attached for at most one job at a time."""
 
@@ -143,6 +193,8 @@ class ServerHandle:
         # The argv that child was launched with, which is what makes the pid
         # above this handle's rather than merely contemporaneous.
         self._launch_argv: tuple[str, ...] = ()
+        _LIVE_HANDLES.add(self)
+        _register_retirement_hook()
 
     @property
     def is_open(self) -> bool:
@@ -444,13 +496,21 @@ class ServerHandle:
                 self.name,
             )
             return False
-        future = asyncio.run_coroutine_threadsafe(self._acleanup(toolkit), owner)
+        # Submitted through the agent-loop helper rather than
+        # ``run_coroutine_threadsafe`` directly, so the task itself is kept:
+        # cancelling the future below says nothing about whether the
+        # cancellation was ever delivered, and this is the exact teardown the
+        # 2026-09-07 hang was captured in. ``_cancel_and_watch`` does the
+        # cancel and watches the task behind it.
+        from maljan.agents.base_agent import _cancel_and_watch, _submit_to_agent_loop
+
+        future, cleanup_task = _submit_to_agent_loop(self._acleanup(toolkit), owner)
         try:
             return await asyncio.wait_for(
                 asyncio.wrap_future(future), timeout=CLEANUP_TIMEOUT + CROSS_LOOP_GRACE
             )
         except TimeoutError:
-            future.cancel()
+            _cancel_and_watch(owner, future, cleanup_task, f"mcp server {self.name!r} cleanup")
             logger.warning(
                 "mcp server '%s' cleanup did not finish on its own loop in %.0fs; abandoning it.",
                 self.name,

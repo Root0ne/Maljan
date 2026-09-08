@@ -358,3 +358,24 @@ def test_close_tears_down_the_toolkit_and_is_idempotent(monkeypatch):
 
     provider.close()  # idempotent: nothing to tear down, no error, no second close call
     assert closed == [1]
+
+
+# ---------------------------------------------------------------------------
+# BUG 4 (live run S4): a stdio server is spawned by the worker and reads the
+# sample off the worker's own filesystem, so it must be handed the host path.
+# The container prefix belongs to a remote server with its own mount.
+# ---------------------------------------------------------------------------
+
+
+def test_a_stdio_server_is_mirrored_to_a_host_path():
+    provider = GenericMCPStaticProvider.from_settings(_cfg(transport="stdio"))
+    spec = provider.mirror_spec()
+    assert spec.work_subdir == ".work"
+    assert spec.container_prefix == ""
+
+
+@pytest.mark.parametrize("transport", ["http", "streamable-http", "sse"])
+def test_a_remote_server_keeps_the_configured_container_prefix(transport):
+    cfg = _cfg(transport=transport, url="http://mcp.example:9999")
+    provider = GenericMCPStaticProvider.from_settings(cfg)
+    assert provider.mirror_spec().container_prefix == "/data/samples"

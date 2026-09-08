@@ -96,6 +96,41 @@ test.describe("tool servers and the REST sandbox", () => {
     expect(sent.use_all_tools).toBe(true);
   });
 
+  /* BUG 2 (live e2e 2026-09-07): `MCPServerConfig.env` had no control at all,
+   * so a stdio server needing a fixed variable (Qu1cksc0pe wants
+   * `SC0PE_MCP_TRANSPORT=stdio`) had to be wrapped in a shell script. */
+  test("a fixed environment map is staged and sent with the server", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.getByRole("button", { name: "Tool servers (MCP)", exact: true }).click();
+
+    await page.getByLabel("new server name").fill("qu1cksc0pe");
+    await page.getByRole("button", { name: "Add server" }).click();
+    const card = page.locator('[data-server="qu1cksc0pe"]');
+    await card.getByLabel("qu1cksc0pe command").fill("qu1cksc0pe.py");
+    await card.getByLabel("qu1cksc0pe env", { exact: true }).fill('{"SC0PE_MCP_TRANSPORT": "stdio"}');
+
+    const patches: unknown[] = [];
+    await page.route("**/api/v1/settings", (r) => {
+      if (r.request().method() === "PATCH") {
+        patches.push(r.request().postDataJSON());
+        return r.fulfill({ json: { applied: ["core.mcp.servers"], applies: { next_job: 1 } } });
+      }
+      return r.fallback();
+    });
+    await page.getByRole("button", { name: "Apply" }).click();
+    await page.getByRole("button", { name: "Confirm and apply" }).click();
+
+    const body = patches[0] as {
+      changes: Record<string, Record<string, { env: Record<string, string> }>>;
+    };
+    expect(body.changes["core.mcp.servers"].qu1cksc0pe.env).toEqual({
+      SC0PE_MCP_TRANSPORT: "stdio",
+    });
+  });
+
   /* B6 (dev audit 2026-09-06): a probe result outlived the configuration it
    * described — the green "3 tools: …" line stayed up while the command it had
    * dialled was edited out from under it. */
