@@ -157,6 +157,26 @@ def _compact_static_summary(static: StaticAnalysis) -> dict[str, Any]:
     return out
 
 
+def _absolute_host_sample_path(state: AnalysisState) -> str:
+    """``state['sample_path']`` made absolute, or "" when there is none.
+
+    Absolute is the whole point (BUG 11): a relative path is only meaningful
+    against a working directory, and the tool that reads it — an MCP sidecar,
+    a container — does not share the worker's. ``resolve`` is used for its
+    normalisation, not to check the file: it works on a path that does not
+    exist, which is what a mock or fixture run has.
+    """
+    raw = state.get("sample_path")
+    if not isinstance(raw, str) or not raw:
+        return ""
+    from pathlib import Path
+
+    try:
+        return str(Path(raw).resolve())
+    except OSError:  # pragma: no cover — an unresolvable path is still better than none
+        return raw
+
+
 def _augment_static_chunks_with_path(
     chunks: list,
     state: AnalysisState,
@@ -199,6 +219,15 @@ def _augment_static_chunks_with_path(
     static_path = paths.get(provider_id) if provider_id else None
     if not static_path:
         static_path = state.get("static_sample_path")
+    if not static_path:
+        # BUG 11 (live 2026-09-07, S5): a provider that mirrors nothing — the
+        # `none` provider, capa/YARA, anything that reads in place — left this
+        # empty, and the helper returned the chunks untouched. The only
+        # path-shaped thing the agent then saw was the sample's own *name*,
+        # which Qu1cksc0pe resolved against its own working directory. A tool
+        # cannot be handed a bare filename: with no mirror, the absolute host
+        # path is the one that is true for every reader on this machine.
+        static_path = _absolute_host_sample_path(state)
     if not static_path or not chunks:
         return chunks
 
