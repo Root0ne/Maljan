@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { CatalogEntry, SettingValue } from "@/types/settings";
+import SecretField, { type SecretStatus } from "./SecretField";
 
 const input =
   "w-full bg-bg-deep border border-border rounded px-2 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent disabled:opacity-50 disabled:cursor-not-allowed";
@@ -348,86 +349,28 @@ export function JsonWidget(p: WidgetProps) {
 }
 
 export function SecretWidget(p: WidgetProps) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState("");
-  const isSet = p.staged !== undefined ? p.staged !== null : Boolean(p.current?.is_set);
-  const status =
+  const status: SecretStatus =
     p.staged !== undefined
       ? p.staged === null
-        ? "will be cleared"
-        : "new value staged"
+        ? "cleared"
+        : "staged"
       : p.current?.is_set
-        ? `set · …${p.current.hint ?? ""} · ${p.current.source}`
-        : "not set";
-  if (!p.entry.editable) {
-    return (
-      <div className="text-sm text-text-muted">
-        {status}
-        {p.entry.reason ? ` — ${p.entry.reason}` : ""}
-      </div>
-    );
-  }
+        ? "set"
+        : "not-set";
   return (
-    <div className="flex items-center gap-2 flex-wrap">
-      {editing ? (
-        <>
-          <label className="sr-only" htmlFor={p.inputId ?? `secret-${p.entry.key}`}>
-            New value for {p.entry.title}
-          </label>
-          <input
-            id={p.inputId ?? `secret-${p.entry.key}`}
-            name={p.entry.key}
-            type="password"
-            autoComplete="new-password"
-            className={input}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder="paste the new value"
-          />
-          <button
-            type="button"
-            className="text-xs text-accent-strong"
-            onClick={() => {
-              p.onChange(draft);
-              setEditing(false);
-              setDraft("");
-            }}
-          >
-            Stage
-          </button>
-          <button
-            type="button"
-            className="text-xs text-text-secondary"
-            onClick={() => {
-              setEditing(false);
-              setDraft("");
-            }}
-          >
-            Cancel
-          </button>
-        </>
-      ) : (
-        <>
-          <span className="text-sm text-text-muted">{status}</span>
-          <button
-            type="button"
-            className="text-xs text-accent-strong"
-            onClick={() => setEditing(true)}
-          >
-            Set new value
-          </button>
-          {isSet && (
-            <button
-              type="button"
-              className="text-xs text-status-red"
-              onClick={() => p.onChange(null)}
-            >
-              Clear
-            </button>
-          )}
-        </>
-      )}
-    </div>
+    <SecretField
+      id={p.inputId ?? `secret-${p.entry.key}`}
+      name={p.entry.key}
+      title={p.entry.title}
+      status={status}
+      hint={p.current?.hint}
+      source={p.current?.source}
+      editable={p.entry.editable}
+      reason={p.entry.reason}
+      onStage={(value) => p.onChange(value)}
+      onClear={() => p.onChange(null)}
+      onCancel={() => undefined}
+    />
   );
 }
 

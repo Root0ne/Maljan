@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import type { ReactNode } from "react";
 import ApplyBar from "./ApplyBar";
 import SectionRail from "./SectionRail";
 import { SettingsProvider, useSettingsContext } from "./SettingsContext";
+import Toolbar from "./Toolbar";
+import { appliesSummary } from "./vocabulary";
 
 function ConfigurationLayoutBody({ children }: { children: ReactNode }) {
   const s = useSettingsContext();
@@ -12,6 +14,14 @@ function ConfigurationLayoutBody({ children }: { children: ReactNode }) {
 
   return (
     <div>
+      <Suspense fallback={null}>
+        <Toolbar />
+      </Suspense>
+      {s.lastResult && (
+        <div className="text-xs text-status-green mb-3" role="status">
+          {appliesSummary(s.lastResult.applies, s.lastResult.applied.length)}
+        </div>
+      )}
       <div className="lg:grid lg:grid-cols-[240px_minmax(0,1fr)] gap-6">
         <SectionRail />
         <div className="min-w-0">{children}</div>

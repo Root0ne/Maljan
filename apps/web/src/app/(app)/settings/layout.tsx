@@ -8,7 +8,7 @@ import { useAuth } from "@/lib/auth";
 const NAV_ITEMS = [
   { href: "/settings/profile", label: "Profile", adminOnly: false },
   { href: "/settings/api-keys", label: "API keys", adminOnly: false },
-  { href: "/settings/setup", label: "Setup guides", adminOnly: true },
+  // The setup-guide hub does not exist yet; Task 16 restores this entry.
   { href: "/settings/configuration", label: "Configuration", adminOnly: true },
 ];
 
