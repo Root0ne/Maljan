@@ -780,9 +780,16 @@ def _retire_wedged_loop(loop: asyncio.AbstractEventLoop, what: str) -> None:
     again), and if the loop is still running after the grace this says so
     loudly, names the thread, and leaves it abandoned.
 
-    Whatever was bound to the loop is invalidated first, before the fresh loop
-    can be handed out: a cached toolkit or async client created on this loop
-    would otherwise park on a future nobody will ever complete.
+    The stop is posted before anything bound to the loop is invalidated. A
+    spinning loop honours ``stop()`` at the end of its current iteration, so
+    posting it first ends the spin at once; the invalidation that follows
+    reaps every child the loop's handles spawned, each with its own grace
+    period, and a loop left spinning through those reaps would starve the
+    rest of the process for exactly that long (BUG 13 showed six abandoned
+    handles queued behind one retirement). Nothing is handed this loop in the
+    meantime: the global was cleared before either step, and a cached toolkit
+    or async client created on this loop would only park on a future nobody
+    will ever complete, which is what the invalidation exists to prevent.
     """
     global _AGENT_LOOP
     with _AGENT_LOOP_LOCK:
@@ -795,9 +802,9 @@ def _retire_wedged_loop(loop: asyncio.AbstractEventLoop, what: str) -> None:
         what,
         CANCEL_DELIVERY_GRACE,
     )
-    _invalidate_loop_bound_state(loop)
     with contextlib.suppress(RuntimeError):
         loop.call_soon_threadsafe(loop.stop)
+    _invalidate_loop_bound_state(loop)
 
     deadline = time.monotonic() + CANCEL_DELIVERY_GRACE
     while time.monotonic() < deadline:

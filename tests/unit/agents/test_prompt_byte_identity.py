@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
 PROMPTS = FIXTURES / "prompts"
 GOLDEN = FIXTURES / "golden"
@@ -85,22 +87,51 @@ def test_the_assembled_dynamic_prompt_equals_the_golden():
     )
 
 
-def _mock_container():
+@pytest.fixture(autouse=True)
+def _no_real_tool_servers(monkeypatch):
+    """Resolve prompts without spawning the built-in sidecars.
+
+    ``resolve_agent`` attaches every server bound to the role, so resolving the
+    judge or the network analyst against a real container used to start the
+    network and threat-intel sidecars: two child processes a prompt test never
+    reads, and nothing closed them. Dropping the container with those handles
+    still open is what drove the agent loop into anyio's cancel-delivery spin
+    for the rest of the test process (BUG 13). The stand-ins attach nothing
+    real, and ``container`` closes whatever they did attach.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    def factory(*args, **kwargs):
+        toolkit = MagicMock()
+        toolkit.initialize = AsyncMock(return_value=None)
+        toolkit.get_tools = MagicMock(return_value=[])
+        toolkit.cleanup = AsyncMock(return_value=None)
+        return toolkit
+
+    def run_async_stub(coro, label):
+        coro.close()
+
+    monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", factory)
+    monkeypatch.setattr("maljan.providers.servers._run_async", run_async_stub)
+
+
+@pytest.fixture
+def container():
     from maljan.core.config import Settings
     from maljan.core.container import ServiceContainer
 
-    return ServiceContainer(Settings(_env_file=None), mock=True)
+    built = ServiceContainer(Settings(_env_file=None), mock=True)
+    yield built
+    built.get_server_registry().close_all()
 
 
-def test_the_resolved_static_prompt_is_the_golden():
+def test_the_resolved_static_prompt_is_the_golden(container):
     from maljan.agents.composition import resolve_agent
 
-    assert resolve_agent("static", _mock_container()).prompt == _golden(
-        "static_isr_system_ghidra.txt"
-    )
+    assert resolve_agent("static", container).prompt == _golden("static_isr_system_ghidra.txt")
 
 
-def test_the_resolved_dynamic_prompt_is_the_golden():
+def test_the_resolved_dynamic_prompt_is_the_golden(container):
     """Pinned to CAPE2, exactly as ``dynamic_analyst._ISR_SYSTEM`` always was.
 
     The dynamic analyst has never assembled its prompt from the *configured*
@@ -111,21 +142,20 @@ def test_the_resolved_dynamic_prompt_is_the_golden():
     from maljan.agents.composition import resolve_agent
     from maljan.agents.dynamic_analyst import _ISR_SYSTEM
 
-    assert resolve_agent("dynamic", _mock_container()).prompt == _ISR_SYSTEM
+    assert resolve_agent("dynamic", container).prompt == _ISR_SYSTEM
     assert _ISR_SYSTEM == _golden("dynamic_system_cape2.txt")
 
 
-def test_the_resolved_network_and_judge_prompts_are_their_constants():
+def test_the_resolved_network_and_judge_prompts_are_their_constants(container):
     from maljan.agents.composition import resolve_agent
     from maljan.agents.judge_agent import JUDGE_VERDICT_SYSTEM
     from maljan.agents.network_analyst import _ISR_SYSTEM as NETWORK_SYSTEM
 
-    container = _mock_container()
     assert resolve_agent("network", container).prompt == NETWORK_SYSTEM
     assert resolve_agent("judge", container).prompt == JUDGE_VERDICT_SYSTEM
 
 
-def test_the_resolved_static_tool_set_is_todays_registry_tool_set():
+def test_the_resolved_static_tool_set_is_todays_registry_tool_set(container):
     """Under the default profile nothing is bound to ``static``, and that is the point.
 
     ``resolve_agent`` composes the *registry* half of an agent's tools; the
@@ -138,6 +168,5 @@ def test_the_resolved_static_tool_set_is_todays_registry_tool_set():
     from maljan.core.config import Settings
     from maljan.providers.servers import ServerRegistry
 
-    container = _mock_container()
     expected, _ = ServerRegistry(Settings(_env_file=None)).tools_for("static", "job")
     assert [t.name for t in resolve_agent("static", container).tools] == [t.name for t in expected]
