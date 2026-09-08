@@ -1094,7 +1094,11 @@ def make_judge_node(container: ServiceContainer) -> Any:
 
             async def _run_yara_scan() -> AgentISR | None:
                 try:
-                    yara_layer = container.get_yara_layer()
+                    # In a thread, like the scan below it. The getter *builds*
+                    # the layer on first use — compiling the whole rule corpus —
+                    # and the container caches behind a lock, so the whole cost
+                    # lands on whichever loop callback asked first (OBS 4).
+                    yara_layer = await asyncio.to_thread(container.get_yara_layer)
                     if yara_layer.rule_count > 0:
                         targets = await asyncio.to_thread(_scan_targets)
                         if not targets:
@@ -1135,11 +1139,19 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 try:
                     from maljan.analysis.sigma_layer import build_events_from_sandbox
 
-                    sigma_layer = container.get_sigma_layer()
+                    # The 209-second heartbeat gap of 2026-09-07 was caught
+                    # here: `from_rules_dir` reading and parsing 2902 rule
+                    # files, in a loop callback, with the worker's own thread
+                    # starved behind it. Building it is the slow part, not the
+                    # scan — and it is slow exactly once, on first use.
+                    sigma_layer = await asyncio.to_thread(container.get_sigma_layer)
                     if sigma_layer.rule_count > 0:
                         _sbx = state.get("sandbox_report")
                         _sbx = _sbx if isinstance(_sbx, dict) else None
-                        sigma_events = build_events_from_sandbox(_sbx)
+                        # Walks every process/file/registry entry of a full
+                        # sandbox report; on a chatty detonation that is
+                        # seconds, and it is pure CPU.
+                        sigma_events = await asyncio.to_thread(build_events_from_sandbox, _sbx)
                         if not sigma_events:
                             return None
                         sigma_layer.reset_filter_stats()
@@ -1313,11 +1325,16 @@ def make_judge_node(container: ServiceContainer) -> Any:
             _sigma_dropped_total = 0
             _yara_dropped_total = 0
             try:
-                _yara_dropped_total = container.get_yara_layer().last_filtered_count
+                # Cached by the scans above on every ordinary run, but not on
+                # the paths that skipped them — and a getter that may build is
+                # a getter that runs in a thread (OBS 4).
+                _yara_layer = await asyncio.to_thread(container.get_yara_layer)
+                _yara_dropped_total = _yara_layer.last_filtered_count
             except Exception as e:
                 logger.debug("Could not read yara_layer.last_filtered_count: %s", e)
             try:
-                _sigma_dropped_total = container.get_sigma_layer().last_filtered_count
+                _sigma_layer = await asyncio.to_thread(container.get_sigma_layer)
+                _sigma_dropped_total = _sigma_layer.last_filtered_count
             except Exception as e:
                 logger.debug("Could not read sigma_layer.last_filtered_count: %s", e)
 
@@ -1943,7 +1960,12 @@ def make_report_node(container: ServiceContainer) -> Any:
             _static_provider = container.get_static_provider()
             _sample_for_evidence = state.get("sample_path")
             if _static_provider.capabilities.provides_evidence and _sample_for_evidence:
-                _static_bundle = _static_provider.collect_evidence(str(_sample_for_evidence))
+                # capa is a subprocess with a 900s budget and YARA is a corpus
+                # scan; both are synchronous, and this is the report phase the
+                # worker's heartbeat went quiet in (OBS 4).
+                _static_bundle = await asyncio.to_thread(
+                    _static_provider.collect_evidence, str(_sample_for_evidence)
+                )
         except Exception as exc:  # noqa: BLE001 - evidence must never fail a report
             logger.warning(
                 "report_node: static evidence collection failed (%s: %s); continuing without it.",
@@ -1976,7 +1998,11 @@ def make_report_node(container: ServiceContainer) -> Any:
                 sample_platform=state.get("platform"),
                 static_evidence=_static_bundle,
             )
-            report = builder.build_deterministic()
+            # Deterministic and self-contained — every input is already in the
+            # builder — so a thread changes when it runs, never what it
+            # produces. It walks every section of every report, which on a
+            # full run is the other half of the report node's loop time.
+            report = await asyncio.to_thread(builder.build_deterministic)
             # Thread the judge node's exact opcode-hash family overlap into the
             # report (deterministic code-reuse links). Best-effort post-build,
             # mirroring how ``similar_samples`` is populated in enrichment.
