@@ -181,12 +181,14 @@ export const MOCK_API_KEY = {
 
 /**
  * Matches `apps/api/app/schemas/settings.py::SchemaResponse` /
- * `apps/web/src/types/settings.ts::SettingsSchema`. Five groups: three field
+ * `apps/web/src/types/settings.ts::SettingsSchema`. Five groups: four field
  * shapes in "negotiation" (plain int, a second int pre-seeded with a `"ui"`
  * source in `MOCK_SETTINGS_VALUES` below so per-row / group reset visibility
  * — shown only for a `"ui"`-sourced value — has something to contrast
- * against the `"default"`/`"env"` rows that must not show it, and a `list`
- * field defaulting to `[]` for `ListWidget` coverage), one secret in
+ * against the `"default"`/`"env"` rows that must not show it, an
+ * `advanced: true` int also `"ui"`-sourced so the "Advanced" fold has a
+ * reason to default open, and a `list` field defaulting to `[]` for
+ * `ListWidget` coverage), one secret in
  * "providers", "sandbox" and "static" — a provider selector each
  * (`order: -1`, `choices_from` naming the registry it was resolved from),
  * "sandbox" also carrying two `applies_when`-gated fields for conditional
@@ -247,6 +249,32 @@ export const MOCK_SETTINGS_SCHEMA = {
           order: 0,
           choices_from: null,
           editor: null, subgroup: null, advanced: false,
+        },
+        // Task 9: an `advanced: true`, `"ui"`-sourced entry so the fold-open
+        // rule (open on mount when something inside it is staged or
+        // ui-sourced) has something to prove itself against.
+        {
+          key: "core.negotiation.advanced_knob",
+          namespace: "core",
+          path: "negotiation.advanced_knob",
+          type: "int",
+          default: 1,
+          nullable: false,
+          choices: null,
+          minimum: null,
+          maximum: null,
+          secret: false,
+          group: "negotiation",
+          title: "Advanced knob",
+          description: "Rarely-tuned negotiation internal.",
+          applies: "next_job",
+          editable: true,
+          reason: null,
+          probe: null,
+          applies_when: null,
+          order: 0,
+          choices_from: null,
+          editor: null, subgroup: null, advanced: true,
         },
         {
           key: "core.negotiation.blocked_hosts",
@@ -541,6 +569,14 @@ export const MOCK_SETTINGS_VALUES = {
     },
     "core.negotiation.retry_delay": {
       value: 10,
+      is_set: null,
+      hint: null,
+      source: "ui",
+      updated_at: "2026-08-01T00:00:00Z",
+      updated_by: "user-1",
+    },
+    "core.negotiation.advanced_knob": {
+      value: 2,
       is_set: null,
       hint: null,
       source: "ui",
