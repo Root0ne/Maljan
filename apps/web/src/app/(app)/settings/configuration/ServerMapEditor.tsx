@@ -4,6 +4,7 @@ import { useState } from "react";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import type { CatalogEntry, McpServerEntry, ProbeResult, SettingValue } from "@/types/settings";
+import Dot from "./Dot";
 import { deepEqual, mapKeyError, putEntry, removeEntry } from "./mapEditorHelpers";
 import SecretField, { type SecretStatus } from "./SecretField";
 
@@ -60,18 +61,6 @@ export const EMPTY_SERVER: McpServerEntry = {
   agents: [],
   label: "",
 };
-
-/** One of the small state dots in the server list. */
-function Dot({ label, className }: { label: string; className: string }) {
-  return (
-    <span
-      role="img"
-      aria-label={label}
-      title={label}
-      className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${className}`}
-    />
-  );
-}
 
 /**
  * The fixed environment a stdio server is started with, as JSON.
