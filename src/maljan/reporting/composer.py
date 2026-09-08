@@ -255,7 +255,8 @@ class ReportComposer:
         ]
         try:
             return await asyncio.wait_for(
-                self._invoke(messages, schema), timeout=float(self.per_section_timeout)
+                self._invoke(messages, schema, section=section),
+                timeout=float(self.per_section_timeout),
             )
         except TimeoutError:
             logger.warning("ReportComposer: section '%s' timed out; skipping.", section)
@@ -268,7 +269,7 @@ class ReportComposer:
             return None
 
     async def _invoke(
-        self, messages: list[BaseMessage], schema: type[BaseModel]
+        self, messages: list[BaseMessage], schema: type[BaseModel], *, section: str = ""
     ) -> BaseModel | None:
         # Skipped outright on endpoints where structured output does not work
         # — see ``structured_output_supported``. The per-section timeout below
@@ -302,7 +303,34 @@ class ReportComposer:
         payload = safe_parse_json(_message_text(raw))
         if not payload:
             return None
+        if _section_declined(payload, schema):
+            # Not a failure: the model looked at the bundle and said the
+            # section has nothing in it. Logged at info so the skip is still
+            # traceable, and never as an error a reader would go chasing.
+            logger.info(
+                "ReportComposer: section '%s' declined by the model (no content); skipping.",
+                section or schema.__name__,
+            )
+            return None
         return schema.model_validate(_unwrap_section_envelope(payload, schema))
+
+
+def _section_declined(payload: Any, schema: type[BaseModel]) -> bool:
+    """True for ``{"<section>": null}``: the model's way of saying "nothing here".
+
+    The same envelope ``_unwrap_section_envelope`` opens, with ``null`` where
+    the object would be. Measured live on 2026-09-08 (qwen3:8b, full profile):
+    ``encryption_scheme``, ``ransom_note`` and ``conclusion`` all came back this
+    way for a sample that encrypts nothing and drops no note, and each was
+    logged as a failed section. A declined section is an empty one, not a
+    broken one, so the caller skips it without an error. The scalar envelope
+    (``{"encryption_scheme": "RC4, XOR"}``) is still left to fail: there is a
+    value there that nobody should guess a field for.
+    """
+    if not isinstance(payload, dict) or len(payload) != 1:
+        return False
+    ((key, value),) = payload.items()
+    return key not in schema.model_fields and value is None
 
 
 def _unwrap_section_envelope(payload: Any, schema: type[BaseModel]) -> Any:

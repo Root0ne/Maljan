@@ -24,6 +24,12 @@ schema, and ``extra="forbid"`` (deliberate, and worth keeping) rejected it.
 Unwrapping is only safe when the envelope is unambiguous: exactly one key, and
 the payload underneath is an object. Anything else is passed through untouched
 so a genuine single-field response is never silently reinterpreted.
+
+The ``input_value=None`` shape above is the one exception, settled on 2026-09-08
+after a full-profile run logged it three times for one report: ``{"<section>":
+null}`` is the model declining the section, and ``_section_declined`` lets the
+composer skip it without calling it a failure. The scalar envelope stays a
+failure.
 """
 
 from __future__ import annotations
@@ -33,7 +39,7 @@ from typing import Any
 import pytest
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from maljan.reporting.composer import _unwrap_section_envelope
+from maljan.reporting.composer import _section_declined, _unwrap_section_envelope
 
 
 class _Demo(BaseModel):
@@ -88,3 +94,33 @@ class TestAnAmbiguousPayloadIsLeftAlone:
     @pytest.mark.parametrize("payload", [None, [], "text", 3])
     def test_non_dict_input_is_returned_unchanged(self, payload: Any) -> None:
         assert _unwrap_section_envelope(payload, _Demo) == payload
+
+
+class TestANullEnvelopeIsADeclinedSection:
+    def test_a_section_key_holding_null_is_declined(self) -> None:
+        assert _section_declined({"ransom_note": None}, _Demo) is True
+
+    def test_a_declined_section_is_not_unwrapped_into_the_schema(self) -> None:
+        # The unwrapper leaves it alone (no object to recover), and validation
+        # would reject it, which is exactly why the caller checks ``declined``
+        # before validating.
+        payload = {"ransom_note": None}
+        assert _unwrap_section_envelope(payload, _Demo) == payload
+        with pytest.raises(ValidationError):
+            _Demo.model_validate(payload)
+
+    def test_a_real_field_set_to_null_is_not_a_declined_section(self) -> None:
+        assert _section_declined({"algorithm": None}, _Demo) is False
+
+    def test_a_scalar_envelope_is_not_declined(self) -> None:
+        assert _section_declined({"encryption_scheme": "RC4, XOR"}, _Demo) is False
+
+    def test_an_object_envelope_is_not_declined(self) -> None:
+        assert _section_declined({"encryption_scheme": {"algorithm": "XOR"}}, _Demo) is False
+
+    def test_two_keys_are_never_a_declined_section(self) -> None:
+        assert _section_declined({"a": None, "b": None}, _Demo) is False
+
+    @pytest.mark.parametrize("payload", [None, "", [], 0, "null"])
+    def test_non_dict_input_is_not_declined(self, payload: Any) -> None:
+        assert _section_declined(payload, _Demo) is False
