@@ -165,6 +165,14 @@ def _absolute_host_sample_path(state: AnalysisState) -> str:
     a container — does not share the worker's. ``resolve`` is used for its
     normalisation, not to check the file: it works on a path that does not
     exist, which is what a mock or fixture run has.
+
+    Two things it cannot do better than the value it is given. A *relative*
+    ``sample_path`` is resolved against **this process's** working directory,
+    which is right when the worker wrote the value (it always does) and a guess
+    when something else did — there is no other cwd available to guess with.
+    And ``resolve`` follows symlinks, so a corpus entry that is a link is handed
+    over as its target; that is the path the reader will actually open, but it
+    is not the name the operator used.
     """
     raw = state.get("sample_path")
     if not isinstance(raw, str) or not raw:
@@ -456,11 +464,17 @@ def make_analyst_node(
                 # so two static analysts on two providers each get their own
                 # mirror path (Task 9 fills in the per-provider dict; until
                 # then the fallback below is the only entry).
+                # The same three-step lookup ``_augment_static_chunks_with_path``
+                # does, absolute host-path fallback included (BUG 11). They have
+                # to agree: the chunk tells the model which path to use and this
+                # tells the tool wrapper, and a provider that mirrors nothing
+                # used to give the model a path and the wrapper ``None``.
                 agent._analysis_file_path = (  # type: ignore[attr-defined]
                     (state.get("static_sample_paths") or {}).get(  # type: ignore[attr-defined]
                         agent._resolved.static_provider_id
                     )
                     or state.get("static_sample_path")
+                    or _absolute_host_sample_path(state)
                     or None
                 )
 
@@ -1486,21 +1500,39 @@ def make_judge_node(container: ServiceContainer) -> Any:
             # least one observational claim, so a truly empty ISR is a
             # failure signal, not a clean result.)
             _analyst_keys = container.analyst_keys()
-            _claimless = [
+            _empty_analysts = [
                 name
                 for name in _analyst_keys
                 if name in isr_reports and not getattr(isr_reports.get(name), "claims", None)
             ]
-            # BUG 12: two different findings, reported for years as one
-            # sentence. An analyst that had nothing to read tells the reader
-            # the run was thin; an analyst that read everything and claimed
-            # nothing tells them the analyst failed. Split by asking the same
-            # guard the revision node asks — its answer is "was there data",
-            # which is exactly the distinction.
-            _no_data_analysts = [
-                name for name in _claimless if _revision_input_is_absent(state, container, name)
-            ]
-            _empty_analysts = [name for name in _claimless if name not in _no_data_analysts]
+            # BUG 12: two different findings, reported as one sentence. An
+            # analyst that had nothing to read says the run was thin; one that
+            # read everything and claimed nothing says the analyst failed.
+            #
+            # The distinction is carried as *data* — a per-agent flag on
+            # ``run_summary.agent_stats`` — and emphatically not as a second
+            # degradation-reason string. ``eval_dynamic_vs_static``'s
+            # ``incidental_reasons`` partitions on the literal "analysts
+            # produced no claims:" to strip the starved analysts out of the
+            # static-only arm's treatment, and that tree is read-only: a rival
+            # string would make every static-only arm record an unexplained
+            # incidental degradation and move the E.1 numbers with nothing
+            # saying so. The reason below is therefore byte-for-byte what it
+            # always was, for every claimless analyst.
+            #
+            # In a thread: the guard reads the file loader from disk and
+            # ``json.dumps`` a whole sandbox slice per analyst, which is
+            # exactly the kind of work the preceding commit moved off this
+            # loop (OBS 4).
+            _no_data_analysts = set(
+                await asyncio.to_thread(
+                    lambda: [
+                        name
+                        for name in _empty_analysts
+                        if _revision_input_is_absent(state, container, name)
+                    ]
+                )
+            )
             # D10: surface anti-emulation / anti-VM / sandbox-detection
             # signatures so the existing DEGRADED RUN banner can explain
             # the empty dynamic tab (sandbox traced nothing because the
@@ -1574,10 +1606,6 @@ def make_judge_node(container: ServiceContainer) -> Any:
             _degradation_reasons.extend(container.server_degradation_reasons())
             if _failed_analysts:
                 _degradation_reasons.append(f"analyst failures: {', '.join(_failed_analysts)}")
-            if _no_data_analysts:
-                _degradation_reasons.append(
-                    f"analysts had no data to analyse: {', '.join(_no_data_analysts)}"
-                )
             if _empty_analysts:
                 _degradation_reasons.append(
                     f"analysts produced no claims: {', '.join(_empty_analysts)}"
@@ -1611,7 +1639,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
                     .set_sample(state.get("file_hash", ""), state.get("file_name"))
                     .set_verdict(decision, len(bundle.objects) if isinstance(bundle, Bundle) else 0)
                     .set_negotiation(negotiation_state, max_iterations=max_iters)
-                    .set_isr_stats(isr_reports)
+                    .set_isr_stats(isr_reports, no_data=_no_data_analysts)
                     .set_validation_summary(ttp_validation_summary)
                     .set_cascade_summary(cascade_summary)
                     .set_platform_filter_summary(

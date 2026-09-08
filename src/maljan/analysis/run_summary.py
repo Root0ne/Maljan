@@ -72,6 +72,18 @@ class ISRAgentStats:
     mean_confidence: float
     technique_ids: list[str]
     has_dissent: bool
+    # True when this analyst had nothing to analyse, as opposed to having
+    # analysed its data and claimed nothing. The two are different findings —
+    # one says the run was thin, the other says the analyst failed — and they
+    # were reported identically until BUG 12.
+    #
+    # A flag rather than a second degradation-reason string, deliberately:
+    # ``tests/evaluation/eval_dynamic_vs_static.incidental_reasons`` partitions
+    # on the literal "analysts produced no claims:" to strip the starved
+    # analysts out of the static-only arm, and that tree is read-only. A new
+    # reason string would have made every static-only arm record an
+    # unexplained incidental degradation and moved the E.1 numbers silently.
+    no_data: bool = False
 
 
 @dataclass
@@ -294,8 +306,11 @@ class RunSummary:
             for s in self.agent_stats:
                 ttps = ", ".join(s.technique_ids) if s.technique_ids else "—"
                 dissent = "yes" if s.has_dissent else "no"
+                # An analyst with zero claims reads as a failure unless the
+                # table says it had nothing to read (BUG 12).
+                agent = f"{s.agent_id} (no data)" if s.no_data else s.agent_id
                 lines.append(
-                    f"| {s.agent_id} | {s.domain} | {s.claim_count} | "
+                    f"| {agent} | {s.domain} | {s.claim_count} | "
                     f"{s.mean_confidence:.2f} | {ttps} | {s.revision_round} | {dissent} |"
                 )
             lines.append("")
@@ -443,6 +458,7 @@ class RunSummary:
                     "mean_confidence": round(s.mean_confidence, 4),
                     "technique_ids": s.technique_ids,
                     "has_dissent": s.has_dissent,
+                    "no_data": s.no_data,
                 }
                 for s in self.agent_stats
             ],
@@ -691,8 +707,17 @@ class RunSummaryBuilder:
         )
         return self
 
-    def set_isr_stats(self, isr_reports: dict[str, Any]) -> RunSummaryBuilder:
-        """Extract per-agent ISR statistics."""
+    def set_isr_stats(
+        self, isr_reports: dict[str, Any], no_data: set[str] | None = None
+    ) -> RunSummaryBuilder:
+        """Extract per-agent ISR statistics.
+
+        ``no_data`` names the analysts that had nothing to analyse, so a reader
+        can tell them from the ones that analysed their data and claimed
+        nothing. Optional, and empty by default: every caller that does not know
+        the difference reports what it always did.
+        """
+        starved = no_data or set()
         stats: list[ISRAgentStats] = []
         for isr in isr_reports.values():
             technique_ids = [c.technique_id for c in isr.claims if c.technique_id is not None]
@@ -705,6 +730,7 @@ class RunSummaryBuilder:
                     mean_confidence=isr.mean_confidence,
                     technique_ids=list(dict.fromkeys(technique_ids)),  # deduplicate, preserve order
                     has_dissent=bool(isr.dissent_items),
+                    no_data=isr.agent_id in starved,
                 )
             )
         self._agent_stats = stats
