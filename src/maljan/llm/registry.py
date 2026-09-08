@@ -124,6 +124,8 @@ class LLMProviderRegistry:
     def build_model_for_agent(
         self,
         agent_name: str,
+        *,
+        fallback_role: str = "expert",
         **kwargs: Any,
     ) -> BaseChatModel:
         """Build a ChatModel for a specific named agent.
@@ -133,12 +135,15 @@ class LLMProviderRegistry:
         agent's dedicated provider and model name — enabling heterogeneous
         model ensemble (different model families per agent).
 
-        When no override is found, falls back to build_model("expert")
-        for full backward compatibility.
+        When no override is found, falls back to ``build_model`` with
+        ``fallback_role`` — "expert" for the analysts, which is what every
+        caller wanted before the judge started using this path too.
 
         Args:
             agent_name: The agent registry key (e.g. "static", "dynamic",
                         "network"). Case-insensitive lookup.
+            fallback_role: Role passed to ``build_model`` when the agent has
+                        no usable override.
             **kwargs:   Extra kwargs forwarded to the provider.
 
         Returns:
@@ -148,8 +153,12 @@ class LLMProviderRegistry:
 
         if agent_cfg is None:
             # No per-agent override — fall back to global expert LLM
-            logger.debug("No per-agent LLM config for '%s', using global expert LLM.", agent_name)
-            return self.build_model(role="expert", **kwargs)
+            logger.debug(
+                "No per-agent LLM config for '%s', using the %s role's model.",
+                agent_name,
+                fallback_role,
+            )
+            return self.build_model(role=fallback_role, **kwargs)
 
         # Per-agent override found
         provider_cls = _PROVIDER_REGISTRY.get(agent_cfg.provider)
@@ -157,12 +166,13 @@ class LLMProviderRegistry:
             available = ", ".join(_PROVIDER_REGISTRY.keys()) or "(none)"
             logger.warning(
                 "Agent '%s' specifies unknown provider '%s' (available: %s). "
-                "Falling back to global expert LLM.",
+                "Falling back to the %s role's model.",
                 agent_name,
                 agent_cfg.provider,
                 available,
+                fallback_role,
             )
-            return self.build_model(role="expert", **kwargs)
+            return self.build_model(role=fallback_role, **kwargs)
 
         temp = agent_cfg.temperature if agent_cfg.temperature is not None else 0.1
         logger.info(

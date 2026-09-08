@@ -46,6 +46,77 @@ export const EMPTY_SERVER: McpServerEntry = {
 };
 
 /**
+ * The fixed environment a stdio server is started with, as JSON.
+ *
+ * `env_allow` names variables inherited from the worker's own environment;
+ * `env` sets them outright, and a server that needs one (Qu1cksc0pe wants
+ * `SC0PE_MCP_TRANSPORT=stdio`) could not be configured from this screen at
+ * all — the operator had to wrap the command in a shell script. The text is
+ * local state so a half-typed object is not reformatted under the cursor;
+ * only a parsed object of string values is staged, and an empty box is `{}`.
+ */
+function EnvMapField({
+  serverKey,
+  env,
+  onChange,
+}: {
+  serverKey: string;
+  env: Record<string, string>;
+  onChange: (env: Record<string, string>) => void;
+}) {
+  const [text, setText] = useState(() =>
+    Object.keys(env).length ? JSON.stringify(env, null, 2) : "",
+  );
+  const [bad, setBad] = useState<string | null>(null);
+
+  const stage = (next: string) => {
+    setText(next);
+    if (next.trim() === "") {
+      setBad(null);
+      onChange({});
+      return;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(next);
+    } catch (err) {
+      setBad((err as Error).message);
+      return;
+    }
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      setBad("expected an object of name to value");
+      return;
+    }
+    const entries = Object.entries(parsed as Record<string, unknown>);
+    if (entries.some(([, v]) => typeof v !== "string")) {
+      setBad("every value must be a string");
+      return;
+    }
+    setBad(null);
+    onChange(Object.fromEntries(entries) as Record<string, string>);
+  };
+
+  return (
+    <label className="block">
+      <span className="text-text-muted">Environment variables (JSON object)</span>
+      <textarea
+        className={`${input} font-mono`}
+        rows={3}
+        aria-label={`${serverKey} env`}
+        aria-invalid={bad ? true : undefined}
+        value={text}
+        onChange={(e) => stage(e.target.value)}
+      />
+      {bad && (
+        <div className="text-[11px] text-status-red mt-1" role="alert">
+          Invalid environment map: {bad}
+        </div>
+      )}
+    </label>
+  );
+}
+
+/**
  * The whole `core.mcp.servers` leaf, as a list of cards.
  *
  * One staged value for the whole map, not one per card: the PATCH body is the
@@ -231,6 +302,11 @@ export default function ServerMapEditor({
                       onChange={(e) => put(key, { cwd: e.target.value })}
                     />
                   </label>
+                  <EnvMapField
+                    serverKey={key}
+                    env={server.env ?? {}}
+                    onChange={(env) => put(key, { env })}
+                  />
                   <label className="block">
                     <span className="text-text-muted">
                       Environment names passed through (one per line)

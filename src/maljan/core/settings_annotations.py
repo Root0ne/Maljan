@@ -155,14 +155,19 @@ ANNOTATIONS: dict[str, Annotation] = {
             "(LLM__AGENTS__<AGENT>__PROVIDER/MODEL/TEMPERATURE), letting different "
             "analysts (static, dynamic, network) run on different providers/models "
             "instead of sharing one global expert LLM. Empty by default, meaning every "
-            "agent uses the global expert LLM."
+            "agent uses the global expert LLM. The judge reads this map too; an entry "
+            "that sets only provider and model runs at the per-agent default "
+            "temperature of 0.1, not the judge role's 0.0, so set temperature "
+            "explicitly to keep the verdict call deterministic."
         ),
+        "probe": "llm",
     },
     "llm.anthropic.api_key": {
         "title": "Anthropic API key",
         "description": (
             "Bearer credential for the Anthropic API. Required whenever llm.provider is anthropic."
         ),
+        "probe": "llm",
     },
     "llm.anthropic.expert_model": {
         "title": "Anthropic expert model",
@@ -170,10 +175,12 @@ ANNOTATIONS: dict[str, Annotation] = {
             "Model used for analyst LLM calls when llm.provider is anthropic, e.g. "
             "claude-sonnet-4-20250514."
         ),
+        "probe": "llm",
     },
     "llm.anthropic.judge_model": {
         "title": "Anthropic judge model",
         "description": ("Model used for the judge verdict call when llm.provider is anthropic."),
+        "probe": "llm",
     },
     "llm.expert_max_tokens": {
         "title": "Analyst max output tokens",
@@ -306,14 +313,17 @@ ANNOTATIONS: dict[str, Annotation] = {
             "Bearer credential (Google AI API key) for Gemini. Required whenever "
             "llm.provider is gemini."
         ),
+        "probe": "llm",
     },
     "llm.gemini.expert_model": {
         "title": "Gemini expert model",
         "description": ("Gemini model used for analyst LLM calls, e.g. gemini-2.5-pro."),
+        "probe": "llm",
     },
     "llm.gemini.judge_model": {
         "title": "Gemini judge model",
         "description": ("Gemini model used for the judge verdict call."),
+        "probe": "llm",
     },
     "llm.judge_max_tokens": {
         "title": "Judge max output tokens",
@@ -330,14 +340,17 @@ ANNOTATIONS: dict[str, Annotation] = {
             "Base URL of the local Ollama server used when llm.provider is ollama, e.g. "
             "http://localhost:11434."
         ),
+        "probe": "llm",
     },
     "llm.ollama.expert_model": {
         "title": "Ollama expert model",
         "description": ("Ollama model tag used for analyst LLM calls, e.g. qwen3.5:9b."),
+        "probe": "llm",
     },
     "llm.ollama.judge_model": {
         "title": "Ollama judge model",
         "description": ("Ollama model tag used for the judge verdict call."),
+        "probe": "llm",
     },
     "llm.ollama.keep_alive": {
         "title": "Ollama keep-alive",
@@ -1154,8 +1167,10 @@ ANNOTATIONS.update(
             "title": "radare2 sample directory",
             "description": (
                 "Host directory the sample is copied into so radare2 can open it by "
-                "path. Defaults to the same private .work directory the Ghidra "
-                "mirror uses."
+                "path, hardened the way every mirror is: owner-only, and removed when "
+                "the job ends. It may not be hidden. radare2 rejects any path with a "
+                "'/.' segment, so a sample under one makes every r2 tool call answer "
+                "'Failed to open file.'"
             ),
             "applies_when": _STATIC_R2,
         },

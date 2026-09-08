@@ -9,12 +9,16 @@ and exception translation so callers see a uniform ``AnalystError`` API.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import itertools
 import json
 import re
 import threading
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from concurrent.futures import CancelledError as _FuturesCancelled
+from concurrent.futures import Future as _ConcurrentFuture
 from concurrent.futures import TimeoutError as _FuturesTimeout
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -670,21 +674,227 @@ _AGENT_LOOP: asyncio.AbstractEventLoop | None = None
 _AGENT_LOOP_LOCK = threading.Lock()
 
 
+# How long a cancelled agent coroutine has to actually end before the loop it
+# runs on is treated as wedged. Cancelling is a request: a task that never
+# awaits again — anyio delivering into a shielded child-process wait is the
+# case seen live — never receives it, and anyio re-arms the delivery with
+# ``call_soon`` on every iteration, which turns the loop thread into a 100 %
+# CPU spin that nothing ends. Ten seconds is far longer than any teardown that
+# is going to succeed and far shorter than the 80 minutes that spin ran for.
+#
+# It is measured against the *shielded* teardown budgets in
+# ``providers/servers.py``, which are the only work allowed to continue after a
+# cancel: ``CHILD_TERM_GRACE`` 2s and ``REAP_BUDGET`` 4s, both far inside this.
+# The unshielded ones there are larger than this grace on purpose —
+# ``CLEANUP_TIMEOUT`` 12s, plus ``CROSS_LOOP_GRACE`` 14s routed, and
+# ``SYNC_CLOSE_TIMEOUT`` 20s — but a cancel is only ever watched *after* one of
+# those fences has already fired, so they are never in flight here. Raising a
+# shielded budget in that module past this value would start retiring healthy
+# loops, so the two are changed together.
+CANCEL_DELIVERY_GRACE = 10.0
+
+# Callbacks fired when a loop is retired, so whatever was bound to it can be
+# dropped before anything tries to use it on the fresh loop (see
+# ``_retire_wedged_loop``). Registered by ``providers.servers`` and
+# ``core.container``; called on the watchdog thread, so a hook does the least
+# work that makes its own state unusable and never blocks for long.
+_LOOP_RETIREMENT_HOOKS: list[Callable[[asyncio.AbstractEventLoop], None]] = []
+_LOOP_HOOKS_LOCK = threading.Lock()
+# The thread serving each live agent loop, so a loop that refuses to stop can
+# be named in the log rather than described. Keyed by ``id`` because a loop is
+# only ever compared by identity here.
+_LOOP_THREADS: dict[int, threading.Thread] = {}
+_LOOP_SEQUENCE = itertools.count(1)
+
+
+def on_agent_loop_retired(hook: Callable[[asyncio.AbstractEventLoop], None]) -> None:
+    """Register ``hook`` to run when an agent loop is retired. Never unregisters."""
+    with _LOOP_HOOKS_LOCK:
+        if hook not in _LOOP_RETIREMENT_HOOKS:
+            _LOOP_RETIREMENT_HOOKS.append(hook)
+
+
+def _invalidate_loop_bound_state(loop: asyncio.AbstractEventLoop) -> None:
+    """Tell every registered owner that ``loop`` is gone. Never raises."""
+    with _LOOP_HOOKS_LOCK:
+        hooks = list(_LOOP_RETIREMENT_HOOKS)
+    for hook in hooks:
+        try:
+            hook(loop)
+        except Exception as exc:  # noqa: BLE001 — one owner must not stop the rest
+            logger.warning("agent-loop retirement hook failed (non-fatal): %s", exc)
+
+
+def _serve_agent_loop(loop: asyncio.AbstractEventLoop) -> None:
+    """Run ``loop`` until it is stopped, then close it.
+
+    ``run_forever`` only returns after a retirement posted ``stop()``, so the
+    close is reached exactly once per retired loop and never for a healthy one.
+    Closing frees the selector and the self-pipe, which otherwise stayed open
+    for the life of the process — one pair of descriptors per retirement.
+    """
+    try:
+        loop.run_forever()
+    finally:
+        with contextlib.suppress(Exception):
+            loop.close()
+
+
 def _get_agent_loop() -> asyncio.AbstractEventLoop:
     """Return the process-wide agent event loop, starting it on first use."""
     global _AGENT_LOOP
     with _AGENT_LOOP_LOCK:
         loop = _AGENT_LOOP
+        # ``is_running()`` is deliberately not consulted: a loop whose thread
+        # has been started but has not yet entered ``run_forever`` would look
+        # dead to a second caller and get replaced, orphaning the first. A
+        # retired loop is signalled by ``_retire_wedged_loop`` clearing this
+        # global instead.
         if loop is None or loop.is_closed():
             loop = asyncio.new_event_loop()
             thread = threading.Thread(
-                target=loop.run_forever,
-                name="maljan-agent-loop",
+                target=_serve_agent_loop,
+                args=(loop,),
+                name=f"maljan-agent-loop-{next(_LOOP_SEQUENCE)}",
                 daemon=True,
             )
+            _LOOP_THREADS[id(loop)] = thread
             thread.start()
             _AGENT_LOOP = loop
         return loop
+
+
+def _retire_wedged_loop(loop: asyncio.AbstractEventLoop, what: str) -> None:
+    """Stop ``loop``, verify it stopped, and let the next caller start a fresh one.
+
+    Only ever reached from the watchdog below, and only for a loop that is
+    already unusable: it carries a task that refused a cancellation, or it is
+    not servicing callbacks at all, so everything queued behind it is starved
+    anyway.
+
+    ``stop()`` is a request too. It is honoured at the end of a ``_run_once``
+    iteration, which is exactly what the anyio cancel-delivery spin does reach
+    — but a coroutine blocked in synchronous code never returns to the loop, so
+    the stop is never seen. Claiming the loop was retired in that case would be
+    a lie: the global is cleared either way (nothing may be handed this loop
+    again), and if the loop is still running after the grace this says so
+    loudly, names the thread, and leaves it abandoned.
+
+    The stop is posted before anything bound to the loop is invalidated. A
+    spinning loop honours ``stop()`` at the end of its current iteration, so
+    posting it first ends the spin at once; the invalidation that follows
+    reaps every child the loop's handles spawned, each with its own grace
+    period, and a loop left spinning through those reaps would starve the
+    rest of the process for exactly that long (BUG 13 showed six abandoned
+    handles queued behind one retirement). Nothing is handed this loop in the
+    meantime: the global was cleared before either step, and a cached toolkit
+    or async client created on this loop would only park on a future nobody
+    will ever complete, which is what the invalidation exists to prevent.
+    """
+    global _AGENT_LOOP
+    with _AGENT_LOOP_LOCK:
+        if _AGENT_LOOP is loop:
+            _AGENT_LOOP = None
+    thread = _LOOP_THREADS.pop(id(loop), None)
+    logger.error(
+        "%s ignored its cancellation for %.0fs; the agent loop is being retired and "
+        "a fresh one will be started for the next call.",
+        what,
+        CANCEL_DELIVERY_GRACE,
+    )
+    with contextlib.suppress(RuntimeError):
+        loop.call_soon_threadsafe(loop.stop)
+    _invalidate_loop_bound_state(loop)
+
+    deadline = time.monotonic() + CANCEL_DELIVERY_GRACE
+    while time.monotonic() < deadline:
+        if loop.is_closed() or not loop.is_running():
+            return
+        time.sleep(0.1)
+    logger.error(
+        "the retired agent loop did not stop within %.0fs either: thread %r is abandoned "
+        "and keeps running whatever blocked it until this process exits. Everything that "
+        "was bound to that loop has been dropped, so the work itself continues on the "
+        "fresh loop; the cost is one wedged thread.",
+        CANCEL_DELIVERY_GRACE,
+        thread.name if thread is not None else "maljan-agent-loop",
+    )
+
+
+def _on_agent_loop_thread(loop: asyncio.AbstractEventLoop) -> bool:
+    """True when the calling thread is the one serving ``loop``.
+
+    Read from the recorded thread rather than from ``get_running_loop``: the
+    callers that matter are *synchronous* functions reached from a coroutine
+    running on the agent loop, and those have no running loop of their own to
+    ask.
+    """
+    thread = _LOOP_THREADS.get(id(loop))
+    return thread is not None and thread.ident == threading.get_ident()
+
+
+def _submit_to_agent_loop(
+    coro: Any, loop: asyncio.AbstractEventLoop
+) -> tuple[_ConcurrentFuture[Any], list[asyncio.Task[Any]]]:
+    """Schedule ``coro`` on ``loop``, keeping the task it actually runs as.
+
+    ``run_coroutine_threadsafe`` hands back a ``concurrent.futures.Future``
+    that is marked cancelled the moment ``cancel()`` is called, whether or not
+    the asyncio task ever ends — so the future says nothing about whether a
+    cancellation was delivered. The task does, and this is the only way to
+    hold one: the wrapper records itself before awaiting.
+    """
+    running: list[asyncio.Task[Any]] = []
+
+    async def _tracked() -> Any:
+        task = asyncio.current_task()
+        if task is not None:
+            running.append(task)
+        return await coro
+
+    return asyncio.run_coroutine_threadsafe(_tracked(), loop), running
+
+
+def _cancel_and_watch(
+    loop: asyncio.AbstractEventLoop,
+    future: _ConcurrentFuture[Any],
+    running: list[asyncio.Task[Any]],
+    what: str,
+) -> None:
+    """Cancel ``future`` and make sure the cancellation is actually delivered.
+
+    ``future.cancel()`` on its own is fire-and-forget: the live hang of
+    2026-09-07 was a teardown whose cancellation could not be delivered, after
+    which the loop thread spun at 100 % CPU for 80 minutes, starved the
+    worker's own thread of the GIL and stopped the job's heartbeat. The
+    watchdog is a daemon thread rather than a wait here, so no caller is
+    delayed by a task that is going to end normally.
+    """
+    future.cancel()
+    # An empty ``running`` is ambiguous: the coroutine may have been cancelled
+    # before the loop gave it a turn (a healthy loop, nothing to do), or the
+    # loop may already be wedged by an *earlier* task so this one never
+    # started — the state the whole fix exists for. A callback posted now tells
+    # the two apart: a loop that still services callbacks is healthy, a loop
+    # that never runs this one is not servicing anything.
+    servicing = threading.Event()
+    with contextlib.suppress(RuntimeError):
+        loop.call_soon_threadsafe(servicing.set)
+
+    def _watch() -> None:
+        deadline = time.monotonic() + CANCEL_DELIVERY_GRACE
+        while time.monotonic() < deadline:
+            if running and running[0].done():
+                return
+            time.sleep(0.05)
+        if running:
+            if not running[0].done():
+                _retire_wedged_loop(loop, what)
+            return
+        if not servicing.is_set():
+            _retire_wedged_loop(loop, f"{what} (never started: the loop is not running work)")
+
+    threading.Thread(target=_watch, name="maljan-agent-loop-watchdog", daemon=True).start()
 
 
 def _run_coro_blocking(coro: Any, hard_timeout: float, label: str = "") -> Any:
@@ -705,13 +915,28 @@ def _run_coro_blocking(coro: Any, hard_timeout: float, label: str = "") -> Any:
     database came to say ``CancelledError`` and nothing else.
     """
     loop = _get_agent_loop()
-    future = asyncio.run_coroutine_threadsafe(coro, loop)
     what = label or "agent coroutine"
+    # Blocking the agent loop's *own* thread on work the agent loop has to run
+    # is a deadlock by construction: ``future.result`` holds that thread, so the
+    # coroutine it waits for never gets a turn and the loop is dead underneath
+    # it for the whole hard cap — the "blocked in synchronous code" case
+    # ``_retire_wedged_loop`` can only report, never end. Refusing names the
+    # caller, which is the one thing a stack trace of a wedged loop cannot.
+    if _on_agent_loop_thread(loop):
+        coro.close()
+        raise RuntimeError(
+            f"{what} was submitted with a blocking wait from the agent loop's own "
+            "thread, which cannot serve it: await it there instead, or move the "
+            "synchronous caller to asyncio.to_thread"
+        )
+    future, running = _submit_to_agent_loop(coro, loop)
     try:
         return future.result(timeout=hard_timeout)
     except _FuturesTimeout:
-        # We cancelled it: it ran out of wall clock.
-        future.cancel()  # schedule cancellation of the asyncio task on the loop
+        # We cancelled it: it ran out of wall clock. Whether that cancellation
+        # is ever *delivered* is a separate question, and one the watchdog
+        # answers rather than assuming.
+        _cancel_and_watch(loop, future, running, what)
         raise TimeoutError(f"{what} exceeded hard cap of {hard_timeout}s") from None
     except _FuturesCancelled as exc:
         # It cancelled itself. ``concurrent.futures.CancelledError`` is an
@@ -751,12 +976,12 @@ async def run_on_agent_loop(coro: Any, hard_timeout: float, label: str = "") -> 
     ``asyncio.to_thread``, which binds no loop at all.
     """
     loop = _get_agent_loop()
-    future = asyncio.run_coroutine_threadsafe(coro, loop)
+    future, running = _submit_to_agent_loop(coro, loop)
     what = label or "agent coroutine"
     try:
         return await asyncio.wait_for(asyncio.wrap_future(future), hard_timeout)
     except TimeoutError:
-        future.cancel()
+        _cancel_and_watch(loop, future, running, what)
         raise TimeoutError(f"{what} exceeded hard cap of {hard_timeout}s") from None
     except (asyncio.CancelledError, _FuturesCancelled) as exc:
         # Same distinction as ``_run_coro_blocking``, and here the old code was

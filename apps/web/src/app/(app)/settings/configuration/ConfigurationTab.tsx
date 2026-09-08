@@ -277,7 +277,14 @@ export default function ConfigurationTab() {
                   probes={probes}
                   overridden={hasUiOverride[g.key] ?? false}
                   onProbe={async (name) => {
-                    const keys = g.entries.filter((e) => e.probe === name).map((e) => e.key);
+                    // Every staged input the probe consumes has to travel with
+                    // it, wherever the catalog files it: `core.llm.provider`
+                    // lives in a different group from the per-provider base
+                    // URL and model leaves, so a group-local key list would
+                    // silently drop half of what the backend reads.
+                    const keys = Array.from(s.entries.values())
+                      .filter((e) => e.probe === name)
+                      .map((e) => e.key);
                     const r = await s.probe(name, keys);
                     if (r.models) setModels(r.models);
                     return r;

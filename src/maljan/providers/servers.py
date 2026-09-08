@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import weakref
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -56,14 +57,27 @@ AGENT_TOOL_UNAVAILABLE_REASON = "agent tool '{server}.{name}' unavailable"
 # So a routed close plus its reap is 18s against the container's 20s, and the
 # container's own fence is what ends a handle that misbehaves beyond that.
 #
-# How long one toolkit's own cleanup may take before it is abandoned. An
-# ``mcp`` stdio exit stack closes the child's stdin, waits, then escalates
-# SIGTERM -> SIGKILL; this is comfortably past that escalation.
-CLEANUP_TIMEOUT = 12.0
+# How long one toolkit's own cleanup may take before its child is taken away
+# from it. An ``mcp`` stdio exit stack closes the child's stdin, waits 2s, then
+# escalates SIGTERM -> SIGKILL over another 2s; this is comfortably past that
+# escalation, so reaching it means the escalation itself did not run.
+CLEANUP_TIMEOUT = 10.0
+
+# How long the transport then gets to finish unwinding, with its child already
+# killed. Every wait inside the stack — the child wait, the pipe readers —
+# returns on its own once the process is gone, so this covers the unwind only.
+# ``CLEANUP_TIMEOUT + CHILD_EXIT_GRACE`` is the whole local budget and is what
+# the routed fence below is measured against.
+CHILD_EXIT_GRACE = 2.0
 
 # Extra headroom for a cleanup routed to another loop: the owning loop still
-# applies ``CLEANUP_TIMEOUT`` itself, so this only has to outlast the hop.
+# applies its own budget, so this only has to outlast the hop.
 CROSS_LOOP_GRACE = 2.0
+
+# The fence the *calling* loop puts around a routed close: the owning loop's
+# whole budget plus the hop. Named rather than spelled out at both use sites,
+# because it is the number the comment block above balances.
+ROUTED_CLOSE_TIMEOUT = CLEANUP_TIMEOUT + CHILD_EXIT_GRACE + CROSS_LOOP_GRACE
 
 # How long a child gets between SIGTERM and SIGKILL in the backstop reap.
 CHILD_TERM_GRACE = 2.0
@@ -117,6 +131,70 @@ def _run_async(coro: Any, label: str) -> None:
     _run_coro_blocking(coro, hard_timeout=120.0, label=label)
 
 
+# Every handle that still exists, so a retired agent loop can be told which of
+# them it took with it. Weak, so a handle nobody holds is simply gone.
+_LIVE_HANDLES: weakref.WeakSet[ServerHandle] = weakref.WeakSet()
+
+# Every handle that is attached right now, held strongly until it is closed.
+# ``_LIVE_HANDLES`` is weak so a handle nobody holds can simply go; an
+# *attached* handle cannot be allowed to. Its toolkit's stdio transport is an
+# async generator, and when the last reference to an open one is dropped the
+# agent loop's async-generator finalizer schedules ``aclose()`` as a fresh task
+# on that loop. That unwinds the transport's task group from a task other than
+# the one that entered it: anyio cancels the scope, cannot deliver the
+# cancellation to tasks it no longer hosts, and re-arms the delivery with
+# ``call_soon`` on every iteration, so the agent loop spins at 100 % CPU for
+# the rest of the process (BUG 13, 2026-09-08: a prompt test dropped a
+# container that had resolved the judge, and every later test ran starved of
+# the GIL). Ownership of an open handle therefore belongs to the process, and
+# ends only in ``_forget_attachment``, which every detach path reaches.
+_ATTACHED_HANDLES: set[ServerHandle] = set()
+_HOOK_REGISTERED = threading.Event()
+
+
+def _abandon_handles_on(loop: asyncio.AbstractEventLoop) -> None:
+    """Drop every handle bound to a retired loop and reap its child.
+
+    An exit stack can only be unwound on the loop that wound it, so a handle
+    whose loop has been retired can never be closed properly again — which is
+    exactly the case ``_close_on_owner`` already refuses to enter, and the same
+    answer applies here: forget the toolkit and take the child directly. Doing
+    it at retirement rather than at the next ``aclose`` means the sidecar goes
+    away even when nothing ever closes that handle again, and it means the next
+    user of the server re-attaches on the fresh loop instead of parking on a
+    future the retired loop will never complete.
+
+    Runs on the watchdog thread. The reap is the only slow part and is bounded
+    by ``CHILD_TERM_GRACE``.
+    """
+    for handle in list(_LIVE_HANDLES):
+        if handle._owner_loop is not loop:
+            continue
+        logger.error(
+            "mcp server %r was attached to the agent loop that has just been retired; "
+            "abandoning its toolkit and reaping its child.",
+            handle.name,
+        )
+        handle._toolkit = None
+        handle._all_tools = []
+        handle._opened_async = False
+        try:
+            handle._reap_children()
+        except Exception as exc:  # noqa: BLE001 — teardown never propagates
+            logger.warning("mcp server %r child reap failed (non-fatal): %s", handle.name, exc)
+        handle._forget_attachment()
+
+
+def _register_retirement_hook() -> None:
+    """Subscribe once to agent-loop retirements. Imported late to avoid a cycle."""
+    if _HOOK_REGISTERED.is_set():
+        return
+    from maljan.agents.base_agent import on_agent_loop_retired
+
+    on_agent_loop_retired(_abandon_handles_on)
+    _HOOK_REGISTERED.set()
+
+
 class ServerHandle:
     """One configured MCP server, attached for at most one job at a time."""
 
@@ -143,6 +221,8 @@ class ServerHandle:
         # The argv that child was launched with, which is what makes the pid
         # above this handle's rather than merely contemporaneous.
         self._launch_argv: tuple[str, ...] = ()
+        _LIVE_HANDLES.add(self)
+        _register_retirement_hook()
 
     @property
     def is_open(self) -> bool:
@@ -292,6 +372,7 @@ class ServerHandle:
             self._teardown(toolkit)
             raise
         self._toolkit = toolkit
+        _ATTACHED_HANDLES.add(self)
         self._opened_async = False
         # ``_run_async`` hands the coroutine to the shared agent loop, so that
         # is the loop this toolkit's exit stack was wound on.
@@ -362,6 +443,7 @@ class ServerHandle:
             self._child_pids = ()
             raise
         self._toolkit = toolkit
+        _ATTACHED_HANDLES.add(self)
         self._opened_async = True
         self._note_child_pids(before)
         self._all_tools = list(toolkit.get_tools())
@@ -379,25 +461,76 @@ class ServerHandle:
         Returns True when the toolkit closed itself, False when it was
         abandoned — the caller reaps the child in that case, once, from a
         place a cancellation cannot skip.
+
+        Bounded by ``_close_bounded``, which is where the BUG-7 fix lives.
         """
         closer = getattr(toolkit, "cleanup", None) or getattr(toolkit, "aclose", None)
         if closer is None:
             return True
+        return await self._close_bounded(closer, CLEANUP_TIMEOUT)
+
+    async def _close_bounded(self, closer: Callable[[], Any], budget: float) -> bool:
+        """Await ``closer()`` under ``budget``, killing its child before any cancel.
+
+        **The child dies first; only then may the unwind be cancelled.** That
+        is the BUG-7 fix, and it is the opposite of what the bound used to do.
+        A stdio transport's exit stack waits on its child process, and a child
+        that does not exit waits forever; the obvious answer — a plain
+        ``asyncio.wait_for`` — cancels the unwind while the child is still
+        running, and that is what wedged the worker on 2026-09-07:
+
+        * The cancellation is delivered **once**, and ``mcp``'s stdio shutdown
+          block consumes it (``mcp/client/stdio/__init__.py:190-216``). That
+          block is unshielded, so the ``CancelledError`` raises out of
+          ``await process.wait()`` at once — and its ``except TimeoutError:``,
+          the SIGTERM -> SIGKILL escalation, does not catch a
+          ``CancelledError`` and never runs. The child therefore *outlives* the
+          cancellation that was supposed to end the wait on it.
+        * The unwind then continues into anyio's ``Process.aclose``, whose
+          ``await self.wait()`` is *not* shielded (``_backends/_asyncio.py``
+          drops the shield first, and kills the child if a cancellation lands
+          there) — but the cancellation has already been delivered and
+          consumed, so nothing re-cancels it and it simply parks on a child
+          that is still running.
+        * That task is still in the task group's cancel scope, and
+          ``CancelScope._deliver_cancellation`` sets ``should_retry`` for every
+          task in ``self._tasks``, re-arming itself with ``loop.call_soon`` on
+          every iteration. A scope that can never empty therefore spins its
+          loop thread at 100 % CPU — 80 minutes of it, starving the worker of
+          the GIL and stopping the job's heartbeat.
+
+        So a timer takes the child away at ``budget``, and the unwind is given
+        ``CHILD_EXIT_GRACE`` more to finish by itself. With the process gone
+        every wait inside the stack returns, the scope empties, and the fence
+        usually has nothing left to cancel. If it does cancel, it is cancelling
+        a stack whose child is already dead, so each wait in it completes
+        rather than parking.
+
+        The close is awaited in the caller's own task, never wrapped in one:
+        anyio cancel scopes are task-bound, and running the unwind in a
+        separate task turns every close into "Attempted to exit cancel scope in
+        a different task" plus a cancellation delivered to the wrong task.
+
+        Returns True when the toolkit closed itself, False when it was
+        abandoned — the caller reaps the child in that case.
+        """
+        loop = asyncio.get_running_loop()
+        killer = loop.call_later(budget, self._kill_children_now)
         try:
-            # A stdio transport's exit stack waits on the child process, and a
-            # child that does not exit waits forever — the 42-minute teardown
-            # ``JudgeAgent.aclose`` was written for.
-            await asyncio.wait_for(closer(), timeout=CLEANUP_TIMEOUT)
+            await asyncio.wait_for(closer(), timeout=budget + CHILD_EXIT_GRACE)
         except TimeoutError:
             logger.warning(
-                "mcp server '%s' cleanup did not finish in %.0fs; abandoning it.",
+                "mcp server '%s' cleanup did not finish within %.0fs of its child being "
+                "killed; abandoning it.",
                 self.name,
-                CLEANUP_TIMEOUT,
+                CHILD_EXIT_GRACE,
             )
             return False
         except Exception as exc:  # noqa: BLE001 — teardown never propagates
             logger.warning("mcp server '%s' teardown failed (non-fatal): %s", self.name, exc)
             return False
+        finally:
+            killer.cancel()
         return True
 
     async def _close_on_owner(self, toolkit: Any) -> bool:
@@ -444,17 +577,23 @@ class ServerHandle:
                 self.name,
             )
             return False
-        future = asyncio.run_coroutine_threadsafe(self._acleanup(toolkit), owner)
+        # Submitted through the agent-loop helper rather than
+        # ``run_coroutine_threadsafe`` directly, so the task itself is kept:
+        # cancelling the future below says nothing about whether the
+        # cancellation was ever delivered, and this is the exact teardown the
+        # 2026-09-07 hang was captured in. ``_cancel_and_watch`` does the
+        # cancel and watches the task behind it.
+        from maljan.agents.base_agent import _cancel_and_watch, _submit_to_agent_loop
+
+        future, cleanup_task = _submit_to_agent_loop(self._acleanup(toolkit), owner)
         try:
-            return await asyncio.wait_for(
-                asyncio.wrap_future(future), timeout=CLEANUP_TIMEOUT + CROSS_LOOP_GRACE
-            )
+            return await asyncio.wait_for(asyncio.wrap_future(future), timeout=ROUTED_CLOSE_TIMEOUT)
         except TimeoutError:
-            future.cancel()
+            _cancel_and_watch(owner, future, cleanup_task, f"mcp server {self.name!r} cleanup")
             logger.warning(
                 "mcp server '%s' cleanup did not finish on its own loop in %.0fs; abandoning it.",
                 self.name,
-                CLEANUP_TIMEOUT + CROSS_LOOP_GRACE,
+                ROUTED_CLOSE_TIMEOUT,
             )
             return False
         except Exception as exc:  # noqa: BLE001 — teardown never propagates
@@ -504,6 +643,28 @@ class ServerHandle:
             with contextlib.suppress(OSError):
                 os.kill(pid, sig)
 
+    def _kill_children_now(self) -> None:
+        """SIGKILL this handle's children at once, no grace. Never raises.
+
+        The polite path is already spent by the time this runs: the transport's
+        own shutdown closes stdin, waits, then escalates SIGTERM -> SIGKILL,
+        and reaching ``CLEANUP_TIMEOUT`` means all of that either did not run
+        or did not work. A second SIGTERM would only add its grace period to a
+        teardown that has already overrun — and the live case, the network
+        sidecar inside scapy, was exactly a child that sat through one.
+        """
+        import signal
+
+        pids = self._live_children()
+        if not pids:
+            return
+        self._signal_children(pids, signal.SIGKILL)
+        logger.warning(
+            "mcp server '%s' child(ren) %s killed so its transport can finish unwinding.",
+            self.name,
+            ", ".join(str(pid) for pid in pids),
+        )
+
     def _kill_survivors(self, pids: list[int]) -> None:
         """SIGKILL whichever of ``pids`` sat through the SIGTERM."""
         import signal
@@ -549,6 +710,7 @@ class ServerHandle:
 
     def _forget_attachment(self) -> None:
         """Drop what only an attached handle carries. Call after the reap."""
+        _ATTACHED_HANDLES.discard(self)
         self._owner_loop = None
         self._child_pids = ()
         self._launch_argv = ()
@@ -613,6 +775,12 @@ class ServerHandle:
         ``open`` runs ``initialize`` through ``_run_async`` — but the owner is
         read rather than assumed, so a handle that reaches here having been
         opened elsewhere is routed rather than corrupted.
+
+        The close itself goes through ``_close_bounded`` for the same reason
+        the async path does: the hard cap in ``_run_coro_blocking`` cancels
+        whatever it is waiting on, and cancelling a transport that is still
+        parked on a live child is what spins the agent loop (BUG 7). The child
+        is killed inside the budget, before that cap can fire.
         """
         closer = getattr(toolkit, "cleanup", None) or getattr(toolkit, "aclose", None)
         if closer is None:
@@ -621,9 +789,20 @@ class ServerHandle:
 
         owner = self._owner_loop
         budget = SYNC_CLOSE_TIMEOUT
+        # The inner fence has to finish strictly inside the hard cap, or the
+        # two race and the cap — which cancels, and cancels a transport whose
+        # child may still be alive — can win. ``_close_bounded`` spends
+        # ``inner + CHILD_EXIT_GRACE``, so the whole of it lands
+        # ``CROSS_LOOP_GRACE`` before the cap, the same headroom the routed
+        # path leaves.
+        inner = budget - CHILD_EXIT_GRACE - CROSS_LOOP_GRACE
         try:
             if owner is None or owner is _get_agent_loop():
-                _run_coro_blocking(closer(), hard_timeout=budget, label=f"{self.name}-mcp-close")
+                _run_coro_blocking(
+                    self._close_bounded(closer, inner),
+                    hard_timeout=budget,
+                    label=f"{self.name}-mcp-close",
+                )
             else:
                 # Blocking on a loop that is running in *this* thread would
                 # deadlock; ``close`` never does that (it skips async-opened

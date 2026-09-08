@@ -157,6 +157,61 @@ def _compact_static_summary(static: StaticAnalysis) -> dict[str, Any]:
     return out
 
 
+def _absolute_host_sample_path(state: AnalysisState) -> str:
+    """``state['sample_path']`` made absolute, or "" when there is none.
+
+    Absolute is the whole point (BUG 11): a relative path is only meaningful
+    against a working directory, and the tool that reads it — an MCP sidecar,
+    a container — does not share the worker's. ``resolve`` is used for its
+    normalisation, not to check the file: it works on a path that does not
+    exist, which is what a mock or fixture run has.
+
+    Two things it cannot do better than the value it is given. A *relative*
+    ``sample_path`` is resolved against **this process's** working directory,
+    which is right when the worker wrote the value (it always does) and a guess
+    when something else did — there is no other cwd available to guess with.
+    And ``resolve`` follows symlinks, so a corpus entry that is a link is handed
+    over as its target; that is the path the reader will actually open, but it
+    is not the name the operator used.
+    """
+    raw = state.get("sample_path")
+    if not isinstance(raw, str) or not raw:
+        return ""
+    from pathlib import Path
+
+    try:
+        return str(Path(raw).resolve())
+    except OSError:  # pragma: no cover — an unresolvable path is still better than none
+        return raw
+
+
+def _pin_sample_path(agent: Any, state: AnalysisState) -> None:
+    """Pin the path this agent's tools must be given, on the agent itself.
+
+    The same three-step lookup ``_augment_static_chunks_with_path`` does — the
+    agent's own provider mirror, the global mirror, then the absolute host
+    path (BUG 11) — because the two have to agree: the chunk tells the model
+    which path to use and this tells the tool layer, and a disagreement is a
+    tool call against a file that is not there.
+
+    BUG 11, second round (live 2026-09-07, S5c): this used to run for the
+    ``static`` role only. A *generic* agent (``static_qu1cksc0pe``, provider
+    ``none``) therefore had the path in its chunk JSON and nothing anywhere
+    else, so when the model called ``analyze_file`` with the bare filename
+    there was no pinned value to correct it against and Qu1cksc0pe resolved
+    the name against its own working directory.
+
+    Assigned unconditionally: agents are cached across samples, so a path that
+    cannot be recomputed must become ``None`` rather than stay yesterday's.
+    """
+    agent._analysis_file_path = (
+        (state.get("static_sample_paths") or {}).get(agent._resolved.static_provider_id)
+        or state.get("static_sample_path")
+        or _absolute_host_sample_path(state)
+        or None
+    )
+
+
 def _augment_static_chunks_with_path(
     chunks: list,
     state: AnalysisState,
@@ -199,6 +254,15 @@ def _augment_static_chunks_with_path(
     static_path = paths.get(provider_id) if provider_id else None
     if not static_path:
         static_path = state.get("static_sample_path")
+    if not static_path:
+        # BUG 11 (live 2026-09-07, S5): a provider that mirrors nothing — the
+        # `none` provider, capa/YARA, anything that reads in place — left this
+        # empty, and the helper returned the chunks untouched. The only
+        # path-shaped thing the agent then saw was the sample's own *name*,
+        # which Qu1cksc0pe resolved against its own working directory. A tool
+        # cannot be handed a bare filename: with no mirror, the absolute host
+        # path is the one that is true for every reader on this machine.
+        static_path = _absolute_host_sample_path(state)
     if not static_path or not chunks:
         return chunks
 
@@ -364,6 +428,13 @@ def make_analyst_node(
                         _e,
                     )
 
+                # BUG 11, second round: the chunk carries the path for the
+                # model to read; this carries it for the tool layer, which is
+                # what actually corrects a model that sends the bare filename.
+                # Pinned *before* the chunk is built: the augmentation reads a
+                # file and can raise, and the outer handler would then leave a
+                # cached agent on the previous sample's path.
+                _pin_sample_path(agent, state)
                 static_context_chunks = _augment_static_chunks_with_path(
                     container.load_chunked(state["file_hash"], agent_name),
                     state,
@@ -412,13 +483,6 @@ def make_analyst_node(
                 except Exception as _e:  # noqa: BLE001
                     logger.debug("static summary extraction skipped: %s", _e)
 
-                chunks = _augment_static_chunks_with_path(
-                    chunks,
-                    state,
-                    static=_st,
-                    provider_id=agent._resolved.static_provider_id,
-                )
-
                 # Pin the container-visible path on the agent so the
                 # load_program tool wrapper can override hallucinated paths.
                 # Assign unconditionally — agents are cached across samples;
@@ -427,12 +491,21 @@ def make_analyst_node(
                 # so two static analysts on two providers each get their own
                 # mirror path (Task 9 fills in the per-provider dict; until
                 # then the fallback below is the only entry).
-                agent._analysis_file_path = (  # type: ignore[attr-defined]
-                    (state.get("static_sample_paths") or {}).get(  # type: ignore[attr-defined]
-                        agent._resolved.static_provider_id
-                    )
-                    or state.get("static_sample_path")
-                    or None
+                # The same three-step lookup ``_augment_static_chunks_with_path``
+                # does, absolute host-path fallback included (BUG 11). They have
+                # to agree: the chunk tells the model which path to use and this
+                # tells the tool wrapper, and a provider that mirrors nothing
+                # used to give the model a path and the wrapper ``None``.
+                # Pinned before the augmentation, which reads a file and can
+                # raise: the guarantee that no stale path survives is worth
+                # nothing if it holds only on the happy path.
+                _pin_sample_path(agent, state)
+
+                chunks = _augment_static_chunks_with_path(
+                    chunks,
+                    state,
+                    static=_st,
+                    provider_id=agent._resolved.static_provider_id,
                 )
 
                 # 2026-07 round 3: hand the static analyst the sample's capability
@@ -652,10 +725,33 @@ def _revision_input_is_absent(
     round 1. ``_is_placeholder_only`` carries the static carve-out with it:
     static falls back to a metadata-only prompt rather than being skipped.
 
+    "The same signal" has to mean the same *source*, and that is BUG 12. Round 0
+    reads ``load_sandbox_data_for_agent(agent, sandbox_report)`` whenever a
+    sandbox report exists, and only falls back to ``load_chunked`` when one does
+    not. This asked ``load_chunked`` unconditionally — which for dynamic and
+    network on a live sample is the file loader's own "No <layer> data
+    available" placeholder — so an analyst that had just analysed a full
+    detonation report was judged data-less and its round-0 claims were
+    discarded. A sandbox report that yields chunks *is* the data; the
+    placeholder check belongs to the loader path alone.
+
     Fails **open**. A loader that raises tells us nothing about whether data
     exists, and silently deleting an analyst on a transient Qdrant blip is a
     far worse failure than one wasted revise call.
     """
+    sandbox_report = state.get("sandbox_report")
+    if isinstance(sandbox_report, dict) and sandbox_report:
+        try:
+            sandbox_chunks = container.load_sandbox_data_for_agent(agent_name, sandbox_report)
+        except Exception as exc:  # noqa: BLE001 — fails open, same as the loader below
+            logger.debug(
+                "_revision_input_is_absent: sandbox slice failed for '%s' (%s); revising anyway.",
+                agent_name,
+                exc,
+            )
+            return False
+        if sandbox_chunks:
+            return False
     try:
         chunks = container.load_chunked(state.get("file_hash", ""), agent_name)
     except Exception as exc:  # noqa: BLE001
@@ -919,6 +1015,24 @@ def make_revision_node(container: ServiceContainer) -> Any:
             # Measured 2026-07-29 with CAPE unreachable: the sycophancy
             # detector flagged static vs dynamic at sim=1.000.
             if _revision_input_is_absent(state, container, name):
+                # Declining to revise is the point; deleting is not (BUG 12).
+                # An analyst that made claims on round 0 keeps them — whatever
+                # the guard now says about round 1, those claims were made
+                # against data that existed at the time, and replacing them
+                # with an empty ISR both loses evidence and makes the report
+                # say "analysts produced no claims" about an analyst that
+                # produced several. Only an analyst that had nothing to begin
+                # with gets a fresh empty ISR.
+                _round0 = (state.get("isr_reports") or {}).get(name)
+                if _round0 is not None and getattr(_round0, "claims", None):
+                    logger.info(
+                        "Agent '%s': no data to revise — keeping its report and its "
+                        "%d round-0 claim(s) (round %d).",
+                        name,
+                        len(_round0.claims),
+                        iteration,
+                    )
+                    return original_reports.get(name, ""), _round0
                 logger.info(
                     "Agent '%s': no data to revise — keeping its report and "
                     "contributing no claims (round %d).",
@@ -1094,7 +1208,11 @@ def make_judge_node(container: ServiceContainer) -> Any:
 
             async def _run_yara_scan() -> AgentISR | None:
                 try:
-                    yara_layer = container.get_yara_layer()
+                    # In a thread, like the scan below it. The getter *builds*
+                    # the layer on first use — compiling the whole rule corpus —
+                    # and the container caches behind a lock, so the whole cost
+                    # lands on whichever loop callback asked first (OBS 4).
+                    yara_layer = await asyncio.to_thread(container.get_yara_layer)
                     if yara_layer.rule_count > 0:
                         targets = await asyncio.to_thread(_scan_targets)
                         if not targets:
@@ -1135,11 +1253,19 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 try:
                     from maljan.analysis.sigma_layer import build_events_from_sandbox
 
-                    sigma_layer = container.get_sigma_layer()
+                    # The 209-second heartbeat gap of 2026-09-07 was caught
+                    # here: `from_rules_dir` reading and parsing 2902 rule
+                    # files, in a loop callback, with the worker's own thread
+                    # starved behind it. Building it is the slow part, not the
+                    # scan — and it is slow exactly once, on first use.
+                    sigma_layer = await asyncio.to_thread(container.get_sigma_layer)
                     if sigma_layer.rule_count > 0:
                         _sbx = state.get("sandbox_report")
                         _sbx = _sbx if isinstance(_sbx, dict) else None
-                        sigma_events = build_events_from_sandbox(_sbx)
+                        # Walks every process/file/registry entry of a full
+                        # sandbox report; on a chatty detonation that is
+                        # seconds, and it is pure CPU.
+                        sigma_events = await asyncio.to_thread(build_events_from_sandbox, _sbx)
                         if not sigma_events:
                             return None
                         sigma_layer.reset_filter_stats()
@@ -1313,11 +1439,16 @@ def make_judge_node(container: ServiceContainer) -> Any:
             _sigma_dropped_total = 0
             _yara_dropped_total = 0
             try:
-                _yara_dropped_total = container.get_yara_layer().last_filtered_count
+                # Cached by the scans above on every ordinary run, but not on
+                # the paths that skipped them — and a getter that may build is
+                # a getter that runs in a thread (OBS 4).
+                _yara_layer = await asyncio.to_thread(container.get_yara_layer)
+                _yara_dropped_total = _yara_layer.last_filtered_count
             except Exception as e:
                 logger.debug("Could not read yara_layer.last_filtered_count: %s", e)
             try:
-                _sigma_dropped_total = container.get_sigma_layer().last_filtered_count
+                _sigma_layer = await asyncio.to_thread(container.get_sigma_layer)
+                _sigma_dropped_total = _sigma_layer.last_filtered_count
             except Exception as e:
                 logger.debug("Could not read sigma_layer.last_filtered_count: %s", e)
 
@@ -1404,6 +1535,34 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 for name in _analyst_keys
                 if name in isr_reports and not getattr(isr_reports.get(name), "claims", None)
             ]
+            # BUG 12: two different findings, reported as one sentence. An
+            # analyst that had nothing to read says the run was thin; one that
+            # read everything and claimed nothing says the analyst failed.
+            #
+            # The distinction is carried as *data* — a per-agent flag on
+            # ``run_summary.agent_stats`` — and emphatically not as a second
+            # degradation-reason string. ``eval_dynamic_vs_static``'s
+            # ``incidental_reasons`` partitions on the literal "analysts
+            # produced no claims:" to strip the starved analysts out of the
+            # static-only arm's treatment, and that tree is read-only: a rival
+            # string would make every static-only arm record an unexplained
+            # incidental degradation and move the E.1 numbers with nothing
+            # saying so. The reason below is therefore byte-for-byte what it
+            # always was, for every claimless analyst.
+            #
+            # In a thread: the guard reads the file loader from disk and
+            # ``json.dumps`` a whole sandbox slice per analyst, which is
+            # exactly the kind of work the preceding commit moved off this
+            # loop (OBS 4).
+            _no_data_analysts = set(
+                await asyncio.to_thread(
+                    lambda: [
+                        name
+                        for name in _empty_analysts
+                        if _revision_input_is_absent(state, container, name)
+                    ]
+                )
+            )
             # D10: surface anti-emulation / anti-VM / sandbox-detection
             # signatures so the existing DEGRADED RUN banner can explain
             # the empty dynamic tab (sandbox traced nothing because the
@@ -1510,7 +1669,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
                     .set_sample(state.get("file_hash", ""), state.get("file_name"))
                     .set_verdict(decision, len(bundle.objects) if isinstance(bundle, Bundle) else 0)
                     .set_negotiation(negotiation_state, max_iterations=max_iters)
-                    .set_isr_stats(isr_reports)
+                    .set_isr_stats(isr_reports, no_data=_no_data_analysts)
                     .set_validation_summary(ttp_validation_summary)
                     .set_cascade_summary(cascade_summary)
                     .set_platform_filter_summary(
@@ -1943,7 +2102,12 @@ def make_report_node(container: ServiceContainer) -> Any:
             _static_provider = container.get_static_provider()
             _sample_for_evidence = state.get("sample_path")
             if _static_provider.capabilities.provides_evidence and _sample_for_evidence:
-                _static_bundle = _static_provider.collect_evidence(str(_sample_for_evidence))
+                # capa is a subprocess with a 900s budget and YARA is a corpus
+                # scan; both are synchronous, and this is the report phase the
+                # worker's heartbeat went quiet in (OBS 4).
+                _static_bundle = await asyncio.to_thread(
+                    _static_provider.collect_evidence, str(_sample_for_evidence)
+                )
         except Exception as exc:  # noqa: BLE001 - evidence must never fail a report
             logger.warning(
                 "report_node: static evidence collection failed (%s: %s); continuing without it.",
@@ -1976,7 +2140,11 @@ def make_report_node(container: ServiceContainer) -> Any:
                 sample_platform=state.get("platform"),
                 static_evidence=_static_bundle,
             )
-            report = builder.build_deterministic()
+            # Deterministic and self-contained — every input is already in the
+            # builder — so a thread changes when it runs, never what it
+            # produces. It walks every section of every report, which on a
+            # full run is the other half of the report node's loop time.
+            report = await asyncio.to_thread(builder.build_deterministic)
             # Thread the judge node's exact opcode-hash family overlap into the
             # report (deterministic code-reuse links). Best-effort post-build,
             # mirroring how ``similar_samples`` is populated in enrichment.

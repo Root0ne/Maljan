@@ -5,6 +5,7 @@ from __future__ import annotations
 import gzip
 import io
 import json
+import pathlib
 import uuid
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
@@ -164,6 +165,27 @@ def test_a_nested_cape_target_hash_mismatch_still_warns(client):
     assert r.status_code == 201
     assert r.json()["sample_sha256_match"] is False
     assert "does not match" in r.json()["warning"]
+
+
+def test_a_live_triage_overview_with_dict_tasks_is_accepted(client):
+    """BUG 6: a real tria.ge overview keys ``tasks`` by task id and used to be
+    refused with 415 because the sniffer only accepted a list."""
+    api, sample, _ = client
+    fixture = (
+        pathlib.Path(__file__).resolve().parents[1]
+        / "fixtures"
+        / "sandbox"
+        / "triage_overview_dict_tasks.json"
+    )
+    payload = json.loads(fixture.read_text(encoding="utf-8"))
+    assert isinstance(payload["tasks"], dict)
+    r = api.post(
+        f"/api/v1/samples/{sample.id}/sandbox-reports",
+        files={"file": ("overview.json", fixture.read_bytes(), "application/json")},
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["format"] == "triage"
+    assert r.json()["task_id"] == payload["sample"]["id"]
 
 
 def test_an_unrecognised_format_is_refused(client):

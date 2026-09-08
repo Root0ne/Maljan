@@ -299,3 +299,111 @@ def test_the_route_is_admin_only_and_passes_the_name_through(monkeypatch):
     assert response.status_code == 200
     assert seen == ["strings"]
     assert response.json()["details"] == {"prompt_chars": 3}
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_definition_reports_why_not_only_which_field():
+    """A generic agent with no prompt is a legible sentence, not "agents".
+
+    ``build_settings`` raises a ValidationError whose ``loc`` is the useless
+    part ("agents") and whose ``msg`` is the whole diagnosis. Reporting only
+    the field left the operator with nothing to act on.
+    """
+    staged = {
+        "agents.definitions": {"nameless": {"role": "generic"}},
+        "agents.profiles": {"one": {"analysts": ["nameless"]}},
+        "agents.profile": "one",
+    }
+    result = await probe_agent({"name": "nameless", "settings": staged})
+    assert result.ok is False
+    assert "needs a prompt" in result.detail
+    assert "nameless" in result.detail
+
+
+@pytest.mark.asyncio
+async def test_an_inheriting_agent_reports_the_resolved_global_expert_model(monkeypatch):
+    """An agent with no per-agent override still names the model it would get."""
+    _tags(monkeypatch, ["qwen3.5:9b"])
+    staged = {"llm.provider": "ollama", "llm.ollama.expert_model": "qwen3.5:9b"}
+    result = await probe_agent({"name": "network", "settings": staged})
+    assert result.ok is True
+    assert result.details["llm"] == {"provider": "ollama", "model": "qwen3.5:9b"}
+
+
+# ---------------------------------------------------------------------------
+# BUG 8: an Ollama tag that is not on the server is the operator's typo, and
+# the probe is the last place to catch it before a job spends 10 minutes
+# reaching that agent.
+# ---------------------------------------------------------------------------
+
+
+def _tags(monkeypatch, names, *, reachable=True):
+    """Stand in for one GET of ``/api/tags``, counting the calls."""
+    import httpx
+
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        if not reachable:
+            raise httpx.ConnectError("connection refused", request=request)
+        return httpx.Response(200, json={"models": [{"name": n} for n in names]})
+
+    monkeypatch.setattr(
+        settings_probes,
+        "_client",
+        lambda: httpx.AsyncClient(transport=httpx.MockTransport(handler), timeout=10),
+    )
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_a_per_agent_ollama_model_the_server_lacks_is_reported(monkeypatch):
+    calls = _tags(monkeypatch, ["qwen3:8b"])
+    staged = {
+        "llm.provider": "ollama",
+        "llm.ollama.expert_model": "qwen3:8b",
+        "llm.agents": {"network": {"provider": "ollama", "model": "qwen3:nope"}},
+    }
+    result = await probe_agent({"name": "network", "settings": staged})
+    assert result.ok is False
+    assert "qwen3:nope" in result.detail
+    assert "not present on the Ollama server" in result.detail
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_per_agent_ollama_model_the_server_has_still_resolves(monkeypatch):
+    _tags(monkeypatch, ["qwen3:8b", "qwen3:4b"])
+    staged = {
+        "llm.provider": "ollama",
+        "llm.ollama.expert_model": "qwen3:8b",
+        "llm.agents": {"network": {"provider": "ollama", "model": "qwen3:4b"}},
+    }
+    result = await probe_agent({"name": "network", "settings": staged})
+    assert result.ok is True
+    assert result.details["llm"] == {"provider": "ollama", "model": "qwen3:4b"}
+
+
+@pytest.mark.asyncio
+async def test_an_unreachable_ollama_server_does_not_fail_the_agent_probe(monkeypatch):
+    _tags(monkeypatch, [], reachable=False)
+    staged = {
+        "llm.provider": "ollama",
+        "llm.ollama.expert_model": "qwen3:8b",
+        "llm.agents": {"network": {"provider": "ollama", "model": "qwen3:4b"}},
+    }
+    result = await probe_agent({"name": "network", "settings": staged})
+    assert result.ok is True, "reachability is the LLM probe's job, not this one"
+
+
+@pytest.mark.asyncio
+async def test_a_non_ollama_agent_model_is_not_checked_against_any_tag_list(monkeypatch):
+    calls = _tags(monkeypatch, ["qwen3:8b"])
+    staged = {
+        "llm.provider": "openai",
+        "llm.agents": {"network": {"provider": "openai", "model": "gpt-4o"}},
+    }
+    result = await probe_agent({"name": "network", "settings": staged})
+    assert result.ok is True
+    assert calls == []

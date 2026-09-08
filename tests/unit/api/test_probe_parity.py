@@ -55,3 +55,17 @@ def test_rest_inputs_cover_the_rest_leaves_the_probe_actually_reads():
 def test_mcp_inputs_are_empty_by_design():
     """The server key comes from the route's query parameter, not a leaf."""
     assert _INPUTS["mcp"] == {}
+
+
+def test_every_llm_input_is_annotated_with_the_llm_probe():
+    """The staged value only travels if its own leaf declares the probe.
+
+    The web collects the probe's key set from the catalog entries whose
+    ``probe`` is ``llm``; a key ``_INPUTS["llm"]`` reads but no annotation
+    names is one the backend silently falls back to a stored value for --
+    exactly how a staged Ollama base URL and model went missing while the
+    probe reported "missing model".
+    """
+    by_key = {e.key: e for e in full_catalog()}
+    unannotated = sorted(k for k in _INPUTS["llm"] if by_key[k].probe != "llm")
+    assert unannotated == [], unannotated

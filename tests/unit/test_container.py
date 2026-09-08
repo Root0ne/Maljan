@@ -99,3 +99,63 @@ class TestAcloseNeverBuildsAProviderJustToCloseIt:
 
         static_provider.close.assert_called_once()
         sandbox_provider.close.assert_called_once()
+
+
+class TestJudgePerAgentOverride:
+    """BUG 9: ``core.llm.agents.judge`` was accepted but never consulted.
+
+    The judge was built through ``build_model(role="judge")``, which only
+    knows the global ``llm.judge_model`` — a live run whose settings snapshot
+    carried ``llm.agents.judge = {provider: ollama, model: qwen3:4b}`` still
+    built ``qwen3:8b``.
+    """
+
+    def _container(self, config: Settings) -> ServiceContainer:
+        container = ServiceContainer(config=config, mock=True)
+        container._llm_registry = MagicMock()
+        return container
+
+    def test_a_judge_override_is_built_through_the_per_agent_path(self) -> None:
+        from maljan.core.config import AgentLLMConfig
+
+        config = Settings()
+        config.llm.judge_max_tokens = 2048
+        config.llm.agents["judge"] = AgentLLMConfig(
+            provider="ollama", model="qwen3:4b", temperature=0.1
+        )
+        container = self._container(config)
+
+        built = container.get_judge_llm()
+
+        registry = container._llm_registry
+        registry.build_model_for_agent.assert_called_once_with(
+            "judge", fallback_role="judge", max_tokens=2048
+        )
+        registry.build_model.assert_not_called()
+        assert built is registry.build_model_for_agent.return_value
+
+    def test_without_an_override_the_judge_role_still_decides_the_model(self) -> None:
+        config = Settings()
+        config.llm.judge_max_tokens = 2048
+        config.llm.agents.pop("judge", None)
+        container = self._container(config)
+
+        container.get_judge_llm()
+
+        registry = container._llm_registry
+        # The per-agent path is asked with the judge role as its fallback, so
+        # an unconfigured judge lands on exactly the model the role selects.
+        registry.build_model_for_agent.assert_called_once_with(
+            "judge", fallback_role="judge", max_tokens=2048
+        )
+
+    def test_the_judge_token_cap_is_still_omitted_when_unset(self) -> None:
+        config = Settings()
+        config.llm.judge_max_tokens = 0
+        container = self._container(config)
+
+        container.get_judge_llm()
+
+        container._llm_registry.build_model_for_agent.assert_called_once_with(
+            "judge", fallback_role="judge"
+        )

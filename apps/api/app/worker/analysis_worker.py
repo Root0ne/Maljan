@@ -101,7 +101,11 @@ def mirror_target_for(provider: Any, *, sha256: str, extension: str) -> tuple[Pa
     spec = provider.mirror_spec()
     if spec is None:
         return None
-    host = sample_files.work_dir() / f"{sha256}{extension}"
+    # The spec's own subdirectory, not a fixed one. This was ``work_dir()``
+    # unconditionally, which put r2's copy in the hidden ``.work`` that radare2
+    # refuses to open — BUG 10, every live r2 tool call answering "Failed to
+    # open file." The container-visible path below already read the spec.
+    host = sample_files.work_dir(spec.work_subdir) / f"{sha256}{extension}"
     if not spec.container_prefix:
         # An empty prefix means the analyst-facing tool is co-located with the
         # worker (e.g. a stdio r2mcp) and opens the sample by its host path

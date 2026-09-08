@@ -206,25 +206,20 @@ class TestTheJudgeCloseIsBounded:
         close, it closes every handle bound to its role through
         ``JudgeAgent.aclose``, and each handle's own fixed 20s budget is what
         stands between a hung child process and a stuck job. That budget is
-        ``servers.CLEANUP_TIMEOUT``, a module constant rather than a setting,
-        so this shortens only that specific call rather than every
-        ``wait_for`` in the test — and reads the constant rather than
-        repeating its value, which is how this test broke when the budgets
-        were made coherent with the container's.
+        ``servers.CLEANUP_TIMEOUT`` plus ``servers.CHILD_EXIT_GRACE``, module
+        constants rather than settings, so shortening them here shortens only
+        the handle's own fences and nothing else in the test. They are set
+        rather than intercepted through ``asyncio.wait_for``: since the BUG-7
+        fix the first budget is a ``loop.call_later`` that kills the child, and
+        no ``wait_for`` is armed with ``CLEANUP_TIMEOUT`` for an interceptor to
+        recognise.
         """
         from maljan.core.config import MCPServerConfig
         from maljan.providers import servers
         from maljan.providers.servers import ServerHandle
 
-        real_wait_for = asyncio.wait_for
-        budget = servers.CLEANUP_TIMEOUT
-
-        async def fast_wait_for(coro: Any, timeout: float | None = None) -> Any:
-            if timeout == budget:
-                timeout = 0.1
-            return await real_wait_for(coro, timeout=timeout)
-
-        monkeypatch.setattr(asyncio, "wait_for", fast_wait_for)
+        monkeypatch.setattr(servers, "CLEANUP_TIMEOUT", 0.1)
+        monkeypatch.setattr(servers, "CHILD_EXIT_GRACE", 0.1)
 
         handle = ServerHandle("threatintel", MCPServerConfig(enabled=True))
         toolkit: Any = _NeverReturns()
@@ -249,15 +244,8 @@ class TestTheJudgeCloseIsBounded:
         from maljan.providers import servers
         from maljan.providers.servers import ServerRegistry
 
-        real_wait_for = asyncio.wait_for
-        budget = servers.CLEANUP_TIMEOUT
-
-        async def fast_wait_for(coro: Any, timeout: float | None = None) -> Any:
-            if timeout == budget:
-                timeout = 0.1
-            return await real_wait_for(coro, timeout=timeout)
-
-        monkeypatch.setattr(asyncio, "wait_for", fast_wait_for)
+        monkeypatch.setattr(servers, "CLEANUP_TIMEOUT", 0.1)
+        monkeypatch.setattr(servers, "CHILD_EXIT_GRACE", 0.1)
 
         registry = ServerRegistry(Settings(_env_file=None))
         handle = registry.get("threatintel")
@@ -573,3 +561,248 @@ class TestTheSynchronousSweepCannotBlockTheFence:
         assert registry.entered.wait(5), "the sweep should have started in a worker thread"
         # The fence fired on time: the loop was free the whole way through.
         assert time.monotonic() - started < 10
+
+
+class TestACancellationNobodyReceivesCannotSpinTheLoopForever:
+    """BUG 7 (live run S6): the worker spun at 100 % CPU for 80 minutes.
+
+    py-spy caught the "maljan-agent-loop" thread in anyio's
+    ``CancelScope._deliver_cancellation`` -> ``select(timeout=0)``: a task had
+    been cancelled after a hard timeout, could not receive the cancellation
+    (anyio was delivering it into a shielded wait on a child process that never
+    exited), and anyio re-armed the delivery with ``call_soon`` on every
+    iteration. The worker's own thread was starved of the GIL, the job's
+    heartbeat stopped, and only SIGKILL ended it.
+
+    Cancelling is a request, so the fix cannot be "cancel harder": it is to
+    notice that the request was never honoured and retire the loop instead of
+    letting it burn.
+    """
+
+    @staticmethod
+    def _wedged_coro(started: threading.Event):
+        async def _ignores_cancellation() -> None:
+            started.set()
+            while True:
+                try:
+                    await asyncio.sleep(0.01)
+                except asyncio.CancelledError:
+                    # Exactly what a shielded teardown looks like from the
+                    # outside: the cancellation arrives and changes nothing.
+                    continue
+
+        return _ignores_cancellation()
+
+    @staticmethod
+    def _thread_alive(name: str) -> bool:
+        """Whether the named loop-serving thread is still running, spin included."""
+        return any(t.name == name and t.is_alive() for t in threading.enumerate())
+
+    @staticmethod
+    def _wait_until(predicate, seconds: float = 5.0) -> bool:
+        import time
+
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            if predicate():
+                return True
+            time.sleep(0.05)
+        return predicate()
+
+    def test_a_task_that_ignores_cancellation_retires_the_agent_loop(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from maljan.agents import base_agent
+
+        monkeypatch.setattr(base_agent, "CANCEL_DELIVERY_GRACE", 0.3, raising=False)
+        loop = base_agent._get_agent_loop()
+        serving = base_agent._LOOP_THREADS[id(loop)].name
+        started = threading.Event()
+
+        with pytest.raises(TimeoutError):
+            base_agent._run_coro_blocking(
+                self._wedged_coro(started), hard_timeout=0.5, label="wedged-teardown"
+            )
+        assert started.is_set()
+        assert self._wait_until(lambda: not loop.is_running()), (
+            "the loop carrying an undeliverable cancellation must be stopped, "
+            "not left spinning for the life of the process"
+        )
+
+        fresh = base_agent._get_agent_loop()
+        assert fresh is not loop
+        assert self._wait_until(lambda: fresh.is_running())
+
+        # Stopped, not merely replaced: the retired loop closes itself once
+        # ``run_forever`` returns, so its selector and self-pipe go with it and
+        # nothing is left turning callbacks over.
+        assert self._wait_until(loop.is_closed), "a retired loop that stopped must be closed"
+        assert self._wait_until(lambda: not self._thread_alive(serving)), (
+            f"the retired loop's thread {serving} is still running: stopping it is the "
+            "whole point, an abandoned thread would keep the spin going"
+        )
+
+    def test_a_task_that_ends_on_cancellation_keeps_the_loop(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The ordinary timeout: one slow call must not cost the whole loop."""
+        from maljan.agents import base_agent
+
+        monkeypatch.setattr(base_agent, "CANCEL_DELIVERY_GRACE", 0.3, raising=False)
+        loop = base_agent._get_agent_loop()
+
+        async def _sleeps() -> None:
+            await asyncio.sleep(30)
+
+        with pytest.raises(TimeoutError):
+            base_agent._run_coro_blocking(_sleeps(), hard_timeout=0.2, label="slow-call")
+
+        import time
+
+        time.sleep(0.6)
+        assert loop.is_running()
+        assert base_agent._get_agent_loop() is loop
+
+    def test_a_coroutine_blocked_in_synchronous_code_is_reported_as_abandoned(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The other half of the hypothesis: a task that never yields at all.
+
+        ``task._fut_waiter is None`` literally means the coroutine is running
+        synchronous code, so it never reaches the end-of-iteration check where
+        ``loop.stop()`` is honoured. The loop cannot be stopped, and saying it
+        was retired would be a lie — the global is cleared either way, but the
+        abandonment has to be logged rather than pretended away.
+
+        The blocking coroutine is released at the end so the test itself does
+        not leave a thread spinning for the rest of the session.
+        """
+        import time
+
+        from maljan.agents import base_agent
+
+        monkeypatch.setattr(base_agent, "CANCEL_DELIVERY_GRACE", 0.3, raising=False)
+        loop = base_agent._get_agent_loop()
+        release = threading.Event()
+        started = threading.Event()
+
+        async def _blocks_the_loop() -> None:
+            started.set()
+            while not release.is_set():
+                time.sleep(0.02)  # synchronous on purpose: the loop cannot run
+
+        try:
+            with caplog.at_level("ERROR"):
+                with pytest.raises(TimeoutError):
+                    base_agent._run_coro_blocking(
+                        _blocks_the_loop(), hard_timeout=0.5, label="blocked-teardown"
+                    )
+                assert started.wait(5)
+                assert self._wait_until(lambda: base_agent._AGENT_LOOP is not loop), (
+                    "a loop that cannot be stopped must still be taken out of service"
+                )
+                assert self._wait_until(
+                    lambda: any("did not stop" in r.message for r in caplog.records)
+                ), [r.message for r in caplog.records]
+
+            assert loop.is_running(), "the blocked loop is abandoned, not stopped"
+            fresh = base_agent._get_agent_loop()
+            assert fresh is not loop
+            assert self._wait_until(lambda: fresh.is_running())
+        finally:
+            release.set()
+        assert self._wait_until(lambda: not loop.is_running())
+
+    def test_a_task_that_never_starts_on_a_wedged_loop_retires_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """F1: the second caller onto an already-wedged loop.
+
+        Its coroutine never gets a turn, so there is no task to watch — the
+        state the watchdog used to treat as "nothing to do". The loop is not
+        servicing callbacks either, and that is what tells the two apart.
+        """
+        import time
+
+        from maljan.agents import base_agent
+
+        monkeypatch.setattr(base_agent, "CANCEL_DELIVERY_GRACE", 0.3, raising=False)
+        loop = base_agent._get_agent_loop()
+        release = threading.Event()
+        started = threading.Event()
+
+        async def _blocks_the_loop() -> None:
+            started.set()
+            while not release.is_set():
+                time.sleep(0.02)
+
+        try:
+            asyncio.run_coroutine_threadsafe(_blocks_the_loop(), loop)
+            assert started.wait(5)
+
+            async def _never_gets_a_turn() -> None:
+                return None
+
+            with pytest.raises(TimeoutError):
+                base_agent._run_coro_blocking(
+                    _never_gets_a_turn(), hard_timeout=0.2, label="queued-behind-a-wedge"
+                )
+            assert self._wait_until(lambda: base_agent._AGENT_LOOP is not loop), (
+                "a loop that never started the work handed to it must be retired"
+            )
+        finally:
+            release.set()
+
+    def test_a_cancel_that_lands_before_the_task_starts_keeps_a_healthy_loop(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The other reading of an empty task list, which must not retire anything."""
+        from maljan.agents import base_agent
+
+        monkeypatch.setattr(base_agent, "CANCEL_DELIVERY_GRACE", 0.3, raising=False)
+        loop = base_agent._get_agent_loop()
+        future: object = _DoneFuture()
+
+        base_agent._cancel_and_watch(loop, future, [], "cancelled-before-it-started")
+
+        import time
+
+        time.sleep(0.8)
+        assert loop.is_running()
+        assert base_agent._get_agent_loop() is loop
+
+    def test_a_retirement_drops_the_state_bound_to_that_loop(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """F2: cached clients and handles must not outlive their loop."""
+        from maljan.agents import base_agent
+
+        monkeypatch.setattr(base_agent, "CANCEL_DELIVERY_GRACE", 0.3, raising=False)
+        seen: list[object] = []
+        base_agent.on_agent_loop_retired(seen.append)
+        loop = base_agent._get_agent_loop()
+        started = threading.Event()
+
+        with pytest.raises(TimeoutError):
+            base_agent._run_coro_blocking(
+                self._wedged_coro(started), hard_timeout=0.5, label="wedged-teardown"
+            )
+        assert self._wait_until(lambda: loop in seen), seen
+
+
+class _DoneFuture:
+    """A future that is already resolved: ``cancel`` is a no-op, ``done`` is True.
+
+    Stands in for the ``concurrent.futures.Future`` of a coroutine whose cancel
+    landed before the loop gave it a turn, which is the benign half of an empty
+    task list in ``_cancel_and_watch``.
+    """
+
+    def cancel(self) -> bool:
+        return False
+
+    def done(self) -> bool:
+        return True
+
+    def cancelled(self) -> bool:
+        return True

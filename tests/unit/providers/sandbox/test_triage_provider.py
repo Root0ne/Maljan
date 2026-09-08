@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -522,3 +523,214 @@ async def test_probe_without_a_token_reports_clearly_without_a_request():
     result = await provider.probe()
     assert result.ok is False
     assert "sandbox.triage.api_token" in result.detail
+
+
+OVERVIEW_FIXTURES = ["triage_overview.json", "triage_overview_dict_tasks.json"]
+
+
+@pytest.mark.parametrize("fixture", OVERVIEW_FIXTURES)
+def test_a_behavioural_report_is_fetched_whatever_shape_tasks_has(fixture):
+    """BUG 6: live tria.ge keys ``tasks`` by task id; the fixture used a list.
+
+    Both shapes must yield the same behavioural task names, so both reach the
+    per-task report the mapper needs.
+    """
+    overview = json.loads((FIX / fixture).read_text(encoding="utf-8"))
+    task = json.loads((FIX / "triage_report_behavioral1.json").read_text(encoding="utf-8"))
+    seen: list[str] = []
+
+    def handler(request):
+        seen.append(request.url.path)
+        if request.url.path.endswith("overview.json"):
+            return httpx.Response(200, json=overview)
+        if request.url.path.endswith("report_triage.json"):
+            return httpx.Response(200, json=task)
+        return httpx.Response(200, json={"id": "s1", "status": "reported"})
+
+    run = _provider(handler).fetch(str(overview["sample"]["id"]))
+    assert run.report.source_format == "triage"
+    assert run.report.target.sha256 == overview["sample"]["sha256"]
+    assert any(p.endswith("/behavioral1/report_triage.json") for p in seen), seen
+    assert run.report.processes
+
+
+def test_dict_shaped_tasks_keep_the_listed_order_and_skip_static_tasks():
+    overview = json.loads((FIX / "triage_overview_dict_tasks.json").read_text(encoding="utf-8"))
+    assert isinstance(overview["tasks"], dict)
+    names = TriageSandboxProvider._behavioral_task_names(overview)
+    assert names == ["behavioral1", "behavioral2"]
+
+
+def test_the_pcap_is_fetched_from_a_dict_shaped_overview(tmp_path):
+    overview = {
+        "tasks": {
+            "s1-static1": {"name": "static1", "kind": "static"},
+            "s1-behavioral7": {"name": "behavioral7", "kind": "behavioral"},
+        }
+    }
+    seen_paths: list[str] = []
+
+    def handler(request):
+        seen_paths.append(request.url.path)
+        if request.url.path.endswith("overview.json"):
+            return httpx.Response(200, json=overview)
+        if request.url.path.endswith("dump.pcap"):
+            return httpx.Response(200, content=b"\xd4\xc3\xb2\xa1" + b"\x00" * 40)
+        return httpx.Response(404, json={})
+
+    path = _provider(handler).fetch_pcap("s1", tmp_path)
+    assert path is not None
+    assert any(p.endswith("/behavioral7/dump.pcap") for p in seen_paths), seen_paths
+
+
+# ---------------------------------------------------------------------------
+# BUG 5 (live run S6): the multipart upload was accepted and the response was
+# then dropped by the transport. The run lost its sandbox data and Triage kept
+# an orphaned submission, because a transport error was treated as final.
+# ---------------------------------------------------------------------------
+
+
+def _sample_file(tmp_path):
+    path = tmp_path / "sample.exe"
+    path.write_bytes(b"MZ" + b"\x00" * 64)
+    import hashlib
+
+    return path, hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_a_dropped_response_is_reconciled_against_the_owned_samples(tmp_path):
+    path, sha = _sample_file(tmp_path)
+    posts: list[str] = []
+
+    def handler(request):
+        if request.method == "POST":
+            posts.append(request.url.path)
+            raise httpx.RemoteProtocolError(
+                "Server disconnected without sending a response.", request=request
+            )
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "id": "260907-older",
+                        "sha256": sha,
+                        "submitted": "2026-09-07T15:00:00Z",
+                    },
+                    {
+                        "id": "260907-slyq5axxbt",
+                        "sha256": sha,
+                        "submitted": "2026-09-07T15:13:26Z",
+                    },
+                    {"id": "260907-other", "sha256": "b" * 64, "submitted": "2026-09-07T15:14:00Z"},
+                ]
+            },
+        )
+
+    provider = _provider(handler)
+    provider._sleep = lambda _s: None
+    provider._now_utc = lambda: datetime(2026, 9, 7, 15, 15, 0, tzinfo=UTC)
+
+    assert provider.submit(path) == "260907-slyq5axxbt"
+    assert len(posts) == 1, "a reconciled submission must not be posted twice"
+
+
+def test_a_dropped_response_with_no_owned_match_is_retried_once(tmp_path):
+    path, _sha = _sample_file(tmp_path)
+    posts: list[int] = []
+    slept: list[float] = []
+
+    def handler(request):
+        if request.method == "POST":
+            posts.append(1)
+            if len(posts) == 1:
+                raise httpx.RemoteProtocolError(
+                    "Server disconnected without sending a response.", request=request
+                )
+            return httpx.Response(200, json={"id": "260907-retried"})
+        return httpx.Response(200, json={"data": []})
+
+    provider = _provider(handler)
+    provider._sleep = slept.append
+
+    assert provider.submit(path) == "260907-retried"
+    assert len(posts) == 2
+    assert slept == [2.0]
+
+
+def test_a_stale_owned_sample_is_not_mistaken_for_this_submission(tmp_path):
+    path, sha = _sample_file(tmp_path)
+    posts: list[int] = []
+
+    def handler(request):
+        if request.method == "POST":
+            posts.append(1)
+            if len(posts) == 1:
+                raise httpx.RemoteProtocolError("dropped", request=request)
+            return httpx.Response(200, json={"id": "260907-fresh"})
+        return httpx.Response(
+            200,
+            json={
+                "data": [{"id": "260901-old", "sha256": sha, "submitted": "2026-09-01T00:00:00Z"}]
+            },
+        )
+
+    provider = _provider(handler)
+    provider._sleep = lambda _s: None
+    provider._now_utc = lambda: datetime(2026, 9, 7, 15, 15, 0, tzinfo=UTC)
+
+    assert provider.submit(path) == "260907-fresh"
+    assert len(posts) == 2
+
+
+def test_a_transport_failure_on_both_attempts_reports_the_first_message(tmp_path):
+    path, _sha = _sample_file(tmp_path)
+
+    def handler(request):
+        if request.method == "POST":
+            raise httpx.RemoteProtocolError(
+                "Server disconnected without sending a response.", request=request
+            )
+        return httpx.Response(200, json={"data": []})
+
+    provider = _provider(handler)
+    provider._sleep = lambda _s: None
+    with pytest.raises(ProviderError) as exc:
+        provider.submit(path)
+    assert "Server disconnected without sending a response." in str(exc.value)
+
+
+def test_an_authentication_failure_is_not_retried(tmp_path):
+    path, _sha = _sample_file(tmp_path)
+    seen: list[str] = []
+
+    def handler(request):
+        seen.append(f"{request.method} {request.url.path}")
+        return httpx.Response(401, json={"error": "UNAUTHORIZED"})
+
+    provider = _provider(handler)
+    provider._sleep = lambda _s: pytest.fail("an HTTP error must not be retried")
+    with pytest.raises(ProviderError) as exc:
+        provider.submit(path)
+    assert "401" in str(exc.value)
+    assert seen == ["POST /api/v0/samples"]
+
+
+def test_a_non_transport_failure_on_the_retry_propagates_unchanged(tmp_path):
+    """Only a dropped transport is the retry's business (review M5)."""
+    path, _sha = _sample_file(tmp_path)
+    posts: list[int] = []
+
+    def handler(request):
+        if request.method == "POST":
+            posts.append(1)
+            if len(posts) == 1:
+                raise httpx.RemoteProtocolError("dropped", request=request)
+            raise RuntimeError("something else entirely")
+        return httpx.Response(200, json={"data": []})
+
+    provider = _provider(handler)
+    provider._sleep = lambda _s: None
+    with pytest.raises(RuntimeError, match="something else entirely"):
+        provider.submit(path)
+    assert len(posts) == 2

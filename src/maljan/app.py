@@ -193,7 +193,13 @@ class MaljanApp:
             if hasattr(client, "submit_and_wait"):
                 result = await client.submit_and_wait(path)
             else:
-                task_id = client.submit(sample_path)
+                # Every call on this branch is synchronous: the Triage provider
+                # drives an ``httpx.Client`` and polls with ``time.sleep``, so
+                # awaited bare they stop the worker's event loop — and its
+                # heartbeat — for the whole detonation (OBS 4). The provider
+                # objects are plain HTTP clients with no loop affinity, so a
+                # thread changes nothing but where the blocking happens.
+                task_id = await asyncio.to_thread(client.submit, sample_path)
                 # Thread the active provider's own completion timeout + poll
                 # interval into the poll loop (see ``_poll_budget``). Without
                 # this the client's 300s default — or another provider's
@@ -203,13 +209,14 @@ class MaljanApp:
                 # before the report was ready — silently degrading every run
                 # to static-only. All SandboxClient impls share this signature.
                 timeout_seconds, poll_interval_seconds = self._poll_budget(provider)
-                status = client.wait_for_completion(
+                status = await asyncio.to_thread(
+                    client.wait_for_completion,
                     task_id,
                     timeout_seconds=timeout_seconds,
                     poll_interval_seconds=poll_interval_seconds,
                 )
                 if status == "reported":
-                    result = client.fetch_report(task_id)
+                    result = await asyncio.to_thread(client.fetch_report, task_id)
                     # Pull the raw PCAP alongside the JSON report so the network
                     # analyst can deep-inspect the capture with its local PCAP
                     # MCP (per-packet beaconing / tunnelling / TLS-SNI) — the

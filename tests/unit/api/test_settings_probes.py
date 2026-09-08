@@ -593,3 +593,89 @@ async def test_rest_probe_never_puts_the_token_in_the_url_or_detail(monkeypatch)
     )
     assert "super-secret-rest-token" not in r.detail
     assert "super-secret-rest-token" not in str(seen["url"])
+
+
+# ---------------------------------------------------------------------------
+# BUG 8 (live run S9): a per-agent model that does not exist on the Ollama
+# server was accepted by both probes and only surfaced when the job reached
+# the agent that used it.
+# ---------------------------------------------------------------------------
+
+
+def _tags_transport(monkeypatch, names):
+    def handler(req: httpx.Request):
+        assert req.url.path.endswith("/api/tags")
+        return httpx.Response(200, json={"models": [{"name": n} for n in names]})
+
+    monkeypatch.setattr(
+        probes, "_client", lambda: httpx.AsyncClient(transport=transport(handler), timeout=10)
+    )
+
+
+@pytest.mark.asyncio
+async def test_llm_probe_names_a_per_agent_model_the_server_does_not_have(monkeypatch):
+    _tags_transport(monkeypatch, ["qwen3:8b"])
+    r = await probes.probe_llm(
+        {
+            "provider": "ollama",
+            "ollama_base_url": "http://ollama:11434",
+            "ollama_expert_model": "qwen3:8b",
+            "ollama_judge_model": "qwen3:8b",
+            "agents": {"judge": {"provider": "ollama", "model": "qwen3:nope"}},
+        }
+    )
+    assert r.ok is False
+    assert "judge=qwen3:nope" in r.detail
+
+
+@pytest.mark.asyncio
+async def test_llm_probe_accepts_per_agent_models_the_server_has(monkeypatch):
+    _tags_transport(monkeypatch, ["qwen3:8b", "qwen3:4b"])
+    r = await probes.probe_llm(
+        {
+            "provider": "ollama",
+            "ollama_base_url": "http://ollama:11434",
+            "ollama_expert_model": "qwen3:8b",
+            "ollama_judge_model": "qwen3:8b",
+            "agents": {"judge": {"provider": "ollama", "model": "qwen3:4b"}},
+        }
+    )
+    assert r.ok is True
+
+
+@pytest.mark.asyncio
+async def test_llm_probe_ignores_a_per_agent_entry_on_another_provider(monkeypatch):
+    _tags_transport(monkeypatch, ["qwen3:8b"])
+    r = await probes.probe_llm(
+        {
+            "provider": "ollama",
+            "ollama_base_url": "http://ollama:11434",
+            "ollama_expert_model": "qwen3:8b",
+            "ollama_judge_model": "qwen3:8b",
+            "agents": {"static": {"provider": "openai", "model": "gpt-4o"}},
+        }
+    )
+    assert r.ok is True
+
+
+@pytest.mark.asyncio
+async def test_run_probe_resolves_the_per_agent_map_for_the_llm_probe(monkeypatch):
+    seen = {}
+
+    async def fake(values):
+        seen.update(values)
+        return probes.ProbeResult(True, 1, "x")
+
+    monkeypatch.setitem(probes.PROBES, "llm", fake)
+    await probes.run_probe(
+        "llm",
+        {"core.llm.agents": {"judge": {"provider": "ollama", "model": "qwen3:4b"}}},
+        {},
+    )
+    assert seen["agents"] == {"judge": {"provider": "ollama", "model": "qwen3:4b"}}
+
+
+def test_the_per_agent_map_is_annotated_with_the_llm_probe():
+    from maljan.core.settings_annotations import ANNOTATIONS
+
+    assert ANNOTATIONS["llm.agents"].get("probe") == "llm"

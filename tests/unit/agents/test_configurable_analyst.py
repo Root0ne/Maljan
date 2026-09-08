@@ -154,3 +154,179 @@ def test_a_genuine_answer_starting_with_warn_is_not_mistaken_for_a_degradation()
     isr = agent.analyze_isr("EVIDENCE-BLOB")
     assert isr.claims and isr.claims[0].technique_id == "T1027"
     assert agent.degradation_reasons == []
+
+
+# ---------------------------------------------------------------------------
+# BUG 11, second round (live 2026-09-07, S5c). `static_qu1cksc0pe` — a generic
+# agent whose static provider resolved to `none` — was handed a chunk whose
+# JSON carried an absolute ``analysis_file_path``, and called every one of its
+# MCP tools with the *bare filename* instead: {"file_path": "<sha>.exe"}.
+# Qu1cksc0pe resolved that against its own working directory and reported
+# "File not found: /home/user/tools/Qu1cksc0pe/<sha>.exe".
+#
+# The static role has never had this problem because its human turn opens with
+# an explicit "use the one above verbatim" line. A generic agent's prompt is
+# the operator's own text and says nothing about paths, so the framework — not
+# the operator — has to say it, and has to catch the model when it says it
+# anyway. Two layers, in that order.
+# ---------------------------------------------------------------------------
+
+_PATH = "/srv/maljan/data/samples/abc123.exe"
+_CHUNK = (
+    '{\n  "note": "Live analysis run",\n  "sha256": "abc123",\n'
+    f'  "analysis_file_path": "{_PATH}"\n}}'
+)
+
+
+def _human_of_last_call() -> str:
+    return str(_Recording.seen[-1][1]["content"])
+
+
+class TestTheSamplePathIsStatedExplicitly:
+    def test_the_header_names_the_absolute_path_when_the_chunk_carries_one(self):
+        agent = _agent()
+        agent.analyze(_CHUNK)
+        human = _human_of_last_call()
+        assert _PATH in human
+        head = human.split(_CHUNK)[0]
+        assert _PATH in head, "the path must be hoisted ABOVE the data, not left inside the JSON"
+        assert "exactly" in head.lower()
+
+    def test_the_pinned_path_is_used_when_the_data_carries_no_json(self):
+        """A non-head chunk has no JSON; the pin set by the analyst node is
+        what keeps every chunk of a chunked run pointed at the same file."""
+        agent = _agent()
+        agent._analysis_file_path = _PATH
+        agent.analyze("plain text chunk with no path in it")
+        assert _PATH in _human_of_last_call()
+
+    def test_nothing_is_prepended_when_no_path_is_known(self):
+        """The pre-fix prompt is preserved byte-for-byte when there is no
+        path to state — an operator's agent that never touches a file is not
+        given a line about one."""
+        agent = _agent()
+        agent.analyze("EVIDENCE-BLOB")
+        assert _human_of_last_call() == "EVIDENCE-BLOB"
+
+    def test_the_isr_run_states_the_path_as_well(self):
+        agent = _agent()
+        agent._analysis_file_path = _PATH
+        agent.analyze_isr("EVIDENCE-BLOB")
+        assert _PATH in _human_of_last_call()
+
+    def test_a_revision_round_states_the_path_as_well(self):
+        agent = _agent()
+        agent._analysis_file_path = _PATH
+        agent.revise_isr(_CHUNK, "OWN", {}, "F", revision_round=1)
+        assert any(_PATH in str(m["content"]) for m in _Recording.seen[-1])
+
+
+class TestABareFilenameToolArgIsRewritten:
+    """Belt and braces: a small local model told the path will still send the
+    name. The framework rewrites it before the call rather than letting a tool
+    resolve it against a working directory that is not ours."""
+
+    def _agent_with_recording_tool(self):
+        """A tool with a real ``args_schema``, as every MCP tool in this repo has.
+
+        The guard rebuilds the tool around its schema, so a schema-less stub
+        would exercise a path no live tool takes — and, since the guard now
+        declines to rebuild one, would not be wrapped at all.
+        """
+        calls: list[dict[str, Any]] = []
+
+        def _scan(file_path: str = "", query: str = "") -> str:
+            calls.append({k: v for k, v in (("file_path", file_path), ("query", query)) if v})
+            return "scanned"
+
+        tool = StructuredTool.from_function(
+            func=_scan,
+            name="analyze_file",
+            description="analyze a file",
+        )
+        agent = _agent(tools=[tool])
+        agent._analysis_file_path = _PATH
+        return agent, calls
+
+    def _invoke(self, agent: ConfigurableAnalyst, args: dict[str, Any]) -> Any:
+        tool = agent.pinned_tools()[0]
+        return tool.func(**args)  # type: ignore[misc]
+
+    def test_a_bare_filename_equal_to_the_sample_name_becomes_the_absolute_path(self):
+        agent, calls = self._agent_with_recording_tool()
+        self._invoke(agent, {"file_path": "abc123.exe"})
+        assert calls == [{"file_path": _PATH}]
+
+    def test_the_rewrite_is_logged(self, caplog):
+        import logging
+
+        agent, _calls = self._agent_with_recording_tool()
+        with caplog.at_level(logging.WARNING):
+            self._invoke(agent, {"file_path": "abc123.exe"})
+        logged = [r.getMessage() for r in caplog.records]
+        assert any("abc123.exe" in m and _PATH in m for m in logged)
+
+    def test_a_path_the_model_got_right_is_left_alone(self):
+        agent, calls = self._agent_with_recording_tool()
+        self._invoke(agent, {"file_path": _PATH})
+        assert calls == [{"file_path": _PATH}]
+
+    def test_an_unrelated_filename_is_never_rewritten(self):
+        """Only the sample's own name is a known mistake. A tool asked to read
+        a dropped file, a rule file or an output the agent just wrote must
+        keep the name it was given."""
+        agent, calls = self._agent_with_recording_tool()
+        self._invoke(agent, {"file_path": "rules.yar"})
+        assert calls == [{"file_path": "rules.yar"}]
+
+    def test_a_non_path_argument_is_never_rewritten(self):
+        agent, calls = self._agent_with_recording_tool()
+        self._invoke(agent, {"query": "abc123.exe"})
+        assert calls == [{"query": "abc123.exe"}]
+
+    def test_a_relative_path_ending_in_the_sample_name_is_not_touched(self):
+        """The failure is a *bare* name resolved against a foreign cwd. A model
+        that supplied a directory meant that directory."""
+        agent, calls = self._agent_with_recording_tool()
+        self._invoke(agent, {"file_path": "dropped/abc123.exe"})
+        assert calls == [{"file_path": "dropped/abc123.exe"}]
+
+    def test_the_rewrite_survives_the_schema_bound_invoke_path(self):
+        """The wrapped tool is what the ReAct loop actually calls, and it calls
+        it through ``invoke`` against the rebuilt schema, not through ``func``."""
+        agent, calls = self._agent_with_recording_tool()
+        assert agent.pinned_tools()[0].invoke({"file_path": "abc123.exe"}) == "scanned"
+        assert calls == [{"file_path": _PATH}]
+
+    def test_with_no_pin_the_tools_are_handed_through_unwrapped(self):
+        def _scan(file_path: str = "") -> str:
+            return "scanned"
+
+        tool = StructuredTool.from_function(func=_scan, name="analyze_file", description="d")
+        agent = _agent(tools=[tool])
+        assert agent.pinned_tools() == [tool]
+
+    def test_a_tool_with_no_args_schema_is_left_exactly_as_it_is(self):
+        """The guard rebuilds a tool around its schema. With none to rebuild
+        around, wrapping would hand the model a tool that binds badly — worse
+        than the bare-filename call it is there to prevent."""
+
+        def _scan(**kwargs: Any) -> str:
+            return "scanned"
+
+        tool = StructuredTool.from_function(
+            func=_scan, name="analyze_file", description="d", infer_schema=False
+        )
+        assert tool.args_schema is None
+        agent = _agent(tools=[tool])
+        agent._analysis_file_path = _PATH
+        assert agent.pinned_tools() == [tool]
+
+    def test_a_free_text_input_argument_is_no_longer_treated_as_a_path(self):
+        """``input`` names free text as often as it names a file; a lookup tool
+        asked about the sample by name must keep the name it was given."""
+        from maljan.agents.configurable_analyst import _is_path_argument
+
+        assert _is_path_argument("input") is False
+        assert _is_path_argument("query") is False
+        assert all(_is_path_argument(n) for n in ("file_path", "path", "binary", "target"))

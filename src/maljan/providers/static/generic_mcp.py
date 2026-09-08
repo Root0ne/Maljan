@@ -226,7 +226,20 @@ class GenericMCPStaticProvider(StaticProvider):
         return str(getattr(cfg, "tool_selection", "curated"))
 
     def mirror_spec(self) -> MirrorSpec:
-        return MirrorSpec(work_subdir=".work", container_prefix="/data/samples")
+        """Where the sample is mirrored, and under which path the server sees it.
+
+        A stdio server is spawned by the worker and reads the worker's own
+        filesystem, so it has to be told the host path — the empty prefix the
+        mirror step reads as "no translation", the same answer
+        ``R2StaticProvider`` gives. Only an http/streamable-http/sse server is
+        somewhere else with its own mount, and only then does the container
+        prefix describe the path it can open (BUG 4, live run S4). That prefix
+        is the literal the mount in ``docker/docker-compose.yml`` uses; the
+        worker translates it through ``ghidra_container_samples_path`` when it
+        writes the mirror.
+        """
+        prefix = "" if self._cfg.transport == "stdio" else "/data/samples"
+        return MirrorSpec(work_subdir=".work", container_prefix=prefix)
 
     def close(self) -> None:
         self.tools = []

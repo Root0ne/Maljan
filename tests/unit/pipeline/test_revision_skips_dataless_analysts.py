@@ -173,3 +173,214 @@ class TestTheGuardSurvivesALoaderFailure:
         _run(c)
 
         assert c._agents["dynamic"].safe_revise_isr.called
+
+
+# ---------------------------------------------------------------------------
+# BUG 12 (live 2026-09-07): an analyst that ran on round 0 and produced claims
+# came out of the revision round with none, and the report's degradation text
+# said "analysts produced no claims".
+#
+# The two rounds read different inputs. Round 0 for dynamic/network uses
+# `load_sandbox_data_for_agent(agent, sandbox_report)` whenever a sandbox
+# report exists; `_revision_input_is_absent` only ever consulted
+# `load_chunked`, which for those layers is the file loader's own
+# "No <layer> data available" placeholder on a live sample. So the guard read
+# "no data" for an analyst that had a full detonation report, and the skip
+# branch replaced its ISR with `_empty_isr` — wiping claims that were already
+# made rather than merely declining to make new ones.
+#
+# Two separate rules come out of it: the guard must ask the same question
+# round 0 asked, and no branch may replace a report that carries claims with
+# an empty ISR. Declining to *revise* is fine; deleting is not.
+# ---------------------------------------------------------------------------
+
+
+def _isr_with(claim_count: int) -> MagicMock:
+    isr = MagicMock()
+    isr.claims = [MagicMock() for _ in range(claim_count)]
+    isr.dissent_items = []
+    return isr
+
+
+def _state_with_round0(isr_reports: dict[str, Any]) -> dict[str, Any]:
+    state = _state()
+    state["reports"]["dynamic"] = "Injected into explorer.exe; contacted 10.0.0.5:443."
+    state["isr_reports"] = isr_reports
+    return state
+
+
+def _run_with(container: MagicMock, state: dict[str, Any]) -> dict[str, Any]:
+    node = make_revision_node(container)
+    return asyncio.run(node(state))
+
+
+class TestRoundZeroClaimsSurviveTheRevisionRound:
+    def test_an_analyst_that_ran_on_the_sandbox_report_keeps_its_claims(self) -> None:
+        """The live case: dynamic analysed a full detonation report on round 0,
+        and `load_chunked` — the only source the guard looked at — says
+        "No dynamic data available"."""
+        c = _container({"static": _REAL_DATA, "dynamic": _placeholder("dynamic")})
+        c.load_sandbox_data_for_agent.return_value = [_Chunk(content='{"processes": [1, 2]}')]
+
+        round0 = _isr_with(4)
+        state = _state_with_round0({"dynamic": round0, "static": _isr_with(2)})
+        state["sandbox_report"] = {"behavior": {"processes": [{"pid": 1}]}}
+
+        out = _run_with(c, state)
+
+        assert out["isr_reports"]["dynamic"].claims, (
+            "dynamic's four round-0 claims were replaced by an empty ISR: the "
+            "revision guard read a different data source than round 0 did"
+        )
+
+    def test_the_guard_sees_the_sandbox_report_as_data(self) -> None:
+        """The guard itself, directly: a sandbox report present means the
+        analyst had data, whatever the file loader says."""
+        from maljan.pipeline.nodes import _revision_input_is_absent
+
+        c = _container({"dynamic": _placeholder("dynamic")})
+        c.load_sandbox_data_for_agent.return_value = [_Chunk(content='{"processes": []}')]
+        state = _state()
+        state["sandbox_report"] = {"behavior": {}}
+
+        assert _revision_input_is_absent(state, c, "dynamic") is False
+
+    def test_without_a_sandbox_report_the_loader_check_still_applies(self) -> None:
+        """(b) A truly data-less analyst: no sandbox report, loader placeholder
+        only. It is skipped, and it stays empty."""
+        from maljan.pipeline.nodes import _revision_input_is_absent
+
+        c = _container({"static": _REAL_DATA, "dynamic": _placeholder("dynamic")})
+        state = _state()
+
+        assert _revision_input_is_absent(state, c, "dynamic") is True
+
+        out = _run_with(c, state)
+        assert not c._agents["dynamic"].safe_revise_isr.called
+        assert out["isr_reports"]["dynamic"].claims == []
+
+    def test_a_skip_never_replaces_an_isr_that_carries_claims(self) -> None:
+        """The second rule, independent of which source the guard reads: even a
+        correctly skipped analyst keeps whatever it already claimed."""
+        c = _container({"static": _REAL_DATA, "dynamic": _placeholder("dynamic")})
+        round0 = _isr_with(3)
+        state = _state_with_round0({"dynamic": round0})
+
+        out = _run_with(c, state)
+
+        assert not c._agents["dynamic"].safe_revise_isr.called, "skipping the revise is correct"
+        assert out["isr_reports"]["dynamic"] is round0, (
+            "the round-0 ISR must be carried forward untouched, not replaced"
+        )
+
+
+class TestTheDataLessDistinctionIsCarriedAsDataNotAsANewReasonString:
+    """(c), reworked after the wave-4 review.
+
+    The first cut split the degradation reason into "analysts had no data to
+    analyse" and "analysts produced no claims". That silently broke the paper's
+    evaluation harness: `tests/evaluation/eval_dynamic_vs_static.py`
+    partitions on the literal "analysts produced no claims:" to strip the
+    starved analysts out of the static-only arm's treatment, and the evaluation
+    tree is read-only. Every static-only arm would have recorded an unexplained
+    incidental degradation, and the E.1 numbers would have moved without
+    anything saying so.
+
+    So the reason string stays exactly as it was for every claimless analyst,
+    and the distinction is carried as data: a per-agent `no_data` flag on
+    `run_summary.agent_stats`, rendered as "(no data)" beside the analyst.
+    """
+
+    def test_the_legacy_reason_string_is_the_only_one_emitted(self) -> None:
+        """The harness's partition key, and the absence of a rival string."""
+        import inspect
+
+        from maljan.pipeline import nodes
+
+        source = inspect.getsource(nodes.make_judge_node)
+        assert "analysts produced no claims" in source
+        assert "analysts had no data to analyse" not in source, (
+            "a second degradation reason bypasses the evaluation harness's "
+            "treatment carve-out (eval_dynamic_vs_static.incidental_reasons)"
+        )
+
+    def test_the_harness_still_recognises_the_reason_it_partitions_on(self) -> None:
+        """Read the harness rather than trust the string: it is read-only, so
+        this side has to keep matching it."""
+        from maljan.analysis.run_summary import RunSummaryBuilder
+
+        summary = (
+            RunSummaryBuilder(start_time=0.0)
+            .set_verdict("Suspicious", 0)
+            .set_degraded_mode(True, ["analysts produced no claims: dynamic, network"])
+            .build()
+        )
+        reason = summary.degradation_reasons[0]
+        head, sep, tail = reason.partition("analysts produced no claims:")
+        assert sep and not head.strip()
+        assert {p.strip() for p in tail.split(",")} == {"dynamic", "network"}
+
+    def test_a_dataless_analyst_is_flagged_in_agent_stats(self) -> None:
+        from maljan.analysis.run_summary import RunSummaryBuilder
+
+        summary = (
+            RunSummaryBuilder(start_time=0.0)
+            .set_verdict("Suspicious", 0)
+            .set_isr_stats(
+                {"dynamic": _stub_isr("dynamic", 0), "static": _stub_isr("static", 3)},
+                no_data={"dynamic"},
+            )
+            .build()
+        )
+        by_agent = {s.agent_id: s for s in summary.agent_stats}
+        assert by_agent["dynamic"].no_data is True
+        assert by_agent["static"].no_data is False
+
+        payload = summary.to_dict()["agent_stats"]
+        assert {row["agent_id"]: row["no_data"] for row in payload} == {
+            "dynamic": True,
+            "static": False,
+        }
+
+    def test_the_markdown_says_no_data_beside_that_analyst(self) -> None:
+        from maljan.analysis.run_summary import RunSummaryBuilder
+
+        summary = (
+            RunSummaryBuilder(start_time=0.0)
+            .set_verdict("Suspicious", 0)
+            .set_isr_stats(
+                {"dynamic": _stub_isr("dynamic", 0), "static": _stub_isr("static", 3)},
+                no_data={"dynamic"},
+            )
+            .build()
+        )
+        rows = [line for line in summary.to_markdown().splitlines() if line.startswith("| dynamic")]
+        assert rows and "(no data)" in rows[0]
+        static_rows = [
+            line for line in summary.to_markdown().splitlines() if line.startswith("| static")
+        ]
+        assert static_rows and "(no data)" not in static_rows[0]
+
+    def test_omitting_the_flag_keeps_every_analyst_unflagged(self) -> None:
+        """Existing callers pass no `no_data` at all, and must be unaffected."""
+        from maljan.analysis.run_summary import RunSummaryBuilder
+
+        summary = (
+            RunSummaryBuilder(start_time=0.0)
+            .set_verdict("Suspicious", 0)
+            .set_isr_stats({"static": _stub_isr("static", 1)})
+            .build()
+        )
+        assert summary.agent_stats[0].no_data is False
+        assert "(no data)" not in summary.to_markdown()
+
+
+def _stub_isr(name: str, claim_count: int) -> Any:
+    isr = MagicMock()
+    isr.agent_id = name
+    isr.domain = name
+    isr.revision_round = 0
+    isr.claims = [MagicMock(technique_id=None) for _ in range(claim_count)]
+    isr.mean_confidence = 0.5
+    isr.dissent_items = []
+    return isr
