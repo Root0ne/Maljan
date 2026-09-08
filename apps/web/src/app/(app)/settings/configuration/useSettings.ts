@@ -95,6 +95,28 @@ export function useSettings() {
     return m;
   }, [schema]);
 
+  const entriesByKey = useMemo(() => {
+    const m: Record<string, CatalogEntry> = {};
+    entries.forEach((entry, key) => {
+      m[key] = entry;
+    });
+    return m;
+  }, [entries]);
+
+  // Pending-key count per backend group, for the rail's dirty badges. Keyed
+  // by `entries[key].group` — a virtual group (e.g. "profiles") is not a real
+  // catalog group, so the rail derives its own count from the two keys it
+  // covers and subtracts them back out of "agents" itself.
+  const stagedCountByGroup = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const key of Object.keys(pending)) {
+      const group = entries.get(key)?.group;
+      if (!group) continue;
+      m[group] = (m[group] ?? 0) + 1;
+    }
+    return m;
+  }, [pending, entries]);
+
   /**
    * Stage an edit — unless it puts the key back where it started.
    *
@@ -244,6 +266,8 @@ export function useSettings() {
     schema,
     values,
     entries,
+    entriesByKey,
+    stagedCountByGroup,
     pending,
     errors,
     loading,
