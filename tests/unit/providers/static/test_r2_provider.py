@@ -123,3 +123,67 @@ def test_opening_never_writes_the_resolved_command_back_into_the_config(monkeypa
 
     assert recorded["command"] == "r2mcp", "the fake toolkit must receive binary_path as command"
     assert cfg.static.r2.command == original_command, "open() must not mutate the shared config"
+
+
+# ---------------------------------------------------------------------------
+# BUG 10 (live 2026-09-07): every r2 `open_file` in the run reported
+# "Failed to open file." radare2's own sandbox path check rejects a path with a
+# `/.` segment, and the r2 mirror lived in `data/samples/.work`. Reproduced
+# against a live r2mcp with one PE: it opens from `data/samples/<sha>.exe` and
+# from `data/samples/r2work/<sha>.exe`, and fails from
+# `data/samples/.work/<sha>.exe` — with `-g none` too, so it is not the
+# sandbox profile. The mirror therefore has to live somewhere unhidden, and the
+# setting has to refuse a directory that would put it back.
+# ---------------------------------------------------------------------------
+
+
+def _hidden_segments(path: str) -> list[str]:
+    return [part for part in Path(path).parts if part.startswith(".") and part not in (".", "..")]
+
+
+def test_the_r2_mirror_directory_is_not_hidden() -> None:
+    """The default the operator inherits must be one r2 can actually open."""
+    cfg = _cfg()
+    assert _hidden_segments(cfg.static.r2.mirror_dir) == [], (
+        f"r2 cannot open a sample under a hidden directory: {cfg.static.r2.mirror_dir!r}"
+    )
+
+
+def test_the_mirror_spec_carries_no_hidden_segment() -> None:
+    provider = R2StaticProvider.from_settings(_cfg())
+    subdir = provider.mirror_spec().work_subdir
+    assert not subdir.startswith("."), f"r2 mirror subdirectory is hidden: {subdir!r}"
+
+
+def test_a_hidden_mirror_directory_is_rejected_at_settings_validation() -> None:
+    """An operator who points it back at `.work` is told why, not left with a
+    provider that silently analyses nothing."""
+    import pytest
+    from pydantic import ValidationError
+
+    from maljan.core.config import StaticR2Config
+
+    with pytest.raises(ValidationError) as excinfo:
+        StaticR2Config(mirror_dir="data/samples/.hidden")
+    message = str(excinfo.value)
+    assert "hidden" in message.lower()
+    assert "radare2" in message.lower() or "r2" in message.lower()
+
+
+def test_a_hidden_segment_anywhere_in_the_path_is_rejected() -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    from maljan.core.config import StaticR2Config
+
+    with pytest.raises(ValidationError):
+        StaticR2Config(mirror_dir="data/.private/samples/r2-work")
+
+
+def test_an_ordinary_directory_is_accepted() -> None:
+    from maljan.core.config import StaticR2Config
+
+    assert StaticR2Config(mirror_dir="data/samples/r2-work").mirror_dir == "data/samples/r2-work"
+    assert StaticR2Config(mirror_dir="./data/samples/r2-work").mirror_dir == (
+        "./data/samples/r2-work"
+    )

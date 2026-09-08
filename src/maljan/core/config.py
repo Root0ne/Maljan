@@ -23,9 +23,17 @@ import copy
 import json
 import re
 import sys
+from pathlib import PurePosixPath
 from typing import Annotated, Any, Literal, cast
 
-from pydantic import BaseModel, Field, PrivateAttr, SecretStr, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    PrivateAttr,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
@@ -1067,21 +1075,44 @@ class AgentsConfig(BaseModel):
 class StaticR2Config(MCPServerConfig):
     """radare2 MCP server, plus where the sample has to be for r2 to read it.
 
-    ``mirror_dir`` is **advisory only** (M1, final review): the worker's
-    private per-job mirror always lives under the security-hardened (0o700,
-    per-file 0o600) ``.work`` subdirectory of ``samples_dir`` — see
-    ``apps/api/app/worker/sample_files.work_dir()`` — regardless of this
-    value, because that is also where the H3 hardening removes the copy from
-    when the job ends. With r2's own ``container_prefix=""`` (a co-located
-    r2mcp reads the host path directly, with no separate container mount to
-    translate into), this setting changes nothing an operator can observe
-    today. It is kept, rather than removed, as the documented seam a future
-    provider that genuinely needs a distinct host mirror directory would
-    read.
+    ``mirror_dir`` names the ``samples_dir`` subdirectory the worker copies the
+    sample into for r2 to open; only its last segment is used, and the copy
+    keeps the same hardening every mirror gets (0o700 directory, 0o600 file,
+    removed when the job ends) — see
+    ``apps/api/app/worker/sample_files.work_dir()``.
+
+    **It may not be hidden.** radare2 rejects a path carrying a ``/.`` segment,
+    so an r2mcp handed a sample under ``.work`` answers "Failed to open file."
+    to every tool call and the run analyses nothing — BUG 10, live on
+    2026-09-07, where the default *was* ``.work``. Reproduced against a live
+    r2mcp with one PE: it opens from ``data/samples/<sha>.exe`` and from
+    ``data/samples/r2work/<sha>.exe``, and fails from
+    ``data/samples/.work/<sha>.exe``, with ``-g none`` too. Hence the default
+    below and the validator: an operator who points this back at a hidden
+    directory is told why, rather than getting a provider that silently reads
+    nothing.
     """
 
     binary_path: str = "r2mcp"
-    mirror_dir: str = "data/samples/.work"
+    mirror_dir: str = "data/samples/r2-work"
+
+    @field_validator("mirror_dir")
+    @classmethod
+    def _no_hidden_segment(cls, value: str) -> str:
+        hidden = [
+            part
+            for part in PurePosixPath(value.replace("\\", "/")).parts
+            if part.startswith(".") and part not in (".", "..")
+        ]
+        if hidden:
+            raise ValueError(
+                f"radare2 cannot open a sample under a hidden directory, and "
+                f"{value!r} contains {', '.join(repr(h) for h in hidden)}: r2 rejects any "
+                f"path with a '/.' segment, so every tool call would answer "
+                f"'Failed to open file.'. Use an unhidden directory such as "
+                f"'data/samples/r2-work'."
+            )
+        return value
 
 
 class StaticCapaConfig(BaseModel):

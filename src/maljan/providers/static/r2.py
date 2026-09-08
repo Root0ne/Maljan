@@ -106,8 +106,10 @@ class R2StaticProvider(GenericMCPStaticProvider):
 
     # ``StaticR2Config.mirror_dir``'s own default, kept here too: a provider
     # built any way other than ``from_settings`` (there is none today, but the
-    # base class's constructor allows it) still gets a sane mirror spec.
-    _mirror_dir: str = "data/samples/.work"
+    # base class's constructor allows it) still gets a sane mirror spec — and,
+    # since BUG 10, one radare2 will actually open. It rejects any path with a
+    # ``/.`` segment, so this must never become a hidden directory again.
+    _mirror_dir: str = "data/samples/r2-work"
 
     @classmethod
     def from_settings(cls, cfg: Settings) -> R2StaticProvider:
