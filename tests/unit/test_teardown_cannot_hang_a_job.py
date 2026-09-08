@@ -206,25 +206,20 @@ class TestTheJudgeCloseIsBounded:
         close, it closes every handle bound to its role through
         ``JudgeAgent.aclose``, and each handle's own fixed 20s budget is what
         stands between a hung child process and a stuck job. That budget is
-        ``servers.CLEANUP_TIMEOUT``, a module constant rather than a setting,
-        so this shortens only that specific call rather than every
-        ``wait_for`` in the test — and reads the constant rather than
-        repeating its value, which is how this test broke when the budgets
-        were made coherent with the container's.
+        ``servers.CLEANUP_TIMEOUT`` plus ``servers.CHILD_EXIT_GRACE``, module
+        constants rather than settings, so shortening them here shortens only
+        the handle's own fences and nothing else in the test. They are set
+        rather than intercepted through ``asyncio.wait_for``: since the BUG-7
+        fix the first budget is a ``loop.call_later`` that kills the child, and
+        no ``wait_for`` is armed with ``CLEANUP_TIMEOUT`` for an interceptor to
+        recognise.
         """
         from maljan.core.config import MCPServerConfig
         from maljan.providers import servers
         from maljan.providers.servers import ServerHandle
 
-        real_wait_for = asyncio.wait_for
-        budget = servers.CLEANUP_TIMEOUT
-
-        async def fast_wait_for(coro: Any, timeout: float | None = None) -> Any:
-            if timeout == budget:
-                timeout = 0.1
-            return await real_wait_for(coro, timeout=timeout)
-
-        monkeypatch.setattr(asyncio, "wait_for", fast_wait_for)
+        monkeypatch.setattr(servers, "CLEANUP_TIMEOUT", 0.1)
+        monkeypatch.setattr(servers, "CHILD_EXIT_GRACE", 0.1)
 
         handle = ServerHandle("threatintel", MCPServerConfig(enabled=True))
         toolkit: Any = _NeverReturns()
@@ -249,15 +244,8 @@ class TestTheJudgeCloseIsBounded:
         from maljan.providers import servers
         from maljan.providers.servers import ServerRegistry
 
-        real_wait_for = asyncio.wait_for
-        budget = servers.CLEANUP_TIMEOUT
-
-        async def fast_wait_for(coro: Any, timeout: float | None = None) -> Any:
-            if timeout == budget:
-                timeout = 0.1
-            return await real_wait_for(coro, timeout=timeout)
-
-        monkeypatch.setattr(asyncio, "wait_for", fast_wait_for)
+        monkeypatch.setattr(servers, "CLEANUP_TIMEOUT", 0.1)
+        monkeypatch.setattr(servers, "CHILD_EXIT_GRACE", 0.1)
 
         registry = ServerRegistry(Settings(_env_file=None))
         handle = registry.get("threatintel")

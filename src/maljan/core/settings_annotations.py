@@ -1167,8 +1167,10 @@ ANNOTATIONS.update(
             "title": "radare2 sample directory",
             "description": (
                 "Host directory the sample is copied into so radare2 can open it by "
-                "path. Defaults to the same private .work directory the Ghidra "
-                "mirror uses."
+                "path, hardened the way every mirror is: owner-only, and removed when "
+                "the job ends. It may not be hidden. radare2 rejects any path with a "
+                "'/.' segment, so a sample under one makes every r2 tool call answer "
+                "'Failed to open file.'"
             ),
             "applies_when": _STATIC_R2,
         },

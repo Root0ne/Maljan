@@ -814,6 +814,18 @@ def _retire_wedged_loop(loop: asyncio.AbstractEventLoop, what: str) -> None:
     )
 
 
+def _on_agent_loop_thread(loop: asyncio.AbstractEventLoop) -> bool:
+    """True when the calling thread is the one serving ``loop``.
+
+    Read from the recorded thread rather than from ``get_running_loop``: the
+    callers that matter are *synchronous* functions reached from a coroutine
+    running on the agent loop, and those have no running loop of their own to
+    ask.
+    """
+    thread = _LOOP_THREADS.get(id(loop))
+    return thread is not None and thread.ident == threading.get_ident()
+
+
 def _submit_to_agent_loop(
     coro: Any, loop: asyncio.AbstractEventLoop
 ) -> tuple[_ConcurrentFuture[Any], list[asyncio.Task[Any]]]:
@@ -896,8 +908,21 @@ def _run_coro_blocking(coro: Any, hard_timeout: float, label: str = "") -> Any:
     database came to say ``CancelledError`` and nothing else.
     """
     loop = _get_agent_loop()
-    future, running = _submit_to_agent_loop(coro, loop)
     what = label or "agent coroutine"
+    # Blocking the agent loop's *own* thread on work the agent loop has to run
+    # is a deadlock by construction: ``future.result`` holds that thread, so the
+    # coroutine it waits for never gets a turn and the loop is dead underneath
+    # it for the whole hard cap — the "blocked in synchronous code" case
+    # ``_retire_wedged_loop`` can only report, never end. Refusing names the
+    # caller, which is the one thing a stack trace of a wedged loop cannot.
+    if _on_agent_loop_thread(loop):
+        coro.close()
+        raise RuntimeError(
+            f"{what} was submitted with a blocking wait from the agent loop's own "
+            "thread, which cannot serve it: await it there instead, or move the "
+            "synchronous caller to asyncio.to_thread"
+        )
+    future, running = _submit_to_agent_loop(coro, loop)
     try:
         return future.result(timeout=hard_timeout)
     except _FuturesTimeout:

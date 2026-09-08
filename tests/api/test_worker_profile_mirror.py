@@ -69,10 +69,14 @@ def test_each_provider_gets_its_own_container_visible_path():
     )
     r2 = mirror_target_for(container.get_static_provider("r2"), sha256="ab" * 32, extension=".exe")
     assert ghidra is not None and r2 is not None
-    # Same host file, two answers about how a tool reaches it: Ghidra sees the
-    # container mount, a co-located r2mcp sees the host path itself.
-    assert ghidra[0] == r2[0]
+    # Two answers about how a tool reaches the sample: Ghidra sees the container
+    # mount, a co-located r2mcp sees the host path itself.
     assert ghidra[1] != r2[1]
+    # And, since BUG 10, two host files. radare2 rejects a path with a `/.`
+    # segment, so r2 cannot be given the hidden `.work` copy Ghidra reads.
+    assert ghidra[0] != r2[0]
+    assert ghidra[0].parent.name == ".work"
+    assert not r2[0].parent.name.startswith(".")
 
 
 def test_the_state_carries_a_path_per_provider_and_keeps_the_global_key():
@@ -82,10 +86,10 @@ def test_the_state_carries_a_path_per_provider_and_keeps_the_global_key():
     assert "static_sample_path" in AnalysisState.__annotations__
 
 
-def test_two_providers_sharing_a_host_path_copy_the_sample_only_once():
-    """Ghidra and r2 answer the same host path for the same sample (see
-    ``test_each_provider_gets_its_own_container_visible_path``); the mirror
-    step must copy that file once, not once per provider that lands on it."""
+def test_each_distinct_host_path_is_copied_once_and_cleaned_up():
+    """Ghidra and r2 need separate host copies since BUG 10 — r2 cannot read
+    the hidden `.work` one — so the mirror step makes one copy per distinct
+    host path, and every one of them is returned for cleanup."""
     container = _container(
         definitions={"static_r2": {"role": "static", "static_provider": "r2"}},
         profiles={"two": {"analysts": ["static", "static_r2"]}},
@@ -105,8 +109,6 @@ def test_two_providers_sharing_a_host_path_copy_the_sample_only_once():
     )
 
     assert profile_static_providers(container) == ["ghidra", "r2"]
-    assert len(calls) == 1, "one shared host path must be copied exactly once"
-    assert len(host_mirrors) == 1, "one cleanup entry, not one per provider"
     assert set(static_sample_paths) == {"ghidra", "r2"}
     ghidra_target = mirror_target_for(
         container.get_static_provider("ghidra"), sha256="ab" * 32, extension=".exe"
@@ -117,7 +119,13 @@ def test_two_providers_sharing_a_host_path_copy_the_sample_only_once():
     assert ghidra_target is not None and r2_target is not None
     assert static_sample_paths["ghidra"] == ghidra_target[1]
     assert static_sample_paths["r2"] == r2_target[1]
-    assert host_mirrors[0] == ghidra_target[0] == r2_target[0]
+    # Two distinct host paths, one copy each, and both handed back so the
+    # cleanup removes them — a copy that is made and not returned outlives the
+    # job in a directory that holds live malware.
+    assert len(calls) == 2
+    assert {dst for _src, dst in calls} == {ghidra_target[0], r2_target[0]}
+    assert set(host_mirrors) == {ghidra_target[0], r2_target[0]}
+    assert len(host_mirrors) == len(set(host_mirrors)), "no path may be listed twice"
 
 
 def test_the_frozen_key_is_the_global_providers_mirror_not_the_first_one_made():
