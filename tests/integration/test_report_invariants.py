@@ -20,6 +20,7 @@ disagree about the same report, even if both surfaces are internally fine.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -89,6 +90,11 @@ def _report(*, degraded: bool = False, confidence: float = 0.91) -> MalwareRepor
         ]
         report.overall_confidence = min(confidence, DEGRADED_CONFIDENCE_CAP)
     report.figures = build_figures(report)
+    # The renderers print ``generated_at`` to the microsecond, and a test below
+    # asserts that a number is *absent* from the rendered page. Left at "now",
+    # the seconds fraction eventually spells that number: CI run 34268210590
+    # failed on ``"0.91" not in markdown`` with a timestamp ending in 0.91xxxx.
+    report.generated_at = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
     return report
 
 
