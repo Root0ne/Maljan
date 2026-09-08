@@ -10,6 +10,7 @@ import { probeLabel } from "../configuration/GroupHeader";
 import { buildReviewItems, ReviewList } from "../configuration/ReviewList";
 import { useSettingsContext, type SettingsContextValue } from "../configuration/SettingsContext";
 import { appliesSummary } from "../configuration/vocabulary";
+import { isProbeStale, probeFingerprint } from "./probeStale";
 import {
   LLM_PROVIDER_BLURB,
   LLM_PROVIDER_TITLE,
@@ -19,12 +20,12 @@ import {
   type GuideStep,
 } from "./guides";
 
-/** A finished probe result, plus whether any of the probe's inputs was
- *  already staged when it ran: the answer changing is what makes the result
- *  stale, exactly as in the console's `GroupHeader`. */
+/** A finished probe result, plus a fingerprint of the values the probe read
+ *  when it ran: the result stops being shown as soon as those values move,
+ *  because it no longer describes what a press would do now. */
 interface ProbeEntry {
   result: ProbeResult | "running";
-  stagedWhenRun: boolean;
+  inputsWhenRun: string;
 }
 
 function Row({ ctx, entry }: { ctx: SettingsContextValue; entry: CatalogEntry }) {
@@ -141,8 +142,8 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
   // keys the previous choice staged.
   const [touched, setTouched] = useState<string[]>([]);
 
-  const probeInputsStaged = useCallback(
-    (probeId: string) => Object.keys(ctx.probeValues(probeId)).length > 0,
+  const probeInputs = useCallback(
+    (probeId: string) => probeFingerprint(ctx.probeValues(probeId)),
     [ctx]
   );
 
@@ -151,9 +152,9 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
       const entry = probes[probeId];
       if (!entry) return undefined;
       if (entry.result === "running") return "running";
-      return probeInputsStaged(probeId) === entry.stagedWhenRun ? entry.result : undefined;
+      return isProbeStale(entry.inputsWhenRun, probeInputs(probeId)) ? undefined : entry.result;
     },
-    [probes, probeInputsStaged]
+    [probes, probeInputs]
   );
 
   const guideCtx = useMemo<GuideContext>(
@@ -191,6 +192,15 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
     });
   }, [stepKeys]);
 
+  useEffect(() => {
+    // A finished apply leaves its summary on the review step. The moment the
+    // operator stages anything again, that summary is describing the previous
+    // round: drop it so the review list and the Apply button come back.
+    if (Object.keys(ctx.pending).length === 0) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setApplied((previous) => (previous === null ? previous : null));
+  }, [ctx.pending]);
+
   const requested = searchParams.get("step");
   const index = Math.max(
     0,
@@ -211,8 +221,8 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
       const keys = Array.from(ctx.entries.values())
         .filter((e) => e.probe === name)
         .map((e) => e.key);
-      const stagedWhenRun = probeInputsStaged(name);
-      setProbes((p) => ({ ...p, [name]: { result: "running", stagedWhenRun } }));
+      const inputsWhenRun = probeInputs(name);
+      setProbes((p) => ({ ...p, [name]: { result: "running", inputsWhenRun } }));
       const result = await ctx.probe(name, keys).catch((e) => ({
         ok: false,
         latency_ms: 0,
@@ -222,9 +232,9 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
         details: null,
       }));
       if (result.models) ctx.setModels(result.models);
-      setProbes((p) => ({ ...p, [name]: { result, stagedWhenRun } }));
+      setProbes((p) => ({ ...p, [name]: { result, inputsWhenRun } }));
     },
-    [ctx, probeInputsStaged]
+    [ctx, probeInputs]
   );
 
   if (!step) {
@@ -233,7 +243,12 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
 
   const blockedReason = step.canContinue?.(guideCtx) ?? null;
   const lines = buildReviewItems(ctx).filter((item) => touched.includes(item.key));
-  const errorCount = Object.keys(ctx.errors).length;
+  // Only the errors this guide's own review list can show: a stored override
+  // in some other group failing validation is the console's business, and
+  // counting it here would name a number the list below never accounts for.
+  const errorCount = Object.keys(ctx.errors).filter((key) =>
+    touched.some((k) => key === k || key.startsWith(`${k}.`))
+  ).length;
   const probeId = step.probe;
   const result = probeId ? probeResult(probeId) : undefined;
 
@@ -307,9 +322,7 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
         <div className="mt-2">
           {applied ? (
             <div className="text-sm text-status-green" role="status">
-              <p>
-                Applied. {appliesSummary(applied.applies, applied.applied.length)}
-              </p>
+              <p>{appliesSummary(applied.applies, applied.applied.length)}</p>
               <p className="mt-2 text-xs">
                 <Link href={guide.groupHref} className="text-accent-strong">
                   See these settings in the console
