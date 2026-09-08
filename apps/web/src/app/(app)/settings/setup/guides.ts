@@ -44,6 +44,17 @@ export interface GuideStep {
     | "rest-mapping"
     | "provider-choice"
     | "review";
+  /** Which part of a `server-form` / `agent-form` the step draws. The step
+   *  components normalise an unknown value to their first section, so a
+   *  guide that names none still renders. */
+  section?:
+    | "connection"
+    | "tools"
+    | "agents"
+    | "identity"
+    | "prompt"
+    | "model"
+    | "resolve";
   /** The reason Continue is blocked, or null when the step is complete. */
   canContinue?: (ctx: GuideContext) => string | null;
 }

@@ -11,6 +11,10 @@ import { buildReviewItems, ReviewList } from "../configuration/ReviewList";
 import { useSettingsContext, type SettingsContextValue } from "../configuration/SettingsContext";
 import { appliesSummary } from "../configuration/vocabulary";
 import { isProbeStale, probeFingerprint } from "./probeStale";
+import AgentFormStep, { agentStepSection } from "./steps/AgentFormStep";
+import ProfilePickerStep from "./steps/ProfilePickerStep";
+import RestMappingStep from "./steps/RestMappingStep";
+import ServerFormStep, { serverStepSection } from "./steps/ServerFormStep";
 import {
   LLM_PROVIDER_BLURB,
   LLM_PROVIDER_TITLE,
@@ -132,9 +136,15 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   // Per-guide scratch: choices no catalog key holds (a selected server key, a
-  // clone source). The language-model guide needs none; the tool-server and
-  // agent guides fill it in.
-  const [state] = useState<Record<string, unknown>>({});
+  // clone source, whether the new agent resolved). The language-model guide
+  // needs none; the tool-server and agent guides fill it in. A step patches
+  // it through `setGuideState`, which re-renders the guide so the step's own
+  // `canContinue` reads what the body just stored.
+  const [state, setState] = useState<Record<string, unknown>>({});
+  const setGuideState = useCallback(
+    (patch: Record<string, unknown>) => setState((s) => ({ ...s, ...patch })),
+    []
+  );
   const [probes, setProbes] = useState<Record<string, ProbeEntry | undefined>>({});
   const [applied, setApplied] = useState<PatchResult | null>(null);
   // Every key any step of this guide has offered so far — the review step
@@ -295,6 +305,28 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
       {step.component === "provider-choice" && selectorKey && (
         <ProviderChoice ctx={ctx} selectorKey={selectorKey} />
       )}
+
+      {step.component === "server-form" && (
+        <ServerFormStep
+          section={serverStepSection(step.section)}
+          state={state}
+          setState={setGuideState}
+        />
+      )}
+
+      {step.component === "agent-form" && (
+        <AgentFormStep
+          section={agentStepSection(step.section)}
+          state={state}
+          setState={setGuideState}
+        />
+      )}
+
+      {step.component === "profile-picker" && (
+        <ProfilePickerStep state={state} setState={setGuideState} />
+      )}
+
+      {step.component === "rest-mapping" && <RestMappingStep />}
 
       {probeId && (
         <div className="flex items-center gap-3 flex-wrap mt-2">

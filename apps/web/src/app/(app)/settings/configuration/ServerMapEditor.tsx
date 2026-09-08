@@ -133,6 +133,470 @@ function EnvMapField({
   );
 }
 
+/** Which blocks of the detail pane to draw. The console editor draws all of
+ *  them; a guide step draws the one its step is about. */
+export type ServerSection = "header" | "connection" | "tools" | "agents";
+
+const ALL_SERVER_SECTIONS: ServerSection[] = ["header", "connection", "tools", "agents"];
+
+/**
+ * What a probe knows about one server map, and about the one server whose
+ * detail is on screen.
+ *
+ * The state is a map rather than a single result because the console's list
+ * shows a verdict per server; `result`/`stale` are that map read at
+ * `serverKey`, so a guide step that only ever holds one server reads them and
+ * ignores the rest.
+ */
+export interface ServerProbeApi {
+  /** Every result so far, keyed by server — the list's per-row verdict. */
+  probes: Record<string, ProbeResult | "running">;
+  /** The focused server's result, if it still describes what is configured. */
+  result: ProbeResult | "running" | undefined;
+  /** The focused server's result was dropped by an edit to what it dialled. */
+  stale: boolean;
+  probe: (key: string) => Promise<void>;
+  /** Called before an edit is staged: drops a result the edit invalidates. */
+  noteEdit: (key: string, next: Partial<McpServerEntry>) => void;
+}
+
+/** The probe half of the server detail, so the console editor and a guide
+ *  step can each own an instance without duplicating the staleness rule. */
+export function useServerProbe(
+  serverKey: string | null,
+  value: Record<string, McpServerEntry>
+): ServerProbeApi {
+  const [probes, setProbes] = useState<Record<string, ProbeResult | "running">>({});
+  /** Servers whose probe result was dropped by an edit to what it dialled, so
+   *  the Tools section can say why the tool list went away. */
+  const [staleProbe, setStaleProbe] = useState<Record<string, boolean>>({});
+
+  const noteEdit = (key: string, next: Partial<McpServerEntry>) => {
+    if (!Object.keys(next).some((k) => PROBE_INPUTS.has(k as keyof McpServerEntry))) return;
+    if (probes[key] === undefined) return;
+    setProbes((p) => {
+      const n = { ...p };
+      delete n[key];
+      return n;
+    });
+    setStaleProbe((s) => ({ ...s, [key]: true }));
+  };
+
+  const probe = async (key: string) => {
+    setStaleProbe((s) => ({ ...s, [key]: false }));
+    setProbes((p) => ({ ...p, [key]: "running" }));
+    try {
+      const result = await api.testMcpServer(key, { "core.mcp.servers": value });
+      setProbes((p) => ({ ...p, [key]: result }));
+    } catch (e) {
+      setProbes((p) => ({
+        ...p,
+        [key]: { ok: false, latency_ms: 0, detail: getErrorMessage(e), models: null, tools: null, details: null },
+      }));
+    }
+  };
+
+  return {
+    probes,
+    result: serverKey === null ? undefined : probes[serverKey],
+    stale: serverKey !== null && staleProbe[serverKey] === true,
+    probe,
+    noteEdit,
+  };
+}
+
+/**
+ * One server's form: the header, the connection fields, the tool list and the
+ * agent bindings, in that order.
+ *
+ * The console renders every section of it beside its server list; a guide step
+ * renders one section at a time for the server the guide is building, staging
+ * into the same `core.mcp.servers` map through the same `onChange`. There is
+ * one copy of these fields, so a rule added here — the staleness of a probe,
+ * how a token is cleared — reaches both.
+ */
+export function ServerDetail({
+  serverKey,
+  value,
+  onChange,
+  probe,
+  errors = {},
+  entryKey = "core.mcp.servers",
+  editable = true,
+  sections = ALL_SERVER_SECTIONS,
+}: {
+  serverKey: string;
+  /** The whole staged map, staged as a whole: the PATCH body is the full dict. */
+  value: Record<string, McpServerEntry>;
+  onChange: (value: Record<string, McpServerEntry>) => void;
+  probe: ServerProbeApi;
+  /** The full validation-error map, keyed by dotted path, so an error like
+   *  `core.mcp.servers.<key>.command` lands on the server that caused it. */
+  errors?: Record<string, string>;
+  /** The leaf these errors are keyed under. */
+  entryKey?: string;
+  /** Whether the token may be replaced — the leaf's own `editable`. */
+  editable?: boolean;
+  sections?: ServerSection[];
+}) {
+  const server = value[serverKey];
+  const has = (section: ServerSection) => sections.includes(section);
+  const showHeader = has("header");
+
+  const put = (key: string, next: Partial<McpServerEntry>) => {
+    probe.noteEdit(key, next);
+    onChange(putEntry(value, key, next));
+  };
+
+  const remove = (key: string) => {
+    if (BUILTIN.has(key)) {
+      put(key, { enabled: false });
+      return;
+    }
+    onChange(removeEntry(value, key));
+  };
+
+  if (!server) return null;
+
+  const result = probe.result;
+  const manifest = result && result !== "running" ? result.tools : null;
+  const allowed = server.tools;
+  const detailError = Object.entries(errors).find(
+    ([k]) => k === `${entryKey}.${serverKey}` || k.startsWith(`${entryKey}.${serverKey}.`)
+  )?.[1];
+  const tokenSource = server.auth_token_source ?? "default";
+  /** What the shared secret control shows for this token: a value the operator
+   *  typed is staged, `null` is a clear, the mask (or an empty string) is
+   *  whatever the API reported. */
+  const tokenStatus: SecretStatus =
+    server.auth_token === null
+      ? "cleared"
+      : server.auth_token !== "" && server.auth_token !== TOKEN_MASK
+        ? "staged"
+        : tokenSource === "default"
+          ? "not-set"
+          : "set";
+
+  /* The verdict of the last press. It sits under the header in the console;
+   * a guide step that draws no header carries it into the Tools section
+   * instead, beside the button that runs the probe there. */
+  const status = (
+    <>
+      {result === "running" && <p className="text-[11px] text-text-muted">testing…</p>}
+      {result && result !== "running" && (
+        <p
+          className={`text-[11px] ${result.ok ? "text-status-green" : "text-status-red"}`}
+          role="status"
+        >
+          {result.ok ? "ok" : "failed"} · {result.latency_ms} ms · {result.detail}
+        </p>
+      )}
+      {detailError && (
+        <p className="text-[11px] text-status-red" role="alert">
+          {detailError}
+        </p>
+      )}
+    </>
+  );
+
+  return (
+    <section
+      data-server-detail={serverKey}
+      aria-label={`Server ${serverKey}`}
+      className="min-w-0 border border-border rounded p-3 space-y-3"
+    >
+      {showHeader && (
+        <>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <span className="text-sm text-text-primary font-mono">{serverKey}</span>
+            <div className="flex items-center gap-3">
+              <label className="text-xs text-text-secondary flex items-center gap-1">
+                <input
+                  type="checkbox"
+                  aria-label={`${serverKey} enabled`}
+                  checked={server.enabled}
+                  onChange={(e) => put(serverKey, { enabled: e.target.checked })}
+                />
+                enabled
+              </label>
+              <button
+                type="button"
+                className="text-xs text-accent-strong disabled:opacity-50"
+                disabled={result === "running"}
+                onClick={() => void probe.probe(serverKey)}
+              >
+                Test
+              </button>
+              <button
+                type="button"
+                className="text-xs text-text-secondary"
+                onClick={() => remove(serverKey)}
+              >
+                {BUILTIN.has(serverKey) ? "Disable" : "Remove"}
+              </button>
+            </div>
+          </div>
+
+          <label className="block text-xs">
+            <span className="text-text-muted">Label</span>
+            <input
+              className={input}
+              aria-label={`${serverKey} label`}
+              value={server.label}
+              onChange={(e) => put(serverKey, { label: e.target.value })}
+            />
+          </label>
+
+          {status}
+        </>
+      )}
+
+      {has("connection") && (
+        <fieldset className="border border-border rounded p-2">
+          <legend className="text-xs text-text-muted px-1">Connection</legend>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+            <label className="block">
+              <span className="text-text-muted">Transport</span>
+              <select
+                className={input}
+                aria-label={`${serverKey} transport`}
+                value={server.transport}
+                onChange={(e) => put(serverKey, { transport: e.target.value })}
+              >
+                {TRANSPORTS.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+            </label>
+            {server.transport === "stdio" ? (
+              <>
+                <label className="block">
+                  <span className="text-text-muted">Command</span>
+                  <input
+                    className={input}
+                    aria-label={`${serverKey} command`}
+                    value={server.command}
+                    onChange={(e) => put(serverKey, { command: e.target.value })}
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-text-muted">Arguments (one per line)</span>
+                  <textarea
+                    className={input}
+                    rows={2}
+                    aria-label={`${serverKey} args`}
+                    value={server.args.join("\n")}
+                    onChange={(e) =>
+                      put(serverKey, { args: e.target.value.split("\n").filter((a) => a !== "") })
+                    }
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-text-muted">Working directory</span>
+                  <input
+                    className={input}
+                    aria-label={`${serverKey} cwd`}
+                    value={server.cwd}
+                    onChange={(e) => put(serverKey, { cwd: e.target.value })}
+                  />
+                </label>
+                <EnvMapField
+                  serverKey={serverKey}
+                  env={server.env ?? {}}
+                  onChange={(env) => put(serverKey, { env })}
+                />
+                <label className="block">
+                  <span className="text-text-muted">
+                    Environment names passed through (one per line)
+                  </span>
+                  <textarea
+                    className={input}
+                    rows={2}
+                    aria-label={`${serverKey} env allow`}
+                    value={server.env_allow.join("\n")}
+                    onChange={(e) =>
+                      put(serverKey, {
+                        env_allow: e.target.value.split("\n").filter((a) => a !== ""),
+                      })
+                    }
+                  />
+                </label>
+              </>
+            ) : (
+              <>
+                <label className="block">
+                  <span className="text-text-muted">URL</span>
+                  <input
+                    className={input}
+                    aria-label={`${serverKey} url`}
+                    value={server.url}
+                    onChange={(e) => put(serverKey, { url: e.target.value })}
+                  />
+                </label>
+                <div className="block">
+                  <span className="text-text-muted">Auth token</span>
+                  <div className="py-1.5">
+                    <SecretField
+                      id={`server-token-${serverKey}`}
+                      name={`server-token-${serverKey}`}
+                      title={`${serverKey} auth token`}
+                      status={tokenStatus}
+                      editable={editable}
+                      labels={{ replace: "Replace token" }}
+                      /* The three words this screen has always used for a
+                         server token — where it comes from, not the generic
+                         `set · …hint · source` line — and the attribute the
+                         spec reads them through. */
+                      statusText={
+                        tokenStatus === "set" || tokenStatus === "not-set"
+                          ? (TOKEN_SOURCE_LABEL[tokenSource] ?? "not set")
+                          : undefined
+                      }
+                      statusAttrs={{ "data-token-state": serverKey }}
+                      onStage={(v) => put(serverKey, { auth_token: v })}
+                      onCancel={() =>
+                        // Closing the field abandons whatever was typed and
+                        // puts the mask back, which the API reads as "leave
+                        // the stored token alone".
+                        put(serverKey, {
+                          auth_token: tokenSource === "default" ? "" : TOKEN_MASK,
+                        })
+                      }
+                      onClear={() =>
+                        // `null` is how every secret in this project is
+                        // cleared: the API deletes the row rather than
+                        // storing an empty one.
+                        put(serverKey, { auth_token: null as unknown as string })
+                      }
+                    />
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </fieldset>
+      )}
+
+      {/* WEB-2 (dev audit 2026-09-06): both of these are on every server
+          the editor creates, both are read by the providers that drive a
+          server (`providers/static/generic_mcp.py`, `ghidra.py`), and
+          neither had a control anywhere on this screen — a new server
+          kept whatever the default happened to be with no way to change
+          it. */}
+      {has("tools") && (
+        <fieldset className="border border-border rounded p-2">
+          <legend className="text-xs text-text-muted px-1">Tools</legend>
+          {!showHeader && status}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+            <label className="block">
+              <span className="text-text-muted">Tool selection</span>
+              <select
+                className={input}
+                aria-label={`${serverKey} tool selection`}
+                disabled={server.use_all_tools}
+                value={server.tool_selection}
+                onChange={(e) => put(serverKey, { tool_selection: e.target.value })}
+              >
+                {TOOL_SELECTIONS.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+            </label>
+            <label className="text-xs text-text-secondary flex items-center gap-1 self-end pb-1.5">
+              <input
+                type="checkbox"
+                aria-label={`${serverKey} force all tools`}
+                checked={server.use_all_tools}
+                onChange={(e) => put(serverKey, { use_all_tools: e.target.checked })}
+              />
+              force every tool, whatever the selection says
+            </label>
+          </div>
+
+          {manifest && manifest.length > 0 ? (
+            <div className="mt-2">
+              <p className="text-xs text-text-muted">
+                Tools the model may call ({allowed === null ? "all" : allowed.length} of{" "}
+                {manifest.length})
+              </p>
+              <div className="flex gap-3 flex-wrap mt-1">
+                {manifest.map((tool) => (
+                  <label
+                    key={tool}
+                    className="text-xs text-text-secondary flex items-center gap-1"
+                  >
+                    <input
+                      type="checkbox"
+                      aria-label={`${serverKey} tool ${tool}`}
+                      checked={allowed === null || allowed.includes(tool)}
+                      onChange={(e) => {
+                        // `null` means "every tool", which only the built-ins
+                        // start with. The first tick turns that into an
+                        // explicit list, so a later server-side change to the
+                        // manifest cannot silently widen what the model sees.
+                        const base = allowed === null ? manifest : allowed;
+                        put(serverKey, {
+                          tools: e.target.checked
+                            ? [...base, tool]
+                            : base.filter((t) => t !== tool),
+                        });
+                      }}
+                    />
+                    {tool}
+                  </label>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="mt-2 flex items-center gap-2">
+              <p className="text-xs text-text-muted">
+                {probe.stale
+                  ? "Connection changed; run Test again"
+                  : "Run Test to load the tool list"}
+              </p>
+              {/* Named apart from the header's Test so a "Test" button is
+                  never ambiguous on this pane. */}
+              <button
+                type="button"
+                className="text-xs text-accent-strong disabled:opacity-50"
+                disabled={result === "running"}
+                onClick={() => void probe.probe(serverKey)}
+              >
+                Load tool list
+              </button>
+            </div>
+          )}
+        </fieldset>
+      )}
+
+      {has("agents") && (
+        <fieldset className="border border-border rounded p-2">
+          <legend className="text-xs text-text-muted px-1">Agents</legend>
+          <div className="flex gap-3 flex-wrap">
+            {ROLES.map((role) => (
+              <label key={role} className="text-xs text-text-secondary flex items-center gap-1">
+                <input
+                  type="checkbox"
+                  aria-label={`${serverKey} agent ${role}`}
+                  checked={server.agents.includes(role)}
+                  onChange={(e) =>
+                    put(serverKey, {
+                      agents: e.target.checked
+                        ? [...server.agents, role]
+                        : server.agents.filter((r) => r !== role),
+                    })
+                  }
+                />
+                {role}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      )}
+    </section>
+  );
+}
+
 /**
  * The whole `core.mcp.servers` leaf, as a master–detail editor.
  *
@@ -178,30 +642,13 @@ export default function ServerMapEditor({
   const savedMap = (current?.value ?? entry.default ?? {}) as Record<string, McpServerEntry>;
   const [newKey, setNewKey] = useState("");
   const [keyError, setKeyError] = useState<string | null>(null);
-  const [probes, setProbes] = useState<Record<string, ProbeResult | "running">>({});
-  /** Servers whose probe result was dropped by an edit to what it dialled, so
-   *  the Tools section can say why the tool list went away. */
-  const [staleProbe, setStaleProbe] = useState<Record<string, boolean>>({});
   /** The server the detail pane shows. Null until something is picked, and a
    *  key that has since been removed falls back to the first one. */
   const [picked, setPicked] = useState<string | null>(null);
 
   const keys = Object.keys(value);
   const selected = picked !== null && picked in value ? picked : (keys[0] ?? null);
-
-  const put = (key: string, next: Partial<McpServerEntry>) => {
-    if (Object.keys(next).some((k) => PROBE_INPUTS.has(k as keyof McpServerEntry))) {
-      if (probes[key] !== undefined) {
-        setProbes((p) => {
-          const n = { ...p };
-          delete n[key];
-          return n;
-        });
-        setStaleProbe((s) => ({ ...s, [key]: true }));
-      }
-    }
-    onChange(putEntry(value, key, next));
-  };
+  const probe = useServerProbe(selected, value);
 
   const add = () => {
     const key = newKey.trim();
@@ -216,52 +663,10 @@ export default function ServerMapEditor({
     onChange({ ...value, [key]: { ...EMPTY_SERVER } });
   };
 
-  const remove = (key: string) => {
-    if (BUILTIN.has(key)) {
-      put(key, { enabled: false });
-      return;
-    }
-    onChange(removeEntry(value, key));
-  };
-
-  const probe = async (key: string) => {
-    setStaleProbe((s) => ({ ...s, [key]: false }));
-    setProbes((p) => ({ ...p, [key]: "running" }));
-    try {
-      const result = await api.testMcpServer(key, { "core.mcp.servers": value });
-      setProbes((p) => ({ ...p, [key]: result }));
-    } catch (e) {
-      setProbes((p) => ({
-        ...p,
-        [key]: { ok: false, latency_ms: 0, detail: getErrorMessage(e), models: null, tools: null, details: null },
-      }));
-    }
-  };
-
   const errorFor = (key: string): string | undefined =>
     Object.entries(errors).find(
       ([k]) => k === `${entry.key}.${key}` || k.startsWith(`${entry.key}.${key}.`)
     )?.[1];
-
-  const server = selected === null ? null : value[selected];
-  const result = selected === null ? undefined : probes[selected];
-  const manifest = result && result !== "running" ? result.tools : null;
-  const allowed = server ? server.tools : null;
-  const detailError = selected === null ? undefined : errorFor(selected);
-  const tokenSource = server?.auth_token_source ?? "default";
-  /** What the shared secret control shows for this token: a value the operator
-   *  typed is staged, `null` is a clear, the mask (or an empty string) is
-   *  whatever the API reported. */
-  const tokenStatus: SecretStatus =
-    server === null
-      ? "not-set"
-      : server.auth_token === null
-        ? "cleared"
-        : server.auth_token !== "" && server.auth_token !== TOKEN_MASK
-          ? "staged"
-          : tokenSource === "default"
-            ? "not-set"
-            : "set";
 
   return (
     <div
@@ -276,7 +681,7 @@ export default function ServerMapEditor({
         >
           {keys.map((key) => {
             const item = value[key];
-            const itemResult = probes[key];
+            const itemResult = probe.probes[key];
             const verdict =
               itemResult && itemResult !== "running" ? (itemResult.ok ? "ok" : "failed") : null;
             const changed = !deepEqual(item, savedMap[key]);
@@ -346,304 +751,17 @@ export default function ServerMapEditor({
         )}
       </div>
 
-      {selected !== null && server && (
-        <section
+      {selected !== null && (
+        <ServerDetail
           key={selected}
-          data-server-detail={selected}
-          aria-label={`Server ${selected}`}
-          className="min-w-0 border border-border rounded p-3 space-y-3"
-        >
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <span className="text-sm text-text-primary font-mono">{selected}</span>
-            <div className="flex items-center gap-3">
-              <label className="text-xs text-text-secondary flex items-center gap-1">
-                <input
-                  type="checkbox"
-                  aria-label={`${selected} enabled`}
-                  checked={server.enabled}
-                  onChange={(e) => put(selected, { enabled: e.target.checked })}
-                />
-                enabled
-              </label>
-              <button
-                type="button"
-                className="text-xs text-accent-strong disabled:opacity-50"
-                disabled={result === "running"}
-                onClick={() => void probe(selected)}
-              >
-                Test
-              </button>
-              <button
-                type="button"
-                className="text-xs text-text-secondary"
-                onClick={() => remove(selected)}
-              >
-                {BUILTIN.has(selected) ? "Disable" : "Remove"}
-              </button>
-            </div>
-          </div>
-
-          <label className="block text-xs">
-            <span className="text-text-muted">Label</span>
-            <input
-              className={input}
-              aria-label={`${selected} label`}
-              value={server.label}
-              onChange={(e) => put(selected, { label: e.target.value })}
-            />
-          </label>
-
-          {result === "running" && <p className="text-[11px] text-text-muted">testing…</p>}
-          {result && result !== "running" && (
-            <p
-              className={`text-[11px] ${result.ok ? "text-status-green" : "text-status-red"}`}
-              role="status"
-            >
-              {result.ok ? "ok" : "failed"} · {result.latency_ms} ms · {result.detail}
-            </p>
-          )}
-          {detailError && (
-            <p className="text-[11px] text-status-red" role="alert">
-              {detailError}
-            </p>
-          )}
-
-          <fieldset className="border border-border rounded p-2">
-            <legend className="text-xs text-text-muted px-1">Connection</legend>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-              <label className="block">
-                <span className="text-text-muted">Transport</span>
-                <select
-                  className={input}
-                  aria-label={`${selected} transport`}
-                  value={server.transport}
-                  onChange={(e) => put(selected, { transport: e.target.value })}
-                >
-                  {TRANSPORTS.map((t) => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
-                </select>
-              </label>
-              {server.transport === "stdio" ? (
-                <>
-                  <label className="block">
-                    <span className="text-text-muted">Command</span>
-                    <input
-                      className={input}
-                      aria-label={`${selected} command`}
-                      value={server.command}
-                      onChange={(e) => put(selected, { command: e.target.value })}
-                    />
-                  </label>
-                  <label className="block">
-                    <span className="text-text-muted">Arguments (one per line)</span>
-                    <textarea
-                      className={input}
-                      rows={2}
-                      aria-label={`${selected} args`}
-                      value={server.args.join("\n")}
-                      onChange={(e) =>
-                        put(selected, { args: e.target.value.split("\n").filter((a) => a !== "") })
-                      }
-                    />
-                  </label>
-                  <label className="block">
-                    <span className="text-text-muted">Working directory</span>
-                    <input
-                      className={input}
-                      aria-label={`${selected} cwd`}
-                      value={server.cwd}
-                      onChange={(e) => put(selected, { cwd: e.target.value })}
-                    />
-                  </label>
-                  <EnvMapField
-                    serverKey={selected}
-                    env={server.env ?? {}}
-                    onChange={(env) => put(selected, { env })}
-                  />
-                  <label className="block">
-                    <span className="text-text-muted">
-                      Environment names passed through (one per line)
-                    </span>
-                    <textarea
-                      className={input}
-                      rows={2}
-                      aria-label={`${selected} env allow`}
-                      value={server.env_allow.join("\n")}
-                      onChange={(e) =>
-                        put(selected, {
-                          env_allow: e.target.value.split("\n").filter((a) => a !== ""),
-                        })
-                      }
-                    />
-                  </label>
-                </>
-              ) : (
-                <>
-                  <label className="block">
-                    <span className="text-text-muted">URL</span>
-                    <input
-                      className={input}
-                      aria-label={`${selected} url`}
-                      value={server.url}
-                      onChange={(e) => put(selected, { url: e.target.value })}
-                    />
-                  </label>
-                  <div className="block">
-                    <span className="text-text-muted">Auth token</span>
-                    <div className="py-1.5">
-                      <SecretField
-                        id={`server-token-${selected}`}
-                        name={`server-token-${selected}`}
-                        title={`${selected} auth token`}
-                        status={tokenStatus}
-                        editable={entry.editable}
-                        labels={{ replace: "Replace token" }}
-                        /* The three words this screen has always used for a
-                           server token — where it comes from, not the generic
-                           `set · …hint · source` line — and the attribute the
-                           spec reads them through. */
-                        statusText={
-                          tokenStatus === "set" || tokenStatus === "not-set"
-                            ? (TOKEN_SOURCE_LABEL[tokenSource] ?? "not set")
-                            : undefined
-                        }
-                        statusAttrs={{ "data-token-state": selected }}
-                        onStage={(v) => put(selected, { auth_token: v })}
-                        onCancel={() =>
-                          // Closing the field abandons whatever was typed and
-                          // puts the mask back, which the API reads as "leave
-                          // the stored token alone".
-                          put(selected, {
-                            auth_token: tokenSource === "default" ? "" : TOKEN_MASK,
-                          })
-                        }
-                        onClear={() =>
-                          // `null` is how every secret in this project is
-                          // cleared: the API deletes the row rather than
-                          // storing an empty one.
-                          put(selected, { auth_token: null as unknown as string })
-                        }
-                      />
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-          </fieldset>
-
-          {/* WEB-2 (dev audit 2026-09-06): both of these are on every server
-              the editor creates, both are read by the providers that drive a
-              server (`providers/static/generic_mcp.py`, `ghidra.py`), and
-              neither had a control anywhere on this screen — a new server
-              kept whatever the default happened to be with no way to change
-              it. */}
-          <fieldset className="border border-border rounded p-2">
-            <legend className="text-xs text-text-muted px-1">Tools</legend>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-              <label className="block">
-                <span className="text-text-muted">Tool selection</span>
-                <select
-                  className={input}
-                  aria-label={`${selected} tool selection`}
-                  disabled={server.use_all_tools}
-                  value={server.tool_selection}
-                  onChange={(e) => put(selected, { tool_selection: e.target.value })}
-                >
-                  {TOOL_SELECTIONS.map((t) => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="text-xs text-text-secondary flex items-center gap-1 self-end pb-1.5">
-                <input
-                  type="checkbox"
-                  aria-label={`${selected} force all tools`}
-                  checked={server.use_all_tools}
-                  onChange={(e) => put(selected, { use_all_tools: e.target.checked })}
-                />
-                force every tool, whatever the selection says
-              </label>
-            </div>
-
-            {manifest && manifest.length > 0 ? (
-              <div className="mt-2">
-                <p className="text-xs text-text-muted">
-                  Tools the model may call ({allowed === null ? "all" : allowed.length} of{" "}
-                  {manifest.length})
-                </p>
-                <div className="flex gap-3 flex-wrap mt-1">
-                  {manifest.map((tool) => (
-                    <label
-                      key={tool}
-                      className="text-xs text-text-secondary flex items-center gap-1"
-                    >
-                      <input
-                        type="checkbox"
-                        aria-label={`${selected} tool ${tool}`}
-                        checked={allowed === null || allowed.includes(tool)}
-                        onChange={(e) => {
-                          // `null` means "every tool", which only the built-ins
-                          // start with. The first tick turns that into an
-                          // explicit list, so a later server-side change to the
-                          // manifest cannot silently widen what the model sees.
-                          const base = allowed === null ? manifest : allowed;
-                          put(selected, {
-                            tools: e.target.checked
-                              ? [...base, tool]
-                              : base.filter((t) => t !== tool),
-                          });
-                        }}
-                      />
-                      {tool}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div className="mt-2 flex items-center gap-2">
-                <p className="text-xs text-text-muted">
-                  {staleProbe[selected]
-                    ? "Connection changed; run Test again"
-                    : "Run Test to load the tool list"}
-                </p>
-                {/* Named apart from the header's Test so a "Test" button is
-                    never ambiguous on this pane. */}
-                <button
-                  type="button"
-                  className="text-xs text-accent-strong disabled:opacity-50"
-                  disabled={result === "running"}
-                  onClick={() => void probe(selected)}
-                >
-                  Load tool list
-                </button>
-              </div>
-            )}
-          </fieldset>
-
-          <fieldset className="border border-border rounded p-2">
-            <legend className="text-xs text-text-muted px-1">Agents</legend>
-            <div className="flex gap-3 flex-wrap">
-              {ROLES.map((role) => (
-                <label key={role} className="text-xs text-text-secondary flex items-center gap-1">
-                  <input
-                    type="checkbox"
-                    aria-label={`${selected} agent ${role}`}
-                    checked={server.agents.includes(role)}
-                    onChange={(e) =>
-                      put(selected, {
-                        agents: e.target.checked
-                          ? [...server.agents, role]
-                          : server.agents.filter((r) => r !== role),
-                      })
-                    }
-                  />
-                  {role}
-                </label>
-              ))}
-            </div>
-          </fieldset>
-        </section>
+          serverKey={selected}
+          value={value}
+          onChange={onChange}
+          probe={probe}
+          errors={errors}
+          entryKey={entry.key}
+          editable={entry.editable}
+        />
       )}
     </div>
   );
