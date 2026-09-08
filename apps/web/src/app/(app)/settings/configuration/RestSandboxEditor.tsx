@@ -49,6 +49,10 @@ export default function RestSandboxEditor({
   const [preview, setPreview] = useState<MappingPreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
+  // Once a preview result or error exists, the <details> opens itself and
+  // stays open for the rest of the session, even if the state that opened
+  // it is later cleared (e.g. a fresh "paste a sample response first").
+  const [sampleOpen, setSampleOpen] = useState(false);
 
   const mappingEntries = useMemo(
     () => entries.filter((e) => e.key.startsWith(MAPPING_PREFIX)),
@@ -82,6 +86,7 @@ export default function RestSandboxEditor({
     if (sample.trim() === "") {
       setPreview(null);
       setPreviewError("paste a sample response first");
+      setSampleOpen(true);
       return;
     }
     setRunning(true);
@@ -100,11 +105,13 @@ export default function RestSandboxEditor({
       setPreview(
         await api.previewSandboxMapping(parsed, mapping as unknown as Record<string, string>)
       );
+      setSampleOpen(true);
     } catch (e) {
       setPreview(null);
       setPreviewError(
         e instanceof SyntaxError ? "the pasted text is not valid JSON" : getErrorMessage(e)
       );
+      setSampleOpen(true);
     } finally {
       setRunning(false);
     }
@@ -145,7 +152,7 @@ export default function RestSandboxEditor({
             Report mapping
           </legend>
           <table className="w-full text-xs mt-2">
-            <thead>
+            <thead className="sticky top-0 bg-bg-deep">
               <tr className="border-b border-border text-text-muted">
                 <th className="text-left font-normal py-1">Channel</th>
                 <th className="text-left font-normal py-1">JSONPath</th>
@@ -238,36 +245,41 @@ export default function RestSandboxEditor({
             <div className="mt-2">{row(fieldNamesEntry)}</div>
           )}
 
-          <label htmlFor="rest-sample" className="block text-xs text-text-muted mt-3">
-            Paste a sample response
-          </label>
-          <textarea
-            id="rest-sample"
-            rows={5}
-            className="w-full bg-bg-deep border border-border rounded px-2 py-1.5 text-xs font-mono text-text-primary"
-            value={sample}
-            onChange={(e) => setSample(e.target.value)}
-          />
-          <div className="flex items-center gap-3 mt-2">
-            <button
-              type="button"
-              className="text-xs text-accent-strong disabled:opacity-50"
-              disabled={running}
-              onClick={() => void runPreview()}
-            >
-              Preview mapping
-            </button>
-            {preview && (
-              <span className="text-[11px] text-text-secondary" role="status">
-                sample hash: {preview.target_sha256 || "not matched"}
-              </span>
-            )}
-            {previewError && (
-              <span className="text-[11px] text-status-red" role="alert">
-                {previewError}
-              </span>
-            )}
-          </div>
+          <details className="mt-3" open={sampleOpen} onToggle={(e) => setSampleOpen(e.currentTarget.open)}>
+            <summary className="text-xs text-text-primary cursor-pointer select-none">
+              Test with a sample response
+            </summary>
+            <label htmlFor="rest-sample" className="block text-xs text-text-muted mt-2">
+              Paste a sample response
+            </label>
+            <textarea
+              id="rest-sample"
+              rows={5}
+              className="w-full bg-bg-deep border border-border rounded px-2 py-1.5 text-xs font-mono text-text-primary"
+              value={sample}
+              onChange={(e) => setSample(e.target.value)}
+            />
+            <div className="flex items-center gap-3 mt-2">
+              <button
+                type="button"
+                className="text-xs text-accent-strong disabled:opacity-50"
+                disabled={running}
+                onClick={() => void runPreview()}
+              >
+                Preview mapping
+              </button>
+              {preview && (
+                <span className="text-[11px] text-text-secondary" role="status">
+                  sample hash: {preview.target_sha256 || "not matched"}
+                </span>
+              )}
+              {previewError && (
+                <span className="text-[11px] text-status-red" role="alert">
+                  {previewError}
+                </span>
+              )}
+            </div>
+          </details>
         </fieldset>
       )}
     </div>
