@@ -200,6 +200,7 @@ export const MOCK_SETTINGS_SCHEMA = {
     {
       key: "negotiation",
       title: "Negotiation",
+      description: "",
       entries: [
         {
           key: "core.negotiation.max_iterations",
@@ -222,7 +223,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           applies_when: null,
           order: 0,
           choices_from: null,
-          editor: null,
+          editor: null, subgroup: null, advanced: false,
         },
         {
           key: "core.negotiation.retry_delay",
@@ -245,7 +246,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           applies_when: null,
           order: 0,
           choices_from: null,
-          editor: null,
+          editor: null, subgroup: null, advanced: false,
         },
         {
           key: "core.negotiation.blocked_hosts",
@@ -268,13 +269,14 @@ export const MOCK_SETTINGS_SCHEMA = {
           applies_when: null,
           order: 0,
           choices_from: null,
-          editor: null,
+          editor: null, subgroup: null, advanced: false,
         },
       ],
     },
     {
       key: "providers",
       title: "Providers",
+      description: "",
       entries: [
         {
           key: "core.llm.openai.api_key",
@@ -297,7 +299,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           applies_when: null,
           order: 0,
           choices_from: null,
-          editor: null,
+          editor: null, subgroup: null, advanced: false,
         },
         // Task C14 fix: real `core_catalog()` leaves the agent-definitions
         // editor's LLM section falls back to — `llm.provider` exists (an
@@ -310,7 +312,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           minimum: null, maximum: null, secret: false, group: "providers",
           title: "Provider", description: "Selects which LLM backend serves both the expert and judge roles.",
           applies: "next_job", editable: true, reason: null, probe: "llm",
-          applies_when: null, order: 0, choices_from: null, editor: null,
+          applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
         },
         // `llm.agents` (`dict[str, AgentLLMConfig]`) is one JSON leaf, staged
         // as a whole exactly like `core.mcp.servers` — the agent-definitions
@@ -323,7 +325,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           title: "Per-agent LLM overrides",
           description: "Per-agent LLM overrides for the heterogeneous model ensemble.",
           applies: "next_job", editable: true, reason: null, probe: null,
-          applies_when: null, order: 0, choices_from: null, editor: null,
+          applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
         },
       ],
     },
@@ -334,6 +336,7 @@ export const MOCK_SETTINGS_SCHEMA = {
     {
       key: "llm",
       title: "LLM & model",
+      description: "",
       entries: [
         {
           key: "core.llm.ollama.base_url", namespace: "core", path: "llm.ollama.base_url",
@@ -342,7 +345,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           title: "Ollama base URL",
           description: "Base URL of the local Ollama server.",
           applies: "next_job", editable: true, reason: null, probe: "llm",
-          applies_when: null, order: 0, choices_from: null, editor: null,
+          applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
         },
       ],
     },
@@ -351,6 +354,7 @@ export const MOCK_SETTINGS_SCHEMA = {
     {
       key: "sandbox",
       title: "Sandbox provider",
+      description: "",
       entries: [
         {
           key: "core.sandbox.provider", namespace: "core", path: "sandbox.provider",
@@ -359,7 +363,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           minimum: null, maximum: null, secret: false, group: "sandbox",
           title: "Sandbox provider", description: "Which sandbox produces the dynamic evidence.",
           applies: "next_job", editable: true, reason: null, probe: null,
-          applies_when: null, order: -1, choices_from: "sandbox_providers", editor: null,
+          applies_when: null, order: -1, choices_from: "sandbox_providers", editor: null, subgroup: null, advanced: false,
         },
         {
           key: "core.sandbox.cape2.base_url", namespace: "core", path: "sandbox.cape2.base_url",
@@ -368,7 +372,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           title: "CAPEv2 base URL", description: "Base URL of the CAPEv2 REST API.",
           applies: "next_job", editable: true, reason: null, probe: "cape2",
           applies_when: { "core.sandbox.provider": ["cape2"] }, order: 0,
-          choices_from: null, editor: null,
+          choices_from: null, editor: null, subgroup: null, advanced: false,
         },
         {
           key: "core.sandbox.triage.base_url", namespace: "core", path: "sandbox.triage.base_url",
@@ -377,7 +381,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           title: "Triage API base URL", description: "Hatching Triage cloud API root.",
           applies: "next_job", editable: true, reason: null, probe: "triage",
           applies_when: { "core.sandbox.provider": ["triage"] }, order: 0,
-          choices_from: null, editor: null,
+          choices_from: null, editor: null, subgroup: null, advanced: false,
         },
         // Task B17/B18: the REST sandbox's own fields, grouped and rendered by
         // `RestSandboxEditor` — `editor: "rest_sandbox"` is what routes them
@@ -391,7 +395,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           title: "REST sandbox base URL", description: "Base URL of the REST-flavoured sandbox.",
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: { "core.sandbox.provider": ["rest"] }, order: 0,
-          choices_from: null, editor: "rest_sandbox",
+          choices_from: null, editor: "rest_sandbox", subgroup: null, advanced: false,
         },
         {
           key: "core.sandbox.rest.report.format", namespace: "core", path: "sandbox.rest.report.format",
@@ -400,7 +404,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           title: "Report format", description: "Whether the report needs the mapping below.",
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: { "core.sandbox.provider": ["rest"] }, order: 0,
-          choices_from: null, editor: "rest_sandbox",
+          choices_from: null, editor: "rest_sandbox", subgroup: null, advanced: false,
         },
         {
           key: "core.sandbox.rest.mapping.processes", namespace: "core", path: "sandbox.rest.mapping.processes",
@@ -412,7 +416,7 @@ export const MOCK_SETTINGS_SCHEMA = {
             "core.sandbox.provider": ["rest"],
             "core.sandbox.rest.report.format": ["generic"],
           }, order: 0,
-          choices_from: null, editor: "rest_sandbox",
+          choices_from: null, editor: "rest_sandbox", subgroup: null, advanced: false,
         },
         {
           key: "core.sandbox.rest.mapping.dns", namespace: "core", path: "sandbox.rest.mapping.dns",
@@ -424,7 +428,7 @@ export const MOCK_SETTINGS_SCHEMA = {
             "core.sandbox.provider": ["rest"],
             "core.sandbox.rest.report.format": ["generic"],
           }, order: 0,
-          choices_from: null, editor: "rest_sandbox",
+          choices_from: null, editor: "rest_sandbox", subgroup: null, advanced: false,
         },
         {
           key: "core.sandbox.rest.mapping.target_sha256", namespace: "core",
@@ -437,7 +441,7 @@ export const MOCK_SETTINGS_SCHEMA = {
             "core.sandbox.provider": ["rest"],
             "core.sandbox.rest.report.format": ["generic"],
           }, order: 0,
-          choices_from: null, editor: "rest_sandbox",
+          choices_from: null, editor: "rest_sandbox", subgroup: null, advanced: false,
         },
       ],
     },
@@ -446,6 +450,7 @@ export const MOCK_SETTINGS_SCHEMA = {
     {
       key: "static",
       title: "Static provider",
+      description: "",
       entries: [
         {
           key: "core.static.provider", namespace: "core", path: "static.provider",
@@ -454,7 +459,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           minimum: null, maximum: null, secret: false, group: "static",
           title: "Static provider", description: "Which tool the static analyst attaches.",
           applies: "next_job", editable: true, reason: null, probe: null,
-          applies_when: null, order: -1, choices_from: "static_providers", editor: null,
+          applies_when: null, order: -1, choices_from: "static_providers", editor: null, subgroup: null, advanced: false,
         },
       ],
     },
@@ -463,6 +468,7 @@ export const MOCK_SETTINGS_SCHEMA = {
     {
       key: "mcp",
       title: "Tool servers (MCP)",
+      description: "",
       entries: [
         {
           key: "core.mcp.servers", namespace: "core", path: "mcp.servers",
@@ -471,7 +477,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           title: "Tool servers",
           description: "Every MCP server Maljan can attach, keyed by a short name.",
           applies: "next_job", editable: true, reason: null, probe: null,
-          applies_when: null, order: -1, choices_from: null, editor: "server_map",
+          applies_when: null, order: -1, choices_from: null, editor: "server_map", subgroup: null, advanced: false,
         },
         {
           key: "core.static.generic.server", namespace: "core", path: "static.generic.server",
@@ -480,7 +486,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           title: "Custom MCP server",
           description: "Which registry entry the generic_mcp static provider drives.",
           applies: "next_job", editable: true, reason: null, probe: null,
-          applies_when: null, order: 0, choices_from: "mcp_servers", editor: null,
+          applies_when: null, order: 0, choices_from: "mcp_servers", editor: null, subgroup: null, advanced: false,
         },
       ],
     },
@@ -489,6 +495,7 @@ export const MOCK_SETTINGS_SCHEMA = {
     {
       key: "agents",
       title: "Agents",
+      description: "",
       entries: [
         {
           key: "core.agents.profile", namespace: "core", path: "agents.profile",
@@ -497,7 +504,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           minimum: null, maximum: null, secret: false, group: "agents",
           title: "Active profile", description: "Which analyst profile a new job runs.",
           applies: "next_job", editable: true, reason: null, probe: null,
-          applies_when: null, order: -1, choices_from: "profiles", editor: null,
+          applies_when: null, order: -1, choices_from: "profiles", editor: null, subgroup: null, advanced: false,
         },
         {
           key: "core.agents.definitions", namespace: "core", path: "agents.definitions",
@@ -506,7 +513,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           title: "Agent definitions",
           description: "Every analyst Maljan can run, keyed by a short name.",
           applies: "next_job", editable: true, reason: null, probe: null,
-          applies_when: null, order: -1, choices_from: null, editor: "agent_definitions",
+          applies_when: null, order: -1, choices_from: null, editor: "agent_definitions", subgroup: null, advanced: false,
         },
         {
           key: "core.agents.profiles", namespace: "core", path: "agents.profiles",
@@ -515,7 +522,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           title: "Profiles",
           description: "Named analyst line-ups a job can select.",
           applies: "next_job", editable: true, reason: null, probe: null,
-          applies_when: null, order: -1, choices_from: null, editor: "profiles",
+          applies_when: null, order: -1, choices_from: null, editor: "profiles", subgroup: null, advanced: false,
         },
       ],
     },

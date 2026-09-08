@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test:unit": "vitest run",
     "test:e2e": "./scripts/e2e-clean-env.sh npx playwright test"
   },
   "dependencies": {
@@ -26,6 +27,7 @@
     "eslint": "^9.0.0",
     "eslint-config-next": "16.2.4",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^3.2.7"
   }
 }
