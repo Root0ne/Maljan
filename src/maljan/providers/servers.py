@@ -462,15 +462,22 @@ class ServerHandle:
         ``asyncio.wait_for`` — cancels the unwind while the child is still
         running, and that is what wedged the worker on 2026-09-07:
 
-        * ``mcp``'s stdio shutdown block is unshielded, so a cancellation
-          delivered into it raises out of ``await process.wait()`` at once and
-          its ``except TimeoutError:`` — the SIGTERM -> SIGKILL escalation —
-          never runs. The child therefore *outlives* the cancellation that was
-          supposed to end the wait on it.
-        * anyio's own child wait (``Process.aclose``) is shielded, so that task
-          cannot receive the cancellation either, and
+        * The cancellation is delivered **once**, and ``mcp``'s stdio shutdown
+          block consumes it (``mcp/client/stdio/__init__.py:190-216``). That
+          block is unshielded, so the ``CancelledError`` raises out of
+          ``await process.wait()`` at once — and its ``except TimeoutError:``,
+          the SIGTERM -> SIGKILL escalation, does not catch a
+          ``CancelledError`` and never runs. The child therefore *outlives* the
+          cancellation that was supposed to end the wait on it.
+        * The unwind then continues into anyio's ``Process.aclose``, whose
+          ``await self.wait()`` is *not* shielded (``_backends/_asyncio.py``
+          drops the shield first, and kills the child if a cancellation lands
+          there) — but the cancellation has already been delivered and
+          consumed, so nothing re-cancels it and it simply parks on a child
+          that is still running.
+        * That task is still in the task group's cancel scope, and
           ``CancelScope._deliver_cancellation`` sets ``should_retry`` for every
-          task still in the scope, re-arming itself with ``loop.call_soon`` on
+          task in ``self._tasks``, re-arming itself with ``loop.call_soon`` on
           every iteration. A scope that can never empty therefore spins its
           loop thread at 100 % CPU — 80 minutes of it, starving the worker of
           the GIL and stopping the job's heartbeat.
@@ -479,8 +486,8 @@ class ServerHandle:
         ``CHILD_EXIT_GRACE`` more to finish by itself. With the process gone
         every wait inside the stack returns, the scope empties, and the fence
         usually has nothing left to cancel. If it does cancel, it is cancelling
-        a stack whose child is already dead — the case anyio's shielded wait
-        *can* complete — rather than one parked on a live process.
+        a stack whose child is already dead, so each wait in it completes
+        rather than parking.
 
         The close is awaited in the caller's own task, never wrapped in one:
         anyio cancel scopes are task-bound, and running the unwind in a
@@ -764,10 +771,17 @@ class ServerHandle:
 
         owner = self._owner_loop
         budget = SYNC_CLOSE_TIMEOUT
+        # The inner fence has to finish strictly inside the hard cap, or the
+        # two race and the cap — which cancels, and cancels a transport whose
+        # child may still be alive — can win. ``_close_bounded`` spends
+        # ``inner + CHILD_EXIT_GRACE``, so the whole of it lands
+        # ``CROSS_LOOP_GRACE`` before the cap, the same headroom the routed
+        # path leaves.
+        inner = budget - CHILD_EXIT_GRACE - CROSS_LOOP_GRACE
         try:
             if owner is None or owner is _get_agent_loop():
                 _run_coro_blocking(
-                    self._close_bounded(closer, budget - CHILD_EXIT_GRACE),
+                    self._close_bounded(closer, inner),
                     hard_timeout=budget,
                     label=f"{self.name}-mcp-close",
                 )

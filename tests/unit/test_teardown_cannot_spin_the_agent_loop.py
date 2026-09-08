@@ -10,15 +10,21 @@ GIL and the job's heartbeat stopped. The chain:
    `asyncio.wait_for(closer(), CLEANUP_TIMEOUT)`.
 2. When that budget expired, `wait_for` **cancelled** the task that was
    half-way through unwinding `mcp.client.stdio.stdio_client`.
-3. That transport's shutdown block is *unshielded*. Under an already-delivered
-   cancellation every `await` in it raises `CancelledError` at once, and its
-   `except TimeoutError:` does not catch that — so `_terminate_process_tree`,
-   the SIGTERM -> SIGKILL escalation, never runs and the child stays alive.
-4. anyio's live child wait is shielded (`Process.aclose`), so the cancellation
-   can never be *delivered* to it; and `CancelScope._deliver_cancellation` sets
-   `should_retry = True` for every task still in the scope, re-arming itself
-   with `loop.call_soon` on every single iteration. A scope that can never
-   empty therefore spins the loop thread for the life of the process.
+3. That transport's shutdown block is *unshielded*, and it consumes the one
+   cancellation there is: the `CancelledError` raises out of
+   `await process.wait()` at once, and its `except TimeoutError:` does not
+   catch that — so `_terminate_process_tree`, the SIGTERM -> SIGKILL
+   escalation, never runs and the child stays alive.
+4. The unwind continues into anyio's `Process.aclose`, whose `await self.wait()`
+   is *not* shielded — it drops the shield first, and kills the child if a
+   cancellation lands there. But the cancellation has already been delivered
+   and consumed, so nothing re-cancels this wait and it parks on a child that
+   is still running.
+5. That task is still in the task group's cancel scope, and
+   `CancelScope._deliver_cancellation` sets `should_retry = True` for every
+   task in `self._tasks`, re-arming itself with `loop.call_soon` on every
+   single iteration. A scope that can never empty therefore spins the loop
+   thread for the life of the process.
 
 So the fix is not a bigger budget or a better watchdog: it is to stop
 cancelling a transport that is parked on a child, and take the child instead.
@@ -53,16 +59,23 @@ def _spawn_sigterm_deaf_child() -> subprocess.Popen[bytes]:
 
 
 class _StdioLikeToolkit:
-    """A toolkit whose close behaves the way `mcp`'s stdio transport does.
+    """A toolkit whose close reproduces the shape of `mcp`'s stdio shutdown.
 
-    Two properties, both taken from the real code rather than invented:
+    One property is taken from the real code, the other is a deliberately
+    worse-than-real stand-in:
 
-    * the shutdown escalation lives *after* an unshielded `await`, so a
+    * *Real*: the shutdown escalation lives after an unshielded `await`, so a
       cancellation delivered into the unwind skips it entirely
       (`mcp/client/stdio/__init__.py`, the `finally:` at the end of
-      `stdio_client`);
-    * the wait on the child is shielded, so the cancellation is never received
-      and the scope it belongs to can never empty (anyio's `Process.aclose`).
+      `stdio_client`).
+    * *Worst case*: the wait on the child is permanently shielded. The real
+      unwind is not — anyio's `Process.aclose` drops its shield before waiting
+      and SIGKILLs the child if a cancellation lands there — it simply is
+      never re-cancelled, because the shutdown block above already consumed
+      the only cancellation there was. A permanent shield is the simplest
+      thing that holds a task in the scope the same way, and it is strictly
+      harder to escape than what happens live, so a fix that clears this
+      clears the real case too.
     """
 
     def __init__(self, child: subprocess.Popen[bytes]) -> None:
