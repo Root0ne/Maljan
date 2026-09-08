@@ -185,6 +185,33 @@ def _absolute_host_sample_path(state: AnalysisState) -> str:
         return raw
 
 
+def _pin_sample_path(agent: Any, state: AnalysisState) -> None:
+    """Pin the path this agent's tools must be given, on the agent itself.
+
+    The same three-step lookup ``_augment_static_chunks_with_path`` does — the
+    agent's own provider mirror, the global mirror, then the absolute host
+    path (BUG 11) — because the two have to agree: the chunk tells the model
+    which path to use and this tells the tool layer, and a disagreement is a
+    tool call against a file that is not there.
+
+    BUG 11, second round (live 2026-09-07, S5c): this used to run for the
+    ``static`` role only. A *generic* agent (``static_qu1cksc0pe``, provider
+    ``none``) therefore had the path in its chunk JSON and nothing anywhere
+    else, so when the model called ``analyze_file`` with the bare filename
+    there was no pinned value to correct it against and Qu1cksc0pe resolved
+    the name against its own working directory.
+
+    Assigned unconditionally: agents are cached across samples, so a path that
+    cannot be recomputed must become ``None`` rather than stay yesterday's.
+    """
+    agent._analysis_file_path = (
+        (state.get("static_sample_paths") or {}).get(agent._resolved.static_provider_id)
+        or state.get("static_sample_path")
+        or _absolute_host_sample_path(state)
+        or None
+    )
+
+
 def _augment_static_chunks_with_path(
     chunks: list,
     state: AnalysisState,
@@ -401,6 +428,13 @@ def make_analyst_node(
                         _e,
                     )
 
+                # BUG 11, second round: the chunk carries the path for the
+                # model to read; this carries it for the tool layer, which is
+                # what actually corrects a model that sends the bare filename.
+                # Pinned *before* the chunk is built: the augmentation reads a
+                # file and can raise, and the outer handler would then leave a
+                # cached agent on the previous sample's path.
+                _pin_sample_path(agent, state)
                 static_context_chunks = _augment_static_chunks_with_path(
                     container.load_chunked(state["file_hash"], agent_name),
                     state,
@@ -449,13 +483,6 @@ def make_analyst_node(
                 except Exception as _e:  # noqa: BLE001
                     logger.debug("static summary extraction skipped: %s", _e)
 
-                chunks = _augment_static_chunks_with_path(
-                    chunks,
-                    state,
-                    static=_st,
-                    provider_id=agent._resolved.static_provider_id,
-                )
-
                 # Pin the container-visible path on the agent so the
                 # load_program tool wrapper can override hallucinated paths.
                 # Assign unconditionally — agents are cached across samples;
@@ -469,13 +496,16 @@ def make_analyst_node(
                 # to agree: the chunk tells the model which path to use and this
                 # tells the tool wrapper, and a provider that mirrors nothing
                 # used to give the model a path and the wrapper ``None``.
-                agent._analysis_file_path = (  # type: ignore[attr-defined]
-                    (state.get("static_sample_paths") or {}).get(  # type: ignore[attr-defined]
-                        agent._resolved.static_provider_id
-                    )
-                    or state.get("static_sample_path")
-                    or _absolute_host_sample_path(state)
-                    or None
+                # Pinned before the augmentation, which reads a file and can
+                # raise: the guarantee that no stale path survives is worth
+                # nothing if it holds only on the happy path.
+                _pin_sample_path(agent, state)
+
+                chunks = _augment_static_chunks_with_path(
+                    chunks,
+                    state,
+                    static=_st,
+                    provider_id=agent._resolved.static_provider_id,
                 )
 
                 # 2026-07 round 3: hand the static analyst the sample's capability

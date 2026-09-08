@@ -303,3 +303,56 @@ class TestTheGenericContextAlwaysCarriesAnAbsolutePath:
         result = node({"file_hash": "abc123"})
         agent.safe_analyze_isr.assert_called_once()
         assert "analyst skipped" not in result["reports"]["qs"]
+
+
+# ---------------------------------------------------------------------------
+# BUG 11, second round (live 2026-09-07, S5c). The chunk JSON *did* carry an
+# absolute ``analysis_file_path`` — the class above proves it — and the live
+# run still failed: `static_qu1cksc0pe` called every tool with the bare
+# filename and Qu1cksc0pe resolved it against its own working directory.
+#
+# The path reached the *chunk* and stopped there. ``agent._analysis_file_path``
+# — the one channel a tool wrapper can read — is assigned inside the
+# ``role == "static"`` branch only, so a generic agent's tools had nothing to
+# be pinned against.
+# ---------------------------------------------------------------------------
+
+
+class TestAGenericAgentIsPinnedToTheSamplePathToo:
+    def _pin(self, state: dict[str, Any], *, provider_id: str) -> Any:
+        agent = _agent(provider_id)
+        agent._analysis_file_path = "/stale/from/a/previous/sample.exe"
+        container = _container(agent, role="generic", load_chunked_return=_placeholder("qs"))
+        node = make_analyst_node("static_qu1cksc0pe", container)
+        node(state)
+        return agent._analysis_file_path
+
+    def test_the_provider_that_mirrors_nothing_pins_the_absolute_host_path(self) -> None:
+        """The live S5c state shape: global provider `none`, an r2 mirror that
+        belongs to a *different* agent, and no global mirror at all."""
+        pinned = self._pin(
+            {
+                "file_hash": "abc123",
+                "sample_path": "/srv/maljan/data/samples/abc123.exe",
+                "static_sample_path": None,
+                "static_sample_paths": {"r2": "/srv/maljan/data/samples/r2-work/abc123.exe"},
+            },
+            provider_id="none",
+        )
+        assert pinned == "/srv/maljan/data/samples/abc123.exe"
+
+    def test_a_generic_agent_on_a_mirroring_provider_pins_its_own_mirror(self) -> None:
+        pinned = self._pin(
+            {
+                "file_hash": "abc123",
+                "sample_path": "/srv/maljan/data/samples/abc123.exe",
+                "static_sample_paths": {"r2": "/srv/maljan/data/samples/r2-work/abc123.exe"},
+            },
+            provider_id="r2",
+        )
+        assert pinned == "/srv/maljan/data/samples/r2-work/abc123.exe"
+
+    def test_a_stale_pin_from_the_previous_sample_is_cleared(self) -> None:
+        """Agents are cached across samples; a pin that cannot be recomputed
+        must become None rather than point at yesterday's file."""
+        assert self._pin({"file_hash": "abc123"}, provider_id="none") is None
