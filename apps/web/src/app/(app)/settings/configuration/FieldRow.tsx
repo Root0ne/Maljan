@@ -171,7 +171,13 @@ export default function FieldRow({
     <>
       <div role="group" aria-labelledby={labelId}>
         {entry.editor === "server_map" ? (
-          <ServerMapEditor entry={entry} current={current} staged={staged} onChange={onChange} />
+          <ServerMapEditor
+            entry={entry}
+            current={current}
+            staged={staged}
+            errors={errors ?? {}}
+            onChange={onChange}
+          />
         ) : entry.editor === "agent_definitions" ? (
           <AgentDefinitionsEditor
             entry={entry}

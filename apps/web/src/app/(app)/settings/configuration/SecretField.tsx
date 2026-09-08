@@ -45,6 +45,8 @@ export default function SecretField({
   onClear,
   onCancel,
   labels,
+  statusText,
+  statusAttrs,
 }: {
   id: string;
   name: string;
@@ -59,16 +61,25 @@ export default function SecretField({
   onClear: () => void;
   onCancel: () => void;
   labels?: { replace?: string };
+  /** Wording a caller's own contract pins, in place of the computed line: the
+   *  tool-server token says where it comes from (`set in .env`) rather than
+   *  `set · …hint · source`, and that text is asserted by the servers spec. */
+  statusText?: string;
+  /** Attributes for the element the status line is rendered in, so a caller
+   *  can keep a hook it already published — `data-token-state` on the server
+   *  token. Only applied while the field is closed, which is the only time a
+   *  status is shown at all. */
+  statusAttrs?: Record<string, string>;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
-  const statusText = secretStatusText(status, hint, source);
+  const line = statusText ?? secretStatusText(status, hint, source);
   const replaceLabel = labels?.replace ?? "Set new value";
 
   if (!editable) {
     return (
-      <div className="text-sm text-text-muted">
-        {statusText}
+      <div className="text-sm text-text-muted" {...statusAttrs}>
+        {line}
         {reason ? ` — ${reason}` : ""}
       </div>
     );
@@ -116,7 +127,9 @@ export default function SecretField({
         </>
       ) : (
         <>
-          <span className="text-sm text-text-muted">{statusText}</span>
+          <span className="text-sm text-text-muted" {...statusAttrs}>
+            {line}
+          </span>
           <button
             type="button"
             className="text-xs text-accent-strong"
