@@ -72,10 +72,15 @@ function CopyKeyButton({ settingKey }: { settingKey: string }) {
 function Description({ text, full }: { text: string; full: boolean }) {
   const [expanded, setExpanded] = useState(false);
   if (!text) return null;
-  if (full || text.length <= DESCRIPTION_LIMIT) {
+  const head = firstSentence(text);
+  // A "more" toggle only earns its place when there is actually more behind
+  // it: a description with no sentence-ending punctuation before the limit
+  // has `firstSentence` fall back to the whole text, and a toggle that reveals
+  // nothing new is worse than none.
+  const foldable = !full && text.length > DESCRIPTION_LIMIT && head.length < text.length;
+  if (!foldable) {
     return <p className="text-xs text-text-secondary mt-1">{text}</p>;
   }
-  const head = firstSentence(text);
   return (
     <p className="text-xs text-text-secondary mt-1">
       {expanded ? text : head}{" "}

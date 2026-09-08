@@ -60,6 +60,10 @@ function SearchResults() {
       }));
   }, [schema, query, ctx]);
 
+  if (!query.trim()) {
+    return <p className="text-sm text-text-muted">Type to search settings</p>;
+  }
+
   if (blocks.length === 0) {
     return (
       <p className="text-sm text-text-muted">

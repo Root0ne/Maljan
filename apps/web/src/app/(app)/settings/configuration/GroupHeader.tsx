@@ -102,14 +102,21 @@ export default function GroupHeader({
         <div className="flex items-center gap-4 flex-wrap mt-2">
           {probes.map((name) => {
             const entry = results[name];
-            const stale = entry !== undefined && probeInputsStaged(name) !== entry.stagedWhenRun;
+            // A running probe stays running-looking no matter what happens to
+            // its inputs mid-flight: staleness only describes a *finished*
+            // result (does it still reflect what a press would send now), and
+            // must never flip a still-running button back to enabled or swap
+            // its "testing…" text out from under it.
+            const running = entry?.result === "running";
+            const stale =
+              !running && entry !== undefined && probeInputsStaged(name) !== entry.stagedWhenRun;
             const r = entry && !stale ? entry.result : undefined;
             return (
               <span key={name} className="flex items-center gap-2">
                 <button
                   type="button"
                   className="text-xs text-accent-strong disabled:opacity-50"
-                  disabled={r === "running"}
+                  disabled={running}
                   onClick={async () => {
                     const stagedWhenRun = probeInputsStaged(name);
                     setResults((s) => ({ ...s, [name]: { result: "running", stagedWhenRun } }));
@@ -134,7 +141,7 @@ export default function GroupHeader({
                     {r.ok ? "ok" : "failed"} · {r.latency_ms} ms · {r.detail}
                   </span>
                 )}
-                {r === "running" && <span className="text-[11px] text-text-muted">testing…</span>}
+                {running && <span className="text-[11px] text-text-muted">testing…</span>}
               </span>
             );
           })}

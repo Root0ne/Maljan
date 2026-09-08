@@ -156,27 +156,40 @@ export default function GroupPage({ section, group }: { section: string; group: 
   const sorted = [...resolved.entries].sort(
     (a, b) => a.order - b.order || a.key.localeCompare(b.key)
   );
-  const probes = Array.from(
-    new Set(sorted.map((e) => e.probe).filter((p): p is string => Boolean(p)))
-  );
   const overriddenKeys = sorted.filter((e) => ctx.values[e.key]?.source === "ui");
 
-  let shown = sorted.filter((e) => ctx.isVisible(e));
+  const visible = sorted.filter((e) => ctx.isVisible(e));
+  // The probe row follows what is currently *visible*, not the group's full
+  // entry list: `core.sandbox.cape2.base_url` and `core.sandbox.triage.base_url`
+  // both carry a probe id, but `applies_when` only shows one of them at a
+  // time depending on the provider selector — the button next to the header
+  // has to swap with it, not offer both forever.
+  const probes = Array.from(
+    new Set(visible.map((e) => e.probe).filter((p): p is string => Boolean(p)))
+  );
+
+  const isProviderGroup = PROVIDER_GROUPS.has(resolved.backendGroup);
+  const isSelectorEntry = (e: CatalogEntry) =>
+    e.order === -1 &&
+    (e.choices_from === "static_providers" || e.choices_from === "sandbox_providers");
+
+  let shown = visible;
   if (ctx.onlyChanged) {
-    shown = shown.filter((e) => e.key in ctx.pending || ctx.values[e.key]?.source === "ui");
+    shown = shown.filter(
+      (e) =>
+        e.key in ctx.pending ||
+        ctx.values[e.key]?.source === "ui" ||
+        // The selector itself stays visible under "Only changed" even when it
+        // is untouched, so the "<Choice> settings" heading and its context
+        // survive alongside whatever in that provider's fields did change.
+        (isProviderGroup && isSelectorEntry(e))
+    );
   }
 
   const rest = shown.filter((e) => e.editor === "rest_sandbox");
   const rows = shown.filter((e) => e.editor !== "rest_sandbox");
 
-  const isProviderGroup = PROVIDER_GROUPS.has(resolved.backendGroup);
-  const selector = isProviderGroup
-    ? rows.find(
-        (e) =>
-          e.order === -1 &&
-          (e.choices_from === "static_providers" || e.choices_from === "sandbox_providers")
-      )
-    : undefined;
+  const selector = isProviderGroup ? rows.find(isSelectorEntry) : undefined;
   const dependents = selector ? rows.filter((e) => e.key !== selector.key) : rows;
   const selectedProvider = selector ? String(ctx.effectiveValue(selector.key) ?? "") : "";
 

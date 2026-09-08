@@ -70,12 +70,20 @@ export default function Toolbar() {
 
   useEffect(() => {
     const trimmed = query.trim();
-    if (!trimmed || trimmed === urlQuery) return;
+    if (trimmed === urlQuery) return;
     const t = setTimeout(() => {
-      router.push(`${SEARCH_PATH}?q=${encodeURIComponent(trimmed)}`);
+      if (trimmed) {
+        router.push(`${SEARCH_PATH}?q=${encodeURIComponent(trimmed)}`);
+      } else if (onSearchPage) {
+        // Clearing the box while already on the search page drops `?q`
+        // entirely rather than leaving the stale query in the URL — the page
+        // then falls back to its "type to search" prompt instead of a
+        // "no settings match" for an empty string nobody typed.
+        router.push(SEARCH_PATH);
+      }
     }, 300);
     return () => clearTimeout(t);
-  }, [query, urlQuery, router]);
+  }, [query, urlQuery, onSearchPage, router]);
 
   useEffect(() => {
     if (!toast) return;
