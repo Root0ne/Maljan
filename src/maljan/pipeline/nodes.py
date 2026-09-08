@@ -681,10 +681,33 @@ def _revision_input_is_absent(
     round 1. ``_is_placeholder_only`` carries the static carve-out with it:
     static falls back to a metadata-only prompt rather than being skipped.
 
+    "The same signal" has to mean the same *source*, and that is BUG 12. Round 0
+    reads ``load_sandbox_data_for_agent(agent, sandbox_report)`` whenever a
+    sandbox report exists, and only falls back to ``load_chunked`` when one does
+    not. This asked ``load_chunked`` unconditionally — which for dynamic and
+    network on a live sample is the file loader's own "No <layer> data
+    available" placeholder — so an analyst that had just analysed a full
+    detonation report was judged data-less and its round-0 claims were
+    discarded. A sandbox report that yields chunks *is* the data; the
+    placeholder check belongs to the loader path alone.
+
     Fails **open**. A loader that raises tells us nothing about whether data
     exists, and silently deleting an analyst on a transient Qdrant blip is a
     far worse failure than one wasted revise call.
     """
+    sandbox_report = state.get("sandbox_report")
+    if isinstance(sandbox_report, dict) and sandbox_report:
+        try:
+            sandbox_chunks = container.load_sandbox_data_for_agent(agent_name, sandbox_report)
+        except Exception as exc:  # noqa: BLE001 — fails open, same as the loader below
+            logger.debug(
+                "_revision_input_is_absent: sandbox slice failed for '%s' (%s); revising anyway.",
+                agent_name,
+                exc,
+            )
+            return False
+        if sandbox_chunks:
+            return False
     try:
         chunks = container.load_chunked(state.get("file_hash", ""), agent_name)
     except Exception as exc:  # noqa: BLE001
@@ -948,6 +971,24 @@ def make_revision_node(container: ServiceContainer) -> Any:
             # Measured 2026-07-29 with CAPE unreachable: the sycophancy
             # detector flagged static vs dynamic at sim=1.000.
             if _revision_input_is_absent(state, container, name):
+                # Declining to revise is the point; deleting is not (BUG 12).
+                # An analyst that made claims on round 0 keeps them — whatever
+                # the guard now says about round 1, those claims were made
+                # against data that existed at the time, and replacing them
+                # with an empty ISR both loses evidence and makes the report
+                # say "analysts produced no claims" about an analyst that
+                # produced several. Only an analyst that had nothing to begin
+                # with gets a fresh empty ISR.
+                _round0 = (state.get("isr_reports") or {}).get(name)
+                if _round0 is not None and getattr(_round0, "claims", None):
+                    logger.info(
+                        "Agent '%s': no data to revise — keeping its report and its "
+                        "%d round-0 claim(s) (round %d).",
+                        name,
+                        len(_round0.claims),
+                        iteration,
+                    )
+                    return original_reports.get(name, ""), _round0
                 logger.info(
                     "Agent '%s': no data to revise — keeping its report and "
                     "contributing no claims (round %d).",
@@ -1445,11 +1486,21 @@ def make_judge_node(container: ServiceContainer) -> Any:
             # least one observational claim, so a truly empty ISR is a
             # failure signal, not a clean result.)
             _analyst_keys = container.analyst_keys()
-            _empty_analysts = [
+            _claimless = [
                 name
                 for name in _analyst_keys
                 if name in isr_reports and not getattr(isr_reports.get(name), "claims", None)
             ]
+            # BUG 12: two different findings, reported for years as one
+            # sentence. An analyst that had nothing to read tells the reader
+            # the run was thin; an analyst that read everything and claimed
+            # nothing tells them the analyst failed. Split by asking the same
+            # guard the revision node asks — its answer is "was there data",
+            # which is exactly the distinction.
+            _no_data_analysts = [
+                name for name in _claimless if _revision_input_is_absent(state, container, name)
+            ]
+            _empty_analysts = [name for name in _claimless if name not in _no_data_analysts]
             # D10: surface anti-emulation / anti-VM / sandbox-detection
             # signatures so the existing DEGRADED RUN banner can explain
             # the empty dynamic tab (sandbox traced nothing because the
@@ -1523,6 +1574,10 @@ def make_judge_node(container: ServiceContainer) -> Any:
             _degradation_reasons.extend(container.server_degradation_reasons())
             if _failed_analysts:
                 _degradation_reasons.append(f"analyst failures: {', '.join(_failed_analysts)}")
+            if _no_data_analysts:
+                _degradation_reasons.append(
+                    f"analysts had no data to analyse: {', '.join(_no_data_analysts)}"
+                )
             if _empty_analysts:
                 _degradation_reasons.append(
                     f"analysts produced no claims: {', '.join(_empty_analysts)}"
