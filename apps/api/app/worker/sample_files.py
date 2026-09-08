@@ -53,16 +53,55 @@ def temp_dir() -> Path:
 def work_dir(subdir: str = WORK_SUBDIR) -> Path:
     """The private mirror directory ``subdir`` names, created 0o700.
 
-    ``subdir`` is a provider's ``MirrorSpec.work_subdir``. Only the name is
-    used, so a spec built from a configured path cannot escape ``samples_dir``.
+    ``subdir`` is a provider's ``MirrorSpec.work_subdir``, which for r2 comes
+    from an operator-set path. Taking the last segment is not on its own enough
+    to keep this inside ``samples_dir``: ``Path("data/samples/..").name`` is
+    ``".."``, which resolves to the *parent* of ``samples_dir`` — a directory
+    this would then chmod 0o700 and ``sweep`` would delete stale files in.
+    ``""`` and ``"."`` were quieter and no better: they fell back to the hidden
+    ``WORK_SUBDIR``, silently putting r2's sample back where radare2 refuses to
+    open it (BUG 10).
+
+    So the three names that do not denote a child are refused outright rather
+    than corrected into something plausible. ``StaticR2Config`` rejects them at
+    settings validation too; this is the fence for every other caller.
     """
-    name = Path(subdir).name or WORK_SUBDIR
+    name = Path(subdir).name
+    if name in ("", ".", ".."):
+        raise ValueError(
+            f"invalid sample mirror directory {subdir!r}: its last segment is {name!r}, "
+            f"which names a directory itself or its parent rather than a private "
+            f"subdirectory of the samples directory"
+        )
     return _private_dir((Path(settings.samples_dir) / name).resolve())
+
+
+def _configured_mirror_subdirs() -> tuple[str, ...]:
+    """Mirror subdirectories an operator configured, on top of the built-ins.
+
+    ``WORK_SUBDIRS`` alone left a custom ``static.r2.mirror_dir`` — which the
+    validator accepts — cleaned per job through the explicit ``host_mirrors``
+    list but never reached by ``sweep`` or ``remove_for_sha``, so a crashed
+    worker's copies stayed forever in a directory that holds live malware.
+
+    Read lazily and defensively: this module is imported by the API as well as
+    the worker, and a settings load that fails must not take the sweep with it.
+    """
+    try:
+        from maljan.core.config import get_settings
+
+        configured = Path(get_settings().static.r2.mirror_dir).name
+    except Exception:  # noqa: BLE001 — the built-ins are still swept
+        return ()
+    return (configured,) if configured and configured not in ("", ".", "..") else ()
 
 
 def work_dirs() -> list[Path]:
     """Every mirror directory, for the paths that sweep or clean up."""
-    return [work_dir(name) for name in WORK_SUBDIRS]
+    seen: dict[str, None] = {}
+    for name in (*WORK_SUBDIRS, *_configured_mirror_subdirs()):
+        seen.setdefault(name, None)
+    return [work_dir(name) for name in seen]
 
 
 def private_copy(src: Path, dest: Path) -> None:

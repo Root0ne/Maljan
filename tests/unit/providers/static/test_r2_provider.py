@@ -187,3 +187,30 @@ def test_an_ordinary_directory_is_accepted() -> None:
     assert StaticR2Config(mirror_dir="./data/samples/r2-work").mirror_dir == (
         "./data/samples/r2-work"
     )
+
+
+def test_a_traversal_mirror_directory_is_rejected() -> None:
+    """Wave-4 review F1: `data/samples/..` passed the hidden check — `..` was
+    explicitly excluded from it — and resolved outside samples_dir."""
+    import pytest
+    from pydantic import ValidationError
+
+    from maljan.core.config import StaticR2Config
+
+    for bad in ("data/samples/..", "..", "", ".", "data/samples/subdir/.."):
+        with pytest.raises(ValidationError):
+            StaticR2Config(mirror_dir=bad)
+
+
+def test_a_trailing_dot_is_normalised_rather_than_refused() -> None:
+    """`data/samples/.` is not one of the refused segments: path normalisation
+    drops the `.` first, so the last segment is `samples` and the value names
+    an ordinary subdirectory. Pinned because it is the surprising case — it is
+    accepted, and it means `<samples_dir>/samples`, not the samples directory
+    itself."""
+    from pathlib import Path as _Path
+
+    from maljan.core.config import StaticR2Config
+
+    cfg = StaticR2Config(mirror_dir="data/samples/.")
+    assert _Path(cfg.mirror_dir).name == "samples"

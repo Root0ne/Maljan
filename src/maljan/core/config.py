@@ -1112,6 +1112,22 @@ class StaticR2Config(MCPServerConfig):
                 f"'Failed to open file.'. Use an unhidden directory such as "
                 f"'data/samples/r2-work'."
             )
+        # Only the last segment is honoured — the mirror is always a
+        # subdirectory of the worker's ``samples_dir`` — so a value whose last
+        # segment names a directory itself or its parent is not a mirror
+        # location at all. ``..`` is the one that matters: it slipped through
+        # the check above (which excludes it as "not hidden") and resolved
+        # *outside* ``samples_dir``, into a directory the worker would then
+        # chmod 0o700 and sweep stale files from. ``''`` and ``'.'`` used to
+        # fall back to the hidden default, which is BUG 10 again.
+        last = PurePosixPath(value.replace("\\", "/")).name
+        if last in ("", ".", ".."):
+            raise ValueError(
+                f"{value!r} does not name a mirror directory: only its last segment is "
+                f"used, and that segment is {last!r}, which means the samples directory "
+                f"itself or its parent. Use a subdirectory name such as "
+                f"'data/samples/r2-work'."
+            )
         return value
 
 

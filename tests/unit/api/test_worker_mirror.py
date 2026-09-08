@@ -192,3 +192,46 @@ def test_two_providers_landing_on_one_host_path_still_copy_once(tmp_path, monkey
     assert len(calls) == 1
     assert len(host_mirrors) == 1
     assert set(paths) == {"one", "two"}
+
+
+# ---------------------------------------------------------------------------
+# Wave-4 review F1: `Path(subdir).name` keeps "..", so a configured mirror_dir
+# ending in `..` resolved *outside* samples_dir — which `_private_dir` then
+# chmods 0o700 and `sweep()` deletes stale files in. "" and "." were quieter
+# but no better: `.name` is empty, the old code fell back to the hidden
+# `.work`, and r2 was silently re-broken by the very setting that exists to
+# stop that.
+# ---------------------------------------------------------------------------
+
+
+def test_a_traversal_subdirectory_is_refused(tmp_path, monkeypatch):
+    import pytest
+
+    from app.worker import sample_files
+
+    monkeypatch.setattr(sample_files.settings, "samples_dir", str(tmp_path / "samples"))
+
+    for bad in ("..", "data/samples/..", "", "."):
+        with pytest.raises(ValueError, match="mirror directory"):
+            sample_files.work_dir(bad)
+
+    assert not (tmp_path / "samples").exists(), "a refused name must create nothing"
+
+
+def test_an_empty_name_does_not_fall_back_to_the_hidden_default(tmp_path, monkeypatch):
+    """The silent half of the finding: falling back to `.work` would put r2's
+    sample back where radare2 refuses to open it."""
+    import pytest
+
+    from app.worker import sample_files
+
+    monkeypatch.setattr(sample_files.settings, "samples_dir", str(tmp_path))
+    with pytest.raises(ValueError):
+        sample_files.work_dir("")
+
+
+def test_an_ordinary_subdirectory_is_still_accepted(tmp_path, monkeypatch):
+    from app.worker import sample_files
+
+    monkeypatch.setattr(sample_files.settings, "samples_dir", str(tmp_path))
+    assert sample_files.work_dir("r2-work").parent == tmp_path.resolve()
