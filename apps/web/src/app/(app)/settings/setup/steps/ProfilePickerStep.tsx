@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { ProfileEntry } from "@/types/settings";
 import { mapKeyError } from "../../configuration/mapEditorHelpers";
 import { useSettingsContext } from "../../configuration/SettingsContext";
+import { withAgentInProfile, withoutProfile } from "./profilePicker";
 import { stateString, type GuideStepProps } from "./types";
 
 const PROFILES_KEY = "core.agents.profiles";
@@ -25,9 +26,11 @@ const input =
  * console's profiles editor stages them, so the guide's Apply is still one
  * PATCH.
  *
- * Every change re-stages from the map as it stood when this step opened
- * rather than from what the step itself last staged, so picking profile A and
- * then profile B leaves the agent in B alone.
+ * Every change first undoes this step's previous pick and then applies the
+ * new one, so picking profile A and then B leaves the agent in B alone, and
+ * clearing a half-typed new name takes the half-typed profile back out of
+ * what Apply would send. Only what this step staged is ever taken back: a
+ * pending active-profile change made elsewhere is left where it is.
  */
 export default function ProfilePickerStep({ state, setState }: GuideStepProps) {
   const ctx = useSettingsContext();
@@ -38,13 +41,17 @@ export default function ProfilePickerStep({ state, setState }: GuideStepProps) {
     {}) as Record<string, ProfileEntry>;
   const activeProfile = String(ctx.effectiveValue(ACTIVE_KEY) ?? "default");
 
-  /** The profile map this step started from: what a pick is applied to, so
-   *  picking twice does not leave the agent in the profile picked first. */
+  /** The profile map this step started from: what "undo my pick" restores to,
+   *  so a pick is never applied on top of the previous one. */
   const [base] = useState<Record<string, ProfileEntry>>(profiles);
   const [choice, setChoice] = useState<string>("");
   const [newKey, setNewKey] = useState("");
   const [makeActive, setMakeActive] = useState(false);
   const [keyError, setKeyError] = useState<string | null>(null);
+  /** The profile this step last wrote the agent into, and the profile it last
+   *  made active — the two things it is allowed to take back. */
+  const [ownProfile, setOwnProfile] = useState<string | null>(null);
+  const [ownActive, setOwnActive] = useState<string | null>(null);
 
   const agentKey = stateString(state, "agentKey");
 
@@ -59,44 +66,59 @@ export default function ProfilePickerStep({ state, setState }: GuideStepProps) {
     );
   }
 
-  /** With `agentKey` appended, unless the profile already runs it. */
-  const withAgent = (analysts: string[]): string[] =>
-    analysts.includes(agentKey) ? analysts : [...analysts, agentKey];
-
   const stageChoice = (nextChoice: string, nextName: string, active: boolean) => {
-    if (nextChoice === "") return;
+    /* This step's previous pick, undone: a profile it created goes away, a
+     * profile it edited goes back to the entry it had when the step opened.
+     * Everything else in the map — including edits made in the console before
+     * the guide was opened — is left exactly as it is. */
+    const undone =
+      ownProfile === null
+        ? profiles
+        : ownProfile in base
+          ? { ...profiles, [ownProfile]: base[ownProfile] }
+          : withoutProfile(profiles, ownProfile);
+
+    const commit = (map: Record<string, ProfileEntry>, key: string | null) => {
+      // `stage` drops the key from the pending patch when the value is back
+      // where it started, so undoing a pick leaves no phantom change behind.
+      ctx.stage(PROFILES_KEY, map);
+      setOwnProfile(key);
+      setState({ profileKey: key });
+      if (key !== null && active) {
+        ctx.stage(ACTIVE_KEY, key);
+        setOwnActive(key);
+      } else if (ownActive !== null) {
+        ctx.unstage(ACTIVE_KEY);
+        setOwnActive(null);
+      }
+    };
+
     if (nextChoice === NEW_PROFILE) {
       const key = nextName.trim();
       if (key === "") {
+        // A cleared name box is not an error, but it is also no longer a
+        // profile: whatever the half-typed name staged comes back out.
         setKeyError(null);
+        commit(undone, null);
         return;
       }
       const problem = mapKeyError(key, base, "profile");
       if (problem) {
         setKeyError(problem);
+        commit(undone, null);
         return;
       }
       setKeyError(null);
-      const source = base[activeProfile];
-      ctx.stage(PROFILES_KEY, {
-        ...base,
-        [key]: { label: "", analysts: withAgent(source ? [...source.analysts] : []) },
-      });
-      setState({ profileKey: key });
-      if (active) ctx.stage(ACTIVE_KEY, key);
-      else ctx.unstage(ACTIVE_KEY);
+      commit(withAgentInProfile(undone, key, agentKey, activeProfile), key);
+      return;
+    }
+    if (nextChoice === "") {
+      setKeyError(null);
+      commit(undone, null);
       return;
     }
     setKeyError(null);
-    const target = base[nextChoice];
-    if (!target) return;
-    ctx.stage(PROFILES_KEY, {
-      ...base,
-      [nextChoice]: { ...target, analysts: withAgent([...target.analysts]) },
-    });
-    setState({ profileKey: nextChoice });
-    if (active) ctx.stage(ACTIVE_KEY, nextChoice);
-    else ctx.unstage(ACTIVE_KEY);
+    commit(withAgentInProfile(undone, nextChoice, agentKey), nextChoice);
   };
 
   return (
