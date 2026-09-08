@@ -17,8 +17,7 @@ test.describe("agent definitions and profiles", () => {
   test("cloning the static analyst stages a new definition on radare2", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
     await page.getByRole("button", { name: "Agents", exact: true }).click();
 
     const source = page.locator('[data-agent="static"]');
@@ -86,8 +85,7 @@ test.describe("agent definitions and profiles", () => {
   test("a profile is built from enabled analysts, ordered, set active and applied", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
     await page.getByRole("button", { name: "Agents", exact: true }).click();
 
     await expect(page.locator('[data-profile="default"]').getByText("built in")).toBeVisible();
@@ -138,8 +136,7 @@ test.describe("agent definitions and profiles", () => {
   test("a generic analyst is created with a prompt and one server tool", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
     await page.getByRole("button", { name: "Agents", exact: true }).click();
 
     await page.getByLabel("new agent name").fill("strings");
@@ -179,8 +176,7 @@ test.describe("agent definitions and profiles", () => {
   test("a generic analyst can be given its static provider's tools", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
     await page.getByRole("button", { name: "Agents", exact: true }).click();
 
     await page.getByLabel("new agent name").fill("decomp");
@@ -220,8 +216,7 @@ test.describe("agent definitions and profiles", () => {
       return r.fallback();
     });
 
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
     await page.getByRole("button", { name: "Agents", exact: true }).click();
 
     const card = page.locator('[data-agent="network"]');
@@ -237,8 +232,7 @@ test.describe("agent definitions and profiles", () => {
   test("editing what Resolve reads clears that card's result", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
     await page.getByRole("button", { name: "Agents", exact: true }).click();
 
     await page.getByLabel("new agent name").fill("strings");
@@ -258,8 +252,7 @@ test.describe("agent definitions and profiles", () => {
   test("a built-in definition offers only its enabled switch", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
     await page.getByRole("button", { name: "Agents", exact: true }).click();
 
     const card = page.locator('[data-agent="dynamic"]');
@@ -291,8 +284,7 @@ test.describe("agent definitions and profiles", () => {
   test("the judge card offers no Clone, because the judge cannot be cloned", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
     await page.getByRole("button", { name: "Agents", exact: true }).click();
 
     const judge = page.locator('[data-agent="judge"]');
@@ -310,8 +302,7 @@ test.describe("agent definitions and profiles", () => {
   test("Clone with an empty name box names the copy after its source", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
     await page.getByRole("button", { name: "Agents", exact: true }).click();
 
     const source = page.locator('[data-agent="static"]');
@@ -330,8 +321,7 @@ test.describe("agent definitions and profiles", () => {
   test("an invalid name is reported at the button that was pressed", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
     await page.getByRole("button", { name: "Agents", exact: true }).click();
 
     await page.getByLabel("new agent name").fill("Bad Name!");
@@ -352,8 +342,7 @@ test.describe("agent definitions and profiles", () => {
   test("a validation error lands on the card that caused it", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
     await page.getByRole("button", { name: "Agents", exact: true }).click();
 
     await page.getByLabel("new agent name").fill("nameless");
@@ -392,8 +381,7 @@ test.describe("agent definitions and profiles", () => {
   test("an entry-level error lands on its card, for definitions and profiles", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
     await page.getByRole("button", { name: "Agents", exact: true }).click();
 
     await page.getByLabel("new agent name").fill("nameless");

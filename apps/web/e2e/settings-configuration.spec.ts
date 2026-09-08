@@ -23,8 +23,7 @@ test.describe("Settings → Configuration (admin)", () => {
   test("shows the tab and renders the schema's groups", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
 
     await expect(page.getByRole("button", { name: "Negotiation", exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Providers", exact: true })).toBeVisible();
@@ -34,8 +33,7 @@ test.describe("Settings → Configuration (admin)", () => {
   test("stages a change, shows the pending bar, and Apply → Confirm sends one PATCH with the applies summary", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
     await expect(page.getByText("core.negotiation.max_iterations")).toBeVisible();
 
     const patches: unknown[] = [];
@@ -64,8 +62,7 @@ test.describe("Settings → Configuration (admin)", () => {
   test("a 422 from PATCH maps the message to the field and shows no success status", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
 
     await page.route("**/api/v1/settings", (r) =>
       r.request().method() === "PATCH"
@@ -88,8 +85,7 @@ test.describe("Settings → Configuration (admin)", () => {
   test("a secret never renders its value and shows no password input until editing", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
     await page.getByRole("button", { name: "Providers", exact: true }).click();
 
     await expect(page.getByText("set · …1234 · env")).toBeVisible();
@@ -99,8 +95,7 @@ test.describe("Settings → Configuration (admin)", () => {
   test("setting a new secret value sends it in the PATCH body exactly once", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
     await page.getByRole("button", { name: "Providers", exact: true }).click();
 
     await page.getByRole("button", { name: "Set new value" }).click();
@@ -131,8 +126,7 @@ test.describe("Settings → Configuration (admin)", () => {
   test("clearing a set secret sends null in the PATCH body", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
     await page.getByRole("button", { name: "Providers", exact: true }).click();
 
     await page.getByRole("button", { name: "Clear" }).click();
@@ -159,8 +153,7 @@ test.describe("Settings → Configuration (admin)", () => {
   test("per-row reset only appears for a UI-sourced value and calls DELETE on that key", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
 
     const uiRow = page.locator("#setting-core\\.negotiation\\.retry_delay");
     const defaultRow = page.locator("#setting-core\\.negotiation\\.max_iterations");
@@ -183,8 +176,7 @@ test.describe("Settings → Configuration (admin)", () => {
   test("group reset only appears when a value in the group is UI-sourced, and calls DELETE with the group query", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
 
     // Negotiation (default active group) has a "ui"-sourced entry.
     await expect(page.getByRole("button", { name: "Reset group to env" })).toBeVisible();
@@ -207,8 +199,7 @@ test.describe("Settings → Configuration (admin)", () => {
   test("Test connection calls the probe endpoint and renders ok/latency", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
     await page.getByRole("button", { name: "Providers", exact: true }).click();
 
     let probeUrl: string | null = null;
@@ -227,8 +218,7 @@ test.describe("Settings → Configuration (admin)", () => {
   test("the probe body carries every staged input it reads, including another group's", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
 
     // Stage the Ollama base URL in the "LLM & model" group. `getByLabel` is
     // ambiguous on this tab: `FieldRow` points the title at the input with
@@ -266,8 +256,7 @@ test.describe("Settings → Configuration (admin)", () => {
   test("export calls the export endpoint (no download assertion)", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
 
     let exportRequested = false;
     await page.route("**/api/v1/settings/export", (r) => {
@@ -285,8 +274,7 @@ test.describe("Settings → Configuration (admin)", () => {
   });
 
   test("the search box narrows the visible rows", async ({ authenticatedPage: page }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
 
     await page.getByLabel("Search settings").fill("openai");
     await expect(page.getByText("OpenAI-compatible API key")).toBeVisible();
@@ -299,8 +287,7 @@ test.describe("Settings → Configuration (admin)", () => {
     const pageErrors: Error[] = [];
     page.on("pageerror", (err) => pageErrors.push(err));
 
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
 
     // `core.negotiation.retry_delay` is the "ui"-sourced key in the mock —
     // the only one of the two negotiation entries that actually renders a
@@ -332,8 +319,7 @@ test.describe("Settings → Configuration (admin)", () => {
   test("clearing a required number field un-stages the edit instead of reverting it", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
 
     const field = page.locator("#setting-core\\.negotiation\\.max_iterations input[type=number]");
     const pendingBar = page.getByText("1 change pending");
@@ -355,8 +341,7 @@ test.describe("Settings → Configuration (admin)", () => {
   test("typing into a list field entry by entry stages every entry, not just the first", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
 
     const patches: unknown[] = [];
     await page.route("**/api/v1/settings", (r) => {
@@ -392,8 +377,7 @@ test.describe("Settings → Configuration (admin)", () => {
   test("Discard resets the list widget's textarea back to the current value", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
 
     const field = page.locator("#setting-core\\.negotiation\\.blocked_hosts textarea");
     await field.fill("a");
@@ -413,8 +397,7 @@ test.describe("Settings → Configuration (admin)", () => {
   test("resetGroup unstages only that group's pending edits, leaving another group's edit intact", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
     await expect(page.getByText("core.negotiation.max_iterations")).toBeVisible();
 
     // Stage an edit in "negotiation" (the group about to be reset)...
@@ -454,8 +437,7 @@ test.describe("Settings → Configuration (admin)", () => {
   test("returning a field to its saved value clears the pending change", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
     await page.getByRole("button", { name: "Static provider", exact: true }).click();
 
     const row = page.locator("#setting-core\\.static\\.provider");
@@ -475,8 +457,7 @@ test.describe("Settings → Configuration (admin)", () => {
     /* The saved value of a secret is `null` however it is set — the API never
      * returns one — so "clear this secret" stages a value that deep-equals
      * what is stored, and the rule above must not swallow it. */
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
     await page.getByRole("button", { name: "Providers", exact: true }).click();
 
     await page.getByRole("button", { name: "Clear" }).click();
@@ -491,8 +472,7 @@ test.describe("Settings → Configuration (admin)", () => {
   test("a field's title is a label for a control that has an id and a name", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
 
     const field = page.locator("#setting-core\\.negotiation\\.max_iterations input[type=number]");
     await expect(field).toHaveAttribute("id", "setting-input-core.negotiation.max_iterations");
@@ -507,8 +487,7 @@ test.describe("Settings → Configuration (admin)", () => {
   test("switching the sandbox provider reveals the Triage fields and hides the CAPE ones", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
     await page.getByRole("button", { name: "Sandbox provider", exact: true }).click();
 
     await expect(page.getByText("core.sandbox.cape2.base_url")).toBeVisible();
@@ -527,8 +506,7 @@ test.describe("Settings → Configuration (admin)", () => {
   test("an edit that a provider switch hides is still staged and is counted", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
     await page.getByRole("button", { name: "Sandbox provider", exact: true }).click();
 
     await page
@@ -569,8 +547,7 @@ test.describe("Settings → Configuration (stale stored override)", () => {
   test("a 422 that blames an untouched key is named in the action banner", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
     await page.route("**/api/v1/settings", (r) =>
       r.request().method() === "PATCH"
         ? r.fulfill({
@@ -595,10 +572,10 @@ test.describe("Settings → Configuration (non-admin)", () => {
   test("the tab is disabled with 'Admin role required' and cannot be opened", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
+    await page.goto("/settings/profile");
 
-    const tab = page.getByRole("button", { name: "Configuration" });
-    await expect(tab).toBeDisabled();
+    const tab = page.getByText("Configuration", { exact: true });
+    await expect(tab).toHaveAttribute("aria-disabled", "true");
     await expect(tab).toHaveAttribute("title", "Admin role required");
     await expect(page.locator("#settings-search")).toHaveCount(0);
   });

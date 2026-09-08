@@ -88,6 +88,7 @@ test.describe("Settings", () => {
     authenticatedPage: page,
   }) => {
     await page.goto("/settings");
+    await expect(page).toHaveURL(/\/settings\/profile$/);
 
     await expect(page.getByLabel("Full Name")).toHaveValue("Test User");
     await expect(page.getByLabel("Email")).toHaveValue("test@example.com");
@@ -96,8 +97,7 @@ test.describe("Settings", () => {
   });
 
   test("the API keys tab lists existing keys", async ({ authenticatedPage: page }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "API Keys" }).click();
+    await page.goto("/settings/api-keys");
 
     await expect(page.getByText("CI/CD integration")).toBeVisible();
     await expect(page.getByText(/mlj_a1b2/)).toBeVisible();

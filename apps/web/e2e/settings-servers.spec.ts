@@ -19,8 +19,7 @@ test.describe("tool servers and the REST sandbox", () => {
   test("a new server is added, probed, narrowed to two tools and bound to static", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
     await page.getByRole("button", { name: "Tool servers (MCP)", exact: true }).click();
 
     await page.getByLabel("new server name").fill("r2custom");
@@ -66,8 +65,7 @@ test.describe("tool servers and the REST sandbox", () => {
   test("a server's tool selection is editable and is sent", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
     await page.getByRole("button", { name: "Tool servers (MCP)", exact: true }).click();
 
     const card = page.locator('[data-server="network"]');
@@ -102,8 +100,7 @@ test.describe("tool servers and the REST sandbox", () => {
   test("a fixed environment map is staged and sent with the server", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
     await page.getByRole("button", { name: "Tool servers (MCP)", exact: true }).click();
 
     await page.getByLabel("new server name").fill("qu1cksc0pe");
@@ -137,8 +134,7 @@ test.describe("tool servers and the REST sandbox", () => {
   test("editing what a probe dialled clears that card's result", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
     await page.getByRole("button", { name: "Tool servers (MCP)", exact: true }).click();
 
     await page.getByLabel("new server name").fill("r2custom");
@@ -160,8 +156,7 @@ test.describe("tool servers and the REST sandbox", () => {
   test("a built-in offers disable rather than remove, and one PATCH disables it while its key and other fields survive", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
     await page.getByRole("button", { name: "Tool servers (MCP)", exact: true }).click();
 
     const intel = page.locator('[data-server="threatintel"]');
@@ -203,8 +198,7 @@ test.describe("tool servers and the REST sandbox", () => {
   test("a token is typed once, never read back, and an untouched one stays untouched", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
     await page.getByRole("button", { name: "Tool servers (MCP)", exact: true }).click();
 
     // The fixture's `threatintel` entry arrives with a token set in .env: the
@@ -246,8 +240,7 @@ test.describe("tool servers and the REST sandbox", () => {
   test("the REST editor previews counts, a channel error, a truncation and the target hash", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
     await page.getByRole("button", { name: "Sandbox provider", exact: true }).click();
 
     await expect(page.getByTestId("rest-sandbox-editor")).toHaveCount(0);
@@ -287,8 +280,7 @@ test.describe("tool servers and the REST sandbox", () => {
   test("a mapping row is hidden when the report format is not generic", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
+    await page.goto("/settings/configuration");
     await page.getByRole("button", { name: "Sandbox provider", exact: true }).click();
     await page.locator("#setting-core\\.sandbox\\.provider select").selectOption("rest");
 
