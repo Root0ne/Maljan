@@ -491,3 +491,44 @@ def test_one_loop_keeps_sharing_a_single_handle(monkeypatch):
     finally:
         loop.call_soon_threadsafe(loop.stop)
         thread.join(timeout=30)
+
+
+# ---------------------------------------------------------------------------
+# BUG 13 (2026-09-08): an attached handle must not be garbage-collectable.
+#
+# A prompt test built a throwaway ``ServiceContainer``, resolved the judge, and
+# dropped the container without closing it. The registry, its handles and their
+# toolkits became garbage; the ``mcp`` stdio transport is an async generator, so
+# the agent loop's async-generator finalizer scheduled its ``aclose()`` as a new
+# task on the agent loop. That unwound the transport's task group from a task
+# other than the one that entered it: anyio cancelled the scope, could not
+# deliver the cancellation, and re-armed the delivery with ``call_soon`` on
+# every loop iteration for the rest of the process. Every later test then ran
+# starved of the GIL, and the timing-sensitive ones failed.
+#
+# An open handle is therefore owned by the process until something closes it,
+# never by whoever happens to hold the last reference.
+# ---------------------------------------------------------------------------
+
+
+def test_an_attached_handle_outlives_the_registry_that_opened_it(patched):
+    import gc
+    import weakref
+
+    registry = ServerRegistry(Settings(_env_file=None))
+    registry.tools_for("network", "job-1")
+    handle = registry._handles["network"]
+    assert handle.is_open is True
+    ref = weakref.ref(handle)
+
+    del registry, handle
+    gc.collect()
+
+    survivor = ref()
+    assert survivor is not None, "an open handle was collected with the registry that opened it"
+    assert survivor.is_open is True
+
+    survivor.close()
+    del survivor
+    gc.collect()
+    assert ref() is None, "a closed handle is not held by the process any more"

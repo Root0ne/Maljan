@@ -134,6 +134,21 @@ def _run_async(coro: Any, label: str) -> None:
 # Every handle that still exists, so a retired agent loop can be told which of
 # them it took with it. Weak, so a handle nobody holds is simply gone.
 _LIVE_HANDLES: weakref.WeakSet[ServerHandle] = weakref.WeakSet()
+
+# Every handle that is attached right now, held strongly until it is closed.
+# ``_LIVE_HANDLES`` is weak so a handle nobody holds can simply go; an
+# *attached* handle cannot be allowed to. Its toolkit's stdio transport is an
+# async generator, and when the last reference to an open one is dropped the
+# agent loop's async-generator finalizer schedules ``aclose()`` as a fresh task
+# on that loop. That unwinds the transport's task group from a task other than
+# the one that entered it: anyio cancels the scope, cannot deliver the
+# cancellation to tasks it no longer hosts, and re-arms the delivery with
+# ``call_soon`` on every iteration, so the agent loop spins at 100 % CPU for
+# the rest of the process (BUG 13, 2026-09-08: a prompt test dropped a
+# container that had resolved the judge, and every later test ran starved of
+# the GIL). Ownership of an open handle therefore belongs to the process, and
+# ends only in ``_forget_attachment``, which every detach path reaches.
+_ATTACHED_HANDLES: set[ServerHandle] = set()
 _HOOK_REGISTERED = threading.Event()
 
 
@@ -357,6 +372,7 @@ class ServerHandle:
             self._teardown(toolkit)
             raise
         self._toolkit = toolkit
+        _ATTACHED_HANDLES.add(self)
         self._opened_async = False
         # ``_run_async`` hands the coroutine to the shared agent loop, so that
         # is the loop this toolkit's exit stack was wound on.
@@ -427,6 +443,7 @@ class ServerHandle:
             self._child_pids = ()
             raise
         self._toolkit = toolkit
+        _ATTACHED_HANDLES.add(self)
         self._opened_async = True
         self._note_child_pids(before)
         self._all_tools = list(toolkit.get_tools())
@@ -693,6 +710,7 @@ class ServerHandle:
 
     def _forget_attachment(self) -> None:
         """Drop what only an attached handle carries. Call after the reap."""
+        _ATTACHED_HANDLES.discard(self)
         self._owner_loop = None
         self._child_pids = ()
         self._launch_argv = ()
