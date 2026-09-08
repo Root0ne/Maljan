@@ -69,8 +69,14 @@ _PATH_HEADER = (
 # ``file``, ``file_path``, ``filepath``, ``filename``, ``path``, ``target_file``;
 # the exact set covers the few path arguments that are named for what they hold
 # rather than for being a path.
+#
+# The name test is the narrowing half of the rule, not an extra: value equality
+# on its own would rewrite ``{"query": "<sha>.exe"}`` too, turning a model that
+# legitimately names the file in prose into one that passes a path. ``input``
+# was dropped from the exact set for the same reason — a lookup tool taking free
+# text as ``input`` is the one plausible false positive here.
 _PATH_ARG_SUBSTRINGS = ("path", "file")
-_PATH_ARG_NAMES = frozenset({"binary", "sample", "target", "input", "program"})
+_PATH_ARG_NAMES = frozenset({"binary", "sample", "target", "program"})
 
 
 def _is_path_argument(name: str) -> bool:
@@ -175,6 +181,14 @@ class ConfigurableAnalyst(BaseAnalyst):
         coroutine = getattr(tool, "coroutine", None)
         if func is None and coroutine is None:
             return tool
+        args_schema = getattr(tool, "args_schema", None)
+        if args_schema is None:
+            # Rebuilding with ``infer_schema=False`` and no schema does not
+            # raise — the non-empty description short-circuits the only
+            # ValueError — it silently yields a schema-less tool that binds
+            # badly. A tool the guard cannot rebuild faithfully is better left
+            # exactly as it is.
+            return tool
 
         name = getattr(tool, "name", "")
         base = os.path.basename(pinned)
@@ -213,7 +227,7 @@ class ConfigurableAnalyst(BaseAnalyst):
                 coroutine=wrapped_coroutine,
                 name=name,
                 description=getattr(tool, "description", ""),
-                args_schema=getattr(tool, "args_schema", None),
+                args_schema=args_schema,
                 infer_schema=False,
             )
         except Exception as exc:  # noqa: BLE001 — a guardrail never costs a tool

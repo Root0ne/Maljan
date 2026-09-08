@@ -226,18 +226,23 @@ class TestABareFilenameToolArgIsRewritten:
     name. The framework rewrites it before the call rather than letting a tool
     resolve it against a working directory that is not ours."""
 
-    def _agent_with_recording_tool(self, arg_name: str = "file_path"):
+    def _agent_with_recording_tool(self):
+        """A tool with a real ``args_schema``, as every MCP tool in this repo has.
+
+        The guard rebuilds the tool around its schema, so a schema-less stub
+        would exercise a path no live tool takes — and, since the guard now
+        declines to rebuild one, would not be wrapped at all.
+        """
         calls: list[dict[str, Any]] = []
 
-        def _scan(**kwargs: Any) -> str:
-            calls.append(dict(kwargs))
+        def _scan(file_path: str = "", query: str = "") -> str:
+            calls.append({k: v for k, v in (("file_path", file_path), ("query", query)) if v})
             return "scanned"
 
         tool = StructuredTool.from_function(
             func=_scan,
             name="analyze_file",
             description="analyze a file",
-            infer_schema=False,
         )
         agent = _agent(tools=[tool])
         agent._analysis_file_path = _PATH
@@ -286,12 +291,42 @@ class TestABareFilenameToolArgIsRewritten:
         self._invoke(agent, {"file_path": "dropped/abc123.exe"})
         assert calls == [{"file_path": "dropped/abc123.exe"}]
 
+    def test_the_rewrite_survives_the_schema_bound_invoke_path(self):
+        """The wrapped tool is what the ReAct loop actually calls, and it calls
+        it through ``invoke`` against the rebuilt schema, not through ``func``."""
+        agent, calls = self._agent_with_recording_tool()
+        assert agent.pinned_tools()[0].invoke({"file_path": "abc123.exe"}) == "scanned"
+        assert calls == [{"file_path": _PATH}]
+
     def test_with_no_pin_the_tools_are_handed_through_unwrapped(self):
+        def _scan(file_path: str = "") -> str:
+            return "scanned"
+
+        tool = StructuredTool.from_function(func=_scan, name="analyze_file", description="d")
+        agent = _agent(tools=[tool])
+        assert agent.pinned_tools() == [tool]
+
+    def test_a_tool_with_no_args_schema_is_left_exactly_as_it_is(self):
+        """The guard rebuilds a tool around its schema. With none to rebuild
+        around, wrapping would hand the model a tool that binds badly — worse
+        than the bare-filename call it is there to prevent."""
+
         def _scan(**kwargs: Any) -> str:
             return "scanned"
 
         tool = StructuredTool.from_function(
             func=_scan, name="analyze_file", description="d", infer_schema=False
         )
+        assert tool.args_schema is None
         agent = _agent(tools=[tool])
+        agent._analysis_file_path = _PATH
         assert agent.pinned_tools() == [tool]
+
+    def test_a_free_text_input_argument_is_no_longer_treated_as_a_path(self):
+        """``input`` names free text as often as it names a file; a lookup tool
+        asked about the sample by name must keep the name it was given."""
+        from maljan.agents.configurable_analyst import _is_path_argument
+
+        assert _is_path_argument("input") is False
+        assert _is_path_argument("query") is False
+        assert all(_is_path_argument(n) for n in ("file_path", "path", "binary", "target"))

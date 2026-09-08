@@ -428,16 +428,19 @@ def make_analyst_node(
                         _e,
                     )
 
+                # BUG 11, second round: the chunk carries the path for the
+                # model to read; this carries it for the tool layer, which is
+                # what actually corrects a model that sends the bare filename.
+                # Pinned *before* the chunk is built: the augmentation reads a
+                # file and can raise, and the outer handler would then leave a
+                # cached agent on the previous sample's path.
+                _pin_sample_path(agent, state)
                 static_context_chunks = _augment_static_chunks_with_path(
                     container.load_chunked(state["file_hash"], agent_name),
                     state,
                     static=_st_generic,
                     provider_id=agent._resolved.static_provider_id,
                 )
-                # BUG 11, second round: the chunk carries the path for the
-                # model to read; this carries it for the tool layer, which is
-                # what actually corrects a model that sends the bare filename.
-                _pin_sample_path(agent, state)
                 sandbox_chunks: list = []
                 if sandbox_report:
                     sandbox_chunks = container.load_sandbox_data_for_agent(
@@ -480,13 +483,6 @@ def make_analyst_node(
                 except Exception as _e:  # noqa: BLE001
                     logger.debug("static summary extraction skipped: %s", _e)
 
-                chunks = _augment_static_chunks_with_path(
-                    chunks,
-                    state,
-                    static=_st,
-                    provider_id=agent._resolved.static_provider_id,
-                )
-
                 # Pin the container-visible path on the agent so the
                 # load_program tool wrapper can override hallucinated paths.
                 # Assign unconditionally — agents are cached across samples;
@@ -500,7 +496,17 @@ def make_analyst_node(
                 # to agree: the chunk tells the model which path to use and this
                 # tells the tool wrapper, and a provider that mirrors nothing
                 # used to give the model a path and the wrapper ``None``.
+                # Pinned before the augmentation, which reads a file and can
+                # raise: the guarantee that no stale path survives is worth
+                # nothing if it holds only on the happy path.
                 _pin_sample_path(agent, state)
+
+                chunks = _augment_static_chunks_with_path(
+                    chunks,
+                    state,
+                    static=_st,
+                    provider_id=agent._resolved.static_provider_id,
+                )
 
                 # 2026-07 round 3: hand the static analyst the sample's capability
                 # categories (from the PE import classification) so dynamic Ghidra
