@@ -707,7 +707,7 @@ export function AgentDetail({
                 <li
                   key={server}
                   role="treeitem"
-                  aria-expanded={listed !== undefined}
+                  aria-expanded={listed && listed.length > 0 ? true : undefined}
                   aria-selected={hasRef(agentKey, { kind: "mcp", server, name: null })}
                 >
                   <div className="flex items-center gap-2">

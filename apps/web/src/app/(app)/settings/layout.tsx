@@ -31,11 +31,16 @@ export default function SettingsLayout({ children }: { children: ReactNode }) {
     // requests on a schema the API refuses them, on every settings page.
     body = <SettingsProvider>{children}</SettingsProvider>;
   } else if (isAdminArea(pathname)) {
+    // Each area names itself: a notice under the guides that talks about the
+    // Configuration console describes a tab the reader is not on.
+    const notice = pathname.startsWith("/settings/setup")
+      ? "Setup guides are available to administrators only (admin role required)."
+      : "Configuration is available to administrators only (admin role required).";
     body = loading ? (
       <div className="text-sm text-text-secondary">Loading…</div>
     ) : (
       <div className="text-sm text-text-secondary" role="alert">
-        Configuration is available to administrators only (admin role required).
+        {notice}
       </div>
     );
   }

@@ -12,7 +12,7 @@ const STATUS_DURATION_MS = 6000;
  *  misclick shouldn't drop a session's worth of edits. */
 export default function ChangesBar() {
   const ctx = useSettingsContext();
-  const { pending, hiddenKeys, saving, lastResult, errors } = ctx;
+  const { pending, hiddenKeys, saving, lastResult } = ctx;
   const [reviewing, setReviewing] = useState(false);
   const [discarding, setDiscarding] = useState(false);
   const [statusVisible, setStatusVisible] = useState(false);
@@ -20,7 +20,6 @@ export default function ChangesBar() {
   const keys = Object.keys(pending);
   const count = keys.length;
   const hiddenCount = keys.filter((k) => hiddenKeys.includes(k)).length;
-  const errorCount = Object.keys(errors).length;
 
   useEffect(() => {
     if (!lastResult) return;
@@ -36,6 +35,9 @@ export default function ChangesBar() {
   if (count === 0 && !(statusVisible && lastResult)) return null;
 
   const lines = buildReviewItems(ctx);
+  // Rows of the list below, not raw error entries: one composite leaf can
+  // carry several field-level errors and still be a single row to fix.
+  const errorCount = lines.filter((line) => line.error).length;
 
   const discardAll = () => {
     keys.forEach((k) => ctx.unstage(k));
@@ -75,7 +77,7 @@ export default function ChangesBar() {
           <div className="border border-border rounded bg-bg-surface shadow-lg px-4 py-3 max-h-[60vh] overflow-auto">
             {errorCount > 0 && (
               <p className="text-xs text-status-red mb-2" role="alert">
-                {errorCount} field{errorCount === 1 ? "" : "s"} need attention
+                {errorCount} field{errorCount === 1 ? " needs" : "s need"} attention
               </p>
             )}
             <ReviewList lines={lines} />

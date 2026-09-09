@@ -9,7 +9,7 @@ export type SecretStatus = "set" | "not-set" | "staged" | "cleared";
 
 /** The one status line every secret shows, in the wording the e2e spec pins:
  *  `set · …<hint> · <source>`, `not set`, `new value staged`, `will be cleared`. */
-export function secretStatusText(
+function secretStatusText(
   status: SecretStatus,
   hint?: string | null,
   source?: "default" | "env" | "ui"

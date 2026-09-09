@@ -34,6 +34,26 @@ describe("llmLooksConfigured", () => {
     const withKey = ctx(values, ["core.llm.openai.api_key"]);
     expect(llmLooksConfigured(withKey.effective, withKey.isSet)).toBe(true);
   });
+
+  /* Task 21: the same credential also has a flat catalog key, and an operator
+   * who filled that one in was still told the model was not configured. */
+  it("accepts the flat shortcut key for each hosted provider", () => {
+    const flat: [string, string][] = [
+      ["openai", "core.openai_api_key"],
+      ["anthropic", "core.anthropic_api_key"],
+      ["gemini", "core.google_api_key"],
+    ];
+    for (const [provider, key] of flat) {
+      const values = { "core.llm.provider": provider };
+      const withFlat = ctx(values, [key]);
+      expect(llmLooksConfigured(withFlat.effective, withFlat.isSet)).toBe(true);
+    }
+  });
+
+  it("does not accept another provider's flat key", () => {
+    const withOther = ctx({ "core.llm.provider": "anthropic" }, ["core.openai_api_key"]);
+    expect(llmLooksConfigured(withOther.effective, withOther.isSet)).toBe(false);
+  });
 });
 
 describe("guideStatus", () => {
