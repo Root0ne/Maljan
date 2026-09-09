@@ -9,6 +9,7 @@ import RestSandboxEditor from "./RestSandboxEditor";
 import { resolveGroup, VIRTUAL_GROUPS } from "./sections";
 import { useSettingsContext, type SettingsContextValue } from "./SettingsContext";
 import { guideById, type GuideId } from "../setup/guides";
+import { probeFingerprint } from "../setup/probeStale";
 
 /** The setup guide that covers a backend group's keys, if one does. A guide
  *  that is not defined yet simply has no link: `guideById` decides, so this
@@ -148,8 +149,11 @@ export default function GroupPage({ section, group }: { section: string; group: 
     [schema, section, group]
   );
 
-  const probeInputsStaged = useCallback(
-    (probeId: string) => Object.keys(ctx.probeValues(probeId)).length > 0,
+  // The same rule the guides use: a finished result is described by the
+  // *values* the probe read, not by whether anything was staged at all. A
+  // boolean cannot notice a second edit to the same field.
+  const probeInputs = useCallback(
+    (probeId: string) => probeFingerprint(ctx.probeValues(probeId)),
     [ctx]
   );
 
@@ -242,7 +246,7 @@ export default function GroupPage({ section, group }: { section: string; group: 
       onProbe={onProbe}
       onResetGroup={onResetGroup}
       guideHref={guideHrefForGroup(resolved.backendGroup)}
-      probeInputsStaged={probeInputsStaged}
+      probeInputs={probeInputs}
     />
   );
 

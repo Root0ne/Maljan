@@ -337,6 +337,30 @@ test.describe("Settings → Configuration (admin)", () => {
     await expect(result).toHaveCount(0);
   });
 
+  /* Task 21: staleness used to be the boolean "is anything staged?", which
+   * cannot notice a *second* edit to the same field — a green result survived
+   * the URL being retyped. The console now compares the values themselves,
+   * the way the guides do. */
+  test("a probe result disappears when an already-staged input is edited again", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto(LLM_PATH);
+
+    await page.route("**/api/v1/settings/test/*", (r) =>
+      r.fulfill({ json: { ok: true, latency_ms: 5, detail: "ok", models: [], tools: null } })
+    );
+
+    const url = page.getByRole("textbox", { name: "Ollama base URL" });
+    await url.fill("http://10.0.0.9:11434");
+
+    await page.getByRole("button", { name: "Test connection & fetch models" }).click();
+    const result = page.getByText(/ok · 5 ms · ok/);
+    await expect(result).toBeVisible();
+
+    await url.fill("http://10.0.0.10:11434");
+    await expect(result).toHaveCount(0);
+  });
+
   test("the probe body carries every staged input it reads, including another group's", async ({
     authenticatedPage: page,
   }) => {
