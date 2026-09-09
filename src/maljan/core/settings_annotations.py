@@ -6,6 +6,11 @@ the key prefix (``group_for``); an entry may override its group. ``applies``
 defaults to ``next_job`` for every core setting. ``probe`` names the
 connection test in apps/api/app/services/settings_probes.py that exercises
 the field.
+
+``GROUP_ORDER`` names and orders the groups; ``GROUP_DESCRIPTIONS`` gives each
+one the sentence the console prints under its heading. Inside a group,
+``subgroup`` puts an entry under a heading of its own and ``advanced`` folds it
+into the group's closed "Advanced" disclosure.
 """
 
 from __future__ import annotations

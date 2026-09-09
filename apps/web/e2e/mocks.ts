@@ -553,6 +553,21 @@ export const MOCK_SETTINGS_SCHEMA = {
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: null, order: -1, choices_from: null, editor: "profiles", subgroup: null, advanced: false,
         },
+        // Task 21: a plain leaf that stays on the *Agents* page while
+        // `core.agents.profile` above moves to the virtual *Profiles* page.
+        // Both are `"ui"`-sourced in `MOCK_SETTINGS_VALUES`, so "Remove all
+        // overrides in this group" on either page has something to remove —
+        // and a group-wide DELETE would visibly take the other page's
+        // override with it.
+        {
+          key: "core.react_agent_timeout", namespace: "core", path: "react_agent_timeout",
+          type: "int", default: 600, nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "agents",
+          title: "ReAct agent timeout",
+          description: "Seconds one analyst may run before it is cut off.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: 1, choices_from: null, editor: null, subgroup: null, advanced: false,
+        },
       ],
     },
   ],
@@ -741,7 +756,15 @@ export const MOCK_SETTINGS_VALUES = {
       value: "default",
       is_set: null,
       hint: null,
-      source: "default",
+      source: "ui",
+      updated_at: null,
+      updated_by: null,
+    },
+    "core.react_agent_timeout": {
+      value: 900,
+      is_set: null,
+      hint: null,
+      source: "ui",
       updated_at: null,
       updated_by: null,
     },

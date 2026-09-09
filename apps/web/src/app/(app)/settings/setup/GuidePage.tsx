@@ -250,13 +250,16 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
   }
 
   const blockedReason = step.canContinue?.(guideCtx) ?? null;
-  const lines = buildReviewItems(ctx).filter((item) => touched.includes(item.key));
-  // Only the errors this guide's own review list can show: a stored override
-  // in some other group failing validation is the console's business, and
-  // counting it here would name a number the list below never accounts for.
-  const errorCount = Object.keys(ctx.errors).filter((key) =>
-    touched.some((k) => key === k || key.startsWith(`${k}.`))
-  ).length;
+  const allItems = buildReviewItems(ctx);
+  const lines = allItems.filter((item) => touched.includes(item.key));
+  // Apply PATCHes the whole pending map, not this guide's slice of it, so a
+  // value staged in the console before the guide was opened travels with it.
+  // The review step names those too rather than sending them unannounced.
+  const alsoStaged = allItems.filter((item) => !touched.includes(item.key));
+  const stagedCount = lines.length + alsoStaged.length;
+  // Counted as rows of the two lists above, not as raw error entries: one
+  // composite leaf can carry several field-level errors and still be one row.
+  const errorCount = [...lines, ...alsoStaged].filter((item) => item.error).length;
   const probeId = step.probe;
   const result = probeId ? probeResult(probeId) : undefined;
 
@@ -370,16 +373,24 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
                 </Link>
               </p>
             </div>
-          ) : lines.length === 0 ? (
+          ) : stagedCount === 0 ? (
             <p className="text-sm text-text-secondary">Nothing to apply.</p>
           ) : (
             <>
               {errorCount > 0 && (
                 <p className="text-xs text-status-red mb-2" role="alert">
-                  {errorCount} field{errorCount === 1 ? "" : "s"} need attention
+                  {errorCount} field{errorCount === 1 ? " needs" : "s need"} attention
                 </p>
               )}
               <ReviewList lines={lines} />
+              {alsoStaged.length > 0 && (
+                <div className="mt-4 pt-3 border-t border-border">
+                  <h4 className="text-xs font-medium text-text-primary mb-2">
+                    Also staged elsewhere
+                  </h4>
+                  <ReviewList lines={alsoStaged} />
+                </div>
+              )}
             </>
           )}
         </div>
@@ -398,14 +409,22 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
           Back
         </button>
         {step.component === "review" ? (
-          <button
-            type="button"
-            disabled={ctx.saving || lines.length === 0 || applied !== null}
-            className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent text-white rounded hover:bg-accent-hover transition-colors disabled:opacity-50"
-            onClick={onApply}
-          >
-            {ctx.saving ? "Saving…" : "Apply"}
-          </button>
+          <>
+            <button
+              type="button"
+              disabled={ctx.saving || stagedCount === 0 || applied !== null}
+              className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent text-white rounded hover:bg-accent-hover transition-colors disabled:opacity-50"
+              onClick={onApply}
+            >
+              {ctx.saving ? "Saving…" : "Apply"}
+            </button>
+            {applied === null && alsoStaged.length > 0 && (
+              <span className="text-xs text-text-muted">
+                Apply also sends the {alsoStaged.length} change
+                {alsoStaged.length === 1 ? "" : "s"} staged elsewhere.
+              </span>
+            )}
+          </>
         ) : (
           <>
             <button

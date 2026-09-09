@@ -12,6 +12,16 @@ export type IsSet = (key: string) => boolean;
 /** The providers that authenticate with a key rather than a local endpoint. */
 const HOSTED_PROVIDERS = new Set(["openai", "anthropic", "gemini"]);
 
+/** The flat catalog keys that hold the same credential as
+ *  `core.llm.<provider>.api_key`: an operator who filled one of these in has
+ *  configured that provider just as much as one who filled in the namespaced
+ *  leaf, and the hub must not go on calling it unconfigured. */
+const FLAT_API_KEY: Record<string, string> = {
+  openai: "core.openai_api_key",
+  anthropic: "core.anthropic_api_key",
+  gemini: "core.google_api_key",
+};
+
 const PROVIDER_TITLE: Record<string, string> = {
   openai: "OpenAI",
   anthropic: "Anthropic",
@@ -53,7 +63,10 @@ const BUILTIN_AGENTS = new Set(["static", "dynamic", "network", "judge"]);
 export function llmLooksConfigured(effective: EffectiveValue, isSet: IsSet): boolean {
   const provider = text(effective("core.llm.provider"));
   if (!provider) return false;
-  if (HOSTED_PROVIDERS.has(provider)) return isSet(`core.llm.${provider}.api_key`);
+  if (HOSTED_PROVIDERS.has(provider)) {
+    const flat = FLAT_API_KEY[provider];
+    return isSet(`core.llm.${provider}.api_key`) || (flat !== undefined && isSet(flat));
+  }
   return text(effective(`core.llm.${provider}.base_url`)) !== "";
 }
 

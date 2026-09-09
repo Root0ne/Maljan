@@ -184,6 +184,29 @@ describe("describeChange: core.mcp.servers", () => {
     const line = describeChange(serversEntry, before, after);
     expect(line.detail).toEqual(["srv: changed: command, label"]);
   });
+
+  /* Task 21: a flip that travelled with another edit used to disappear —
+   * "srv: changed: url" said nothing about the server having been switched
+   * off at the same time. */
+  it("keeps a disabled flip that happens alongside another field", () => {
+    const before = { srv: { enabled: true, transport: "http", url: "http://old" } };
+    const after = { srv: { enabled: false, transport: "http", url: "http://new" } };
+    const line = describeChange(serversEntry, before, after);
+    expect(line.detail).toEqual(["srv: changed: disabled, url"]);
+  });
+
+  it("keeps an enabled flip that happens alongside another field", () => {
+    const before = { srv: { enabled: false, transport: "http", url: "http://old" } };
+    const after = { srv: { enabled: true, transport: "http", url: "http://new" } };
+    const line = describeChange(serversEntry, before, after);
+    expect(line.detail).toEqual(["srv: changed: enabled, url"]);
+  });
+
+  it("still reports a lone enable as one word", () => {
+    const before = { srv: { enabled: false, transport: "http", url: "http://x" } };
+    const after = { srv: { enabled: true, transport: "http", url: "http://x" } };
+    expect(describeChange(serversEntry, before, after).detail).toEqual(["srv: enabled"]);
+  });
 });
 
 describe("describeChange: core.agents.definitions", () => {
@@ -238,6 +261,30 @@ describe("describeChange: core.agents.definitions", () => {
     const line = describeChange(definitionsEntry, before, after);
     expect(line.detail).toEqual(["a: changed: prompt, tools, static provider, label, role"]);
   });
+
+  it("keeps a disabled flip that happens alongside a prompt edit", () => {
+    const before = {
+      a: { role: "generic", label: "A", prompt: "old", tools: [], static_provider: null, enabled: true },
+    };
+    const after = {
+      a: { role: "generic", label: "A", prompt: "new", tools: [], static_provider: null, enabled: false },
+    };
+    expect(describeChange(definitionsEntry, before, after).detail).toEqual([
+      "a: changed: disabled, prompt",
+    ]);
+  });
+
+  it("keeps an enabled flip that happens alongside a prompt edit", () => {
+    const before = {
+      a: { role: "generic", label: "A", prompt: "old", tools: [], static_provider: null, enabled: false },
+    };
+    const after = {
+      a: { role: "generic", label: "A", prompt: "new", tools: [], static_provider: null, enabled: true },
+    };
+    expect(describeChange(definitionsEntry, before, after).detail).toEqual([
+      "a: changed: enabled, prompt",
+    ]);
+  });
 });
 
 describe("describeChange: core.agents.profiles", () => {
@@ -278,6 +325,25 @@ describe("describeChange: core.agents.profiles", () => {
     const after = {};
     const line = describeChange(profilesEntry, before, after);
     expect(line.detail).toEqual(["p1: removed"]);
+  });
+
+  /* Task 21: a rename that arrived with an analyst edit used to be swallowed
+   * by the analysts line, so the review never mentioned the new name. */
+  it("reports a rename alongside an analyst set change", () => {
+    const before = { p1: { label: "P1", analysts: ["a", "b"] } };
+    const after = { p1: { label: "Renamed", analysts: ["a", "c"] } };
+    const line = describeChange(profilesEntry, before, after);
+    expect(line.detail).toEqual(["p1: analysts changed (+1 −1)", "p1: label changed"]);
+    expect(line.summary).toBe("1 profile(s) changed");
+  });
+
+  it("reports a rename alongside a reorder", () => {
+    const before = { p1: { label: "P1", analysts: ["a", "b"] } };
+    const after = { p1: { label: "Renamed", analysts: ["b", "a"] } };
+    expect(describeChange(profilesEntry, before, after).detail).toEqual([
+      "p1: analysts reordered (b, a)",
+      "p1: label changed",
+    ]);
   });
 });
 

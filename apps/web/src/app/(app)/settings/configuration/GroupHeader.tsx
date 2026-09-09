@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { ProbeResult } from "@/types/settings";
+import { isProbeStale } from "../setup/probeStale";
 
 /** Every probe id the catalog can carry has a label here; an id that arrives
  *  without one still gets a usable button ("Test <id>") rather than a blank. */
@@ -37,7 +38,7 @@ export default function GroupHeader({
   onProbe,
   onResetGroup,
   guideHref,
-  probeInputsStaged,
+  probeInputs,
 }: {
   title: string;
   description: string;
@@ -51,16 +52,17 @@ export default function GroupHeader({
   onProbe: (name: string) => Promise<ProbeResult>;
   onResetGroup: () => Promise<void>;
   guideHref?: string;
-  /** Whether anything the given probe reads is staged. A result taken before
-   *  an input changed no longer describes what the button would do now, so it
-   *  is dropped the moment that flips true. */
-  probeInputsStaged: (probeId: string) => boolean;
+  /** A fingerprint of the values the given probe would send right now
+   *  (`probeStale.probeFingerprint`). A result taken before one of those
+   *  values changed no longer describes what the button would do, so it is
+   *  dropped as soon as the fingerprint moves. */
+  probeInputs: (probeId: string) => string;
 }) {
-  /** Each entry remembers whether any of the probe's inputs was already staged
-   *  when the button was pressed: a result stops being shown as soon as that
-   *  answer changes, because it no longer describes what a press would do. */
+  /** Each entry remembers the fingerprint of the probe's inputs at the moment
+   *  the button was pressed: the result stops being shown as soon as those
+   *  values move, because it no longer describes what a press would do. */
   const [results, setResults] = useState<
-    Record<string, { result: ProbeResult | "running"; stagedWhenRun: boolean } | undefined>
+    Record<string, { result: ProbeResult | "running"; inputsWhenRun: string } | undefined>
   >({});
   const [confirming, setConfirming] = useState(false);
 
@@ -109,7 +111,9 @@ export default function GroupHeader({
             // its "testing…" text out from under it.
             const running = entry?.result === "running";
             const stale =
-              !running && entry !== undefined && probeInputsStaged(name) !== entry.stagedWhenRun;
+              !running &&
+              entry !== undefined &&
+              isProbeStale(entry.inputsWhenRun, probeInputs(name));
             const r = entry && !stale ? entry.result : undefined;
             return (
               <span key={name} className="flex items-center gap-2">
@@ -118,8 +122,8 @@ export default function GroupHeader({
                   className="text-xs text-accent-strong disabled:opacity-50"
                   disabled={running}
                   onClick={async () => {
-                    const stagedWhenRun = probeInputsStaged(name);
-                    setResults((s) => ({ ...s, [name]: { result: "running", stagedWhenRun } }));
+                    const inputsWhenRun = probeInputs(name);
+                    setResults((s) => ({ ...s, [name]: { result: "running", inputsWhenRun } }));
                     const res = await onProbe(name).catch((e) => ({
                       ok: false,
                       latency_ms: 0,
@@ -128,7 +132,7 @@ export default function GroupHeader({
                       tools: null,
                       details: null,
                     }));
-                    setResults((s) => ({ ...s, [name]: { result: res, stagedWhenRun } }));
+                    setResults((s) => ({ ...s, [name]: { result: res, inputsWhenRun } }));
                   }}
                 >
                   {probeLabel(name)}

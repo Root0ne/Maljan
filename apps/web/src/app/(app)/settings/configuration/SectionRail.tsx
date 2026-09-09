@@ -2,26 +2,29 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { groupsBySection, type RailGroup } from "./sections";
+import { groupsBySection, VIRTUAL_GROUPS, type RailGroup } from "./sections";
 import { useSettingsContext } from "./SettingsContext";
 
-/** Keys the virtual "profiles" rail entry covers — carved out of the "agents"
- *  backend group's own pending count so a change doesn't double-count. */
-const PROFILES_KEYS = ["core.agents.profiles", "core.agents.profile"];
+function stagedIn(keys: string[], pending: Record<string, unknown>): number {
+  return keys.filter((k) => k in pending).length;
+}
 
+/** A virtual rail entry counts only the keys it was carved out of its backend
+ *  group with, and that backend group's own entry counts the rest — derived
+ *  from `VIRTUAL_GROUPS` so adding a split does not need a second edit here. */
 function countFor(
   group: RailGroup,
   stagedCountByGroup: Record<string, number>,
   pending: Record<string, unknown>
 ): number {
-  if (group.key === "profiles") {
-    return PROFILES_KEYS.filter((k) => k in pending).length;
-  }
-  if (group.key === "agents") {
-    const profilesCount = PROFILES_KEYS.filter((k) => k in pending).length;
-    return Math.max(0, (stagedCountByGroup["agents"] ?? 0) - profilesCount);
-  }
-  return stagedCountByGroup[group.key] ?? 0;
+  const virtual = VIRTUAL_GROUPS[group.key];
+  if (virtual) return stagedIn(virtual.keys, pending);
+
+  const carvedOut = Object.values(VIRTUAL_GROUPS)
+    .filter((v) => v.fromGroup === group.key)
+    .flatMap((v) => v.keys);
+  const own = stagedCountByGroup[group.key] ?? 0;
+  return Math.max(0, own - stagedIn(carvedOut, pending));
 }
 
 export default function SectionRail() {
@@ -31,6 +34,7 @@ export default function SectionRail() {
 
   if (!schema) return null;
   const sections = groupsBySection(schema);
+  const onGroupRoute = sections.some(({ groups }) => groups.some((g) => g.path === pathname));
 
   return (
     <>
@@ -85,6 +89,14 @@ export default function SectionRail() {
           onChange={(e) => router.push(e.target.value)}
           className="w-full bg-bg-deep border border-border rounded px-3 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent"
         >
+          {/* The search route is not one of the groups, and without a value to
+              match a select shows its first option — naming a group the page
+              is not on. Offer a placeholder for that case instead. */}
+          {!onGroupRoute && (
+            <option value={pathname ?? ""} disabled>
+              Jump to a group
+            </option>
+          )}
           {sections.flatMap(({ section, groups }) =>
             groups.map((group) => (
               <option key={group.path} value={group.path}>
