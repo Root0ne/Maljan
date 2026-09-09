@@ -6,7 +6,7 @@ import FieldRow from "./FieldRow";
 import { buildFieldRowProps } from "./fieldRowProps";
 import GroupHeader from "./GroupHeader";
 import RestSandboxEditor from "./RestSandboxEditor";
-import { resolveGroup } from "./sections";
+import { resolveGroup, VIRTUAL_GROUPS } from "./sections";
 import { useSettingsContext, type SettingsContextValue } from "./SettingsContext";
 import { guideById, type GuideId } from "../setup/guides";
 
@@ -213,6 +213,25 @@ export default function GroupPage({ section, group }: { section: string; group: 
   const dependents = selector ? rows.filter((e) => e.key !== selector.key) : rows;
   const selectedProvider = selector ? String(ctx.effectiveValue(selector.key) ?? "") : "";
 
+  // A virtual split (the "Profiles" page and the "Agents" page it was carved
+  // out of) shows only its own slice of a backend group, so
+  // `DELETE /settings?group=<backend group>` would remove the other side's
+  // overrides too while the dialog counted only this page's. Both sides reset
+  // per key instead, so what is removed is exactly what was counted.
+  const isVirtualSplit =
+    VIRTUAL_GROUPS[group] !== undefined ||
+    Object.values(VIRTUAL_GROUPS).some((v) => v.fromGroup === resolved.backendGroup);
+
+  const onResetGroup = async () => {
+    if (!isVirtualSplit) {
+      await ctx.resetGroup(resolved.backendGroup);
+      return;
+    }
+    for (const entry of overriddenKeys) {
+      await ctx.reset(entry.key);
+    }
+  };
+
   const header = (
     <GroupHeader
       title={resolved.title}
@@ -221,7 +240,7 @@ export default function GroupPage({ section, group }: { section: string; group: 
       overridden={overriddenKeys.length > 0}
       overriddenCount={overriddenKeys.length}
       onProbe={onProbe}
-      onResetGroup={() => ctx.resetGroup(resolved.backendGroup)}
+      onResetGroup={onResetGroup}
       guideHref={guideHrefForGroup(resolved.backendGroup)}
       probeInputsStaged={probeInputsStaged}
     />

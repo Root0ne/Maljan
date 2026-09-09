@@ -31,6 +31,7 @@ const PROVIDERS_PATH = "/settings/configuration/models/providers";
 const LLM_PATH = "/settings/configuration/models/llm";
 const SANDBOX_PATH = "/settings/configuration/tools/sandbox";
 const STATIC_PATH = "/settings/configuration/tools/static";
+const PROFILES_PATH = "/settings/configuration/agents/profiles";
 const SEARCH_PATH = "/settings/configuration/search";
 
 test.describe("Settings → Configuration (admin)", () => {
@@ -240,6 +241,42 @@ test.describe("Settings → Configuration (admin)", () => {
     await page.getByRole("button", { name: /Remove all overrides in this group/ }).click();
     await page.getByRole("button", { name: /Remove \d+ overrides/ }).click();
     await expect.poll(() => deleteUrl).toContain("group=negotiation");
+  });
+
+  /* Task 21: "Profiles" is carved out of the backend `agents` group, so a
+   * group-wide DELETE from that page would also remove the overrides that
+   * belong to the *Agents* page — more than the dialog counted. Both sides of
+   * a virtual split reset per key instead. */
+  test("a virtual group's reset deletes only its own keys, not the whole backend group", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto(PROFILES_PATH);
+
+    const deletedKeys: string[] = [];
+    let groupDeletes = 0;
+    await page.route("**/api/v1/settings/*", (r) => {
+      if (r.request().method() === "DELETE") {
+        const key = new URL(r.request().url()).pathname.split("/").pop() ?? "";
+        deletedKeys.push(key);
+        return r.fulfill({ json: { reset: [key] } });
+      }
+      return r.fallback();
+    });
+    await page.route("**/api/v1/settings?**", (r) => {
+      groupDeletes += 1;
+      return r.fulfill({ json: { reset: [] } });
+    });
+
+    // Only `core.agents.profile` is this page's own ui-sourced key —
+    // `core.react_agent_timeout` is ui-sourced too but belongs to the Agents
+    // page, and must survive.
+    const reset = page.getByRole("button", { name: "Remove all overrides in this group (1)" });
+    await expect(reset).toBeVisible();
+    await reset.click();
+    await page.getByRole("button", { name: /Remove 1 overrides/ }).click();
+
+    await expect.poll(() => deletedKeys).toEqual(["core.agents.profile"]);
+    expect(groupDeletes).toBe(0);
   });
 
   test("the group-reset dialog appears and cancelling with 'Keep them' sends no DELETE", async ({
