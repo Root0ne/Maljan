@@ -320,6 +320,50 @@ test.describe("Settings → Setup guides (admin)", () => {
     expect(changes["core.agents.profile"]).toBe("full");
   });
 
+  /* Task 21: the review step listed only this guide's own keys, but Apply
+   * PATCHes the whole pending map — anything staged in the console before the
+   * guide was opened went out unannounced. */
+  test("the review names a key staged in the console and sends it with the guide's own", async ({
+    authenticatedPage: page,
+  }) => {
+    // Stage a console key first. Every step from here is a client-side
+    // navigation: a `page.goto` would remount the provider and drop it.
+    await page.goto("/settings/configuration/tools/memory");
+    await page.locator("#setting-core\\.memory\\.top_k input[type=number]").fill("9");
+    await expect(page.getByTestId("changes-count")).toHaveText("1 change");
+
+    await page.getByRole("link", { name: "Setup guides" }).click();
+    await page.getByRole("link", { name: "Start" }).first().click();
+    await page.waitForURL("**/settings/setup/llm");
+
+    await page.getByRole("radio", { name: /^Ollama/ }).click();
+    await page.getByRole("button", { name: /Review and apply/ }).click();
+
+    await expect(page.getByText("Also staged elsewhere")).toBeVisible();
+    await expect(page.getByText("Neighbours per lookup")).toBeVisible();
+    await expect(page.getByText("Apply also sends the 1 change staged elsewhere.")).toBeVisible();
+
+    const patches: Record<string, unknown>[] = [];
+    await page.route("**/api/v1/settings", (r) => {
+      if (r.request().method() === "PATCH") {
+        patches.push(r.request().postDataJSON() as Record<string, unknown>);
+        return r.fulfill({
+          json: {
+            applied: ["core.llm.provider", "core.memory.top_k"],
+            applies: { next_job: 2 },
+          },
+        });
+      }
+      return r.fallback();
+    });
+
+    await page.getByRole("button", { name: "Apply", exact: true }).click();
+    await expect(page.getByText(/Applied 2 settings/)).toBeVisible();
+    expect(patches).toEqual([
+      { changes: { "core.llm.provider": "ollama", "core.memory.top_k": 9 } },
+    ]);
+  });
+
   test("leaving the LLM guide after staging shows the rail badge and the changes bar", async ({
     authenticatedPage: page,
   }) => {
