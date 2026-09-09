@@ -202,7 +202,12 @@ function describeServerMap(before: unknown, after: unknown): {
     const tokenChange = describeTokenChange(bs.auth_token, as.auth_token);
     if (tokenChange) fields.push(tokenChange);
 
-    if (fields.length === 0 && enabledChanged) {
+    // A flip that happens alongside other edits joins the `changed:` list
+    // rather than being dropped for them: "disabled" is usually the most
+    // consequential half of such a change.
+    if (enabledChanged) fields.unshift(as.enabled ? "enabled" : "disabled");
+
+    if (fields.length === 1 && enabledChanged) {
       detail.push(`${key}: ${as.enabled ? "enabled" : "disabled"}`);
       changedCount++;
     } else if (fields.length > 0) {
@@ -273,7 +278,11 @@ function describeDefinitionsMap(before: unknown, after: unknown): {
       if (!deepEqual(bs[field], as[field])) fields.push(label);
     }
 
-    if (fields.length === 0 && enabledChanged) {
+    // Same rule as the server map: an enable/disable that travels with other
+    // edits is named in the `changed:` list instead of vanishing.
+    if (enabledChanged) fields.unshift(as.enabled ? "enabled" : "disabled");
+
+    if (fields.length === 1 && enabledChanged) {
       detail.push(`${key}: ${as.enabled ? "enabled" : "disabled"}`);
       changedCount++;
     } else if (fields.length > 0) {
@@ -326,16 +335,17 @@ function describeProfilesMap(before: unknown, after: unknown): {
     const analystsDiffer = !deepEqual(bp.analysts, ap.analysts);
     const labelChanged = bp.label !== ap.label;
 
-    let line: string | null = null;
+    // A rename and an analyst edit are two separate facts about one profile:
+    // both get a line, and the profile still counts once.
+    const lines: string[] = [];
     if (!sameSet) {
-      line = `${key}: analysts changed (+${added.length} −${removed.length})`;
+      lines.push(`${key}: analysts changed (+${added.length} −${removed.length})`);
     } else if (analystsDiffer) {
-      line = `${key}: analysts reordered (${ap.analysts.join(", ")})`;
-    } else if (labelChanged) {
-      line = `${key}: label changed`;
+      lines.push(`${key}: analysts reordered (${ap.analysts.join(", ")})`);
     }
-    if (line) {
-      detail.push(line);
+    if (labelChanged) lines.push(`${key}: label changed`);
+    if (lines.length > 0) {
+      detail.push(...lines);
       changedCount++;
     }
   }
