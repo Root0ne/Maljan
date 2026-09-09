@@ -1,4 +1,5 @@
 import type { Page, Route, WebSocketRoute } from "@playwright/test";
+import type { SettingsSchema, SettingsValues } from "@/types/settings";
 
 /**
  * The whole API surface the E2E suite is allowed to touch — and a trap for
@@ -782,6 +783,484 @@ export const MOCK_SETTINGS_VALUES = {
   },
 };
 
+/**
+ * The setup-guides' own schema/values fixture (Task 19).
+ *
+ * `settings-setup.spec.ts` walks all seven `/settings/setup/<guide>` guides,
+ * which together touch a much wider slice of the catalog than
+ * `MOCK_SETTINGS_SCHEMA` above covers — every guide's own group, in the
+ * groups the real console rail expects (`sections.ts`), so `pathForKey` and
+ * the rail badges resolve exactly the way they do against the real backend.
+ *
+ * `core.llm.provider` starts on `openai` with no key stored: "not configured"
+ * per `llmStatus`, and staging `ollama` in the LLM guide is a real change
+ * (`stage()` only writes a key when it differs from what's saved) — the guide
+ * spec depends on the provider actually appearing in the Apply's PATCH body,
+ * which it could not if the fixture's starting provider already were the one
+ * the guide walkthrough picks.
+ *
+ * Groups deliberately split the way the real catalog does: "llm" carries the
+ * provider selector and the token-budget/parallelism knobs, "providers"
+ * carries the per-provider credentials and model names — so the rail's dirty
+ * badge after the LLM guide lands on "LLM & model" (just the provider) and
+ * "Providers" (the three ollama fields), never a combined count on one.
+ */
+export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
+  secrets_available: true,
+  groups: [
+    {
+      key: "llm",
+      title: "LLM & model",
+      description: "",
+      entries: [
+        {
+          key: "core.llm.provider", namespace: "core", path: "llm.provider",
+          type: "enum", default: "openai", nullable: false,
+          choices: ["openai", "anthropic", "ollama", "gemini"],
+          minimum: null, maximum: null, secret: false, group: "llm",
+          title: "Provider", description: "Selects which LLM backend serves both the expert and judge roles.",
+          applies: "next_job", editable: true, reason: null, probe: "llm",
+          applies_when: null, order: -1, choices_from: null, editor: null, subgroup: null, advanced: false,
+        },
+        {
+          key: "core.llm.expert_max_tokens", namespace: "core", path: "llm.expert_max_tokens",
+          type: "int", default: 4096, nullable: false, choices: null,
+          minimum: 1, maximum: null, secret: false, group: "llm",
+          title: "Expert max tokens", description: "Token budget for one analyst turn.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+        },
+        {
+          key: "core.llm.judge_max_tokens", namespace: "core", path: "llm.judge_max_tokens",
+          type: "int", default: 4096, nullable: false, choices: null,
+          minimum: 1, maximum: null, secret: false, group: "llm",
+          title: "Judge max tokens", description: "Token budget for the judge's verdict.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+        },
+        {
+          key: "core.llm.parallel_analysts", namespace: "core", path: "llm.parallel_analysts",
+          type: "int", default: 3, nullable: false, choices: null,
+          minimum: 1, maximum: null, secret: false, group: "llm",
+          title: "Parallel analysts", description: "How many analysts run at once.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+        },
+        {
+          key: "core.llm.view_decomposition_mode", namespace: "core", path: "llm.view_decomposition_mode",
+          type: "enum", default: "single", nullable: false, choices: ["single", "split"],
+          minimum: null, maximum: null, secret: false, group: "llm",
+          title: "View decomposition mode", description: "Whether a large sample is split into multiple views.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+        },
+        {
+          key: "core.llm.view_decomposition_views", namespace: "core", path: "llm.view_decomposition_views",
+          type: "int", default: 1, nullable: false, choices: null,
+          minimum: 1, maximum: null, secret: false, group: "llm",
+          title: "View decomposition views", description: "How many views a split sample is divided into.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+        },
+      ],
+    },
+    {
+      key: "providers",
+      title: "Providers",
+      description: "",
+      entries: [
+        {
+          key: "core.llm.ollama.base_url", namespace: "core", path: "llm.ollama.base_url",
+          type: "str", default: "", nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "providers",
+          title: "Ollama base URL", description: "Base URL of the local Ollama server.",
+          applies: "next_job", editable: true, reason: null, probe: "llm",
+          applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+        },
+        {
+          key: "core.llm.ollama.expert_model", namespace: "core", path: "llm.ollama.expert_model",
+          type: "str", default: "", nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "providers",
+          title: "Ollama expert model", description: "Model the analysts run on.",
+          applies: "next_job", editable: true, reason: null, probe: "llm",
+          applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+        },
+        {
+          key: "core.llm.ollama.judge_model", namespace: "core", path: "llm.ollama.judge_model",
+          type: "str", default: "", nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "providers",
+          title: "Ollama judge model", description: "Model the judge writes the verdict on.",
+          applies: "next_job", editable: true, reason: null, probe: "llm",
+          applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+        },
+        {
+          key: "core.llm.ollama.num_ctx", namespace: "core", path: "llm.ollama.num_ctx",
+          type: "int", default: 8192, nullable: false, choices: null,
+          minimum: 1, maximum: null, secret: false, group: "providers",
+          title: "Ollama context length", description: "The context window Ollama is asked to serve.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+        },
+        {
+          key: "core.llm.ollama.keep_alive", namespace: "core", path: "llm.ollama.keep_alive",
+          type: "str", default: "5m", nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "providers",
+          title: "Ollama keep-alive", description: "How long Ollama keeps the model loaded after a request.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+        },
+        {
+          key: "core.llm.openai.api_key", namespace: "core", path: "llm.openai.api_key",
+          type: "secret", default: null, nullable: true, choices: null,
+          minimum: null, maximum: null, secret: true, group: "providers",
+          title: "OpenAI-compatible API key", description: "Bearer token for the OpenAI-compatible endpoint.",
+          applies: "next_job", editable: true, reason: null, probe: "llm",
+          applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+        },
+      ],
+    },
+    {
+      key: "static",
+      title: "Static provider",
+      description: "",
+      entries: [
+        {
+          key: "core.static.provider", namespace: "core", path: "static.provider",
+          type: "enum", default: "ghidra", nullable: false,
+          choices: ["ghidra", "r2", "capa_yara", "generic_mcp", "none"],
+          minimum: null, maximum: null, secret: false, group: "static",
+          title: "Static provider", description: "Which tool the static analyst attaches.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: -1, choices_from: "static_providers", editor: null, subgroup: null, advanced: false,
+        },
+        {
+          key: "core.static.r2.binary_path", namespace: "core", path: "static.r2.binary_path",
+          type: "str", default: "", nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "static",
+          title: "radare2 binary path", description: "Where the radare2 binary lives on disk.",
+          applies: "next_job", editable: true, reason: null, probe: "r2",
+          applies_when: { "core.static.provider": ["r2"] }, order: 0,
+          choices_from: null, editor: null, subgroup: null, advanced: false,
+        },
+        {
+          key: "core.static.r2.mirror_dir", namespace: "core", path: "static.r2.mirror_dir",
+          type: "str", default: "", nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "static",
+          title: "radare2 mirror directory", description: "Where a copy of the sample is written before analysis.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: { "core.static.provider": ["r2"] }, order: 0,
+          choices_from: null, editor: null, subgroup: null, advanced: false,
+        },
+        {
+          key: "core.static.generic.server", namespace: "core", path: "static.generic.server",
+          type: "str", default: "", nullable: false, choices: ["", "network"],
+          minimum: null, maximum: null, secret: false, group: "static",
+          title: "Custom MCP server", description: "Which registry entry the generic_mcp static provider drives.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: { "core.static.provider": ["generic_mcp"] }, order: 0,
+          choices_from: "mcp_servers", editor: null, subgroup: null, advanced: false,
+        },
+      ],
+    },
+    {
+      key: "sandbox",
+      title: "Sandbox provider",
+      description: "",
+      entries: [
+        {
+          key: "core.sandbox.provider", namespace: "core", path: "sandbox.provider",
+          type: "enum", default: "mock", nullable: false,
+          choices: ["mock", "cape2", "upload", "triage", "rest"],
+          minimum: null, maximum: null, secret: false, group: "sandbox",
+          title: "Sandbox provider", description: "Which sandbox produces the dynamic evidence.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: -1, choices_from: "sandbox_providers", editor: null, subgroup: null, advanced: false,
+        },
+        {
+          key: "core.sandbox.triage.api_token", namespace: "core", path: "sandbox.triage.api_token",
+          type: "secret", default: null, nullable: true, choices: null,
+          minimum: null, maximum: null, secret: true, group: "sandbox",
+          title: "Triage API token", description: "Hatching Triage cloud API token.",
+          applies: "next_job", editable: true, reason: null, probe: "triage",
+          applies_when: { "core.sandbox.provider": ["triage"] }, order: 0,
+          choices_from: null, editor: null, subgroup: null, advanced: false,
+        },
+        {
+          key: "core.sandbox.triage.base_url", namespace: "core", path: "sandbox.triage.base_url",
+          type: "str", default: "https://tria.ge/api/v0", nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "sandbox",
+          title: "Triage API base URL", description: "Hatching Triage cloud API root.",
+          applies: "next_job", editable: true, reason: null, probe: "triage",
+          applies_when: { "core.sandbox.provider": ["triage"] }, order: 0,
+          choices_from: null, editor: null, subgroup: null, advanced: false,
+        },
+        {
+          key: "core.sandbox.triage.profile", namespace: "core", path: "sandbox.triage.profile",
+          type: "str", default: "", nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "sandbox",
+          title: "Triage profile", description: "The analysis profile Triage runs the sample under.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: { "core.sandbox.provider": ["triage"] }, order: 0,
+          choices_from: null, editor: null, subgroup: null, advanced: false,
+        },
+        {
+          key: "core.sandbox.triage.fetch_pcap", namespace: "core", path: "sandbox.triage.fetch_pcap",
+          type: "bool", default: false, nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "sandbox",
+          title: "Fetch the pcap", description: "Whether to download the capture alongside the report.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: { "core.sandbox.provider": ["triage"] }, order: 0,
+          choices_from: null, editor: null, subgroup: null, advanced: false,
+        },
+        {
+          key: "core.sandbox.triage.poll_interval_seconds", namespace: "core",
+          path: "sandbox.triage.poll_interval_seconds",
+          type: "int", default: 30, nullable: false, choices: null,
+          minimum: 1, maximum: null, secret: false, group: "sandbox",
+          title: "Poll interval (seconds)", description: "How often the poller checks the task's status.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: { "core.sandbox.provider": ["triage"] }, order: 0,
+          choices_from: null, editor: null, subgroup: null, advanced: false,
+        },
+        {
+          key: "core.sandbox.triage.timeout_seconds", namespace: "core",
+          path: "sandbox.triage.timeout_seconds",
+          type: "int", default: 600, nullable: false, choices: null,
+          minimum: 1, maximum: null, secret: false, group: "sandbox",
+          title: "Timeout (seconds)", description: "How long to wait for the task before giving up.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: { "core.sandbox.provider": ["triage"] }, order: 0,
+          choices_from: null, editor: null, subgroup: null, advanced: false,
+        },
+      ],
+    },
+    {
+      key: "mcp",
+      title: "Tool servers (MCP)",
+      description: "",
+      entries: [
+        {
+          key: "core.mcp.servers", namespace: "core", path: "mcp.servers",
+          type: "json", default: {}, nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "mcp",
+          title: "Tool servers",
+          description: "Every MCP server Maljan can attach, keyed by a short name.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: -1, choices_from: null, editor: "server_map", subgroup: null, advanced: false,
+        },
+      ],
+    },
+    {
+      key: "agents",
+      title: "Agents",
+      description: "",
+      entries: [
+        {
+          key: "core.agents.profile", namespace: "core", path: "agents.profile",
+          type: "enum", default: "default", nullable: false,
+          choices: ["default"],
+          minimum: null, maximum: null, secret: false, group: "agents",
+          title: "Active profile", description: "Which analyst profile a new job runs.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: -1, choices_from: "profiles", editor: null, subgroup: null, advanced: false,
+        },
+        {
+          key: "core.agents.definitions", namespace: "core", path: "agents.definitions",
+          type: "json", default: {}, nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "agents",
+          title: "Agent definitions",
+          description: "Every analyst Maljan can run, keyed by a short name.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: -1, choices_from: null, editor: "agent_definitions", subgroup: null, advanced: false,
+        },
+        {
+          key: "core.agents.profiles", namespace: "core", path: "agents.profiles",
+          type: "json", default: {}, nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "agents",
+          title: "Profiles",
+          description: "Named analyst line-ups a job can select.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: -1, choices_from: null, editor: "profiles", subgroup: null, advanced: false,
+        },
+      ],
+    },
+    {
+      key: "memory",
+      title: "Memory",
+      description: "",
+      entries: [
+        {
+          key: "core.memory.backend", namespace: "core", path: "memory.backend",
+          type: "enum", default: "memory", nullable: false, choices: ["memory", "qdrant"],
+          minimum: null, maximum: null, secret: false, group: "memory",
+          title: "Backend", description: "In-process memory, or a Qdrant instance that survives a restart.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: -1, choices_from: null, editor: null, subgroup: null, advanced: false,
+        },
+        {
+          key: "core.memory.qdrant_url", namespace: "core", path: "memory.qdrant_url",
+          type: "str", default: "", nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "memory",
+          title: "Qdrant URL", description: "Where the Qdrant instance lives.",
+          applies: "next_job", editable: true, reason: null, probe: "qdrant",
+          applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+        },
+        {
+          key: "core.memory.qdrant_api_key", namespace: "core", path: "memory.qdrant_api_key",
+          type: "secret", default: null, nullable: true, choices: null,
+          minimum: null, maximum: null, secret: true, group: "memory",
+          title: "Qdrant API key", description: "Credential for a hosted Qdrant instance.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+        },
+        {
+          key: "core.memory.qdrant_collection", namespace: "core", path: "memory.qdrant_collection",
+          type: "str", default: "maljan_findings", nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "memory",
+          title: "Qdrant collection", description: "Collection findings are written to and read from.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+        },
+        {
+          key: "core.memory.qdrant_function_hash_collection", namespace: "core",
+          path: "memory.qdrant_function_hash_collection",
+          type: "str", default: "maljan_function_hashes", nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "memory",
+          title: "Qdrant function-hash collection", description: "Collection function hashes are written to and read from.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+        },
+        {
+          key: "core.memory.top_k", namespace: "core", path: "memory.top_k",
+          type: "int", default: 5, nullable: false, choices: null,
+          minimum: 1, maximum: null, secret: false, group: "memory",
+          title: "Neighbours per lookup", description: "How many prior findings a lookup returns.",
+          applies: "next_job", editable: true, reason: null, probe: null,
+          applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+        },
+      ],
+    },
+    {
+      key: "enrichment",
+      title: "Enrichment",
+      description: "",
+      entries: [
+        {
+          key: "api.enrichment_enabled", namespace: "api", path: "enrichment_enabled",
+          type: "bool", default: false, nullable: false, choices: null,
+          minimum: null, maximum: null, secret: false, group: "enrichment",
+          title: "Enrichment enabled", description: "Look indicators up against threat-intelligence sources.",
+          applies: "live", editable: true, reason: null, probe: null,
+          applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+        },
+        {
+          key: "api.enrichment_max_lookups", namespace: "api", path: "enrichment_max_lookups",
+          type: "int", default: 10, nullable: false, choices: null,
+          minimum: 0, maximum: null, secret: false, group: "enrichment",
+          title: "Max lookups per analysis", description: "Caps how many lookups a single analysis may spend.",
+          applies: "live", editable: true, reason: null, probe: null,
+          applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+        },
+        {
+          key: "api.virustotal_api_key", namespace: "api", path: "virustotal_api_key",
+          type: "secret", default: null, nullable: true, choices: null,
+          minimum: null, maximum: null, secret: true, group: "enrichment",
+          title: "VirusTotal API key", description: "Leave empty to skip VirusTotal.",
+          applies: "live", editable: true, reason: null, probe: "virustotal",
+          applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+        },
+        {
+          key: "api.abuseipdb_api_key", namespace: "api", path: "abuseipdb_api_key",
+          type: "secret", default: null, nullable: true, choices: null,
+          minimum: null, maximum: null, secret: true, group: "enrichment",
+          title: "AbuseIPDB API key", description: "Leave empty to skip AbuseIPDB.",
+          applies: "live", editable: true, reason: null, probe: "abuseipdb",
+          applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+        },
+      ],
+    },
+  ],
+};
+
+function unset(source: "default" | "env" | "ui" = "default"): {
+  is_set: null;
+  hint: null;
+  source: "default" | "env" | "ui";
+  updated_at: null;
+  updated_by: null;
+} {
+  return { is_set: null, hint: null, source, updated_at: null, updated_by: null };
+}
+
+/** Values matching `MOCK_SETTINGS_SCHEMA_FULL`, every entry default-sourced
+ *  unless noted. `core.llm.provider` is `"openai"` with no key stored — "not
+ *  configured" per `llmStatus` — and every ollama field starts empty, so the
+ *  hub reads "Not configured" and the LLM guide walkthrough starts from a
+ *  clean slate. */
+export const MOCK_SETTINGS_VALUES_FULL: SettingsValues = {
+  values: {
+    "core.llm.provider": { value: "openai", ...unset() },
+    "core.llm.expert_max_tokens": { value: 4096, ...unset() },
+    "core.llm.judge_max_tokens": { value: 4096, ...unset() },
+    "core.llm.parallel_analysts": { value: 3, ...unset() },
+    "core.llm.view_decomposition_mode": { value: "single", ...unset() },
+    "core.llm.view_decomposition_views": { value: 1, ...unset() },
+    "core.llm.ollama.base_url": { value: "", ...unset() },
+    "core.llm.ollama.expert_model": { value: "", ...unset() },
+    "core.llm.ollama.judge_model": { value: "", ...unset() },
+    "core.llm.ollama.num_ctx": { value: 8192, ...unset() },
+    "core.llm.ollama.keep_alive": { value: "5m", ...unset() },
+    "core.llm.openai.api_key": { value: null, is_set: false, hint: null, source: "default", updated_at: null, updated_by: null },
+    "core.static.provider": { value: "ghidra", ...unset() },
+    "core.static.r2.binary_path": { value: "", ...unset() },
+    "core.static.r2.mirror_dir": { value: "", ...unset() },
+    "core.static.generic.server": { value: "", ...unset() },
+    "core.sandbox.provider": { value: "mock", ...unset() },
+    "core.sandbox.triage.api_token": { value: null, is_set: false, hint: null, source: "default", updated_at: null, updated_by: null },
+    "core.sandbox.triage.base_url": { value: "https://tria.ge/api/v0", ...unset() },
+    "core.sandbox.triage.profile": { value: "", ...unset() },
+    "core.sandbox.triage.fetch_pcap": { value: false, ...unset() },
+    "core.sandbox.triage.poll_interval_seconds": { value: 30, ...unset() },
+    "core.sandbox.triage.timeout_seconds": { value: 600, ...unset() },
+    "core.mcp.servers": {
+      value: {
+        network: {
+          enabled: true, transport: "stdio", command: "python",
+          args: ["services/network-mcp/server.py"], env: {}, cwd: "services/network-mcp",
+          env_allow: [], url: "", auth_token: "", auth_token_source: "default",
+          tool_selection: "dynamic", use_all_tools: false, tools: null,
+          agents: ["network"], label: "Network MCP",
+        },
+      },
+      ...unset(),
+    },
+    "core.agents.profile": { value: "default", ...unset() },
+    "core.agents.definitions": {
+      value: {
+        static: { role: "static", label: "Static analyst", prompt: null, tools: [], static_provider: null, enabled: true },
+        dynamic: { role: "dynamic", label: "Dynamic analyst", prompt: null, tools: [], static_provider: null, enabled: true },
+        network: { role: "network", label: "Network analyst", prompt: null, tools: [], static_provider: null, enabled: true },
+        judge: { role: "judge", label: "Judge", prompt: null, tools: [], static_provider: null, enabled: true },
+      },
+      ...unset(),
+    },
+    "core.agents.profiles": {
+      value: { default: { label: "Default", analysts: ["static", "dynamic", "network"] } },
+      ...unset(),
+    },
+    "core.memory.backend": { value: "memory", ...unset() },
+    "core.memory.qdrant_url": { value: "", ...unset() },
+    "core.memory.qdrant_api_key": { value: null, is_set: false, hint: null, source: "default", updated_at: null, updated_by: null },
+    "core.memory.qdrant_collection": { value: "maljan_findings", ...unset() },
+    "core.memory.qdrant_function_hash_collection": { value: "maljan_function_hashes", ...unset() },
+    "core.memory.top_k": { value: 5, ...unset() },
+    "api.enrichment_enabled": { value: false, ...unset() },
+    "api.enrichment_max_lookups": { value: 10, ...unset() },
+    "api.virustotal_api_key": { value: null, is_set: false, hint: null, source: "default", updated_at: null, updated_by: null },
+    "api.abuseipdb_api_key": { value: null, is_set: false, hint: null, source: "default", updated_at: null, updated_by: null },
+  },
+};
+
 export interface MockOptions {
   /**
    * Handler for `**​/ws/analysis/**`. The default accepts the connection and
@@ -797,6 +1276,14 @@ export interface MockOptions {
    * rather than a second fixture, following this file's one-surface pattern.
    */
   user?: typeof MOCK_USER;
+  /** Overrides the settings schema/values pair `/settings/schema` and the
+   *  GET branch of `/settings` answer with. Defaults to `MOCK_SETTINGS_SCHEMA`
+   *  / `MOCK_SETTINGS_VALUES` — `settings-setup.spec.ts` passes
+   *  `MOCK_SETTINGS_SCHEMA_FULL` / `MOCK_SETTINGS_VALUES_FULL` (or its own
+   *  variant of the values) instead, without moving what every other spec
+   *  already receives. */
+  settingsSchema?: SettingsSchema;
+  settingsValues?: SettingsValues;
 }
 
 /**
@@ -952,7 +1439,7 @@ export async function installApiMocks(
     return json(route, { reset: [key] });
   });
   await page.route("**/api/v1/settings/schema", (route) =>
-    json(route, MOCK_SETTINGS_SCHEMA)
+    json(route, options.settingsSchema ?? MOCK_SETTINGS_SCHEMA)
   );
   await page.route("**/api/v1/settings/export", (route) =>
     route.fulfill({
@@ -1034,7 +1521,7 @@ export async function installApiMocks(
           ),
           applies: { next_job: 1 },
         })
-      : json(route, MOCK_SETTINGS_VALUES)
+      : json(route, options.settingsValues ?? MOCK_SETTINGS_VALUES)
   );
   await page.route("**/api/v1/settings?**", (route) => json(route, { reset: [] }));
 

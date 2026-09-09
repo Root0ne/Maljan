@@ -16,9 +16,8 @@ import ProfilePickerStep from "./steps/ProfilePickerStep";
 import RestMappingStep from "./steps/RestMappingStep";
 import ServerFormStep, { serverStepSection } from "./steps/ServerFormStep";
 import {
-  LLM_PROVIDER_BLURB,
-  LLM_PROVIDER_TITLE,
   PROVIDER_CHOICE_KEY,
+  providerChoiceCopy,
   type GuideContext,
   type GuideDef,
   type GuideStep,
@@ -56,33 +55,32 @@ function ProviderChoice({
     <fieldset className="border-0 p-0 m-0">
       <legend className="sr-only">{entry.title}</legend>
       <div className="grid gap-2 sm:grid-cols-2">
-        {choices.map((choice) => (
-          <label
-            key={choice}
-            className={`flex gap-3 items-start border rounded px-3 py-2 cursor-pointer ${
-              current === choice ? "border-accent bg-bg-surface" : "border-border"
-            }`}
-          >
-            <input
-              type="radio"
-              name={selectorKey}
-              value={choice}
-              checked={current === choice}
-              onChange={() => ctx.stage(selectorKey, choice)}
-              className="mt-1"
-            />
-            <span>
-              <span className="block text-sm text-text-primary">
-                {LLM_PROVIDER_TITLE[choice] ?? choice}
+        {choices.map((choice) => {
+          const copy = providerChoiceCopy(selectorKey, choice);
+          return (
+            <label
+              key={choice}
+              className={`flex gap-3 items-start border rounded px-3 py-2 cursor-pointer ${
+                current === choice ? "border-accent bg-bg-surface" : "border-border"
+              }`}
+            >
+              <input
+                type="radio"
+                name={selectorKey}
+                value={choice}
+                checked={current === choice}
+                onChange={() => ctx.stage(selectorKey, choice)}
+                className="mt-1"
+              />
+              <span>
+                <span className="block text-sm text-text-primary">{copy.title}</span>
+                {copy.blurb && (
+                  <span className="block text-xs text-text-secondary">{copy.blurb}</span>
+                )}
               </span>
-              {LLM_PROVIDER_BLURB[choice] && (
-                <span className="block text-xs text-text-secondary">
-                  {LLM_PROVIDER_BLURB[choice]}
-                </span>
-              )}
-            </span>
-          </label>
-        ))}
+            </label>
+          );
+        })}
       </div>
     </fieldset>
   );
@@ -185,7 +183,7 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
   const selectorKey = PROVIDER_CHOICE_KEY[guide.id];
 
   const stepKeys = useMemo(() => {
-    const keys = steps.flatMap((s) => s.keys ?? []);
+    const keys = steps.flatMap((s) => [...(s.keys ?? []), ...(s.reviewKeys ?? [])]);
     if (selectorKey && steps.some((s) => s.component === "provider-choice")) keys.push(selectorKey);
     return keys;
   }, [steps, selectorKey]);
@@ -299,6 +297,13 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
 
       <h3 className="text-sm font-medium text-text-primary">{step.title}</h3>
       {step.intro && <p className="text-xs text-text-secondary mt-1 mb-2">{step.intro}</p>}
+      {step.link && (
+        <p className="text-xs mb-2">
+          <Link href={step.link.href} className="text-accent-strong">
+            {step.link.label}
+          </Link>
+        </p>
+      )}
 
       {step.keys !== undefined && <StepFields ctx={ctx} step={step} />}
 

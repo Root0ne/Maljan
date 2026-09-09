@@ -116,7 +116,15 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
 
   const gated = gatesOnSchema(pathname);
 
-  if (gated && s.loading) {
+  // Only the *first* load blanks the page: `apply()`, `reset()` and
+  // `resetGroup()` all call `reload()` to refresh `values` after a mutation,
+  // which flips `loading` back to `true` for the duration of that fetch.
+  // Gating on schema-not-yet-loaded rather than on `loading` alone means a
+  // guide or console page already on screen keeps rendering its own local
+  // state (a guide's freshly-set Apply result, its in-progress "which
+  // server/agent" scratch) through that refresh instead of being unmounted
+  // and rebuilt from scratch the moment it resolves.
+  if (gated && s.loading && !s.schema) {
     return <div className="text-sm text-text-secondary">Loading configuration…</div>;
   }
   if (gated && s.forbidden) {
