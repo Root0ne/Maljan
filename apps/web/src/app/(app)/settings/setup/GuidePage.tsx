@@ -183,7 +183,7 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
   const selectorKey = PROVIDER_CHOICE_KEY[guide.id];
 
   const stepKeys = useMemo(() => {
-    const keys = steps.flatMap((s) => s.keys ?? []);
+    const keys = steps.flatMap((s) => [...(s.keys ?? []), ...(s.reviewKeys ?? [])]);
     if (selectorKey && steps.some((s) => s.component === "provider-choice")) keys.push(selectorKey);
     return keys;
   }, [steps, selectorKey]);

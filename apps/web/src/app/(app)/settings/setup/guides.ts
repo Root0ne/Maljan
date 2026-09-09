@@ -28,6 +28,16 @@ export interface GuideStep {
   intro?: string;
   /** Catalog keys rendered with `FieldRow variant="guide"`. */
   keys?: string[];
+  /** Catalog keys this step's own component (`server-form`, `agent-form`,
+   *  `profile-picker`, ...) stages directly, for the review step's "which
+   *  keys belong to this guide" filter — unlike `keys`, these are never
+   *  rendered by `StepFields`, so declaring one here does not put a second,
+   *  redundant `FieldRow` on the page next to the component that already
+   *  edits it. Without this, a guide whose steps are all components (nothing
+   *  ever staged through `keys`) never marks anything "touched": its review
+   *  step would show "Nothing to apply" and Apply would stay disabled no
+   *  matter what the guide actually staged. */
+  reviewKeys?: string[];
   /** Default true: a key hidden by its `applies_when` is skipped. A guide
    *  that has already narrowed the provider itself sets this false so the
    *  step still renders while the selector is only staged. */
@@ -482,6 +492,7 @@ const TOOL_SERVER_GUIDE: GuideDef = {
       intro: "Add a new server, or open one that is already configured.",
       component: "server-form",
       section: "connection",
+      reviewKeys: ["core.mcp.servers"],
       canContinue: (c) => (stateHas(c, "serverKey") ? null : "name or pick a server"),
     },
     {
@@ -523,6 +534,7 @@ const AGENT_GUIDE: GuideDef = {
       intro: "Clone a built-in analyst to inherit its prompt, or start from a blank generic one.",
       component: "agent-form",
       section: "identity",
+      reviewKeys: ["core.agents.definitions", "core.llm.agents"],
       canContinue: (c) => (stateHas(c, "agentKey") ? null : "name the agent"),
     },
     {
@@ -561,6 +573,7 @@ const AGENT_GUIDE: GuideDef = {
       title: "Add to a profile",
       intro: "An analyst runs only as part of a profile.",
       component: "profile-picker",
+      reviewKeys: ["core.agents.profiles", "core.agents.profile"],
     },
     REVIEW_STEP,
   ],
