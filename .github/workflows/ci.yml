@@ -191,6 +191,10 @@ jobs:
         working-directory: apps/web
         run: npm run lint
 
+      - name: Unit tests
+        working-directory: apps/web
+        run: npm run test:unit
+
       - name: Production build
         working-directory: apps/web
         env:

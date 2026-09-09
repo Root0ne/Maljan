@@ -51,7 +51,10 @@ export default defineConfig({
    * loaded machine — the symptom is a single assertion failing in a spec that
    * passes 6/6 on its own. */
   expect: { timeout: 10_000 },
-  reporter: "html",
+  // On CI the line reporter streams one row per test into the job log, so a
+  // slow or wedged test is visible while it runs; the HTML report stays as
+  // the artefact. Locally the HTML report alone is enough.
+  reporter: process.env.CI ? [["line"], ["html", { open: "never" }]] : "html",
   use: {
     baseURL: `http://localhost:${E2E_PORT}`,
     trace: "on-first-retry",

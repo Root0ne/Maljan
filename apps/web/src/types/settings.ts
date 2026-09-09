@@ -56,6 +56,10 @@ export interface CatalogEntry {
   choices_from: ChoicesFrom | null;
   /** A composite editor renders this leaf instead of the type's widget. */
   editor: Editor | null;
+  /** A finer bucket inside `group`, or null for the group's main list. */
+  subgroup: string | null;
+  /** Hidden behind an "Advanced" disclosure until the operator opens it. */
+  advanced: boolean;
 }
 
 /**
@@ -144,6 +148,7 @@ export interface AgentProbeDetails {
 export interface SettingsGroup {
   key: string;
   title: string;
+  description: string;
   entries: CatalogEntry[];
 }
 

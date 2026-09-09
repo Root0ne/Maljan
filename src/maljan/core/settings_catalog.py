@@ -73,6 +73,10 @@ class CatalogEntry:
     choices_from: ChoicesFrom | None = None
     # A composite editor renders this leaf instead of the type's widget.
     editor: Editor | None = None
+    # Heading inside the group; None sits at the top of the group.
+    subgroup: str | None = None
+    # Folded into the group's closed "Advanced" disclosure.
+    advanced: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -199,6 +203,8 @@ def core_catalog() -> list[CatalogEntry]:
                 order=(ann.get("order", 0) if ann else 0),
                 choices_from=(ann.get("choices_from") if ann else None),
                 editor=(ann.get("editor") if ann else None),
+                subgroup=(ann.get("subgroup") if ann else None),
+                advanced=bool(ann.get("advanced", False)) if ann else False,
             )
         )
     order = {g: i for i, (g, _) in enumerate(GROUP_ORDER)}

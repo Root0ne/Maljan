@@ -10,7 +10,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse, PlainTextResponse
 from maljan.core import settings_secrets as box
-from maljan.core.settings_annotations import GROUP_ORDER
+from maljan.core.settings_annotations import GROUP_DESCRIPTIONS, GROUP_ORDER
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -80,7 +80,9 @@ async def get_schema(
             d["reason"] = "SETTINGS_ENCRYPTION_KEY is not set; secrets stay in .env"
         by_group.setdefault(e.group, []).append(CatalogEntryDTO(**d))
     groups = [
-        GroupDTO(key=g, title=t, entries=by_group[g]) for g, t in GROUP_ORDER if g in by_group
+        GroupDTO(key=g, title=t, description=GROUP_DESCRIPTIONS.get(g, ""), entries=by_group[g])
+        for g, t in GROUP_ORDER
+        if g in by_group
     ]
     return SchemaResponse(groups=groups, secrets_available=available)
 

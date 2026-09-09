@@ -88,6 +88,7 @@ test.describe("Settings", () => {
     authenticatedPage: page,
   }) => {
     await page.goto("/settings");
+    await expect(page).toHaveURL(/\/settings\/profile$/);
 
     await expect(page.getByLabel("Full Name")).toHaveValue("Test User");
     await expect(page.getByLabel("Email")).toHaveValue("test@example.com");
@@ -96,8 +97,7 @@ test.describe("Settings", () => {
   });
 
   test("the API keys tab lists existing keys", async ({ authenticatedPage: page }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "API Keys" }).click();
+    await page.goto("/settings/api-keys");
 
     await expect(page.getByText("CI/CD integration")).toBeVisible();
     await expect(page.getByText(/mlj_a1b2/)).toBeVisible();
@@ -106,6 +106,37 @@ test.describe("Settings", () => {
     // assertion on "no keys" passed on a failed request. Neither may appear.
     await expect(page.getByText("No API keys found.")).toHaveCount(0);
     await expectNoAlerts(page);
+  });
+
+  /* The copy button was the one control on this page with no coverage: the
+   * clipboard is unavailable in the test browser's context, so the button
+   * would otherwise only ever take its "Select and copy the key" branch. */
+  test("copying a freshly created key reports Copied", async ({ authenticatedPage: page }) => {
+    const copied: string[] = [];
+    await page.exposeFunction("recordCopy", (text: string) => {
+      copied.push(text);
+    });
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: {
+          writeText: (text: string) =>
+            (window as unknown as { recordCopy: (t: string) => void }).recordCopy(text),
+        },
+      });
+    });
+
+    await page.goto("/settings/api-keys");
+    await page.getByLabel("Key name").fill("copy test");
+    await page.getByRole("button", { name: "Create", exact: true }).click();
+
+    const copy = page.getByRole("button", { name: "Copy", exact: true });
+    await expect(copy).toBeVisible();
+    await copy.click();
+
+    await expect(page.getByRole("button", { name: "Copied" })).toBeVisible();
+    await expect(page.getByText("Select and copy the key")).toHaveCount(0);
+    expect(copied).toEqual(["mlj_secret_value"]);
   });
 });
 

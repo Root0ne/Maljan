@@ -35,11 +35,14 @@ class CatalogEntryDTO(BaseModel):
     order: int = 0
     choices_from: str | None = None
     editor: str | None = None
+    subgroup: str | None = None
+    advanced: bool = False
 
 
 class GroupDTO(BaseModel):
     key: str
     title: str
+    description: str = ""
     entries: list[CatalogEntryDTO]
 
 
