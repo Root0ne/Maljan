@@ -18,25 +18,10 @@ const MAPPING_PREFIX = "core.sandbox.rest.mapping.";
 // the ceiling the server actually applied.
 const MAX_ROWS_PER_CHANNEL = 5000;
 
-/**
- * The `sandbox.rest.*` leaves, grouped, with a mapping table that can be tried.
- *
- * Every field is still an ordinary catalog leaf rendered by `FieldRow`, so
- * staging, per-key reset and `.env` export work exactly as they do everywhere
- * else. What this adds is arrangement — four fieldsets instead of thirty flat
- * rows — and the preview: paste one of the sandbox's real responses, press the
- * button, and see per channel how many rows each JSONPath selected and how
- * many survived. That answer used to cost a detonation.
- */
-export default function RestSandboxEditor({
-  entries,
-  values,
-  pending,
-  errors,
-  onChange,
-  onUnstage,
-  onReset,
-}: {
+/** What both the mapping table and the whole REST editor need: the catalog
+ *  rows they draw and the four callbacks every field on this screen stages
+ *  through. */
+export interface RestEditorProps {
   entries: CatalogEntry[];
   values: Record<string, SettingValue>;
   pending: Record<string, unknown>;
@@ -44,11 +29,34 @@ export default function RestSandboxEditor({
   onChange: (key: string, value: unknown) => void;
   onUnstage: (key: string) => void;
   onReset: (key: string) => void;
-}) {
+}
+
+/**
+ * The report-mapping table and its paste-and-preview block.
+ *
+ * Thirteen ordinary catalog leaves drawn as a table rather than as thirteen
+ * field rows, plus the preview that says, per channel, how many rows each
+ * JSONPath selected and how many survived. The setup guide's mapping step
+ * renders exactly this, so a sandbox configured through the guide and one
+ * configured through the console go through the same control.
+ */
+export function RestMappingTable({
+  entries,
+  values,
+  pending,
+  errors,
+  onChange,
+  onUnstage,
+  onReset,
+}: RestEditorProps) {
   const [sample, setSample] = useState("");
   const [preview, setPreview] = useState<MappingPreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
+  // Once a preview result or error exists, the <details> opens itself and
+  // stays open for the rest of the session, even if the state that opened
+  // it is later cleared (e.g. a fresh "paste a sample response first").
+  const [sampleOpen, setSampleOpen] = useState(false);
 
   const mappingEntries = useMemo(
     () => entries.filter((e) => e.key.startsWith(MAPPING_PREFIX)),
@@ -61,13 +69,6 @@ export default function RestSandboxEditor({
   const tableEntries = useMemo(
     () => mappingEntries.filter((e) => e.key !== `${MAPPING_PREFIX}field_names`),
     [mappingEntries]
-  );
-  const plain = useMemo(
-    () =>
-      entries.filter(
-        (e) => !e.key.startsWith(MAPPING_PREFIX) && !SECTIONS.some((s) => e.key.startsWith(s.prefix))
-      ),
-    [entries]
   );
 
   const effective = (key: string): unknown =>
@@ -82,6 +83,7 @@ export default function RestSandboxEditor({
     if (sample.trim() === "") {
       setPreview(null);
       setPreviewError("paste a sample response first");
+      setSampleOpen(true);
       return;
     }
     setRunning(true);
@@ -100,15 +102,197 @@ export default function RestSandboxEditor({
       setPreview(
         await api.previewSandboxMapping(parsed, mapping as unknown as Record<string, string>)
       );
+      setSampleOpen(true);
     } catch (e) {
       setPreview(null);
       setPreviewError(
         e instanceof SyntaxError ? "the pasted text is not valid JSON" : getErrorMessage(e)
       );
+      setSampleOpen(true);
     } finally {
       setRunning(false);
     }
   };
+
+  const row = (entry: CatalogEntry) => (
+    <FieldRow
+      key={entry.key}
+      entry={entry}
+      current={values[entry.key]}
+      staged={pending[entry.key]}
+      error={errors[entry.key]}
+      onChange={(v) => onChange(entry.key, v)}
+      onUnstage={() => onUnstage(entry.key)}
+      onReset={() => onReset(entry.key)}
+    />
+  );
+
+  if (mappingEntries.length === 0) return null;
+
+  return (
+    <fieldset className="mt-4">
+      <legend className="text-xs font-medium text-text-primary uppercase tracking-wider">
+        Report mapping
+      </legend>
+      <table className="w-full text-xs mt-2">
+        <thead className="sticky top-0 bg-bg-deep">
+          <tr className="border-b border-border text-text-muted">
+            <th className="text-left font-normal py-1">Channel</th>
+            <th className="text-left font-normal py-1">JSONPath</th>
+            <th className="text-left font-normal py-1 w-40">
+              Matched / kept / dropped
+              <span className="text-text-muted">*</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {tableEntries.map((entry) => {
+            const name = entry.key.slice(MAPPING_PREFIX.length);
+            const isTarget = name === "target_sha256";
+            const stats = preview?.channels[name];
+            // These twelve rows are ordinary catalog leaves too (spec
+            // §6): staging, reset and per-key error text apply here the
+            // same as every field ``FieldRow`` renders (F13) — the input
+            // is just a table cell instead of a full field layout.
+            const dirty = entry.key in pending;
+            const source = values[entry.key]?.source ?? "default";
+            const error = errors[entry.key];
+            return (
+              <tr
+                key={entry.key}
+                className={`border-b border-border align-top ${dirty ? "bg-accent/5" : ""}`}
+              >
+                <td className="py-1 text-text-secondary">{name}</td>
+                <td className="py-1">
+                  <input
+                    className="w-full bg-bg-deep border border-border rounded px-2 py-1 font-mono text-text-primary"
+                    aria-label={entry.title}
+                    value={String(effective(entry.key) ?? "")}
+                    onChange={(e) => onChange(entry.key, e.target.value)}
+                  />
+                  {error && (
+                    <div className="text-[11px] text-status-red mt-1" role="alert">
+                      {error}
+                    </div>
+                  )}
+                  <div className="flex gap-3 mt-1">
+                    {dirty && (
+                      <button
+                        type="button"
+                        className="text-[11px] text-text-secondary"
+                        onClick={() => onUnstage(entry.key)}
+                      >
+                        Discard change
+                      </button>
+                    )}
+                    {source === "ui" && entry.editable && (
+                      <button
+                        type="button"
+                        className="text-[11px] text-text-secondary"
+                        onClick={() => onReset(entry.key)}
+                      >
+                        Reset to env
+                      </button>
+                    )}
+                  </div>
+                </td>
+                <td className="py-1 text-text-muted" data-channel={name}>
+                  {isTarget
+                    ? preview
+                      ? `hash: ${preview.target_sha256 || "not matched"}`
+                      : "—"
+                    : stats
+                      ? stats.error
+                        ? stats.error
+                        : `${stats.matched} / ${stats.kept} / ${stats.dropped}${
+                            stats.truncated ? ` · truncated at ${MAX_ROWS_PER_CHANNEL}` : ""
+                          }`
+                      : "—"}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+
+      {/* WEB-1 (dev audit 2026-09-06): `target_sha256` selects one value,
+          not a set of rows, so its cell under the counts column shows the
+          hash the mapping extracted. The column heading spoke for twelve
+          rows and misdescribed the thirteenth. */}
+      <p className="text-[11px] text-text-muted mt-1">
+        * the target_sha256 row selects a single value, so it reports the hash
+        it extracted rather than a row count.
+      </p>
+
+      {fieldNamesEntry && (
+        <div className="mt-2">{row(fieldNamesEntry)}</div>
+      )}
+
+      <details className="mt-3" open={sampleOpen} onToggle={(e) => setSampleOpen(e.currentTarget.open)}>
+        <summary className="text-xs text-text-primary cursor-pointer select-none">
+          Test with a sample response
+        </summary>
+        <label htmlFor="rest-sample" className="block text-xs text-text-muted mt-2">
+          Paste a sample response
+        </label>
+        <textarea
+          id="rest-sample"
+          rows={5}
+          className="w-full bg-bg-deep border border-border rounded px-2 py-1.5 text-xs font-mono text-text-primary"
+          value={sample}
+          onChange={(e) => setSample(e.target.value)}
+        />
+        <div className="flex items-center gap-3 mt-2">
+          <button
+            type="button"
+            className="text-xs text-accent-strong disabled:opacity-50"
+            disabled={running}
+            onClick={() => void runPreview()}
+          >
+            Preview mapping
+          </button>
+          {preview && (
+            <span className="text-[11px] text-text-secondary" role="status">
+              sample hash: {preview.target_sha256 || "not matched"}
+            </span>
+          )}
+          {previewError && (
+            <span className="text-[11px] text-status-red" role="alert">
+              {previewError}
+            </span>
+          )}
+        </div>
+      </details>
+    </fieldset>
+  );
+}
+
+/**
+ * The `sandbox.rest.*` leaves, grouped, with a mapping table that can be tried.
+ *
+ * Every field is still an ordinary catalog leaf rendered by `FieldRow`, so
+ * staging, per-key reset and `.env` export work exactly as they do everywhere
+ * else. What this adds is arrangement — four fieldsets instead of thirty flat
+ * rows — and the preview: paste one of the sandbox's real responses, press the
+ * button, and see per channel how many rows each JSONPath selected and how
+ * many survived. That answer used to cost a detonation.
+ */
+export default function RestSandboxEditor({
+  entries,
+  values,
+  pending,
+  errors,
+  onChange,
+  onUnstage,
+  onReset,
+}: RestEditorProps) {
+  const plain = useMemo(
+    () =>
+      entries.filter(
+        (e) => !e.key.startsWith(MAPPING_PREFIX) && !SECTIONS.some((s) => e.key.startsWith(s.prefix))
+      ),
+    [entries]
+  );
 
   const row = (entry: CatalogEntry) => (
     <FieldRow
@@ -139,137 +323,15 @@ export default function RestSandboxEditor({
         );
       })}
 
-      {mappingEntries.length > 0 && (
-        <fieldset className="mt-4">
-          <legend className="text-xs font-medium text-text-primary uppercase tracking-wider">
-            Report mapping
-          </legend>
-          <table className="w-full text-xs mt-2">
-            <thead>
-              <tr className="border-b border-border text-text-muted">
-                <th className="text-left font-normal py-1">Channel</th>
-                <th className="text-left font-normal py-1">JSONPath</th>
-                <th className="text-left font-normal py-1 w-40">
-                  Matched / kept / dropped
-                  <span className="text-text-muted">*</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {tableEntries.map((entry) => {
-                const name = entry.key.slice(MAPPING_PREFIX.length);
-                const isTarget = name === "target_sha256";
-                const stats = preview?.channels[name];
-                // These twelve rows are ordinary catalog leaves too (spec
-                // §6): staging, reset and per-key error text apply here the
-                // same as every field ``FieldRow`` renders (F13) — the input
-                // is just a table cell instead of a full field layout.
-                const dirty = entry.key in pending;
-                const source = values[entry.key]?.source ?? "default";
-                const error = errors[entry.key];
-                return (
-                  <tr
-                    key={entry.key}
-                    className={`border-b border-border align-top ${dirty ? "bg-accent/5" : ""}`}
-                  >
-                    <td className="py-1 text-text-secondary">{name}</td>
-                    <td className="py-1">
-                      <input
-                        className="w-full bg-bg-deep border border-border rounded px-2 py-1 font-mono text-text-primary"
-                        aria-label={entry.title}
-                        value={String(effective(entry.key) ?? "")}
-                        onChange={(e) => onChange(entry.key, e.target.value)}
-                      />
-                      {error && (
-                        <div className="text-[11px] text-status-red mt-1" role="alert">
-                          {error}
-                        </div>
-                      )}
-                      <div className="flex gap-3 mt-1">
-                        {dirty && (
-                          <button
-                            type="button"
-                            className="text-[11px] text-text-secondary"
-                            onClick={() => onUnstage(entry.key)}
-                          >
-                            Discard change
-                          </button>
-                        )}
-                        {source === "ui" && entry.editable && (
-                          <button
-                            type="button"
-                            className="text-[11px] text-text-secondary"
-                            onClick={() => onReset(entry.key)}
-                          >
-                            Reset to env
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                    <td className="py-1 text-text-muted" data-channel={name}>
-                      {isTarget
-                        ? preview
-                          ? `hash: ${preview.target_sha256 || "not matched"}`
-                          : "—"
-                        : stats
-                          ? stats.error
-                            ? stats.error
-                            : `${stats.matched} / ${stats.kept} / ${stats.dropped}${
-                                stats.truncated ? ` · truncated at ${MAX_ROWS_PER_CHANNEL}` : ""
-                              }`
-                          : "—"}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-
-          {/* WEB-1 (dev audit 2026-09-06): `target_sha256` selects one value,
-              not a set of rows, so its cell under the counts column shows the
-              hash the mapping extracted. The column heading spoke for twelve
-              rows and misdescribed the thirteenth. */}
-          <p className="text-[11px] text-text-muted mt-1">
-            * the target_sha256 row selects a single value, so it reports the hash
-            it extracted rather than a row count.
-          </p>
-
-          {fieldNamesEntry && (
-            <div className="mt-2">{row(fieldNamesEntry)}</div>
-          )}
-
-          <label htmlFor="rest-sample" className="block text-xs text-text-muted mt-3">
-            Paste a sample response
-          </label>
-          <textarea
-            id="rest-sample"
-            rows={5}
-            className="w-full bg-bg-deep border border-border rounded px-2 py-1.5 text-xs font-mono text-text-primary"
-            value={sample}
-            onChange={(e) => setSample(e.target.value)}
-          />
-          <div className="flex items-center gap-3 mt-2">
-            <button
-              type="button"
-              className="text-xs text-accent-strong disabled:opacity-50"
-              disabled={running}
-              onClick={() => void runPreview()}
-            >
-              Preview mapping
-            </button>
-            {preview && (
-              <span className="text-[11px] text-text-secondary" role="status">
-                sample hash: {preview.target_sha256 || "not matched"}
-              </span>
-            )}
-            {previewError && (
-              <span className="text-[11px] text-status-red" role="alert">
-                {previewError}
-              </span>
-            )}
-          </div>
-        </fieldset>
-      )}
+      <RestMappingTable
+        entries={entries}
+        values={values}
+        pending={pending}
+        errors={errors}
+        onChange={onChange}
+        onUnstage={onUnstage}
+        onReset={onReset}
+      />
     </div>
   );
 }

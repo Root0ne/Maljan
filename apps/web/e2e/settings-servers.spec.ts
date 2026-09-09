@@ -11,7 +11,19 @@ import { MOCK_USER } from "./mocks";
  * token set) and `threatintel` (a token sourced from `.env`) — and the
  * `sandbox` group now also carries the four `core.sandbox.rest.*` leaves the
  * REST editor renders, plus the `sandbox-rest/preview` route.
+ *
+ * `ServerMapEditor` is a master–detail editor (task 11): the left-hand list
+ * (`[data-server="<key>"]`, `role="option"`) carries only the key, transport
+ * and probe verdict, and every field lives in the selected server's detail
+ * pane (`[data-server-detail="<key>"]`), so a test always clicks the row
+ * before reaching into the detail. The apply flow itself has no "Apply"
+ * button: staging shows the pending count on `data-testid="changes-count"`,
+ * "Review" opens the confirmation panel, and "Confirm and apply" sends the
+ * one PATCH.
  */
+
+const MCP_PATH = "/settings/configuration/tools/mcp";
+const SANDBOX_PATH = "/settings/configuration/tools/sandbox";
 
 test.describe("tool servers and the REST sandbox", () => {
   test.use({ mockOptions: { user: { ...MOCK_USER, role: "admin" } } });
@@ -19,24 +31,24 @@ test.describe("tool servers and the REST sandbox", () => {
   test("a new server is added, probed, narrowed to two tools and bound to static", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
-    await page.getByRole("button", { name: "Tool servers (MCP)", exact: true }).click();
+    await page.goto(MCP_PATH);
 
     await page.getByLabel("new server name").fill("r2custom");
     await page.getByRole("button", { name: "Add server" }).click();
-    const card = page.locator('[data-server="r2custom"]');
-    await expect(card).toBeVisible();
+    const row = page.locator('[data-server="r2custom"]');
+    await expect(row).toBeVisible();
+    await row.click();
 
-    await card.getByLabel("r2custom command").fill("r2mcp");
-    await card.getByRole("button", { name: "Test" }).click();
-    await expect(card.getByText("3 tools: open_file, analyze, list_imports")).toBeVisible();
+    const detail = page.locator('[data-server-detail="r2custom"]');
+    await detail.getByLabel("r2custom command").fill("r2mcp");
+    await detail.getByRole("button", { name: "Test" }).click();
+    await expect(detail.getByText("3 tools: open_file, analyze, list_imports")).toBeVisible();
 
     // A new server starts with no tools allowed at all: tick the two it
     // should keep, and leave the third unticked.
-    await card.getByLabel("r2custom tool open_file").check();
-    await card.getByLabel("r2custom tool analyze").check();
-    await card.getByLabel("r2custom agent static").check();
+    await detail.getByLabel("r2custom tool open_file").check();
+    await detail.getByLabel("r2custom tool analyze").check();
+    await detail.getByLabel("r2custom agent static").check();
 
     const patches: unknown[] = [];
     await page.route("**/api/v1/settings", (r) => {
@@ -46,7 +58,7 @@ test.describe("tool servers and the REST sandbox", () => {
       }
       return r.fallback();
     });
-    await page.getByRole("button", { name: "Apply" }).click();
+    await page.getByRole("button", { name: "Review" }).click();
     await page.getByRole("button", { name: "Confirm and apply" }).click();
 
     const body = patches[0] as { changes: Record<string, Record<string, {
@@ -59,6 +71,50 @@ test.describe("tool servers and the REST sandbox", () => {
     expect(sent.agents).toEqual(["static"]);
   });
 
+  /* Task 14: selecting a server was never anything more than reading a
+   * `<section>` that was always mounted, but the master–detail rewrite
+   * (task 11) makes the detail pane conditional on which row is picked —
+   * so an edit staged on one server must survive switching away and back,
+   * not just staying stuck to whichever server happens to be selected. */
+  test("selecting another server keeps the first one's staged edits", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto(MCP_PATH);
+
+    await page.locator('[data-server="network"]').click();
+    const networkDetail = page.locator('[data-server-detail="network"]');
+    await networkDetail.getByLabel("network label").fill("Network (staged)");
+    await expect(page.getByTestId("changes-count")).toHaveText("1 change");
+
+    await page.locator('[data-server="threatintel"]').click();
+    await expect(page.locator('[data-server-detail="threatintel"]')).toBeVisible();
+    await expect(page.locator('[data-server-detail="network"]')).toHaveCount(0);
+
+    await page.locator('[data-server="network"]').click();
+    await expect(
+      page.locator('[data-server-detail="network"]').getByLabel("network label")
+    ).toHaveValue("Network (staged)");
+    await expect(page.getByTestId("changes-count")).toHaveText("1 change");
+  });
+
+  /* Task 14: a server with no probe result yet says so, with a way to get
+   * one right there in the Tools section — distinct from the header's own
+   * "Test" button, which the first test already exercises. */
+  test("the Tools section says to run Test before a probe has been made", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto(MCP_PATH);
+
+    await page.getByLabel("new server name").fill("r2custom");
+    await page.getByRole("button", { name: "Add server" }).click();
+    const detail = page.locator('[data-server-detail="r2custom"]');
+    await expect(detail.getByText("Run Test to load the tool list")).toBeVisible();
+
+    await detail.getByRole("button", { name: "Load tool list" }).click();
+    await expect(detail.getByText("3 tools: open_file, analyze, list_imports")).toBeVisible();
+    await expect(detail.getByText("Run Test to load the tool list")).toHaveCount(0);
+  });
+
   /* WEB-2 (dev audit 2026-09-06): every server carries `tool_selection` and
    * `use_all_tools`, the providers read both, and neither had a control on
    * this screen — so a server added here kept whatever default it was given
@@ -66,16 +122,15 @@ test.describe("tool servers and the REST sandbox", () => {
   test("a server's tool selection is editable and is sent", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
-    await page.getByRole("button", { name: "Tool servers (MCP)", exact: true }).click();
+    await page.goto(MCP_PATH);
 
-    const card = page.locator('[data-server="network"]');
-    await expect(card.getByLabel("network tool selection")).toHaveValue("dynamic");
-    await card.getByLabel("network tool selection").selectOption("curated");
-    await card.getByLabel("network force all tools").check();
+    await page.locator('[data-server="network"]').click();
+    const detail = page.locator('[data-server-detail="network"]');
+    await expect(detail.getByLabel("network tool selection")).toHaveValue("dynamic");
+    await detail.getByLabel("network tool selection").selectOption("curated");
+    await detail.getByLabel("network force all tools").check();
     // The back-compat flag overrides the selection, so the select says so.
-    await expect(card.getByLabel("network tool selection")).toBeDisabled();
+    await expect(detail.getByLabel("network tool selection")).toBeDisabled();
 
     const patches: unknown[] = [];
     await page.route("**/api/v1/settings", (r) => {
@@ -85,7 +140,7 @@ test.describe("tool servers and the REST sandbox", () => {
       }
       return r.fallback();
     });
-    await page.getByRole("button", { name: "Apply" }).click();
+    await page.getByRole("button", { name: "Review" }).click();
     await page.getByRole("button", { name: "Confirm and apply" }).click();
 
     const body = patches[0] as {
@@ -102,15 +157,13 @@ test.describe("tool servers and the REST sandbox", () => {
   test("a fixed environment map is staged and sent with the server", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
-    await page.getByRole("button", { name: "Tool servers (MCP)", exact: true }).click();
+    await page.goto(MCP_PATH);
 
     await page.getByLabel("new server name").fill("qu1cksc0pe");
     await page.getByRole("button", { name: "Add server" }).click();
-    const card = page.locator('[data-server="qu1cksc0pe"]');
-    await card.getByLabel("qu1cksc0pe command").fill("qu1cksc0pe.py");
-    await card.getByLabel("qu1cksc0pe env", { exact: true }).fill('{"SC0PE_MCP_TRANSPORT": "stdio"}');
+    const detail = page.locator('[data-server-detail="qu1cksc0pe"]');
+    await detail.getByLabel("qu1cksc0pe command").fill("qu1cksc0pe.py");
+    await detail.getByLabel("qu1cksc0pe env", { exact: true }).fill('{"SC0PE_MCP_TRANSPORT": "stdio"}');
 
     const patches: unknown[] = [];
     await page.route("**/api/v1/settings", (r) => {
@@ -120,7 +173,7 @@ test.describe("tool servers and the REST sandbox", () => {
       }
       return r.fallback();
     });
-    await page.getByRole("button", { name: "Apply" }).click();
+    await page.getByRole("button", { name: "Review" }).click();
     await page.getByRole("button", { name: "Confirm and apply" }).click();
 
     const body = patches[0] as {
@@ -137,41 +190,37 @@ test.describe("tool servers and the REST sandbox", () => {
   test("editing what a probe dialled clears that card's result", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
-    await page.getByRole("button", { name: "Tool servers (MCP)", exact: true }).click();
+    await page.goto(MCP_PATH);
 
     await page.getByLabel("new server name").fill("r2custom");
     await page.getByRole("button", { name: "Add server" }).click();
-    const card = page.locator('[data-server="r2custom"]');
-    await card.getByLabel("r2custom command").fill("r2mcp");
-    await card.getByRole("button", { name: "Test" }).click();
-    await expect(card.getByText("3 tools: open_file, analyze, list_imports")).toBeVisible();
+    const detail = page.locator('[data-server-detail="r2custom"]');
+    await detail.getByLabel("r2custom command").fill("r2mcp");
+    await detail.getByRole("button", { name: "Test" }).click();
+    await expect(detail.getByText("3 tools: open_file, analyze, list_imports")).toBeVisible();
 
     // The allow-list is rendered from that same result, so ticking a tool must
     // not clear it.
-    await card.getByLabel("r2custom tool open_file").check();
-    await expect(card.getByText("3 tools: open_file, analyze, list_imports")).toBeVisible();
+    await detail.getByLabel("r2custom tool open_file").check();
+    await expect(detail.getByText("3 tools: open_file, analyze, list_imports")).toBeVisible();
 
-    await card.getByLabel("r2custom command").fill("something-else");
-    await expect(card.getByText("3 tools: open_file, analyze, list_imports")).toHaveCount(0);
+    await detail.getByLabel("r2custom command").fill("something-else");
+    await expect(detail.getByText("3 tools: open_file, analyze, list_imports")).toHaveCount(0);
   });
 
   test("a built-in offers disable rather than remove, and one PATCH disables it while its key and other fields survive", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
-    await page.getByRole("button", { name: "Tool servers (MCP)", exact: true }).click();
+    await page.goto(MCP_PATH);
 
-    const intel = page.locator('[data-server="threatintel"]');
-    await expect(intel.getByRole("button", { name: "Disable" })).toBeVisible();
-    await expect(intel.getByRole("button", { name: "Remove" })).toHaveCount(0);
+    await page.locator('[data-server="threatintel"]').click();
+    const detail = page.locator('[data-server-detail="threatintel"]');
+    await expect(detail.getByRole("button", { name: "Disable" })).toBeVisible();
+    await expect(detail.getByRole("button", { name: "Remove" })).toHaveCount(0);
 
-    await intel.getByRole("button", { name: "Disable" }).click();
-    await expect(intel).toBeVisible();
-    await expect(intel.getByLabel("threatintel enabled")).not.toBeChecked();
-    await expect(page.getByText("1 change pending")).toBeVisible();
+    await detail.getByRole("button", { name: "Disable" }).click();
+    await expect(detail.getByLabel("threatintel enabled")).not.toBeChecked();
+    await expect(page.getByTestId("changes-count")).toHaveText("1 change");
 
     const patches: unknown[] = [];
     await page.route("**/api/v1/settings", (r) => {
@@ -181,7 +230,7 @@ test.describe("tool servers and the REST sandbox", () => {
       }
       return r.fallback();
     });
-    await page.getByRole("button", { name: "Apply" }).click();
+    await page.getByRole("button", { name: "Review" }).click();
     await page.getByRole("button", { name: "Confirm and apply" }).click();
 
     const body = patches[0] as {
@@ -203,21 +252,24 @@ test.describe("tool servers and the REST sandbox", () => {
   test("a token is typed once, never read back, and an untouched one stays untouched", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
-    await page.getByRole("button", { name: "Tool servers (MCP)", exact: true }).click();
+    await page.goto(MCP_PATH);
 
     // The fixture's `threatintel` entry arrives with a token set in .env: the
     // page may say so, but must never carry the value.
-    const intel = page.locator('[data-server="threatintel"]');
+    await page.locator('[data-server="threatintel"]').click();
+    const intel = page.locator('[data-server-detail="threatintel"]');
     await intel.getByLabel("threatintel transport").selectOption("http");
     await expect(intel.locator('[data-token-state="threatintel"]')).toHaveText("set in .env");
     await expect(page.getByLabel("threatintel auth token")).toHaveCount(0);
 
-    const custom = page.locator('[data-server="network"]');
+    await page.locator('[data-server="network"]').click();
+    const custom = page.locator('[data-server-detail="network"]');
     await custom.getByLabel("network transport").selectOption("http");
     await custom.getByRole("button", { name: "Replace token" }).click();
     await custom.getByLabel("network auth token").fill("s3cr3t");
+    // `SecretField` commits on its own "Stage" button, not on keystroke — the
+    // typed value stages only once this is pressed (task 11 report).
+    await custom.getByRole("button", { name: "Stage" }).click();
 
     const patches: unknown[] = [];
     await page.route("**/api/v1/settings", (r) => {
@@ -227,7 +279,7 @@ test.describe("tool servers and the REST sandbox", () => {
       }
       return r.fallback();
     });
-    await page.getByRole("button", { name: "Apply" }).click();
+    await page.getByRole("button", { name: "Review" }).click();
     await page.getByRole("button", { name: "Confirm and apply" }).click();
 
     const body = patches[0] as {
@@ -246,14 +298,17 @@ test.describe("tool servers and the REST sandbox", () => {
   test("the REST editor previews counts, a channel error, a truncation and the target hash", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
-    await page.getByRole("button", { name: "Sandbox provider", exact: true }).click();
+    await page.goto(SANDBOX_PATH);
 
     await expect(page.getByTestId("rest-sandbox-editor")).toHaveCount(0);
     await page.locator("#setting-core\\.sandbox\\.provider select").selectOption("rest");
     const editor = page.getByTestId("rest-sandbox-editor");
     await expect(editor).toBeVisible();
+
+    // The sample block sits behind a <summary> collapsed by default; its
+    // contents are inert until the disclosure is opened.
+    await editor.getByText("Test with a sample response").click();
+
     /* B8 (dev audit 2026-09-06): the button used to stay disabled until the
      * textarea had seen a keystroke, so a value that arrived any other way
      * left it dead with nothing saying why. It is live from the start and
@@ -287,9 +342,7 @@ test.describe("tool servers and the REST sandbox", () => {
   test("a mapping row is hidden when the report format is not generic", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
-    await page.getByRole("button", { name: "Sandbox provider", exact: true }).click();
+    await page.goto(SANDBOX_PATH);
     await page.locator("#setting-core\\.sandbox\\.provider select").selectOption("rest");
 
     await expect(page.getByLabel("Mapping: processes")).toBeVisible();

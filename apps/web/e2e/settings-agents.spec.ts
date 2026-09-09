@@ -9,7 +9,23 @@ import { MOCK_USER } from "./mocks";
  * `settings-servers.spec.ts` does. Fixture data (`e2e/mocks.ts`): the `agents`
  * group carries the four built-in definitions, the `default` profile and the
  * agent probe route.
+ *
+ * `AgentDefinitionsEditor` is a master–detail editor (task 12), on its own
+ * route from `ProfilesEditor` (task 13) — `Agents` and `Profiles` are
+ * separate groups under `/settings/configuration/agents/*`, both inside one
+ * `SettingsProvider` (`configuration/layout.tsx`), so staged edits on one
+ * survive a rail-link navigation to the other but not a full `page.goto`.
+ * `[data-agent="<key>"]` is the list row; every field lives inside the
+ * selected agent's `[data-agent-detail="<key>"]`, so a test clicks the row
+ * before reaching into its detail. `ProfilesEditor` stayed a plain list of
+ * cards — `[data-profile="<key>"]` still carries its own controls directly.
+ * The apply flow has no "Apply" button: staging shows the pending count on
+ * `data-testid="changes-count"`, "Review" opens the confirmation panel, and
+ * "Confirm and apply" sends the one PATCH.
  */
+
+const AGENTS_PATH = "/settings/configuration/agents/agents";
+const PROFILES_PATH = "/settings/configuration/agents/profiles";
 
 test.describe("agent definitions and profiles", () => {
   test.use({ mockOptions: { user: { ...MOCK_USER, role: "admin" } } });
@@ -17,13 +33,14 @@ test.describe("agent definitions and profiles", () => {
   test("cloning the static analyst stages a new definition on radare2", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
-    await page.getByRole("button", { name: "Agents", exact: true }).click();
+    await page.goto(AGENTS_PATH);
 
-    const source = page.locator('[data-agent="static"]');
-    await expect(source).toBeVisible();
-    await expect(source.getByText("built in", { exact: true })).toBeVisible();
+    const sourceRow = page.locator('[data-agent="static"]');
+    await expect(sourceRow).toBeVisible();
+    await expect(sourceRow.getByText("built in", { exact: true })).toBeVisible();
+    await sourceRow.click();
+
+    const source = page.locator('[data-agent-detail="static"]');
     await expect(source.getByLabel("static prompt")).toBeDisabled();
 
     await page.getByLabel("new agent name").fill("static_r2");
@@ -31,15 +48,17 @@ test.describe("agent definitions and profiles", () => {
 
     const clone = page.locator('[data-agent="static_r2"]');
     await expect(clone).toBeVisible();
-    await expect(clone.getByLabel("static_r2 prompt")).toBeEnabled();
-    await clone.getByLabel("static_r2 static provider").selectOption("r2");
+    // A clone auto-selects, so its detail is already the one on screen.
+    const cloneDetail = page.locator('[data-agent-detail="static_r2"]');
+    await expect(cloneDetail.getByLabel("static_r2 prompt")).toBeEnabled();
+    await cloneDetail.getByLabel("static_r2 static provider").selectOption("r2");
 
     // The per-agent LLM override lives on its own catalog leaf,
     // `core.llm.agents` (`dict[str, AgentLLMConfig]`, one JSON map staged as
     // a whole exactly like `core.mcp.servers`) — not inside the definitions
     // map — so typing a model here stages one further pending change.
-    await clone.getByLabel("static_r2 llm model").fill("gpt-4o-mini");
-    await expect(page.getByText("2 changes pending")).toBeVisible();
+    await cloneDetail.getByLabel("static_r2 llm model").fill("gpt-4o-mini");
+    await expect(page.getByTestId("changes-count")).toHaveText("2 changes");
 
     const patches: unknown[] = [];
     await page.route("**/api/v1/settings", (r) => {
@@ -54,7 +73,7 @@ test.describe("agent definitions and profiles", () => {
       }
       return r.fallback();
     });
-    await page.getByRole("button", { name: "Apply" }).click();
+    await page.getByRole("button", { name: "Review" }).click();
     await page.getByRole("button", { name: "Confirm and apply" }).click();
 
     const body = patches[0] as {
@@ -86,9 +105,7 @@ test.describe("agent definitions and profiles", () => {
   test("a profile is built from enabled analysts, ordered, set active and applied", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
-    await page.getByRole("button", { name: "Agents", exact: true }).click();
+    await page.goto(PROFILES_PATH);
 
     await expect(page.locator('[data-profile="default"]').getByText("built in")).toBeVisible();
     await expect(
@@ -102,9 +119,17 @@ test.describe("agent definitions and profiles", () => {
     await lean.getByLabel("lean add analyst").selectOption("network");
     await lean.getByLabel("lean add analyst").selectOption("static");
     await expect(lean.getByText("1. network")).toBeVisible();
-    await lean.getByLabel("lean move static up").click();
+
+    // "Move up"/"Move down" share one accessible name across every analyst
+    // row and every profile, so the button is scoped to the `<li>` naming the
+    // analyst rather than picked up by a bare role-and-name locator.
+    const staticRow = lean.locator("li").filter({ hasText: "static" });
+    await staticRow.getByRole("button", { name: "Move up" }).click();
     await expect(lean.getByText("1. static")).toBeVisible();
-    await lean.getByRole("button", { name: "Set active" }).click();
+
+    const setActive = lean.getByRole("button", { name: "Set active" });
+    await setActive.click();
+    await expect(setActive).toHaveAttribute("aria-pressed", "true");
 
     const patches: unknown[] = [];
     await page.route("**/api/v1/settings", (r) => {
@@ -119,7 +144,7 @@ test.describe("agent definitions and profiles", () => {
       }
       return r.fallback();
     });
-    await page.getByRole("button", { name: "Apply" }).click();
+    await page.getByRole("button", { name: "Review" }).click();
     await page.getByRole("button", { name: "Confirm and apply" }).click();
 
     const body = patches[0] as {
@@ -138,19 +163,18 @@ test.describe("agent definitions and profiles", () => {
   test("a generic analyst is created with a prompt and one server tool", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
-    await page.getByRole("button", { name: "Agents", exact: true }).click();
+    await page.goto(AGENTS_PATH);
 
     await page.getByLabel("new agent name").fill("strings");
     await page.getByRole("button", { name: "Add agent" }).click();
 
-    const card = page.locator('[data-agent="strings"]');
-    await expect(card).toBeVisible();
-    await card.getByLabel("strings label").fill("Strings reviewer");
-    await card.getByLabel("strings prompt").fill("Review the extracted strings for IOCs.");
-    await card.getByRole("button", { name: "List tools" }).first().click();
-    await card.getByLabel("strings tool network.extract_dns").check();
+    const row = page.locator('[data-agent="strings"]');
+    await expect(row).toBeVisible();
+    const detail = page.locator('[data-agent-detail="strings"]');
+    await detail.getByLabel("strings label").fill("Strings reviewer");
+    await detail.getByLabel("strings prompt").fill("Review the extracted strings for IOCs.");
+    await detail.getByRole("button", { name: "List tools" }).first().click();
+    await detail.getByLabel("strings tool network.extract_dns").check();
 
     const patches: unknown[] = [];
     await page.route("**/api/v1/settings", (r) => {
@@ -162,7 +186,7 @@ test.describe("agent definitions and profiles", () => {
       }
       return r.fallback();
     });
-    await page.getByRole("button", { name: "Apply" }).click();
+    await page.getByRole("button", { name: "Review" }).click();
     await page.getByRole("button", { name: "Confirm and apply" }).click();
 
     const body = patches[0] as {
@@ -176,19 +200,44 @@ test.describe("agent definitions and profiles", () => {
     expect(sent.tools).toEqual([{ kind: "mcp", server: "network", name: "extract_dns" }]);
   });
 
+  test("the agent tool tree nests listed tools under their server", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto(AGENTS_PATH);
+
+    await page.getByLabel("new agent name").fill("strings");
+    await page.getByRole("button", { name: "Add agent" }).click();
+    const detail = page.locator('[data-agent-detail="strings"]');
+
+    const tree = detail.getByRole("tree", { name: "strings tools" });
+    await expect(tree).toBeVisible();
+
+    const networkNode = detail
+      .locator('li[role="treeitem"]')
+      .filter({ hasText: "network (all allowed tools)" });
+    await expect(networkNode.getByRole("group")).toHaveCount(0);
+
+    await networkNode.getByRole("button", { name: "List tools" }).click();
+
+    // The listed tools render as a nested `role="group"` under the server's
+    // own `treeitem`, not as siblings of it.
+    const group = networkNode.getByRole("group");
+    await expect(group).toBeVisible();
+    await expect(group.getByRole("treeitem", { name: "extract_dns" })).toBeVisible();
+    await expect(group.getByRole("treeitem", { name: "read_pcap_summary" })).toBeVisible();
+  });
+
   test("a generic analyst can be given its static provider's tools", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
-    await page.getByRole("button", { name: "Agents", exact: true }).click();
+    await page.goto(AGENTS_PATH);
 
     await page.getByLabel("new agent name").fill("decomp");
     await page.getByRole("button", { name: "Add agent" }).click();
-    const card = page.locator('[data-agent="decomp"]');
-    await card.getByLabel("decomp prompt").fill("Read the decompiled code.");
-    await card.getByLabel("decomp static provider").selectOption("r2");
-    await card.getByLabel("decomp provider tools").check();
+    const detail = page.locator('[data-agent-detail="decomp"]');
+    await detail.getByLabel("decomp prompt").fill("Read the decompiled code.");
+    await detail.getByLabel("decomp static provider").selectOption("r2");
+    await detail.getByLabel("decomp provider tools").check();
 
     const patches: unknown[] = [];
     await page.route("**/api/v1/settings", (r) => {
@@ -198,7 +247,7 @@ test.describe("agent definitions and profiles", () => {
       }
       return r.fallback();
     });
-    await page.getByRole("button", { name: "Apply" }).click();
+    await page.getByRole("button", { name: "Review" }).click();
     await page.getByRole("button", { name: "Confirm and apply" }).click();
 
     const body = patches[0] as {
@@ -220,14 +269,12 @@ test.describe("agent definitions and profiles", () => {
       return r.fallback();
     });
 
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
-    await page.getByRole("button", { name: "Agents", exact: true }).click();
-
-    const card = page.locator('[data-agent="network"]');
-    await card.getByRole("button", { name: "Resolve" }).click();
-    await expect(card.getByText("2 tools: extract_dns, read_pcap_summary")).toBeVisible();
-    await expect(card.getByText("prompt 412 chars")).toBeVisible();
+    await page.goto(AGENTS_PATH);
+    await page.locator('[data-agent="network"]').click();
+    const detail = page.locator('[data-agent-detail="network"]');
+    await detail.getByRole("button", { name: "Resolve" }).click();
+    await expect(detail.getByText("2 tools: extract_dns, read_pcap_summary")).toBeVisible();
+    await expect(detail.getByText("prompt 412 chars")).toBeVisible();
     expect(jobPosts).toHaveLength(0);
   });
 
@@ -237,36 +284,33 @@ test.describe("agent definitions and profiles", () => {
   test("editing what Resolve reads clears that card's result", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
-    await page.getByRole("button", { name: "Agents", exact: true }).click();
+    await page.goto(AGENTS_PATH);
 
     await page.getByLabel("new agent name").fill("strings");
     await page.getByRole("button", { name: "Add agent" }).click();
-    const card = page.locator('[data-agent="strings"]');
-    await card.getByRole("button", { name: "Resolve" }).click();
-    await expect(card.getByText("prompt 412 chars")).toBeVisible();
+    const detail = page.locator('[data-agent-detail="strings"]');
+    await detail.getByRole("button", { name: "Resolve" }).click();
+    await expect(detail.getByText("prompt 412 chars")).toBeVisible();
 
     // The label changes nothing resolution reads; the prompt does.
-    await card.getByLabel("strings label").fill("Strings reviewer");
-    await expect(card.getByText("prompt 412 chars")).toBeVisible();
+    await detail.getByLabel("strings label").fill("Strings reviewer");
+    await expect(detail.getByText("prompt 412 chars")).toBeVisible();
 
-    await card.getByLabel("strings prompt").fill("Review the extracted strings.");
-    await expect(card.getByText("prompt 412 chars")).toHaveCount(0);
+    await detail.getByLabel("strings prompt").fill("Review the extracted strings.");
+    await expect(detail.getByText("prompt 412 chars")).toHaveCount(0);
   });
 
   test("a built-in definition offers only its enabled switch", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
-    await page.getByRole("button", { name: "Agents", exact: true }).click();
+    await page.goto(AGENTS_PATH);
 
-    const card = page.locator('[data-agent="dynamic"]');
-    await expect(card.getByLabel("dynamic label")).toBeDisabled();
-    await expect(card.getByLabel("dynamic prompt")).toBeDisabled();
-    await expect(card.getByLabel("dynamic enabled")).toBeEnabled();
-    await expect(card.getByRole("button", { name: "Remove" })).toHaveCount(0);
+    await page.locator('[data-agent="dynamic"]').click();
+    const detail = page.locator('[data-agent-detail="dynamic"]');
+    await expect(detail.getByLabel("dynamic label")).toBeDisabled();
+    await expect(detail.getByLabel("dynamic prompt")).toBeDisabled();
+    await expect(detail.getByLabel("dynamic enabled")).toBeEnabled();
+    await expect(detail.getByRole("button", { name: "Remove" })).toHaveCount(0);
 
     const patches: unknown[] = [];
     await page.route("**/api/v1/settings", (r) => {
@@ -276,8 +320,8 @@ test.describe("agent definitions and profiles", () => {
       }
       return r.fallback();
     });
-    await card.getByLabel("dynamic enabled").uncheck();
-    await page.getByRole("button", { name: "Apply" }).click();
+    await detail.getByLabel("dynamic enabled").uncheck();
+    await page.getByRole("button", { name: "Review" }).click();
     await page.getByRole("button", { name: "Confirm and apply" }).click();
 
     const body = patches[0] as {
@@ -291,15 +335,16 @@ test.describe("agent definitions and profiles", () => {
   test("the judge card offers no Clone, because the judge cannot be cloned", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
-    await page.getByRole("button", { name: "Agents", exact: true }).click();
+    await page.goto(AGENTS_PATH);
 
-    const judge = page.locator('[data-agent="judge"]');
+    await page.locator('[data-agent="judge"]').click();
+    const judge = page.locator('[data-agent-detail="judge"]');
     await expect(judge).toBeVisible();
     await expect(judge.getByRole("button", { name: "Clone" })).toHaveCount(0);
+
+    await page.locator('[data-agent="static"]').click();
     await expect(
-      page.locator('[data-agent="static"]').getByRole("button", { name: "Clone" })
+      page.locator('[data-agent-detail="static"]').getByRole("button", { name: "Clone" })
     ).toHaveCount(1);
   });
 
@@ -310,18 +355,18 @@ test.describe("agent definitions and profiles", () => {
   test("Clone with an empty name box names the copy after its source", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
-    await page.getByRole("button", { name: "Agents", exact: true }).click();
+    await page.goto(AGENTS_PATH);
 
-    const source = page.locator('[data-agent="static"]');
-    await source.getByRole("button", { name: "Clone" }).click();
+    await page.locator('[data-agent="static"]').click();
+    await page.locator('[data-agent-detail="static"]').getByRole("button", { name: "Clone" }).click();
     await expect(page.locator('[data-agent="static_copy"]')).toBeVisible();
 
     // A second clone of the same source does not collide with the first.
-    await source.getByRole("button", { name: "Clone" }).click();
+    await page.locator('[data-agent="static"]').click();
+    await page.locator('[data-agent-detail="static"]').getByRole("button", { name: "Clone" }).click();
     await expect(page.locator('[data-agent="static_copy2"]')).toBeVisible();
 
+    await page.goto(PROFILES_PATH);
     const profile = page.locator('[data-profile="default"]');
     await profile.getByRole("button", { name: "Clone" }).click();
     await expect(page.locator('[data-profile="default_copy"]')).toBeVisible();
@@ -330,12 +375,11 @@ test.describe("agent definitions and profiles", () => {
   test("an invalid name is reported at the button that was pressed", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
-    await page.getByRole("button", { name: "Agents", exact: true }).click();
+    await page.goto(AGENTS_PATH);
 
     await page.getByLabel("new agent name").fill("Bad Name!");
-    const source = page.locator('[data-agent="static"]');
+    await page.locator('[data-agent="static"]').click();
+    const source = page.locator('[data-agent-detail="static"]');
     await source.getByRole("button", { name: "Clone" }).click();
 
     // On the card, not at the bottom of the editor.
@@ -345,16 +389,14 @@ test.describe("agent definitions and profiles", () => {
 
     await page.getByRole("button", { name: "Add agent" }).click();
     await expect(
-      page.locator('[data-testid="agent-definitions-editor"] > p[role="alert"]')
+      page.locator('[data-testid="agent-definitions-editor"] p[role="alert"]')
     ).toContainText("lowercase, starts with a letter");
   });
 
   test("a validation error lands on the card that caused it", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
-    await page.getByRole("button", { name: "Agents", exact: true }).click();
+    await page.goto(AGENTS_PATH);
 
     await page.getByLabel("new agent name").fill("nameless");
     await page.getByRole("button", { name: "Add agent" }).click();
@@ -375,10 +417,10 @@ test.describe("agent definitions and profiles", () => {
       }
       return r.fallback();
     });
-    await page.getByRole("button", { name: "Apply" }).click();
+    await page.getByRole("button", { name: "Review" }).click();
     await page.getByRole("button", { name: "Confirm and apply" }).click();
     await expect(
-      page.locator('[data-agent="nameless"]').getByRole("alert")
+      page.locator('[data-agent-detail="nameless"]').getByRole("alert")
     ).toContainText("a generic agent needs a prompt");
     // Not the leaf-wide "stored override" banner: this key belongs to a leaf
     // the operator just edited.
@@ -392,12 +434,14 @@ test.describe("agent definitions and profiles", () => {
   test("an entry-level error lands on its card, for definitions and profiles", async ({
     authenticatedPage: page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Configuration" }).click();
-    await page.getByRole("button", { name: "Agents", exact: true }).click();
-
+    await page.goto(AGENTS_PATH);
     await page.getByLabel("new agent name").fill("nameless");
     await page.getByRole("button", { name: "Add agent" }).click();
+
+    // A rail-link switch keeps both editors' staged edits in the one
+    // `SettingsProvider` the whole /settings/configuration tree shares — a
+    // `page.goto` would remount the layout and drop the "nameless" agent.
+    await page.getByRole("link", { name: /^Profiles/ }).click();
     await page.getByLabel("new profile name").fill("lean");
     await page.getByRole("button", { name: "Add profile" }).click();
 
@@ -415,18 +459,22 @@ test.describe("agent definitions and profiles", () => {
       }
       return r.fallback();
     });
-    await page.getByRole("button", { name: "Apply" }).click();
+    await page.getByRole("button", { name: "Review" }).click();
     await page.getByRole("button", { name: "Confirm and apply" }).click();
 
     await expect(
-      page.locator('[data-agent="nameless"]').getByRole("alert")
-    ).toContainText("an agent entry must be an object");
-    await expect(
       page.locator('[data-profile="lean"]').getByText("a profile entry must be an object")
     ).toBeVisible();
-    // The message belongs to one card, not to every card in the editor.
+
+    await page.getByRole("link", { name: /^Agents/ }).click();
+    await page.locator('[data-agent="nameless"]').click();
     await expect(
-      page.locator('[data-agent="static"]').getByRole("alert")
+      page.locator('[data-agent-detail="nameless"]').getByRole("alert")
+    ).toContainText("an agent entry must be an object");
+    // The message belongs to one card, not to every card in the editor.
+    await page.locator('[data-agent="static"]').click();
+    await expect(
+      page.locator('[data-agent-detail="static"]').getByRole("alert")
     ).toHaveCount(0);
     await expect(page.getByText(/Stored override/)).toHaveCount(0);
   });

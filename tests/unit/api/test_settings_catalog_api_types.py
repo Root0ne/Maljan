@@ -40,3 +40,11 @@ def test_full_catalog_leads_provider_groups_with_the_selector():
     sandbox = [e for e in entries if e.group == "sandbox"]
     assert static[0].key == "core.static.provider"
     assert sandbox[0].key == "core.sandbox.provider"
+
+
+def test_schema_dto_carries_subgroup_advanced_and_group_description() -> None:
+    from app.schemas.settings import CatalogEntryDTO, GroupDTO
+
+    assert CatalogEntryDTO.model_fields["subgroup"].default is None
+    assert CatalogEntryDTO.model_fields["advanced"].default is False
+    assert GroupDTO.model_fields["description"].default == ""

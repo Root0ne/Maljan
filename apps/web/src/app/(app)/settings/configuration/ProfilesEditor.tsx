@@ -124,8 +124,12 @@ export default function ProfilesEditor({
               <div className="flex items-center gap-3">
                 <button
                   type="button"
-                  className="text-xs text-accent-strong"
-                  onClick={() => onSetActive(key)}
+                  className="text-xs text-accent-strong disabled:opacity-60"
+                  aria-pressed={key === activeProfile}
+                  disabled={key === activeProfile}
+                  onClick={() => {
+                    if (key !== activeProfile) onSetActive(key);
+                  }}
                 >
                   Set active
                 </button>
@@ -167,32 +171,32 @@ export default function ProfilesEditor({
                   </span>
                   <button
                     type="button"
-                    className="text-[11px] text-text-secondary disabled:opacity-40"
-                    aria-label={`${key} move ${analyst} up`}
+                    className="text-sm text-text-secondary disabled:opacity-40"
+                    aria-label="Move up"
                     disabled={locked || index === 0}
                     onClick={() => move(key, index, -1)}
                   >
-                    up
+                    ↑
                   </button>
                   <button
                     type="button"
-                    className="text-[11px] text-text-secondary disabled:opacity-40"
-                    aria-label={`${key} move ${analyst} down`}
+                    className="text-sm text-text-secondary disabled:opacity-40"
+                    aria-label="Move down"
                     disabled={locked || index === profile.analysts.length - 1}
                     onClick={() => move(key, index, 1)}
                   >
-                    down
+                    ↓
                   </button>
                   <button
                     type="button"
                     className="text-[11px] text-text-secondary disabled:opacity-40"
-                    aria-label={`${key} remove ${analyst}`}
+                    aria-label={`Remove analyst ${analyst}`}
                     disabled={locked}
                     onClick={() =>
                       put(key, { analysts: profile.analysts.filter((a) => a !== analyst) })
                     }
                   >
-                    remove
+                    Remove analyst
                   </button>
                 </li>
               ))}
