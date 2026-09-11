@@ -9,7 +9,9 @@ never touch.
 
 from __future__ import annotations
 
+import os
 from types import SimpleNamespace
+from unittest import mock
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -55,8 +57,18 @@ def make_db(*, marker=None, existing_keys: list[str] | None = None):
 
 
 @pytest.fixture
-def encryption_key(monkeypatch):
-    monkeypatch.setenv("SETTINGS_ENCRYPTION_KEY", Fernet.generate_key().decode())
+def encryption_key():
+    """Only ``SETTINGS_ENCRYPTION_KEY`` in the process environment for the test.
+
+    ``Settings(_env_file=...)``/``LegacyAPIView(_env_file=...)`` honour the
+    given temp ``.env``, but pydantic-settings still layers the real process
+    environment on top of it -- a shell with the repo's own ``.env`` sourced
+    (exactly what running ``make migrate`` leaves behind) would otherwise
+    smuggle extra, real values into every legacy view built here.
+    """
+    key = Fernet.generate_key().decode()
+    with mock.patch.dict(os.environ, {"SETTINGS_ENCRYPTION_KEY": key}, clear=True):
+        yield key
 
 
 @pytest.fixture
@@ -162,6 +174,8 @@ async def test_a_legacy_value_equal_to_the_catalog_default_is_skipped(
     # Only the marker row is written -- nothing differed from the default.
     assert all(not isinstance(r, RuntimeSetting) for r in added)
     assert len(added) == 1
+    # Nothing happened worth auditing -- no row, no invalid value either.
+    assert no_op_audit == []
 
 
 @pytest.mark.asyncio

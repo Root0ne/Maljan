@@ -36,6 +36,7 @@ from maljan.core.settings_overrides import build_settings, flatten_leaves
 from pydantic import Field, SecretStr, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.logging_config import get_logger
@@ -194,11 +195,22 @@ async def run_legacy_import(
             value={"imported": len(keys), "at": datetime.now(UTC).isoformat()},
         )
     )
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # Two replicas raced the same first start; the marker's primary key
+        # rejects the loser's insert and its whole transaction (rows
+        # included) rolls back with it -- the winner already wrote the rows,
+        # the marker, and its own audit entry, so this is a benign outcome,
+        # not a failure.
+        await db.rollback()
+        logger.info("Legacy import marker already exists (another replica imported first).")
+        return []
 
-    await audit.record(
-        "settings.legacy_import",
-        resource_type="settings",
-        details={"keys": keys, "count": len(keys), "skipped_invalid": skipped_invalid},
-    )
+    if keys or skipped_invalid:
+        await audit.record(
+            "settings.legacy_import",
+            resource_type="settings",
+            details={"keys": keys, "count": len(keys), "skipped_invalid": skipped_invalid},
+        )
     return keys

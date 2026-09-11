@@ -103,31 +103,19 @@ async def _probe_components() -> dict[str, dict[str, Any]]:
     return dict(results)
 
 
-async def _config_readiness() -> dict[str, str]:
+def _config_readiness(app: FastAPI) -> dict[str, str]:
     """The three facts ``/health`` reports about configuration state.
 
-    ``bootstrap`` and ``encryption`` are static "ok" here: the process
+    No I/O: ``bootstrap`` and ``encryption`` are static "ok" -- the process
     already passed ``require_bootstrap`` (which checks both) before it could
     ever start serving this endpoint, so there is nothing left to probe.
-    ``legacy_import`` is the one fact that can only be known by asking the
-    database, hence the one cheap ``SELECT`` -- reported as ``"unknown"``
-    rather than failing the request when that read itself fails.
+    ``legacy_import`` is read from ``app.state.legacy_import_status``, set
+    once during the lifespan's legacy-import step (the ``settings_meta``
+    marker is immutable once written, so one read at startup is all this
+    ever needs) -- never re-queried per request, so the bare liveness probe
+    stays dependency-free.
     """
-    from app.database import async_session_factory
-    from app.models.settings_meta import SettingsMeta
-    from app.services.legacy_env_import import MARKER_KEY
-
-    legacy_import = "unknown"
-    try:
-        async with async_session_factory() as session:
-            marker = (
-                await session.execute(select(SettingsMeta).where(SettingsMeta.key == MARKER_KEY))
-            ).scalar_one_or_none()
-        marker_value = marker.value if marker is not None else None
-        imported = marker_value.get("imported", 0) if isinstance(marker_value, dict) else 0
-        legacy_import = "done" if imported > 0 else "not-needed"
-    except Exception as exc:  # noqa: BLE001 — reported as data, never a 500
-        logger.warning("Could not read the legacy-import marker: %s", exc)
+    legacy_import = getattr(app.state, "legacy_import_status", "unknown")
     return {"bootstrap": "ok", "encryption": "ok", "legacy_import": legacy_import}
 
 
@@ -225,20 +213,34 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
 
     from app.database import async_session_factory
-    from app.services.legacy_env_import import run_legacy_import
+    from app.models.settings_meta import SettingsMeta
+    from app.services.legacy_env_import import MARKER_KEY, run_legacy_import
 
     try:
         async with async_session_factory() as _legacy_session:
-            imported = await run_legacy_import(_legacy_session)
-        if imported:
-            logger.info("Legacy configuration import: %d key(s)", len(imported))
+            imported_keys = await run_legacy_import(_legacy_session)
+            # The marker is immutable once written (see the module docstring),
+            # so this one read -- whether this call just wrote it or found it
+            # already there -- is all ``/health`` will ever need; cached below
+            # so the endpoint never touches the database for it.
+            _marker = (
+                await _legacy_session.execute(
+                    select(SettingsMeta).where(SettingsMeta.key == MARKER_KEY)
+                )
+            ).scalar_one_or_none()
+        if imported_keys:
+            logger.info("Legacy configuration import: %d key(s)", len(imported_keys))
         else:
-            logger.debug("Legacy configuration import: %d key(s)", 0)
+            logger.debug("Legacy configuration import: nothing to import")
+        _marker_value = _marker.value if _marker is not None else None
+        _imported_total = _marker_value.get("imported", 0) if isinstance(_marker_value, dict) else 0
+        app.state.legacy_import_status = "done" if _imported_total > 0 else "not-needed"
     except Exception:
         # Best effort, like the audit trail: the marker is only written on
         # success, so a failure here just means the next start tries again --
         # it must never take an otherwise-healthy API down.
         logger.exception("Legacy configuration import failed")
+        app.state.legacy_import_status = "unknown"
 
     if settings.auth_disabled:
         try:
@@ -390,13 +392,16 @@ def create_app() -> FastAPI:
         services and downgrades ``status`` to ``degraded`` when a required one
         is unreachable, so an orchestrator or dashboard can tell the difference.
         The bare form stays dependency-free and fast: a liveness probe must not
-        restart the API just because Postgres is briefly unavailable.
+        restart the API just because Postgres is briefly unavailable. ``config``
+        costs nothing either way — ``bootstrap``/``encryption`` are constants and
+        ``legacy_import`` is read from ``app.state``, cached once at startup
+        (see ``_config_readiness``), never queried per request.
         """
         body: dict[str, Any] = {
             "status": "healthy",
             "service": settings.app_name,
             "version": settings.app_version,
-            "config": await _config_readiness(),
+            "config": _config_readiness(app),
         }
         if not deep:
             return body
