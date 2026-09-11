@@ -20,12 +20,10 @@ Heterogeneous Model Ensemble (Phase 8 / Master Plan Section 4):
 """
 
 import contextvars
-import copy
-import json
 import re
 import sys
 from pathlib import PurePosixPath
-from typing import Annotated, Any, Literal, cast
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -35,7 +33,6 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 # ---------------------------------------------------------------------------
@@ -733,7 +730,7 @@ class MCPServerConfig(BaseModel):
     #   "all"     — every tool the server offers (~165). Maximum coverage but a
     #               large per-step prompt; measured 5-6x slower + noisier locally.
     tool_selection: Literal["curated", "dynamic", "all"] = "dynamic"
-    # Back-compat: MCP__GHIDRA__USE_ALL_TOOLS=true still forces "all".
+    # When true, forces "all" regardless of ``tool_selection``.
     use_all_tools: bool = False
     # New in sub-project B.
     # Working directory for the stdio child; empty means the repository root.
@@ -1305,9 +1302,6 @@ class SandboxConfig(BaseModel):
         "upload" — no detonation: an operator-uploaded report is attached to the job.
         "triage" — Hatching Triage cloud sandbox.
         "rest"   — any HTTP sandbox, described by sandbox.rest.*
-
-    The legacy flat names (``SANDBOX__BACKEND``, ``SANDBOX__CAPE2_BASE_URL``, …)
-    keep working through the alias table on ``Settings``.
     """
 
     provider: Literal["mock", "cape2", "upload", "triage", "rest"] = "mock"
@@ -1315,217 +1309,6 @@ class SandboxConfig(BaseModel):
     triage: SandboxTriageConfig = Field(default_factory=SandboxTriageConfig)
     upload: SandboxUploadConfig = Field(default_factory=SandboxUploadConfig)
     rest: SandboxRestConfig = Field(default_factory=SandboxRestConfig)
-
-    @model_validator(mode="before")
-    @classmethod
-    def _alias_flat_keys(cls, data: Any) -> Any:
-        """Accept ``SandboxConfig(backend=..., cape2_base_url=...)`` directly.
-
-        The table on ``Settings`` covers values arriving through the environment;
-        this covers direct construction, which tests and the container do.
-        """
-        if not isinstance(data, dict):
-            return data
-        out, _used = _alias_within(data, _SANDBOX_LOCAL_ALIASES)
-        return out
-
-
-# ---------------------------------------------------------------------------
-# Legacy key aliases
-# ---------------------------------------------------------------------------
-#
-# The provider layer moved four groups of settings. Every legacy name keeps
-# working: the table below is applied to the assembled input before validation,
-# and only where the new key is absent, so a `.env` written for the old shape
-# and one written for the new shape both produce the same Settings. One warning
-# per process names the file to edit; nothing is removed in this release.
-
-# Where a sub-project A ``static.generic.*`` block lands in the registry.
-GENERIC_SERVER_KEY = "custom"
-
-SETTINGS_ALIASES: tuple[tuple[str, str], ...] = (
-    ("mcp.ghidra", "static.ghidra"),
-    ("mcp.cape", "sandbox.cape2.mcp"),
-    ("sandbox.backend", "sandbox.provider"),
-    ("sandbox.cape2_base_url", "sandbox.cape2.base_url"),
-    ("sandbox.cape2_api_token", "sandbox.cape2.api_token"),
-    ("sandbox.cape2_timeout_seconds", "sandbox.cape2.timeout_seconds"),
-    ("sandbox.cape2_poll_interval_seconds", "sandbox.cape2.poll_interval_seconds"),
-    ("static.generic.enabled", f"mcp.servers.{GENERIC_SERVER_KEY}.enabled"),
-    ("static.generic.transport", f"mcp.servers.{GENERIC_SERVER_KEY}.transport"),
-    ("static.generic.command", f"mcp.servers.{GENERIC_SERVER_KEY}.command"),
-    ("static.generic.args", f"mcp.servers.{GENERIC_SERVER_KEY}.args"),
-    ("static.generic.env", f"mcp.servers.{GENERIC_SERVER_KEY}.env"),
-    ("static.generic.url", f"mcp.servers.{GENERIC_SERVER_KEY}.url"),
-    ("static.generic.auth_token", f"mcp.servers.{GENERIC_SERVER_KEY}.auth_token"),
-    ("static.generic.tool_selection", f"mcp.servers.{GENERIC_SERVER_KEY}.tool_selection"),
-    ("static.generic.use_all_tools", f"mcp.servers.{GENERIC_SERVER_KEY}.use_all_tools"),
-)
-
-# The subset that a bare ``SandboxConfig(...)`` can carry (paths relative to it).
-_SANDBOX_LOCAL_ALIASES: tuple[tuple[str, str], ...] = (
-    ("backend", "provider"),
-    ("cape2_base_url", "cape2.base_url"),
-    ("cape2_api_token", "cape2.api_token"),
-    ("cape2_timeout_seconds", "cape2.timeout_seconds"),
-    ("cape2_poll_interval_seconds", "cape2.poll_interval_seconds"),
-)
-
-_ALIAS_WARNED = False
-
-
-def _dig(data: dict[str, Any], path: str) -> tuple[dict[str, Any] | None, str]:
-    """Return (owning mapping, last segment) for ``path``, or (None, ...) if absent."""
-    cursor: Any = data
-    parts = path.split(".")
-    for part in parts[:-1]:
-        if not isinstance(cursor, dict) or part not in cursor:
-            return None, parts[-1]
-        cursor = cursor[part]
-    return (cursor if isinstance(cursor, dict) else None), parts[-1]
-
-
-def _ensure(data: dict[str, Any], path: str) -> tuple[dict[str, Any], str]:
-    """Return (owning mapping, last segment) for ``path``, creating dicts as needed."""
-    cursor = data
-    parts = path.split(".")
-    for part in parts[:-1]:
-        nxt = cursor.get(part)
-        if not isinstance(nxt, dict):
-            nxt = {}
-            cursor[part] = nxt
-        cursor = nxt
-    return cursor, parts[-1]
-
-
-def _alias_within(
-    data: dict[str, Any], table: tuple[tuple[str, str], ...]
-) -> tuple[dict[str, Any], list[str]]:
-    """Move every legacy path in ``table`` onto its new path, new key wins.
-
-    Sub-mappings are merged key by key (``mcp.ghidra`` -> ``static.ghidra``
-    keeps a ``static.ghidra.url`` that was set explicitly), scalars are moved
-    only when the target is absent. The legacy key is removed either way so the
-    model never sees an unknown field.
-
-    ``data`` is deep-copied before anything is popped from it: a shallow copy
-    would still share the nested per-key dicts with the caller, so popping a
-    legacy leaf out of one of them (e.g. ``sandbox.backend``) would mutate the
-    caller's own mapping too — this is the plain-dict-in, plain-dict-out
-    contract ``apply_settings_aliases`` documents.
-    """
-    out = copy.deepcopy(data)
-    used: list[str] = []
-    for old, new in table:
-        src_owner, src_key = _dig(out, old)
-        if src_owner is None or src_key not in src_owner:
-            continue
-        value = src_owner.pop(src_key)
-        used.append(old)
-        dst_owner, dst_key = _ensure(out, new)
-        if isinstance(value, dict):
-            target = dst_owner.get(dst_key)
-            merged = dict(value)
-            if isinstance(target, dict):
-                merged.update(target)  # explicit new keys win
-            dst_owner[dst_key] = merged
-        elif dst_key not in dst_owner:
-            dst_owner[dst_key] = value
-    if used:
-        _warn_once(used)
-    return out, used
-
-
-def _warn_once(paths: list[str]) -> None:
-    global _ALIAS_WARNED
-    if _ALIAS_WARNED:
-        return
-    _ALIAS_WARNED = True
-    from maljan.core.logger import logger
-
-    logger.warning(
-        "Reading legacy setting name(s) %s; they now live under static.* / sandbox.* "
-        "(MCP__GHIDRA__* -> STATIC__GHIDRA__*, MCP__CAPE__* -> SANDBOX__CAPE2__MCP__*, "
-        "SANDBOX__BACKEND -> SANDBOX__PROVIDER, SANDBOX__CAPE2_* -> SANDBOX__CAPE2__*). "
-        "The old names keep working; update .env when convenient.",
-        ", ".join(sorted(paths)),
-    )
-
-
-_MCP_ALIAS_JSON_LEAVES = ("args", "env")  # the only list-/dict-typed MCPServerConfig fields
-
-
-def _redecode_json_leaves_stranded_by_an_alias(data: dict[str, Any]) -> None:
-    """JSON-decode an ``args``/``env`` an alias left as raw text.
-
-    pydantic-settings' nested-env decoder resolves ``MCP__GHIDRA__ARGS``
-    against whatever type it finds along that path. When the legacy path no
-    longer has a type — ``MCPConfig`` has no ``ghidra`` field, and
-    ``StaticGenericConfig`` has no ``args`` — it hands back the raw JSON text
-    under the *new* path instead, one validation error away from a silently
-    broken ``.env``. A value that already decoded correctly (set under the new
-    name, where the schema is real) is a list or dict and is left alone.
-    Mutates ``data`` in place.
-    """
-    for old, new in SETTINGS_ALIASES:
-        head, _, _tail = old.partition(".")
-        last = old.rsplit(".", 1)[-1]
-        if head == "mcp":
-            # A whole-block alias: the JSON leaves hang one level below it.
-            paths = [f"{new}.{leaf}" for leaf in _MCP_ALIAS_JSON_LEAVES]
-        elif old.startswith("static.generic.") and last in _MCP_ALIAS_JSON_LEAVES:
-            # A per-leaf alias: the new path already names the leaf.
-            paths = [new]
-        else:
-            continue
-        for path in paths:
-            owner, key = _dig(data, path)
-            if owner is None:
-                continue
-            value = owner.get(key)
-            if isinstance(value, str):
-                try:
-                    owner[key] = json.loads(value)
-                except ValueError:
-                    pass  # let ordinary model validation raise on the bad value
-
-
-def _finish_generic_server_move(data: dict[str, Any], moved: list[str]) -> None:
-    """Point ``static.generic.server`` at the migrated block and bind it to static.
-
-    The alias table can move a value; it cannot say that moving it also means
-    "and this is the server the static provider drives, and its tools go to
-    the static analyst". A legacy ``.env`` set neither, because neither
-    existed — so both are filled in here, and only when the move actually
-    happened (``moved`` names at least one ``static.generic.*`` alias this
-    pass fired) and the new keys are not already set explicitly.
-
-    Regression (F3): checking only that ``mcp.servers.custom`` exists as a
-    dict fired on *any* server an operator happened to name ``custom`` —
-    added through the UI or a plain ``MCP__SERVERS__CUSTOM__*`` env var, with
-    no ``static.generic`` alias involved — silently pointing
-    ``static.generic.server`` at it.
-    """
-    if not any(path.startswith("static.generic.") for path in moved):
-        return
-    servers = data.get("mcp", {}).get("servers")
-    if not isinstance(servers, dict):
-        return
-    entry = servers.get(GENERIC_SERVER_KEY)
-    if not isinstance(entry, dict):
-        return
-    entry.setdefault("agents", ["static"])
-    generic = data.setdefault("static", {}).setdefault("generic", {})
-    if isinstance(generic, dict):
-        generic.setdefault("server", GENERIC_SERVER_KEY)
-
-
-def apply_settings_aliases(data: dict[str, Any]) -> dict[str, Any]:
-    """Public, pure form of the alias pass — used by the validator and by tests."""
-    out, used = _alias_within(data, SETTINGS_ALIASES)
-    _redecode_json_leaves_stranded_by_an_alias(out)
-    _finish_generic_server_move(out, used)
-    return out
 
 
 # ---------------------------------------------------------------------------
@@ -1648,30 +1431,6 @@ class Settings(BaseSettings):
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
 
     @classmethod
-    def _alias_legacy_keys(cls, data: Any) -> Any:
-        """Translate the pre-provider setting names before validation.
-
-        Called from ``settings_customise_sources`` against each assembled
-        source in turn (init kwargs, environment nested by the ``__``
-        delimiter, dotenv, file secrets) — the probe test in
-        ``tests/unit/core/test_settings_aliases.py`` proved that a
-        ``model_validator(mode="before")`` here is compiled into the
-        pydantic-core schema by reference at class-definition time, so a
-        test that monkeypatches this classmethod afterwards never observes
-        the call; the source pre-pass calls ``cls._alias_legacy_keys``
-        through ordinary attribute lookup on every construction instead,
-        which a monkeypatch does reach.
-
-        Used to also mirror the translated value back onto the deprecated
-        ``mcp.ghidra`` / ``mcp.cape`` paths for readers that had not yet moved
-        onto the provider layer; Task 12 moved the last of them, so the
-        mirror-back is gone and this is a straight translation now.
-        """
-        if not isinstance(data, dict):
-            return data
-        return apply_settings_aliases(data)
-
-    @classmethod
     def settings_customise_sources(
         cls,
         settings_cls: type[BaseSettings],
@@ -1680,47 +1439,17 @@ class Settings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
-        """Alias legacy names inside each source, before they are merged.
-
-        The merge is a deep dict update, so aliasing per source is equivalent to
-        aliasing the merged mapping as long as a source never contributes half
-        of an aliased sub-mapping — and a source is one file or one environment,
-        so it cannot.
+        """Pick which sources a construction reads.
 
         When ``STORE_ONLY`` is set (``build_settings``, the application's
-        construction path), only the aliased init-kwargs source is returned:
-        no environment, no dotenv file, no secrets directory. Bare
-        ``Settings()`` never sets the flag, so it keeps all four sources —
-        that is the documented library behaviour.
+        construction path), only the init-kwargs source is returned: no
+        environment, no dotenv file, no secrets directory. Bare ``Settings()``
+        never sets the flag, so it keeps all four sources — that is the
+        documented library behaviour.
         """
-
-        class _Aliased(PydanticBaseSettingsSource):
-            def __init__(self, inner: PydanticBaseSettingsSource) -> None:
-                super().__init__(settings_cls)
-                self._inner = inner
-
-            def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
-                return self._inner.get_field_value(field, field_name)
-
-            def __call__(self) -> dict[str, Any]:
-                data = self._inner()
-                # An empty source has nothing to alias; skip the call so the
-                # (harmless) no-op does not show up as a call on a source that
-                # never carried a legacy name — e.g. init kwargs when the
-                # settings are built from the environment alone.
-                if not data:
-                    return data
-                return cast("dict[str, Any]", cls._alias_legacy_keys(data))
-
-        aliased_init = _Aliased(init_settings)
         if STORE_ONLY.get():
-            return (aliased_init,)
-        return (
-            aliased_init,
-            _Aliased(env_settings),
-            _Aliased(dotenv_settings),
-            _Aliased(file_secret_settings),
-        )
+            return (init_settings,)
+        return (init_settings, env_settings, dotenv_settings, file_secret_settings)
 
     # Token overflow protection (128K is conservative for Gemini 1M+ context)
     max_token_limit: Annotated[int, Field(ge=1)] = 128_000

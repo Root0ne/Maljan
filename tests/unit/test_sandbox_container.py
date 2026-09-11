@@ -2,9 +2,9 @@
 
 Tests:
   SandboxConfig:
-    - Default backend is "mock"
+    - Default provider is "mock"
     - Default cape2_base_url, api_token, timeout, poll_interval
-    - ENV var override: SANDBOX__BACKEND=cape2
+    - Explicit provider="cape2"
 
   Settings.sandbox:
     - sandbox field present and returns SandboxConfig
@@ -13,8 +13,8 @@ Tests:
   ServiceContainer.get_sandbox_client():
     - Selects the mock provider by default
     - Returns cached instance on second call
-    - SandboxConfig backend="mock" -> the mock provider
-    - Raises SandboxNotAvailableError for backend="cape2" without httpx
+    - SandboxConfig provider="mock" -> the mock provider
+    - Raises SandboxNotAvailableError for provider="cape2" without httpx
     - _samples_dir is forwarded to the mock provider's fixtures_dir
     - SandboxClient Protocol isinstance check
 
@@ -69,11 +69,9 @@ class TestSandboxConfig:
         cfg = SandboxConfig()
         assert cfg.cape2.poll_interval_seconds == 10
 
-    def test_backend_override(self) -> None:
+    def test_provider_override(self) -> None:
         from maljan.core.config import SandboxConfig
 
-        cfg = SandboxConfig(backend="cape2")
-        assert cfg.provider == "cape2"
         assert SandboxConfig(provider="cape2").provider == "cape2"
 
 
@@ -146,11 +144,11 @@ class TestContainerGetSandboxClient:
         # Verify the mock provider uses the correct fixtures directory
         assert container.get_sandbox_provider().fixtures_dir == str(tmp_path)
 
-    def test_cape2_backend_raises_without_httpx(self) -> None:
+    def test_cape2_provider_raises_without_httpx(self) -> None:
         from maljan.core.config import SandboxConfig, Settings
         from maljan.core.container import ServiceContainer
 
-        cfg = Settings(_env_file=None, sandbox=SandboxConfig(backend="cape2"))
+        cfg = Settings(_env_file=None, sandbox=SandboxConfig(provider="cape2"))
         container = ServiceContainer(config=cfg, mock=False)
 
         with patch.dict("sys.modules", {"httpx": None}):
@@ -165,7 +163,7 @@ class TestContainerGetSandboxClient:
         from maljan.core.config import SandboxConfig, Settings
         from maljan.core.container import ServiceContainer
 
-        cfg = Settings(sandbox=SandboxConfig(backend="mock"))
+        cfg = Settings(sandbox=SandboxConfig(provider="mock"))
         container = ServiceContainer(config=cfg, mock=True)
         client = container.get_sandbox_client()
         assert isinstance(client, SandboxClient)
