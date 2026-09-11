@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import subprocess
+import sys
+from pathlib import Path
+
 from cryptography.fernet import Fernet
 
 from app.bootstrap import BootstrapProblem, require_bootstrap, validate_bootstrap
 from app.config import APISettings
+
+_APPS_API_DIR = Path(__file__).resolve().parents[3] / "apps" / "api"
 
 
 def _valid_kwargs(**overrides: object) -> dict[object, object]:
@@ -203,3 +209,44 @@ def test_cookie_secure_off_in_production_is_a_warning() -> None:
         cookie_secure = False
 
     assert validate_bootstrap(_Stub()).warnings == []
+
+
+def test_no_environment_variable_makes_a_process_look_like_a_test_run() -> None:
+    """``PYTEST_CURRENT_TEST`` used to satisfy ``_is_test_env`` (re-review I1).
+
+    The substituted ``TEST_JWT_SECRET`` is 43 characters and not a placeholder,
+    so a process that looked like a test run booted and signed session tokens
+    with a secret published in this repository -- what dropping
+    ``MALJAN_API_SKIP_SECRET_CHECK`` was for, one variable name later. Checked
+    in a subprocess because this process genuinely is a pytest run: the
+    interpreter state is the only thing ``_is_test_env`` may read.
+    """
+    script = (
+        "import os, sys\n"
+        "os.environ['PYTEST_CURRENT_TEST'] = '1'\n"
+        "os.environ.pop('JWT_SECRET_KEY', None)\n"
+        "from cryptography.fernet import Fernet\n"
+        "from app.bootstrap import validate_bootstrap\n"
+        "from app.config import APISettings, _is_test_env\n"
+        "assert 'pytest' not in sys.modules\n"
+        "assert _is_test_env() is False\n"
+        "s = APISettings(\n"
+        "    database_url='postgresql+asyncpg://u:p@127.0.0.1:5433/maljan',\n"
+        "    redis_url='redis://127.0.0.1:6379/0',\n"
+        "    minio_endpoint='127.0.0.1:9000',\n"
+        "    minio_access_key='real-access-key',\n"
+        "    minio_secret_key='real-secret-key-not-a-placeholder',\n"
+        "    settings_encryption_key=Fernet.generate_key().decode(),\n"
+        "    debug=False,\n"
+        "    _env_file=None,\n"
+        ")\n"
+        "problems = validate_bootstrap(s).problems\n"
+        "assert 'JWT_SECRET_KEY is not set' in problems, problems\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=str(_APPS_API_DIR),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"

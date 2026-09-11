@@ -388,3 +388,34 @@ async def test_the_repair_never_overwrites_a_key_the_operator_already_saved(encr
     assert moved == 0
     assert "api_key" not in row.value["glm"]
     assert box.decrypt(db.added[0].value) == "sk-new"
+
+
+@pytest.mark.asyncio
+async def test_resetting_the_composite_removes_every_key_row(encryption_key):
+    """Re-review M1: an orphaned row let a re-created arm inherit a key.
+
+    ``merge_arm_secrets`` folds a row back in by name, so a leftover row made
+    a freshly added arm of the same name show up as already configured.
+    """
+    composite = RuntimeSetting(key=ARMS_KEY, value={"glm": _arm()}, is_secret=False)
+    key_row = RuntimeSetting(key=arm_key_key("glm"), value=box.encrypt("sk-real"), is_secret=True)
+    service, session = _service([composite, key_row])
+
+    removed = await service.reset([ARMS_KEY], user_id=None, ip=None)
+
+    assert session.deleted == [composite, key_row]
+    assert set(removed) == {ARMS_KEY, arm_key_key("glm")}
+
+
+@pytest.mark.asyncio
+async def test_resetting_one_composite_leaves_the_other_alone(encryption_key):
+    composite = RuntimeSetting(key=ARMS_KEY, value={"glm": _arm()}, is_secret=False)
+    arm_row = RuntimeSetting(key=arm_key_key("glm"), value=box.encrypt("sk-a"), is_secret=True)
+    server_row = RuntimeSetting(
+        key="core.mcp.servers.x.auth_token", value=box.encrypt("tok"), is_secret=True
+    )
+    service, session = _service([composite, arm_row, server_row])
+
+    await service.reset([ARMS_KEY], user_id=None, ip=None)
+
+    assert server_row not in session.deleted

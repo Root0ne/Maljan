@@ -1,3 +1,12 @@
+# One backend image for the three services that run this codebase (migrations,
+# API, worker). Declared once and tagged explicitly, so compose builds and
+# stores a single image instead of one per service.
+x-backend-image: &backend-image
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile.backend
+  image: maljan-backend
+
 services:
   # ─────────────────────────────────────────────
   # PostgreSQL 16 — Relational data store
@@ -147,9 +156,7 @@ services:
   # every start and /health reports configuration readiness as "unknown"
   # forever. Runs to completion once; api and worker wait for its exit code.
   migrate:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.backend
+    <<: *backend-image
     container_name: maljan-migrate
     restart: "no"
     environment:
@@ -169,9 +176,7 @@ services:
   # Backend API — FastAPI application server
   # -────────────────────────────────────────────
   backend-api:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.backend
+    <<: *backend-image
     container_name: maljan-api
     restart: unless-stopped
     # Bootstrap contract only (apps/api/app/bootstrap.py) — every other
@@ -238,9 +243,7 @@ services:
   # Backend Worker — ARQ background task runner
   # -────────────────────────────────────────────
   backend-worker:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.backend
+    <<: *backend-image
     container_name: maljan-worker
     restart: unless-stopped
     # Bootstrap contract only (apps/api/app/bootstrap.py, shared with the

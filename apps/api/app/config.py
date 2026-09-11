@@ -39,15 +39,17 @@ TEST_JWT_SECRET = "test-secret-do-not-use-in-prod-0123456789ab"
 def _is_test_env() -> bool:
     """Return True when running under pytest.
 
-    Detected from the interpreter state (the ``pytest`` module is imported,
-    or pytest exported the name of the running test), never from a flag an
-    operator or an image can set: a switch that turns a boot refusal off is a
-    switch that ships to production with it turned off.
+    Read from the interpreter state alone. Nothing in the environment may
+    answer this question: a variable that turns a boot refusal off is a
+    variable that ships to production with it turned off, and
+    ``PYTEST_CURRENT_TEST=1`` would have handed a real deployment the
+    published ``TEST_JWT_SECRET`` exactly the way
+    ``MALJAN_API_SKIP_SECRET_CHECK`` did. The import is what every real run
+    has: pytest imports itself in the main process and in each xdist worker.
     """
-    import os as _os
     import sys as _sys
 
-    return "pytest" in _sys.modules or "PYTEST_CURRENT_TEST" in _os.environ
+    return "pytest" in _sys.modules
 
 
 class APISettings(BaseSettings):

@@ -8,6 +8,8 @@ settings are assembled for a job.
 
 from __future__ import annotations
 
+import logging
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -244,3 +246,117 @@ def test_a_masked_env_value_keeps_the_stored_one():
     # The mask with a stored value behind it keeps it; the one naming a
     # variable this deployment never had is dropped rather than stored.
     assert cleaned["custom"]["env"] == {"API_TOKEN": "s3cr3t", "MODE": "slow"}
+
+
+# ---- the legacy import and the one-off repair ------------------------
+
+
+class _RepairDB:
+    """A fake session for the repair: one row lookup, then the key lookup."""
+
+    def __init__(self, row):
+        self.row = row
+        self.added: list = []
+        self.committed = False
+        self.flushed_before_strip = False
+        self._calls = 0
+
+    async def flush(self):
+        self.flushed_before_strip = all("auth_token" in entry for entry in self.row.value.values())
+
+    async def execute(self, _stmt):
+        self._calls += 1
+        if self._calls == 1:
+            return SimpleNamespace(scalar_one_or_none=lambda: self.row)
+        keys = [(self.row.key,)] if self.row is not None else []
+        keys += [(r.key,) for r in self.added]
+        return SimpleNamespace(all=lambda: keys)
+
+    def add(self, row):
+        self.added.append(row)
+
+    async def commit(self):
+        self.committed = True
+
+
+def _server(**over):
+    entry = {"enabled": True, "transport": "http", "url": "https://h"}
+    entry.update(over)
+    return entry
+
+
+@pytest.mark.asyncio
+async def test_the_repair_moves_a_clear_token_into_an_encrypted_row(encryption_key):
+    from app.models import RuntimeSetting
+    from app.services.legacy_env_import import repair_server_auth_tokens
+
+    row = RuntimeSetting(
+        key="core.mcp.servers", value={"x": _server(auth_token="tok-real")}, is_secret=False
+    )
+    db = _RepairDB(row)
+
+    moved = await repair_server_auth_tokens(db)
+
+    assert moved == 1
+    assert "auth_token" not in row.value["x"]
+    assert db.flushed_before_strip is True
+    stored = db.added[0]
+    assert stored.key == server_token_key("x")
+    assert stored.is_secret is True
+    assert box.decrypt(stored.value) == "tok-real"
+
+
+@pytest.mark.asyncio
+async def test_the_repair_never_strips_a_token_it_did_not_store(encryption_key, caplog):
+    """Re-review I2: the mask is what the legacy import wrote for a token.
+
+    Keeping it is the point. ``merge_server_secrets`` leaves a token the
+    composite itself carries in place, so silently deleting the field would
+    erase the only record that the server had one -- and silently keeping it
+    without a word would hand a job the literal bearer token.
+    """
+    from app.models import RuntimeSetting
+    from app.services.legacy_env_import import repair_server_auth_tokens
+
+    row = RuntimeSetting(
+        key="core.mcp.servers", value={"generic": _server(auth_token=TOKEN_MASK)}, is_secret=False
+    )
+    db = _RepairDB(row)
+
+    with caplog.at_level(logging.WARNING):
+        moved = await repair_server_auth_tokens(db)
+
+    assert moved == 0
+    assert db.added == []
+    assert db.committed is False
+    assert row.value["generic"]["auth_token"] == TOKEN_MASK
+    assert "generic" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_the_server_repair_is_idempotent(encryption_key):
+    from app.models import RuntimeSetting
+    from app.services.legacy_env_import import repair_server_auth_tokens
+
+    row = RuntimeSetting(key="core.mcp.servers", value={"x": _server()}, is_secret=False)
+    db = _RepairDB(row)
+
+    assert await repair_server_auth_tokens(db) == 0
+    assert db.added == []
+    assert db.committed is False
+
+
+@pytest.mark.asyncio
+async def test_the_server_repair_leaves_the_row_alone_without_an_encryption_key(monkeypatch):
+    monkeypatch.delenv(box.ENV_VAR, raising=False)
+    from app.models import RuntimeSetting
+    from app.services.legacy_env_import import repair_server_auth_tokens
+
+    row = RuntimeSetting(
+        key="core.mcp.servers", value={"x": _server(auth_token="tok-real")}, is_secret=False
+    )
+    db = _RepairDB(row)
+
+    assert await repair_server_auth_tokens(db) == 0
+    assert row.value["x"]["auth_token"] == "tok-real"
+    assert db.committed is False

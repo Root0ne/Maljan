@@ -71,6 +71,12 @@ class SaveResult:
     applies: dict[str, int] = field(default_factory=dict)
 
 
+# The composite catalog leaves whose nested credential is stored as its own
+# runtime-keyed row, and the suffix those rows carry. Resetting the composite
+# resets them; ``save`` prunes the ones whose name left the map.
+_COMPOSITE_SECRET_SUFFIX = {SERVER_MAP_KEY: ".auth_token", ARMS_KEY: ".api_key"}
+
+
 def _loc_to_key(ns: str, loc: tuple[Any, ...]) -> str:
     return f"{ns}." + ".".join(str(p) for p in loc if not isinstance(p, int))
 
@@ -500,9 +506,27 @@ class SettingsService:
     async def reset(
         self, keys: list[str], *, user_id: uuid.UUID | None, ip: str | None
     ) -> list[str]:
+        """Drop the stored rows for ``keys``, credentials nested in them included.
+
+        Resetting a composite takes its per-name secret rows with it. Leaving
+        them behind is what ``_save_runtime_secrets`` already refuses to do for
+        a name that leaves the map, and for the same reason: a re-created
+        server or frontier arm of the same name would have a predecessor's
+        credential folded straight back in by ``merge_server_secrets`` /
+        ``merge_arm_secrets``, and ``values()`` would show it as set.
+        """
         rows = {r.key: r for r in await self._rows()}
-        removed = []
+        targets = dict.fromkeys(keys)
         for key in keys:
+            suffix = _COMPOSITE_SECRET_SUFFIX.get(key)
+            if suffix is None:
+                continue
+            prefix = f"{key}."
+            targets.update(
+                dict.fromkeys(k for k in rows if k.startswith(prefix) and k.endswith(suffix))
+            )
+        removed = []
+        for key in targets:
             if key in rows:
                 await self.db.delete(rows[key])
                 removed.append(key)

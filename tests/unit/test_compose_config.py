@@ -136,3 +136,8 @@ def test_migrations_run_once_before_the_api_and_the_worker(tmp_path):
     # Migrating on startup stays off: a multi-replica deployment must not have
     # every replica racing the same upgrade.
     assert api["environment"]["RUN_MIGRATIONS_ON_STARTUP"] == "false"
+
+    # One image for the three services that run this codebase, not one built
+    # and stored per service (re-review M2).
+    images = {config["services"][s]["image"] for s in ("migrate", "backend-api", "backend-worker")}
+    assert images == {"maljan-backend"}
