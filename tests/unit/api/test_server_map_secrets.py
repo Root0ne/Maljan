@@ -217,3 +217,30 @@ async def test_an_unset_token_shows_empty_and_the_environment_is_never_consulted
     assert shown["threatintel"]["auth_token"] == ""
     assert shown["threatintel"]["auth_token_source"] == "default"
     assert "from-env" not in str(shown)
+
+
+def test_a_masked_env_value_keeps_the_stored_one():
+    """The export masks every ``env`` value; importing it back must not write
+    ten asterisks into the variable the server reads its credential from."""
+    from app.services.server_map import split_server_secrets
+
+    stored = {
+        "custom": {
+            "enabled": True,
+            "transport": "stdio",
+            "command": "my-mcp",
+            "env": {"API_TOKEN": "s3cr3t", "MODE": "fast"},
+        }
+    }
+    incoming = {
+        "custom": {
+            "enabled": True,
+            "transport": "stdio",
+            "command": "my-mcp",
+            "env": {"API_TOKEN": TOKEN_MASK, "MODE": "slow", "NEW": TOKEN_MASK},
+        }
+    }
+    cleaned, _ = split_server_secrets(incoming, stored=stored)
+    # The mask with a stored value behind it keeps it; the one naming a
+    # variable this deployment never had is dropped rather than stored.
+    assert cleaned["custom"]["env"] == {"API_TOKEN": "s3cr3t", "MODE": "slow"}

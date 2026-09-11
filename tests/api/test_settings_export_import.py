@@ -163,6 +163,35 @@ def test_export_strips_a_mask_nested_at_any_depth(client):
     assert body["secrets_omitted"] == ["core.mcp.servers.custom.nested.deeper.0.secret"]
 
 
+def test_export_masks_every_server_env_value(client):
+    """SEC-1: a server's ``env`` map is where its own credential lives, so the
+    export carries the variable names and the mask, never the values; each one
+    is named under ``secrets_omitted`` so an operator can see what is missing."""
+    fake = {
+        "core.mcp.servers": ValueInfo(
+            {
+                "custom": {
+                    "command": "my-mcp",
+                    "env": {"API_TOKEN": "s3cr3t", "MODE": "fast"},
+                }
+            },
+            None,
+            None,
+            "ui",
+        ),
+    }
+    with patch("app.api.v1.settings.SettingsService.values", AsyncMock(return_value=fake)):
+        r = client.get("/api/v1/settings/export")
+    body = r.json()
+    env = body["values"]["core.mcp.servers"]["custom"]["env"]
+    assert env == {"API_TOKEN": "**********", "MODE": "**********"}
+    assert body["secrets_omitted"] == [
+        "core.mcp.servers.custom.env.API_TOKEN",
+        "core.mcp.servers.custom.env.MODE",
+    ]
+    assert "s3cr3t" not in r.text
+
+
 def test_export_is_admin_only():
     r = TestClient(_app(UserRole.ANALYST)).get("/api/v1/settings/export")
     assert r.status_code == 403

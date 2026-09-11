@@ -328,18 +328,19 @@ API_READONLY: dict[str, dict[str, Any]] = {
     "debug": {
         "title": "Debug mode",
         "description": (
-            "Verbose logging and relaxed placeholder checks. Set in .env; needs a restart."
+            "Verbose logging and relaxed placeholder checks. Set in the deployment environment."
         ),
     },
     "auth_disabled": {
         "title": "Authentication bypass",
         "description": (
-            "Every request is the seeded dev admin. Local development only. Set in .env."
+            "Every request is the seeded dev admin. Local development only. Set in the "
+            "deployment environment."
         ),
     },
     "cors_origins": {
         "title": "CORS origins",
-        "description": "Browsers allowed to call the API. Set in .env.",
+        "description": "Browsers allowed to call the API. Set in the deployment environment.",
     },
     "database_url": {
         "title": "Database",
@@ -510,7 +511,7 @@ def api_catalog() -> list[CatalogEntry]:
                 description=ann["description"],
                 applies="restart",
                 editable=False,
-                reason="set in .env; restart required",
+                reason="set in the deployment environment; restart required",
                 probe=ann.get("probe"),
                 applies_when=None,
                 order=0,

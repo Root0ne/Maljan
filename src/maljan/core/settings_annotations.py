@@ -257,10 +257,10 @@ ANNOTATIONS: dict[str, Annotation] = {
     "llm.frontier.arms": {
         "title": "Frontier arms",
         "description": (
-            "Named additional frontier comparison endpoints "
-            "(LLM__FRONTIER__ARMS__<NAME>__...), each with its own model, pricing and "
-            "spend ceiling, used to test a parameter-size series rather than a single "
-            "comparison point. Evaluation only."
+            "Named additional frontier comparison endpoints, each with its own model, "
+            "pricing and spend ceiling, used to test a parameter-size series rather than "
+            "a single comparison point. Each arm's API key is stored encrypted on its own "
+            "and shown here masked. Evaluation only."
         ),
     },
     "llm.frontier.base_url": {

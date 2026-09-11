@@ -153,6 +153,7 @@ def split_server_secrets(
     That distinction is what lets the editor round-trip a masked value without
     overwriting the real one with ten asterisks.
     """
+    value = _keep_masked_env(value, stored)
     cleaned = validate_server_map(value, stored=stored, stored_settings=stored_settings)
     tokens: dict[str, str | None] = {}
     for key, entry in (value or {}).items():
@@ -163,6 +164,35 @@ def split_server_secrets(
             continue
         tokens[key] = str(token) if token else None
     return cleaned, tokens
+
+
+def _keep_masked_env(value: Any, stored: dict[str, Any] | None) -> Any:
+    """An ``env`` value that arrives as the mask keeps whatever is stored.
+
+    The JSON export masks every ``env`` value (SEC-1: that map is where a
+    server's own credential lives), so importing the document back must not
+    write ten asterisks into the variable. A mask with nothing stored behind
+    it is dropped rather than stored -- it names a value this deployment never
+    had.
+    """
+    if not isinstance(value, dict):
+        return value
+    out: dict[str, Any] = {}
+    for name, entry in value.items():
+        env = entry.get("env") if isinstance(entry, dict) else None
+        if not isinstance(env, dict) or TOKEN_MASK not in env.values():
+            out[name] = entry
+            continue
+        stored_entry = (stored or {}).get(name)
+        stored_env = stored_entry.get("env") if isinstance(stored_entry, dict) else {}
+        stored_env = stored_env if isinstance(stored_env, dict) else {}
+        kept = {
+            var: (stored_env.get(var) if item == TOKEN_MASK else item)
+            for var, item in env.items()
+            if item != TOKEN_MASK or var in stored_env
+        }
+        out[name] = {**entry, "env": kept}
+    return out
 
 
 def merge_server_secrets(overrides: dict[str, Any]) -> dict[str, Any]:

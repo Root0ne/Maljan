@@ -211,16 +211,42 @@ def _export_value(key: str, value: Any) -> tuple[Any, list[str]]:
     arms lost their credential, rather than silently ending up with none on
     the next import.
     """
-    if key == SERVER_MAP_KEY and isinstance(value, dict):
-        value = {
-            name: (
-                {k: v for k, v in entry.items() if k != "auth_token_source"}
-                if isinstance(entry, dict)
-                else entry
-            )
-            for name, entry in value.items()
-        }
-    return _strip_masks(value, key)
+    if key != SERVER_MAP_KEY or not isinstance(value, dict):
+        return _strip_masks(value, key)
+    value = {
+        name: (
+            {k: v for k, v in entry.items() if k != "auth_token_source"}
+            if isinstance(entry, dict)
+            else entry
+        )
+        for name, entry in value.items()
+    }
+    sanitized, omitted = _strip_masks(value, key)
+    return _mask_server_env(sanitized, omitted)
+
+
+def _mask_server_env(servers: Any, omitted: list[str]) -> tuple[Any, list[str]]:
+    """Every ``env`` value masked, and its variable named in ``omitted``.
+
+    SEC-1 (dev audit 2026-09-06) established a server's ``env`` map as the one
+    place a credential can live without being typed as one, which is why
+    ``public_snapshot`` masks it in run summaries. An export is a file on an
+    operator's disk and the weaker of the two paths, so it masks them too. The
+    variable names stay -- an operator reading the document needs to see what
+    the server was handed -- and only the values go; a masked value coming
+    back on import means "keep the stored one" (``split_server_secrets``).
+    """
+    if not isinstance(servers, dict):
+        return servers, omitted
+    out: dict[str, Any] = {}
+    for name, entry in servers.items():
+        if not isinstance(entry, dict) or not isinstance(entry.get("env"), dict):
+            out[name] = entry
+            continue
+        env = entry["env"]
+        out[name] = {**entry, "env": {var: TOKEN_MASK for var in env}}
+        omitted.extend(f"{SERVER_MAP_KEY}.{name}.env.{var}" for var in env)
+    return out, omitted
 
 
 @router.get("/export", response_model=ExportResponse)

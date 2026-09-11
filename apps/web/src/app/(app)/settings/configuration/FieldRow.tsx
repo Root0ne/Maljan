@@ -254,15 +254,21 @@ export default function FieldRow({
       {!guide && (
         <div className="flex items-center gap-2 flex-wrap mt-0.5">
           <CopyKeyButton settingKey={entry.key} />
-          <span
-            className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${
-              source === "ui"
-                ? "bg-accent/20 text-accent-strong"
-                : "bg-border text-text-muted"
-            }`}
-          >
-            {SOURCE_LABEL[source]}
-          </span>
+          {/* A read-only row carries no source badge: its value comes from the
+              deployment environment, and "DEFAULT" says the opposite of that.
+              The `reason` line under the description is what names the source
+              for these rows (walkthrough finding W4). */}
+          {entry.editable && (
+            <span
+              className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${
+                source === "ui"
+                  ? "bg-accent/20 text-accent-strong"
+                  : "bg-border text-text-muted"
+              }`}
+            >
+              {SOURCE_LABEL[source]}
+            </span>
+          )}
           <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-border text-text-muted">
             {APPLIES_LABEL[entry.applies]}
           </span>
