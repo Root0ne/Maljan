@@ -11,7 +11,7 @@ environment in one command, and where the design record is kept.
 | `apps/api/` | The FastAPI application and the arq worker, as the workspace member `maljan-api`. Alembic migrations sit beside it; its bootstrap contract is documented at the repository root (`bootstrap.env.example`), not here. |
 | `apps/web/` | The Next.js interface. Route-local components stay in their route folder; a component two routes use lives in `src/components/`. |
 | `services/` | Deployable sidecar processes. Each is one `server.py` speaking stdio MCP, launched by `maljan.core.config._builtin_servers()` and bound to one agent. |
-| `scripts/dev/` | Running the system locally: the LLM server launcher, the overnight memory guard, the restart wrapper, the Ghidra MCP manager, the CAPE wrapper, the third-party fetcher. |
+| `scripts/dev/` | Running the system locally: the LLM server launcher, the overnight memory guard, the restart wrapper, the Ghidra MCP manager, the third-party fetcher. |
 | `scripts/goldens/` | One-off capture scripts. Each writes a fixture under `tests/fixtures/golden/` and is committed so a reviewer can re-run it and diff the result. |
 | `scripts/knowledge/` | Builders for the tracked data assets under `data/` and for the evaluation ground truth. The curated lists live in the builder; the JSON is the artefact. |
 | `scripts/paper/` | The paper's machine-checkable rubric and the cohort completer. |
