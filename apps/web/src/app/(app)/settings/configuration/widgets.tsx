@@ -147,7 +147,7 @@ export function NumberWidget(p: WidgetProps) {
       />
       {requiredHint && (
         <div id={hintId} className="text-[11px] text-status-red mt-1" role="alert">
-          Required — enter a value, or use &ldquo;Discard change&rdquo; / &ldquo;Reset to env&rdquo;.
+          Required — enter a value, or use &ldquo;Discard change&rdquo; / &ldquo;Remove override&rdquo;.
         </div>
       )}
     </div>
@@ -285,7 +285,7 @@ function formatJson(p: WidgetProps): string {
 /**
  * Same external-change re-sync as `ListWidget`/`NumberWidget`: `text` used to
  * be seeded once via `useState(initial)` and never revisited, so Discard /
- * Reset to env / a group reset left the textarea showing abandoned JSON even
+ * Remove override / a group reset left the textarea showing abandoned JSON even
  * though `pending` no longer held it.
  */
 export function JsonWidget(p: WidgetProps) {

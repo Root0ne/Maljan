@@ -546,7 +546,6 @@ class ApiClient {
     const token = this.getToken();
     const res = await fetch(`${this.baseUrl}/api/v1/settings/export`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
-      credentials: "include",
     });
     if (res.status === 401) {
       if (typeof window !== "undefined") {
@@ -585,6 +584,12 @@ class ApiClient {
       },
       body: JSON.stringify(body),
     });
+    if (res.status === 401) {
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("access_token");
+      }
+      throw new ApiError("Unauthorized", res.status);
+    }
     if (res.status === 422) {
       const errBody = (await res.json().catch(() => ({}))) as {
         errors?: Record<string, string>;

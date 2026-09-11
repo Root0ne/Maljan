@@ -12,7 +12,11 @@ import { appliesSummary, APPLIES_SENTENCE } from "./vocabulary";
 /** Reads the picked file and normalises whatever JSON it holds into the
  *  shape `buildImportPreview` expects. A file that isn't valid JSON, or
  *  whose top level isn't an object, throws — the caller turns that into the
- *  dialog's "could not read this file" message rather than a stack trace. */
+ *  dialog's "could not read this file" message rather than a stack trace.
+ *  A `values` field that is missing, or isn't itself an object, is passed
+ *  through as-is: `buildImportPreview` treats that the same as an
+ *  unsupported `format` rather than the caller silently defaulting it to
+ *  `{}` and reporting "0 changes" with no explanation. */
 async function parseImportFile(file: File): Promise<ImportDoc> {
   const text = await file.text();
   const parsed: unknown = JSON.parse(text);
@@ -20,11 +24,18 @@ async function parseImportFile(file: File): Promise<ImportDoc> {
     throw new Error("not an object");
   }
   const record = parsed as Record<string, unknown>;
-  const values =
-    typeof record.values === "object" && record.values !== null
-      ? (record.values as Record<string, unknown>)
-      : {};
-  return { format: String(record.format ?? ""), values };
+  return { format: String(record.format ?? ""), values: record.values };
+}
+
+/** Everything inside `container` a Tab key could land on — the same
+ *  selector list every hand-rolled focus trap in the wild converges on.
+ *  `disabled` and negative-tabindex elements are excluded by the browser's
+ *  own focus order, so nothing extra is needed for the primary button while
+ *  it's disabled. */
+function focusableIn(container: HTMLElement): HTMLElement[] {
+  const selector =
+    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  return Array.from(container.querySelectorAll<HTMLElement>(selector));
 }
 
 /** "Import configuration" opens this: pick a `.json` export, see what it
@@ -36,6 +47,7 @@ async function parseImportFile(file: File): Promise<ImportDoc> {
  *  screen to read yet. */
 export default function ImportDialog({ onClose }: { onClose: () => void }) {
   const ctx = useSettingsContext();
+  const panelRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [fileName, setFileName] = useState<string | null>(null);
@@ -47,13 +59,35 @@ export default function ImportDialog({ onClose }: { onClose: () => void }) {
   const [serverErrors, setServerErrors] = useState<Record<string, string> | null>(null);
   const [result, setResult] = useState<PatchResult | null>(null);
 
+  // Moves focus in on mount and — Important 1 — back out to whatever had it
+  // before the dialog opened (the "Import configuration" button, always)
+  // once it closes, so a keyboard user resumes tabbing where they left off
+  // instead of restarting from `<body>`.
   useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
     fileInputRef.current?.focus();
+    return () => opener?.focus();
   }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      // Important 2: this is the console's first true overlay modal — the
+      // settings rows behind the scrim are visually covered but still in
+      // the tab order unless something stops Tab at the panel's own edges.
+      if (e.key !== "Tab" || !panelRef.current) return;
+      const focusable = focusableIn(panelRef.current);
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey ? active === first || !panelRef.current.contains(active) : active === last) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -70,8 +104,10 @@ export default function ImportDialog({ onClose }: { onClose: () => void }) {
     try {
       const parsedDoc = await parseImportFile(file);
       const currentValues: Record<string, unknown> = {};
-      for (const key of Object.keys(parsedDoc.values)) {
-        currentValues[key] = ctx.effectiveValue(key);
+      if (typeof parsedDoc.values === "object" && parsedDoc.values !== null) {
+        for (const key of Object.keys(parsedDoc.values as Record<string, unknown>)) {
+          currentValues[key] = ctx.effectiveValue(key);
+        }
       }
       setDoc(parsedDoc);
       setPreview(buildImportPreview(parsedDoc, ctx.entriesByKey, currentValues));
@@ -80,16 +116,20 @@ export default function ImportDialog({ onClose }: { onClose: () => void }) {
     }
   };
 
+  const totalKeys =
+    doc && typeof doc.values === "object" && doc.values !== null
+      ? Object.keys(doc.values as Record<string, unknown>).length
+      : 0;
   const changedCount = preview?.lines.length ?? 0;
   const errorCount = preview ? Object.keys(preview.errors).length : 0;
-  const unchangedCount =
-    doc && preview ? Object.keys(doc.values).length - preview.lines.length - errorCount : 0;
+  const unchangedCount = preview ? totalKeys - preview.lines.length - errorCount : 0;
   const canImport = doc !== null && preview !== null && changedCount > 0 && errorCount === 0;
 
   const onImport = async () => {
     if (!doc || !preview) return;
+    const docValues = doc.values as Record<string, unknown>;
     const values: Record<string, unknown> = {};
-    for (const line of preview.lines) values[line.key] = doc.values[line.key];
+    for (const line of preview.lines) values[line.key] = docValues[line.key];
     setSubmitting(true);
     setSubmitError(null);
     setServerErrors(null);
@@ -108,6 +148,7 @@ export default function ImportDialog({ onClose }: { onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 px-4 pt-20">
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label="Import configuration"
@@ -245,7 +286,9 @@ export default function ImportDialog({ onClose }: { onClose: () => void }) {
                   className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent text-white rounded hover:bg-accent-hover transition-colors disabled:opacity-50"
                   onClick={onImport}
                 >
-                  {submitting ? "Importing…" : `Import ${changedCount} settings`}
+                  {submitting
+                    ? "Importing…"
+                    : `Import ${changedCount} setting${changedCount === 1 ? "" : "s"}`}
                 </button>
                 <button
                   type="button"

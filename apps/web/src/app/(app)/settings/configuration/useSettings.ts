@@ -195,7 +195,7 @@ export function useSettings() {
           setActionError(
             `Stored override${foreign.length > 1 ? "s" : ""} no longer valid: ${foreign.join(
               ", "
-            )}. Reset ${foreign.length > 1 ? "them" : "it"} to env to save again.`
+            )}. Reset ${foreign.length > 1 ? "them" : "it"} to default to save again.`
           );
         }
       } else setActionError(getErrorMessage(e));

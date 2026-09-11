@@ -34,11 +34,13 @@ function entry(overrides: Partial<CatalogEntry>): CatalogEntry {
 const knownEntry = entry({ key: "core.negotiation.retry_delay", type: "int", title: "Retry delay" });
 const readOnlyEntry = entry({ key: "core.deploy.host", type: "str", title: "Host", editable: false });
 const secretEntry = entry({ key: "core.llm.openai.api_key", type: "secret", title: "OpenAI API key", secret: true });
+const listEntry = entry({ key: "core.negotiation.blocked_hosts", type: "list", title: "Blocked hosts" });
 
 const entriesByKey: Record<string, CatalogEntry> = {
   [knownEntry.key]: knownEntry,
   [readOnlyEntry.key]: readOnlyEntry,
   [secretEntry.key]: secretEntry,
+  [listEntry.key]: listEntry,
 };
 
 function doc(values: Record<string, unknown>, format = "maljan-settings/1"): ImportDoc {
@@ -102,5 +104,45 @@ describe("buildImportPreview", () => {
     expect(result.lines).toHaveLength(1);
     expect(result.lines[0].summary).toBe("(secret) will be set");
     expect(JSON.stringify(result.lines)).not.toContain("sk-super-secret");
+  });
+
+  it("does not line a list value whose entries are the same but written in a different order", () => {
+    // `deepEqual` (shared with `describeChange.ts`) compares arrays by
+    // position, not by set — this pins that a list import is only "changed"
+    // when its contents actually differ, not merely re-serialised.
+    const result = buildImportPreview(
+      doc({ [listEntry.key]: ["a", "b"] }),
+      entriesByKey,
+      { [listEntry.key]: ["a", "b"] }
+    );
+    expect(result.lines).toEqual([]);
+    expect(result.errors).toEqual({});
+  });
+
+  it("lines a list value whose entries actually changed", () => {
+    const result = buildImportPreview(
+      doc({ [listEntry.key]: ["a", "c"] }),
+      entriesByKey,
+      { [listEntry.key]: ["a", "b"] }
+    );
+    expect(result.lines).toHaveLength(1);
+    expect(result.lines[0].key).toBe(listEntry.key);
+  });
+
+  it("errors as an unsupported format when values is missing or not an object", () => {
+    const missing = buildImportPreview(
+      { format: "maljan-settings/1", values: undefined },
+      entriesByKey,
+      {}
+    );
+    expect(missing.lines).toEqual([]);
+    expect(missing.errors).toEqual({ format: "unsupported format" });
+
+    const notAnObject = buildImportPreview(
+      { format: "maljan-settings/1", values: "not an object" },
+      entriesByKey,
+      {}
+    );
+    expect(notAnObject.errors).toEqual({ format: "unsupported format" });
   });
 });

@@ -461,8 +461,7 @@ test.describe("Settings → Configuration (admin)", () => {
     const dialog = page.getByRole("dialog", { name: "Import configuration" });
     await expect(dialog).toBeVisible();
 
-    // `max_iterations` is 5 (default) in the fixture; the file changes it to
-    // 9 and repeats an unset field the console doesn't carry a value for.
+    // `max_iterations` is 5 (default) in the fixture; the file changes it to 9.
     const fixture = {
       format: "maljan-settings/1",
       values: { "core.negotiation.max_iterations": 9 },
@@ -474,7 +473,7 @@ test.describe("Settings → Configuration (admin)", () => {
     });
 
     await expect(dialog.getByText("5 → 9")).toBeVisible();
-    const importButton = dialog.getByRole("button", { name: "Import 1 settings" });
+    const importButton = dialog.getByRole("button", { name: "Import 1 setting", exact: true });
     await expect(importButton).toBeEnabled();
 
     let importBody: unknown = null;
@@ -513,15 +512,81 @@ test.describe("Settings → Configuration (admin)", () => {
     await expect(dialog.getByRole("button", { name: "Import 0 settings" })).toBeDisabled();
   });
 
-  test("Escape closes the import dialog", async ({ authenticatedPage: page }) => {
+  test("a 422 from the import endpoint shows the per-key error and leaves the dialog open", async ({
+    authenticatedPage: page,
+  }) => {
     await page.goto(NEGOTIATION_PATH);
 
     await page.getByRole("button", { name: "Import configuration" }).click();
+    const dialog = page.getByRole("dialog", { name: "Import configuration" });
+
+    const fixture = {
+      format: "maljan-settings/1",
+      values: { "core.negotiation.max_iterations": 9 },
+    };
+    await page.getByLabel("Settings file").setInputFiles({
+      name: "maljan-settings.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify(fixture)),
+    });
+
+    await page.route("**/api/v1/settings/import", (r) =>
+      r.fulfill({
+        status: 422,
+        json: { errors: { "core.llm.provider": "Input should be a valid provider" } },
+      })
+    );
+
+    await dialog.getByRole("button", { name: "Import 1 setting", exact: true }).click();
+
+    await expect(
+      dialog.getByText("core.llm.provider: Input should be a valid provider")
+    ).toBeVisible();
+    await expect(dialog).toBeVisible();
+  });
+
+  test("Escape closes the import dialog and returns focus to the button that opened it", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto(NEGOTIATION_PATH);
+
+    const openButton = page.getByRole("button", { name: "Import configuration" });
+    await openButton.click();
     const dialog = page.getByRole("dialog", { name: "Import configuration" });
     await expect(dialog).toBeVisible();
 
     await page.keyboard.press("Escape");
     await expect(dialog).toHaveCount(0);
+    await expect(openButton).toBeFocused();
+  });
+
+  test("Tab cycles inside the import dialog instead of reaching the console behind it", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto(NEGOTIATION_PATH);
+
+    await page.getByRole("button", { name: "Import configuration" }).click();
+    const dialog = page.getByRole("dialog", { name: "Import configuration" });
+    const closeButton = dialog.getByRole("button", { name: "Close" });
+    const fileInput = page.getByLabel("Settings file");
+
+    // The file input is focused on open (nothing has been picked yet, so it
+    // is the dialog's only other focusable control besides Close, and the
+    // last one in DOM order) — Tab from there must wrap to Close rather than
+    // escape onto a settings row.
+    await expect(fileInput).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(closeButton).toBeFocused();
+    // Ordinary forward Tab from the first control (nothing to trap yet).
+    await page.keyboard.press("Tab");
+    await expect(fileInput).toBeFocused();
+    // Ordinary backward Shift+Tab from the last control.
+    await page.keyboard.press("Shift+Tab");
+    await expect(closeButton).toBeFocused();
+    // Shift+Tab from the first control is the other wrap the trap has to
+    // hold: back around to the last one, not out of the dialog.
+    await page.keyboard.press("Shift+Tab");
+    await expect(fileInput).toBeFocused();
   });
 
   test("the search box narrows the visible rows", async ({ authenticatedPage: page }) => {

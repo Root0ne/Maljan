@@ -8,25 +8,23 @@
  * unit-tested directly.
  */
 import type { CatalogEntry } from "@/types/settings";
-import { describeChange, type ChangeLine } from "./describeChange";
+import { deepEqual, describeChange, type ChangeLine } from "./describeChange";
 import { SETTINGS_EXPORT_FORMAT } from "@/types/settings";
 
-/** The shape of a parsed `.json` export file, before it is known to be valid. */
+/** The shape of a parsed `.json` export file, before it is known to be valid.
+ *  `values` is `unknown` rather than `Record<string, unknown>` on purpose: a
+ *  hand-edited or truncated file can carry anything there (missing, a
+ *  string, an array, ...), and `buildImportPreview` is what decides that is
+ *  the same "this document doesn't parse" failure as a wrong `format`,
+ *  rather than an empty, silently-accepted `{}`. */
 export interface ImportDoc {
   format: string;
-  values: Record<string, unknown>;
+  values: unknown;
 }
 
 export interface ImportPreview {
   lines: ChangeLine[];
   errors: Record<string, string>;
-}
-
-function deepEqual(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (a === null || a === undefined || b === null || b === undefined) return a === b;
-  if (typeof a !== "object" || typeof b !== "object") return false;
-  return JSON.stringify(a) === JSON.stringify(b);
 }
 
 /**
@@ -47,14 +45,19 @@ export function buildImportPreview(
   entriesByKey: Record<string, CatalogEntry>,
   currentValues: Record<string, unknown>
 ): ImportPreview {
-  if (doc.format !== SETTINGS_EXPORT_FORMAT) {
+  if (
+    doc.format !== SETTINGS_EXPORT_FORMAT ||
+    typeof doc.values !== "object" ||
+    doc.values === null ||
+    Array.isArray(doc.values)
+  ) {
     return { lines: [], errors: { format: "unsupported format" } };
   }
 
   const lines: ChangeLine[] = [];
   const errors: Record<string, string> = {};
 
-  for (const [key, importedValue] of Object.entries(doc.values)) {
+  for (const [key, importedValue] of Object.entries(doc.values as Record<string, unknown>)) {
     const entry = entriesByKey[key];
     if (!entry) {
       errors[key] = "unknown key";
