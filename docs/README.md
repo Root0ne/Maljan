@@ -8,7 +8,7 @@ environment in one command, and where the design record is kept.
 | Path | What is there |
 | :-- | :-- |
 | `src/maljan/` | The core package. Agents, the LangGraph pipeline, the provider layer, the deterministic evidence layers, memory and reporting. Module paths are stable; the evaluation corpus imports them by name. |
-| `apps/api/` | The FastAPI application and the arq worker, as the workspace member `maljan-api`. Alembic migrations and the API's own `.env.example` sit beside it. |
+| `apps/api/` | The FastAPI application and the arq worker, as the workspace member `maljan-api`. Alembic migrations sit beside it; its bootstrap contract is documented at the repository root (`bootstrap.env.example`), not here. |
 | `apps/web/` | The Next.js interface. Route-local components stay in their route folder; a component two routes use lives in `src/components/`. |
 | `services/` | Deployable sidecar processes. Each is one `server.py` speaking stdio MCP, launched by `maljan.core.config._builtin_servers()` and bound to one agent. |
 | `scripts/dev/` | Running the system locally: the LLM server launcher, the overnight memory guard, the restart wrapper, the Ghidra MCP manager, the CAPE wrapper, the third-party fetcher. |

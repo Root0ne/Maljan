@@ -136,8 +136,12 @@ cd Maljan
 make setup
 
 # 3. Configure environment
-cp .env.example .env
-# Edit .env: set LLM__PROVIDER and add your API key
+# The standalone CLI builds the core `Settings` model bare, which still
+# reads the process environment and an optional `.env` in the CWD (this is
+# the only place that still works this way — see "Configuration" below).
+# Set the active LLM backend and its API key, e.g.:
+export LLM__PROVIDER=openai
+export LLM__OPENAI__API_KEY=sk-...
 
 # 4. Run a mock analysis (no API key required)
 uv run maljan analyze sample_1 --mock --name test.exe
@@ -148,19 +152,30 @@ uv run maljan analyze <sha256> --provider openai
 
 ### Full-Stack Docker (recommended)
 
-```bash
-cp .env.example .env
-# Edit .env with your API keys and LLM provider settings
+The API and the worker read only a small bootstrap contract from the process
+environment (database, Redis, MinIO, the two secrets below, a handful of
+mount paths); every other application setting — LLM provider, sandbox,
+static analyst, tool servers, agents, rate limits — lives in the settings
+store and is edited from the web UI (Settings → Configuration) once the
+stack is up. The first API start imports a legacy `.env`, if one exists in
+the repository root, into the store once; a fresh checkout with no `.env`
+starts with the catalog defaults instead.
 
+```bash
 cp docker/.env.example docker/.env
-# docker/.env holds three variables compose refuses to start without —
-# there is no baked-in default for any of them:
-#   GHIDRA_MCP_AUTH_TOKEN  bearer token the ghidra-mcp container requires
-#   REDIS_PASSWORD         --requirepass on the redis container
-#   QDRANT_API_KEY         QDRANT__SERVICE__API_KEY on the qdrant container
-# Generate all three:
+# docker/.env holds the variables compose refuses to start without — there
+# is no baked-in default for any of them:
+#   GHIDRA_MCP_AUTH_TOKEN     bearer token the ghidra-mcp container requires
+#   REDIS_PASSWORD            --requirepass on the redis container
+#   QDRANT_API_KEY            QDRANT__SERVICE__API_KEY on the qdrant container
+#   SETTINGS_ENCRYPTION_KEY   encrypts secrets in the settings store
+#   JWT_SECRET_KEY            signs API session tokens
+# Generate the first three:
 python -c "import secrets; [print(f'{k}={secrets.token_urlsafe(32)}') for k in ('GHIDRA_MCP_AUTH_TOKEN','REDIS_PASSWORD','QDRANT_API_KEY')]"
-# and paste the output into docker/.env.
+# and the two application secrets:
+python -c "from cryptography.fernet import Fernet; print('SETTINGS_ENCRYPTION_KEY=' + Fernet.generate_key().decode())"
+python -c "import secrets; print('JWT_SECRET_KEY=' + secrets.token_hex(32))"
+# paste all five into docker/.env.
 #
 # Every published port binds to BIND_ADDRESS, which docker/.env.example
 # defaults to 127.0.0.1 — the stack is unreachable from the network unless
@@ -215,12 +230,13 @@ make external     # or: make setup, which runs it for you
 The static analyst attaches to one of `ghidra`, `r2`, `capa_yara`, `generic_mcp`
 or `none`; the dynamic path pulls its evidence from one of `mock`, `cape2`,
 `upload`, `triage` or `rest`. Pick either pair from Settings → Static analysis
-provider / Sandbox provider in the web UI, per job at submit time, or with
-`STATIC__PROVIDER` / `SANDBOX__PROVIDER` in `.env`. Ghidra plus CAPEv2 is the
+provider / Sandbox provider in the web UI, per job at submit time, or set
+`core.static.provider` / `core.sandbox.provider` from Settings → Configuration.
+Ghidra plus CAPEv2 is the
 profile this project's evaluation was measured on and stays the default for
-both, but neither is required to run Maljan: `STATIC__PROVIDER=capa_yara`
-with `SANDBOX__PROVIDER=upload` needs no external service at all, and
-`SANDBOX__PROVIDER=mock` needs none either.
+both, but neither is required to run Maljan: `core.static.provider=capa_yara`
+with `core.sandbox.provider=upload` needs no external service at all, and
+`core.sandbox.provider=mock` needs none either.
 
 What each optional tool costs to turn on:
 
@@ -273,9 +289,10 @@ never created for you. A bearer token for an HTTP server is typed once and
 stored the way every other secret in Maljan is stored: encrypted with
 `SETTINGS_ENCRYPTION_KEY`, in a row of its own (`core.mcp.servers.<key>.auth_token`)
 rather than in the server list's JSON, never returned by the API and never
-written into a run summary. Without that key set, the UI refuses a token the
-same way it refuses every other secret, and `MCP__SERVERS__<KEY>__AUTH_TOKEN`
-in `.env` stays the way to supply one from the environment instead. A server
+written into a run summary. Without that key set, the process refuses to
+start at all (`SETTINGS_ENCRYPTION_KEY` is part of the bootstrap contract),
+so there is no read-only fallback mode to fall back to — a token is always
+typed into the UI. A server
 bound to the static or dynamic analyst degrades rather than failing a job: if
 it cannot be reached, the run says so in its degradation reasons and
 continues on the evidence it has.
@@ -624,36 +641,52 @@ explains what the numbers mean.
 
 ## Configuration
 
-All settings live in `.env`. The project uses two config systems:
+The API and the worker read a small, validated **bootstrap contract** from
+the process environment — the values a process needs before it can reach
+the settings store at all — and nothing else. Everything else an operator
+configures (LLM provider and credentials, sandbox and static analyst,
+tool servers, agents, rate limits, enrichment, ...) is an **application
+setting**, edited from the web UI, not the environment.
 
-1. **Core Engine**: nested Pydantic models with `__` delimiter (e.g., `LLM__PROVIDER=openai`)
-2. **API Server**: flat env vars (e.g., `DATABASE_URL`, `JWT_SECRET_KEY`)
-
-Critical variables:
+**Bootstrap contract.** See `bootstrap.env.example` at the repository root
+for the full, commented list; the short version:
 
 ```bash
-LLM__PROVIDER=openai|anthropic|ollama|gemini
-OPENAI_API_KEY=sk-...
-ANTHROPIC_API_KEY=sk-ant-...
 DATABASE_URL=postgresql+asyncpg://maljan:maljan_dev@localhost:5432/maljan
 REDIS_URL=redis://localhost:6379/0
+MINIO_ENDPOINT=localhost:9000
+MINIO_ACCESS_KEY=minioadmin
+MINIO_SECRET_KEY=<strong value; boot refuses "minioadmin" outside debug>
+SETTINGS_ENCRYPTION_KEY=<generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())">
 JWT_SECRET_KEY=<generate with openssl rand -hex 32>
 ```
 
-For a fully local LLM backend (no cloud API), set `LLM__PROVIDER=openai` and point `LLM__OPENAI__BASE_URL` at a local OpenAI-compatible server such as `ik_llama.cpp`'s `llama-server`. `make external` fetches the engine at the pinned commit, and `scripts/dev/llm_server.sh` carries the invocation.
+A missing required variable, an empty or placeholder JWT secret outside
+debug, or an invalid `SETTINGS_ENCRYPTION_KEY` aborts the process at
+startup with one message naming every problem
+(`apps/api/app/bootstrap.py`). `/health` reports `config: {bootstrap,
+encryption, legacy_import}` once the process is up. For Docker, these
+variables are supplied by `docker/docker-compose.yml` (built from
+`docker/.env`'s infrastructure secrets) and never read from a `.env` file
+directly; for a bare `uvicorn`/`arq` process, export them into the shell
+(`set -a; . ./bootstrap.env; set +a`, or `make dev-up` / `make migrate`,
+which do this for you when `bootstrap.env` exists). The same contract is
+the whole interface for any other orchestrator: a Kubernetes `Secret` /
+`ConfigMap` projected as container env, or a systemd unit's
+`EnvironmentFile=`, both work the same way compose does here — inject the
+bootstrap variables, nothing more; the process never persists or discovers
+its own deployment secrets.
 
-See `.env.example` for the full reference.
-
-**From the UI.** Administrators (Settings → Configuration; the tab is shown
-but disabled for everyone else) can change every core pipeline setting and the API's
-runtime-safe knobs without editing `.env`. Precedence is
-`UI (Postgres) > environment / .env > code default`; nothing writes `.env`.
-Each field shows where its current value is coming from. A saved change
-either takes effect immediately (`live`, read through a 5-second cache),
-at the start of the next analysis (`next job`, the worker reads overrides
-when a job starts), or requires a process restart (`restart` — shown
-read-only: database, Redis, MinIO, JWT and other bootstrap settings stay in
-`.env`). Secret fields (API keys, tokens) are stored Fernet-encrypted under
+**Application settings, from the UI.** Administrators (Settings →
+Configuration; the tab is shown but disabled for everyone else) change
+every core pipeline setting and the API's runtime-safe knobs here — there
+is no environment-variable path for these any more. Each field shows
+whether its current value is the catalog default or a stored override.
+A saved change either takes effect immediately (`live`, read through a
+5-second cache), at the start of the next analysis (`next job`, the worker
+reads overrides when a job starts), or requires a process restart
+(`restart` — shown read-only: the bootstrap contract above). Secret fields
+(API keys, tokens) are stored Fernet-encrypted under
 `SETTINGS_ENCRYPTION_KEY` and are only ever set or cleared from the UI — a
 saved secret is never read back, the API returns whether it is set and a
 short hint. "Test connection" checks the LLM endpoint (OpenAI, Anthropic,
@@ -667,11 +700,26 @@ directory does not flip the indicator, since capa evidence alone is enough
 for the provider to run. "Test MCP server" launches one configured tool
 server and lists what it offers; "Test sandbox API" asks a REST sandbox's
 status endpoint about a task that does not exist, so any answer other than a
-refused credential means the endpoint and the token are right. Exporting the
-current UI overrides produces a
-`.env`-formatted file with secret values masked as `***`. Every analysis
-records the settings that were actually in effect, and which of them came
-from a UI override, in its run summary.
+refused credential means the endpoint and the token are right.
+
+**Export and import.** "Export configuration" downloads every stored
+override as JSON (`maljan-settings.json`; secret values are omitted and
+listed by key under `secrets_omitted`). "Import configuration" (admin
+only) accepts the same document, validates every key against the catalog,
+previews what will change, and applies it through the same path a UI edit
+takes — audited, encrypted where secret. This is how a configuration moves
+between environments; there is no `.env` export or import any more. Every
+analysis still records the settings that were actually in effect, and
+which of them came from a stored override, in its run summary.
+
+**Legacy `.env` (one-time only).** The first API start after this design
+imports a legacy root `.env`, if one is present, into the settings store:
+for every catalog key whose old value differs from the default and has no
+stored row yet, it writes one, encrypting secrets, and records a single
+audit entry naming the keys (never the values). A later start is a no-op;
+the store is authoritative from then on. The standalone CLI is the one
+remaining consumer that still reads `.env` and the environment directly —
+see the Quick Start section above.
 
 ---
 
