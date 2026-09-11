@@ -28,9 +28,8 @@ REQUIRED_ENV = {
 def test_compose_binds_loopback_and_requires_the_secrets(tmp_path):
     env = {**REQUIRED_ENV, "PATH": "/usr/bin:/bin"}
     # Render a copy of the compose file, not the real one: docker compose
-    # config reads two files from disk regardless of the subprocess env
-    # passed below (docker/.env for interpolation, and each service's
-    # env_file: ../.env), so rendering the real file would fold the
+    # config reads docker/.env from disk for interpolation regardless of the
+    # subprocess env passed below, so rendering the real file would fold the
     # developer's actual secrets into `out` and, on a failing assertion,
     # into the pytest report.
     compose_dir = tmp_path / "docker"
