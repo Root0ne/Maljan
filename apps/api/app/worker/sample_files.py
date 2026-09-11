@@ -146,7 +146,7 @@ def sweep(
 ) -> int:
     """Remove mirrored sample copies older than ``max_age_s``.
 
-    API-2 (dev audit 2026-09-06): the cutoff is the whole of the coordination
+    The cutoff is the whole of the coordination
     there is, and it is deliberate. Several workers may share these directories
     and run this sweep at once, with no lock between them; what makes that safe
     is the age, not a lock. A file in flight for a live job was written when

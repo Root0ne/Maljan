@@ -25,7 +25,7 @@ from pydantic import SecretStr
 from app.config import APISettings
 
 # Every application-shaped setting used to live on APISettings and be
-# configurable through the process environment. Task 2 of the env-free
+# configurable through the process environment. The env-free
 # configuration work moved them out: the environment no longer configures
 # application behaviour, only deployment/bootstrap facts (see API_READONLY
 # below). Each entry's runtime value now comes from the settings store, or
@@ -420,7 +420,7 @@ def _masked(name: str, value: Any) -> Any:
 def validate_editable_api_value(entry: CatalogEntry, value: Any) -> str | None:
     """Return an error message when ``value`` does not fit ``entry``, else ``None``.
 
-    ``API_EDITABLE`` fields no longer live on ``APISettings`` (Task 2), so
+    ``API_EDITABLE`` fields no longer live on ``APISettings``, so
     they no longer get pydantic's type/bounds checking for free when a PATCH
     lands. This is the replacement: the same numeric floors the fields used
     to declare via ``Field(ge=...)`` are carried in ``API_EDITABLE`` instead
@@ -544,7 +544,7 @@ def _choice_sources(
     from maljan.providers.registry import sandbox_provider_ids, static_provider_ids
 
     return {
-        # Declared for completeness and for sub-project C's agent definitions.
+        # Declared for completeness and for the agent definitions.
         # Neither provider selector uses them today: those two are enum leaves
         # whose choices already come from the settings Literal, in its own
         # order, and re-deriving them here would only re-sort the dropdown.

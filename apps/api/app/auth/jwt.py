@@ -32,7 +32,7 @@ def _secret() -> str:
 def _previous_secret() -> str:
     """Return the previous secret if one is configured, else empty string.
 
-    SEC-JWT-ROTATION-01 (audit 2026-05-19): during a key rotation window
+    During a key rotation window
     the previous secret is kept as a fallback in ``decode_token`` so
     in-flight tokens stay valid until they naturally expire.
     """
@@ -62,7 +62,7 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
     """Create a JWT access token.
 
     The expiry minutes come from ``runtime_config.get_cached`` rather than a
-    static setting (Task 2). This function stays synchronous on purpose —
+    static setting. This function stays synchronous on purpose —
     its signature takes no awaitable — and reads the *last value the async
     login/refresh route resolved* rather than awaiting a settings read
     itself; the route calls ``await runtime_config.get(...)`` once before
@@ -117,7 +117,7 @@ def create_refresh_token(data: dict) -> tuple[str, str]:
 def decode_token(token: str) -> dict[str, Any] | None:
     """Decode and validate a JWT token. Returns payload or ``None`` if invalid.
 
-    SEC-JWT-ROTATION-01: try the active secret first, then fall back to
+    Try the active secret first, then fall back to
     the previous secret if configured. This is the dual-secret accept
     window that lets operators rotate ``JWT_SECRET_KEY`` without
     invalidating every issued token at once.

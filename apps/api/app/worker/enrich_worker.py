@@ -44,7 +44,7 @@ async def _get_memory_store() -> MemoryStore | None:
     Returns ``None`` when Qdrant is not installed / not reachable so the
     enrichment task degrades to reputation-only behaviour without aborting.
     ``qdrant_url`` / ``qdrant_collection`` / ``qdrant_api_key`` are the API's
-    own store-backed knobs (Task 2), separate from ``core.memory.qdrant_*``.
+    own store-backed knobs, separate from ``core.memory.qdrant_*``.
     """
     global _memory_store_built, _memory_store
     if _memory_store_built:

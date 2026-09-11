@@ -1,6 +1,6 @@
-"""Standard security response headers (audit 2026-05-19 SEC-CORS-HEADERS-01).
+"""Standard security response headers.
 
-The 2026-05-17 audit added CORS but not the rest of the common defensive
+An earlier audit added CORS but not the rest of the common defensive
 header set. This middleware adds the recommended baseline on every
 response. None of these headers are sensitive to API behaviour — they
 exist purely to harden browser-side handling of stray or hostile content.

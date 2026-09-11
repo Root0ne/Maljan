@@ -105,7 +105,7 @@ async def get_mitre_techniques(
 
 
 # ---------------------------------------------------------------------------
-# Comprehensive MalwareReport endpoints (Faz 5)
+# Comprehensive MalwareReport endpoints
 # ---------------------------------------------------------------------------
 
 
@@ -157,7 +157,7 @@ async def get_full_malware_report_html(
     user: User = Depends(get_current_user),
     svc: ReportService = Depends(_get_service),
 ) -> Response:
-    """Render the comprehensive report as a standalone HTML document (Phase 6).
+    """Render the comprehensive report as a standalone HTML document.
 
     Self-contained: inline CSS and inline SVG figures, no external requests, so
     it can be archived or opened in an offline analysis VM. Served inline by
@@ -198,7 +198,7 @@ async def get_full_malware_report_pdf(
     user: User = Depends(get_current_user),
     svc: ReportService = Depends(_get_service),
 ) -> Response:
-    """Render the comprehensive report as a print-ready PDF (Phase 6).
+    """Render the comprehensive report as a print-ready PDF.
 
     Same document as ``/html``, printed through WeasyPrint: A4, numbered pages,
     a linked table of contents and the deterministic figures in place. Returns
@@ -303,11 +303,11 @@ async def enqueue_enrichment_job(
     if report_row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
 
-    # Wave 9 (2026-05-29) pre-flight: skip the enqueue when the report
-    # carries no network IOCs to enrich. The 2026-05-29 Linux ELF audit
-    # found that ELF samples with no PCAP / sandbox network trace queued
-    # an ARQ job that silently no-op'd; surfacing ``skipped_no_network_iocs``
-    # makes the UI's "Enrich" button informative instead of misleading.
+    # Pre-flight: skip the enqueue when the report carries no network IOCs
+    # to enrich. A Linux ELF audit found that ELF samples with no PCAP /
+    # sandbox network trace queued an ARQ job that silently no-op'd;
+    # surfacing ``skipped_no_network_iocs`` makes the UI's "Enrich" button
+    # informative instead of misleading.
     _mr = report_row.malware_report or {}
     _net = _mr.get("network") if isinstance(_mr, dict) else None
     if not _net or (not (_net.get("domains") or []) and not (_net.get("ips") or [])):

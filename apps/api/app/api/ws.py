@@ -242,7 +242,7 @@ async def ws_analysis(websocket: WebSocket, job_id: str) -> None:
     logger.info("WebSocket authenticated: user=%s job=%s", user_id, job_id)
     await manager.connect(websocket, job_id)
 
-    # SEC-WS-AUTH-CONTINUOUS-01 (audit 2026-05-19): the handshake checked
+    # The handshake checked
     # ``exp``, but a long-lived connection could outlive its token. Read
     # the original ``exp`` claim once and revalidate against the wall
     # clock on every heartbeat tick (~30 s). When expired, close the

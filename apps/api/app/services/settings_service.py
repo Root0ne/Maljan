@@ -128,7 +128,7 @@ class SettingsService:
             if entry.namespace == "core":
                 default_value = core_defaults_by_path[entry.path]
             elif entry.path in API_DEFAULTS:
-                # Task 2: editable api.* leaves no longer live on APISettings
+                # Editable api.* leaves no longer live on APISettings
                 # (and so no longer come from the environment) -- their
                 # fallback is the catalog default table instead.
                 raw = API_DEFAULTS[entry.path]
@@ -221,8 +221,8 @@ class SettingsService:
                 # effect: for a core leaf, the model default resolved through
                 # build_settings({}) above; for an api.* leaf, its live
                 # bootstrap value (``getattr(api_settings, entry.path)`` --
-                # APISettings is still process-environment-only by design,
-                # Task 1). URL-shaped values go through the same credential
+                # APISettings is still process-environment-only by design).
+                # URL-shaped values go through the same credential
                 # mask the catalog's default uses, so a password never
                 # reaches the response either way.
                 shown = default_value if entry.editable else _masked(entry.path, default_value)
@@ -284,8 +284,8 @@ class SettingsService:
             for err in exc.errors():
                 errors[_loc_to_key("core", err["loc"])] = err["msg"]
         # No ``APISettings(**nest(merged_api))`` here: ``extra="ignore"`` drops
-        # everything a catalog ``api.*`` key could supply (Task 2 moved every
-        # one of them off the model), so the call could only ever have failed
+        # everything a catalog ``api.*`` key could supply (every one of them
+        # moved off the model), so the call could only ever have failed
         # on the process environment -- which bootstrap already validated.
         # Each editable api leaf is checked against its catalog entry below.
         index = catalog_index()

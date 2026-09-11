@@ -82,7 +82,7 @@ class APISettings(BaseSettings):
 
     # ── Database ─────────────────────────────────────────────────
     database_url: str = "postgresql+asyncpg://maljan:maljan_dev@127.0.0.1:5433/maljan"
-    # Bounds, here and on every numeric leaf below (B4, dev audit 2026-09-06):
+    # Bounds, here and on every numeric leaf below:
     # each of these is a size, a count or a period, and a value at or below
     # zero does not mean "unlimited" for any of them -- it means a pool that
     # cannot serve, a token already expired, or a Redis expiry that deletes
@@ -106,7 +106,7 @@ class APISettings(BaseSettings):
     minio_bucket: str = "maljan-samples"
     minio_secure: bool = False
 
-    # ── Ghidra MCP container delivery (Wave 6 GHIDRA-DELIVERY-01) ───
+    # ── Ghidra MCP container delivery ───────────────────────────────
     # Worker mirrors each MinIO-downloaded sample into ``data/samples/``
     # on the host so the Ghidra MCP container can read it through its
     # bind mount. ``ghidra_container_samples_path`` is the path at which
@@ -129,7 +129,7 @@ class APISettings(BaseSettings):
     jwt_issuer: str = "maljan-api"
     jwt_audience: str = "maljan-clients"
 
-    # SEC-JWT-ROTATION-01 (audit 2026-05-19) — minimal viable secret
+    # Minimal viable secret
     # rotation. New tokens carry the ``kid`` header set to ``jwt_key_id``.
     # During rotation, operators set ``jwt_previous_secret_key`` to the
     # old value for a grace period; ``decode_token`` accepts both. Once
@@ -160,7 +160,7 @@ class APISettings(BaseSettings):
     auth_disabled_user_email: str = "dev@local"
     auth_disabled_user_full_name: str = "Dev User"
 
-    # Wave 9 (2026-05-29): the 2026-05-29 Linux ELF audit found that
+    # A Linux ELF audit found that
     # ``tempfile.NamedTemporaryFile`` defaults to the system temp dir
     # (``%LOCALAPPDATA%\Temp`` on Windows), which is the Defender quarantine
     # zone. Sample uploads + worker writes targeting that path were
