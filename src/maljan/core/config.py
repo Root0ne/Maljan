@@ -1364,10 +1364,9 @@ class ReportingConfig(BaseModel):
 # only -- no environment, no .env, no secrets directory". Bare ``Settings()``
 # never touches this flag, so it stays environment- and dotenv-capable: that
 # is the documented library behaviour the frozen ``tests/evaluation/**``
-# scripts and the future ``legacy_env_import.py`` depend on. A ContextVar
-# rather than an init kwarg because pydantic-settings validates unknown
-# keyword arguments against the model's fields and rejects one that is not
-# a declared field.
+# scripts depend on. A ContextVar rather than an init kwarg because
+# pydantic-settings validates unknown keyword arguments against the model's
+# fields and rejects one that is not a declared field.
 STORE_ONLY: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "maljan_settings_store_only", default=False
 )

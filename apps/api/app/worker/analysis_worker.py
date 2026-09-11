@@ -1499,43 +1499,6 @@ async def _sweep_orphan_jobs(db_session: async_sessionmaker) -> None:
             )
 
 
-async def _warn_if_configuration_import_has_not_run() -> None:
-    """Say so when the store has not been populated from the legacy environment yet.
-
-    The worker never imports -- by design, it only reads the store -- so on an
-    upgrading deployment a job taken in the seconds before the API's lifespan
-    finishes its one-time import would run on catalog defaults: the wrong LLM
-    provider, the wrong sandbox, and nothing anywhere saying why. Compose makes
-    the worker wait for a healthy API; this covers every other way the two are
-    started, and it never blocks -- a warning an operator can correlate with a
-    surprising run is the whole point.
-    """
-    from sqlalchemy import select
-
-    from app.database import async_session_factory
-    from app.models.settings_meta import SettingsMeta
-    from app.services.legacy_env_import import MARKER_KEY
-
-    try:
-        async with async_session_factory() as session:
-            marker = (
-                await session.execute(select(SettingsMeta).where(SettingsMeta.key == MARKER_KEY))
-            ).scalar_one_or_none()
-    except Exception as exc:  # noqa: BLE001 - reported, never fatal
-        logger.warning(
-            "Could not read the configuration import marker (%s); continuing.",
-            type(exc).__name__,
-            extra={"component": "worker.lifecycle"},
-        )
-        return
-    if marker is None:
-        logger.warning(
-            "Configuration import has not run yet; jobs started now use catalog "
-            "defaults rather than this deployment's configuration.",
-            extra={"component": "worker.lifecycle"},
-        )
-
-
 async def startup(ctx: dict) -> None:
     """Called when the ARQ worker starts up."""
     # Initialize logging for the worker process first: the CRITICAL bootstrap
@@ -1551,8 +1514,6 @@ async def startup(ctx: dict) -> None:
     except BootstrapProblem as exc:
         logger.critical(str(exc))
         raise
-
-    await _warn_if_configuration_import_has_not_run()
 
     # Clear stale private sample copies left behind by a worker that was
     # killed mid-job (no finally ran) before this one starts taking jobs.

@@ -11,7 +11,6 @@ from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select
 
 from app.config import get_settings, settings
 from app.logging_config import get_logger, setup_logging
@@ -104,19 +103,14 @@ async def _probe_components() -> dict[str, dict[str, Any]]:
 
 
 def _config_readiness(app: FastAPI) -> dict[str, str]:
-    """The three facts ``/health`` reports about configuration state.
+    """The two facts ``/health`` reports about configuration state.
 
     No I/O: ``bootstrap`` and ``encryption`` are static "ok" -- the process
     already passed ``require_bootstrap`` (which checks both) before it could
-    ever start serving this endpoint, so there is nothing left to probe.
-    ``legacy_import`` is read from ``app.state.legacy_import_status``, set
-    once during the lifespan's legacy-import step (the ``settings_meta``
-    marker is immutable once written, so one read at startup is all this
-    ever needs) -- never re-queried per request, so the bare liveness probe
-    stays dependency-free.
+    ever start serving this endpoint, so there is nothing left to probe, and
+    the bare liveness probe stays dependency-free.
     """
-    legacy_import = getattr(app.state, "legacy_import_status", "unknown")
-    return {"bootstrap": "ok", "encryption": "ok", "legacy_import": legacy_import}
+    return {"bootstrap": "ok", "encryption": "ok"}
 
 
 @asynccontextmanager
@@ -213,46 +207,28 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
 
     from app.database import async_session_factory
-    from app.models.settings_meta import SettingsMeta
-    from app.services.legacy_env_import import (
-        MARKER_KEY,
+    from app.services.composite_secrets import (
         repair_frontier_arm_keys,
         repair_server_auth_tokens,
-        run_legacy_import,
     )
 
     try:
-        async with async_session_factory() as _legacy_session:
-            imported_keys = await run_legacy_import(_legacy_session)
-            # W3 / re-review I2: an earlier import left the credential of a
-            # composite leaf inside the composite row -- in clear for a
-            # frontier arm's key, as the literal mask for an MCP server's
-            # token. Both repairs are idempotent and a no-op on a store that
-            # never held one.
-            await repair_frontier_arm_keys(_legacy_session)
-            await repair_server_auth_tokens(_legacy_session)
-            # The marker is immutable once written (see the module docstring),
-            # so this one read -- whether this call just wrote it or found it
-            # already there -- is all ``/health`` will ever need; cached below
-            # so the endpoint never touches the database for it.
-            _marker = (
-                await _legacy_session.execute(
-                    select(SettingsMeta).where(SettingsMeta.key == MARKER_KEY)
-                )
-            ).scalar_one_or_none()
-        if imported_keys:
-            logger.info("Legacy configuration import: %d key(s)", len(imported_keys))
-        else:
-            logger.debug("Legacy configuration import: nothing to import")
-        _marker_value = _marker.value if _marker is not None else None
-        _imported_total = _marker_value.get("imported", 0) if isinstance(_marker_value, dict) else 0
-        app.state.legacy_import_status = "done" if _imported_total > 0 else "not-needed"
+        async with async_session_factory() as _repair_session:
+            # A composite leaf must never keep a credential inside its own
+            # row. Both repairs are idempotent and a no-op on a store that
+            # already satisfies that invariant.
+            _moved_arm_keys = await repair_frontier_arm_keys(_repair_session)
+            _moved_server_tokens = await repair_server_auth_tokens(_repair_session)
+        logger.info(
+            "Composite-secret repair: %d arm key(s), %d server token(s) moved",
+            _moved_arm_keys,
+            _moved_server_tokens,
+        )
     except Exception:
-        # Best effort, like the audit trail: the marker is only written on
-        # success, so a failure here just means the next start tries again --
-        # it must never take an otherwise-healthy API down.
-        logger.exception("Legacy configuration import failed")
-        app.state.legacy_import_status = "unknown"
+        # Best effort, like the audit trail: a failure here just means the
+        # next start tries again -- it must never take an otherwise-healthy
+        # API down.
+        logger.exception("Composite-secret repair failed")
 
     if settings.auth_disabled:
         try:
@@ -405,8 +381,7 @@ def create_app() -> FastAPI:
         is unreachable, so an orchestrator or dashboard can tell the difference.
         The bare form stays dependency-free and fast: a liveness probe must not
         restart the API just because Postgres is briefly unavailable. ``config``
-        costs nothing either way — ``bootstrap``/``encryption`` are constants and
-        ``legacy_import`` is read from ``app.state``, cached once at startup
+        costs nothing either way — ``bootstrap``/``encryption`` are constants
         (see ``_config_readiness``), never queried per request.
         """
         body: dict[str, Any] = {
