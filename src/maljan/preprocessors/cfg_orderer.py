@@ -1,7 +1,5 @@
 """CFG Orderer using NetworkX to topologically sort Ghidra call graphs."""
 
-import json
-from pathlib import Path
 from typing import Any
 
 import networkx as nx
@@ -14,13 +12,6 @@ class CFGOrderer:
         self.cfg_data = cfg_data
         self.graph = nx.DiGraph()
         self._build_graph()
-
-    @classmethod
-    def from_file(cls, filepath: str | Path) -> "CFGOrderer":
-        """Initialize from a JSON file path."""
-        with open(filepath, encoding="utf-8") as f:
-            data = json.load(f)
-        return cls(data)
 
     def _build_graph(self) -> None:
         """Build a directed graph from the CFG data."""
@@ -60,10 +51,3 @@ class CFGOrderer:
         # Return reversed order (bottom-up: leaves first, main last)
         # Or top-down (main first). Let's do top-down for readability:
         return ordered
-
-    def get_function_data(self, func_name: str) -> dict[str, Any]:
-        """Get the attributes of a specific function."""
-        result = self.cfg_data.get("functions", {}).get(func_name, {})
-        if not isinstance(result, dict):
-            return {}
-        return result  # type: ignore[no-any-return]

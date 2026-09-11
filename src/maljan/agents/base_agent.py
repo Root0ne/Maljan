@@ -276,11 +276,6 @@ def strip_tool_call_scaffolding(text: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
 
 
-def is_only_scaffolding(text: str) -> bool:
-    """True when nothing but tool-call scaffolding is left once it is removed."""
-    return not strip_tool_call_scaffolding(text).strip()
-
-
 def parse_structured_claims(text: str) -> list[ClaimEvidence]:
     """Parse ``CLAIM:``-delimited blocks, tolerating missing optional fields.
 
