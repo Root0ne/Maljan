@@ -38,14 +38,25 @@ def arm_key_key(arm: str) -> str:
     return f"{ARMS_KEY}.{arm}{_SUFFIX}"
 
 
-def split_arm_secrets(value: Any) -> tuple[Any, dict[str, str | None]]:
+def split_arm_secrets(
+    value: Any, *, stored: dict[str, Any] | None = None
+) -> tuple[Any, dict[str, str | None]]:
     """Separate the per-arm API keys from the map that gets stored.
 
     The second element is an *instruction set*, not a state: an arm appears in
-    it only when the incoming entry actually said something about its key. A
-    non-empty string means "store this"; ``None`` (from an explicit ``null``
-    or an empty string) means "delete the row"; the mask means "leave it
-    alone", and so does an entry that never mentions ``api_key`` at all.
+    it only when something has to happen to its row. A non-empty string means
+    "store this"; ``None`` (from an explicit ``null`` or an empty string)
+    means "delete the row"; the mask means "leave it alone", and so does an
+    entry that never mentions ``api_key`` at all.
+
+    ``stored`` is the arms map as it stands (the effective one, with any
+    encrypted row already merged back in). It exists for one rule: the
+    composite must never lose a key that was never stored anywhere else. An
+    upgraded deployment can still have a key sitting in the composite in clear
+    -- that is what the repair in ``legacy_env_import`` is for -- and an
+    import document, which omits ``api_key`` entirely, would otherwise strip
+    it on the way past. Such a key is carried into the instruction set instead,
+    so the save writes the encrypted row the strip assumes exists.
     """
     if not isinstance(value, dict):
         return value, {}
@@ -55,15 +66,26 @@ def split_arm_secrets(value: Any) -> tuple[Any, dict[str, str | None]]:
         if not isinstance(entry, dict):
             cleaned[name] = entry
             continue
-        stripped = {k: v for k, v in entry.items() if k != "api_key"}
-        cleaned[name] = stripped
-        if "api_key" not in entry:
-            continue
-        api_key = entry["api_key"]
-        if api_key == TOKEN_MASK:
+        cleaned[name] = {k: v for k, v in entry.items() if k != "api_key"}
+        api_key = entry.get("api_key")
+        if "api_key" not in entry or api_key == TOKEN_MASK:
+            carried = _stored_key(stored, name)
+            if carried is not None:
+                keys[str(name)] = carried
             continue
         keys[str(name)] = str(api_key) if api_key else None
     return cleaned, keys
+
+
+def _stored_key(stored: dict[str, Any] | None, name: str) -> str | None:
+    """The real key the stored map holds for ``name``, if it holds one."""
+    entry = (stored or {}).get(name)
+    if not isinstance(entry, dict):
+        return None
+    api_key = entry.get("api_key")
+    if isinstance(api_key, str) and api_key and api_key != TOKEN_MASK:
+        return api_key
+    return None
 
 
 def merge_arm_secrets(overrides: dict[str, Any]) -> dict[str, Any]:

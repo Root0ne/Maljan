@@ -9,6 +9,7 @@ effective settings are assembled for a job.
 
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -182,6 +183,49 @@ def test_values_shows_the_mask_never_the_key(encryption_key):
     assert shown["free"]["api_key"] is None
 
 
+@pytest.mark.asyncio
+async def test_a_real_key_replaces_the_stored_one(encryption_key):
+    stored = RuntimeSetting(key=arm_key_key("glm"), value=box.encrypt("sk-old"), is_secret=True)
+    service, session = _service([stored])
+    service.load_overrides = AsyncMock(  # type: ignore[method-assign]
+        return_value={ARMS_KEY: {"glm": {**_arm(), "api_key": "sk-old"}}}
+    )
+
+    await service.save({ARMS_KEY: {"glm": _arm(api_key="sk-new")}}, user_id=None, ip=None)
+
+    assert session.deleted == []
+    assert box.decrypt(stored.value) == "sk-new"
+
+
+@pytest.mark.asyncio
+async def test_a_save_never_drops_a_key_the_composite_alone_was_holding(encryption_key):
+    """Fix round 1, the same rule on the save path.
+
+    An upgraded deployment can still carry a key in the composite in clear (the
+    repair has not run yet, or it ran while the encryption key was unusable).
+    An import document omits ``api_key`` entirely, so the strip would take that
+    key with it and store nothing. It is carried into an encrypted row instead.
+    """
+    service, session = _service()
+    service.load_overrides = AsyncMock(  # type: ignore[method-assign]
+        return_value={ARMS_KEY: {"glm": {**_arm(), "api_key": "sk-legacy"}}}
+    )
+
+    await service.save({ARMS_KEY: {"glm": _arm()}}, user_id=None, ip=None)
+
+    composite = next(r for r in session.added if r.key == ARMS_KEY)
+    assert "api_key" not in composite.value["glm"]
+    key_row = next(r for r in session.added if r.key == arm_key_key("glm"))
+    assert box.decrypt(key_row.value) == "sk-legacy"
+
+
+def test_a_masked_entry_with_nothing_stored_instructs_nothing():
+    """The mask is not a key: with no stored value behind it there is nothing
+    to write, and nothing is claimed to have been written."""
+    _, keys = split_arm_secrets({"glm": _arm(api_key=TOKEN_MASK)}, stored={})
+    assert keys == {}
+
+
 # ---- the one-off repair ----------------------------------------------
 
 
@@ -190,7 +234,14 @@ class _RepairDB:
         self.row = row
         self.added: list = []
         self.committed = False
+        self.flushed_before_strip = False
         self._calls = 0
+
+    async def flush(self):
+        # Recorded rather than counted: what matters is that nothing was
+        # removed from the composite before every leaf row reached the
+        # transaction.
+        self.flushed_before_strip = all("api_key" in entry for entry in self.row.value.values())
 
     async def execute(self, _stmt):
         self._calls += 1
@@ -234,14 +285,85 @@ async def test_the_repair_is_idempotent(encryption_key):
 
 
 @pytest.mark.asyncio
-async def test_the_repair_drops_a_stored_mask_without_storing_it(encryption_key):
+async def test_the_repair_never_strips_a_key_it_did_not_store(encryption_key, caplog):
+    """Fix round 1: the mask is what the legacy import actually wrote.
+
+    ``flatten_leaves`` dumps the arms map through ``model_dump(mode="json")``,
+    which renders every ``SecretStr`` as ten asterisks -- so the composite row
+    on an upgraded deployment holds the mask, not the key. The first repair
+    reused ``split_arm_secrets``, whose contract is the UI's ("the mask means
+    leave the stored row alone"), and there is no stored row behind it here:
+    it stripped the field from all four arms, stored nothing, and reported 0.
+    The composite must keep what the repair cannot store.
+    """
+    arms = {name: _arm(api_key=TOKEN_MASK) for name in ("glm", "nim", "or", "dsk")}
+    row = RuntimeSetting(key=ARMS_KEY, value=arms, is_secret=False)
+    db = _RepairDB(row)
+
+    with caplog.at_level(logging.WARNING):
+        moved = await repair_frontier_arm_keys(db)
+
+    assert moved == 0
+    assert db.added == []
+    assert db.committed is False
+    for name in arms:
+        assert row.value[name]["api_key"] == TOKEN_MASK
+    assert "glm" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_the_repair_strips_a_masked_arm_once_it_has_a_row(encryption_key):
+    """With the leaf in place the mask in the composite is only a leftover."""
     row = RuntimeSetting(key=ARMS_KEY, value={"glm": _arm(api_key=TOKEN_MASK)}, is_secret=False)
+    db = _RepairDB(row)
+    db.added.append(RuntimeSetting(key=arm_key_key("glm"), value=box.encrypt("sk-real")))
+
+    assert await repair_frontier_arm_keys(db) == 0
+    assert "api_key" not in row.value["glm"]
+    assert db.committed is True
+
+
+@pytest.mark.asyncio
+async def test_the_repair_strips_an_arm_whose_key_was_never_set(encryption_key):
+    row = RuntimeSetting(key=ARMS_KEY, value={"free": _arm(api_key=None)}, is_secret=False)
     db = _RepairDB(row)
 
     assert await repair_frontier_arm_keys(db) == 0
-    assert db.added == []
-    assert "api_key" not in row.value["glm"]
+    assert "api_key" not in row.value["free"]
     assert db.committed is True
+
+
+@pytest.mark.asyncio
+async def test_the_repair_keeps_the_mask_and_moves_the_real_key_beside_it(encryption_key):
+    row = RuntimeSetting(
+        key=ARMS_KEY,
+        value={"glm": _arm(api_key="sk-real"), "nim": _arm(api_key=TOKEN_MASK)},
+        is_secret=False,
+    )
+    db = _RepairDB(row)
+
+    assert await repair_frontier_arm_keys(db) == 1
+    assert "api_key" not in row.value["glm"]
+    assert row.value["nim"]["api_key"] == TOKEN_MASK
+    assert box.decrypt(db.added[0].value) == "sk-real"
+
+
+@pytest.mark.asyncio
+async def test_every_leaf_is_written_before_the_composite_is_stripped(encryption_key):
+    """(c): the strip only ever follows a flush of every leaf row."""
+    arms = {name: _arm(api_key=f"sk-{name}") for name in ("glm", "nim", "or", "dsk")}
+    row = RuntimeSetting(key=ARMS_KEY, value=arms, is_secret=False)
+    db = _RepairDB(row)
+
+    moved = await repair_frontier_arm_keys(db)
+
+    assert moved == 4
+    assert db.flushed_before_strip is True
+    assert [r.key for r in db.added] == [arm_key_key(n) for n in arms]
+    for name in arms:
+        stored = next(r for r in db.added if r.key == arm_key_key(name))
+        assert box.decrypt(stored.value) == f"sk-{name}"
+        assert "api_key" not in row.value[name]
 
 
 @pytest.mark.asyncio

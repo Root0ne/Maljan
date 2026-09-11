@@ -44,6 +44,7 @@ from app.models import RuntimeSetting
 from app.models.settings_meta import SettingsMeta
 from app.services import audit
 from app.services.frontier_arms import ARMS_KEY, arm_key_key, split_arm_secrets
+from app.services.server_map import TOKEN_MASK
 from app.services.settings_catalog_api import (
     API_DEFAULTS,
     catalog_index,
@@ -254,35 +255,68 @@ async def run_legacy_import(
 
 
 async def repair_frontier_arm_keys(db: AsyncSession) -> int:
-    """Move any clear-text arm API key out of the composite row, once.
+    """Move every clear-text arm API key out of the composite row, once.
 
     Walkthrough finding W3: the ``core.llm.frontier.arms`` row an earlier
     import wrote is plain JSONB with each arm's ``api_key`` inside it --
     ``is_secret=false``, never through the Fernet box, sitting in the database
-    in clear beside values the UI echoes back. This moves every such key into
-    its own encrypted ``core.llm.frontier.arms.<arm>.api_key`` row and rewrites
-    the composite without them.
+    beside values the UI echoes back.
 
-    Idempotent: a composite that carries no ``api_key`` field is left alone, so
-    a second start does nothing. An arm that already has its own row keeps it
-    (whatever the operator saved wins). Only the count is logged, never a key.
+    The rule this function is built around, and the one the first attempt broke
+    (fix round 1): an ``api_key`` is removed from the composite **only** when
+    an encrypted row for that arm exists -- one written here, in the same
+    transaction and flushed before anything is stripped, or one the operator
+    already saved. What cannot be recovered is left exactly where it is and
+    named in a warning, because the alternative is deleting the only record
+    that the arm had a key at all.
+
+    This reads the *raw* stored JSON deliberately. It must not go through
+    ``split_arm_secrets``: that splitter serves the UI and the import, where
+    the mask means "leave the stored row alone" because there always is one.
+    Here the mask is what ``flatten_leaves`` wrote in place of a key
+    (``model_dump(mode="json")`` renders a ``SecretStr`` as ten asterisks), so
+    "leave the stored row alone" would silently mean "delete the field".
+
+    Idempotent: a composite with nothing left to move is not rewritten and not
+    committed. Only counts and arm names are logged, never a key.
     """
     row = (
         await db.execute(select(RuntimeSetting).where(RuntimeSetting.key == ARMS_KEY))
     ).scalar_one_or_none()
     if row is None or not isinstance(row.value, dict):
         return 0
-
-    cleaned, arm_keys = split_arm_secrets(row.value)
-    if cleaned == row.value:
+    stored: dict[str, Any] = row.value
+    arms = {
+        name: entry["api_key"]
+        for name, entry in stored.items()
+        if isinstance(entry, dict) and "api_key" in entry
+    }
+    if not arms:
         return 0
 
     existing_keys = {r[0] for r in (await db.execute(select(RuntimeSetting.key))).all()}
     to_store = {
-        arm_key_key(name): api_key
-        for name, api_key in arm_keys.items()
-        if api_key and arm_key_key(name) not in existing_keys
+        name: api_key
+        for name, api_key in arms.items()
+        if isinstance(api_key, str)
+        and api_key
+        and api_key != TOKEN_MASK
+        and arm_key_key(name) not in existing_keys
     }
+    # A mask with no row behind it names a key this deployment no longer has:
+    # it was never the credential, only what the dump left in its place.
+    unrecoverable = sorted(
+        name
+        for name, api_key in arms.items()
+        if api_key == TOKEN_MASK and arm_key_key(name) not in existing_keys
+    )
+    if unrecoverable:
+        logger.warning(
+            "Frontier arm API keys for %s are masked in the stored configuration and "
+            "cannot be recovered; set them again from Settings -> Configuration. The "
+            "masked entries are left untouched.",
+            ", ".join(unrecoverable),
+        )
     if to_store and not box.is_available():
         # Rewriting the composite now would destroy the only copy of a key
         # that cannot yet be encrypted; leave everything as it is and say so.
@@ -292,8 +326,24 @@ async def repair_frontier_arm_keys(db: AsyncSession) -> int:
         )
         return 0
 
-    for key, api_key in to_store.items():
-        db.add(RuntimeSetting(key=key, value=box.encrypt(str(api_key)), is_secret=True))
+    for name, api_key in to_store.items():
+        db.add(RuntimeSetting(key=arm_key_key(name), value=box.encrypt(api_key), is_secret=True))
+    if to_store:
+        # Every leaf reaches the transaction before a single field leaves the
+        # composite: a failing insert takes the strip down with it.
+        await db.flush()
+
+    keep = set(unrecoverable)
+    cleaned = {
+        name: (
+            {k: v for k, v in entry.items() if k != "api_key"}
+            if isinstance(entry, dict) and name in arms and name not in keep
+            else entry
+        )
+        for name, entry in stored.items()
+    }
+    if cleaned == stored:
+        return 0
     row.value = cleaned
     await db.commit()
     logger.info("Frontier arm API keys moved into encrypted rows: %d", len(to_store))

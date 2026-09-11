@@ -163,6 +163,23 @@ def test_export_strips_a_mask_nested_at_any_depth(client):
     assert body["secrets_omitted"] == ["core.mcp.servers.custom.nested.deeper.0.secret"]
 
 
+def test_export_lists_one_path_per_arm_whose_key_is_stored(client):
+    """Once the repair has written the leaves, ``values()`` masks all four arms
+    and the export names each one it did not carry -- exactly once."""
+    arms = {
+        name: {"base_url": "https://f", "model": name, "api_key": "**********"}
+        for name in ("dsk", "glm", "nim", "or")
+    }
+    fake = {"core.llm.frontier.arms": ValueInfo(arms, None, None, "ui")}
+    with patch("app.api.v1.settings.SettingsService.values", AsyncMock(return_value=fake)):
+        r = client.get("/api/v1/settings/export")
+    body = r.json()
+    assert body["secrets_omitted"] == [
+        f"core.llm.frontier.arms.{name}.api_key" for name in ("dsk", "glm", "nim", "or")
+    ]
+    assert all("api_key" not in arm for arm in body["values"]["core.llm.frontier.arms"].values())
+
+
 def test_export_masks_every_server_env_value(client):
     """SEC-1: a server's ``env`` map is where its own credential lives, so the
     export carries the variable names and the mask, never the values; each one

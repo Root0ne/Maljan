@@ -354,7 +354,11 @@ class SettingsService:
                 # (handled below); every per-arm key row goes with it.
                 arms_kept = set()
             else:
-                changes[ARMS_KEY], arm_keys = split_arm_secrets(changes[ARMS_KEY])
+                stored_arms_map = current.get(ARMS_KEY)
+                changes[ARMS_KEY], arm_keys = split_arm_secrets(
+                    changes[ARMS_KEY],
+                    stored=stored_arms_map if isinstance(stored_arms_map, dict) else None,
+                )
                 unstorable = [
                     arm_key_key(name)
                     for name, api_key in arm_keys.items()
