@@ -19,6 +19,7 @@ import uuid
 from typing import TYPE_CHECKING, Any
 
 import redis.asyncio as aioredis
+from maljan.core.settings_overrides import redact_url
 
 from app.logging_config import get_logger
 from app.models.report import AnalysisReport
@@ -62,7 +63,7 @@ async def _get_memory_store() -> MemoryStore | None:
         )
         logger.info(
             "enrich: Qdrant LTM available (url=%s, collection=%s).",
-            qdrant_url,
+            redact_url(qdrant_url),
             qdrant_collection,
         )
     except Exception as exc:  # noqa: BLE001

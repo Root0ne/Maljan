@@ -16,14 +16,12 @@ from maljan.core.settings_overrides import (
     build_settings,
     effective_source,
     flatten_leaves,
-    nest,
     split_key,
 )
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import APISettings
 from app.config import settings as api_settings
 from app.models import RuntimeSetting
 from app.services.frontier_arms import (
@@ -269,8 +267,6 @@ class SettingsService:
                 errors[key] = "unknown setting"
             elif not entry.editable:
                 errors[key] = entry.reason or "read-only"
-            elif entry.secret and changes[key] is not None and not box.is_available():
-                errors[key] = "secrets cannot be stored: SETTINGS_ENCRYPTION_KEY is not set"
         if errors:
             raise SettingsValidationError(errors)
 
@@ -281,15 +277,11 @@ class SettingsService:
         except ValidationError as exc:
             for err in exc.errors():
                 errors[_loc_to_key("core", err["loc"])] = err["msg"]
-        try:
-            # ``extra="ignore"`` means this silently skips every leaf that
-            # Task 2 moved off APISettings; the ``db_*`` pool settings stayed
-            # on the model (deployment-shaped, not store-editable through the
-            # catalog) and are still validated here.
-            APISettings(**nest(merged_api))
-        except ValidationError as exc:
-            for err in exc.errors():
-                errors[_loc_to_key("api", err["loc"])] = err["msg"]
+        # No ``APISettings(**nest(merged_api))`` here: ``extra="ignore"`` drops
+        # everything a catalog ``api.*`` key could supply (Task 2 moved every
+        # one of them off the model), so the call could only ever have failed
+        # on the process environment -- which bootstrap already validated.
+        # Each editable api leaf is checked against its catalog entry below.
         index = catalog_index()
         for name, value in merged_api.items():
             if name not in API_DEFAULTS:

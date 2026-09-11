@@ -9,15 +9,17 @@ call. Two places are allowed to construct bare regardless:
 - ``apps/api/app/config.py`` -- the lazy ``APISettings()`` singleton
   (``get_settings()``'s memoised factory); it is process-environment-only by
   design (Task 1) and is not the core-settings path this task narrows.
-- ``apps/api/app/services/legacy_env_import.py`` -- a future one-shot import
-  tool that reads the legacy ``.env`` into the store; it necessarily
-  constructs a bare, environment-reading ``Settings`` to do that. Kept in the
-  allow-list even though the file does not exist yet.
+- ``apps/api/app/services/legacy_env_import.py`` (landed in Task 4) -- the
+  one-shot import of the legacy ``.env`` into the store; it necessarily
+  constructs a bare, environment-reading ``Settings``/``LegacyAPIView`` to do
+  that.
 
-The regex is bare-call-only (``Settings()``, ``Settings(_env_file=...)``,
-``APISettings()``) so a kwargs construction such as
-``APISettings(**nest(merged_api))`` does not trip it -- that is validating
-supplied values, not reading the environment.
+The check is bare-call-only (``Settings()``, ``Settings(_env_file=...)``,
+``APISettings()``) so a kwargs construction does not trip it -- that is
+validating supplied values, not reading the environment. It follows an alias
+too: ``from maljan.core.config import Settings as _CoreSettings`` followed by
+``_CoreSettings()`` is the same environment read spelled differently, and
+``analysis_worker.py`` already carries such an alias (type-only today).
 
 Fix round 1 (Critical 2/3) found the same leak could come back through
 ``maljan.core.config.get_settings()``, the module-level lazy singleton:
@@ -44,6 +46,20 @@ ROOT = Path(__file__).resolve().parents[2]
 APP_ROOT = ROOT / "apps" / "api" / "app"
 
 _BARE_CONSTRUCTION = re.compile(r"\bSettings\(\)|\bAPISettings\(\)|Settings\(_env_file")
+
+# ``from ... import Settings as _CoreSettings`` -- the alias is what the file
+# then calls, so the name above never appears and the check above sees nothing.
+_ALIASED_IMPORT = re.compile(r"\bimport\s+(?:APISettings|Settings)\s+as\s+(\w+)")
+
+
+def _constructs_bare_settings(text: str) -> bool:
+    if _BARE_CONSTRUCTION.search(text):
+        return True
+    return any(
+        re.search(rf"\b{re.escape(alias)}\((?:\)|_env_file)", text)
+        for alias in _ALIASED_IMPORT.findall(text)
+    )
+
 
 _ALLOWED_FILES = {
     "config.py",
@@ -95,10 +111,10 @@ def test_no_bare_settings_construction_outside_the_allow_list() -> None:
         if rel is not None and str(rel) in _ALLOWED_FILES:
             continue
         if not path.is_file():
-            # legacy_env_import.py is allow-listed before it exists.
+            # A tracked path that is not a file (a submodule entry, say).
             continue
         text = path.read_text(encoding="utf-8")
-        if _BARE_CONSTRUCTION.search(text):
+        if _constructs_bare_settings(text):
             offenders.append(str(path.relative_to(ROOT)))
     assert offenders == [], (
         "bare Settings()/APISettings() construction outside the allow-list: "
@@ -110,7 +126,7 @@ def test_the_worker_builds_core_settings_through_build_settings() -> None:
     worker = APP_ROOT / "worker" / "analysis_worker.py"
     text = worker.read_text(encoding="utf-8")
     assert "build_settings(" in text
-    assert not _BARE_CONSTRUCTION.search(text)
+    assert not _constructs_bare_settings(text)
 
 
 def test_no_core_get_settings_outside_the_allow_list() -> None:
@@ -131,4 +147,20 @@ def test_no_core_get_settings_outside_the_allow_list() -> None:
         "settings_service.effective_core_settings(db) (or, inside a job "
         "after install_settings, get_settings() there is the installed "
         "store-backed instance and is fine) instead"
+    )
+
+
+def test_an_aliased_bare_construction_does_not_slip_past_the_check() -> None:
+    """The regex used to be literal-name-only (final review M2)."""
+    aliased = (
+        "from maljan.core.config import Settings as _CoreSettings\nsettings = _CoreSettings()\n"
+    )
+    assert _constructs_bare_settings(aliased)
+    assert _constructs_bare_settings(
+        "from app.config import APISettings as _API\n_API(_env_file=None)\n"
+    )
+    # A kwargs construction is validating supplied values, not reading the
+    # environment, aliased or not.
+    assert not _constructs_bare_settings(
+        "from maljan.core.config import Settings as _CoreSettings\n_CoreSettings(**values)\n"
     )

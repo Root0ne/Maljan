@@ -271,7 +271,7 @@ export function RestMappingTable({
  * The `sandbox.rest.*` leaves, grouped, with a mapping table that can be tried.
  *
  * Every field is still an ordinary catalog leaf rendered by `FieldRow`, so
- * staging, per-key reset and `.env` export work exactly as they do everywhere
+ * staging, per-key reset and the JSON export work exactly as they do everywhere
  * else. What this adds is arrangement — four fieldsets instead of thirty flat
  * rows — and the preview: paste one of the sandbox's real responses, press the
  * button, and see per channel how many rows each JSONPath selected and how

@@ -8,6 +8,7 @@ import pytest
 from cryptography.fernet import Fernet
 
 from app import observability
+from app.config import APISettings
 from app.models import AuditLog, RuntimeSetting
 from app.services import audit as audit_module
 from app.services import settings_service as svc
@@ -156,12 +157,22 @@ async def test_values_never_hints_a_core_secret_from_the_environment(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_save_secret_without_key_is_refused(monkeypatch):
+async def test_a_process_without_a_usable_encryption_key_never_starts(monkeypatch):
+    """``check_keys`` no longer carries a "secrets cannot be stored" branch.
+
+    It was a remnant of the days when ``SETTINGS_ENCRYPTION_KEY`` was
+    optional. It is a bootstrap requirement now, so the branch could only
+    report a state no running process can be in: this is where that guarantee
+    is actually made (final review M9).
+    """
+    from app.bootstrap import validate_bootstrap
+
     monkeypatch.delenv("SETTINGS_ENCRYPTION_KEY", raising=False)
     s = svc.SettingsService(make_db([]))
-    with pytest.raises(svc.SettingsValidationError) as ei:
-        await s.save({"core.llm.openai.api_key": "x"}, user_id=None, ip=None)
-    assert "SETTINGS_ENCRYPTION_KEY" in ei.value.errors["core.llm.openai.api_key"]
+    assert s.check_keys({"core.llm.openai.api_key": "x"}) is None
+
+    settings = APISettings(settings_encryption_key="", _env_file=None)
+    assert "SETTINGS_ENCRYPTION_KEY is not set" in validate_bootstrap(settings).problems
 
 
 class FakeAuditSession:
