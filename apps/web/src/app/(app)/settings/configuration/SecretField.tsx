@@ -12,7 +12,7 @@ export type SecretStatus = "set" | "not-set" | "staged" | "cleared";
 function secretStatusText(
   status: SecretStatus,
   hint?: string | null,
-  source?: "default" | "env" | "ui"
+  source?: "default" | "ui"
 ): string {
   switch (status) {
     case "staged":
@@ -54,7 +54,7 @@ export default function SecretField({
   title?: string;
   status: SecretStatus;
   hint?: string | null;
-  source?: "default" | "env" | "ui";
+  source?: "default" | "ui";
   editable: boolean;
   reason?: string | null;
   onStage: (value: string) => void;

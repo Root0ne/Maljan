@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import logging
+import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
 from maljan.core import settings_secrets as box
+from maljan.core.config import Settings
 from maljan.core.settings_overrides import (
     build_settings,
     effective_source,
@@ -187,9 +190,12 @@ class SettingsService:
             if row is not None:
                 out[key] = ValueInfo(row.value, None, None, "ui", row.updated_at, row.updated_by)
             else:
-                # A read-only (API_READONLY) entry shows its live default
-                # value -- an operator needs to see what is actually in
-                # effect. URL-shaped values go through the same credential
+                # A read-only (API_READONLY) entry shows what is actually in
+                # effect: for a core leaf, the model default resolved through
+                # build_settings({}) above; for an api.* leaf, its live
+                # bootstrap value (``getattr(api_settings, entry.path)`` --
+                # APISettings is still process-environment-only by design,
+                # Task 1). URL-shaped values go through the same credential
                 # mask the catalog's default uses, so a password never
                 # reaches the response either way.
                 shown = default_value if entry.editable else _masked(entry.path, default_value)
@@ -215,6 +221,12 @@ class SettingsService:
             if server_token_key(name) in rows:
                 shown["auth_token"], shown["auth_token_source"] = TOKEN_MASK, "ui"
             else:
+                # No built-in server ships with a non-empty default
+                # auth_token today, so has_default_token is always False in
+                # practice and this always shows "" -- kept as a real check
+                # rather than a hardcoded "" so a future built-in server that
+                # does ship one still masks correctly instead of silently
+                # showing empty.
                 default_entry = default_servers.get(name)
                 has_default_token = bool(
                     default_entry is not None and default_entry.auth_token.get_secret_value()
@@ -450,3 +462,54 @@ async def load_core_overrides(db: AsyncSession) -> dict[str, Any]:
     """For the worker: core paths without the namespace prefix."""
     overrides = await SettingsService(db).load_overrides()
     return {split_key(k)[1]: v for k, v in overrides.items() if k.startswith("core.")}
+
+
+class _CoreSettingsCache:
+    """Short-TTL cache of ``build_settings(await load_core_overrides(db))``.
+
+    Mirrors ``app.runtime_config.RuntimeConfig``'s TTL cache, but for the one
+    whole core ``Settings`` object a request-path handler needs (the sandbox
+    upload size/format gates today -- see ``effective_core_settings``) rather
+    than a single ``api.*`` knob. A request handler must never build this from
+    the store on every call: that would be a DB round trip per request for a
+    value that changes only when an admin saves a setting.
+    """
+
+    def __init__(
+        self, ttl_seconds: float = 5.0, clock: Callable[[], float] = time.monotonic
+    ) -> None:
+        self._ttl = ttl_seconds
+        self._clock = clock
+        self._cached: Settings | None = None
+        self._loaded_at: float | None = None
+
+    async def get(self, db: AsyncSession) -> Settings:
+        now = self._clock()
+        if (
+            self._cached is not None
+            and self._loaded_at is not None
+            and now - self._loaded_at < self._ttl
+        ):
+            return self._cached
+        self._cached = build_settings(await load_core_overrides(db))
+        self._loaded_at = now
+        return self._cached
+
+    def invalidate(self) -> None:
+        self._cached = None
+        self._loaded_at = None
+
+
+core_settings_cache = _CoreSettingsCache()
+
+
+async def effective_core_settings(db: AsyncSession) -> Settings:
+    """The application's core settings as they stand right now: store overrides
+    over model defaults, cached for a few seconds so a request-path handler
+    (e.g. an upload route reading ``sandbox.upload.*``) does not read the
+    database on every request. ``core_settings_cache.invalidate()`` is called
+    from the same PATCH/DELETE routes that already invalidate
+    ``runtime_config`` (``app.api.v1.settings``), so a saved override is
+    visible within one TTL window either way.
+    """
+    return await core_settings_cache.get(db)

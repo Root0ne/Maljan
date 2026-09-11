@@ -36,6 +36,7 @@ from app.models.user import User
 from app.runtime_config import runtime_config
 from app.schemas.job import SampleListResponse, SampleResponse
 from app.services import audit
+from app.services.settings_service import effective_core_settings
 
 logger = get_logger("api.samples")
 
@@ -568,7 +569,8 @@ async def delete_sample(
 
         from app.worker import sample_files
 
-        for removed in sample_files.remove_for_sha(sha256):
+        core = await effective_core_settings(db)
+        for removed in sample_files.remove_for_sha(sha256, mirror_dir=core.static.r2.mirror_dir):
             logger.info("Removed local copy %s", removed, extra={"sample_id": str(sample_id)})
 
     logger.info(

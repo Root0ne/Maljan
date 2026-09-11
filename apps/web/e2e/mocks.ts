@@ -186,7 +186,7 @@ export const MOCK_API_KEY = {
  * shapes in "negotiation" (plain int, a second int pre-seeded with a `"ui"`
  * source in `MOCK_SETTINGS_VALUES` below so per-row / group reset visibility
  * — shown only for a `"ui"`-sourced value — has something to contrast
- * against the `"default"`/`"env"` rows that must not show it, an
+ * against the `"default"` rows that must not show it, an
  * `advanced: true` int also `"ui"`-sourced so the "Advanced" fold has a
  * reason to default open, and a `list` field defaulting to `[]` for
  * `ListWidget` coverage), one secret in
@@ -611,7 +611,7 @@ export const MOCK_SETTINGS_VALUES = {
       value: null,
       is_set: true,
       hint: "1234",
-      source: "env",
+      source: "ui",
       updated_at: null,
       updated_by: null,
     },
@@ -724,7 +724,7 @@ export const MOCK_SETTINGS_VALUES = {
           enabled: true, transport: "stdio", command: "python",
           args: ["services/threatintel-mcp/server.py"], env: {}, cwd: "services/threatintel-mcp",
           env_allow: ["VIRUSTOTAL_API_KEY", "ABUSEIPDB_API_KEY"], url: "",
-          auth_token: "**********", auth_token_source: "env",
+          auth_token: "**********", auth_token_source: "ui",
           tool_selection: "dynamic", use_all_tools: false, tools: null,
           agents: ["judge"], label: "Threat intel MCP",
         },
@@ -1205,10 +1205,10 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
   ],
 };
 
-function unset(source: "default" | "env" | "ui" = "default"): {
+function unset(source: "default" | "ui" = "default"): {
   is_set: null;
   hint: null;
-  source: "default" | "env" | "ui";
+  source: "default" | "ui";
   updated_at: null;
   updated_by: null;
 } {

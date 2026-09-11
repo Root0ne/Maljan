@@ -22,11 +22,21 @@ def test_build_settings_ignores_the_process_environment(monkeypatch):
     assert s.llm.provider == LLMConfig().provider
 
 
-def test_build_settings_ignores_a_dotenv_file_in_cwd(tmp_path, monkeypatch):
-    (tmp_path / ".env").write_text("LLM__PROVIDER=anthropic\n")
-    monkeypatch.chdir(tmp_path)
-    s = ov.build_settings({})
-    assert s.llm.provider != "anthropic"
+def test_build_settings_ignores_a_dotenv_file_bare_settings_would_read(tmp_path, monkeypatch):
+    """``model_config["env_file"]`` is the absolute path ``_find_env_file()``
+    resolved at class-definition time, so a plain ``.env`` dropped in the
+    CWD is never on that path -- even a bare ``Settings()`` would not read
+    it, which would make a CWD-only ``.env`` a vacuous target for this test.
+    Point the discovered file at the fixture's ``.env`` instead: bare
+    ``Settings()`` reads it (the control, proving the file is actually
+    wired in), and ``build_settings`` must still not.
+    """
+    env_file = tmp_path / ".env"
+    env_file.write_text("LLM__PROVIDER=anthropic\n")
+    monkeypatch.setitem(Settings.model_config, "env_file", str(env_file))
+
+    assert Settings().llm.provider == "anthropic"
+    assert ov.build_settings({}).llm.provider != "anthropic"
 
 
 def test_build_settings_still_applies_explicit_overrides(monkeypatch):

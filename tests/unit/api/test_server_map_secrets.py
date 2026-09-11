@@ -217,4 +217,3 @@ async def test_an_unset_token_shows_empty_and_the_environment_is_never_consulted
     assert shown["threatintel"]["auth_token"] == ""
     assert shown["threatintel"]["auth_token_source"] == "default"
     assert "from-env" not in str(shown)
-    assert "from-env" not in str(shown)

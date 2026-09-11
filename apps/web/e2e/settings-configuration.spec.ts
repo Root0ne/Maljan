@@ -130,7 +130,7 @@ test.describe("Settings → Configuration (admin)", () => {
   }) => {
     await page.goto(PROVIDERS_PATH);
 
-    await expect(page.getByText("set · …1234 · env")).toBeVisible();
+    await expect(page.getByText("set · …1234 · ui")).toBeVisible();
     await expect(page.locator("input[type=password]")).toHaveCount(0);
   });
 

@@ -76,30 +76,39 @@ def work_dir(subdir: str = WORK_SUBDIR) -> Path:
     return _private_dir((Path(settings.samples_dir) / name).resolve())
 
 
-def _configured_mirror_subdirs() -> tuple[str, ...]:
-    """Mirror subdirectories an operator configured, on top of the built-ins.
+def _configured_mirror_subdirs(mirror_dir: str | None) -> tuple[str, ...]:
+    """``mirror_dir``, on top of the built-ins, as a one-entry tuple or none.
 
     ``WORK_SUBDIRS`` alone left a custom ``static.r2.mirror_dir`` — which the
     validator accepts — cleaned per job through the explicit ``host_mirrors``
     list but never reached by ``sweep`` or ``remove_for_sha``, so a crashed
     worker's copies stayed forever in a directory that holds live malware.
 
-    Read lazily and defensively: this module is imported by the API as well as
-    the worker, and a settings load that fails must not take the sweep with it.
+    Takes the effective ``static.r2.mirror_dir`` value as a parameter rather
+    than reading it itself: this module is imported by both the API and the
+    worker, and neither may build core ``Settings`` bare (the environment is
+    not a layer for the application) or reach for the process-wide
+    ``get_settings()`` singleton on a request path that never installed it.
+    Each caller resolves the value the way appropriate to where it runs (the
+    store, for a request handler; a caller inside a job, from the settings
+    already installed for that job) and passes it in. ``None`` (the settings
+    load failed, or the caller has no settings to offer) means "built-ins
+    only" — the same as before this took a parameter.
     """
-    try:
-        from maljan.core.config import get_settings
-
-        configured = Path(get_settings().static.r2.mirror_dir).name
-    except Exception:  # noqa: BLE001 — the built-ins are still swept
+    if not mirror_dir:
         return ()
+    configured = Path(mirror_dir).name
     return (configured,) if configured and configured not in ("", ".", "..") else ()
 
 
-def work_dirs() -> list[Path]:
-    """Every mirror directory, for the paths that sweep or clean up."""
+def work_dirs(mirror_dir: str | None = None) -> list[Path]:
+    """Every mirror directory, for the paths that sweep or clean up.
+
+    ``mirror_dir`` is the effective ``static.r2.mirror_dir``, if the caller
+    has one to offer -- see ``_configured_mirror_subdirs``.
+    """
     seen: dict[str, None] = {}
-    for name in (*WORK_SUBDIRS, *_configured_mirror_subdirs()):
+    for name in (*WORK_SUBDIRS, *_configured_mirror_subdirs(mirror_dir)):
         seen.setdefault(name, None)
     return [work_dir(name) for name in seen]
 
@@ -122,9 +131,9 @@ def remove_quietly(path: Path | str | None, *, job_id: str | None = None) -> Non
         logger.warning("Could not remove %s: %s", p, type(exc).__name__, extra={"job_id": job_id})
 
 
-def remove_for_sha(sha256: str) -> list[Path]:
+def remove_for_sha(sha256: str, *, mirror_dir: str | None = None) -> list[Path]:
     removed: list[Path] = []
-    for base in [temp_dir(), *work_dirs()]:
+    for base in [temp_dir(), *work_dirs(mirror_dir)]:
         for candidate in base.glob(f"{sha256}*"):
             if candidate.is_file():
                 remove_quietly(candidate)
@@ -132,7 +141,9 @@ def remove_for_sha(sha256: str) -> list[Path]:
     return removed
 
 
-def sweep(max_age_s: float = 86_400.0, *, now: float | None = None) -> int:
+def sweep(
+    max_age_s: float = 86_400.0, *, now: float | None = None, mirror_dir: str | None = None
+) -> int:
     """Remove mirrored sample copies older than ``max_age_s``.
 
     API-2 (dev audit 2026-09-06): the cutoff is the whole of the coordination
@@ -153,7 +164,7 @@ def sweep(max_age_s: float = 86_400.0, *, now: float | None = None) -> int:
     """
     cutoff = (now if now is not None else time.time()) - max_age_s
     count = 0
-    for base in [temp_dir(), *work_dirs()]:
+    for base in [temp_dir(), *work_dirs(mirror_dir)]:
         for candidate in base.iterdir():
             try:
                 if candidate.is_file() and candidate.stat().st_mtime < cutoff:
@@ -168,6 +179,6 @@ def sweep(max_age_s: float = 86_400.0, *, now: float | None = None) -> int:
         logger.info(
             "Swept %d stale sample copies from %s",
             count,
-            ", ".join(str(base) for base in [temp_dir(), *work_dirs()]),
+            ", ".join(str(base) for base in [temp_dir(), *work_dirs(mirror_dir)]),
         )
     return count

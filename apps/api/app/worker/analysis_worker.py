@@ -1520,7 +1520,13 @@ async def startup(ctx: dict) -> None:
     try:
         from app.worker import sample_files
 
-        sample_files.sweep()
+        # No DB session exists yet at this point in startup (the session
+        # factory below is created after this block runs), so there is no
+        # store to read a UI override from -- build_settings({}) is model
+        # defaults only, same as bare get_settings() used to fall back to,
+        # minus the environment read.
+        core = build_settings({})
+        sample_files.sweep(mirror_dir=core.static.r2.mirror_dir)
     except OSError as exc:
         logger.warning(
             "Startup sample sweep failed (non-fatal): %s",

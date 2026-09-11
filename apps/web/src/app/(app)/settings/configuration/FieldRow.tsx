@@ -16,7 +16,7 @@ import ServerMapEditor from "./ServerMapEditor";
 import { APPLIES_LABEL } from "./vocabulary";
 import { Widget } from "./widgets";
 
-const SOURCE: Record<string, string> = { default: "default", env: "env", ui: "ui" };
+const SOURCE: Record<string, string> = { default: "default", ui: "ui" };
 
 /** Types whose control is short enough to sit beside the title. Everything
  *  else — lists, JSON, and every composite editor — drops below it. */
@@ -260,9 +260,7 @@ export default function FieldRow({
             className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${
               source === "ui"
                 ? "bg-accent/20 text-accent-strong"
-                : source === "env"
-                  ? "bg-status-orange/10 text-status-orange"
-                  : "bg-border text-text-muted"
+                : "bg-border text-text-muted"
             }`}
           >
             {SOURCE[source]}
