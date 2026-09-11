@@ -206,13 +206,16 @@ def merge_server_secrets(overrides: dict[str, Any]) -> dict[str, Any]:
     """
     prefix = f"{SERVER_MAP_KEY}."
     token_keys = [k for k in overrides if k.startswith(prefix) and k.endswith(".auth_token")]
-    if not token_keys:
-        return overrides
     out = {k: v for k, v in overrides.items() if k not in token_keys}
     servers = out.get(SERVER_MAP_KEY)
     if not isinstance(servers, dict):
         return out
     merged = {name: dict(entry) for name, entry in servers.items() if isinstance(entry, dict)}
+    # A mask carried inside the composite is a placeholder, never a credential:
+    # it must not reach a job as the literal bearer token.
+    for entry in merged.values():
+        if entry.get("auth_token") == TOKEN_MASK:
+            entry.pop("auth_token", None)
     for key in token_keys:
         name = key[len(prefix) : -len(".auth_token")]
         if name in merged:

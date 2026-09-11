@@ -100,13 +100,15 @@ def merge_arm_secrets(overrides: dict[str, Any]) -> dict[str, Any]:
     """
     prefix = f"{ARMS_KEY}."
     key_rows = [k for k in overrides if k.startswith(prefix) and k.endswith(_SUFFIX)]
-    if not key_rows:
-        return overrides
     out = {k: v for k, v in overrides.items() if k not in key_rows}
     arms = out.get(ARMS_KEY)
     if not isinstance(arms, dict):
         return out
     merged = {name: dict(entry) for name, entry in arms.items() if isinstance(entry, dict)}
+    # A mask carried inside the composite is a placeholder, never a credential.
+    for entry in merged.values():
+        if entry.get("api_key") == TOKEN_MASK:
+            entry.pop("api_key", None)
     for key in key_rows:
         name = key[len(prefix) : -len(_SUFFIX)]
         if name in merged:
