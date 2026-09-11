@@ -331,8 +331,8 @@ ANNOTATIONS: dict[str, Annotation] = {
     "llm.frontier.model": {
         "title": "Frontier model",
         "description": (
-            "Model identifier for the single frontier comparison arm (the one the B8 "
-            "evaluation originally ran). Additional arms are configured under "
+            "Model identifier for the single frontier comparison arm used by the "
+            "original evaluation. Additional arms are configured under "
             "llm.frontier.arms."
         ),
     },

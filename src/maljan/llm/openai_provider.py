@@ -102,10 +102,9 @@ class OpenAIProvider:
             extra["chat_template_kwargs"] = ctk
             build_kwargs["extra_body"] = extra
 
-        # Explicit
-        # ``request_timeout`` and ``max_retries`` so the openai SDK can't
-        # silently retry a stalled request three times (3 x default 600s
-        # = 30 min). Caller-supplied kwargs win.
+        # Explicit ``request_timeout`` and ``max_retries`` so the openai SDK
+        # can't silently retry a stalled request three times (3 x default
+        # 600s = 30 min). Caller-supplied kwargs win.
         # ``request_timeout`` must be >= the longest agent ``wait_for``
         # budget; otherwise the HTTP layer truncates a still-decoding
         # response before the outer wrapper's hard cap fires (live trace
