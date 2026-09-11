@@ -168,14 +168,16 @@ cp docker/.env.example docker/.env
 #   GHIDRA_MCP_AUTH_TOKEN     bearer token the ghidra-mcp container requires
 #   REDIS_PASSWORD            --requirepass on the redis container
 #   QDRANT_API_KEY            QDRANT__SERVICE__API_KEY on the qdrant container
+#   MINIO_ROOT_USER            MinIO root account (also MINIO_ACCESS_KEY for the API)
+#   MINIO_ROOT_PASSWORD        MinIO root password (also MINIO_SECRET_KEY for the API)
 #   SETTINGS_ENCRYPTION_KEY   encrypts secrets in the settings store
 #   JWT_SECRET_KEY            signs API session tokens
-# Generate the first three:
-python -c "import secrets; [print(f'{k}={secrets.token_urlsafe(32)}') for k in ('GHIDRA_MCP_AUTH_TOKEN','REDIS_PASSWORD','QDRANT_API_KEY')]"
-# and the two application secrets:
+# Generate the three infrastructure secrets and the MinIO password:
+python -c "import secrets; [print(f'{k}={secrets.token_urlsafe(32)}') for k in ('GHIDRA_MCP_AUTH_TOKEN','REDIS_PASSWORD','QDRANT_API_KEY','MINIO_ROOT_PASSWORD')]"
+# pick a MINIO_ROOT_USER of your own, and generate the two application secrets:
 python -c "from cryptography.fernet import Fernet; print('SETTINGS_ENCRYPTION_KEY=' + Fernet.generate_key().decode())"
 python -c "import secrets; print('JWT_SECRET_KEY=' + secrets.token_hex(32))"
-# paste all five into docker/.env.
+# paste all six into docker/.env.
 #
 # Every published port binds to BIND_ADDRESS, which docker/.env.example
 # defaults to 127.0.0.1 — the stack is unreachable from the network unless
@@ -200,7 +202,18 @@ docker compose up -d --build
 # MinIO Console: http://localhost:9001
 ```
 
-> **Local LLM:** Containers reach the host's LLM via `host.docker.internal:8080/v1` (OpenAI-compatible: typically `ik_llama.cpp`'s `llama-server`). The legacy Ollama path on `:11434` is also wired up as a fallback. `make external` fetches `ik_llama.cpp` at the commit this project was measured against; the model is `Qwen3.6-35B-A3B` quantised to `IQ3_K_R4`, which fits on an 8 GB GPU with a hybrid MoE offload.
+On a **fresh** deployment, set the Docker-network-only application values from
+Settings → Configuration before relying on Ghidra, CAPE or enrichment — compose
+no longer computes these for you, so the stack runs degraded (falling back to
+`localhost`-shaped catalog defaults) until they are entered once: Ghidra MCP
+URL `http://ghidra-mcp:8089`, the CAPE sandbox base URL (your host's, e.g.
+`http://host.docker.internal:18000`), and the enrichment Qdrant URL
+`http://qdrant:6333` with its `QDRANT_API_KEY` (the same value you generated
+into `docker/.env` above). An **existing** deployment upgrading onto this
+design gets all three from the one-time legacy `.env` import instead, so
+nothing to do there.
+
+> **Local LLM:** Containers reach the host's LLM via `host.docker.internal:8080/v1` (OpenAI-compatible: typically `ik_llama.cpp`'s `llama-server`) — set this from Settings → Configuration. The legacy Ollama path on `:11434` is also wired up as a fallback. `make external` fetches `ik_llama.cpp` at the commit this project was measured against; the model is `Qwen3.6-35B-A3B` quantised to `IQ3_K_R4`, which fits on an 8 GB GPU with a hybrid MoE offload.
 
 ### Pre-build the ATT&CK cache (optional)
 
@@ -339,7 +352,7 @@ model id and the static provider — without running a job or spending a token.
 
 ### A sandbox Maljan has never heard of
 
-`SANDBOX__PROVIDER=rest` drives an HTTP sandbox you describe rather than one
+`core.sandbox.provider=rest` (Settings → Configuration → Sandbox) drives an HTTP sandbox you describe rather than one
 this project has an adapter for. You give it a base URL, the path a sample is
 POSTed to, where the task id is in the reply, where to poll and which state
 values are terminal, and where the finished report is. If that report is
@@ -372,12 +385,11 @@ CAPE itself is somebody else's platform and nothing here installs, builds or
 packages it. It wants a Linux host of its own with KVM and its own Windows
 guest images registered as analysis machines, which is a deployment rather
 than a dependency. What this project does is talk to one over its REST API.
-Point it at yours:
+Point it at yours from Settings → Configuration → Sandbox:
 
-```bash
-SANDBOX__CAPE2__BASE_URL=http://<your-cape-host>:8000
-SANDBOX__CAPE2__API_TOKEN=<token from that instance>
-```
+- `core.sandbox.cape2.base_url` — `http://<your-cape-host>:8000`
+- `core.sandbox.cape2.api_token` — the token from that instance (stored
+  Fernet-encrypted, never read back)
 
 With no sandbox reachable the pipeline degrades rather than fails: the dynamic
 path is skipped and the run completes on static evidence, a behaviour pinned by a

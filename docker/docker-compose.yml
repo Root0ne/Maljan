@@ -83,8 +83,8 @@ services:
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in docker/.env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in docker/.env}
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${MINIO_API_PORT:-9000}:9000"
       - "${BIND_ADDRESS:-127.0.0.1}:${MINIO_CONSOLE_PORT:-9001}:9001"
@@ -152,10 +152,10 @@ services:
     # and is edited from Settings -> Configuration, not passed as env.
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-maljan}:${POSTGRES_PASSWORD:-maljan_dev}@postgres:5432/${POSTGRES_DB:-maljan}
-      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in docker/.env}@redis:6379/0
       MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in docker/.env}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in docker/.env}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set JWT_SECRET_KEY in docker/.env}
       SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:?set SETTINGS_ENCRYPTION_KEY in docker/.env}
       SAMPLES_DIR: data/samples
@@ -164,7 +164,10 @@ services:
       GHIDRA_CONTAINER_SAMPLES_PATH: /data/samples
       RUN_MIGRATIONS_ON_STARTUP: ${RUN_MIGRATIONS_ON_STARTUP:-false}
       CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:3000","http://127.0.0.1:3000"]}
-      COOKIE_SECURE: ${COOKIE_SECURE:-}
+      # APISettings.cookie_secure is bool | None; an empty string fails
+      # pydantic validation outright (env_ignore_empty defaults to False), so
+      # this must always resolve to a real boolean, never "".
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
     # F8 (2026-07-05): on Linux ``host.docker.internal`` does not resolve
     # unless mapped to the host gateway (Docker Desktop on Win/Mac provides
     # it natively, where this is a harmless no-op). Lets the container reach
@@ -208,10 +211,10 @@ services:
     # tuning outside the settings catalog and stay here.
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-maljan}:${POSTGRES_PASSWORD:-maljan_dev}@postgres:5432/${POSTGRES_DB:-maljan}
-      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in docker/.env}@redis:6379/0
       MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in docker/.env}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in docker/.env}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set JWT_SECRET_KEY in docker/.env}
       SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:?set SETTINGS_ENCRYPTION_KEY in docker/.env}
       SAMPLES_DIR: data/samples
