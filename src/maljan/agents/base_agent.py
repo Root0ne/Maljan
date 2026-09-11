@@ -943,6 +943,12 @@ def _run_coro_blocking(coro: Any, hard_timeout: float, label: str = "") -> Any:
         ) from exc
 
 
+# Public alias: callers outside this module (the sandbox/static providers)
+# import a name that isn't theirs to treat as private. The leading-underscore
+# name stays for the tests and call sites within this module.
+run_coro_blocking = _run_coro_blocking
+
+
 # How long any single toolkit close may take before it is abandoned. Teardown
 # runs after the analysis has already succeeded, so the only thing at stake is
 # reclaiming a subprocess and a socket — never worth holding a finished job

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from langchain_core.tools import BaseTool
 
-from maljan.agents.base_agent import _run_coro_blocking
+from maljan.agents.base_agent import run_coro_blocking
 from maljan.core.logger import logger
 from maljan.core.settings_overrides import redact_url
 from maljan.providers.base import ProviderProbe, SandboxCapabilities, SandboxProvider
@@ -181,7 +181,7 @@ class CAPE2SandboxProvider(SandboxProvider):
         # different event loop" (see static_analyst._run_async for the full
         # rationale). Always called from the sync analyze path, never from within
         # the agent loop, so blocking on the result cannot deadlock.
-        _run_coro_blocking(toolkit.initialize(), hard_timeout=120.0, label="cape-mcp-init")
+        run_coro_blocking(toolkit.initialize(), hard_timeout=120.0, label="cape-mcp-init")
 
         self._toolkit = toolkit
         all_tools = toolkit.get_tools()
@@ -273,4 +273,4 @@ class CAPE2SandboxProvider(SandboxProvider):
         toolkit, self._toolkit = self._toolkit, None
         if toolkit is not None:
             with suppress(Exception):
-                _run_coro_blocking(toolkit.cleanup(), hard_timeout=20.0, label="cape-mcp-close")
+                run_coro_blocking(toolkit.cleanup(), hard_timeout=20.0, label="cape-mcp-close")
