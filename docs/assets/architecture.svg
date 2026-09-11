@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 520" width="900" height="520" role="img" aria-label="Maljan runtime components">
+  <title>Maljan runtime components</title>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
+    </marker>
+    <style>
+      .bg   { fill: #f8fafc; }
+      .box  { fill: #ffffff; stroke: #94a3b8; stroke-width: 1.5; rx: 8; }
+      .core { fill: #eef2ff; stroke: #6366f1; stroke-width: 1.5; rx: 8; }
+      .store{ fill: #f0fdf4; stroke: #22c55e; stroke-width: 1.5; rx: 8; }
+      .out  { fill: #fff7ed; stroke: #f59e0b; stroke-width: 1.5; rx: 8; }
+      .t    { font-family: "Helvetica Neue", Arial, sans-serif; fill: #0f172a; }
+      .h    { font-size: 14px; font-weight: 600; }
+      .s    { font-size: 11px; fill: #475569; }
+      .l    { font-size: 10.5px; fill: #64748b; }
+      .cap  { font-size: 15px; font-weight: 600; }
+      .edge { stroke: #64748b; stroke-width: 1.4; fill: none; marker-end: url(#arrow); }
+      .edge2{ stroke: #64748b; stroke-width: 1.4; fill: none; marker-start: url(#arrow); marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="900" height="520"/>
+  <text class="t cap" x="24" y="30">Maljan — runtime components</text>
+
+  <!-- Browser -->
+  <rect class="box" x="24" y="196" width="130" height="68"/>
+  <text class="t h" x="89" y="224" text-anchor="middle">Browser</text>
+  <text class="t s" x="89" y="242" text-anchor="middle">Next.js console</text>
+
+  <!-- API -->
+  <rect class="core" x="184" y="196" width="140" height="68"/>
+  <text class="t h" x="254" y="224" text-anchor="middle">API</text>
+  <text class="t s" x="254" y="242" text-anchor="middle">FastAPI</text>
+
+  <!-- Redis -->
+  <rect class="store" x="352" y="206" width="86" height="48"/>
+  <text class="t h" x="395" y="236" text-anchor="middle">Redis</text>
+
+  <!-- Worker -->
+  <rect class="core" x="466" y="190" width="150" height="80"/>
+  <text class="t h" x="541" y="222" text-anchor="middle">Worker</text>
+  <text class="t s" x="541" y="240" text-anchor="middle">arq · analysis pipeline</text>
+
+  <!-- Stores under the API -->
+  <rect class="store" x="150" y="332" width="98" height="52"/>
+  <text class="t h" x="199" y="356" text-anchor="middle">Postgres</text>
+  <text class="t s" x="199" y="372" text-anchor="middle">jobs · settings</text>
+
+  <rect class="store" x="266" y="332" width="98" height="52"/>
+  <text class="t h" x="315" y="356" text-anchor="middle">MinIO</text>
+  <text class="t s" x="315" y="372" text-anchor="middle">samples</text>
+
+  <!-- Reports -->
+  <rect class="out" x="446" y="402" width="200" height="60"/>
+  <text class="t h" x="546" y="426" text-anchor="middle">Reports</text>
+  <text class="t s" x="546" y="444" text-anchor="middle">Markdown · HTML · PDF · STIX 2.1</text>
+
+  <!-- Provider column -->
+  <rect class="box" x="666" y="36" width="212" height="74"/>
+  <text class="t h" x="772" y="60" text-anchor="middle">LLM providers</text>
+  <text class="t s" x="772" y="78" text-anchor="middle">OpenAI · Ollama</text>
+  <text class="t s" x="772" y="94" text-anchor="middle">Anthropic · Gemini</text>
+
+  <rect class="box" x="666" y="126" width="212" height="74"/>
+  <text class="t h" x="772" y="150" text-anchor="middle">Static providers</text>
+  <text class="t s" x="772" y="168" text-anchor="middle">Ghidra MCP · radare2</text>
+  <text class="t s" x="772" y="184" text-anchor="middle">capa + YARA · generic MCP</text>
+
+  <rect class="box" x="666" y="216" width="212" height="74"/>
+  <text class="t h" x="772" y="240" text-anchor="middle">Sandbox providers</text>
+  <text class="t s" x="772" y="258" text-anchor="middle">CAPEv2 · Triage</text>
+  <text class="t s" x="772" y="274" text-anchor="middle">generic REST · uploaded report</text>
+
+  <rect class="box" x="666" y="306" width="212" height="62"/>
+  <text class="t h" x="772" y="330" text-anchor="middle">Qdrant</text>
+  <text class="t s" x="772" y="348" text-anchor="middle">long-term memory</text>
+
+  <rect class="box" x="666" y="384" width="212" height="62"/>
+  <text class="t h" x="772" y="408" text-anchor="middle">Enrichment</text>
+  <text class="t s" x="772" y="426" text-anchor="middle">VirusTotal · AbuseIPDB</text>
+
+  <!-- Edges -->
+  <path class="edge2" d="M 154 230 L 184 230"/>
+  <text class="t l" x="169" y="188" text-anchor="middle">HTTP · WS</text>
+
+  <path class="edge2" d="M 324 230 L 352 230"/>
+  <path class="edge2" d="M 438 230 L 466 230"/>
+  <text class="t l" x="395" y="196" text-anchor="middle">queue · events</text>
+
+  <path class="edge2" d="M 232 264 L 210 332"/>
+  <path class="edge2" d="M 282 264 L 304 332"/>
+
+  <path class="edge2" d="M 472 270 L 420 320 L 364 352"/>
+  <text class="t l" x="430" y="308" text-anchor="middle">samples · job state</text>
+  <path class="edge" d="M 541 270 L 541 402"/>
+  <path class="edge" d="M 446 432 L 254 432 L 254 264"/>
+
+  <path class="edge2" d="M 616 214 L 646 120 L 666 84"/>
+  <path class="edge2" d="M 616 220 L 646 180 L 666 163"/>
+  <path class="edge2" d="M 616 240 L 666 250"/>
+  <path class="edge2" d="M 616 252 L 646 300 L 666 336"/>
+  <path class="edge2" d="M 616 262 L 646 360 L 666 414"/>
+</svg>
