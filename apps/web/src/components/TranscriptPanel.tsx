@@ -82,8 +82,8 @@ function speakerLabel(speaker: string): string {
 /**
  * Two letters that tell one speaker from another *in this run*.
  *
- * C5 (dev audit 2026-09-06): the avatar took the first two characters of the
- * name, so a wide profile running `static`, `static_r2` and `strings` drew
+ * The avatar used to take the first two characters of the name, so a wide
+ * profile running `static`, `static_r2` and `strings` drew
  * three identical "St" circles, distinguishable only by colour. The first
  * choice is still those two characters; a name that would collide takes its
  * first letter plus the first later character that has not been claimed —

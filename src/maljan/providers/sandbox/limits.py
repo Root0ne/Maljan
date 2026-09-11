@@ -1,6 +1,6 @@
 """How much of a sandbox's answer Maljan is willing to read.
 
-CORE-1 (dev audit 2026-09-06): the REST and Triage providers read a report
+The REST and Triage providers read a report
 with ``response.json()`` and streamed a pcap to disk with no ceiling on
 either. A sandbox is a remote service under someone else's control, often a
 public one, and a report is the one body that is legitimately large -- so a

@@ -143,7 +143,7 @@ class MaljanApp:
     def _poll_budget(self, provider: Any) -> tuple[int, int]:
         """How long to wait for this provider, and how often to ask.
 
-        Sub-project A threaded ``sandbox.cape2.*`` into every provider's poll
+        The provider layer used to thread ``sandbox.cape2.*`` into every provider's poll
         loop, which was harmless while every provider that polled was CAPE.
         A provider with its own configured budget reads it; everything else
         keeps CAPE's values, so the cape2, mock, upload and triage paths are
@@ -188,7 +188,7 @@ class MaljanApp:
             # Every provider call below is synchronous: the Triage provider
             # drives an ``httpx.Client`` and polls with ``time.sleep``, so
             # awaited bare they stop the worker's event loop — and its
-            # heartbeat — for the whole detonation (OBS 4). The provider
+            # heartbeat — for the whole detonation. The provider
             # objects are plain HTTP clients with no loop affinity, so a
             # thread changes nothing but where the blocking happens.
             task_id = await asyncio.to_thread(provider.submit, str(path))
@@ -319,10 +319,10 @@ class MaljanApp:
                 f"Unsupported sample OS: {unsupported}. Only Windows and Linux are supported."
             )
 
-        # Phase 2: Submit to sandbox if sample_path is provided
+        # Submit to sandbox if sample_path is provided
         sandbox_report = await self._submit_to_sandbox(sample_path)
 
-        # Wave 4 (2026-05-28): compute file_type + canonical platform up
+        # Compute file_type + canonical platform up
         # front so the judge node's Sigma/YARA scanners + TTP cascade can
         # filter platform-incompatible rules. Without this the pipeline is
         # platform-blind and yields cross-OS FPs (e.g. a Windows-only rule

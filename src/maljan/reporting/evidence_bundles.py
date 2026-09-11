@@ -1,12 +1,12 @@
 """Per-section evidence bundles — the Composer's anti-hallucination boundary.
 
-The section-wise Report Composer (Phase 4) authors one report section per LLM
+The section-wise Report Composer authors one report section per LLM
 call. Each call must see ONLY the evidence relevant to its section, so it can
 cite real artifacts and cannot borrow (or invent) content from another section.
 ``bundle_for(section, ...)`` assembles that tight slice from three sources:
 
   - ISR claims (``report`` deterministic fields + ``isr_reports``),
-  - captured tool outputs (``technical_evidence``, Phase 1),
+  - captured tool outputs (``technical_evidence``),
   - deterministic facts already on the report.
 
 A bundle is a plain dict of strings/lists ready to drop into a prompt. When a
@@ -21,7 +21,7 @@ from typing import Any
 from maljan.reporting.models import MalwareReport
 
 # Section keys the Composer authors. Kept as plain strings (not an enum) so the
-# Composer can iterate a config-driven subset per malware type (Phase 8).
+# Composer can iterate a config-driven subset per malware type.
 SECTIONS = (
     "executive_summary",
     "introduction",

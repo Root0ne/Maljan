@@ -1,9 +1,9 @@
-"""Post-pipeline false-positive linter (Wave 4, 2026-05-28).
+"""Post-pipeline false-positive linter.
 
-A 2026-05-23 audit found that the pipeline's deterministic layers + LLM
+An audit found that the pipeline's deterministic layers + LLM
 narratives could agree on a confidently-wrong story (TTPs from the wrong
 platform attached to a sample, defensive recommendations to "block
-PowerShell" that didn't apply). Wave 4's structural fixes (Sigma/YARA
+PowerShell" that didn't apply). The structural fixes (Sigma/YARA
 platform filters, cascade source-layer override, indicator denylists)
 close the direct path, but every refactor can regress.
 
@@ -102,7 +102,7 @@ def lint_report(report: Any, sample_platform: str | None) -> list[FPWarning]:
                     ),
                     field=f"capability_matrix.{tid}",
                     explanation=(
-                        "Wave 4 Step 4 cascade is expected to drop "
+                        "The TTP cascade is expected to drop "
                         "platform-mismatched claims via "
                         "_is_claim_platform_compatible. This warning means a "
                         "claim slipped through with rule_platforms intact — "
@@ -180,7 +180,7 @@ def lint_report(report: Any, sample_platform: str | None) -> list[FPWarning]:
                 ),
                 field="stix_bundle_extended.objects[indicator]",
                 explanation=(
-                    "Wave 4 Step 5 caps file:name indicators in the STIX "
+                    "The judge post-processor caps file:name indicators in the STIX "
                     "bundle to keep low-signal IOCs from drowning the high-"
                     "signal ones. When this fires, _admit_indicator's cap "
                     "loop in judge_postprocess.py either didn't run or the "
@@ -201,8 +201,8 @@ def lint_report(report: Any, sample_platform: str | None) -> list[FPWarning]:
                 ),
                 field="stix_bundle_extended.objects[indicator]",
                 explanation=(
-                    "Wave 9 hard-caps the STIX bundle's total indicator "
-                    "count to keep downstream consumers (SIEM ingest, MISP "
+                    "The STIX bundle's total indicator count is hard-capped "
+                    "to keep downstream consumers (SIEM ingest, MISP "
                     "export) tractable. When this fires the priority order "
                     "(hashes > network IOCs > file:name) wasn't applied at "
                     "the renderer."
@@ -226,10 +226,10 @@ def lint_report(report: Any, sample_platform: str | None) -> list[FPWarning]:
                     ),
                     field="attribution.family",
                     explanation=(
-                        "D11 guardrail (Wave 3, 2026-05-24): the family "
+                        "D11 guardrail: the family "
                         "name came from analyst LLM with no sandbox CTI, "
                         "sandbox signature, or Qdrant ground match. The "
-                        "confidence has already been zeroed and the Wave 4 "
+                        "confidence has already been zeroed and the "
                         "Sigma/YARA gates refuse auto-generation. UI "
                         "renders the family with strikethrough and "
                         "'(unverified)'."
@@ -237,7 +237,7 @@ def lint_report(report: Any, sample_platform: str | None) -> list[FPWarning]:
                 )
             )
 
-    # C6 — Wave 9: cascade.platform_filter_summary missing or zero.
+    # C6 — cascade.platform_filter_summary missing or zero.
     # Only fire when there is evidence the cascade actually ran (a non-empty
     # capability_matrix or an existing run_summary.cascade dict). Empty test
     # reports with no cascade run must not trip this gate.
@@ -258,7 +258,7 @@ def lint_report(report: Any, sample_platform: str | None) -> list[FPWarning]:
                     ),
                     field="run_summary.cascade.platform_filter_summary",
                     explanation=(
-                        "Wave 9 surfaces per-layer dropped-rule counters "
+                        "Per-layer dropped-rule counters are surfaced "
                         "after Sigma/YARA's platform pre-filter so the "
                         "audit gate can prove the filter executed. When "
                         "this field is missing the Sigma/YARA layer didn't "
@@ -320,7 +320,7 @@ def _count_file_name_indicators(report: Any) -> int:
 
 
 def _count_total_indicators(report: Any) -> int:
-    """Wave 9: total count of STIX ``indicator`` SDOs in the bundle."""
+    """Total count of STIX ``indicator`` SDOs in the bundle."""
     bundle = getattr(report, "stix_bundle_extended", None)
     if not isinstance(bundle, dict):
         return 0

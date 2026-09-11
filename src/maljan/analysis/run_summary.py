@@ -124,8 +124,8 @@ class TruncationMetrics:
     none of it was counted.
 
     The last three fields are not truncation: they record what the STIX integrity
-    pass removed, because C7 claims repairing beats rejecting and that claim needs
-    a number (queue item B4).
+    pass removed, because the claim that repairing beats rejecting needs a
+    number.
     """
 
     tool_output_calls: int
@@ -157,11 +157,11 @@ class CascadeMetrics:
     corroborated_count: int
     consensus_count: int
     top_techniques: list[dict[str, Any]]  # technique_id, label, confidence, layers
-    # Wave 4 (2026-05-28): claims rejected for platform incompatibility.
+    # Claims rejected for platform incompatibility.
     # Empty for legacy runs that didn't supply a sample_platform.
     dropped_by_platform: list[dict[str, Any]] = field(default_factory=list)
-    # Wave 9 (2026-05-29): pre-cascade platform-filter counters. The
-    # 2026-05-29 Linux ELF audit found ``dropped_by_platform`` empty
+    # Pre-cascade platform-filter counters. A Linux ELF audit
+    # found ``dropped_by_platform`` empty
     # because Sigma/YARA layers correctly pre-filter platform-mismatched
     # rules BEFORE claims reach the cascade — so the cascade has nothing
     # to drop. Surfacing per-layer counters lets the audit gate prove the
@@ -814,7 +814,7 @@ class RunSummaryBuilder:
         yara_dropped: int,
         sample_platform: str,
     ) -> RunSummaryBuilder:
-        """Wave 9 (2026-05-29): record pre-cascade platform-filter counters.
+        """Record pre-cascade platform-filter counters.
 
         The Sigma/YARA Layer 0 evaluators pre-filter rules by sample
         platform before the cascade ever runs. Surfacing the drop counts

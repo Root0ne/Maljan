@@ -1,4 +1,4 @@
-"""Render a ``MalwareReport`` as a standalone, print-ready HTML document (Phase 6).
+"""Render a ``MalwareReport`` as a standalone, print-ready HTML document.
 
 Content is **not** re-implemented here. ``MarkdownRenderer`` already owns the
 section order, the tables and the degraded-run banner, and its headings are

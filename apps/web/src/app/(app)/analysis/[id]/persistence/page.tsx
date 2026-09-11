@@ -17,7 +17,7 @@ const KIND_LABELS: Record<PersistenceKind, string> = {
   appinit_dll: "AppInit DLL",
   lsa_provider: "LSA Provider",
   winlogon_helper: "Winlogon Helper",
-  // Linux (ELF) — Wave 9 (2026-05-29)
+  // Linux (ELF)
   systemd_service: "Systemd Service",
   systemd_timer: "Systemd Timer",
   cron_job: "Cron Job",

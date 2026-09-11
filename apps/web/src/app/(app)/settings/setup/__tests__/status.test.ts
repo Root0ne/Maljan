@@ -35,7 +35,7 @@ describe("llmLooksConfigured", () => {
     expect(llmLooksConfigured(withKey.effective, withKey.isSet)).toBe(true);
   });
 
-  /* Task 21: the same credential also has a flat catalog key, and an operator
+  /* The same credential also has a flat catalog key, and an operator
    * who filled that one in was still told the model was not configured. */
   it("accepts the flat shortcut key for each hosted provider", () => {
     const flat: [string, string][] = [

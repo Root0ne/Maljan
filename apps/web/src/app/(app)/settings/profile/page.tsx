@@ -17,7 +17,7 @@ export default function SettingsProfilePage() {
   const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Wave 10 W10-LINT-DEBT-02: legitimate data-fetch initialization
+    // Legitimate data-fetch initialization
     // for an async API call. The state transitions
     // (loading=true → fetch → setUser + setLoading=false) cannot be
     // derived from props alone — they reflect the in-flight request

@@ -73,7 +73,7 @@ export default function SearchPalette({
   const [activeIndex, setActiveIndex] = useState(0);
   const [debouncedQuery, setDebouncedQuery] = useState("");
 
-  // Wave 10 W10-LINT-DEBT-02 (2026-05-30): ``handleSelect`` was declared
+  // ``handleSelect`` was declared
   // BELOW the ``Enter``-key useEffect that called it, which the React
   // Compiler / ESLint ``react-hooks/immutability`` rule flags as
   // access-before-declared (the inner closure was bound when the effect
@@ -94,7 +94,7 @@ export default function SearchPalette({
   }, [query]);
 
   /* Reset highlight whenever the effective query changes. */
-  // Wave 10 W10-LINT-DEBT-02: reset the keyboard highlight on every
+  // Reset the keyboard highlight on every
   // debounced-query change. Derived state is not viable — the highlight
   // is itself stateful (arrow keys mutate it), so the only way to reset
   // it on a new query is an effect setState.
@@ -106,7 +106,7 @@ export default function SearchPalette({
   useEffect(() => {
     if (!open) return;
     if (!debouncedQuery) {
-      // Wave 10 W10-LINT-DEBT-02: empty-query branch clears stale
+      // The empty-query branch clears stale
       // results from the previous query so the dropdown collapses
       // immediately. The state IS derived (an empty query maps to an
       // empty list) but the source of truth — the debounced query —

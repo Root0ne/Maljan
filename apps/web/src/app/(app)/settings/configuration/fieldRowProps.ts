@@ -5,7 +5,7 @@ import type { SettingsContextValue } from "./SettingsContext";
 /**
  * Builds the props `FieldRow` needs for one catalog entry, from the shared
  * settings context. Pulled out of the old `ConfigurationTab` so both the
- * per-group page here and Task 7's fuller group body build the same row the
+ * per-group page here and the fuller group body build the same row the
  * same way.
  */
 export function buildFieldRowProps(ctx: SettingsContextValue, entry: CatalogEntry) {

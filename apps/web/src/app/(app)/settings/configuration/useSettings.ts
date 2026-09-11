@@ -98,7 +98,7 @@ export function useSettings() {
   /**
    * Stage an edit — unless it puts the key back where it started.
    *
-   * B3 (dev audit 2026-09-06): this always wrote `pending[key]`, so setting a
+   * This always wrote `pending[key]`, so setting a
    * select to another value and back left the row marked MODIFIED and the
    * apply bar counting a change that would send the stored value back
    * unchanged. Only "Discard change" cleared it, which nobody looks for on a

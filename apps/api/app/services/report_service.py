@@ -240,7 +240,7 @@ class ReportService:
         report_id: uuid.UUID,
         user: User,
     ) -> dict | None:
-        """Return the full ``MalwareReport`` JSON document (Faz 5).
+        """Return the full ``MalwareReport`` JSON document.
 
         Returns ``None`` when the row exists but predates the feature (the
         column is ``NULL``); the caller distinguishes that from a missing
@@ -274,7 +274,7 @@ class ReportService:
         *,
         nonce: str | None = None,
     ) -> RenderedReport | None:
-        """Render the comprehensive report as a standalone HTML document (Phase 6).
+        """Render the comprehensive report as a standalone HTML document.
 
         ``nonce`` is forwarded to ``HtmlRenderer`` for the report's CSP nonce;
         it is ``None`` by default so existing callers are unaffected.
@@ -294,7 +294,7 @@ class ReportService:
         report_id: uuid.UUID,
         user: User,
     ) -> RenderedReport | None:
-        """Render the comprehensive report as PDF (Phase 6).
+        """Render the comprehensive report as PDF.
 
         Raises:
             PdfUnavailableError: WeasyPrint is not loadable on this host; the

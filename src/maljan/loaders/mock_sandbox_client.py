@@ -1,6 +1,6 @@
 """MockSandboxClient — fixture-based sandbox backend for tests and offline use.
 
-Phase 6: CAPEv2 Sandbox Integration
+Part of the CAPEv2 sandbox integration.
 
 Returns pre-built JSON fixture files instead of submitting to a real sandbox.
 This enables:

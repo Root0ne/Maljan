@@ -47,7 +47,7 @@ export default function ProfilesEditor({
   definitions: Record<string, AgentDefinitionEntry>;
   activeProfile: string;
   /** Validation errors from the last failed apply, keyed by the server's full
-   *  dotted path (`core.agents.profiles.<key>`) — B2 (dev audit 2026-09-06),
+   *  dotted path (`core.agents.profiles.<key>`),
    *  so a rejected profile is named on its own card rather than in a leaf-wide
    *  banner that does not say which profile was wrong. */
   errors: Record<string, string>;
@@ -76,7 +76,7 @@ export default function ProfilesEditor({
 
   const add = (from?: string) => {
     const at = from ?? ADD_BUTTON;
-    // B5: cloning with an empty name box names the copy after its source
+    // Cloning with an empty name box names the copy after its source
     // rather than silently doing nothing.
     const typed = newKey.trim();
     const key = typed === "" && from ? copyKey(from, value) : typed;

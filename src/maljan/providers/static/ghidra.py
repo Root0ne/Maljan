@@ -341,7 +341,7 @@ class GhidraStaticProvider(StaticProvider):
         - ``curated`` — the fixed ~20-tool allowlist (fastest, narrowest).
         - ``dynamic`` — CORE triage set + tools relevant to the sample's
           capability ``categories`` (~30-40). All tools stay reachable; only the
-          relevant subset is shown (2026-07 round 3, tool-RAG). Without
+          relevant subset is shown (tool-RAG). Without
           categories (init time) it falls back to the curated allowlist.
         - ``all`` — every tool the server offers (measured 5-6x slower + noisier).
         """

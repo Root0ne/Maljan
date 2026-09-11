@@ -170,7 +170,7 @@ async def require_active_user(
 ) -> User:
     """Re-validate the user's ``is_active`` state at resource-access time.
 
-    SEC-TOCTOU-AUTHZ-01 (audit 2026-05-19): ``get_current_user`` decodes
+    ``get_current_user`` decodes
     the JWT and reads the user row, but a concurrent admin action can
     deactivate the user *between* that lookup and the actual resource
     operation. Endpoints that mutate or expose sensitive data should
@@ -196,7 +196,7 @@ async def require_active_user(
 async def require_admin(user: User = Depends(require_active_user)) -> User:
     """Dependency that requires the current user to have admin role.
 
-    SEC-TOCTOU-AUTHZ-01 (audit 2026-05-19): now depends on
+    Depends on
     ``require_active_user`` so admin-gated endpoints get the same
     deactivation re-check as ordinary user-gated mutations.
     """

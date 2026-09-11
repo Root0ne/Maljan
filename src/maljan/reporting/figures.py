@@ -1,4 +1,4 @@
-"""Deterministic report figures — real inline SVG from real data (Phase 5).
+"""Deterministic report figures — real inline SVG from real data.
 
 The corpus reports are figure-heavy. The local model cannot produce decompiler
 screenshots, so we generate **real charts/diagrams deterministically** from the
@@ -8,7 +8,7 @@ flow, and Ghidra code listings as ``<pre>`` text figures.
 
 Each ``build_*`` returns a ``Figure`` or ``None`` (omit when the data is
 absent). SVG uses only primitives (rect/line/text) so it renders identically in
-the browser and in WeasyPrint (Phase 6), and is theme-neutral (uses
+the browser and in WeasyPrint, and is theme-neutral (uses
 ``currentColor`` / explicit greys so it works on the light PDF surface).
 ``build_figures(report)`` assembles every applicable figure in report order.
 """

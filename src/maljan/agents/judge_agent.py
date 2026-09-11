@@ -6,12 +6,12 @@ It has two distinct responsibilities:
      negotiation loop, using structured output for reliable confidence scoring.
   2. give_verdict(): Produce the final STIX 2.1 Bundle after negotiation ends.
 
-Phase 1b additions:
+ISR summaries:
   - mediate() and give_verdict() optionally accept isr_reports to include
     structured ISR summaries alongside the plain-text reports. This gives
     the judge access to per-claim confidence scores and dissent signals.
 
-Phase 4.2 additions:
+ATT&CK validation:
   - give_verdict() optionally accepts an ATTCKValidator instance.
   - Before generating the STIX Bundle, all TTP IDs in isr_reports are
     validated against the authoritative ATT&CK dataset. A TTPValidationSummary
@@ -19,12 +19,12 @@ Phase 4.2 additions:
   - Graceful degradation: if no validator is provided (e.g., cache not built),
     verdict generation continues without validation — no crash.
 
-Phase 4.3 additions:
+TTP cascade:
   - give_verdict() optionally accepts a CascadeSummary from TTPCascadeEngine.
   - A three-layer cascade block is injected into the prompt, ranking TTPs by
     cross-layer weighted confidence so the LLM prioritizes corroborated findings.
 
-Phase 7.2 additions (STIX Confidence Intervals):
+STIX confidence intervals:
   - System prompt now instructs the LLM to produce ConfidenceAnnotatedRelationship
     objects instead of plain Relationship objects for all TTP mappings.
   - Each relationship must be populated with:
@@ -37,7 +37,7 @@ Phase 7.2 additions (STIX Confidence Intervals):
   - _build_confidence_instruction() builds cascade-aware evidence basis hints
     from the CascadeSummary so the LLM can ground confidence values rather
     than infer them.
-Phase 7.1 additions (Dynamic Schema Pruning):
+Dynamic schema pruning:
   - give_verdict() infers malware category (ransomware/RAT/dropper/worm/
     infostealer/unknown) from ISR reports using keyword-weighted scoring.
   - A schema pruning hint block is injected into the system prompt, guiding
@@ -96,7 +96,7 @@ _AGREEMENT_RE = re.compile(
 )
 
 
-# The judge's system prompt. A module constant since sub-project C so that
+# The judge's system prompt. A module constant so that
 # ``composition.builtin_prompt("judge")`` and ``give_verdict`` cannot disagree
 # about what the judge is told; the text is unchanged from the inline literal
 # it replaces, and ``tests/unit/agents/test_prompt_byte_identity.py`` says so.
@@ -233,7 +233,7 @@ class JudgeAgent:
 
         if not getattr(self, "tools", None):
             self.logger.warning("No tools initialized. Falling back to standard LLM invoke.")
-            # Wave 5 HANG-01 (2026-05-28): wrap the no-tools ainvoke in the
+            # Wrap the no-tools ainvoke in the
             # same hard timeout used by the tools path so a stalled / queued
             # llama-server cannot freeze the judge node.
             no_tools_timeout = get_settings().react_agent_timeout_overrides.get(
@@ -281,7 +281,7 @@ class JudgeAgent:
             _msgs = result.get("messages", []) or []
             msg_count = len(_msgs)
             self.logger.info("JudgeAgent ReAct loop completed: %d messages.", msg_count)
-            # F4 (2026-07-05): record every AI turn the ReAct executor produced
+            # Record every AI turn the ReAct executor produced
             # so the mediator's tool-loop LLM calls land in the per-run
             # TokenLedger (the tools path previously recorded nothing — only
             # the no-tools fallback above did).
@@ -487,17 +487,17 @@ class JudgeAgent:
     ) -> Bundle:
         """Final judge decision returning a structured STIX 2.1 Bundle.
 
-        Phase 4.2: When `attck_validator` is provided, all TTP IDs in
+        When `attck_validator` is provided, all TTP IDs in
         `isr_reports` are validated against the ATT&CK dataset BEFORE the
         LLM call. The validation summary is injected into the prompt as a
         grounding block so the LLM can self-correct hallucinated IDs.
 
-        Phase 4.3: When `cascade_summary` (CascadeSummary) is provided, a
+        When `cascade_summary` (CascadeSummary) is provided, a
         three-layer confidence ranking block is injected into the prompt so
         the LLM prioritizes corroborated (multi-layer) TTPs over single-layer
         evidence.
 
-        Phase 5: When `memory_store` (MemoryStore protocol) is provided, the
+        When `memory_store` (MemoryStore protocol) is provided, the
         top-k most similar past analysis cases are retrieved and injected as
         few-shot context before the verdict LLM call.
 
@@ -535,18 +535,18 @@ class JudgeAgent:
             if isr_block:
                 reports_text += f"\n\n=== ISR SUMMARIES ===\n{isr_block}"
 
-        # Phase 4.3: Three-layer TTP cascade block (compact)
+        # Three-layer TTP cascade block (compact)
         cascade_block = self._build_cascade_block(cascade_summary)
         if cascade_block:
             # Cascade blocks can be huge; keep only first 800 chars
             reports_text = f"{reports_text}\n\nCASCADE:\n{cascade_block[:800]}"
 
-        # Phase 7.1: Schema hint (compact)
+        # Schema hint (compact)
         schema_hint = self._build_schema_hint(reports, isr_reports)
         if schema_hint:
             reports_text = f"{reports_text}\n\n{schema_hint[:400]}"
 
-        # Phase 5: Long-term memory — inject top-K similar past cases as
+        # Long-term memory — inject top-K similar past cases as
         # weighted priors. The block is bounded (~1.2 KB worst case for
         # top_k=3) and degrades gracefully to an empty string when the store
         # is empty or retrieval fails.
@@ -625,7 +625,7 @@ class JudgeAgent:
             # ``attack-pattern.external_references`` (REP-01).
             from maljan.agents.judge_postprocess import postprocess_judge_bundle
 
-            # Wave 9 (2026-05-29): when a cascade summary is available,
+            # When a cascade summary is available,
             # derive the set of TIDs that survived the cascade and pass it
             # to REP-02 so orphan attack-patterns (TTPs the LLM emitted
             # but the deterministic pipeline rejected) are dropped from
@@ -1044,7 +1044,7 @@ class JudgeAgent:
     ) -> str:
         """Infer malware category and return a STIX schema pruning hint block.
 
-        Phase 7.1 (Dynamic Schema Pruning): Runs keyword-weighted inference
+        Runs keyword-weighted inference
         over the combined analyst reports and ISR claims to detect the malware
         behavioral category (ransomware, RAT, dropper, worm, infostealer).
 
@@ -1169,7 +1169,7 @@ class JudgeAgent:
     ) -> str:
         """Retrieve similar past cases and format them as a few-shot prompt block.
 
-        Phase 5 implementation. Queries the MemoryStore with a summary of the
+        Queries the MemoryStore with a summary of the
         current ISR claims. The retrieved cases are formatted as a structured
         context block to help the judge leverage historical analysis patterns.
 

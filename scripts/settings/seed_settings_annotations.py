@@ -3,8 +3,8 @@
 This harvested a description for each ``core.*`` leaf from the comment block
 above its ``KEY=`` line in the root ``.env.example`` (``LLM__OPENAI__BASE_URL``
 -> ``llm.openai.base_url``). That file was deleted when application settings
-moved into the settings store (2026-09-11, see
-``docs/superpowers/specs/2026-09-11-env-free-configuration-design.md``) and
+moved into the settings store (2026-09-11; see
+``git log -- docs/specs docs/plans docs/superpowers`` for the design record) and
 replaced by ``bootstrap.env.example``, which documents only the bootstrap
 contract (``DATABASE_URL``, ``JWT_SECRET_KEY``, ...) and carries none of the
 ``core.*`` comment blocks this script needs — pointing it there would silently

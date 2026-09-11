@@ -106,7 +106,7 @@ maljan/
 │   └── evaluation/          the measured corpus and its analysis scripts
 ├── data/                    tracked knowledge assets, loaded lazily, each with a fallback
 ├── docker/                  Dockerfiles and the compose stack
-├── docs/                    README.md (this tree explained), assets/, specs/, plans/
+├── docs/                    README.md (this tree explained), assets/
 ├── Makefile                 every gate and every generator
 └── pyproject.toml uv.lock   one uv workspace: maljan plus apps/api
 ```

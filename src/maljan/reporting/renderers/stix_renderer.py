@@ -72,8 +72,9 @@ class ExtendedSTIXRenderer:
         """Render the extended bundle.
 
         ``ledger`` is an optional ``TruncationLedger``; the integrity pass at the
-        end records what it removed there, which is the measurement C7 needs
-        (queue item B4). This is the *second* place the pass runs — the judge's
+        end records what it removed there, which is the measurement the
+        repair-versus-reject claim needs. This is the *second* place the pass
+        runs — the judge's
         own post-process is the first — so both must report or the aggregate
         undercounts.
         """
@@ -105,7 +106,7 @@ class ExtendedSTIXRenderer:
             objects.append(malware_obj)
             malware_id = malware_obj.id
 
-        # Wave 9 (2026-05-29): collect indicators per-kind, then apply
+        # Collect indicators per-kind, then apply
         # MAX_TOTAL_INDICATORS as a hard cap with priority order
         # (hashes > network > file:name strings). The 2026-05-29 Linux
         # ELF audit found 19 indicators leaking past G-FP-4's ≤15 ceiling
@@ -135,7 +136,7 @@ class ExtendedSTIXRenderer:
 
         # 5) StringIOC → Indicator.
         #
-        # Wave 4 Step 5 (2026-05-28): apply the same acceptance-based filter
+        # Apply the same acceptance-based filter
         # used by the judge bundle postprocess (J-02) so deterministic
         # interesting_strings can't smuggle noise (NDK build paths, bundled
         # bytecode class refs, random short strings) into the public STIX
@@ -331,7 +332,7 @@ def _stix_pattern_for_string_ioc(ioc: StringIOC) -> str | None:
 
 
 def _accept_string_ioc(ioc: StringIOC, pattern: str, file_name_kept: int) -> bool:
-    """Wave 4 Step 5: gate StringIOC → Indicator emission.
+    """Gate StringIOC → Indicator emission.
 
     Mirrors :func:`maljan.agents.judge_postprocess._admit_indicator` so the
     extended renderer can't bypass the J-02 noise floor. Mocking out the

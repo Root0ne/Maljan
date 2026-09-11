@@ -1,4 +1,4 @@
-"""Long-Term Memory abstractions for Maljan — Phase 5.
+"""Long-Term Memory abstractions for Maljan.
 
 Defines the StoredCase dataclass and the MemoryStore Protocol that all
 backend implementations must satisfy. The Protocol is runtime-checkable so

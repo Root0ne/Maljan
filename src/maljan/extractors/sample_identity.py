@@ -384,7 +384,7 @@ _MSVC_LINKER: dict[int, str] = {
 def _detect_language_or_compiler(blob: bytes | None) -> str | None:
     """Compiler / runtime fingerprint.
 
-    2026-07 round 2: the previous version only matched six literal byte markers
+    The previous version only matched six literal byte markers
     and returned "unknown" for ordinary MSVC PEs (the toolchain evidence lives in
     the PE Rich header + linker version + import DLLs, none of which it read).
     We keep the fast byte-signature path for packers/scripting runtimes, then

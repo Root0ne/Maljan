@@ -117,7 +117,7 @@ _FILENAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,255}$")
 def _sanitise_filename(raw: str | None) -> str:
     """Reject path-traversal / control characters and double-extensions.
 
-    SEC-MIME-DOUBLE-EXT-01 (audit 2026-05-19): the storage path is sha256-
+    The storage path is sha256-
     derived so the upload itself is safe even if the filename is hostile,
     but the API returns ``original_filename`` verbatim and downstream
     consumers (CLI download, web UI) sometimes use it for save-as. Reject
@@ -218,7 +218,7 @@ async def _audit_upload(
 ) -> None:
     """Record one accepted upload, whichever of the three ways it was accepted.
 
-    A2 re-verification (dev audit 2026-09-06): the audit call used to sit at
+    The audit call used to sit at
     the end of the route, and two of its three successful exits return before
     reaching it -- the per-user dedup path and the shared-storage path both
     answered 201 and wrote nothing. Those are the two worth having: a
@@ -259,10 +259,10 @@ async def upload_sample(
         extra={"user_id": str(user.id), "component": "upload"},
     )
 
-    # Wave 9 (2026-05-29): route uploads through the Defender-excluded
+    # Route uploads through the Defender-excluded
     # ``settings.upload_temp_dir`` instead of the OS temp dir. See the
     # ``APISettings.upload_temp_dir`` field comment for the audit reference.
-    # Wave 9 HOTFIX-08: ``.resolve()`` to keep the path CWD-independent — the
+    # ``.resolve()`` keeps the path CWD-independent — the
     # original ELF smoke test hit "Invalid argument" downstream when a
     # different coroutine opened the relative path from a different CWD.
     upload_tmp_root = Path(settings.upload_temp_dir).resolve()
@@ -359,7 +359,7 @@ async def upload_sample(
             if not client.bucket_exists(settings.minio_bucket):
                 client.make_bucket(settings.minio_bucket)
                 logger.info("MinIO bucket created: %s", settings.minio_bucket)
-                # SEC-MINIO-BUCKET-ACL-01 (2026-05-19 audit): MinIO defaults
+                # MinIO defaults
                 # to private buckets, but an operator can mis-configure
                 # ``MINIO_BROWSER_ALLOW_PUBLIC_BUCKETS`` or a prior process
                 # could have left the bucket public. Set an explicit deny

@@ -2,8 +2,8 @@
 
 ``api.*`` overrides saved from the UI are read through here with a short TTL,
 so a change is effective on every API process within seconds without a
-restart. Anything not overridden falls back to ``API_DEFAULTS`` (Task 2:
-these knobs no longer live on ``APISettings``/the environment at all), and so
+restart. Anything not overridden falls back to ``API_DEFAULTS`` (these knobs
+do not live on ``APISettings``/the environment at all), and so
 does everything when the database cannot be reached: a settings read must
 never take a request down.
 """

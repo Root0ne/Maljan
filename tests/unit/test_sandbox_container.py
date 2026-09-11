@@ -71,9 +71,10 @@ class TestSandboxConfig:
         cfg = SandboxConfig()
         assert cfg.cape2.poll_interval_seconds == 10
 
-    def test_provider_override(self) -> None:
+    def test_default_provider_is_mock_until_overridden(self) -> None:
         from maljan.core.config import SandboxConfig
 
+        assert SandboxConfig().provider == "mock"
         assert SandboxConfig(provider="cape2").provider == "cape2"
 
 

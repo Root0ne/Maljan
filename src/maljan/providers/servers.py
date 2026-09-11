@@ -1,6 +1,6 @@
 """Every MCP server Maljan attaches, and the one lifecycle they share.
 
-Before sub-project B there were three copies of "start an MCP server and take
+There used to be three copies of "start an MCP server and take
 its tools": ``GhidraStaticProvider.open``, ``GenericMCPStaticProvider.open``,
 and a hand-rolled pair inside the network analyst and the judge. They drifted
 — only one of them honoured an output guardrail, only one closed its child on
@@ -206,7 +206,7 @@ class ServerHandle:
         self._job_id: str = ""
         # True once ``aopen`` has attached this handle: its exit stack was
         # wound on whichever loop called it, so it must be unwound there too
-        # (see F6 / ``close``).
+        # (see ``close``).
         self._opened_async = False
         # *Which* loop that was. ``_opened_async`` alone was not enough: it
         # says "not the synchronous path" and the close paths then assumed the
@@ -830,7 +830,7 @@ class ServerHandle:
         """Release the client or subprocess. Never raises.
 
         A handle ``aopen`` attached must be released through ``aclose`` on the
-        loop that opened it (F6): the synchronous path here runs the toolkit's
+        loop that opened it: the synchronous path here runs the toolkit's
         exit stack through ``_run_coro_blocking`` on the *shared agent loop*,
         which is not the graph loop ``aopen`` wound it on, and produces
         anyio's "cancel scope in a different task" on unwind. Skip it here and
@@ -1198,7 +1198,7 @@ class ServerRegistry:
         """Close every handle this job attached synchronously.
 
         Returns the handles ``close()`` could not touch because ``aopen``
-        attached them (F6) — still open, so the caller must ``await
+        attached them — still open, so the caller must ``await
         handle.aclose()``, which routes each one back to the loop that opened
         it; ``ServiceContainer.aclose`` does exactly that. Per-loop handles
         are included: a job that attached the same server from two loops has

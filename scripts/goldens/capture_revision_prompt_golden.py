@@ -1,6 +1,6 @@
 """Pin the exact messages the network analyst's two revision paths send.
 
-Task 4 extracts the revision framing out of ``NetworkAnalyst`` into
+Extracting the revision framing out of ``NetworkAnalyst`` into
 ``BaseAnalyst.revision_messages`` so ``ConfigurableAnalyst`` can call the same
 function. That extraction is a refactor only if the model receives the same
 bytes afterwards, so the bytes are recorded here first, from a fake LLM that

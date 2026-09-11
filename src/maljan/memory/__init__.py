@@ -1,13 +1,13 @@
 """Memory and intelligence retrieval subsystem for Maljan.
 
 Modules:
-  ATT&CK Index (Phase 4):
+  ATT&CK Index:
     - attck_loader:    Downloads and parses MITRE ATT&CK STIX 2.1 bundle.
     - attck_index:     In-memory TF-IDF index over ATT&CK technique descriptions.
     - attck_validator: Validates proposed TTP IDs against the authoritative ATT&CK dataset.
     - ttp_validation:  TTPValidationSummary dataclass and helpers.
 
-  Long-Term Memory (Phase 5):
+  Long-Term Memory:
     - long_term_memory: StoredCase dataclass, MemoryStore Protocol, build_stored_case().
     - in_memory_store:  InMemoryStore -- pure-Python cosine similarity, zero dependencies.
     - qdrant_store:     QdrantStore stub -- production Qdrant backend (requires qdrant-client).

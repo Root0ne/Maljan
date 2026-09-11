@@ -428,7 +428,7 @@ class TriageSandboxProvider(SandboxProvider):
         *,
         skip_errors: bool = False,
     ) -> Any:
-        """One JSON body, streamed and refused past the cap (CORE-1).
+        """One JSON body, streamed and refused past the cap.
 
         ``skip_errors`` is for the bodies a run can do without: a behavioural
         task that never reached "reported" answers 4xx, and the overview alone
@@ -451,7 +451,7 @@ class TriageSandboxProvider(SandboxProvider):
 
         headers = self._auth_headers()
         http = self._get_http()
-        # Streamed and capped rather than fetched whole (CORE-1): an overview
+        # Streamed and capped rather than fetched whole: an overview
         # and its behavioural reports are the bodies Triage legitimately sends
         # by the hundreds of megabytes, and their size is the remote end's
         # choice alone.
@@ -515,7 +515,7 @@ class TriageSandboxProvider(SandboxProvider):
             with http.stream("GET", url, headers=headers) as response:
                 if response.status_code >= 400:
                     return None
-                # CORE-1: a capture past the cap degrades this call the way
+                # A capture past the cap degrades this call the way
                 # every other pcap failure does, rather than filling the disk.
                 stream_to_file_capped(response, out, what="The Triage capture")
         except Exception:

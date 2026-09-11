@@ -127,18 +127,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # ── Startup ──────────────────────────────────────────────
     logger.info("Starting Maljan API server...")
 
-    # Wave 9 (2026-05-29): ensure the Defender-excluded sample upload tmp
-    # dir exists before any request can land. The 2026-05-29 Linux ELF
-    # audit found that uploads routed to ``%LOCALAPPDATA%\Temp`` were
-    # quarantined silently. See APISettings.upload_temp_dir.
+    # Create the Defender-excluded sample upload tmp dir before any request
+    # can land: uploads routed to ``%LOCALAPPDATA%\Temp`` are quarantined
+    # silently. See APISettings.upload_temp_dir.
     from pathlib import Path as _Path
 
-    # Wave 9 HOTFIX-08 (2026-05-29): resolve to absolute BEFORE writing so
-    # downstream consumers (worker MinIO download, sandbox submit) don't
-    # inherit a CWD-dependent relative path. The 2026-05-29 ELF smoke test
-    # hit ``[Errno 22] Invalid argument`` from the sandbox client's submit
-    # path when its httpx coroutine context tried to open
-    # ``data\uploads\.tmp\<sha>.elf`` from a CWD that wasn't the project root.
+    # Resolve to absolute BEFORE writing so downstream consumers (worker
+    # MinIO download, sandbox submit) don't inherit a CWD-dependent relative
+    # path. An ELF smoke test hit ``[Errno 22] Invalid argument`` from the
+    # sandbox client's submit path when its httpx coroutine context tried to
+    # open ``data\uploads\.tmp\<sha>.elf`` from a CWD that wasn't the project
+    # root.
     _upload_tmp = _Path(settings.upload_temp_dir).resolve()
     try:
         _upload_tmp.mkdir(parents=True, exist_ok=True)
@@ -326,11 +325,11 @@ def create_app() -> FastAPI:
     )
 
     # ── Security Headers ─────────────────────────────────────
-    # SEC-CORS-HEADERS-01 (audit 2026-05-19): bare CORS leaves browsers
-    # without the standard hardening header set. The middleware below
-    # installs OWASP-recommended defaults (CSP / X-Frame-Options /
-    # X-Content-Type-Options / Referrer-Policy / Permissions-Policy)
-    # without touching API semantics. HSTS stays off in dev (HTTP).
+    # Bare CORS leaves browsers without the standard hardening header set.
+    # The middleware below installs OWASP-recommended defaults (CSP /
+    # X-Frame-Options / X-Content-Type-Options / Referrer-Policy /
+    # Permissions-Policy) without touching API semantics. HSTS stays off in
+    # dev (HTTP).
     from app.middleware.security_headers_middleware import SecurityHeadersMiddleware
 
     app.add_middleware(

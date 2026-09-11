@@ -1,6 +1,6 @@
 """STIX 2.1 Domain Object schemas with per-claim confidence intervals.
 
-Phase 7.2 addition: ConfidenceAnnotatedRelationship
+Adds ``ConfidenceAnnotatedRelationship``.
 
 Literature gap: No existing system adds per-claim uncertainty scores and
 multi-agent attribution metadata to STIX 2.1 Relationship objects. Standard

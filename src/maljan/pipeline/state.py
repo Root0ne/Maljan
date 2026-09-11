@@ -49,15 +49,15 @@ class AnalysisState(TypedDict):
     sample_path: str | None
     sandbox_report: dict[str, Any] | None
 
-    # Wave 4 (2026-05-28): file_type + canonical platform inferred at
+    # file_type + canonical platform inferred at
     # pipeline bootstrap. Consumed by the Sigma/YARA scan helpers in the
     # judge node (filter out platform-incompatible rules) and the TTP
     # cascade (drop platform-mismatched techniques). Optional because
-    # legacy state dicts persisted before Wave 4 don't carry them.
+    # legacy state dicts persisted earlier don't carry them.
     file_type: str | None
     platform: str | None
 
-    # Wave 6 (2026-05-28, GHIDRA-DELIVERY-01): the container-visible path
+    # The container-visible path
     # at which the static analyst's Ghidra MCP server can read the sample.
     # The worker mirrors the MinIO download into ``data/samples/`` (host)
     # which the Ghidra container sees through its bind mount at
@@ -69,10 +69,10 @@ class AnalysisState(TypedDict):
     # ISR via the existing PIPE-ANA-01 guard.
     static_sample_path: str | None
 
-    # Sub-project C: one container-visible path per static provider a profile
+    # One container-visible path per static provider a profile
     # uses, keyed by provider id. ``static_sample_path`` above stays exactly
     # what it was — the *globally configured* provider's path, which is what
-    # sub-project A's contract promises and what every single-provider run
+    # the provider layer's contract promises and what every single-provider run
     # reads — and this is the second and later entries a profile with two
     # static analysts needs. Empty on every default-profile run.
     static_sample_paths: dict[str, str]
@@ -84,7 +84,7 @@ class AnalysisState(TypedDict):
     # Per-agent structured ISR reports
     isr_reports: Annotated[dict[str, AgentISR], _merge_dicts]
 
-    # Report-reshaping Phase 1: per-agent captured tool-loop outputs
+    # Per-agent captured tool-loop outputs
     # (decompiled functions, crypto constants, emulation/dataflow traces).
     # Written by the analyst node from ``agent.get_last_tool_evidence()`` and
     # read by ``report_node`` to ground the deep technical spine. Each value is

@@ -1,6 +1,6 @@
 """Dynamic schema pruning for STIX output quality improvement.
 
-Phase 7.1 implementation — CTI-GEN (IEEE CSR 2025) methodology.
+Implements the CTI-GEN (IEEE CSR 2025) methodology.
 
 Problem: The JudgeAgent's give_verdict() calls llm.with_structured_output(Bundle),
 which exposes the LLM to the full STIX schema (all SDO types). This causes:
