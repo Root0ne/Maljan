@@ -582,7 +582,7 @@ class ServiceContainer:
                 )
             except Exception as exc:  # noqa: BLE001 — teardown never propagates
                 logger.warning("Closing the tool-server registry failed (non-fatal): %s", exc)
-            # F6: a handle ``aopen`` attached is unwound on the loop that
+            # A handle ``aopen`` attached is unwound on the loop that
             # opened it (``ServerHandle.aclose`` routes it there) rather than
             # through the synchronous sweep, which skips it. Read from the
             # registry rather than from the sweep's return value, so a sweep
@@ -643,7 +643,7 @@ class ServiceContainer:
     def get_report_composer(self) -> Any | None:
         """Return the singleton section-wise ReportComposer, or ``None``.
 
-        Reshaping Phase 4. ``None`` in mock mode or when ``composer_enabled`` is
+        ``None`` in mock mode or when ``composer_enabled`` is
         off (callers then simply skip the professional spine). Reuses the judge
         LLM like the NarrativeAgent.
         """

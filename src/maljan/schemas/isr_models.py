@@ -40,7 +40,7 @@ class ClaimEvidence(BaseModel):
         description="MITRE ATT&CK technique ID if applicable, e.g. 'T1055.001'.",
         pattern=r"^T\d{4}(\.\d{3})?$",
     )
-    # Wave 4 (2026-05-28): the platforms the source rule/layer explicitly
+    # The platforms the source rule/layer explicitly
     # declared (e.g. ["windows"] for a Sigma rule with
     # ``logsource.product=windows``, ["any"] for a YARA rule annotated
     # cross-platform). Cascade engine prefers this over the MITRE catalog

@@ -1,6 +1,6 @@
 """Section-wise Report Composer — authors the professional technical spine.
 
-Report-reshaping Phase 4. The deterministic builder fills every factual table;
+The deterministic builder fills every factual table;
 the existing ``NarrativeAgent`` writes the exec-summary / capabilities / defensive
 recommendations in one round. The Composer authors the NEW professional sections
 (introduction, technical-analysis spine, C2 channels, conclusion) **one section

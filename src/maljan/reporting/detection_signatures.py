@@ -69,7 +69,7 @@ def build_detection_rules(report: MalwareReport) -> list[DetectionRule]:
     silently filters them out. The list ordering is stable: YARA, Sigma,
     Suricata. Callers can rely on ``DetectionRule.kind`` for dispatch.
 
-    Wave 4 (2026-05-28) — per-format gates:
+    Per-format gates:
 
     * **YARA** is hash-anchored (sha256 condition) so it's platform-neutral
       and always safe to ship. The rule name still gets de-familied when
@@ -141,8 +141,8 @@ def _rule_name_seed(report: MalwareReport) -> str:
 def _rule_name_component(report: MalwareReport) -> str:
     """The family/category component of a generated rule name.
 
-    Falls back to the sample hash when nothing is attributed. Audit 2026-07-26
-    round 2: the D11 placeholder check gates YARA and Sigma, but Suricata is
+    Falls back to the sample hash when nothing is attributed. The D11
+    placeholder check gates YARA and Sigma, but Suricata is
     deliberately ungated — its rule body fires on network IOCs, which stay valid
     whether or not the family is known, so refusing it would throw away a good
     signature. The *name* still has to be honest, and it was not: an
@@ -188,8 +188,8 @@ def _family_grounded_reason(report: MalwareReport) -> str | None:
 
 
 def _sigma_gate_reason(report: MalwareReport) -> str | None:
-    """Wave 4 Sigma gate — block when the rule would embed an unverified
-    family name in its title (the 2026-05-23 ungrounded-family FP).
+    """Sigma gate — block when the rule would embed an unverified
+    family name in its title (the ungrounded-family FP).
 
     Originally also blocked on ``platform == "unknown"``, but that broke
     legitimate test scenarios where the sample bytes aren't reachable
@@ -201,9 +201,9 @@ def _sigma_gate_reason(report: MalwareReport) -> str | None:
 
 
 def _yara_gate_reason(report: MalwareReport) -> str | None:
-    """Wave 9 YARA gate (2026-05-29) — mirror the Sigma gate.
+    """YARA gate — mirror the Sigma gate.
 
-    The 2026-05-29 Linux ELF audit's report f072cd22 shipped a stub
+    A Linux ELF audit's report f072cd22 shipped a stub
     ``Maljan_AutoGen_unknown`` YARA rule even though family_grounded=false
     because the previous gate was Sigma-only. The rule body's
     ``description = "Auto-generated, verdict=Malware, family=unknown"``

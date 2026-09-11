@@ -225,8 +225,8 @@ _BLOCK_CONFIDENCE_RE = re.compile(r"CONFIDENCE:\s*([\d.]+)")
 _BLOCK_TECHNIQUE_RE = re.compile(r"TECHNIQUE:\s*(T\d{4}(?:\.\d{3})?|NONE)", re.IGNORECASE)
 
 
-# Model tool-call scaffolding, which is not prose and is never a finding
-# (C1, dev audit 2026-09-06). A local model that emits its tool calls into the
+# Model tool-call scaffolding, which is not prose and is never a finding.
+# A local model that emits its tool calls into the
 # assistant channel -- rather than through the API's own tool-call field --
 # leaves these blocks in the text the ISR extraction reads, and a live
 # ``static_r2`` run put them in front of an operator as claims.
@@ -1115,7 +1115,7 @@ class BaseAnalyst(ABC):
         # Per-run truncation ledger (pitfall P6, findings-log §2.0). Same
         # lifecycle as token_ledger; None disables counting.
         self.truncation_ledger: Any | None = None
-        # Report-reshaping Phase 1: durable capture of the ReAct tool loop's
+        # Durable capture of the ReAct tool loop's
         # ToolMessages (decompile/crypto/emulate/dataflow) so the report
         # Composer can ground deep sections instead of hallucinating. Populated
         # by execute_tool_loop; read via get_last_tool_evidence().
@@ -1292,7 +1292,7 @@ class BaseAnalyst(ABC):
             warning and raise TimeoutError. The daemon flag ensures the OS will
             reap the thread when the worker process eventually exits.
 
-        Wave 5 fix (2026-05-28, HANG-01): the no-tools fallback path used to
+        The no-tools fallback path used to
         call ``self.llm.invoke(prebuilt)`` synchronously with no timeout, so
         when an analyst with no MCP tools (e.g. dynamic analyst with CAPE
         disabled) hit a slow / queued llama-server, the worker hung
@@ -1326,7 +1326,7 @@ class BaseAnalyst(ABC):
 
         self.logger.info("Starting ReAct agent loop with %d tools...", len(self.tools))
 
-        # Report-reshaping Phase 1: reset the per-run capture buffer before this
+        # Reset the per-run capture buffer before this
         # loop populates it from the ReAct message stream (see below).
         self._last_tool_evidence = []
 
@@ -1435,7 +1435,7 @@ class BaseAnalyst(ABC):
             raise AnalystError(f"{self.name} ReAct agent returned no result")
 
         msgs = thread_result.get("messages", []) or []
-        # Report-reshaping Phase 1: capture the tool loop's ToolMessages as
+        # Capture the tool loop's ToolMessages as
         # durable evidence for the report Composer. Best-effort — a capture
         # failure must never sink the analysis.
         try:
@@ -1447,7 +1447,7 @@ class BaseAnalyst(ABC):
         # is a non-empty list. Counting them is cheap and the most useful
         # single metric for "did this analyst overspend on Ghidra".
         tool_call_count = sum(len(getattr(m, "tool_calls", None) or []) for m in msgs)
-        # F4 (2026-07-05): the ReAct tool-loop's LLM calls happen INSIDE
+        # The ReAct tool-loop's LLM calls happen INSIDE
         # langgraph's ``create_react_agent`` executor, so they never passed
         # through ``_invoke_llm_with_timeout`` where token usage is tallied.
         # Only the no-tools fallback and view paths recorded usage, so the
@@ -1543,7 +1543,7 @@ class BaseAnalyst(ABC):
     def _capture_tool_evidence(self, msgs: list) -> list[CapturedToolOutput]:
         """Pair each tool call with its result from the ReAct message stream.
 
-        Report-reshaping Phase 1. AIMessages carry ``tool_calls`` (name + args +
+        AIMessages carry ``tool_calls`` (name + args +
         id); ToolMessages carry the result keyed by ``tool_call_id``. We pair by
         id — not positional order — so provider-specific interleaving cannot
         mis-associate an output. Capped at ``MAX_OUTPUTS_PER_AGENT`` and each
@@ -1661,7 +1661,7 @@ class BaseAnalyst(ABC):
     def _invoke_llm_with_timeout(self, messages: list, timeout: int) -> str:
         """Run ``self.llm.invoke(messages)`` with a hard wall-clock timeout.
 
-        Wave 5 HANG-01 fix (2026-05-28). Used by ``execute_tool_loop`` when
+        Used by ``execute_tool_loop`` when
         the agent has no tools registered. Mirrors the daemon-thread pattern
         from the tools path so a stalled / queued llama-server cannot freeze
         the worker. The thread is daemonised so the OS will reap it if it
@@ -1737,7 +1737,7 @@ class BaseAnalyst(ABC):
         pass
 
     # ------------------------------------------------------------------
-    # ISR interface (Phase 1b — subclasses may override for richer output)
+    # ISR interface (subclasses may override for richer output)
     # ------------------------------------------------------------------
 
     def analyze_isr(self, data: str) -> AgentISR:
@@ -2181,7 +2181,7 @@ class BaseAnalyst(ABC):
         """Convert a free-text report into a minimal AgentISR."""
         domain = self._infer_domain()
 
-        # C1 (dev audit 2026-09-06): a model that writes its tool calls into
+        # A model that writes its tool calls into
         # the assistant channel leaves them here, and the sentence splitter
         # below has no way to tell a call from prose -- a live static_r2 run
         # put raw ``<tool_call>`` blocks in front of an operator as findings.
@@ -2231,7 +2231,7 @@ class BaseAnalyst(ABC):
         ]
         claims: list[ClaimEvidence] = []
         for sentence in raw_sentences[:10]:
-            # F9 (2026-07-05): bind a technique ID to the sentence that
+            # Bind a technique ID to the sentence that
             # actually mentions it, not by positional index. The previous
             # ``technique_ids[i]`` stapled a T-code extracted anywhere in the
             # report onto an unrelated sentence, injecting mis-attributed
@@ -2269,7 +2269,7 @@ class BaseAnalyst(ABC):
         mapped *any* unrecognised name to "network", which broke cascade
         weighting for new agent kinds.
 
-        Returns ``str`` rather than the three-way Literal since sub-project C:
+        Returns ``str`` rather than a three-way Literal:
         a custom analyst's domain is its own definition key, and ``AgentISR``
         has always accepted a free string there.
         """

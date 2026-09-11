@@ -17,9 +17,9 @@ snapshotted into the ``RunSummary`` by the judge node.
 
 It also carries the **STIX integrity pass** counters, which are not truncation
 but are the same kind of question: the pass drops malformed indicators, dedups
-attack-patterns and prunes dangling relationships, and C7 claims that repairing
-is better than rejecting. That claim needs a number for *how often the pass
-fires* and *what it removes* — see queue item B4.
+attack-patterns and prunes dangling relationships, and the claim that repairing
+is better than rejecting needs a number for *how often the pass fires* and
+*what it removes*.
 
 Recording never raises. Telemetry that can break an analysis is worse than no
 telemetry, which is the same rule ``TokenLedger`` follows.

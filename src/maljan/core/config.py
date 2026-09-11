@@ -4,7 +4,7 @@ Uses nested Pydantic models so that each subsystem (LLM, negotiation, etc.)
 has its own isolated config namespace. Environment variables are flattened
 with double-underscore separators (e.g. LLM__PROVIDER=anthropic).
 
-Heterogeneous Model Ensemble (Phase 8 / Master Plan Section 4):
+Heterogeneous Model Ensemble:
   Agents can now be assigned different LLM providers/models via
   LLMConfig.agents dict. Example env vars:
 
@@ -164,7 +164,7 @@ class FrontierArm(BaseModel):
     # Throttling is a property of the endpoint, so it is configured per arm
     # rather than assumed by the harness. Measured 2026-08-14 on NVIDIA NIM:
     # two calls four seconds apart succeed and the next six return HTTP 429.
-    # The first attempt at B8 recorded throttles as failures and reported n=9
+    # An earlier harness recorded throttles as failures and reported n=9
     # with a wrong point estimate, so a paced client with backoff is now part of
     # the arm's definition and not something each harness reinvents.
     min_interval_s: Annotated[float, Field(ge=0)] = 0.0
@@ -180,7 +180,7 @@ class FrontierArm(BaseModel):
 
 
 class FrontierConfig(FrontierArm):
-    """The frontier comparison arms (findings-log E.8, queue items B8 / C6).
+    """The frontier comparison arms.
 
     **Evaluation only.** Nothing in the analysis pipeline reads this; only the
     eval harnesses do, through ``maljan.core.frontier``. The arms exist to close
@@ -189,7 +189,7 @@ class FrontierConfig(FrontierArm):
 
     Inherits the endpoint fields so the original single-endpoint configuration
     keeps working unchanged (``LLM__FRONTIER__MODEL`` and friends still describe
-    one arm, the one B8 ran). Additional arms go in ``arms`` and are addressed by
+    one arm). Additional arms go in ``arms`` and are addressed by
     name: ``LLM__FRONTIER__ARMS__GLM__MODEL=...``.
     """
 
@@ -226,9 +226,9 @@ class LLMConfig(BaseModel):
     # fix — focus comes from the §7.1 hint. Set 0 to disable (unbounded).
     judge_max_tokens: Annotated[int, Field(ge=0)] = 8192
 
-    # Wave 7 THROUGHPUT-01 (2026-05-28): when True, analysts run in parallel —
-    # correct for hosted multi-slot LLMs. When False (the DEFAULT since
-    # 2026-07-13), the pipeline runs analysts sequentially so a single-slot
+    # When True, analysts run in parallel —
+    # correct for hosted multi-slot LLMs. When False (the default), the
+    # pipeline runs analysts sequentially so a single-slot
     # local llama-server gives each analyst exclusive slot use for its
     # per-agent timeout budget instead of letting them choke each other in the
     # request queue. Set ``LLM__PARALLEL_ANALYSTS=true`` only for a hosted
@@ -367,7 +367,7 @@ class ChunkingConfig(BaseModel):
 
 
 class MemoryConfig(BaseModel):
-    """Phase 5 Long-Term Memory configuration.
+    """Long-Term Memory configuration.
 
     Controls which backend is used to store and retrieve past analysis
     cases for few-shot context injection in JudgeAgent.give_verdict().
@@ -688,12 +688,11 @@ class PreprocessingConfig(BaseModel):
 # role with no class of its own: it runs as ``ConfigurableAnalyst``.
 AnalystRole = Literal["static", "dynamic", "network", "judge", "generic"]
 
-# Deprecated since sub-project C. ``MCPServerConfig.agents`` used to be a
-# Literal of the four built-in roles; an operator can now bind a server to any
-# definition key, so the field is a plain ``str`` validated against the
-# definition map in ``Settings``. The name stays because sub-project B's
-# modules import it, and it stays a type so an annotation using it still
-# type-checks.
+# Deprecated. ``MCPServerConfig.agents`` used to be a Literal of the four
+# built-in roles; an operator can now bind a server to any definition key, so
+# the field is a plain ``str`` validated against the definition map in
+# ``Settings``. The name stays because the tool-server modules import it, and
+# it stays a type so an annotation using it still type-checks.
 AgentRole = str
 
 # A server key is a slug: lowercase, starts with a letter, at most 32 chars.
@@ -721,7 +720,7 @@ class MCPServerConfig(BaseModel):
     # http transport settings
     url: str = ""
     auth_token: SecretStr = SecretStr("")
-    # 2026-07 round 3: how many Ghidra MCP tools the static analyst exposes to the
+    # How many Ghidra MCP tools the static analyst exposes to the
     # model (MCP__GHIDRA__TOOL_SELECTION):
     #   "curated" — fixed ~20-tool allowlist (fastest, narrowest).
     #   "dynamic" — CORE triage set + tools relevant to the sample's capability
@@ -732,7 +731,6 @@ class MCPServerConfig(BaseModel):
     tool_selection: Literal["curated", "dynamic", "all"] = "dynamic"
     # When true, forces "all" regardless of ``tool_selection``.
     use_all_tools: bool = False
-    # New in sub-project B.
     # Working directory for the stdio child; empty means the repository root.
     cwd: str = ""
     # Names copied out of the API process's own environment into the child.
@@ -743,9 +741,9 @@ class MCPServerConfig(BaseModel):
     # built-ins do today); ``[]`` exposes nothing, which is what a freshly
     # added custom server does until the operator ticks tools from its probe.
     tools: list[str] | None = None
-    # Which agents receive this server's tools. Definition keys since
-    # sub-project C — the four built-in roles are simply the four built-in
-    # keys — validated against ``agents.definitions`` in ``Settings``.
+    # Which agents receive this server's tools. Definition keys — the four
+    # built-in roles are simply the four built-in keys — validated against
+    # ``agents.definitions`` in ``Settings``.
     agents: list[str] = Field(default_factory=list)
     # Display name; empty means "use the key".
     label: str = ""
@@ -755,7 +753,8 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
     """The two sidecars every run depends on, as settings rather than constants.
 
     Byte-for-byte the launch parameters ``NetworkAnalyst._initialize_mcp_client``
-    and ``JudgeAgent._initialize_mcp_client`` used before sub-project B:
+    and ``JudgeAgent._initialize_mcp_client`` used before the sidecars became
+    settings:
     ``sys.executable`` running ``<dir>/server.py`` with ``<dir>`` as cwd, the
     threat-intel one alone allowed to see the two intel keys. ``tools=None``
     keeps the whole manifest, which is what those agents did, and what
@@ -789,14 +788,13 @@ class MCPConfig(BaseModel):
 
     ``ghidra`` and ``cape`` used to live here as a transitional mirror of
     ``static.ghidra`` / ``sandbox.cape2.mcp`` for readers that had not yet
-    moved onto the provider layer; Task 12 moved the last of them, so the
-    mirror was gone until this task filled ``servers`` back in with a real
-    ``dict[str, MCPServerConfig]`` for operator-configured MCP tools that are
-    not one of the built-in providers.
+    moved onto the provider layer; the last of those readers has since moved,
+    and ``servers`` now holds a real ``dict[str, MCPServerConfig]`` for
+    operator-configured MCP tools that are not one of the built-in providers.
 
     ``ghidra`` and ``cape`` below are a **deprecated read-only compatibility
-    view**, for ``tests/evaluation/``'s reproduction scripts alone (final
-    review I5) — that harness predates the provider layer and reads
+    view**, for ``tests/evaluation/``'s reproduction scripts alone — that
+    harness predates the provider layer and reads
     ``cfg.mcp.ghidra`` / ``cfg.mcp.cape`` directly, and the plan-wide
     constraint forbids editing it. ``Settings.model_validator(mode="after")``
     populates the two private attributes with the *same objects* as
@@ -847,7 +845,7 @@ class MCPConfig(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Agent composition (sub-project C)
+# Agent composition
 # ---------------------------------------------------------------------------
 
 # A definition key is a slug, exactly like a server key: it names a graph node
@@ -901,8 +899,8 @@ class AgentDefinition(BaseModel):
     is what keeps a clone honest: change the provider, keep the prompt null,
     and the middle of the prompt changes with it.
 
-    The LLM is *not* here. It lives at ``llm.agents.<key>.*``, the location
-    sub-project A froze; two copies of one setting drift.
+    The LLM is *not* here. It lives at ``llm.agents.<key>.*`` and nowhere else;
+    two copies of one setting drift.
     """
 
     role: AnalystRole
@@ -1153,7 +1151,7 @@ class StaticYaraConfig(BaseModel):
 class StaticGenericConfig(BaseModel):
     """Which entry of ``mcp.servers`` the ``generic_mcp`` static provider drives.
 
-    Sub-project A gave this provider its own copy of an ``MCPServerConfig``.
+    This provider used to carry its own copy of an ``MCPServerConfig``.
     One server can now serve several analysts, so the configuration lives in
     ``mcp.servers`` and this is only the name of the one the static provider
     owns. Empty means the provider has nothing to attach, and its probe says
@@ -1312,7 +1310,7 @@ class SandboxConfig(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Reporting (Faz 2+)
+# Reporting
 # ---------------------------------------------------------------------------
 
 
@@ -1326,10 +1324,10 @@ class ReportingConfig(BaseModel):
     - ``include_extended_stix``: emit the extended Bundle (Identity / Note /
       Report SDOs). Disable to halve serialization cost when consumers only
       need the minimal judge bundle.
-    - ``narrative_max_tokens``: hard cap for the NarrativeAgent LLM round
-      (Faz 3). Keeps tail latency predictable.
+    - ``narrative_max_tokens``: hard cap for the NarrativeAgent LLM round.
+      Keeps tail latency predictable.
     - ``auto_generate_detection_rules``: template-based YARA/Sigma/Suricata
-      generation (Faz 4).
+      generation.
     """
 
     enabled: bool = True
@@ -1344,13 +1342,13 @@ class ReportingConfig(BaseModel):
     author_team: str = "Maljan Multi-Agent Pipeline"
     report_number_prefix: str = "MJN"
     default_tlp: Literal["CLEAR", "GREEN", "AMBER", "AMBER_STRICT", "RED"] = "CLEAR"
-    # Section-wise Report Composer (Phase 4). When False, the pipeline keeps the
+    # Section-wise Report Composer. When False, the pipeline keeps the
     # legacy single-round NarrativeAgent. Bounded per-section prompts + hard
     # per-section timeout keep the local SWA model from stalling.
     composer_enabled: bool = True
     composer_section_max_tokens: Annotated[int, Field(ge=1)] = 900
     composer_per_section_timeout: Annotated[int, Field(ge=1)] = 120
-    # Server-side HTML→PDF export (Phase 6).
+    # Server-side HTML→PDF export.
     html_export_enabled: bool = True
 
 
@@ -1420,9 +1418,9 @@ class Settings(BaseSettings):
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
     preprocessing: PreprocessingConfig = Field(default_factory=PreprocessingConfig)
-    # Empty until sub-project B (see ``MCPConfig``'s own docstring); the
-    # transitional ``static.ghidra`` / ``sandbox.cape2.mcp`` mirror that used
-    # to live here for not-yet-migrated readers is gone as of Task 12.
+    # See ``MCPConfig``'s own docstring; the transitional ``static.ghidra`` /
+    # ``sandbox.cape2.mcp`` mirror that used to live here for not-yet-migrated
+    # readers is gone.
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     reporting: ReportingConfig = Field(default_factory=ReportingConfig)
     # Which analysts exist, in what order, and what each one gets. The
@@ -1475,7 +1473,7 @@ class Settings(BaseSettings):
     # ``REACT_AGENT_TIMEOUT_OVERRIDES__static=600``.
     react_agent_timeout_overrides: dict[str, int] = Field(
         default_factory=lambda: {
-            # Wave 7.5 THROUGHPUT-02 (2026-05-28): the static analyst runs a
+            # The static analyst runs a
             # full ReAct loop against Ghidra MCP (load_program → auto-
             # analyze → behaviour scan → decompile). On the local 35B Qwen
             # at ~4.6 tok/s output the previous 600s ceiling fired
@@ -1504,7 +1502,7 @@ class Settings(BaseSettings):
             # final-verdict LLM call on Qwen 35B repeatedly bottlenecked
             # at 180-300s in the 2026-05-28 sequential live runs.
             "judge": 600,
-            # Wave 5 HANG-01 (2026-05-28): single-slot llama-server serialises
+            # A single-slot llama-server serialises
             # all three analyst LLM calls — when the static analyst holds the
             # slot for ~600s the dynamic / network analysts spend most of
             # their budget queueing. Bump them so they don't time out before
@@ -1585,7 +1583,7 @@ class Settings(BaseSettings):
     def _populate_deprecated_mcp_view(self) -> "Settings":
         """Wire ``mcp.ghidra`` / ``mcp.cape`` to the real provider-layer objects.
 
-        See ``MCPConfig``'s docstring (final review I5): this is a read-only
+        See ``MCPConfig``'s docstring: this is a read-only
         compatibility view for ``tests/evaluation/``'s scripts, which predate
         the provider layer and cannot be edited under the plan-wide
         constraint. The views share the *same* ``MCPServerConfig`` instances

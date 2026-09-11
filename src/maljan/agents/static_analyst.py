@@ -1,6 +1,6 @@
 """Static Analyst agent — evaluates decompiled code and binary strings.
 
-Phase 1b: Overrides analyze_isr() and revise_isr() to extract structured
+Overrides analyze_isr() and revise_isr() to extract structured
 ClaimEvidence objects via a structured-output prompt. Each claim cites a
 concrete artifact reference (function name, string offset, API call).
 """
@@ -26,8 +26,9 @@ _ISR_HEAD = (
     "You are an expert Static Malware Analyst with 15 years of reverse engineering experience. "
 )
 
-# Empty today. Declared because the assembly order is the contract sub-projects
-# B and C build agent prompts from, and an implicit empty tail is a trap.
+# Empty today. Declared because the assembly order is the contract the tool
+# server and agent-composition layers build agent prompts from, and an
+# implicit empty tail is a trap.
 _ISR_TAIL = ""
 
 
@@ -209,7 +210,7 @@ class StaticAnalyst(BaseAnalyst):
         # Ghidra-specific by construction: this pre-pass drives the headless
         # Ghidra REST API directly (load_program / call graph), not a
         # capability any other static provider could satisfy. Generalising it
-        # behind a capability flag is sub-project C's, not this one's.
+        # behind a capability flag is future work.
         #
         # L3 (live-run finding): ``cfg.static.ghidra`` is Ghidra's own
         # sub-config and keeps its "http" default regardless of which static
@@ -504,7 +505,7 @@ class StaticAnalyst(BaseAnalyst):
 
         self._try_initialize_mcp()
 
-        # Phase 4: If data looks like a file path and exists, use PELoader
+        # If data looks like a file path and exists, use PELoader
         # for structural PE analysis instead of passing raw path to LLM.
         target_info: str
         if len(data.strip()) < 512 and os.path.exists(data.strip()):
@@ -524,7 +525,7 @@ class StaticAnalyst(BaseAnalyst):
         else:
             target_info = f"Static output:\n{data}"
 
-        # 2026-07 round 3: dynamic-mode tool narrowing when data is a file path.
+        # Dynamic-mode tool narrowing when data is a file path.
         if len(data.strip()) < 512 and os.path.exists(data.strip()):
             self._refine_tools_for_sample(data.strip())
 
@@ -593,7 +594,7 @@ class StaticAnalyst(BaseAnalyst):
         return str(response.content)
 
     # ------------------------------------------------------------------
-    # ISR interface (Phase 1b — structured claim extraction)
+    # ISR interface (structured claim extraction)
     # ------------------------------------------------------------------
 
     def analyze_isr(self, data: str) -> AgentISR:
@@ -636,7 +637,7 @@ class StaticAnalyst(BaseAnalyst):
             f"Target File: {data}" if len(data.strip()) < 512 else f"Static output:\n{data}"
         )
 
-        # Wave 6 (2026-05-28, GHIDRA-DELIVERY-01): make the load_program
+        # Make the load_program
         # path *explicit* in the human turn instead of leaving the LLM to
         # infer it from the JSON. The path is injected upstream in
         # ``nodes.py:_augment_static_chunks_with_path`` as
@@ -675,7 +676,7 @@ class StaticAnalyst(BaseAnalyst):
             # own long-term memory. Same host profile as the family RAG, different KB
             # (prior cases -> recurring techniques). Fail-safe and gated OFF by default.
             attck_hint = self._compute_attck_case_hint(host_path)
-        # 2026-07 round 3: in dynamic mode, narrow the Ghidra tool manifest to the
+        # In dynamic mode, narrow the Ghidra tool manifest to the
         # tools relevant to THIS sample's capability categories before the ReAct
         # loop (all tools stay reachable; only the relevant subset is shown).
         self._refine_tools_for_sample(host_path)
@@ -829,7 +830,7 @@ class StaticAnalyst(BaseAnalyst):
 def _extract_load_hint(data: str) -> str:
     """Return a one-line ``load_program`` hint when the chunk carries a path.
 
-    Wave 6 GHIDRA-DELIVERY-01. The analyst-node wrapper splices the
+    The analyst-node wrapper splices the
     container-visible sample path into the chunk JSON as
     ``analysis_file_path``. We hoist that to a dedicated line at the top
     of the human turn so the LLM doesn't have to discover it inside the
@@ -965,7 +966,7 @@ def _parse_claim_blocks(text: str) -> list[ClaimEvidence]:
             continue
         claim_text = strip_tool_call_scaffolding(claim_match.group(1)).strip()
         if not claim_text:
-            # C1 (dev audit 2026-09-06): the whole claim was model tool-call
+            # The whole claim was model tool-call
             # scaffolding, which a live static_r2 run showed to an operator as
             # a finding. An empty finding is worse than none: it reaches the
             # Pipeline tab as a blank row.

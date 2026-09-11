@@ -112,7 +112,7 @@ def postprocess_judge_bundle(
     observations, network IOCs. When provided, indicators whose pattern
     value isn't a substring of any corpus entry are dropped.
 
-    ``valid_technique_ids`` (Wave 9, 2026-05-29) is the set of TIDs that
+    ``valid_technique_ids`` is the set of TIDs that
     survived the cascade and are present in the report's
     capability_matrix. When provided, REP-01 drops AttackPattern SDOs
     whose technique_id is not in the set (orphan attack-patterns), along
@@ -150,7 +150,7 @@ def postprocess_judge_bundle(
     if evidence_corpus is not None:
         haystack = " ".join(evidence_corpus).lower()
         # Sandbox-derived "real activity" corpus for tightened file:name
-        # admission (Wave 4 Step 5). Carried separately because evidence
+        # admission. Carried separately because evidence
         # corpus is permissive (whole interesting_strings list); the
         # sandbox set is the only positive runtime signal.
         runtime_paths: set[str] = set()
@@ -196,7 +196,7 @@ def postprocess_judge_bundle(
             objects = kept
             bundle_dict["objects"] = kept
 
-    # ── REP-02 (Wave 9): drop orphan attack-patterns absent from the
+    # ── REP-02: drop orphan attack-patterns absent from the
     # report's capability_matrix. Sweep relationships pointing to them.
     if valid_technique_ids is not None:
         orphan_ap_ids: set[str] = set()
@@ -283,7 +283,7 @@ def postprocess_judge_bundle(
 
 
 # ---------------------------------------------------------------------------
-# Indicator admission (Wave 4 Step 5)
+# Indicator admission
 # ---------------------------------------------------------------------------
 
 
@@ -297,8 +297,8 @@ def _admit_indicator(
 ) -> str:
     """Return ``"keep"`` or a short reason string for J-02 logging.
 
-    Acceptance-based filter for ``file:name`` indicators (tightened in
-    Wave 4 after a noise audit found ~45 noisy SDOs); falls back to the
+    Acceptance-based filter for ``file:name`` indicators (tightened after
+    a noise audit found ~45 noisy SDOs); falls back to the
     original "any-literal-in-corpus" check for every other kind.
     """
     if not pattern:
@@ -527,10 +527,10 @@ def enforce_bundle_integrity(
     Args:
         objects: The bundle contents to repair.
         ledger:  Optional :class:`~maljan.core.truncation_ledger.TruncationLedger`.
-                 C7 claims repairing beats rejecting; that needs a number for how
+                 The claim that repairing beats rejecting needs a number for how
                  often this pass fires and what it removes, and nothing counted it
-                 before (queue item A3, measured at B4). Typed loosely to keep this
-                 module free of a core import it does not otherwise need.
+                 before. Typed loosely to keep this module free of a core import
+                 it does not otherwise need.
     """
     _objects_in = len(objects)
     _dropped: dict[str, int] = {}

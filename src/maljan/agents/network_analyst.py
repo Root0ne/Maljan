@@ -1,6 +1,6 @@
 """Network Analyst agent — evaluates network flows (Zeek/PCAP/DNS logs).
 
-Phase 1b: Overrides analyze_isr() and revise_isr() to extract structured
+Overrides analyze_isr() and revise_isr() to extract structured
 ClaimEvidence objects. Focuses on C2 beaconing patterns, DGA domains,
 TLS certificate anomalies, and protocol tunneling.
 
@@ -200,7 +200,7 @@ class NetworkAnalyst(BaseAnalyst):
         return str(response.content)
 
     # ------------------------------------------------------------------
-    # ISR interface (Phase 1b)
+    # ISR interface
     # ------------------------------------------------------------------
 
     def analyze_isr(self, data: str) -> AgentISR:

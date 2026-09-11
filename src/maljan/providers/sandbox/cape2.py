@@ -114,7 +114,7 @@ class CAPE2SandboxProvider(SandboxProvider):
         instead of a module-level ``get_settings().mcp.cape``, and the
         allow-list itself, which is always ``CAPE_ESSENTIAL_TOOLS`` now — the
         dead ``mcp.cape.tools`` config-driven branch is not carried forward
-        (``MCPServerConfig`` has no such field; it arrives in sub-project B).
+        (``MCPServerConfig`` had no such field at the time).
 
         Idempotent: a toolkit already attached — by an earlier call, or by a
         caller that assigned ``_toolkit`` directly, as tests do — is reused

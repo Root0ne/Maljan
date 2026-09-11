@@ -1,9 +1,9 @@
-"""Post-pipeline false-positive linter (Wave 4, 2026-05-28).
+"""Post-pipeline false-positive linter.
 
-A 2026-05-23 audit found that the pipeline's deterministic layers + LLM
+An audit found that the pipeline's deterministic layers + LLM
 narratives could agree on a confidently-wrong story (TTPs from the wrong
 platform attached to a sample, defensive recommendations to "block
-PowerShell" that didn't apply). Wave 4's structural fixes (Sigma/YARA
+PowerShell" that didn't apply). The structural fixes (Sigma/YARA
 platform filters, cascade source-layer override, indicator denylists)
 close the direct path, but every refactor can regress.
 
@@ -237,7 +237,7 @@ def lint_report(report: Any, sample_platform: str | None) -> list[FPWarning]:
                 )
             )
 
-    # C6 — Wave 9: cascade.platform_filter_summary missing or zero.
+    # C6 — cascade.platform_filter_summary missing or zero.
     # Only fire when there is evidence the cascade actually ran (a non-empty
     # capability_matrix or an existing run_summary.cascade dict). Empty test
     # reports with no cascade run must not trip this gate.
@@ -320,7 +320,7 @@ def _count_file_name_indicators(report: Any) -> int:
 
 
 def _count_total_indicators(report: Any) -> int:
-    """Wave 9: total count of STIX ``indicator`` SDOs in the bundle."""
+    """Total count of STIX ``indicator`` SDOs in the bundle."""
     bundle = getattr(report, "stix_bundle_extended", None)
     if not isinstance(bundle, dict):
         return 0

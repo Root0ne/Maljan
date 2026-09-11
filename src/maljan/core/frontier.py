@@ -7,8 +7,7 @@ exposed to. `arXiv:2606.18166` sharpens it: across models on the nearest task,
 ATT&CK-classification F1 (rho=0.85, p=0.014), while prompt strategy,
 chain-of-thought and temperature were not. A single-model finding therefore
 cannot be read as a property of the architecture, and no amount of careful
-writing changes that — only a second, differently-sized model does. That is
-queue items **B8** (fixture sanity check) and **C6** (the n=100 cohort).
+writing changes that — only a second, differently-sized model does.
 
 **Why the ceiling is the interesting part.** This arm spends the author's money.
 An eval harness that loops over 100 samples with a retry path is exactly the
@@ -233,9 +232,10 @@ def build_frontier_llm(cfg: Any, *, max_tokens: int | None = None) -> Any:
 def resolve_arms(cfg: Any) -> dict[str, Any]:
     """The comparison arms this configuration defines, by name.
 
-    The inherited single-endpoint fields are arm ``default`` — that is the arm
-    B8 ran, and keeping its name stable means the stored B8 record does not have
-    to be rewritten to accommodate the ones added after it. Named arms follow.
+    The inherited single-endpoint fields are arm ``default`` — the arm the
+    first evaluation ran, and keeping its name stable means the stored record
+    does not have to be rewritten to accommodate the ones added after it.
+    Named arms follow.
 
     Only arms that pass :func:`frontier_ready` are returned. An arm that is
     half-configured is dropped here rather than failing in the middle of a run,
@@ -277,7 +277,7 @@ def arm_provenance(name: str, arm: Any) -> dict[str, Any]:
 def is_rate_limited(exc: BaseException) -> bool:
     """Whether an exception is the endpoint saying "too fast" rather than "no".
 
-    The distinction is the whole point. B8's first attempt counted HTTP 429s as
+    The distinction is the whole point. An early run counted HTTP 429s as
     failed calls, finished with 9 of 25 arms, and reported a point estimate that
     the completed run later moved by 0.086 — through the local mean and out the
     other side. A throttle is not a result; it is a request to wait.

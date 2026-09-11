@@ -113,9 +113,9 @@ def build_persistence_list(
         _scan_service_apis(sandbox_report, found)
         _scan_scheduled_task_apis(sandbox_report, found)
     if run_linux:
-        # Wave 9 (2026-05-29): Linux ELF persistence detection. Driven from
+        # Linux ELF persistence detection. Driven from
         # ``dynamic.file_operations`` paths + ``notable_apis`` execve calls so
-        # ELF samples (e.g. the 2026-05-29 Mirai audit) surface real
+        # ELF samples (e.g. the Mirai audit) surface real
         # persistence instead of an empty tab.
         _scan_linux_persistence(sandbox_report, found)
 
@@ -162,7 +162,7 @@ def _scan_linux_persistence(
     sandbox_report: dict[str, Any],
     found: dict[tuple[str, str], PersistenceMechanism],
 ) -> None:
-    """Wave 9 (2026-05-29): inspect Linux-style persistence surfaces.
+    """Inspect Linux-style persistence surfaces.
 
     Sources:
       * ``behavior.summary.files`` / ``behavior.summary.write_files`` —

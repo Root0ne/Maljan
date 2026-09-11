@@ -4,7 +4,7 @@ Instead of hardcoding which agents exist, the builder reads the AgentRegistry
 and creates nodes and edges automatically. Adding a new agent to the registry
 means the graph automatically includes it.
 
-Topology (Wave 7, 2026-05-28, THROUGHPUT-01):
+Topology:
   * When ``config.llm.parallel_analysts == True``: analysts fan out from
     START and fan in to negotiation. This is the right call for hosted
     APIs (OpenAI / Anthropic / Gemini) where each request gets its own
@@ -66,7 +66,7 @@ def build_graph(container: ServiceContainer) -> CompiledStateGraph:
     agent_names = container.analyst_keys()
 
     if not agent_names:
-        # CORE-2 (dev audit 2026-09-06): unreachable through a validated
+        # Unreachable through a validated
         # ``Settings``. ``AgentsConfig`` refuses an empty profile outright
         # ("profile 'x' needs at least one analyst"), and the API refuses one
         # before it is ever stored, so a profile that reaches here has at

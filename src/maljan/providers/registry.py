@@ -3,7 +3,7 @@
 Same pattern as ``maljan.llm.registry``: a module-level dict, a decorator, and
 one discovery import. The id functions are the project's single provider
 vocabulary — the settings ``Literal`` choices, the API enum, the job override
-and (in sub-project C) the profile references all read them, and a test refuses
+and the profile references all read them, and a test refuses
 any drift between them.
 """
 

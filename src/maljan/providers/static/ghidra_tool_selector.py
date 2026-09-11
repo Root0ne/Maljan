@@ -1,4 +1,4 @@
-"""Dynamic, per-sample Ghidra MCP tool selection (2026-07 round 3).
+"""Dynamic, per-sample Ghidra MCP tool selection.
 
 Exposing all ~165 Ghidra tools to the local model made each ReAct step re-prefill
 a ~15-25K-token manifest — 5-6x slower and measurably noisier (the model

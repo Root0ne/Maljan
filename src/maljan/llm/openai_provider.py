@@ -102,7 +102,7 @@ class OpenAIProvider:
             extra["chat_template_kwargs"] = ctk
             build_kwargs["extra_body"] = extra
 
-        # Wave 5 HANG-01 + Wave 7 THROUGHPUT-01 (2026-05-28): explicit
+        # Explicit
         # ``request_timeout`` and ``max_retries`` so the openai SDK can't
         # silently retry a stalled request three times (3 x default 600s
         # = 30 min). Caller-supplied kwargs win.
@@ -110,7 +110,7 @@ class OpenAIProvider:
         # budget; otherwise the HTTP layer truncates a still-decoding
         # response before the outer wrapper's hard cap fires (live trace
         # 2026-05-28 showed static analyst dropping at exactly 300s
-        # because the previous Wave 5 value was tighter than its 600s
+        # because the previous value was tighter than its 600s
         # ReAct budget). 1800s (2026-07-13) stays >= the longest agent
         # ``wait_for`` hard cap: the deep-analysis restore raised static's
         # per-chunk budget to 1500s (hard cap timeout+30 = 1530s), plus decode

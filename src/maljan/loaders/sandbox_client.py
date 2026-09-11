@@ -1,4 +1,4 @@
-"""SandboxClient abstraction layer — Phase 6: CAPEv2 Sandbox Integration.
+"""SandboxClient abstraction layer for CAPEv2 sandbox integration.
 
 Defines the SandboxClient Protocol and SubmissionResult dataclass that all
 sandbox backend implementations must satisfy.

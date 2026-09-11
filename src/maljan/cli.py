@@ -160,11 +160,11 @@ def _write_markdown_report(result: dict, report_path: str) -> None:
 
     Prefers the comprehensive ``MalwareReport`` rendering that the
     ``report`` pipeline node leaves in ``result["malware_report_markdown"]``
-    (added in Phase 2 of the reporting refactor).
+    (added by the reporting refactor).
 
     Falls back to the legacy ``RunSummary.to_markdown()`` when the new
     payload is absent — happens when ``MALJAN_REPORTING__ENABLED=false``
-    flips the pipeline back to the pre-Phase 2 ``judge → END`` edge.
+    flips the pipeline back to the legacy ``judge → END`` edge.
     """
     new_markdown = result.get("malware_report_markdown")
     if isinstance(new_markdown, str) and new_markdown.strip():
@@ -299,7 +299,7 @@ def benchmark(
         help="Output format: markdown (default) or json.",
     ),
 ) -> None:
-    """Run the Phase 8.2 evaluation benchmark suite against all ground truth fixtures.
+    """Run the evaluation benchmark suite against all ground truth fixtures.
 
     Loads every *.json ground truth file from the fixtures directory, synthesizes
     pipeline outputs from the known technique IDs (perfect-precision baseline), and

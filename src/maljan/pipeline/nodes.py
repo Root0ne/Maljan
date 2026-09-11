@@ -221,10 +221,9 @@ def _augment_static_chunks_with_path(
 ) -> list:
     """Inject the container-visible sample path into the static analyst's chunks.
 
-    Wave 6 (2026-05-28, GHIDRA-DELIVERY-01). The static analyst's data
-    surface is a JSON-stringified ``target`` block from the sandbox report
-    (or a raw chunk when no sandbox ran). Before Wave 6 the chunk only
-    carried ``{sha256, md5, name, size}`` — there was no way for the LLM
+    The static analyst's data surface is a JSON-stringified ``target`` block
+    from the sandbox report (or a raw chunk when no sandbox ran). The chunk
+    used to carry only ``{sha256, md5, name, size}`` — there was no way for the LLM
     to know which path to hand ``load_program``, so it either guessed
     (always wrong, since the file lived in the host tempdir invisible to
     the Ghidra container) or skipped the call entirely. We now splice
@@ -464,8 +463,7 @@ def make_analyst_node(
             else:
                 chunks = container.load_chunked(state["file_hash"], agent_name)
 
-            # Wave 6 (2026-05-28, GHIDRA-DELIVERY-01): the static analyst
-            # needs to know the container-visible path to call
+            # The static analyst needs to know the container-visible path to call
             # ``load_program(file=...)``. Inject it into the chunk's JSON
             # under ``analysis_file_path`` so the existing chunk-text flow
             # carries the path into the LLM prompt without a new state hop.
@@ -489,8 +487,8 @@ def make_analyst_node(
                 # a stale path from the previous sample must be cleared. The
                 # mirror is looked up by this agent's own static provider id
                 # so two static analysts on two providers each get their own
-                # mirror path (Task 9 fills in the per-provider dict; until
-                # then the fallback below is the only entry).
+                # mirror path (the fallback below is the only entry until the
+                # per-provider dict is filled in).
                 # The same three-step lookup ``_augment_static_chunks_with_path``
                 # does, absolute host-path fallback included (BUG 11). They have
                 # to agree: the chunk tells the model which path to use and this
@@ -508,7 +506,7 @@ def make_analyst_node(
                     provider_id=agent._resolved.static_provider_id,
                 )
 
-                # 2026-07 round 3: hand the static analyst the sample's capability
+                # Hand the static analyst the sample's capability
                 # categories (from the PE import classification) so dynamic Ghidra
                 # tool selection works regardless of whether the chunk carried a
                 # readable path. state["sample_path"] is reliably host-readable.
@@ -522,8 +520,7 @@ def make_analyst_node(
                     logger.debug("static category hint skipped: %s", _e)
 
             if not chunks or _is_placeholder_only(chunks, role):
-                # Wave 9 (2026-05-29): the 2026-05-29 Linux ELF audit
-                # found that an ELF sample with no PCAP / sandbox network
+                # A Linux ELF audit found that an ELF sample with no PCAP / sandbox network
                 # trace caused the network analyst to fail-hard with an
                 # AnalystError ([ERROR] prefix), which then routed into
                 # ``failed_analysts`` and forced ``degraded_mode=true``.
@@ -618,7 +615,7 @@ def make_analyst_node(
                     f"[WARN] {agent_name}: ISR produced no claims (multi-chunk fallback empty)."
                 )
 
-            # Report-reshaping Phase 1: carry the captured tool-loop outputs
+            # Carry the captured tool-loop outputs
             # (decompiled functions, crypto constants, emulation/dataflow) into
             # state so report_node can ground the deep technical spine. Best-
             # effort — a capture read must never break the analyst node.
@@ -1164,7 +1161,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
 
             isr_reports: dict[str, AgentISR] = dict(state.get("isr_reports") or {})
 
-            # Wave 4: pick up the platform the bootstrap inferred. The
+            # Pick up the platform the bootstrap inferred. The
             # rule layers + cascade use this to drop platform-mismatched
             # signals (e.g. a Windows-only Sigma rule firing against a
             # Linux sample).
@@ -1211,7 +1208,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
                     # In a thread, like the scan below it. The getter *builds*
                     # the layer on first use — compiling the whole rule corpus —
                     # and the container caches behind a lock, so the whole cost
-                    # lands on whichever loop callback asked first (OBS 4).
+                    # lands on whichever loop callback asked first.
                     yara_layer = await asyncio.to_thread(container.get_yara_layer)
                     if yara_layer.rule_count > 0:
                         targets = await asyncio.to_thread(_scan_targets)
@@ -1320,7 +1317,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
             except Exception as e:  # noqa: BLE001
                 logger.warning("LOLBin Layer 0 failed: %s. Skipping.", e)
 
-            # Import-capability Layer 0 (2026-07 round 2): turn the PE extractor's
+            # Import-capability Layer 0: turn the PE extractor's
             # deterministic import classification (+ static-string IOCs) into
             # grounded ATT&CK techniques (e.g. WS2_32 client + hard-coded domain
             # -> T1071). Closes the under-reporting gap the byte-scan YARA corpus
@@ -1432,7 +1429,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
             except Exception as e:
                 logger.warning("TTP cascade failed: %s. Skipping.", e)
 
-            # Wave 9 (2026-05-29): capture pre-cascade platform-filter
+            # Capture pre-cascade platform-filter
             # counters from both Layer 0 evaluators so the audit gate
             # G-FP-8 can prove the filter ran even when the cascade has
             # nothing to drop.
@@ -1441,7 +1438,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
             try:
                 # Cached by the scans above on every ordinary run, but not on
                 # the paths that skipped them — and a getter that may build is
-                # a getter that runs in a thread (OBS 4).
+                # a getter that runs in a thread.
                 _yara_layer = await asyncio.to_thread(container.get_yara_layer)
                 _yara_dropped_total = _yara_layer.last_filtered_count
             except Exception as e:
@@ -1553,7 +1550,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
             # In a thread: the guard reads the file loader from disk and
             # ``json.dumps`` a whole sandbox slice per analyst, which is
             # exactly the kind of work the preceding commit moved off this
-            # loop (OBS 4).
+            # loop.
             _no_data_analysts = set(
                 await asyncio.to_thread(
                     lambda: [
@@ -1974,7 +1971,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
 
 
 # ---------------------------------------------------------------------------
-# Report node — assembles the comprehensive MalwareReport (Faz 2)
+# Report node — assembles the comprehensive MalwareReport
 # ---------------------------------------------------------------------------
 
 
@@ -2005,7 +2002,7 @@ def make_report_node(container: ServiceContainer) -> Any:
 
         isr_reports = dict(state.get("isr_reports") or {})
 
-        # Wave 4: re-run the cascade with the same sample_platform the judge
+        # Re-run the cascade with the same sample_platform the judge
         # node used, so the report_node's cascade output stays consistent
         # with what the verdict + STIX bundle saw.
         report_sample_platform = state.get("platform") or "unknown"
@@ -2104,7 +2101,7 @@ def make_report_node(container: ServiceContainer) -> Any:
             if _static_provider.capabilities.provides_evidence and _sample_for_evidence:
                 # capa is a subprocess with a 900s budget and YARA is a corpus
                 # scan; both are synchronous, and this is the report phase the
-                # worker's heartbeat went quiet in (OBS 4).
+                # worker's heartbeat went quiet in.
                 _static_bundle = await asyncio.to_thread(
                     _static_provider.collect_evidence, str(_sample_for_evidence)
                 )
@@ -2172,7 +2169,7 @@ def make_report_node(container: ServiceContainer) -> Any:
                     # Grounded by construction: the claim text naming this family
                     # is in the ISR the cascade already consumed.
                     report.attribution.family_grounded = bool(report.attribution.family)
-            # Report-reshaping Phase 1: attach the captured tool-loop evidence so
+            # Attach the captured tool-loop evidence so
             # the Composer can ground the deep technical spine. Already size-
             # capped upstream (schemas.tool_evidence); stored verbatim here.
             _tool_ev = cast(
@@ -2202,7 +2199,7 @@ def make_report_node(container: ServiceContainer) -> Any:
             logger.error("report_node: deterministic build failed (%s).", exc, exc_info=True)
             return {"report_error": f"{type(exc).__name__}: {exc}"}
 
-        # Narrative LLM round (Faz 3). NarrativeAgent is None in mock mode;
+        # Narrative LLM round. NarrativeAgent is None in mock mode;
         # also returns None when the structured-output and manual-parse
         # fallbacks both fail. In every "no narrative" branch we apply the
         # deterministic template so the report never ships with empty prose.
@@ -2252,7 +2249,7 @@ def make_report_node(container: ServiceContainer) -> Any:
         else:
             report = MalwareReportBuilder.apply_fallback_narrative(report)
 
-        # Report-reshaping Phase 4: section-wise Composer authors the professional
+        # Section-wise Composer authors the professional
         # spine (intro, technical-analysis subsections, C2 channels, conclusion),
         # each grounded in its isolated evidence bundle. Best-effort — a Composer
         # failure never blocks the report. None in mock / when composer disabled.
@@ -2269,7 +2266,7 @@ def make_report_node(container: ServiceContainer) -> Any:
                     "report_node: ReportComposer.compose raised (%s); spine skipped.", exc
                 )
 
-        # Report-reshaping Phase 5: deterministic figures (inline SVG + Ghidra
+        # Deterministic figures (inline SVG + Ghidra
         # code listings) generated from the report's own data — real charts, no
         # fabricated screenshots. Best-effort; empty when data is absent.
         try:
@@ -2279,7 +2276,7 @@ def make_report_node(container: ServiceContainer) -> Any:
         except Exception as exc:  # noqa: BLE001
             logger.warning("report_node: figure generation failed (%s).", exc)
 
-        # Detection signatures (Faz 4) — template-based YARA/Sigma/Suricata
+        # Detection signatures — template-based YARA/Sigma/Suricata
         # generation. Runs after narrative so the LLM-written family name can
         # influence rule metadata. Disabled via config when desired.
         if cfg is None or cfg.auto_generate_detection_rules:
@@ -2341,7 +2338,7 @@ def make_report_node(container: ServiceContainer) -> Any:
 
             report.stix_bundle_extended = extended_dump
 
-        # Wave 4 Step 8: post-pipeline FP linter. Run after every other
+        # Post-pipeline FP linter. Run after every other
         # mutation has happened (narrative + detection sigs + STIX dump)
         # so the linter sees the exact payload a downstream consumer
         # will see. Findings are merged into ``run_summary`` so the API
@@ -2374,7 +2371,7 @@ def make_report_node(container: ServiceContainer) -> Any:
             len(fp_warnings),
         )
 
-        # Wave 9 HOTFIX-09 (2026-05-29): surface ``fp_warnings`` into the
+        # Surface ``fp_warnings`` into the
         # pipeline state's ``run_summary`` so the worker writes them to the
         # ``reports.run_summary`` JSONB column. Without this the warnings
         # only landed on ``MalwareReport.run_summary`` (saved to the

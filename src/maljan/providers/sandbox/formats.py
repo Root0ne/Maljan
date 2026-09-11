@@ -1,7 +1,7 @@
 """Name the sandbox format behind an already-parsed report payload.
 
-Used by the upload provider (Task 15) to decide which normaliser handles an
-attached report, and by the Triage adapter (Task 16) to confirm what it just
+Used by the upload provider to decide which normaliser handles an attached
+report, and by the Triage adapter to confirm what it just
 fetched. Kept a pure function over a plain ``dict`` — no I/O, no provider
 imports — so both call sites can use it without a dependency on each other.
 """
