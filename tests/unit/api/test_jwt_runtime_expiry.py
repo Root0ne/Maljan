@@ -1,6 +1,6 @@
 """Task 2: token expiry comes from the settings store, not APISettings.
 
-``create_access_token`` stays sync (called from sync and async paths alike),
+``create_access_token`` stays sync (its two callers are async routes that keep the builders cheap),
 so it reads the expiry minutes through ``runtime_config.get_cached`` instead
 of awaiting a settings read on every token. The cache is warmed by an async
 caller invoking ``runtime_config.get`` once; ``invalidate()`` clears it so a
