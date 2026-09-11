@@ -8,7 +8,7 @@ import { MOCK_USER } from "./mocks";
  * overrides `mockOptions.user` to `role: "admin"` the way
  * `settings-configuration.spec.ts` does. Fixture data (`e2e/mocks.ts`): the
  * `mcp` group carries two built-ins — `network` (a custom transport with no
- * token set) and `threatintel` (a token sourced from `.env`) — and the
+ * token set) and `threatintel` (a token set from the UI) — and the
  * `sandbox` group now also carries the four `core.sandbox.rest.*` leaves the
  * REST editor renders, plus the `sandbox-rest/preview` route.
  *
@@ -254,12 +254,12 @@ test.describe("tool servers and the REST sandbox", () => {
   }) => {
     await page.goto(MCP_PATH);
 
-    // The fixture's `threatintel` entry arrives with a token set in .env: the
-    // page may say so, but must never carry the value.
+    // The fixture's `threatintel` entry arrives with a token set from the
+    // UI: the page may say so, but must never carry the value.
     await page.locator('[data-server="threatintel"]').click();
     const intel = page.locator('[data-server-detail="threatintel"]');
     await intel.getByLabel("threatintel transport").selectOption("http");
-    await expect(intel.locator('[data-token-state="threatintel"]')).toHaveText("set in .env");
+    await expect(intel.locator('[data-token-state="threatintel"]')).toHaveText("set from the UI");
     await expect(page.getByLabel("threatintel auth token")).toHaveCount(0);
 
     await page.locator('[data-server="network"]').click();
