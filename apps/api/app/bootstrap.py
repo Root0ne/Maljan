@@ -59,17 +59,17 @@ def validate_bootstrap(s: APISettings) -> BootstrapReport:
     if not _secret_value(s.minio_secret_key).strip():
         problems.append("MINIO_SECRET_KEY is not set")
 
-    jwt_secret = _secret_value(s.jwt_secret_key)
+    jwt_secret = _secret_value(s.jwt_secret_key).strip()
     if not s.debug:
-        if not jwt_secret.strip():
+        if not jwt_secret:
             problems.append("JWT_SECRET_KEY is not set")
         elif jwt_secret in _PLACEHOLDER_JWT_SECRETS:
             problems.append("JWT_SECRET_KEY is a known placeholder value")
         elif len(jwt_secret) < 32:
             problems.append("JWT_SECRET_KEY is shorter than 32 characters")
 
-    encryption_key = _secret_value(s.settings_encryption_key)
-    if not encryption_key.strip():
+    encryption_key = _secret_value(s.settings_encryption_key).strip()
+    if not encryption_key:
         problems.append("SETTINGS_ENCRYPTION_KEY is not set")
     else:
         try:

@@ -1501,6 +1501,12 @@ async def _sweep_orphan_jobs(db_session: async_sessionmaker) -> None:
 
 async def startup(ctx: dict) -> None:
     """Called when the ARQ worker starts up."""
+    # Initialize logging for the worker process first: the CRITICAL bootstrap
+    # failure log below must go through the configured JSON stdout handler,
+    # not the ``logging.lastResort`` stderr handler a bare logger falls back
+    # to before ``setup_logging()`` attaches one.
+    setup_logging()
+
     from app.bootstrap import BootstrapProblem, require_bootstrap
 
     try:
@@ -1508,9 +1514,6 @@ async def startup(ctx: dict) -> None:
     except BootstrapProblem as exc:
         logger.critical(str(exc))
         raise
-
-    # Initialize logging for the worker process
-    setup_logging()
 
     # Clear stale private sample copies left behind by a worker that was
     # killed mid-job (no finally ran) before this one starts taking jobs.

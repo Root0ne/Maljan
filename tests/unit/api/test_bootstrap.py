@@ -74,6 +74,12 @@ def test_placeholder_jwt_secret_allowed_only_in_debug() -> None:
     assert not any("JWT_SECRET_KEY" in p for p in debug_report.problems)
 
 
+def test_whitespace_padded_placeholder_jwt_secret_is_a_problem_outside_debug() -> None:
+    s = APISettings(**_valid_kwargs(debug=False, jwt_secret_key="  changeme  \n"), _env_file=None)
+    report = validate_bootstrap(s)
+    assert any("JWT_SECRET_KEY" in p for p in report.problems)
+
+
 def test_clean_bootstrap_has_no_problems() -> None:
     s = APISettings(**_valid_kwargs(), _env_file=None)
     report = validate_bootstrap(s)
