@@ -102,7 +102,7 @@ async def _probe_components() -> dict[str, dict[str, Any]]:
     return dict(results)
 
 
-def _config_readiness(app: FastAPI) -> dict[str, str]:
+def _config_readiness() -> dict[str, str]:
     """The two facts ``/health`` reports about configuration state.
 
     No I/O: ``bootstrap`` and ``encryption`` are static "ok" -- the process
@@ -388,7 +388,7 @@ def create_app() -> FastAPI:
             "status": "healthy",
             "service": settings.app_name,
             "version": settings.app_version,
-            "config": _config_readiness(app),
+            "config": _config_readiness(),
         }
         if not deep:
             return body
