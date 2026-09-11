@@ -42,8 +42,11 @@ cp docker/.env.example docker/.env  # then fill in every secret it declares
 make dev-up                         # docker compose up -d, development overlay
 ```
 
-Every variable in [`docker/.env.example`](docker/.env.example) is declared with
-`:?` in the compose file, so the stack refuses to start while any is missing;
+The development overlay is for a workstation; [docs/deployment.md](docs/deployment.md)
+covers a production deployment.
+
+Every secret in [`docker/.env.example`](docker/.env.example) is declared with
+`:?` in the compose file, so the stack refuses to start while one is missing;
 [docs/getting-started.md](docs/getting-started.md) has the commands that
 generate them. Open <http://localhost:3000>, register the first account from
 the login page, promote it to `admin` once in the database, then walk
