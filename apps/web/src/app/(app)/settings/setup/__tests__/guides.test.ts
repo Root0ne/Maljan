@@ -57,7 +57,6 @@ const KEYS = [
 ];
 
 const schema: SettingsSchema = {
-  secrets_available: true,
   groups: [{ key: "all", title: "All", description: "", entries: KEYS.map(entry) }],
 };
 

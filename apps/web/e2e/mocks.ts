@@ -198,7 +198,6 @@ export const MOCK_API_KEY = {
  * "mcp_servers"`).
  */
 export const MOCK_SETTINGS_SCHEMA = {
-  secrets_available: true,
   groups: [
     {
       key: "negotiation",
@@ -829,7 +828,6 @@ export const MOCK_SETTINGS_VALUES = {
  * "Providers" (the three ollama fields), never a combined count on one.
  */
 export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
-  secrets_available: true,
   groups: [
     {
       key: "llm",
@@ -1467,10 +1465,27 @@ export async function installApiMocks(
   await page.route("**/api/v1/settings/export", (route) =>
     route.fulfill({
       status: 200,
-      contentType: "text/plain",
-      body: "CORE_NEGOTIATION_RETRY_DELAY=10\n",
+      contentType: "application/json",
+      headers: { "content-disposition": "attachment; filename=maljan-settings.json" },
+      body: JSON.stringify({
+        format: "maljan-settings/1",
+        exported_at: "2026-08-01T00:00:00Z",
+        values: { "core.negotiation.retry_delay": 10 },
+        secrets_omitted: ["core.llm.openai.api_key"],
+      }),
     })
   );
+  // A spec that wants a 422 (an unsupported format, an unknown/read-only
+  // key) overrides this with its own `page.route(...)`, same as every other
+  // mutating settings route.
+  await page.route("**/api/v1/settings/import", (route) => {
+    const body = route.request().postDataJSON() as {
+      format: string;
+      values: Record<string, unknown>;
+    };
+    const keys = Object.keys(body.values ?? {});
+    return json(route, { applied: keys, applies: { next_job: keys.length } });
+  });
   await page.route("**/api/v1/settings/test/*", (route) =>
     json(route, { ok: true, latency_ms: 42, detail: "mock probe ok", models: null, tools: null })
   );

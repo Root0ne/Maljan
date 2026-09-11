@@ -191,7 +191,7 @@ export function RestMappingTable({
                         className="text-[11px] text-text-secondary"
                         onClick={() => onReset(entry.key)}
                       >
-                        Reset to env
+                        Remove override
                       </button>
                     )}
                   </div>

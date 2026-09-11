@@ -7,6 +7,7 @@ import type {
 import { ApiError } from "@/lib/errors";
 import { SettingsValidationError } from "@/types/settings";
 import type {
+  ImportRequest,
   MappingPreview,
   PatchResult,
   ProbeResult,
@@ -532,8 +533,74 @@ class ApiClient {
     });
   }
 
-  exportSettings() {
-    return this.textRequest("/api/v1/settings/export");
+  /**
+   * Fetches the configuration export and triggers a browser download of it
+   * as `maljan-settings.json` — no server round trip beyond the fetch
+   * already made, and the viewer never sees a bare `data:` link. The
+   * document is downloaded byte-for-byte as the API sent it (`format`,
+   * `exported_at`, `values`, `secrets_omitted` in that order) rather than
+   * re-serialised, so the file on disk is exactly what `GET
+   * /settings/export` returned.
+   */
+  async exportSettings(): Promise<void> {
+    const token = this.getToken();
+    const res = await fetch(`${this.baseUrl}/api/v1/settings/export`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (res.status === 401) {
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("access_token");
+      }
+      throw new ApiError("Unauthorized", res.status);
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new ApiError(body.detail || `Request failed: ${res.status}`, res.status);
+    }
+    const text = await res.text();
+    const blob = new Blob([text], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "maljan-settings.json";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  /** Imports a previously exported (or hand-written) configuration document.
+   *  A 422 — an unknown key, a read-only key, an unsupported `format`, or a
+   *  value that fails the same validation `PATCH` runs — surfaces as a
+   *  `SettingsValidationError` carrying the per-key error map, exactly like
+   *  `patchSettings`. */
+  async importSettings(body: ImportRequest): Promise<PatchResult> {
+    const token = this.getToken();
+    const res = await fetch(`${this.baseUrl}/api/v1/settings/import`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(body),
+    });
+    if (res.status === 401) {
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("access_token");
+      }
+      throw new ApiError("Unauthorized", res.status);
+    }
+    if (res.status === 422) {
+      const errBody = (await res.json().catch(() => ({}))) as {
+        errors?: Record<string, string>;
+      };
+      throw new SettingsValidationError(errBody.errors ?? {});
+    }
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new ApiError(errBody.detail || `Request failed: ${res.status}`, res.status);
+    }
+    return res.json();
   }
 
   /* ── Samples ───────────────────────────────────────── */

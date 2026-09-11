@@ -41,7 +41,14 @@ function formatBool(v: unknown): string {
   return v ? "on" : "off";
 }
 
-function deepEqual(a: unknown, b: unknown): boolean {
+/** Structural equality for two catalog values — used everywhere a "did this
+ *  leaf actually change" question needs an answer that doesn't care about
+ *  key order (`JSON.stringify` is order-sensitive for object keys, but every
+ *  caller here compares against a freshly-decoded document or freshly-read
+ *  state, not two independently-serialised copies of the same map, so that
+ *  edge case does not arise in practice). Exported so `importPreview.ts`
+ *  shares this one rule instead of carrying its own copy. */
+export function deepEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (a === null || a === undefined || b === null || b === undefined) return a === b;
   if (typeof a !== "object" || typeof b !== "object") return false;

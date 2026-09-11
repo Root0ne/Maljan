@@ -400,7 +400,7 @@ test.describe("Settings → Configuration (admin)", () => {
     });
   });
 
-  test("export calls the export endpoint (no download assertion)", async ({
+  test("export requests the JSON export and downloads it as maljan-settings.json", async ({
     authenticatedPage: page,
   }) => {
     await page.goto(NEGOTIATION_PATH);
@@ -410,14 +410,183 @@ test.describe("Settings → Configuration (admin)", () => {
       exportRequested = true;
       return r.fulfill({
         status: 200,
-        contentType: "text/plain",
-        body: "CORE_NEGOTIATION_RETRY_DELAY=10\n",
+        contentType: "application/json",
+        headers: { "content-disposition": "attachment; filename=maljan-settings.json" },
+        body: JSON.stringify({
+          format: "maljan-settings/1",
+          exported_at: "2026-08-01T00:00:00Z",
+          values: { "core.negotiation.retry_delay": 10 },
+          secrets_omitted: [],
+        }),
       });
     });
 
-    await page.getByRole("button", { name: "Export overrides", exact: true }).click();
-    await expect.poll(() => exportRequested).toBe(true);
-    await expect(page.getByText("Overrides downloaded as maljan-settings.env")).toBeVisible();
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      page.getByRole("button", { name: "Export configuration", exact: true }).click(),
+    ]);
+    expect(exportRequested).toBe(true);
+    expect(download.suggestedFilename()).toBe("maljan-settings.json");
+    await expect(
+      page.getByText("Configuration downloaded as maljan-settings.json")
+    ).toBeVisible();
+  });
+
+  test("the source badge is only ever default or ui, and the secrets banner is gone", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto(NEGOTIATION_PATH);
+
+    // `max_iterations` is default-sourced, `retry_delay` is ui-sourced in the
+    // fixture (`MOCK_SETTINGS_VALUES`) — one of each badge value.
+    await expect(
+      page.locator('[id="setting-core.negotiation.max_iterations"]').getByText("default", {
+        exact: true,
+      })
+    ).toBeVisible();
+    await expect(
+      page.locator('[id="setting-core.negotiation.retry_delay"]').getByText("ui", { exact: true })
+    ).toBeVisible();
+
+    await expect(page.getByText(/secrets are read-only/i)).toHaveCount(0);
+    await expect(page.getByText(/SETTINGS_ENCRYPTION_KEY/i)).toHaveCount(0);
+  });
+
+  test("import previews the changed keys and sends only those on confirm", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto(NEGOTIATION_PATH);
+
+    await page.getByRole("button", { name: "Import configuration" }).click();
+    const dialog = page.getByRole("dialog", { name: "Import configuration" });
+    await expect(dialog).toBeVisible();
+
+    // `max_iterations` is 5 (default) in the fixture; the file changes it to 9.
+    const fixture = {
+      format: "maljan-settings/1",
+      values: { "core.negotiation.max_iterations": 9 },
+    };
+    await page.getByLabel("Settings file").setInputFiles({
+      name: "maljan-settings.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify(fixture)),
+    });
+
+    await expect(dialog.getByText("5 → 9")).toBeVisible();
+    const importButton = dialog.getByRole("button", { name: "Import 1 setting", exact: true });
+    await expect(importButton).toBeEnabled();
+
+    let importBody: unknown = null;
+    await page.route("**/api/v1/settings/import", (r) => {
+      importBody = r.request().postDataJSON();
+      return r.fulfill({
+        json: { applied: ["core.negotiation.max_iterations"], applies: { next_job: 1 } },
+      });
+    });
+
+    await importButton.click();
+    await expect.poll(() => importBody).not.toBeNull();
+    expect(importBody).toEqual({
+      format: "maljan-settings/1",
+      values: { "core.negotiation.max_iterations": 9 },
+    });
+    await expect(dialog.getByText(/Applied 1 setting/)).toBeVisible();
+  });
+
+  test("import names an unknown key as an error and disables Import", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto(NEGOTIATION_PATH);
+
+    await page.getByRole("button", { name: "Import configuration" }).click();
+    const dialog = page.getByRole("dialog", { name: "Import configuration" });
+
+    const fixture = { format: "maljan-settings/1", values: { "core.no.such.key": 1 } };
+    await page.getByLabel("Settings file").setInputFiles({
+      name: "bad.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify(fixture)),
+    });
+
+    await expect(dialog.getByText("core.no.such.key: unknown key")).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Import 0 settings" })).toBeDisabled();
+  });
+
+  test("a 422 from the import endpoint shows the per-key error and leaves the dialog open", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto(NEGOTIATION_PATH);
+
+    await page.getByRole("button", { name: "Import configuration" }).click();
+    const dialog = page.getByRole("dialog", { name: "Import configuration" });
+
+    const fixture = {
+      format: "maljan-settings/1",
+      values: { "core.negotiation.max_iterations": 9 },
+    };
+    await page.getByLabel("Settings file").setInputFiles({
+      name: "maljan-settings.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify(fixture)),
+    });
+
+    await page.route("**/api/v1/settings/import", (r) =>
+      r.fulfill({
+        status: 422,
+        json: { errors: { "core.llm.provider": "Input should be a valid provider" } },
+      })
+    );
+
+    await dialog.getByRole("button", { name: "Import 1 setting", exact: true }).click();
+
+    await expect(
+      dialog.getByText("core.llm.provider: Input should be a valid provider")
+    ).toBeVisible();
+    await expect(dialog).toBeVisible();
+  });
+
+  test("Escape closes the import dialog and returns focus to the button that opened it", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto(NEGOTIATION_PATH);
+
+    const openButton = page.getByRole("button", { name: "Import configuration" });
+    await openButton.click();
+    const dialog = page.getByRole("dialog", { name: "Import configuration" });
+    await expect(dialog).toBeVisible();
+
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(openButton).toBeFocused();
+  });
+
+  test("Tab cycles inside the import dialog instead of reaching the console behind it", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto(NEGOTIATION_PATH);
+
+    await page.getByRole("button", { name: "Import configuration" }).click();
+    const dialog = page.getByRole("dialog", { name: "Import configuration" });
+    const closeButton = dialog.getByRole("button", { name: "Close" });
+    const fileInput = page.getByLabel("Settings file");
+
+    // The file input is focused on open (nothing has been picked yet, so it
+    // is the dialog's only other focusable control besides Close, and the
+    // last one in DOM order) — Tab from there must wrap to Close rather than
+    // escape onto a settings row.
+    await expect(fileInput).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(closeButton).toBeFocused();
+    // Ordinary forward Tab from the first control (nothing to trap yet).
+    await page.keyboard.press("Tab");
+    await expect(fileInput).toBeFocused();
+    // Ordinary backward Shift+Tab from the last control.
+    await page.keyboard.press("Shift+Tab");
+    await expect(closeButton).toBeFocused();
+    // Shift+Tab from the first control is the other wrap the trap has to
+    // hold: back around to the last one, not out of the dialog.
+    await page.keyboard.press("Shift+Tab");
+    await expect(fileInput).toBeFocused();
   });
 
   test("the search box narrows the visible rows", async ({ authenticatedPage: page }) => {
