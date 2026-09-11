@@ -48,7 +48,6 @@ class GroupDTO(BaseModel):
 
 class SchemaResponse(BaseModel):
     groups: list[GroupDTO]
-    secrets_available: bool
 
 
 class ValueDTO(BaseModel):
@@ -75,6 +74,18 @@ class PatchResponse(BaseModel):
 
 class ResetResponse(BaseModel):
     reset: list[str]
+
+
+class ExportResponse(BaseModel):
+    format: str
+    exported_at: datetime
+    values: dict[str, Any]
+    secrets_omitted: list[str]
+
+
+class ImportRequest(BaseModel):
+    format: str
+    values: dict[str, Any] = Field(default_factory=dict)
 
 
 class ProbeRequest(BaseModel):

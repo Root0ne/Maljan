@@ -7,7 +7,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.api.v1.settings import _env_literal, router
+from app.api.v1.settings import router
 from app.database import get_db
 from app.deps import require_admin
 from app.models.user import UserRole
@@ -20,31 +20,6 @@ def _dsn(scheme: str, userinfo: str, rest: str) -> str:
     """Assemble a credentialed URL at runtime so no literal DSN sits in the source
     (secret scanners flag ``scheme://user:pass@host`` even in a masking test)."""
     return f"{scheme}://{userinfo}@{rest}"
-
-
-def test_export_literals_survive_a_round_trip_through_pydantic_settings(tmp_path):
-    from maljan.core.config import Settings
-
-    cases = {
-        "MCP__GHIDRA__ARGS": ["-x", "a b", "c #d"],
-        "MCP__CAPE__ENV": {"K": "v #w", "Q": "x"},
-        "REPORTING__PUBLISHER": "Team #1",
-        "REPORTING__REPORT_NUMBER_PREFIX": "",
-        "LLM__PARALLEL_ANALYSTS": True,
-        "NEGOTIATION__MAX_ITERATIONS": 7,
-        "LLM__OLLAMA__BASE_URL": "http://ollama:11434",
-    }
-    env = tmp_path / ".env"
-    env.write_text("".join(f"{k}={_env_literal(False, v)}\n" for k, v in cases.items()))
-    s = Settings(_env_file=env)
-    assert s.static.ghidra.args == cases["MCP__GHIDRA__ARGS"]
-    assert s.sandbox.cape2.mcp.env == cases["MCP__CAPE__ENV"]
-    assert s.reporting.publisher == "Team #1"
-    assert s.reporting.report_number_prefix == ""
-    assert s.llm.parallel_analysts is True
-    assert s.negotiation.max_iterations == 7
-    assert s.llm.ollama.base_url == "http://ollama:11434"
-    assert _env_literal(True, "whatever") == "***"
 
 
 def test_readonly_values_mask_credentials_in_every_url_shaped_setting():
