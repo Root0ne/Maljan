@@ -11,12 +11,15 @@ def test_override_applies_and_job_config_still_wins():
 
 
 def test_snapshot_masks_secrets(monkeypatch):
+    # Task 3: build_job_settings is store-only, so an env-set key must not
+    # leak into the snapshot; set here specifically to prove that.
     monkeypatch.setenv("LLM__OPENAI__API_KEY", "env-key")
     from app.worker.analysis_worker import settings_snapshot
 
-    snap = settings_snapshot(build_job_settings({}, None))
+    snap = settings_snapshot(build_job_settings({"llm.openai.api_key": "ui-key"}, None))
     assert snap["llm.openai.api_key"] == "***"
     assert "env-key" not in str(snap)
+    assert "ui-key" not in str(snap)
 
 
 def test_snapshot_records_overridden_keys():

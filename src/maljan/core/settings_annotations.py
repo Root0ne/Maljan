@@ -50,7 +50,7 @@ GROUP_ORDER: list[tuple[str, str]] = [
     ("tracing", "Tracing"),
     ("enrichment", "Enrichment / threat intelligence"),
     ("api", "API"),
-    ("system", "System (read-only)"),
+    ("system", "Deployment (read-only)"),
 ]
 
 GROUP_DESCRIPTIONS: dict[str, str] = {
@@ -81,10 +81,7 @@ GROUP_DESCRIPTIONS: dict[str, str] = {
     "tracing": "LangSmith tracing of every model call.",
     "enrichment": "Threat-intelligence lookups for the indicators a report names.",
     "api": "Request limits and login protection of the HTTP API; changes take effect immediately.",
-    "system": (
-        "Deployment values read from the environment at start; shown for reference and "
-        "changed by restarting."
-    ),
+    "system": "Set in the process environment when the service starts; changed by redeploying.",
 }
 
 _PREFIX_GROUPS: list[tuple[str, str]] = [

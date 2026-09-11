@@ -201,15 +201,19 @@ async def test_the_values_endpoint_masks_a_set_token_and_reports_its_source(encr
 
 
 @pytest.mark.asyncio
-async def test_an_unset_token_shows_empty_and_a_dot_env_token_shows_env(
+async def test_an_unset_token_shows_empty_and_the_environment_is_never_consulted(
     monkeypatch, encryption_key
 ):
+    """Task 3: ``values()`` builds the default map through ``build_settings({})``,
+    which is store-only -- a token set only via the environment must not be
+    picked up, let alone reported as its own source. Both built-in servers
+    with no stored row show empty, ``"default"``."""
     monkeypatch.setenv("MCP__SERVERS__NETWORK__AUTH_TOKEN", "from-env")
     service, _ = _service()
     values = await service.values()
     shown = values["core.mcp.servers"].value
-    assert shown["network"]["auth_token"] == TOKEN_MASK
-    assert shown["network"]["auth_token_source"] == "env"
+    assert shown["network"]["auth_token"] == ""
+    assert shown["network"]["auth_token_source"] == "default"
     assert shown["threatintel"]["auth_token"] == ""
     assert shown["threatintel"]["auth_token_source"] == "default"
     assert "from-env" not in str(shown)

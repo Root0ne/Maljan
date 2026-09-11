@@ -31,7 +31,7 @@ from pydantic import ValidationError
 from sqlalchemy import Select, func, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.config import settings
+from app.config import get_settings, settings
 from app.logging_config import get_logger, setup_logging
 from app.runtime_config import runtime_config
 
@@ -59,7 +59,7 @@ def attached_report_stmt(report_id: uuid.UUID, sample_id: uuid.UUID) -> Select[A
 def build_job_settings(
     overrides: dict[str, Any], job_config: dict[str, Any] | None
 ) -> _CoreSettings:
-    """UI overrides layered over the environment, then the job's own config on top.
+    """UI overrides layered over the model defaults, then the job's own config on top.
 
     The job's values are folded into the override dict rather than assigned
     afterwards, so the model's Literal choices and bounds apply to them too
@@ -468,11 +468,12 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 extra={"job_id": job_id, "component": "pipeline"},
             )
 
-            # Build this job's Settings from env + any stored UI overrides
-            # (UI > env > default; see settings_overrides.build_settings),
-            # then the job's own config on top. A DB error loading overrides
-            # must not fail the job -- fall back to env-only settings and
-            # say so, without ever logging a secret value.
+            # Build this job's Settings from any stored UI overrides plus
+            # model defaults (UI > default; see settings_overrides.
+            # build_settings -- the environment is not a layer here), then
+            # the job's own config on top. A DB error loading overrides must
+            # not fail the job -- fall back to default-only settings and say
+            # so, without ever logging a secret value.
             from maljan.core.config import install_settings
 
             from app.services.settings_service import load_core_overrides
@@ -482,7 +483,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             except Exception as exc:  # noqa: BLE001 — overrides are best-effort
                 logger.warning(
                     "Failed to load runtime setting overrides (%s); "
-                    "running job %s on environment settings only.",
+                    "running job %s on default settings only.",
                     type(exc).__name__,
                     job_id,
                     extra={"job_id": job_id},
@@ -494,7 +495,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 # Stored overrides that validated when saved can stop validating
                 # after a deploy narrows a field, and two orphan rows can nest
                 # into a conflict. One job must not take the queue down: run on
-                # environment settings, name the fields.
+                # default settings, name the fields.
                 bad = (
                     sorted({".".join(str(x) for x in e["loc"]) for e in exc.errors()})
                     if isinstance(exc, ValidationError)
@@ -515,8 +516,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     # stored override (the API validates it at submit time,
                     # but a row written another way still reaches here).
                     logger.warning(
-                        "Job %s config rejected by the model; "
-                        "running on environment settings only.",
+                        "Job %s config rejected by the model; running on default settings only.",
                         job_id,
                         extra={"job_id": job_id},
                     )
@@ -540,8 +540,8 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # Mock-mode resolution (audit 2026-05-17: W-01 permanent fix).
             # Two independent toggles must agree before the pipeline runs
             # in mock mode:
-            #   1. ``settings.mock_mode_allowed`` — operator-level gate
-            #      (defaults False; must be flipped via API config).
+            #   1. ``api.mock_mode_allowed`` — operator-level gate
+            #      (defaults False; must be flipped via the settings store).
             #   2. Either the per-job ``config.mock_mode`` flag OR the
             #      ``MALJAN_MOCK_MODE`` env var.
             # A leaked env var alone is no longer sufficient — production
@@ -555,7 +555,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             if _mock_requested and not _mock_active:
                 logger.warning(
                     "Pipeline mock requested (env=%s, job=%s) but blocked: "
-                    "settings.mock_mode_allowed=False. Running real pipeline.",
+                    "api.mock_mode_allowed=False. Running real pipeline.",
                     _env_mock,
                     _job_mock,
                 )
@@ -1501,15 +1501,32 @@ async def _sweep_orphan_jobs(db_session: async_sessionmaker) -> None:
 
 async def startup(ctx: dict) -> None:
     """Called when the ARQ worker starts up."""
-    # Initialize logging for the worker process
+    # Initialize logging for the worker process first: the CRITICAL bootstrap
+    # failure log below must go through the configured JSON stdout handler,
+    # not the ``logging.lastResort`` stderr handler a bare logger falls back
+    # to before ``setup_logging()`` attaches one.
     setup_logging()
+
+    from app.bootstrap import BootstrapProblem, require_bootstrap
+
+    try:
+        require_bootstrap(get_settings())
+    except BootstrapProblem as exc:
+        logger.critical(str(exc))
+        raise
 
     # Clear stale private sample copies left behind by a worker that was
     # killed mid-job (no finally ran) before this one starts taking jobs.
     try:
         from app.worker import sample_files
 
-        sample_files.sweep()
+        # No DB session exists yet at this point in startup (the session
+        # factory below is created after this block runs), so there is no
+        # store to read a UI override from -- build_settings({}) is model
+        # defaults only, same as bare get_settings() used to fall back to,
+        # minus the environment read.
+        core = build_settings({})
+        sample_files.sweep(mirror_dir=core.static.r2.mirror_dir)
     except OSError as exc:
         logger.warning(
             "Startup sample sweep failed (non-fatal): %s",

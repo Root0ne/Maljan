@@ -84,7 +84,11 @@ def _upload(monkeypatch, db: MagicMock, user: MagicMock):
         module, "_streaming_hashes", lambda file, dest, cap: (SHA256, "c" * 40, "d" * 32, 2048)
     )
     monkeypatch.setattr(module, "_detect_mime", lambda path: "application/x-dosexec")
-    monkeypatch.setattr(module.runtime_config, "get", AsyncMock(return_value=100 * 1024 * 1024))
+
+    async def _get(name: str):
+        return {"upload_max_bytes": 100 * 1024 * 1024, "upload_allowed_mime_types": []}[name]
+
+    monkeypatch.setattr(module.runtime_config, "get", AsyncMock(side_effect=_get))
     monkeypatch.setattr(module, "_minio_client", lambda: MagicMock())
 
     app = FastAPI()

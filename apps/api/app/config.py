@@ -1,15 +1,16 @@
 """Maljan API — Application configuration.
 
-Loads from environment variables with sensible defaults for development.
-All settings can be overridden via .env or OS environment.
+Loads from the process environment only, with sensible defaults for local
+development. No ``.env`` file is discovered or read — set variables in the
+process environment (or the container/orchestrator config) instead.
 
 Security-sensitive defaults (JWT secret, MinIO credentials) refuse to boot
-the API in non-debug mode unless the operator provided real values.
+the API in non-debug mode unless the operator provided real values; see
+``app.bootstrap`` for the full startup validation contract.
 """
 
 from __future__ import annotations
 
-import ipaddress
 from typing import Any
 
 from pydantic import Field, SecretStr, field_validator, model_validator
@@ -42,8 +43,7 @@ class APISettings(BaseSettings):
     """API-level configuration (separate from maljan-core Settings)."""
 
     model_config = SettingsConfigDict(
-        env_file=(".env", "../../.env", "../../../.env"),
-        env_file_encoding="utf-8",
+        env_file=None,
         extra="ignore",
     )
 
@@ -57,12 +57,6 @@ class APISettings(BaseSettings):
     # when actively debugging queries: ``SQL_ECHO=true``.
     sql_echo: bool = False
 
-    # ── Pipeline mock-mode gate ──────────────────────────────────
-    # ``MALJAN_MOCK_MODE=true`` alone no longer flips the pipeline
-    # into mock mode — the operator must ALSO set this gate to True
-    # (or pass ``config.mock_mode=true`` on the job itself). Stops a
-    # leaked env var from silently disabling real LLM + sandbox calls.
-    mock_mode_allowed: bool = False
     cors_origins: list[str] = Field(default=["http://localhost:3000", "http://127.0.0.1:3000"])
     cors_allow_methods: list[str] = Field(
         default=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
@@ -72,10 +66,6 @@ class APISettings(BaseSettings):
     cors_allow_headers: list[str] = Field(
         default=["Authorization", "Content-Type", "X-Correlation-Id", "X-API-Key"]
     )
-
-    # Trusted reverse-proxy IPs allowed to set X-Forwarded-For for rate limiting.
-    # Empty list means do not honour XFF (uvicorn peer IP only).
-    trusted_proxy_ips: list[str] = Field(default=[])
 
     # ── Database ─────────────────────────────────────────────────
     database_url: str = "postgresql+asyncpg://maljan:maljan_dev@127.0.0.1:5433/maljan"
@@ -113,11 +103,16 @@ class APISettings(BaseSettings):
     # the mount or running Ghidra outside Docker.
     ghidra_container_samples_path: str = "/data/samples"
 
+    # ── Settings-store encryption ──────────────────────────────
+    # Fernet key that encrypts secret values in the runtime settings store.
+    # Read directly from the environment by ``maljan.core.settings_secrets``
+    # too (that reader is unchanged by this field); declared here as well so
+    # bootstrap validation can see it alongside the rest of the contract.
+    settings_encryption_key: SecretStr = SecretStr("")
+
     # ── JWT Auth ─────────────────────────────────────────────────
     jwt_secret_key: SecretStr = SecretStr("")
     jwt_algorithm: str = "HS256"
-    jwt_access_token_expire_minutes: int = Field(default=30, ge=1)
-    jwt_refresh_token_expire_days: int = Field(default=7, ge=1)
     jwt_issuer: str = "maljan-api"
     jwt_audience: str = "maljan-clients"
 
@@ -141,12 +136,6 @@ class APISettings(BaseSettings):
         description="Secure flag on the refresh cookie; defaults to the inverse of debug.",
     )
 
-    # Login throttle (per-account)
-    login_max_attempts: int = Field(default=10, ge=1)
-    # A negative lockout is a Redis expiry that deletes the lockout key, so a
-    # negative value here disables the brute-force lockout outright.
-    login_lockout_seconds: int = Field(default=300, ge=1)
-
     # ── Auth bypass (local development only) ─────────────────────
     # When True, the API skips all JWT decoding and pretends every
     # request is made by a fixed dev admin user. The user row is
@@ -158,152 +147,6 @@ class APISettings(BaseSettings):
     auth_disabled_user_email: str = "dev@local"
     auth_disabled_user_full_name: str = "Dev User"
 
-    # ── Qdrant (passed through to maljan-core) ───────────────────
-    qdrant_url: str = "http://127.0.0.1:6333"
-    qdrant_collection: str = "maljan_ltm"
-    qdrant_api_key: SecretStr | None = None
-
-    # ── Threat-intel enrichment (Faz 6) ──────────────────────────
-    # API keys are optional. When empty the enrichment task skips the
-    # corresponding provider and leaves reputation fields as ``null``.
-    virustotal_api_key: SecretStr = SecretStr("")
-    abuseipdb_api_key: SecretStr = SecretStr("")
-    enrichment_max_lookups: int = Field(default=25, ge=1)
-    enrichment_enabled: bool = True
-
-    # ── Rate Limiting ────────────────────────────────────────────
-    rate_limit_enabled: bool = Field(default=True)
-    rate_limit_requests: int = Field(default=100, ge=1)
-    rate_limit_window_seconds: int = Field(default=60, ge=1)
-    rate_limit_whitelist: list[str] = Field(default=["/health"])
-
-    # ── File upload ──────────────────────────────────────────────
-    # 1 KiB floor rather than 1 byte: a limit below one block rejects every
-    # upload there is, which is a broken deployment rather than a policy.
-    upload_max_bytes: int = Field(default=100 * 1024 * 1024, ge=1024)  # 100 MB
-    upload_allowed_mime_types: list[str] = Field(
-        # The list mirrors every analyzer package shipped by CAPEv2 under
-        # ``external/CAPEv2/analyzer/{windows,linux}/modules/packages/`` so
-        # any file the sandbox can detonate also clears the API gate.
-        #
-        # Synonym handling: ``filetype`` (magic-byte) and libmagic disagree
-        # on some entries — ELF is ``x-elf`` vs ``x-executable``; PE is
-        # ``x-msdownload`` vs ``vnd.microsoft.portable-executable``. Every
-        # documented synonym is listed. Scripts (.vbs/.ps1/.bat/.py/.js)
-        # typically come back as ``text/plain`` or ``None`` from filetype;
-        # those still pass because samples.py only enforces the allow-list
-        # when a MIME was actually detected.
-        default=[
-            # ── Generic / catch-all ─────────────────────────────────
-            "application/octet-stream",
-            # ── Windows PE family (exe / dll / service / regsvr / msbuild) ──
-            "application/x-dosexec",
-            "application/x-msdownload",
-            "application/vnd.microsoft.portable-executable",
-            # ── Windows installers (msi / msix / nsis) ──────────────
-            "application/x-ms-installer",
-            "application/x-msi",
-            "application/vnd.ms-msi",
-            # ── *nix executables (ELF / Mach-O / shared libs) ───────
-            "application/x-mach-binary",
-            "application/x-elf",
-            "application/x-executable",
-            "application/x-sharedlib",
-            "application/x-pie-executable",
-            # ── Android (APK) ───────────────────────────────────────
-            "application/vnd.android.package-archive",
-            # ── Archives (CAPE ``zip`` / ``rar`` / ``jar`` / ``archive``) ──
-            "application/zip",
-            "application/x-zip-compressed",
-            "application/x-7z-compressed",
-            "application/x-rar-compressed",
-            "application/vnd.rar",
-            "application/gzip",
-            "application/x-gzip",
-            "application/x-bzip2",
-            "application/x-xz",
-            "application/x-lzma",
-            "application/x-tar",
-            "application/x-iso9660-image",
-            "application/java-archive",
-            # ── Linux package formats (CAPE Linux ``deb`` package) ──
-            "application/x-deb",
-            "application/vnd.debian.binary-package",
-            # ── PDF (CAPE ``pdf`` package) ──────────────────────────
-            "application/pdf",
-            # ── Microsoft Office — legacy binary formats ────────────
-            "application/msword",
-            "application/vnd.ms-word",
-            "application/vnd.ms-excel",
-            "application/vnd.ms-powerpoint",
-            "application/vnd.ms-publisher",
-            "application/x-mspublisher",
-            "application/vnd.ms-access",
-            "application/x-msaccess",
-            "application/onenote",
-            "application/msonenote",
-            "application/vnd.ms-xpsdocument",
-            # ── Office Open XML (.docx / .xlsx / .pptx + macro variants) ──
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            "application/vnd.ms-word.document.macroEnabled.12",
-            "application/vnd.ms-excel.sheet.macroEnabled.12",
-            "application/vnd.ms-powerpoint.presentation.macroEnabled.12",
-            "application/vnd.ms-word.template.macroEnabled.12",
-            "application/vnd.ms-excel.template.macroEnabled.12",
-            # ── Rich Text + Hangul + Ichitaro ───────────────────────
-            "application/rtf",
-            "text/rtf",
-            "application/x-hwp",
-            "application/haansofthwp",
-            "application/x-ichitaro",
-            # ── Mail (CAPE ``eml`` / ``msg`` / ``mht``) ─────────────
-            "message/rfc822",
-            "application/vnd.ms-outlook",
-            "application/x-mimearchive",
-            "multipart/related",
-            # ── Browser / web (CAPE ``chrome`` / ``ie`` / ``crx``) ──
-            "text/html",
-            "application/xhtml+xml",
-            "application/xml",
-            "text/xml",
-            "application/x-chrome-extension",
-            # ── Shortcuts, HTA, registry, control panel ─────────────
-            "application/x-ms-shortcut",
-            "application/x-mslnk",
-            "application/hta",
-            "application/x-hta",
-            "application/x-registry",
-            "text/x-ms-regedit",
-            "application/x-cpl",
-            "application/x-rdp",
-            # ── Help, Flash, Java applet ────────────────────────────
-            "application/vnd.ms-htmlhelp",
-            "application/x-chm",
-            "application/x-shockwave-flash",
-            "application/x-java-applet",
-            # ── Scripts that DO carry a magic-byte MIME ─────────────
-            # (the .vbs/.ps1/.bat/.py/.js majority come back None and
-            # pass via samples.py's "detected_mime is None" branch)
-            "text/x-shellscript",
-            "application/x-shellscript",
-            "text/x-python",
-            "application/x-python",
-            "text/x-perl",
-            "application/x-perl",
-            "application/javascript",
-            "application/x-javascript",
-            "text/javascript",
-            "application/x-powershell",
-            "text/x-powershell",
-            "application/x-vbscript",
-            "text/vbscript",
-            "application/x-bat",
-            "text/x-msdos-batch",
-            "application/x-msdos-program",
-        ]
-    )
     # Wave 9 (2026-05-29): the 2026-05-29 Linux ELF audit found that
     # ``tempfile.NamedTemporaryFile`` defaults to the system temp dir
     # (``%LOCALAPPDATA%\Temp`` on Windows), which is the Defender quarantine
@@ -341,18 +184,6 @@ class APISettings(BaseSettings):
             # itself cannot see other fields, so we leave the assertion to a
             # post-init hook (model_post_init).
             return SecretStr(secret)
-        return value
-
-    @field_validator("trusted_proxy_ips")
-    @classmethod
-    def _proxies_are_networks(cls, value: list[str]) -> list[str]:
-        for entry in value:
-            try:
-                ipaddress.ip_network(entry, strict=False)
-            except ValueError as exc:
-                raise ValueError(
-                    f"trusted_proxy_ips entry {entry!r} is not an IP address or CIDR network"
-                ) from exc
         return value
 
     @model_validator(mode="after")

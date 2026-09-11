@@ -19,6 +19,7 @@ Heterogeneous Model Ensemble (Phase 8 / Master Plan Section 4):
   (backward-compatible: existing configs require no changes).
 """
 
+import contextvars
 import copy
 import json
 import re
@@ -1575,11 +1576,31 @@ class ReportingConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+# Flipped around ``Settings(**overrides)`` by ``build_settings`` (see
+# ``maljan.core.settings_overrides``) to mean "init kwargs and field defaults
+# only -- no environment, no .env, no secrets directory". Bare ``Settings()``
+# never touches this flag, so it stays environment- and dotenv-capable: that
+# is the documented library behaviour the frozen ``tests/evaluation/**``
+# scripts and the future ``legacy_env_import.py`` depend on. A ContextVar
+# rather than an init kwarg because pydantic-settings validates unknown
+# keyword arguments against the model's fields and rejects one that is not
+# a declared field.
+STORE_ONLY: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "maljan_settings_store_only", default=False
+)
+
+
 def _find_env_file() -> str:
     """Walk up from this file to find the project root .env.
 
     Supports launching from any subdirectory (apps/api, apps/web, etc.)
     without requiring the caller to set CWD to the project root.
+
+    Bare-path only: this is consulted by the bare ``Settings()`` constructor
+    (env- and dotenv-capable, library behaviour). The application's own
+    construction path -- ``build_settings`` -- sets ``STORE_ONLY`` instead,
+    which drops the dotenv source outright regardless of what this function
+    returns.
     """
     from pathlib import Path
 
@@ -1665,6 +1686,12 @@ class Settings(BaseSettings):
         aliasing the merged mapping as long as a source never contributes half
         of an aliased sub-mapping — and a source is one file or one environment,
         so it cannot.
+
+        When ``STORE_ONLY`` is set (``build_settings``, the application's
+        construction path), only the aliased init-kwargs source is returned:
+        no environment, no dotenv file, no secrets directory. Bare
+        ``Settings()`` never sets the flag, so it keeps all four sources —
+        that is the documented library behaviour.
         """
 
         class _Aliased(PydanticBaseSettingsSource):
@@ -1685,8 +1712,11 @@ class Settings(BaseSettings):
                     return data
                 return cast("dict[str, Any]", cls._alias_legacy_keys(data))
 
+        aliased_init = _Aliased(init_settings)
+        if STORE_ONLY.get():
+            return (aliased_init,)
         return (
-            _Aliased(init_settings),
+            aliased_init,
             _Aliased(env_settings),
             _Aliased(dotenv_settings),
             _Aliased(file_secret_settings),
@@ -1925,7 +1955,8 @@ def install_settings(instance: Settings) -> None:
     """Make ``instance`` the process-wide singleton every ``get_settings()`` caller sees.
 
     The arq worker (``max_jobs = 1``) calls this once per job with the Settings
-    it built from the environment plus the UI-managed overrides. Agents,
+    it built from the UI-managed overrides plus model defaults (``build_settings``,
+    store-only). Agents,
     pipeline nodes and extractors read ``get_settings()`` rather than an
     injected config, so without this a UI override would reach the container
     and nothing below it.

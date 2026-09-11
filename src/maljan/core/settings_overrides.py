@@ -1,11 +1,15 @@
-"""Layer database overrides over the environment.
+"""Build the application's core settings from the store and defaults only.
 
 Overrides are dotted paths (``llm.openai.base_url``). ``build_settings`` nests
-them and passes them to ``Settings(**nested)``; pydantic-settings deep-merges
-init kwargs with the environment and dotenv sources, so an overridden
-``llm.openai.base_url`` keeps an ``LLM__OPENAI__API_KEY`` from ``.env``
-(verified against the real model on 2026-09-02). Precedence is therefore
-``UI > env > default`` with no code of its own.
+them and passes them to ``Settings(**nested)`` with the module-level
+``STORE_ONLY`` flag set, which drops the environment, ``.env``, and secrets
+directory sources for that one construction (see
+``maljan.core.config.Settings.settings_customise_sources``). Precedence is
+therefore ``UI > default`` — the environment is no longer a layer for the
+application. The bare ``Settings()`` constructor is unaffected by this
+module and stays environment- and dotenv-capable; it is a library behaviour
+used by the frozen ``tests/evaluation/**`` scripts and by the legacy
+one-shot environment import.
 """
 
 from __future__ import annotations
@@ -16,11 +20,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
-from maljan.core.config import Settings
+from maljan.core.config import STORE_ONLY, Settings
 
 CORE_NS = "core"
 API_NS = "api"
-Source = Literal["ui", "env", "default"]
+Source = Literal["ui", "default"]
 
 
 def split_key(key: str) -> tuple[str, str]:
@@ -73,13 +77,22 @@ def flatten_leaves(model: BaseModel, leaf_keys: Iterable[str]) -> dict[str, Any]
 
 
 def build_settings(core_overrides: Mapping[str, Any]) -> Settings:
-    return Settings(**nest(core_overrides))
+    """The application's core settings: ``core_overrides`` over model defaults.
+
+    Store-only: the environment, ``.env``, and any secrets directory are
+    never consulted, regardless of what is set in the process. This is the
+    only construction path the application (API, worker) may use — see
+    ``tests/unit/test_no_bare_settings_in_app.py``.
+    """
+    token = STORE_ONLY.set(True)
+    try:
+        return Settings(**nest(core_overrides))
+    finally:
+        STORE_ONLY.reset(token)
 
 
-def effective_source(*, overridden: bool, env_value: Any, default_value: Any) -> Source:
-    if overridden:
-        return "ui"
-    return "env" if env_value != default_value else "default"
+def effective_source(*, overridden: bool) -> Source:
+    return "ui" if overridden else "default"
 
 
 # ``mcp.servers.<key>.env.<VAR>`` after flattening: an open-ended mapping an

@@ -24,7 +24,6 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
-from maljan.core.config import get_settings
 from maljan.providers.sandbox.formats import sniff_format
 from pydantic import SecretStr
 from sqlalchemy import delete, select
@@ -39,6 +38,7 @@ from app.models.sandbox_report import SandboxReportRow
 from app.models.user import User
 from app.schemas.job import SandboxReportListResponse, SandboxReportResponse
 from app.services import audit
+from app.services.settings_service import effective_core_settings
 
 logger = get_logger("api.sandbox_reports")
 
@@ -52,12 +52,14 @@ _CHUNK = 64 * 1024
 _TASK_ID_MAX_LENGTH = 128
 
 
-def _max_report_bytes() -> int:
-    return int(get_settings().sandbox.upload.max_report_bytes)
+async def _max_report_bytes(db: AsyncSession) -> int:
+    core = await effective_core_settings(db)
+    return int(core.sandbox.upload.max_report_bytes)
 
 
-def _allowed_formats() -> set[str]:
-    return set(get_settings().sandbox.upload.allowed_formats)
+async def _allowed_formats(db: AsyncSession) -> set[str]:
+    core = await effective_core_settings(db)
+    return set(core.sandbox.upload.allowed_formats)
 
 
 async def _maybe_await(value: Any) -> Any:
@@ -108,7 +110,7 @@ def get_object(path: str) -> bytes:
         response.release_conn()
 
 
-def _read_payload(file: UploadFile) -> tuple[bytes, dict[str, Any]]:
+async def _read_payload(file: UploadFile, db: AsyncSession) -> tuple[bytes, dict[str, Any]]:
     """Stream, size-cap, inflate and parse. Returns (canonical json bytes, payload).
 
     M7 (final review): this used to take a ``filename`` parameter that was
@@ -117,7 +119,7 @@ def _read_payload(file: UploadFile) -> tuple[bytes, dict[str, Any]]:
     do here. Dropped rather than wired up to avoid a second, redundant way
     to decide the same thing.
     """
-    limit = _max_report_bytes()
+    limit = await _max_report_bytes(db)
     raw = bytearray()
     while True:
         chunk = file.file.read(_CHUNK)
@@ -239,9 +241,9 @@ async def upload_sandbox_report(
     db: AsyncSession = Depends(get_db),
 ) -> SandboxReportResponse:
     sample = await _maybe_await(_load_sample(db, sample_id, user))
-    body, payload = _read_payload(file)
+    body, payload = await _read_payload(file, db)
     fmt = sniff_format(payload)
-    allowed = _allowed_formats()
+    allowed = await _allowed_formats(db)
     if fmt not in allowed:
         raise HTTPException(
             status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,

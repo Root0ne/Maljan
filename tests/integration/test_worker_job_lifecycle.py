@@ -33,14 +33,21 @@ def _isolated_runtime_settings(monkeypatch: pytest.MonkeyPatch):
     ``run_analysis`` (and fall back on the connection error), and
     ``install_settings`` would leave the last job's Settings behind for the
     next test.
+
+    ``api.mock_mode_allowed`` is set here rather than through the
+    ``MOCK_MODE_ALLOWED`` env var some tests below still also set: Task 2
+    moved that knob off ``APISettings`` entirely, so the env var has had no
+    effect on it since, and the store override (what ``runtime_config.get``
+    actually reads) is the only lever left. Every test in this module that
+    requests mock mode via the job/env flag relies on this being True.
     """
     from app import runtime_config as rc
     from maljan.core.config import reset_settings_cache
 
-    async def _no_overrides() -> dict[str, Any]:
-        return {}
+    async def _mock_mode_allowed_override() -> dict[str, Any]:
+        return {"api.mock_mode_allowed": True}
 
-    monkeypatch.setattr(rc.runtime_config, "_overrides", _no_overrides)
+    monkeypatch.setattr(rc.runtime_config, "_overrides", _mock_mode_allowed_override)
     yield
     reset_settings_cache()
 
@@ -185,13 +192,14 @@ async def test_mock_pipeline_completes(
 
     mock_db_session.execute = _fake_execute
 
-    # Audit 2026-05-17 (W-01 permanent fix): mock mode now requires BOTH
-    # the env-var AND ``settings.mock_mode_allowed=True``. Without the
-    # second toggle the worker stays on the real LLM path — exactly the
-    # opposite of what this test wants. ``MOCK_MODE_ALLOWED`` flows
-    # through pydantic-settings env loading; combined with the cleared
-    # settings cache it produces a fresh ``APISettings`` with both gates
-    # on.
+    # Audit 2026-05-17 (W-01 permanent fix): mock mode requires BOTH the
+    # env/job flag AND ``api.mock_mode_allowed=True``. Without the second
+    # toggle the worker stays on the real LLM path -- exactly the opposite of
+    # what this test wants. The second toggle comes from the module's
+    # autouse ``_isolated_runtime_settings`` fixture (Task 2 moved
+    # ``mock_mode_allowed`` off ``APISettings`` into the settings store, so
+    # an env var no longer reaches it); the leftover ``MOCK_MODE_ALLOWED``
+    # env var below is inert and kept only for history.
     from app import config as api_config
 
     api_config._settings = None
@@ -276,6 +284,7 @@ async def test_report_less_pipeline_result_fails_the_job(
 async def test_reporting_disabled_completes_without_a_malware_report(
     mock_ctx: dict[str, Any],
     mock_db_session: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A missing ``malware_report`` is not itself a failure.
 
@@ -286,7 +295,18 @@ async def test_reporting_disabled_completes_without_a_malware_report(
     behaviour (see ``tests/integration/test_report_pipeline.py::
     TestReportNodeDisabled``), not a report-less failure. The job must still
     complete.
+
+    Task 3: ``build_job_settings`` is store-only, so ``reporting.enabled``
+    can no longer be pinned via a ``REPORTING__ENABLED`` env var -- it has to
+    arrive the way a real UI-saved override would, through
+    ``load_core_overrides``.
     """
+    from app.services import settings_service
+
+    async def _reporting_disabled(_db: Any) -> dict[str, Any]:
+        return {"reporting.enabled": False}
+
+    monkeypatch.setattr(settings_service, "load_core_overrides", _reporting_disabled)
     job = _make_job()
     sample = _make_sample()
 
@@ -318,11 +338,7 @@ async def test_reporting_disabled_completes_without_a_malware_report(
     with (
         patch.dict(
             "os.environ",
-            {
-                "MALJAN_MOCK_MODE": "true",
-                "MOCK_MODE_ALLOWED": "true",
-                "REPORTING__ENABLED": "false",
-            },
+            {"MALJAN_MOCK_MODE": "true"},
             clear=False,
         ),
         patch(
@@ -914,7 +930,7 @@ def test_upload_temp_dir_resolves_to_absolute_path() -> None:
 
 
 @pytest.mark.asyncio
-async def test_override_load_failure_falls_back_to_env_settings(
+async def test_override_load_failure_falls_back_to_default_settings(
     mock_ctx: dict[str, Any],
     mock_db_session: AsyncMock,
     monkeypatch: pytest.MonkeyPatch,
@@ -922,8 +938,10 @@ async def test_override_load_failure_falls_back_to_env_settings(
 ) -> None:
     """A DB error while loading UI overrides must not fail the job.
 
-    The job runs on environment settings and one warning names the exception
-    type only -- never a value, never a connection string.
+    The job runs on default settings (Task 3: build_settings is store-only,
+    so "default" replaces what used to be "environment") and one warning
+    names the exception type only -- never a value, never a connection
+    string.
     """
     job = _make_job()
     sample = _make_sample()
@@ -971,7 +989,7 @@ async def test_override_load_failure_falls_back_to_env_settings(
     api_config._settings = None
 
     assert result["status"] == "completed"
-    warnings = [r for r in caplog.records if "environment settings only" in r.getMessage()]
+    warnings = [r for r in caplog.records if "default settings only" in r.getMessage()]
     assert len(warnings) == 1
     assert "ConnectionError" in warnings[0].getMessage()
     assert "s3cret" not in caplog.text

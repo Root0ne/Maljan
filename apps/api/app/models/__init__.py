@@ -5,6 +5,7 @@ from app.models.report import AgentFinding, AnalysisReport
 from app.models.sample import Sample
 from app.models.sandbox_report import SandboxReportRow
 from app.models.settings import RuntimeSetting
+from app.models.settings_meta import SettingsMeta
 from app.models.user import User
 
 __all__ = [
@@ -17,4 +18,5 @@ __all__ = [
     "AuditLog",
     "APIKey",
     "RuntimeSetting",
+    "SettingsMeta",
 ]

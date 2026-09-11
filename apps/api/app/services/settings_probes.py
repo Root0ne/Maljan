@@ -23,6 +23,7 @@ from redis.asyncio import Redis
 
 from app.config import settings as api_settings
 from app.services.server_map import TOKEN_MASK as _TOKEN_MASK
+from app.services.settings_catalog_api import API_DEFAULTS
 
 TIMEOUT = 10.0
 
@@ -476,11 +477,9 @@ async def run_mcp_probe(server: str, values: dict[str, Any], stored: dict[str, A
     stored_map = stored_candidate if isinstance(stored_candidate, dict) else {}
     staged_map = staged_candidate if isinstance(staged_candidate, dict) else {}
     if server not in stored_map and server not in staged_map:
-        # Fall back to the effective settings: a built-in the operator has
+        # Fall back to the default settings: a built-in the operator has
         # never edited has no stored row at all.
-        from maljan.core.config import Settings
-
-        effective = Settings().mcp.servers
+        effective = build_settings({}).mcp.servers
         if server not in effective:
             available = (
                 ", ".join(sorted(set(stored_map) | set(staged_map) | set(effective))) or "(none)"
@@ -996,6 +995,10 @@ async def run_probe(name: str, values: dict[str, Any], stored: dict[str, Any]) -
             for part in path.split("."):
                 cursor = getattr(cursor, part)
             resolved[short] = _unwrap(cursor)
+        elif path in API_DEFAULTS:
+            # Task 2: editable api.* leaves no longer live on APISettings;
+            # their probe-time default comes from the catalog table instead.
+            resolved[short] = _unwrap(API_DEFAULTS[path])
         else:
             resolved[short] = _unwrap(getattr(api_settings, path))
     return await in_probe_loop(lambda: probe(resolved))

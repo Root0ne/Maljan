@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.runtime_config import RuntimeConfig
+from app.services.settings_catalog_api import API_DEFAULTS
 
 
 def factory_returning(overrides: dict):
@@ -57,3 +58,50 @@ async def test_db_failure_falls_back_and_does_not_raise(monkeypatch):
 
     rc = RuntimeConfig(boom, ttl_seconds=5)
     assert isinstance(await rc.get("rate_limit_requests"), int)
+
+
+@pytest.mark.asyncio
+async def test_every_api_default_is_reachable_with_no_override(monkeypatch):
+    """Task 2: every removed-from-APISettings knob still resolves through
+    ``get``/``get_secret``, falling back to ``API_DEFAULTS`` with no store
+    override and no environment involved at all."""
+    session, load, _ = factory_returning({})
+    monkeypatch.setattr(
+        "app.runtime_config.SettingsService.load_overrides", lambda self: load(self.db)
+    )
+    rc = RuntimeConfig(session, ttl_seconds=5)
+    for name, default in API_DEFAULTS.items():
+        value = await rc.get(name)
+        assert value == default
+
+
+@pytest.mark.asyncio
+async def test_get_raises_for_a_name_absent_from_defaults(monkeypatch):
+    session, load, _ = factory_returning({})
+    monkeypatch.setattr(
+        "app.runtime_config.SettingsService.load_overrides", lambda self: load(self.db)
+    )
+    rc = RuntimeConfig(session, ttl_seconds=5)
+    with pytest.raises(KeyError):
+        await rc.get("not_a_real_setting")
+
+
+@pytest.mark.asyncio
+async def test_get_cached_returns_the_default_before_get_is_ever_called():
+    session, _, _ = factory_returning({})
+    rc = RuntimeConfig(session, ttl_seconds=5)
+    assert rc.get_cached("jwt_access_token_expire_minutes") == 30
+
+
+@pytest.mark.asyncio
+async def test_get_cached_reflects_the_last_get_and_invalidate_clears_it(monkeypatch):
+    session, load, _ = factory_returning({"api.jwt_access_token_expire_minutes": 99})
+    monkeypatch.setattr(
+        "app.runtime_config.SettingsService.load_overrides", lambda self: load(self.db)
+    )
+    rc = RuntimeConfig(session, ttl_seconds=5)
+    assert rc.get_cached("jwt_access_token_expire_minutes") == 30
+    assert await rc.get("jwt_access_token_expire_minutes") == 99
+    assert rc.get_cached("jwt_access_token_expire_minutes") == 99
+    rc.invalidate()
+    assert rc.get_cached("jwt_access_token_expire_minutes") == 30

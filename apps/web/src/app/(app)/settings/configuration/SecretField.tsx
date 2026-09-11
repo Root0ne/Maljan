@@ -12,7 +12,7 @@ export type SecretStatus = "set" | "not-set" | "staged" | "cleared";
 function secretStatusText(
   status: SecretStatus,
   hint?: string | null,
-  source?: "default" | "env" | "ui"
+  source?: "default" | "ui"
 ): string {
   switch (status) {
     case "staged":
@@ -54,7 +54,7 @@ export default function SecretField({
   title?: string;
   status: SecretStatus;
   hint?: string | null;
-  source?: "default" | "env" | "ui";
+  source?: "default" | "ui";
   editable: boolean;
   reason?: string | null;
   onStage: (value: string) => void;
@@ -62,8 +62,9 @@ export default function SecretField({
   onCancel: () => void;
   labels?: { replace?: string };
   /** Wording a caller's own contract pins, in place of the computed line: the
-   *  tool-server token says where it comes from (`set in .env`) rather than
-   *  `set · …hint · source`, and that text is asserted by the servers spec. */
+   *  tool-server token says where it comes from (`set from the UI`) rather
+   *  than `set · …hint · source`, and that text is asserted by the servers
+   *  spec. */
   statusText?: string;
   /** Attributes for the element the status line is rendered in, so a caller
    *  can keep a hook it already published — `data-token-state` on the server

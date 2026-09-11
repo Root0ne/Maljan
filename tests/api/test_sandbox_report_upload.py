@@ -56,6 +56,19 @@ def _build_client(db: MagicMock, sample: MagicMock, user: MagicMock) -> TestClie
     return TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def _fresh_core_settings_cache():
+    """Every test gets its own ``db`` mock; the module-level TTL cache in
+    ``settings_service`` does not know that, so drop any settings a previous
+    test resolved before this one runs (and after, so nothing here leaks
+    into an unrelated test file within the same TTL window)."""
+    from app.services.settings_service import core_settings_cache
+
+    core_settings_cache.invalidate()
+    yield
+    core_settings_cache.invalidate()
+
+
 @pytest.fixture
 def client(monkeypatch, tmp_path):
     from app.database import get_db
@@ -66,6 +79,11 @@ def client(monkeypatch, tmp_path):
     user = MagicMock(id=uuid.uuid4())
     sample = MagicMock(id=uuid.uuid4(), sha256=SHA, uploaded_by=user.id)
     db = MagicMock()
+    # The upload route now resolves sandbox.upload.* through
+    # effective_core_settings(db), which reads no rows here -- give
+    # db.execute a real (empty) result instead of the bare MagicMock the
+    # dependency-injected settings read used to skip entirely.
+    db.execute = AsyncMock(return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: [])))
     monkeypatch.setattr(module, "_load_sample", MagicMock(return_value=sample))
     stored: dict[str, bytes] = {}
     monkeypatch.setattr(
@@ -210,7 +228,7 @@ def test_a_non_json_body_is_refused_before_anything_is_stored(client):
 
 def test_the_size_cap_is_enforced_while_streaming(client, monkeypatch):
     api, sample, stored = client
-    monkeypatch.setattr(module, "_max_report_bytes", lambda: 64)
+    monkeypatch.setattr(module, "_max_report_bytes", AsyncMock(return_value=64))
     r = api.post(
         f"/api/v1/samples/{sample.id}/sandbox-reports",
         files={"file": ("report.json", _cape_blob(), "application/json")},
@@ -221,7 +239,7 @@ def test_the_size_cap_is_enforced_while_streaming(client, monkeypatch):
 
 def test_the_inflated_size_cap_is_enforced_too(client, monkeypatch):
     api, sample, stored = client
-    monkeypatch.setattr(module, "_max_report_bytes", lambda: 4096)
+    monkeypatch.setattr(module, "_max_report_bytes", AsyncMock(return_value=4096))
     buf = io.BytesIO()
     with gzip.GzipFile(fileobj=buf, mode="wb") as gz:
         gz.write(b'{"info": {"version": "CAPEv2"}, "pad": "' + b"A" * 200_000 + b'"}')

@@ -36,7 +36,11 @@ from app.services.mapping_preview import PREVIEW_MAX_BYTES, preview_mapping
 from app.services.server_map import SERVER_MAP_KEY
 from app.services.settings_catalog_api import catalog_index, full_catalog, resolved_catalog
 from app.services.settings_probes import PROBES, run_agent_probe, run_mcp_probe, run_probe
-from app.services.settings_service import SettingsService, SettingsValidationError
+from app.services.settings_service import (
+    SettingsService,
+    SettingsValidationError,
+    core_settings_cache,
+)
 
 logger = get_logger("api.settings")
 
@@ -53,9 +57,9 @@ async def _effective_servers(db: AsyncSession) -> list[str]:
     servers = stored.get("core.mcp.servers")
     if isinstance(servers, dict) and servers:
         return list(servers)
-    from maljan.core.config import Settings
+    from maljan.core.settings_overrides import build_settings
 
-    return list(Settings().mcp.servers)
+    return list(build_settings({}).mcp.servers)
 
 
 async def _effective_agents(db: AsyncSession) -> tuple[list[str], list[str]]:
@@ -109,6 +113,7 @@ async def patch_values(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"errors": exc.errors}
         )
     runtime_config.invalidate()
+    core_settings_cache.invalidate()
     return PatchResponse(applied=res.applied, applies=res.applies)
 
 
@@ -124,6 +129,7 @@ async def reset_group(
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown group: {group}")
     removed = await SettingsService(db).reset(keys, user_id=user.id, ip=_client_ip(request))
     runtime_config.invalidate()
+    core_settings_cache.invalidate()
     return ResetResponse(reset=removed)
 
 
@@ -141,6 +147,7 @@ async def reset_key(
     if not removed and key not in catalog_index():
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown setting: {key}")
     runtime_config.invalidate()
+    core_settings_cache.invalidate()
     return ResetResponse(reset=removed)
 
 
