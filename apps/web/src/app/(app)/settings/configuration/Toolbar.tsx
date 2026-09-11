@@ -4,23 +4,10 @@ import { useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
+import ImportDialog from "./ImportDialog";
 import { useSettingsContext } from "./SettingsContext";
 
 const SEARCH_PATH = "/settings/configuration/search";
-
-/** Triggers a browser download of `text` as `filename` — no server round trip
- * beyond the fetch already made; the viewer never sees a bare data: link. */
-function downloadText(filename: string, text: string) {
-  const blob = new Blob([text], { type: "text/plain" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
 
 function DownloadIcon() {
   return (
@@ -41,10 +28,28 @@ function DownloadIcon() {
   );
 }
 
+function UploadIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="w-3.5 h-3.5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M8 10V2" />
+      <path d="M4.5 4.5 8 1l3.5 3.5" />
+      <path d="M2.5 13h11" />
+    </svg>
+  );
+}
+
 /**
- * The strip above every settings page: search, the "only changed" filter, the
- * override export, and the two banners that belong to the whole console (the
- * read-only-secrets warning and the last failed action).
+ * The strip above every settings page: search, the "only changed" filter,
+ * the configuration export/import pair, and the last-failed-action banner.
  */
 export default function Toolbar() {
   const s = useSettingsContext();
@@ -57,6 +62,7 @@ export default function Toolbar() {
   const [query, setQuery] = useState(urlQuery);
   const [toast, setToast] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
 
   // The box mirrors `?q` on the search page and is empty everywhere else, so
   // picking a group in the rail clears the query it navigated away from. The
@@ -139,27 +145,28 @@ export default function Toolbar() {
           onClick={async () => {
             setExportError(null);
             try {
-              const text = await api.exportSettings();
-              downloadText("maljan-settings.env", text);
-              setToast("Overrides downloaded as maljan-settings.env");
+              await api.exportSettings();
+              setToast("Configuration downloaded as maljan-settings.json");
             } catch (e) {
               setExportError(getErrorMessage(e));
             }
           }}
         >
           <DownloadIcon />
-          Export overrides
+          Export configuration
+        </button>
+        <button
+          type="button"
+          className="flex items-center gap-1.5 text-xs text-accent-strong shrink-0"
+          onClick={() => setImportOpen(true)}
+        >
+          <UploadIcon />
+          Import configuration
         </button>
       </form>
 
-      {s.schema && !s.schema.secrets_available && (
-        <div
-          className="w-full text-[11px] text-status-orange bg-status-orange/10 border border-status-orange/20 rounded px-3 py-2 mt-3"
-          role="status"
-        >
-          SETTINGS_ENCRYPTION_KEY is not set: secrets are read-only
-        </div>
-      )}
+      {importOpen && <ImportDialog onClose={() => setImportOpen(false)} />}
+
       {exportError && (
         <div className="text-xs text-status-red mt-3" role="alert">
           {exportError}

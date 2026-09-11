@@ -53,7 +53,6 @@ const negotiationTimeout = entry({
 });
 
 const schema: SettingsSchema = {
-  secrets_available: true,
   groups: [
     {
       key: "llm",

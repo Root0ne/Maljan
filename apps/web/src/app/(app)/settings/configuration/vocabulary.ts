@@ -1,5 +1,14 @@
 import type { Applies } from "@/types/settings";
 
+/** The two places a setting's value can come from, once the mandatory
+ *  encryption key retired the third (`.env`, removed in an earlier task on
+ *  this branch): the catalog's built-in default, or a value an operator
+ *  saved through the UI. */
+export const SOURCE_LABEL: Record<"default" | "ui", string> = {
+  default: "default",
+  ui: "ui",
+};
+
 export const APPLIES_LABEL: Record<Applies, string> = {
   next_job: "next analysis",
   live: "immediately",

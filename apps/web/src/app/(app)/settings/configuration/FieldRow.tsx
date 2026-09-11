@@ -13,10 +13,8 @@ import AgentDefinitionsEditor, {
 } from "./AgentDefinitionsEditor";
 import ProfilesEditor from "./ProfilesEditor";
 import ServerMapEditor from "./ServerMapEditor";
-import { APPLIES_LABEL } from "./vocabulary";
+import { APPLIES_LABEL, SOURCE_LABEL } from "./vocabulary";
 import { Widget } from "./widgets";
-
-const SOURCE: Record<string, string> = { default: "default", ui: "ui" };
 
 /** Types whose control is short enough to sit beside the title. Everything
  *  else — lists, JSON, and every composite editor — drops below it. */
@@ -263,7 +261,7 @@ export default function FieldRow({
                 : "bg-border text-text-muted"
             }`}
           >
-            {SOURCE[source]}
+            {SOURCE_LABEL[source]}
           </span>
           <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-border text-text-muted">
             {APPLIES_LABEL[entry.applies]}
