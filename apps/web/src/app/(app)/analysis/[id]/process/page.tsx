@@ -8,7 +8,7 @@ import TimelinePanel from "@/components/analysis/TimelinePanel";
 import TranscriptView from "./TranscriptView";
 
 /**
- * Unified "Process" tab (2026-07 round 2).
+ * Unified "Process" tab.
  *
  * AGENTS, PIPELINE and TIMELINE all describe the same thing — how the
  * multi-agent run produced the verdict — and read the same post-analysis data

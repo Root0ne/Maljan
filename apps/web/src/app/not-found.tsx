@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 /**
- * A5 (dev audit 2026-09-06): an unknown URL used to render Next's built-in 404
+ * An unknown URL used to render Next's built-in 404
  * — no chrome, no link, nothing but the browser's Back button to get out of.
  * This one is still deliberately outside the app shell: the shell mounts
  * `AuthProvider`, which redirects an unauthenticated visitor to /login, and a

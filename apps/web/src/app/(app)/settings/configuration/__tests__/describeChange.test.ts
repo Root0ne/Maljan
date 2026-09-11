@@ -185,7 +185,7 @@ describe("describeChange: core.mcp.servers", () => {
     expect(line.detail).toEqual(["srv: changed: command, label"]);
   });
 
-  /* Task 21: a flip that travelled with another edit used to disappear —
+  /* A flip that travelled with another edit used to disappear —
    * "srv: changed: url" said nothing about the server having been switched
    * off at the same time. */
   it("keeps a disabled flip that happens alongside another field", () => {
@@ -327,7 +327,7 @@ describe("describeChange: core.agents.profiles", () => {
     expect(line.detail).toEqual(["p1: removed"]);
   });
 
-  /* Task 21: a rename that arrived with an analyst edit used to be swallowed
+  /* A rename that arrived with an analyst edit used to be swallowed
    * by the analysts line, so the review never mentioned the new name. */
   it("reports a rename alongside an analyst set change", () => {
     const before = { p1: { label: "P1", analysts: ["a", "b"] } };

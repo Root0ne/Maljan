@@ -78,7 +78,7 @@ export interface LlmGlobalFallback {
   modelValue: string | null;
 }
 
-/* B6 (dev audit 2026-09-06): a resolved prompt and tool list describe the
+/* A resolved prompt and tool list describe the
  * definition as it stood when Resolve was pressed. Editing what resolution
  * reads — the prompt, the tool refs, the static provider, the role — leaves
  * that status line describing something else, so it is dropped with the
@@ -794,8 +794,8 @@ export function AgentDetail({
  * selected agent's form fills the right-hand side in four named sections.
  *
  * One staged value for the whole map, exactly as `ServerMapEditor` stages the
- * whole server map: the PATCH body is the full dict, so sub-project A's apply
- * bar, hidden-dirty count and reset behaviour need no special case, and a
+ * whole server map: the PATCH body is the full dict, so the apply bar,
+ * hidden-dirty count and reset behaviour need no special case, and a
  * half-applied map cannot happen. The per-agent LLM override rides on its own
  * leaf (`core.llm.agents`) and is staged as a whole the same way.
  *
@@ -869,7 +869,7 @@ export default function AgentDefinitionsEditor({
 
   const add = (from?: string) => {
     const at = from ?? ADD_BUTTON;
-    // B5: an empty name box on a Clone means "name it after its source"; on
+    // An empty name box on a Clone means "name it after its source"; on
     // Add it is still a name the operator has to supply.
     const typed = newKey.trim();
     const key = typed === "" && from ? copyKey(from, value) : typed;
@@ -893,7 +893,7 @@ export default function AgentDefinitionsEditor({
     setPicked(key);
   };
 
-  /* B2 (dev audit 2026-09-06): the API qualifies an agent-map error with the
+  /* The API qualifies an agent-map error with the
    * leaf it belongs to, and it points either at one field
    * (`core.agents.definitions.<key>.<field>`) or at the whole entry
    * (`core.agents.definitions.<key>`, for a name that is not a slug or an

@@ -75,7 +75,7 @@ export function RestMappingTable({
     key in pending ? pending[key] : values[key]?.value;
 
   const runPreview = async () => {
-    /* B8 (dev audit 2026-09-06): the button used to disable itself until the
+    /* The button used to disable itself until the
      * textarea held something, and the textarea only fills from a real input
      * event — so any non-keystroke path that set its value left the button
      * dead with nothing on screen saying why. It is always live now and says
@@ -215,7 +215,7 @@ export function RestMappingTable({
         </tbody>
       </table>
 
-      {/* WEB-1 (dev audit 2026-09-06): `target_sha256` selects one value,
+      {/* `target_sha256` selects one value,
           not a set of rows, so its cell under the counts column shows the
           hash the mapping extracted. The column heading spoke for twelve
           rows and misdescribed the thirteenth. */}

@@ -10,7 +10,7 @@ import { verdictLabel } from "@/lib/verdict";
 import { SEVERITY_STYLES } from "@/types/malware-report";
 import type { FpWarning, MalwareReport, TTPMapping } from "@/types/malware-report";
 
-// F6 (2026-07-05): the comprehensive report's verdict vocabulary is
+// The comprehensive report's verdict vocabulary is
 // "Malware" | "Suspicious" | "Benign" (backend models.py), so a lower-cased
 // verdict is "malware" — which was absent from these maps and fell back to
 // the muted "unknown" grey, rendering every Malware verdict as if it were
@@ -222,7 +222,7 @@ function LegacySummary() {
   );
 }
 
-/* ── MalwareReport summary (Faz 5+ payload) ──────────────────────────── */
+/* ── MalwareReport summary payload ───────────────────────────────────── */
 function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
   const { report } = useReport();
   const reportId = report?.id ?? "";
@@ -241,15 +241,14 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
   const sha256 = mr.identity.hashes.sha256;
   const shortHash = sha256.slice(0, 12);
 
-  // OPS-DEGRADED-VERDICT-01 (audit 2026-05-19): surface the degraded flag
-  // from run_summary. Without this banner a 0.6 capped verdict reads the
-  // same as a confidently-low real one. Wave 9 narrowed the type so the
-  // cast is no longer needed.
+  // Surface the degraded flag from run_summary. Without this banner a 0.6
+  // capped verdict reads the same as a confidently-low real one. The type is
+  // narrow enough that no cast is needed.
   const runSummary = report?.run_summary ?? null;
   const isDegraded = Boolean(runSummary?.degraded_mode);
   const degradationReasons = runSummary?.degradation_reasons ?? [];
   const failedAnalysts = runSummary?.failed_analysts ?? [];
-  // Wave 9 (2026-05-29): surface FP linter findings in a separate amber
+  // Surface FP linter findings in a separate amber
   // banner. ``explanation`` is shown as small muted text below each rule.
   const fpWarnings: FpWarning[] = runSummary?.fp_warnings ?? [];
   const hasErrorWarning = fpWarnings.some((w) => w.severity === "error");
@@ -299,7 +298,7 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
         </div>
       )}
 
-      {/* Wave 9 (2026-05-29): post-pipeline FP linter findings. The
+      {/* Post-pipeline FP linter findings. The
           banner is collapsed by default and auto-expanded if any warning
           is ``severity=error``. */}
       {fpWarnings.length > 0 && (
@@ -472,7 +471,7 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
           )}
         </div>
       </div>
-      {/* 2026-07 round 2: "External References" section removed from SUMMARY per
+      {/* The "External References" section is removed from SUMMARY per
        * user request. The same references remain in the Markdown export
        * (## References). */}
     </div>
@@ -556,8 +555,8 @@ function DownloadBar({
     }
   };
 
-  /* C4 (dev audit 2026-09-06): the IOC, ATT&CK and timeline endpoints all
-   * worked and nothing in the UI reached any of them — the only way to an IOC
+  /* The IOC, ATT&CK and timeline endpoints all worked and nothing in the UI
+   * reached any of them — the only way to an IOC
    * list was to read the markdown report or call the API by hand. Each fetches
    * its own endpoint and saves the answer; a failure says so in the same
    * banner the document exports use. */

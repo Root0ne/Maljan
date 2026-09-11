@@ -20,7 +20,7 @@ interface AnalystClaim {
  * What the dynamic analyst concluded, whether or not the sandbox produced
  * anything.
  *
- * C2 (dev audit 2026-09-06): this tab rendered the "not detonated" notice and
+ * This tab used to render the "not detonated" notice and
  * nothing else whenever the sandbox report was empty — including on runs where
  * the dynamic analyst did execute and reasoned its way to a stated position
  * (sandbox evasion, say). That reasoning was in the API's `agent_findings` all

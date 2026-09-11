@@ -63,7 +63,7 @@ export default function AttributionTab() {
   const hashMatches = attribution.function_hash_matches ?? [];
   const ragCandidates = attribution.family_rag_candidates ?? [];
   const casePriors = attribution.attck_case_candidates ?? [];
-  // Wave 4 (D11 UI completion): when the family came back ungrounded the
+  // When the family comes back ungrounded the
   // builder already zeroed the confidence. Render the name as muted +
   // strikethrough + "(unverified)" suffix instead of bold so it's clearly
   // signalled as LLM-only.

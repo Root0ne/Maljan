@@ -20,7 +20,7 @@ export interface WidgetProps {
   /** Filled in by the LLM probe result so a model field renders a datalist. */
   models?: string[];
   /** The DOM id this widget's control takes, so `FieldRow`'s title can be a
-   *  real `<label htmlFor>` — B7 (dev audit 2026-09-06): every one of the
+   *  real `<label htmlFor>`. Every one of the
    *  ~1050 controls on this tab had neither an `id` nor a `name`, which
    *  browser autofill heuristics and any tooling that targets them by name
    *  need. The `name` is the setting key itself. */
@@ -236,7 +236,7 @@ export function ListWidget(p: WidgetProps) {
   useEffect(() => {
     const stagedJustCleared = prevStagedRef.current !== undefined && p.staged === undefined;
     const currentValueChanged = p.current?.value !== prevCurrentValueRef.current;
-    /* B3 (dev audit 2026-09-06): staging now *un*-stages a key whose value is
+    /* Staging *un*-stages a key whose value is
      * back where it started, so `staged -> undefined` no longer means "an
      * external discard happened". Typing "a", Enter stages ["a"] both times,
      * the second one un-stages, and this effect used to answer that by wiping

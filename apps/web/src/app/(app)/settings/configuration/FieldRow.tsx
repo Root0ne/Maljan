@@ -155,7 +155,7 @@ export default function FieldRow({
   const dirty = staged !== undefined;
   const source = current?.source ?? "default";
   const labelId = `setting-label-${entry.key}`;
-  /* B7 (dev audit 2026-09-06): the controls on this tab carried neither an id
+  /* The controls on this tab carried neither an id
    * nor a name, so nothing could associate the title with the input it names
    * except the widget's own `aria-label`. A composite editor renders many
    * controls and has no single one to point at, so it keeps the labelled
