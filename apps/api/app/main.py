@@ -12,7 +12,7 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.config import settings
+from app.config import get_settings, settings
 from app.logging_config import get_logger, setup_logging
 
 # Initialize logging before anything else
@@ -102,6 +102,14 @@ async def _probe_components() -> dict[str, dict[str, Any]]:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifecycle: startup and shutdown events."""
+    from app.bootstrap import BootstrapProblem, require_bootstrap
+
+    try:
+        require_bootstrap(get_settings())
+    except BootstrapProblem as exc:
+        logger.critical(str(exc))
+        raise
+
     # ── Startup ──────────────────────────────────────────────
     logger.info("Starting Maljan API server...")
 

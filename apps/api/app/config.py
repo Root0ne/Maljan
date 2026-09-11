@@ -1,10 +1,12 @@
 """Maljan API — Application configuration.
 
-Loads from environment variables with sensible defaults for development.
-All settings can be overridden via .env or OS environment.
+Loads from the process environment only, with sensible defaults for local
+development. No ``.env`` file is discovered or read — set variables in the
+process environment (or the container/orchestrator config) instead.
 
 Security-sensitive defaults (JWT secret, MinIO credentials) refuse to boot
-the API in non-debug mode unless the operator provided real values.
+the API in non-debug mode unless the operator provided real values; see
+``app.bootstrap`` for the full startup validation contract.
 """
 
 from __future__ import annotations
@@ -42,8 +44,7 @@ class APISettings(BaseSettings):
     """API-level configuration (separate from maljan-core Settings)."""
 
     model_config = SettingsConfigDict(
-        env_file=(".env", "../../.env", "../../../.env"),
-        env_file_encoding="utf-8",
+        env_file=None,
         extra="ignore",
     )
 
@@ -112,6 +113,13 @@ class APISettings(BaseSettings):
     # ``docker/docker-compose.yml``. Override via env when relocating
     # the mount or running Ghidra outside Docker.
     ghidra_container_samples_path: str = "/data/samples"
+
+    # ── Settings-store encryption ──────────────────────────────
+    # Fernet key that encrypts secret values in the runtime settings store.
+    # Read directly from the environment by ``maljan.core.settings_secrets``
+    # too (that reader is unchanged by this field); declared here as well so
+    # bootstrap validation can see it alongside the rest of the contract.
+    settings_encryption_key: SecretStr = SecretStr("")
 
     # ── JWT Auth ─────────────────────────────────────────────────
     jwt_secret_key: SecretStr = SecretStr("")

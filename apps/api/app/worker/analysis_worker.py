@@ -31,7 +31,7 @@ from pydantic import ValidationError
 from sqlalchemy import Select, func, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.config import settings
+from app.config import get_settings, settings
 from app.logging_config import get_logger, setup_logging
 from app.runtime_config import runtime_config
 
@@ -1501,6 +1501,14 @@ async def _sweep_orphan_jobs(db_session: async_sessionmaker) -> None:
 
 async def startup(ctx: dict) -> None:
     """Called when the ARQ worker starts up."""
+    from app.bootstrap import BootstrapProblem, require_bootstrap
+
+    try:
+        require_bootstrap(get_settings())
+    except BootstrapProblem as exc:
+        logger.critical(str(exc))
+        raise
+
     # Initialize logging for the worker process
     setup_logging()
 
