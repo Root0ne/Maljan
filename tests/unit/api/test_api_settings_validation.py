@@ -15,6 +15,24 @@ def test_trusted_proxy_entries_must_be_addresses_or_networks():
         assert "api.trusted_proxy_ips" in exc.value.errors
 
 
+@pytest.mark.parametrize(
+    ("name", "bad_value"),
+    [
+        ("upload_allowed_mime_types", [1]),
+        ("rate_limit_whitelist", [None]),
+        ("trusted_proxy_ips", [3.5]),
+    ],
+)
+def test_a_list_settings_leaf_rejects_a_non_string_item(name, bad_value):
+    # Fix round 1, minor 1: the old ``list[str]`` field on APISettings would
+    # have rejected/coerced a non-string item; the catalog-driven validator
+    # must reject it the same way now that the field is gone.
+    service = SettingsService.__new__(SettingsService)
+    with pytest.raises(SettingsValidationError) as exc:
+        service.validate({}, {name: bad_value})
+    assert f"api.{name}" in exc.value.errors
+
+
 # B4 (dev audit 2026-09-06): a negative ``login_lockout_seconds`` was accepted
 # and applied. It reaches Redis as an expiry, and a negative expiry deletes the
 # key instead of setting it -- an operator who typed "-300" silently turned the

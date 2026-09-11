@@ -440,10 +440,13 @@ def validate_editable_api_value(entry: CatalogEntry, value: Any) -> str | None:
     if entry.type == "list":
         if not isinstance(value, list):
             return "Input should be a valid list"
+        for item in value:
+            if not isinstance(item, str):
+                return "Input should be a valid string"
         if entry.path == "trusted_proxy_ips":
             for item in value:
                 try:
-                    ipaddress.ip_network(str(item), strict=False)
+                    ipaddress.ip_network(item, strict=False)
                 except ValueError:
                     return f"{item!r} is not an IP address or CIDR network"
         return None

@@ -54,12 +54,13 @@ REFRESH_COOKIE = "maljan_refresh"
 REFRESH_COOKIE_PATH = "/api/v1/auth"
 
 
-def _set_refresh_cookie(response: Response, token: str) -> None:
-    # ``get_cached`` returns the value the caller warmed with an ``await
-    # runtime_config.get("jwt_refresh_token_expire_days")`` just beforehand
-    # (see ``login`` / ``refresh_token`` below) — this function itself stays
-    # sync so it can be called from both the response-building code paths.
-    refresh_days = runtime_config.get_cached("jwt_refresh_token_expire_days")
+def _set_refresh_cookie(response: Response, token: str, refresh_days: int) -> None:
+    # ``refresh_days`` is passed in explicitly rather than read from
+    # ``runtime_config`` here, so this function has no hidden dependency on
+    # a caller having awaited a settings read first — the caller (``login``
+    # / ``refresh_token`` below) already has the value, from the same
+    # ``await runtime_config.get(...)`` it used to warm ``create_refresh_token``'s
+    # cache.
     response.set_cookie(
         REFRESH_COOKIE,
         token,
@@ -200,17 +201,17 @@ async def login(
 
     await clear_login_throttle(body.email)
 
-    # Warm runtime_config's sync cache before create_access_token /
-    # create_refresh_token read it via get_cached() — those two stay sync
-    # because they are also called from non-async paths, so the one place
-    # that can await a settings read does it here, once per issuance.
+    # create_access_token / create_refresh_token stay synchronous (see their
+    # docstrings in app.auth.jwt) and read expiries via get_cached() instead
+    # of awaiting; this route does the one settings read that keeps that
+    # cache warm before minting.
     await runtime_config.get("jwt_access_token_expire_minutes")
-    await runtime_config.get("jwt_refresh_token_expire_days")
+    refresh_days = await runtime_config.get("jwt_refresh_token_expire_days")
 
     token_data = {"sub": str(user.id)}
     refresh, jti = create_refresh_token(token_data)
     await refresh_token_register(str(user.id), jti)
-    _set_refresh_cookie(response, refresh)
+    _set_refresh_cookie(response, refresh, refresh_days)
 
     await _audit(db, user.id, "auth.login.success", request=request)
     logger.info("Login successful: user=%s", user.id, extra={"user_id": str(user.id)})
@@ -281,12 +282,12 @@ async def refresh_token(
         )
 
     await runtime_config.get("jwt_access_token_expire_minutes")
-    await runtime_config.get("jwt_refresh_token_expire_days")
+    refresh_days = await runtime_config.get("jwt_refresh_token_expire_days")
 
     token_data = {"sub": str(user.id)}
     new_refresh, new_jti = create_refresh_token(token_data)
     await refresh_token_register(str(user.id), new_jti)
-    _set_refresh_cookie(response, new_refresh)
+    _set_refresh_cookie(response, new_refresh, refresh_days)
 
     await _audit(db, user.id, "auth.refresh.success", request=request)
     return {

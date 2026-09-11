@@ -9,12 +9,39 @@ freshly-saved override is picked up by the next warm.
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
 from app.auth.jwt import create_access_token, decode_token
 from app.runtime_config import runtime_config
+
+_APPS_API_DIR = Path(__file__).resolve().parents[3] / "apps" / "api"
+
+
+def test_importing_jwt_does_not_import_database():
+    """Fix round 1, minor 3: ``app.runtime_config`` (and so ``app.database``,
+    which calls ``create_async_engine`` at import time) must be a lazy import
+    inside the two token builders, not a module-level import of
+    ``app.auth.jwt`` — a script that only wants to mint/verify a token should
+    not pay that import-time cost."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import app.auth.jwt, sys; sys.exit(1 if 'app.database' in sys.modules else 0)",
+        ],
+        cwd=str(_APPS_API_DIR),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, (
+        f"importing app.auth.jwt pulled in app.database as a side effect "
+        f"(stdout={result.stdout!r} stderr={result.stderr!r})"
+    )
 
 
 @pytest.mark.asyncio

@@ -16,7 +16,12 @@ from jose import JWTError, jwt
 from pydantic import SecretStr
 
 from app.config import settings
-from app.runtime_config import runtime_config
+
+# ``app.runtime_config`` is imported lazily inside the two token builders
+# below, not at module scope: it transitively imports ``app.database``,
+# which calls ``create_async_engine`` at import time. Nothing connects, but
+# a script that only wants to mint/verify a token should not pay that
+# import-time cost just for importing this module.
 
 
 def _secret() -> str:
@@ -57,10 +62,15 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
     """Create a JWT access token.
 
     The expiry minutes come from ``runtime_config.get_cached`` rather than a
-    static setting (Task 2): this function stays sync because both a sync
-    and an async caller create tokens, so the async login/refresh route reads
-    ``runtime_config.get(...)`` once beforehand to warm the cache.
+    static setting (Task 2). This function stays synchronous on purpose —
+    its signature takes no awaitable — and reads the *last value the async
+    login/refresh route resolved* rather than awaiting a settings read
+    itself; the route calls ``await runtime_config.get(...)`` once before
+    minting so that cached value is fresh for the tokens it is about to
+    issue.
     """
+    from app.runtime_config import runtime_config
+
     expire = datetime.now(UTC) + (
         expires_delta
         or timedelta(minutes=runtime_config.get_cached("jwt_access_token_expire_minutes"))
@@ -81,8 +91,12 @@ def create_refresh_token(data: dict) -> tuple[str, str]:
     """Create a JWT refresh token. Returns ``(token, jti)``.
 
     Callers should persist the ``jti`` so they can later detect reuse and
-    rotate the token at the next ``/auth/refresh`` request.
+    rotate the token at the next ``/auth/refresh`` request. See
+    ``create_access_token`` for why the expiry is read via
+    ``runtime_config.get_cached`` rather than awaited here.
     """
+    from app.runtime_config import runtime_config
+
     expire = datetime.now(UTC) + timedelta(
         days=runtime_config.get_cached("jwt_refresh_token_expire_days")
     )
