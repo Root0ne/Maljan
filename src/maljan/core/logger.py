@@ -36,5 +36,4 @@ def quiet_noisy_http_loggers() -> None:
 
 # Global application logger
 logger = setup_logger()
-base_logger = logger
 quiet_noisy_http_loggers()

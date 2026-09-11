@@ -9,14 +9,5 @@ class ProviderError(MaljanError):
     """A provider could not do what it was asked."""
 
 
-class ProviderNotAvailableError(ProviderError, ImportError):
-    """A provider's dependency or tool server is not installed.
-
-    Multi-inherits from ImportError for the same reason
-    ``SandboxNotAvailableError`` does: callers that catch ImportError around an
-    optional integration keep working.
-    """
-
-
 class ProviderConfigurationError(ProviderError):
     """The settings name a provider that does not exist, or configure it wrongly."""

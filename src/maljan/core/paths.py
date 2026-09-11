@@ -70,8 +70,8 @@ def resolve_mcp_args(args: list[str]) -> list[str]:
     project directory.  CLI flags and already-absolute paths are left untouched.
 
     This allows ``.env`` files to store portable relative paths such as
-    ``scripts/dev/cape_mcp_wrapper.py`` instead of hard-coding host-specific
-    absolute paths like ``/mnt/d/MyCodes/Maljan/scripts/dev/cape_mcp_wrapper.py``.
+    ``scripts/dev/ghidra_manager.py`` instead of hard-coding host-specific
+    absolute paths like ``/mnt/d/MyCodes/Maljan/scripts/dev/ghidra_manager.py``.
 
     Args:
         args: Raw argument list from :class:`~maljan.core.config.MCPServerConfig`.

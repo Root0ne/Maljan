@@ -328,9 +328,9 @@ class GhidraStaticProvider(StaticProvider):
         ``analyze_isr``) on the main/worker thread — never from within the agent
         loop itself — so blocking on the result cannot deadlock.
         """
-        from maljan.agents.base_agent import _run_coro_blocking
+        from maljan.agents.base_agent import run_coro_blocking
 
-        _run_coro_blocking(coro, hard_timeout=120.0, label="ghidra-mcp-init")
+        run_coro_blocking(coro, hard_timeout=120.0, label="ghidra-mcp-init")
 
     def get_tools(self) -> list[BaseTool]:
         return self._all_tools
@@ -490,7 +490,7 @@ class GhidraStaticProvider(StaticProvider):
         Teardown that can throw is teardown nobody calls, so every failure
         here is a warning.
         """
-        from maljan.agents.base_agent import _run_coro_blocking
+        from maljan.agents.base_agent import run_coro_blocking
 
         toolkit, self._toolkit = self._toolkit, None
         self._all_tools = []
@@ -500,7 +500,7 @@ class GhidraStaticProvider(StaticProvider):
         if closer is None:
             return
         try:
-            _run_coro_blocking(closer(), hard_timeout=20.0, label="ghidra-close")
+            run_coro_blocking(closer(), hard_timeout=20.0, label="ghidra-close")
         except Exception as exc:  # noqa: BLE001 - teardown never propagates
             logger.warning("Ghidra provider teardown failed (non-fatal): %s", exc)
 

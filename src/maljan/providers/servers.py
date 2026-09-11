@@ -126,9 +126,9 @@ def _run_async(coro: Any, label: str) -> None:
     has to run there too rather than on a throwaway loop. A module-level
     function rather than a method so a test can replace it in one place.
     """
-    from maljan.agents.base_agent import _run_coro_blocking
+    from maljan.agents.base_agent import run_coro_blocking
 
-    _run_coro_blocking(coro, hard_timeout=120.0, label=label)
+    run_coro_blocking(coro, hard_timeout=120.0, label=label)
 
 
 # Every handle that still exists, so a retired agent loop can be told which of
@@ -785,7 +785,7 @@ class ServerHandle:
         closer = getattr(toolkit, "cleanup", None) or getattr(toolkit, "aclose", None)
         if closer is None:
             return
-        from maljan.agents.base_agent import _get_agent_loop, _run_coro_blocking
+        from maljan.agents.base_agent import _get_agent_loop, run_coro_blocking
 
         owner = self._owner_loop
         budget = SYNC_CLOSE_TIMEOUT
@@ -798,7 +798,7 @@ class ServerHandle:
         inner = budget - CHILD_EXIT_GRACE - CROSS_LOOP_GRACE
         try:
             if owner is None or owner is _get_agent_loop():
-                _run_coro_blocking(
+                run_coro_blocking(
                     self._close_bounded(closer, inner),
                     hard_timeout=budget,
                     label=f"{self.name}-mcp-close",

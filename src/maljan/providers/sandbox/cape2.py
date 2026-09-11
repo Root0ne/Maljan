@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from langchain_core.tools import BaseTool
 
-from maljan.agents.base_agent import _run_coro_blocking
+from maljan.agents.base_agent import run_coro_blocking
 from maljan.core.logger import logger
 from maljan.core.settings_overrides import redact_url
 from maljan.providers.base import ProviderProbe, SandboxCapabilities, SandboxProvider
@@ -137,9 +137,9 @@ class CAPE2SandboxProvider(SandboxProvider):
         transport = (getattr(self._cfg.mcp, "transport", "stdio") or "stdio").lower()
 
         if transport in ("http", "streamable-http", "sse"):
-            # Remote CAPE MCP server (e.g. cape_mcp_wrapper.py running on a
-            # separate Ubuntu VM with --transport streamable-http). There is no
-            # local subprocess to launch; connect over HTTP.
+            # Remote CAPE MCP server (one started on the sandbox host with
+            # --transport streamable-http). There is no local subprocess to
+            # launch; connect over HTTP.
             url = self._cfg.mcp.url
             if not url:
                 logger.warning(
@@ -181,7 +181,7 @@ class CAPE2SandboxProvider(SandboxProvider):
         # different event loop" (see static_analyst._run_async for the full
         # rationale). Always called from the sync analyze path, never from within
         # the agent loop, so blocking on the result cannot deadlock.
-        _run_coro_blocking(toolkit.initialize(), hard_timeout=120.0, label="cape-mcp-init")
+        run_coro_blocking(toolkit.initialize(), hard_timeout=120.0, label="cape-mcp-init")
 
         self._toolkit = toolkit
         all_tools = toolkit.get_tools()
@@ -273,4 +273,4 @@ class CAPE2SandboxProvider(SandboxProvider):
         toolkit, self._toolkit = self._toolkit, None
         if toolkit is not None:
             with suppress(Exception):
-                _run_coro_blocking(toolkit.cleanup(), hard_timeout=20.0, label="cape-mcp-close")
+                run_coro_blocking(toolkit.cleanup(), hard_timeout=20.0, label="cape-mcp-close")
