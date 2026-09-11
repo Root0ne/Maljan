@@ -81,17 +81,4 @@ export interface KeyError {
 
 export const ADD_BUTTON = "add";
 
-/**
- * Whether two staged entries are the same value.
- *
- * The master–detail editors mark a list row as "changed" by comparing the
- * staged entry with the saved one; entry values are plain JSON built by these
- * editors themselves, so a stringify comparison over stable key order is
- * enough — the objects are always spread from the same shapes.
- */
-export function deepEqual(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (a === null || a === undefined || b === null || b === undefined) return a === b;
-  if (typeof a !== "object" || typeof b !== "object") return false;
-  return JSON.stringify(a) === JSON.stringify(b);
-}
+export { deepEqual } from "./deepEqual";

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import { SettingsValidationError } from "@/types/settings";
+import { deepEqual } from "./deepEqual";
 import type {
   CatalogEntry,
   PatchResult,
@@ -14,29 +15,6 @@ import type {
 
 /** key -> staged value; `null` means "clear this secret". */
 export type Pending = Record<string, unknown>;
-
-/**
- * Structural equality for setting values.
- *
- * A composite leaf (the server map, the agent definitions) stages a whole
- * object, so "is this back where it started" is not a `===` question. Key
- * order is not: two maps with the same entries written in a different order
- * are the same setting.
- */
-function deepEqual(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (typeof a !== typeof b || a === null || b === null) return false;
-  if (Array.isArray(a) || Array.isArray(b)) {
-    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
-    return a.every((item, i) => deepEqual(item, b[i]));
-  }
-  if (typeof a !== "object") return false;
-  const left = a as Record<string, unknown>;
-  const right = b as Record<string, unknown>;
-  const keys = Object.keys(left);
-  if (keys.length !== Object.keys(right).length) return false;
-  return keys.every((k) => k in right && deepEqual(left[k], right[k]));
-}
 
 /**
  * Loads the settings schema + current values, tracks in-flight edits, and
