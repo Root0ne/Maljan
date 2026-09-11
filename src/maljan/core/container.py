@@ -21,9 +21,8 @@ LangSmith Observability:
 
 Sandbox Backend:
     ``get_sandbox_provider()`` builds the configured ``SandboxProvider`` from
-    the registry (``mock`` when the container's own ``mock`` flag is set);
-    ``get_sandbox_client()`` wraps it as the legacy client. Both are cached
-    for the lifetime of the container.
+    the registry (``mock`` when the container's own ``mock`` flag is set) and
+    caches it for the lifetime of the container.
 """
 
 from __future__ import annotations
@@ -52,7 +51,6 @@ if TYPE_CHECKING:
     from maljan.analysis.sigma_layer import SigmaLayer
     from maljan.analysis.yara_layer import YaraLayer
     from maljan.loaders.binary_chunker import TextChunk
-    from maljan.loaders.sandbox_client import SandboxClient
     from maljan.memory.long_term_memory import MemoryStore
     from maljan.pipeline.events import EventSink
     from maljan.providers.base import SandboxProvider, StaticProvider
@@ -161,7 +159,6 @@ class ServiceContainer:
         self._judge_agent_cache: dict[str, Any] = {}
         self._data_cache: dict[tuple[str, str], str] = {}
         self._memory_store_cache: MemoryStore | None = None
-        self._sandbox_client_cache: SandboxClient | None = None
         self._sandbox_provider_cache: SandboxProvider | None = None
         self._static_provider_cache: dict[str, StaticProvider] = {}
         self._server_registry_cache: ServerRegistry | None = None
@@ -376,15 +373,6 @@ class ServiceContainer:
         """
         registry = self._server_registry_cache
         return list(registry.degradation_reasons) if registry is not None else []
-
-    def get_sandbox_client(self) -> SandboxClient:
-        """The provider, dressed as the client the pipeline already speaks."""
-        with self._lock:
-            if self._sandbox_client_cache is None:
-                from maljan.providers.sandbox._legacy import as_sandbox_client
-
-                self._sandbox_client_cache = as_sandbox_client(self.get_sandbox_provider())
-            return self._sandbox_client_cache
 
     def get_token_ledger(self) -> TokenLedger:
         """Return the per-run LLM token/cost ledger (findings-log §4 Item 1)."""
