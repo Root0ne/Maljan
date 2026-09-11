@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 168 176" width="168" height="176" role="img" aria-label="Maljan">
+  <defs>
+    <linearGradient id="mBody" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#1d4ed8"/>
+    </linearGradient>
+    <linearGradient id="mBolt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fde047"/><stop offset="1" stop-color="#f59e0b"/>
+    </linearGradient>
+  </defs>
+  <g>
+    <!-- the M, drawn as one filled outline so the legs meet the feet flush -->
+    <path fill="url(#mBody)" d="
+      M24 26 L44 26 L84 68 L124 26 L144 26 L144 96 L120 96 L120 62 L84 104 L48 62 L48 96 L24 96 Z"/>
+    <!-- the two feet, each continuing its leg as a bolt: the top edge is the
+         leg's own width so there is no seam to notice -->
+    <path fill="url(#mBolt)" d="M24 96 H48 L34 124 H48 L18 168 L28 130 H10 Z"/>
+    <path fill="url(#mBolt)" d="M120 96 H144 L130 124 H144 L114 168 L124 130 H106 Z"/>
+  </g>
+</svg>
