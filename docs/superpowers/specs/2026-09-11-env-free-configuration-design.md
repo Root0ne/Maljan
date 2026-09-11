@@ -85,8 +85,19 @@ Everything else is an application setting in the store. Concretely:
 `APISettings` shrinks to the bootstrap contract and is renamed `BootstrapSettings`
 with a compatibility alias `settings` for the modules that import it; every former
 application field is removed from it, so nothing can read an application value from the
-environment by accident. `src/maljan/core/config.py` keeps its model classes and
-defaults; `_find_env_file` is deleted.
+environment by accident.
+
+The core `Settings` model itself stays environment-capable when constructed bare
+(`Settings()` reads the environment and a discovered `.env`): the offline evaluation
+scripts under `tests/evaluation/` construct it that way, steer it with variables such as
+`REACT_AGENT_TIMEOUT_OVERRIDES__static`, and that tree is frozen by the CI gate. The
+rule is therefore about the product, not the library: the API and the worker never
+construct `Settings` bare. `build_settings(overrides)` is their only entry point and it
+disables the environment and dotenv sources; an architecture test
+(`tests/unit/test_no_bare_settings_in_app.py`) asserts that `Settings()` /
+`APISettings()` appear nowhere under `apps/api/app/` except `legacy_env_import.py`, and
+that `src/maljan/core/container.py` builds its settings through `build_settings` when
+handed overrides. `_find_env_file` stays for the bare path and is documented as such.
 
 ## Legacy import
 
@@ -161,12 +172,11 @@ The first API start after this change imports the previous configuration once:
 - Web: vitest for the import preview mapping; Playwright updates in
   `settings-configuration.spec.ts` (badge values, export JSON, import flow with a mocked
   endpoint, no secrets banner).
-- Existing tests that set `LLM__*` variables to steer the core `Settings` are rewritten to
-  pass overrides explicitly (53 files reference `monkeypatch.setenv`/`_env_file`; only
-  the ones steering application settings change; `tests/evaluation/**` is untouched —
-  if any evaluation test depends on environment steering, the compatibility path stays
-  behind an explicit `MALJAN_ALLOW_ENV_SETTINGS=1` flag used only by that suite, and the
-  spec records it).
+- Existing tests that set `LLM__*`-style variables to steer the *application* (API/worker
+  paths) are rewritten to pass overrides explicitly (11 files); tests that exercise the
+  bare core `Settings` keep working unchanged; `tests/evaluation/**` is untouched and keeps
+  working because the bare constructor stays environment-capable (see Application
+  settings).
 - Live: start the stack with only the bootstrap variables, confirm the legacy import
   populated the store, walk the console and one guide, export and re-import.
 
