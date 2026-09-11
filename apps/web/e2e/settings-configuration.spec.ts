@@ -223,8 +223,12 @@ test.describe("Settings → Configuration (admin)", () => {
       page.getByRole("button", { name: /Remove all overrides in this group/ })
     ).toBeVisible();
 
-    // Providers has none — no button once its group is the one showing.
-    await page.goto(PROVIDERS_PATH);
+    // The static group has no ui-sourced value — no button once its page is
+    // the one showing. (Providers is no longer a valid negative case: its
+    // OpenAI key is ui-sourced in the fixture.) Wait for the heading first so
+    // a count taken between navigations cannot pass vacuously.
+    await page.goto(STATIC_PATH);
+    await expect(page.getByText("core.static.provider")).toBeVisible();
     await expect(
       page.getByRole("button", { name: /Remove all overrides in this group/ })
     ).toHaveCount(0);
@@ -238,8 +242,13 @@ test.describe("Settings → Configuration (admin)", () => {
       });
     });
 
-    await page.getByRole("button", { name: /Remove all overrides in this group/ }).click();
-    await page.getByRole("button", { name: /Remove \d+ overrides/ }).click();
+    // Wait for this group's own header (two overrides) before opening the
+    // confirm step, so the click cannot land on a header that is about to be
+    // replaced.
+    const resetAll = page.getByRole("button", { name: /Remove all overrides in this group \(2\)/ });
+    await expect(resetAll).toBeVisible();
+    await resetAll.click();
+    await page.getByRole("button", { name: /Remove 2 overrides/ }).click();
     await expect.poll(() => deleteUrl).toContain("group=negotiation");
   });
 
@@ -783,6 +792,10 @@ test.describe("Settings → Configuration (admin)", () => {
     // The rail link carries a pending marker once the group is dirty, so
     // match on the title prefix rather than the exact accessible name.
     await page.getByRole("link", { name: /^Negotiation/ }).click();
+    // The soft navigation lands after the click resolves; until then the
+    // Providers page is still on screen with a same-named reset button, so
+    // wait for the Negotiation heading before touching the header.
+    await expect(page.getByRole("heading", { name: "Negotiation", level: 2 })).toBeVisible();
     await page.getByRole("button", { name: /Remove all overrides in this group/ }).click();
     await page.getByRole("button", { name: /Remove \d+ overrides/ }).click();
 
