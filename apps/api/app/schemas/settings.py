@@ -80,7 +80,16 @@ class ExportResponse(BaseModel):
     format: str
     exported_at: datetime
     values: dict[str, Any]
-    secrets_omitted: list[str]
+    secrets_omitted: list[str] = Field(
+        description=(
+            "Names of what the export left out: catalog keys whose stored value is a "
+            "secret, plus informational paths like "
+            "'core.mcp.servers.<name>.auth_token' for a server whose token was dropped "
+            "from the core.mcp.servers map. Those nested paths are not catalog keys -- "
+            "importing one back as a top-level key is rejected as an unknown key; the "
+            "token is restored as the nested auth_token field inside the map instead."
+        )
+    )
 
 
 class ImportRequest(BaseModel):

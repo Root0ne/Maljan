@@ -36,7 +36,7 @@ from app.schemas.settings import (
 )
 from app.services.audit import record as audit_record
 from app.services.mapping_preview import PREVIEW_MAX_BYTES, preview_mapping
-from app.services.server_map import SERVER_MAP_KEY
+from app.services.server_map import SERVER_MAP_KEY, TOKEN_MASK
 from app.services.settings_catalog_api import catalog_index, full_catalog, resolved_catalog
 from app.services.settings_probes import PROBES, run_agent_probe, run_mcp_probe, run_probe
 from app.services.settings_service import (
@@ -152,8 +152,8 @@ async def reset_key(
     return ResetResponse(reset=removed)
 
 
-def _export_value(key: str, value: Any) -> Any:
-    """The value as it goes into the export document, native JSON throughout.
+def _export_value(key: str, value: Any) -> tuple[Any, list[str]]:
+    """The value as it goes into the export document, plus any paths it cost.
 
     Only ``core.mcp.servers`` needs sanitizing: ``values()`` masks every
     server's token to ten literal asterisks (``TOKEN_MASK``) so the UI never
@@ -163,16 +163,28 @@ def _export_value(key: str, value: Any) -> Any:
     ``auth_token_source`` (not an ``MCPServerConfig`` field) are dropped
     instead; an operator who wants the server usable again adds a fresh
     token by hand, through the UI or directly in the imported file.
+
+    The second return value names ``core.mcp.servers.<name>.auth_token`` for
+    every server whose token was actually the mask (a present-but-empty
+    field, or one with no default token to protect, costs nothing and is not
+    listed). These paths are informational only, not catalog keys: importing
+    a document that includes one back as a top-level key is rejected as
+    ``unknown key``, the same as any other stray field. They exist so an
+    operator reading the export can see which servers lost their token,
+    rather than silently ending up with none on the next import.
     """
     if key != SERVER_MAP_KEY or not isinstance(value, dict):
-        return value
+        return value, []
     sanitized: dict[str, Any] = {}
+    omitted: list[str] = []
     for name, entry in value.items():
         clean = dict(entry)
-        clean.pop("auth_token", None)
+        had_token = clean.pop("auth_token", None) == TOKEN_MASK
         clean.pop("auth_token_source", None)
         sanitized[name] = clean
-    return sanitized
+        if had_token:
+            omitted.append(f"{SERVER_MAP_KEY}.{name}.auth_token")
+    return sanitized, omitted
 
 
 @router.get("/export", response_model=ExportResponse)
@@ -188,10 +200,14 @@ async def export_values(
         if info.source != "ui":
             continue
         entry = index[key]
+        if not entry.editable:
+            continue
         if entry.secret:
             secrets_omitted.append(key)
             continue
-        values[key] = _export_value(key, info.value)
+        sanitized, omitted_paths = _export_value(key, info.value)
+        values[key] = sanitized
+        secrets_omitted.extend(omitted_paths)
     response.headers["Content-Disposition"] = "attachment; filename=maljan-settings.json"
     return ExportResponse(
         format=EXPORT_FORMAT,
@@ -231,13 +247,14 @@ async def import_values(
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"errors": exc.errors}
         )
-    await audit_record(
-        "settings.import",
-        resource_type="settings",
-        user_id=user.id,
-        details={"keys": sorted(body.values), "count": len(body.values)},
-        ip=_client_ip(request),
-    )
+    if res.applied:
+        await audit_record(
+            "settings.import",
+            resource_type="settings",
+            user_id=user.id,
+            details={"keys": sorted(res.applied), "count": len(res.applied)},
+            ip=_client_ip(request),
+        )
     runtime_config.invalidate()
     core_settings_cache.invalidate()
     return PatchResponse(applied=res.applied, applies=res.applies)

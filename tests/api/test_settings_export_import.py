@@ -3,6 +3,7 @@ that round-trips through the same ``SettingsService`` path a UI edit uses."""
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -52,8 +53,25 @@ def test_export_omits_secrets_and_lists_their_names(client):
     assert body["format"] == "maljan-settings/1"
     assert body["values"] == {"core.llm.provider": "openai"}
     assert body["secrets_omitted"] == ["core.llm.openai.api_key"]
-    assert "exported_at" in body
+    exported_at = datetime.fromisoformat(body["exported_at"])
+    assert exported_at.tzinfo is not None
+    assert exported_at.utcoffset() == UTC.utcoffset(None)
     assert "1234" not in r.text
+
+
+def test_export_skips_a_stored_but_read_only_key(client):
+    """A row for a key the catalog no longer lets an admin edit (``api.debug``
+    is ``editable=False``) still reports ``source == "ui"`` -- exporting it
+    anyway would hand back a document its own import rejects as read-only."""
+    fake = {
+        "api.debug": ValueInfo(True, None, None, "ui"),
+        "core.llm.provider": ValueInfo("openai", None, None, "ui"),
+    }
+    with patch("app.api.v1.settings.SettingsService.values", AsyncMock(return_value=fake)):
+        r = client.get("/api/v1/settings/export")
+    body = r.json()
+    assert body["values"] == {"core.llm.provider": "openai"}
+    assert "api.debug" not in body["secrets_omitted"]
 
 
 def test_export_values_are_native_json_not_strings(client):
@@ -95,6 +113,7 @@ def test_export_of_the_server_map_strips_the_token_mask(client):
     assert "auth_token" not in server
     assert "auth_token_source" not in server
     assert server["command"] == "my-mcp"
+    assert "core.mcp.servers.custom.auth_token" in body["secrets_omitted"]
 
 
 def test_export_is_admin_only():
@@ -184,6 +203,59 @@ def test_import_never_echoes_a_secret_value(client):
         )
     assert r.status_code == 200
     assert "sk-super-secret" not in r.text
+
+
+def test_import_audits_nothing_when_no_key_was_applied(client):
+    """A no-op import (an empty document, or one whose changes all resolve to
+    nothing) must not add a settings.import row -- same reasoning as the
+    legacy import only auditing real work (84c609e)."""
+    with (
+        patch(
+            "app.api.v1.settings.SettingsService.save",
+            AsyncMock(return_value=SaveResult([], {})),
+        ) as save,
+        patch("app.api.v1.settings.audit_record", AsyncMock()) as audit_record,
+    ):
+        r = client.post(
+            "/api/v1/settings/import",
+            json={"format": "maljan-settings/1", "values": {}},
+        )
+    assert r.status_code == 200
+    assert r.json() == {"applied": [], "applies": {}}
+    save.assert_awaited_once()
+    audit_record.assert_not_called()
+
+
+def test_export_then_import_round_trips_unchanged(client):
+    """The document a real export produces posts straight back to import:
+    the extra ``exported_at``/``secrets_omitted`` fields are ignored, and the
+    values that made it through export are exactly what gets saved."""
+    fake = {
+        "core.llm.openai.api_key": ValueInfo(None, True, "1234", "ui"),
+        "core.llm.provider": ValueInfo("openai", None, None, "ui"),
+        "core.negotiation.max_iterations": ValueInfo(7, None, None, "ui"),
+    }
+    with patch("app.api.v1.settings.SettingsService.values", AsyncMock(return_value=fake)):
+        exported = client.get("/api/v1/settings/export").json()
+    assert "secrets_omitted" in exported
+    assert exported["values"] == {
+        "core.llm.provider": "openai",
+        "core.negotiation.max_iterations": 7,
+    }
+    with (
+        patch(
+            "app.api.v1.settings.SettingsService.save",
+            AsyncMock(
+                return_value=SaveResult(
+                    list(exported["values"]), {"next_job": len(exported["values"])}
+                )
+            ),
+        ) as save,
+        patch("app.api.v1.settings.audit_record", AsyncMock()),
+    ):
+        r = client.post("/api/v1/settings/import", json=exported)
+    assert r.status_code == 200
+    assert save.call_args.args[0] == exported["values"]
 
 
 def test_import_is_admin_only():
