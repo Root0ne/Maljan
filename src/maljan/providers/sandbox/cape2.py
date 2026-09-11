@@ -137,9 +137,9 @@ class CAPE2SandboxProvider(SandboxProvider):
         transport = (getattr(self._cfg.mcp, "transport", "stdio") or "stdio").lower()
 
         if transport in ("http", "streamable-http", "sse"):
-            # Remote CAPE MCP server (e.g. cape_mcp_wrapper.py running on a
-            # separate Ubuntu VM with --transport streamable-http). There is no
-            # local subprocess to launch; connect over HTTP.
+            # Remote CAPE MCP server (one started on the sandbox host with
+            # --transport streamable-http). There is no local subprocess to
+            # launch; connect over HTTP.
             url = self._cfg.mcp.url
             if not url:
                 logger.warning(

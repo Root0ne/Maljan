@@ -9,6 +9,10 @@
  * The three keyed-map editors (`ServerMapEditor`, `AgentDefinitionsEditor`,
  * `ProfilesEditor` via `describeChange`/`importPreview`) and `useSettings`
  * each carried their own copy of this rule; this is the one copy.
+ *
+ * Unlike the former `JSON.stringify` copies, a key holding `undefined` is a
+ * real key here and `NaN` is not equal to itself; stored setting values are
+ * JSON-decoded, so neither shape occurs in practice.
  */
 export function deepEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
