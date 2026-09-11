@@ -98,10 +98,11 @@ export default function Sidebar() {
       style={{ width: expanded ? "var(--sidebar-expanded)" : "var(--sidebar-width)" }}
     >
       {/* Logo */}
-      <div className="flex items-center h-12 px-3 border-b border-border">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--status-blue)" strokeWidth="2">
-          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />
-        </svg>
+      <div className="flex items-center h-12 px-2.5 border-b border-border">
+        {/* The mark is a static SVG in public/; next/image would route it
+            through the image optimizer, which refuses SVG by default. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/logo.svg" alt="Maljan" width={27} height={28} />
         {expanded && (
           <span className="ml-3 text-sm font-semibold text-text-primary tracking-wide">
             MALJAN

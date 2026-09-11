@@ -58,9 +58,10 @@ export default function LoginPage() {
     <div className="w-full max-w-sm">
       {/* Logo */}
       <div className="flex items-center justify-center mb-8">
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--status-blue)" strokeWidth="2">
-          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />
-        </svg>
+        {/* The mark is a static SVG in public/; next/image would route it
+            through the image optimizer, which refuses SVG by default. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/logo.svg" alt="Maljan" width={53} height={56} />
         <span className="ml-3 text-lg font-semibold text-text-primary tracking-wide">
           MALJAN
         </span>

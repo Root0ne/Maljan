@@ -26,6 +26,10 @@ export const metadata: Metadata = {
   title: "Maljan - Multi-Agent Malware Analysis",
   description:
     "Professional multi-agent malware analysis platform with AI-powered threat intelligence.",
+  icons: {
+    icon: "/favicon.svg",
+    apple: "/logo.svg",
+  },
 };
 
 export default function RootLayout({
