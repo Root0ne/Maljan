@@ -1,9 +1,9 @@
 """Encryption for secret settings stored in the database.
 
 A secret set from the UI is written as ``enc:v1:<fernet token>`` under the key
-in ``SETTINGS_ENCRYPTION_KEY``. The API and the worker share ``.env``, so both
-can open it. Without the key, callers get ``SecretsUnavailable`` and the UI
-shows secret fields read-only.
+in ``SETTINGS_ENCRYPTION_KEY``. The API and the worker read that key from the
+process environment, so both can open it. Without the key, callers get
+``SecretsUnavailable`` and the UI shows secret fields read-only.
 """
 
 from __future__ import annotations

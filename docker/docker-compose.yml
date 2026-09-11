@@ -226,9 +226,9 @@ services:
         condition: service_started
       ghidra-mcp:
         condition: service_healthy
-    # The worker waits on this: the API's lifespan runs the one-time legacy
-    # configuration import, and a job taken before it finishes would run on
-    # catalog defaults instead of the operator's configuration.
+    # The worker waits on this: the healthcheck gates it on an API that has
+    # finished its startup, so a job is never taken while the settings store
+    # and its caches are still coming up.
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
       interval: 10s
