@@ -531,7 +531,7 @@ def make_analyst_node(
                 # treats the analyst as "absent" rather than "broken".
                 logger.info(
                     "Agent '%s': no data chunks available — emitting empty ISR "
-                    "as graceful degradation (Wave 9 no-data path).",
+                    "as graceful degradation (no-data path).",
                     agent_name,
                 )
                 no_data_text = (

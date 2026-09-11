@@ -102,7 +102,7 @@ def lint_report(report: Any, sample_platform: str | None) -> list[FPWarning]:
                     ),
                     field=f"capability_matrix.{tid}",
                     explanation=(
-                        "Wave 4 Step 4 cascade is expected to drop "
+                        "The TTP cascade is expected to drop "
                         "platform-mismatched claims via "
                         "_is_claim_platform_compatible. This warning means a "
                         "claim slipped through with rule_platforms intact — "
@@ -180,7 +180,7 @@ def lint_report(report: Any, sample_platform: str | None) -> list[FPWarning]:
                 ),
                 field="stix_bundle_extended.objects[indicator]",
                 explanation=(
-                    "Wave 4 Step 5 caps file:name indicators in the STIX "
+                    "The judge post-processor caps file:name indicators in the STIX "
                     "bundle to keep low-signal IOCs from drowning the high-"
                     "signal ones. When this fires, _admit_indicator's cap "
                     "loop in judge_postprocess.py either didn't run or the "
@@ -201,8 +201,8 @@ def lint_report(report: Any, sample_platform: str | None) -> list[FPWarning]:
                 ),
                 field="stix_bundle_extended.objects[indicator]",
                 explanation=(
-                    "Wave 9 hard-caps the STIX bundle's total indicator "
-                    "count to keep downstream consumers (SIEM ingest, MISP "
+                    "The STIX bundle's total indicator count is hard-capped "
+                    "to keep downstream consumers (SIEM ingest, MISP "
                     "export) tractable. When this fires the priority order "
                     "(hashes > network IOCs > file:name) wasn't applied at "
                     "the renderer."
@@ -226,10 +226,10 @@ def lint_report(report: Any, sample_platform: str | None) -> list[FPWarning]:
                     ),
                     field="attribution.family",
                     explanation=(
-                        "D11 guardrail (Wave 3, 2026-05-24): the family "
+                        "D11 guardrail: the family "
                         "name came from analyst LLM with no sandbox CTI, "
                         "sandbox signature, or Qdrant ground match. The "
-                        "confidence has already been zeroed and the Wave 4 "
+                        "confidence has already been zeroed and the "
                         "Sigma/YARA gates refuse auto-generation. UI "
                         "renders the family with strikethrough and "
                         "'(unverified)'."
@@ -258,7 +258,7 @@ def lint_report(report: Any, sample_platform: str | None) -> list[FPWarning]:
                     ),
                     field="run_summary.cascade.platform_filter_summary",
                     explanation=(
-                        "Wave 9 surfaces per-layer dropped-rule counters "
+                        "Per-layer dropped-rule counters are surfaced "
                         "after Sigma/YARA's platform pre-filter so the "
                         "audit gate can prove the filter executed. When "
                         "this field is missing the Sigma/YARA layer didn't "
