@@ -360,3 +360,15 @@ async def test_the_server_repair_leaves_the_row_alone_without_an_encryption_key(
     assert await repair_server_auth_tokens(db) == 0
     assert row.value["x"]["auth_token"] == "tok-real"
     assert db.committed is False
+
+
+def test_a_masked_token_inside_the_composite_is_dropped_by_the_merge():
+    from app.services.server_map import SERVER_MAP_KEY, merge_server_secrets
+
+    entry = {"transport": "http", "url": "http://x", "auth_token": TOKEN_MASK}
+    merged = merge_server_secrets({SERVER_MAP_KEY: {"threatintel": entry}})
+    assert "auth_token" not in merged[SERVER_MAP_KEY]["threatintel"]
+    merged = merge_server_secrets(
+        {SERVER_MAP_KEY: {"threatintel": entry}, server_token_key("threatintel"): "real-token"}
+    )
+    assert merged[SERVER_MAP_KEY]["threatintel"]["auth_token"] == "real-token"

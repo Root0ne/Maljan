@@ -100,6 +100,18 @@ def test_a_row_for_an_arm_that_is_gone_is_dropped():
     assert merged == {ARMS_KEY: {}}
 
 
+def test_a_mask_inside_the_composite_never_becomes_a_credential():
+    from app.services.server_map import TOKEN_MASK
+
+    arm = {**_arm(), "api_key": TOKEN_MASK}
+    # No encrypted row behind the mask: the placeholder is dropped, not sent.
+    merged = merge_arm_secrets({ARMS_KEY: {"glm": arm}})
+    assert "api_key" not in merged[ARMS_KEY]["glm"]
+    # With a row behind it, the real key wins.
+    merged = merge_arm_secrets({ARMS_KEY: {"glm": arm}, arm_key_key("glm"): "sk-real"})
+    assert merged[ARMS_KEY]["glm"]["api_key"] == "sk-real"
+
+
 # ---- save / read -----------------------------------------------------
 
 
