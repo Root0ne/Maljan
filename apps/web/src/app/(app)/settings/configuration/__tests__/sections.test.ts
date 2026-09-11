@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { firstGroupPath, groupsBySection, pathForKey, resolveGroup } from "../sections";
 import type { SettingsSchema, CatalogEntry } from "@/types/settings";
 const entry = (key: string, group: string): CatalogEntry => ({ key, namespace: "core", path: key.slice(5), type: "int", default: 1, nullable: false, choices: null, minimum: null, maximum: null, secret: false, group, title: key, description: "", applies: "next_job", editable: true, reason: null, probe: null, applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false });
-const schema: SettingsSchema = { secrets_available: true, groups: [
+const schema: SettingsSchema = { groups: [
   { key: "agents", title: "Agents", description: "", entries: [entry("core.agents.profiles", "agents"), entry("core.agents.profile", "agents"), entry("core.react_agent_timeout", "agents")] },
   { key: "llm", title: "LLM & model", description: "", entries: [entry("core.llm.provider", "llm")] },
   { key: "mystery", title: "Mystery", description: "", entries: [entry("core.mystery.x", "mystery")] },

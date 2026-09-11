@@ -11,8 +11,9 @@ from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import select
 
-from app.config import settings
+from app.config import get_settings, settings
 from app.logging_config import get_logger, setup_logging
 
 # Initialize logging before anything else
@@ -67,8 +68,11 @@ async def _probe_minio() -> None:
 async def _probe_qdrant() -> None:
     import httpx
 
+    from app.runtime_config import runtime_config
+
+    qdrant_url = await runtime_config.get("qdrant_url")
     async with httpx.AsyncClient(timeout=_PROBE_TIMEOUT_SECONDS) as client:
-        resp = await client.get(f"{settings.qdrant_url.rstrip('/')}/readyz")
+        resp = await client.get(f"{qdrant_url.rstrip('/')}/readyz")
         resp.raise_for_status()
 
 
@@ -99,9 +103,33 @@ async def _probe_components() -> dict[str, dict[str, Any]]:
     return dict(results)
 
 
+def _config_readiness(app: FastAPI) -> dict[str, str]:
+    """The three facts ``/health`` reports about configuration state.
+
+    No I/O: ``bootstrap`` and ``encryption`` are static "ok" -- the process
+    already passed ``require_bootstrap`` (which checks both) before it could
+    ever start serving this endpoint, so there is nothing left to probe.
+    ``legacy_import`` is read from ``app.state.legacy_import_status``, set
+    once during the lifespan's legacy-import step (the ``settings_meta``
+    marker is immutable once written, so one read at startup is all this
+    ever needs) -- never re-queried per request, so the bare liveness probe
+    stays dependency-free.
+    """
+    legacy_import = getattr(app.state, "legacy_import_status", "unknown")
+    return {"bootstrap": "ok", "encryption": "ok", "legacy_import": legacy_import}
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifecycle: startup and shutdown events."""
+    from app.bootstrap import BootstrapProblem, require_bootstrap
+
+    try:
+        require_bootstrap(get_settings())
+    except BootstrapProblem as exc:
+        logger.critical(str(exc))
+        raise
+
     # ── Startup ──────────────────────────────────────────────
     logger.info("Starting Maljan API server...")
 
@@ -183,6 +211,48 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "Skipping Alembic auto-upgrade (run_migrations_on_startup=False). "
             "Run `alembic upgrade head` from your deploy pipeline instead."
         )
+
+    from app.database import async_session_factory
+    from app.models.settings_meta import SettingsMeta
+    from app.services.legacy_env_import import (
+        MARKER_KEY,
+        repair_frontier_arm_keys,
+        repair_server_auth_tokens,
+        run_legacy_import,
+    )
+
+    try:
+        async with async_session_factory() as _legacy_session:
+            imported_keys = await run_legacy_import(_legacy_session)
+            # W3 / re-review I2: an earlier import left the credential of a
+            # composite leaf inside the composite row -- in clear for a
+            # frontier arm's key, as the literal mask for an MCP server's
+            # token. Both repairs are idempotent and a no-op on a store that
+            # never held one.
+            await repair_frontier_arm_keys(_legacy_session)
+            await repair_server_auth_tokens(_legacy_session)
+            # The marker is immutable once written (see the module docstring),
+            # so this one read -- whether this call just wrote it or found it
+            # already there -- is all ``/health`` will ever need; cached below
+            # so the endpoint never touches the database for it.
+            _marker = (
+                await _legacy_session.execute(
+                    select(SettingsMeta).where(SettingsMeta.key == MARKER_KEY)
+                )
+            ).scalar_one_or_none()
+        if imported_keys:
+            logger.info("Legacy configuration import: %d key(s)", len(imported_keys))
+        else:
+            logger.debug("Legacy configuration import: nothing to import")
+        _marker_value = _marker.value if _marker is not None else None
+        _imported_total = _marker_value.get("imported", 0) if isinstance(_marker_value, dict) else 0
+        app.state.legacy_import_status = "done" if _imported_total > 0 else "not-needed"
+    except Exception:
+        # Best effort, like the audit trail: the marker is only written on
+        # success, so a failure here just means the next start tries again --
+        # it must never take an otherwise-healthy API down.
+        logger.exception("Legacy configuration import failed")
+        app.state.legacy_import_status = "unknown"
 
     if settings.auth_disabled:
         try:
@@ -267,7 +337,6 @@ def create_app() -> FastAPI:
     app.add_middleware(
         RateLimitMiddleware,
         redis_url=settings.redis_url,
-        whitelist=settings.rate_limit_whitelist,
     )
 
     # ── CORS ─────────────────────────────────────────────────
@@ -335,12 +404,16 @@ def create_app() -> FastAPI:
         services and downgrades ``status`` to ``degraded`` when a required one
         is unreachable, so an orchestrator or dashboard can tell the difference.
         The bare form stays dependency-free and fast: a liveness probe must not
-        restart the API just because Postgres is briefly unavailable.
+        restart the API just because Postgres is briefly unavailable. ``config``
+        costs nothing either way — ``bootstrap``/``encryption`` are constants and
+        ``legacy_import`` is read from ``app.state``, cached once at startup
+        (see ``_config_readiness``), never queried per request.
         """
         body: dict[str, Any] = {
             "status": "healthy",
             "service": settings.app_name,
             "version": settings.app_version,
+            "config": _config_readiness(app),
         }
         if not deep:
             return body

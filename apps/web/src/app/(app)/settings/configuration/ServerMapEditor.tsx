@@ -24,7 +24,6 @@ const TOKEN_MASK = "**********";
 
 const TOKEN_SOURCE_LABEL: Record<string, string> = {
   ui: "set from the UI",
-  env: "set in .env",
   default: "not set",
 };
 

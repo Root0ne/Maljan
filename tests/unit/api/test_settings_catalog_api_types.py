@@ -1,6 +1,72 @@
-from app.services.settings_catalog_api import api_catalog, full_catalog
+from app.config import APISettings
+from app.services.settings_catalog_api import (
+    API_DEFAULTS,
+    api_catalog,
+    catalog_index,
+    full_catalog,
+)
 
 _KNOWN_WIDGET_TYPES = {"bool", "int", "float", "str", "secret", "enum", "list", "dict", "json"}
+
+# Task 2: every one of these left APISettings/the environment and now lives
+# in the settings store, falling back to API_DEFAULTS. Bootstrap-contract
+# fields (debug, auth_disabled, cors_origins, database_url, redis_url,
+# minio_endpoint, cookie_secure, samples_dir, upload_temp_dir) are the only
+# ones that stay read-only.
+_MOVED_TO_STORE = {
+    "mock_mode_allowed",
+    "enrichment_enabled",
+    "enrichment_max_lookups",
+    "virustotal_api_key",
+    "abuseipdb_api_key",
+    "rate_limit_enabled",
+    "rate_limit_requests",
+    "rate_limit_window_seconds",
+    "rate_limit_whitelist",
+    "login_max_attempts",
+    "login_lockout_seconds",
+    "upload_max_bytes",
+    "upload_allowed_mime_types",
+    "trusted_proxy_ips",
+    "qdrant_url",
+    "qdrant_collection",
+    "qdrant_api_key",
+    "jwt_access_token_expire_minutes",
+    "jwt_refresh_token_expire_days",
+}
+
+_READONLY_CONTRACT = {
+    "debug",
+    "auth_disabled",
+    "cors_origins",
+    "database_url",
+    "redis_url",
+    "minio_endpoint",
+    "cookie_secure",
+    "samples_dir",
+    "upload_temp_dir",
+}
+
+
+def test_apisettings_has_no_moved_application_field():
+    assert not _MOVED_TO_STORE & set(APISettings.model_fields)
+
+
+def test_every_moved_field_is_an_api_default_and_a_live_catalog_entry():
+    by_path = {e.path: e for e in api_catalog()}
+    for name in _MOVED_TO_STORE:
+        assert name in API_DEFAULTS, name
+        entry = by_path[name]
+        assert entry.applies == "live"
+        assert entry.editable is True
+
+
+def test_readonly_group_is_exactly_the_bootstrap_contract():
+    by_path = {e.path: e for e in api_catalog() if not e.editable}
+    assert set(by_path) == _READONLY_CONTRACT
+    for entry in by_path.values():
+        assert entry.applies == "restart"
+        assert entry.group == "system"
 
 
 def test_cookie_secure_types_as_bool_not_str():
@@ -48,3 +114,31 @@ def test_schema_dto_carries_subgroup_advanced_and_group_description() -> None:
     assert CatalogEntryDTO.model_fields["subgroup"].default is None
     assert CatalogEntryDTO.model_fields["advanced"].default is False
     assert GroupDTO.model_fields["description"].default == ""
+
+
+def test_no_catalog_text_points_an_operator_at_a_dotenv_file() -> None:
+    """The ``.env`` layer is gone, and the catalog is what the UI reads aloud.
+
+    The read-only ``reason`` is wire-visible beyond the UI too: it is the 422
+    message ``POST /settings/import`` and ``check_keys`` return for a
+    read-only key.
+    """
+    offenders = [
+        (e.key, text)
+        for e in full_catalog()
+        for text in (e.description or "", e.reason or "")
+        if ".env" in text
+    ]
+    assert offenders == []
+
+
+def test_the_read_only_group_names_the_deployment_environment() -> None:
+    entry = catalog_index()["api.debug"]
+    assert entry.editable is False
+    assert entry.reason == "set in the deployment environment; restart required"
+    assert "Set in the deployment environment." in entry.description
+
+
+def test_the_frontier_arms_description_drops_the_environment_variable_hint() -> None:
+    """W5: there is no environment form of this setting to hint at any more."""
+    assert "LLM__FRONTIER__ARMS" not in catalog_index()["core.llm.frontier.arms"].description

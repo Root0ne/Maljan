@@ -5,11 +5,11 @@ from __future__ import annotations
 import json
 from collections.abc import Awaitable
 from contextlib import suppress
+from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import JSONResponse, PlainTextResponse
-from maljan.core import settings_secrets as box
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi.responses import JSONResponse
 from maljan.core.settings_annotations import GROUP_DESCRIPTIONS, GROUP_ORDER
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,7 +20,9 @@ from app.models.user import User
 from app.runtime_config import runtime_config
 from app.schemas.settings import (
     CatalogEntryDTO,
+    ExportResponse,
     GroupDTO,
+    ImportRequest,
     MappingPreviewRequest,
     MappingPreviewResponse,
     PatchRequest,
@@ -32,11 +34,18 @@ from app.schemas.settings import (
     ValueDTO,
     ValuesResponse,
 )
+from app.services.audit import record as audit_record
 from app.services.mapping_preview import PREVIEW_MAX_BYTES, preview_mapping
-from app.services.server_map import SERVER_MAP_KEY
+from app.services.server_map import SERVER_MAP_KEY, TOKEN_MASK
 from app.services.settings_catalog_api import catalog_index, full_catalog, resolved_catalog
 from app.services.settings_probes import PROBES, run_agent_probe, run_mcp_probe, run_probe
-from app.services.settings_service import SettingsService, SettingsValidationError
+from app.services.settings_service import (
+    SettingsService,
+    SettingsValidationError,
+    core_settings_cache,
+)
+
+EXPORT_FORMAT = "maljan-settings/1"
 
 logger = get_logger("api.settings")
 
@@ -53,9 +62,9 @@ async def _effective_servers(db: AsyncSession) -> list[str]:
     servers = stored.get("core.mcp.servers")
     if isinstance(servers, dict) and servers:
         return list(servers)
-    from maljan.core.config import Settings
+    from maljan.core.settings_overrides import build_settings
 
-    return list(Settings().mcp.servers)
+    return list(build_settings({}).mcp.servers)
 
 
 async def _effective_agents(db: AsyncSession) -> tuple[list[str], list[str]]:
@@ -70,21 +79,17 @@ async def _effective_agents(db: AsyncSession) -> tuple[list[str], list[str]]:
 async def get_schema(
     _: User = Depends(require_admin), db: AsyncSession = Depends(get_db)
 ) -> SchemaResponse:
-    available = box.is_available()
     profiles, agents = await _effective_agents(db)
     by_group: dict[str, list[CatalogEntryDTO]] = {}
     for e in resolved_catalog(await _effective_servers(db), profiles=profiles, agents=agents):
         d = e.to_dict()
-        if e.secret and e.editable and not available:
-            d["editable"] = False
-            d["reason"] = "SETTINGS_ENCRYPTION_KEY is not set; secrets stay in .env"
         by_group.setdefault(e.group, []).append(CatalogEntryDTO(**d))
     groups = [
         GroupDTO(key=g, title=t, description=GROUP_DESCRIPTIONS.get(g, ""), entries=by_group[g])
         for g, t in GROUP_ORDER
         if g in by_group
     ]
-    return SchemaResponse(groups=groups, secrets_available=available)
+    return SchemaResponse(groups=groups)
 
 
 @router.get("", response_model=ValuesResponse)
@@ -109,6 +114,7 @@ async def patch_values(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"errors": exc.errors}
         )
     runtime_config.invalidate()
+    core_settings_cache.invalidate()
     return PatchResponse(applied=res.applied, applies=res.applies)
 
 
@@ -124,6 +130,7 @@ async def reset_group(
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown group: {group}")
     removed = await SettingsService(db).reset(keys, user_id=user.id, ip=_client_ip(request))
     runtime_config.invalidate()
+    core_settings_cache.invalidate()
     return ResetResponse(reset=removed)
 
 
@@ -141,72 +148,178 @@ async def reset_key(
     if not removed and key not in catalog_index():
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown setting: {key}")
     runtime_config.invalidate()
+    core_settings_cache.invalidate()
     return ResetResponse(reset=removed)
 
 
-def _env_literal(secret: bool, value: object) -> str:
-    """One ``.env`` right-hand side pydantic-settings reads back unchanged.
+def _strip_masks(value: Any, path: str) -> tuple[Any, list[str]]:
+    """``value`` with every nested mask removed, plus the path of each one.
 
-    Lists and dicts must be JSON (a Python repr with single quotes is
-    rejected); strings with whitespace or ``#`` need quoting.
+    ``values()`` replaces a stored credential with ``TOKEN_MASK`` wherever one
+    is nested inside a composite leaf -- a server's ``auth_token``, a frontier
+    arm's ``api_key`` -- so the UI never echoes a real one. Writing that mask
+    into the export would configure it as the literal credential on the next
+    import (the failure mode F8 fixed for the old ``.env`` export), so it is
+    dropped here instead, at any depth: a composite that grows a new secret
+    leaf is covered the day it is added rather than the day someone remembers
+    to extend this function.
     """
-    if secret:
-        return "***"
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, (list, dict)):
-        # Quoted twice on purpose: dotenv strips the outer quotes (and would
-        # otherwise cut the line at a " #" inside a list element), then
-        # pydantic-settings JSON-parses the inner text.
-        return json.dumps(json.dumps(value, separators=(",", ":")))
-    text = str(value)
-    if text == "" or any(ch in text for ch in " \t#\"'"):
-        return json.dumps(text)
-    return text
+    if isinstance(value, dict):
+        out: dict[str, Any] = {}
+        omitted: list[str] = []
+        for name, item in value.items():
+            child = f"{path}.{name}"
+            if item == TOKEN_MASK:
+                omitted.append(child)
+                continue
+            cleaned, paths = _strip_masks(item, child)
+            out[name] = cleaned
+            omitted.extend(paths)
+        return out, omitted
+    if isinstance(value, list):
+        items: list[Any] = []
+        omitted = []
+        for i, item in enumerate(value):
+            child = f"{path}.{i}"
+            if item == TOKEN_MASK:
+                omitted.append(child)
+                continue
+            cleaned, paths = _strip_masks(item, child)
+            items.append(cleaned)
+            omitted.extend(paths)
+        return items, omitted
+    return value, []
 
 
-@router.get("/export", response_class=PlainTextResponse)
-async def export_overrides(
-    _: User = Depends(require_admin), db: AsyncSession = Depends(get_db)
-) -> str:
+def _export_value(key: str, value: Any) -> tuple[Any, list[str]]:
+    """The value as it goes into the export document, plus any paths it cost.
+
+    Two composite leaves carry credentials inside them: ``core.mcp.servers``
+    (one ``auth_token`` per server) and ``core.llm.frontier.arms`` (one
+    ``api_key`` per arm). Both reach here as the mask, and both are stripped by
+    ``_strip_masks`` above, together with anything else masked at any depth.
+    The server map additionally carries the synthetic ``auth_token_source``
+    (not an ``MCPServerConfig`` field, so it would not import back), which is
+    dropped without being listed.
+
+    The paths returned name every credential the export did not carry, e.g.
+    ``core.mcp.servers.<name>.auth_token`` or
+    ``core.llm.frontier.arms.<arm>.api_key``. They are informational only, not
+    catalog keys: importing a document that includes one back as a top-level
+    key is rejected as ``unknown key``, the same as any other stray field.
+    They exist so an operator reading the export can see which servers and
+    arms lost their credential, rather than silently ending up with none on
+    the next import.
+    """
+    if key != SERVER_MAP_KEY or not isinstance(value, dict):
+        return _strip_masks(value, key)
+    value = {
+        name: (
+            {k: v for k, v in entry.items() if k != "auth_token_source"}
+            if isinstance(entry, dict)
+            else entry
+        )
+        for name, entry in value.items()
+    }
+    sanitized, omitted = _strip_masks(value, key)
+    return _mask_server_env(sanitized, omitted)
+
+
+def _mask_server_env(servers: Any, omitted: list[str]) -> tuple[Any, list[str]]:
+    """Every ``env`` value masked, and its variable named in ``omitted``.
+
+    SEC-1 (dev audit 2026-09-06) established a server's ``env`` map as the one
+    place a credential can live without being typed as one, which is why
+    ``public_snapshot`` masks it in run summaries. An export is a file on an
+    operator's disk and the weaker of the two paths, so it masks them too. The
+    variable names stay -- an operator reading the document needs to see what
+    the server was handed -- and only the values go; a masked value coming
+    back on import means "keep the stored one" (``split_server_secrets``).
+    """
+    if not isinstance(servers, dict):
+        return servers, omitted
+    out: dict[str, Any] = {}
+    for name, entry in servers.items():
+        if not isinstance(entry, dict) or not isinstance(entry.get("env"), dict):
+            out[name] = entry
+            continue
+        env = entry["env"]
+        out[name] = {**entry, "env": {var: TOKEN_MASK for var in env}}
+        omitted.extend(f"{SERVER_MAP_KEY}.{name}.env.{var}" for var in env)
+    return out, omitted
+
+
+@router.get("/export", response_model=ExportResponse)
+async def export_values(
+    response: Response,
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> ExportResponse:
     index = catalog_index()
-    lines = ["# Maljan runtime overrides (UI). Secrets are exported masked as ***."]
+    values: dict[str, Any] = {}
+    secrets_omitted: list[str] = []
     for key, info in (await SettingsService(db).values()).items():
         if info.source != "ui":
             continue
         entry = index[key]
-        env_name = entry.path.upper().replace(".", "__")
-        if key == SERVER_MAP_KEY:
-            lines.extend(_server_map_env_lines(env_name, dict(info.value or {})))
+        if not entry.editable:
             continue
-        lines.append(f"{env_name}={_env_literal(entry.secret, info.value)}")
-    return "\n".join(lines) + "\n"
+        if entry.secret:
+            secrets_omitted.append(key)
+            continue
+        sanitized, omitted_paths = _export_value(key, info.value)
+        values[key] = sanitized
+        secrets_omitted.extend(omitted_paths)
+    response.headers["Content-Disposition"] = "attachment; filename=maljan-settings.json"
+    return ExportResponse(
+        format=EXPORT_FORMAT,
+        exported_at=datetime.now(UTC),
+        values=values,
+        secrets_omitted=sorted(secrets_omitted),
+    )
 
 
-def _server_map_env_lines(env_name: str, servers: dict[str, Any]) -> list[str]:
-    """``core.mcp.servers`` as ``.env`` lines a plain re-import will not break.
-
-    ``values()`` masks every server's token to ten literal asterisks
-    (``TOKEN_MASK``) so the UI never echoes a real credential; embedding that
-    mask inside the exported ``MCP__SERVERS`` JSON would configure it as the
-    actual token on re-import, a silent auth failure rather than a visible
-    placeholder. The token (and the synthetic ``auth_token_source`` --  not
-    an ``MCPServerConfig`` field) is stripped from the map instead, and a
-    commented placeholder line stands in for it per server that has one, the
-    same visible-but-inert shape ``_env_literal(secret=True, ...)`` gives an
-    ordinary secret leaf.
-    """
-    sanitized: dict[str, Any] = {}
-    lines: list[str] = []
-    for name, entry in servers.items():
-        clean = dict(entry)
-        has_token = bool(clean.pop("auth_token_source", None)) or bool(clean.get("auth_token"))
-        clean.pop("auth_token", None)
-        sanitized[name] = clean
-        if has_token:
-            lines.append(f"# {env_name}__{name.upper()}__AUTH_TOKEN=***")
-    lines.insert(0, f"{env_name}={_env_literal(False, sanitized)}")
-    return lines
+@router.post("/import", response_model=PatchResponse)
+async def import_values(
+    body: ImportRequest,
+    request: Request,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> PatchResponse | JSONResponse:
+    if body.format != EXPORT_FORMAT:
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content={"errors": {"format": "unsupported format"}},
+        )
+    index = catalog_index()
+    errors: dict[str, str] = {}
+    for key in body.values:
+        entry = index.get(key)
+        if entry is None:
+            errors[key] = "unknown key"
+        elif not entry.editable:
+            errors[key] = "read-only"
+    if errors:
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"errors": errors}
+        )
+    try:
+        res = await SettingsService(db).save(body.values, user_id=user.id, ip=_client_ip(request))
+    except SettingsValidationError as exc:
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"errors": exc.errors}
+        )
+    if res.applied:
+        await audit_record(
+            "settings.import",
+            resource_type="settings",
+            user_id=user.id,
+            details={"keys": sorted(res.applied), "count": len(res.applied)},
+            ip=_client_ip(request),
+        )
+    runtime_config.invalidate()
+    core_settings_cache.invalidate()
+    return PatchResponse(applied=res.applied, applies=res.applies)
 
 
 async def _probe_response(coro: Awaitable[Any]) -> ProbeResponse:

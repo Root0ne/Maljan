@@ -17,10 +17,10 @@ from maljan.core.config import (
     BUILTIN_PROFILES,
     AgentDefinition,
     ProfileDefinition,
-    Settings,
     _builtin_definitions,
     _builtin_profiles,
 )
+from maljan.core.settings_overrides import build_settings
 from pydantic import ValidationError
 
 AGENT_DEFINITIONS_KEY = "core.agents.definitions"
@@ -79,7 +79,7 @@ def _server_allow_lists(overrides: dict[str, Any]) -> dict[str, list[str] | None
     those is checked at resolution and degrades there, because what it offers is
     only knowable from a live handshake.
     """
-    servers = Settings().mcp.servers
+    servers = build_settings({}).mcp.servers
     out: dict[str, list[str] | None] = {
         name: (list(cfg.tools) if cfg.tools is not None else None) for name, cfg in servers.items()
     }

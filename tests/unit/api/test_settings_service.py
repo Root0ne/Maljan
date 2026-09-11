@@ -8,6 +8,7 @@ import pytest
 from cryptography.fernet import Fernet
 
 from app import observability
+from app.config import APISettings
 from app.models import AuditLog, RuntimeSetting
 from app.services import audit as audit_module
 from app.services import settings_service as svc
@@ -110,7 +111,7 @@ async def test_values_masks_secrets_and_labels_source(key):
     assert sec.value is None and sec.is_set is True and sec.hint == "1234" and sec.source == "ui"
     assert vals["core.negotiation.max_iterations"].value == 7
     assert vals["core.negotiation.max_iterations"].source == "ui"
-    assert vals["core.chunking.overlap_tokens"].source in ("env", "default")
+    assert vals["core.chunking.overlap_tokens"].source == "default"
 
 
 @pytest.mark.asyncio
@@ -136,27 +137,42 @@ async def test_values_reports_is_set_when_stored_secret_cannot_be_decrypted(monk
 
 
 @pytest.mark.asyncio
-async def test_values_hints_env_only_core_secret_by_attribute_not_json_dump(monkeypatch):
-    """Finding 2: a core secret configured only via .env must not be hinted
-    from Settings().model_dump(mode="json"), whose default SecretStr dump
-    masks any non-empty secret to "**********". Read it by attribute and
-    unwrap SecretStr instead."""
+async def test_values_never_hints_a_core_secret_from_the_environment(monkeypatch):
+    """Finding 2 (historical) was that a core secret configured only via
+    ``.env`` had to be hinted by reading ``build_settings({})`` by attribute,
+    not from ``model_dump(mode="json")`` (whose default SecretStr dump masks
+    any non-empty secret to "**********"). Task 3 makes the premise
+    impossible instead: ``values()`` resolves the default through
+    ``build_settings({})``, which is store-only, so an env-only secret is
+    never set at all -- no row, no hint, no source claiming otherwise, and
+    the value never leaks into any string representation."""
     monkeypatch.setenv("LLM__OPENAI__API_KEY", "sk-envonly-9999")
     s = svc.SettingsService(make_db([]))
     vals = await s.values()
     sec = vals["core.llm.openai.api_key"]
-    assert sec.is_set is True
-    assert sec.hint == "9999"
-    assert sec.source == "env"
+    assert sec.is_set is False
+    assert sec.hint is None
+    assert sec.source == "default"
+    assert "sk-envonly-9999" not in str(vals)
 
 
 @pytest.mark.asyncio
-async def test_save_secret_without_key_is_refused(monkeypatch):
+async def test_a_process_without_a_usable_encryption_key_never_starts(monkeypatch):
+    """``check_keys`` no longer carries a "secrets cannot be stored" branch.
+
+    It was a remnant of the days when ``SETTINGS_ENCRYPTION_KEY`` was
+    optional. It is a bootstrap requirement now, so the branch could only
+    report a state no running process can be in: this is where that guarantee
+    is actually made (final review M9).
+    """
+    from app.bootstrap import validate_bootstrap
+
     monkeypatch.delenv("SETTINGS_ENCRYPTION_KEY", raising=False)
     s = svc.SettingsService(make_db([]))
-    with pytest.raises(svc.SettingsValidationError) as ei:
-        await s.save({"core.llm.openai.api_key": "x"}, user_id=None, ip=None)
-    assert "SETTINGS_ENCRYPTION_KEY" in ei.value.errors["core.llm.openai.api_key"]
+    assert s.check_keys({"core.llm.openai.api_key": "x"}) is None
+
+    settings = APISettings(settings_encryption_key="", _env_file=None)
+    assert "SETTINGS_ENCRYPTION_KEY is not set" in validate_bootstrap(settings).problems
 
 
 class FakeAuditSession:
@@ -273,3 +289,31 @@ async def test_save_rejects_values_the_pipeline_could_not_use():
             ip=None,
         )
     assert set(exc.value.errors) == {"core.llm.provider", "core.negotiation.max_iterations"}
+
+
+@pytest.mark.asyncio
+async def test_the_mask_for_a_secret_leaf_means_unchanged(key):
+    """An import document carries the mask wherever a secret was omitted.
+
+    Storing it would set the credential to ten literal asterisks; the key is
+    dropped from the change set instead, so the stored row survives untouched.
+    """
+    from app.services.server_map import TOKEN_MASK
+
+    stored = RuntimeSetting(
+        key="core.llm.openai.api_key",
+        value=svc.box.encrypt("sk-real"),
+        is_secret=True,
+    )
+    db = make_db([stored])
+    service = svc.SettingsService(db)
+    service.load_overrides = AsyncMock(return_value={})  # type: ignore[method-assign]
+
+    result = await service.save(
+        {"core.llm.openai.api_key": TOKEN_MASK, "core.llm.provider": "anthropic"},
+        user_id=None,
+        ip=None,
+    )
+
+    assert result.applied == ["core.llm.provider"]
+    assert svc.box.decrypt(stored.value) == "sk-real"

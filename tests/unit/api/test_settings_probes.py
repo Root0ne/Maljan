@@ -57,7 +57,7 @@ async def test_timeout_is_reported_not_raised(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_run_probe_merges_form_over_stored_and_env(monkeypatch):
+async def test_run_probe_merges_form_over_stored_over_defaults(monkeypatch):
     seen = {}
 
     async def fake(values):
@@ -65,18 +65,20 @@ async def test_run_probe_merges_form_over_stored_and_env(monkeypatch):
         return probes.ProbeResult(True, 1, "x")
 
     monkeypatch.setitem(probes.PROBES, "llm", fake)
+    # Task 3: build_settings is store-only, so an env sibling must not leak
+    # into the resolved value -- it is set here specifically to prove that.
     monkeypatch.setenv("LLM__OPENAI__API_KEY", "env-key")
     await probes.run_probe(
         "llm",
         {"core.llm.openai.base_url": "http://form/v1", "core.llm.openai.api_key": None},
         {"core.llm.openai.expert_model": "stored-model"},
     )
-    # form beats stored beats env, per field, for the OpenAI slot...
+    # form beats stored beats the model default, per field, for the OpenAI slot...
     assert seen["base_url"] == "http://form/v1"
-    assert seen["api_key"] == "env-key"
+    assert seen["api_key"] is None
     assert seen["expert_model"] == "stored-model"
     assert seen["provider"] == "openai"
-    # ...and every other provider's fields are still resolved (candidate > stored > env),
+    # ...and every other provider's fields are still resolved (candidate > stored > default),
     # so _INPUTS["llm"] covers all four providers regardless of which one is active.
     assert {
         "judge_model",
@@ -348,14 +350,20 @@ async def test_cape_probe_resolves_from_the_live_settings_object_with_nothing_st
     monkeypatch, name
 ):
     """Regression: with no candidate value and no stored override, every
-    ``_INPUTS[name]`` key is resolved by walking attributes off the live
-    ``Settings`` object (``run_probe``'s fallback branch, exercised by neither
-    of the two tests above). A flat ``cape2_base_url``/``cape2_api_token``
-    here raised ``AttributeError`` against the nested ``SandboxConfig.cape2``
-    block the provider rename introduced -- the actual failure mode behind
-    the settings UI's "Test CAPE connection" button returning a 500.
+    ``_INPUTS[name]`` key is resolved by walking attributes off the
+    default-only ``Settings`` object ``run_probe`` builds via
+    ``build_settings`` (its fallback branch, exercised by neither of the two
+    tests above). A flat ``cape2_base_url``/``cape2_api_token`` here raised
+    ``AttributeError`` against the nested ``SandboxConfig.cape2`` block the
+    provider rename introduced -- the actual failure mode behind the
+    settings UI's "Test CAPE connection" button returning a 500.
+
+    Compared against ``build_settings({})`` rather than bare ``Settings()``
+    (Task 3: ``run_probe`` is store-only and never reads the environment;
+    comparing against the environment-reading constructor here would drift
+    on any box with a real ``.env``).
     """
-    from maljan.core.config import Settings
+    from maljan.core.settings_overrides import build_settings
 
     seen: dict[str, object] = {}
 
@@ -367,8 +375,8 @@ async def test_cape_probe_resolves_from_the_live_settings_object_with_nothing_st
     result = await probes.run_probe(name, {}, {})
 
     assert result.ok is True
-    live = Settings()
-    assert seen["base_url"] == live.sandbox.cape2.base_url
+    defaults = build_settings({})
+    assert seen["base_url"] == defaults.sandbox.cape2.base_url
     assert isinstance(seen["api_token"], str)
 
 

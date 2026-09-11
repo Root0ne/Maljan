@@ -19,8 +19,8 @@ import uuid
 from typing import TYPE_CHECKING, Any
 
 import redis.asyncio as aioredis
+from maljan.core.settings_overrides import redact_url
 
-from app.config import settings
 from app.logging_config import get_logger
 from app.models.report import AnalysisReport
 from app.runtime_config import runtime_config
@@ -38,11 +38,13 @@ _memory_store_built: bool = False
 _memory_store: MemoryStore | None = None
 
 
-def _get_memory_store() -> MemoryStore | None:
+async def _get_memory_store() -> MemoryStore | None:
     """Lazily build the Qdrant LTM store. Cached process-wide, never raises.
 
     Returns ``None`` when Qdrant is not installed / not reachable so the
     enrichment task degrades to reputation-only behaviour without aborting.
+    ``qdrant_url`` / ``qdrant_collection`` / ``qdrant_api_key`` are the API's
+    own store-backed knobs (Task 2), separate from ``core.memory.qdrant_*``.
     """
     global _memory_store_built, _memory_store
     if _memory_store_built:
@@ -51,17 +53,18 @@ def _get_memory_store() -> MemoryStore | None:
     try:
         from maljan.memory.qdrant_store import QdrantStore
 
+        qdrant_url = await runtime_config.get("qdrant_url")
+        qdrant_collection = await runtime_config.get("qdrant_collection")
+        qdrant_api_key = await runtime_config.get_secret("qdrant_api_key") or None
         _memory_store = QdrantStore(
-            url=settings.qdrant_url,
-            collection=settings.qdrant_collection,
-            api_key=(
-                settings.qdrant_api_key.get_secret_value() if settings.qdrant_api_key else None
-            ),
+            url=qdrant_url,
+            collection=qdrant_collection,
+            api_key=qdrant_api_key,
         )
         logger.info(
             "enrich: Qdrant LTM available (url=%s, collection=%s).",
-            settings.qdrant_url,
-            settings.qdrant_collection,
+            redact_url(qdrant_url),
+            qdrant_collection,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning(
@@ -111,7 +114,7 @@ async def enrich_threat_intel(ctx: dict, report_id: str) -> dict[str, Any]:
         before_domain_reps = _count_reputations(report.malware_report, "domains")
         before_ip_reps = _count_reputations(report.malware_report, "ips")
 
-        memory_store = _get_memory_store()
+        memory_store = await _get_memory_store()
 
         try:
             updated = await enrich_malware_report(

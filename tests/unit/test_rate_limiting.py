@@ -38,17 +38,20 @@ def _patch_runtime_config(
     max_requests: int = 100,
     window_seconds: int = 60,
     trusted_proxy_ips: list[str] | None = None,
+    rate_limit_whitelist: list[str] | None = None,
 ):
     """Rate limits now come from ``runtime_config`` rather than constructor
-    attributes (Task 7: live api.* overrides). Tests exercise ``dispatch``
-    directly, so the values that used to live on ``self`` are supplied
-    through a patched ``runtime_config.get`` instead.
+    attributes (Task 7: live api.* overrides; Task 2: the whitelist joined
+    them). Tests exercise ``dispatch`` directly, so the values that used to
+    live on ``self`` are supplied through a patched ``runtime_config.get``
+    instead.
     """
     values = {
         "rate_limit_enabled": enabled,
         "rate_limit_requests": max_requests,
         "rate_limit_window_seconds": window_seconds,
         "trusted_proxy_ips": trusted_proxy_ips or [],
+        "rate_limit_whitelist": rate_limit_whitelist or [],
     }
 
     async def _get(name: str):
@@ -86,7 +89,6 @@ class TestRateLimitMiddleware:
         middleware = RateLimitMiddleware(
             mock_app,
             redis_url="redis://localhost:6379/0",
-            whitelist=[],
         )
         # Replace with fake Redis for testing
         middleware._redis_pool = fake_redis.connection_pool
@@ -121,7 +123,6 @@ class TestRateLimitMiddleware:
         middleware = RateLimitMiddleware(
             mock_app,
             redis_url="redis://localhost:6379/0",
-            whitelist=[],
         )
         middleware._redis_pool = fake_redis.connection_pool
         _install_counter(middleware)
@@ -161,7 +162,6 @@ class TestRateLimitMiddleware:
         middleware = RateLimitMiddleware(
             mock_app,
             redis_url="redis://localhost:6379/0",
-            whitelist=["/health"],
         )
         middleware._redis_pool = fake_redis.connection_pool
 
@@ -182,7 +182,9 @@ class TestRateLimitMiddleware:
             return Response(content='{"ok":true}', status_code=200)
 
         # Multiple requests to whitelisted path should all succeed
-        with _patch_runtime_config(max_requests=1, window_seconds=60):
+        with _patch_runtime_config(
+            max_requests=1, window_seconds=60, rate_limit_whitelist=["/health"]
+        ):
             for _ in range(5):
                 response = await middleware.dispatch(request, call_next)
                 assert response.status_code == 200
@@ -192,7 +194,6 @@ class TestRateLimitMiddleware:
         middleware = RateLimitMiddleware(
             mock_app,
             redis_url="redis://localhost:6379/0",
-            whitelist=[],
         )
         middleware._redis_pool = fake_redis.connection_pool
 
@@ -225,7 +226,6 @@ class TestRateLimitMiddleware:
         middleware = RateLimitMiddleware(
             mock_app,
             redis_url="redis://invalid:6379/0",
-            whitelist=[],
         )
 
         request = Request(
@@ -254,7 +254,6 @@ class TestRateLimitMiddleware:
         middleware = RateLimitMiddleware(
             mock_app,
             redis_url="redis://localhost:6379/0",
-            whitelist=[],
         )
         middleware._redis_pool = fake_redis.connection_pool
         _install_counter(middleware)
@@ -316,18 +315,18 @@ async def _peer_ip(middleware, peer: str, xff: str | None, trusted: list[str], m
 
 class TestTrustedProxyNetworks:
     async def test_cidr_matches_a_host_inside_it(self, mock_app, fake_redis, monkeypatch):
-        mw = RateLimitMiddleware(mock_app, redis_url="redis://localhost:6379/0", whitelist=[])
+        mw = RateLimitMiddleware(mock_app, redis_url="redis://localhost:6379/0")
         result = await _peer_ip(mw, "10.1.2.3", "203.0.113.9", ["10.0.0.0/8"], monkeypatch)
         assert result == "203.0.113.9"
 
     async def test_bare_address_matches_itself_only(self, mock_app, fake_redis, monkeypatch):
-        mw = RateLimitMiddleware(mock_app, redis_url="redis://localhost:6379/0", whitelist=[])
+        mw = RateLimitMiddleware(mock_app, redis_url="redis://localhost:6379/0")
         result1 = await _peer_ip(mw, "192.168.1.5", "203.0.113.9", ["192.168.1.5"], monkeypatch)
         assert result1 == "203.0.113.9"
         result2 = await _peer_ip(mw, "192.168.1.6", "203.0.113.9", ["192.168.1.5"], monkeypatch)
         assert result2 == "192.168.1.6"
 
     async def test_untrusted_peer_ignores_xff(self, mock_app, fake_redis, monkeypatch):
-        mw = RateLimitMiddleware(mock_app, redis_url="redis://localhost:6379/0", whitelist=[])
+        mw = RateLimitMiddleware(mock_app, redis_url="redis://localhost:6379/0")
         result = await _peer_ip(mw, "198.51.100.7", "203.0.113.9", ["10.0.0.0/8"], monkeypatch)
         assert result == "198.51.100.7"

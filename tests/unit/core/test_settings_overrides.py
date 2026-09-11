@@ -30,13 +30,16 @@ def test_split_key():
         ov.split_key("llm.provider")
 
 
-def test_override_wins_and_env_sibling_survives(monkeypatch):
+def test_override_applies_and_the_environment_is_never_consulted(monkeypatch):
+    """``build_settings`` is store-only (Task 3): an env sibling is ignored,
+    not merged in -- the overridden field comes from the override, every
+    other field comes from the model default."""
     monkeypatch.setenv("LLM__OPENAI__API_KEY", "env-key")
     monkeypatch.setenv("LLM__OPENAI__EXPERT_MODEL", "env-expert")
     s = ov.build_settings({"llm.openai.base_url": "http://ui:1/v1"})
     assert s.llm.openai.base_url == "http://ui:1/v1"
-    assert s.llm.openai.api_key.get_secret_value() == "env-key"
-    assert s.llm.openai.expert_model == "env-expert"
+    assert s.llm.openai.api_key is None
+    assert s.llm.openai.expert_model == "gpt-4o-mini"
 
 
 def test_build_settings_rejects_invalid_value():
@@ -45,9 +48,8 @@ def test_build_settings_rejects_invalid_value():
 
 
 def test_effective_source():
-    assert ov.effective_source(overridden=True, env_value=1, default_value=1) == "ui"
-    assert ov.effective_source(overridden=False, env_value=2, default_value=1) == "env"
-    assert ov.effective_source(overridden=False, env_value=1, default_value=1) == "default"
+    assert ov.effective_source(overridden=True) == "ui"
+    assert ov.effective_source(overridden=False) == "default"
 
 
 def test_public_snapshot_masks_secrets(monkeypatch):

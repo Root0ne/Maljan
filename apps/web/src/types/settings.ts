@@ -86,8 +86,8 @@ export interface McpServerEntry {
    *  alone"; sending a new string replaces it; sending `null` clears it. */
   auth_token: string;
   /** Where the effective token comes from, reported the way every other
-   *  row's `source` is: a UI-saved secret row, `.env`, or nothing set. */
-  auth_token_source: "ui" | "env" | "default";
+   *  row's `source` is: a UI-saved secret row, or the built-in default. */
+  auth_token_source: "ui" | "default";
   tool_selection: string;
   use_all_tools: boolean;
   tools: string[] | null;
@@ -154,14 +154,13 @@ export interface SettingsGroup {
 
 export interface SettingsSchema {
   groups: SettingsGroup[];
-  secrets_available: boolean;
 }
 
 export interface SettingValue {
   value: unknown;
   is_set: boolean | null;
   hint: string | null;
-  source: "default" | "env" | "ui";
+  source: "default" | "ui";
   updated_at: string | null;
   updated_by: string | null;
 }
@@ -173,6 +172,28 @@ export interface SettingsValues {
 export interface PatchResult {
   applied: string[];
   applies: Partial<Record<Applies, number>>; // only the buckets that changed are present
+}
+
+/** The wire format both `GET /settings/export` and `POST /settings/import`
+ *  speak, mirrored from `ExportResponse` / `ImportRequest` in
+ *  `apps/api/app/schemas/settings.py`. */
+export const SETTINGS_EXPORT_FORMAT = "maljan-settings/1";
+
+export interface ExportResponse {
+  format: string;
+  exported_at: string;
+  values: Record<string, unknown>;
+  /** Catalog keys the export left out because their stored value is a
+   *  secret, plus informational nested paths (a server's dropped auth
+   *  token) — see the API docstring. Not something the console renders
+   *  today; kept on the type so a caller that wants it does not have to
+   *  guess the shape. */
+  secrets_omitted: string[];
+}
+
+export interface ImportRequest {
+  format: string;
+  values: Record<string, unknown>;
 }
 
 export interface ProbeResult {

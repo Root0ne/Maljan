@@ -29,6 +29,7 @@ apps/web/playwright-report/
 .env
 .env.local
 .env.*.local
+bootstrap.env
 !**/.env.example
 !**/.env.template
 

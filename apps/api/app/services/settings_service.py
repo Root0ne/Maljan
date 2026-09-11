@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -14,16 +16,21 @@ from maljan.core.settings_overrides import (
     build_settings,
     effective_source,
     flatten_leaves,
-    nest,
     split_key,
 )
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import APISettings
 from app.config import settings as api_settings
 from app.models import RuntimeSetting
+from app.services.frontier_arms import (
+    ARMS_KEY,
+    arm_key_key,
+    masked_arms,
+    merge_arm_secrets,
+    split_arm_secrets,
+)
 from app.services.server_map import (
     SERVER_MAP_KEY,
     TOKEN_MASK,
@@ -32,7 +39,12 @@ from app.services.server_map import (
     server_token_key,
     split_server_secrets,
 )
-from app.services.settings_catalog_api import _masked, catalog_index
+from app.services.settings_catalog_api import (
+    API_DEFAULTS,
+    _masked,
+    catalog_index,
+    validate_editable_api_value,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +71,12 @@ class SaveResult:
     applies: dict[str, int] = field(default_factory=dict)
 
 
+# The composite catalog leaves whose nested credential is stored as its own
+# runtime-keyed row, and the suffix those rows carry. Resetting the composite
+# resets them; ``save`` prunes the ones whose name left the map.
+_COMPOSITE_SECRET_SUFFIX = {SERVER_MAP_KEY: ".auth_token", ARMS_KEY: ".api_key"}
+
+
 def _loc_to_key(ns: str, loc: tuple[Any, ...]) -> str:
     return f"{ns}." + ".".join(str(p) for p in loc if not isinstance(p, int))
 
@@ -79,7 +97,8 @@ class SettingsService:
         (see ``server_map``); they are merged back into the ``core.mcp.servers``
         map here, so every caller downstream — the worker's ``Settings``, the
         probes, ``runtime_config`` — sees one map with the tokens in place and
-        never has to know the storage was split.
+        never has to know the storage was split. The per-arm frontier API keys
+        (see ``frontier_arms``) are stored and merged the same way.
         """
         out: dict[str, Any] = {}
         for row in await self._rows():
@@ -95,37 +114,54 @@ class SettingsService:
                     continue
             else:
                 out[row.key] = row.value
-        return merge_server_secrets(out)
+        return merge_arm_secrets(merge_server_secrets(out))
 
     async def values(self) -> dict[str, ValueInfo]:
         index = catalog_index()
         rows = {r.key: r for r in await self._rows()}
-        env_core = Settings()
+        core_defaults = build_settings({})
         core_paths = [e.path for e in index.values() if e.namespace == "core"]
-        core_env = flatten_leaves(env_core, core_paths)
+        core_defaults_by_path = flatten_leaves(core_defaults, core_paths)
         out: dict[str, ValueInfo] = {}
         for key, entry in index.items():
             row = rows.get(key)
             if entry.namespace == "core":
-                env_value = core_env[entry.path]
+                default_value = core_defaults_by_path[entry.path]
+            elif entry.path in API_DEFAULTS:
+                # Task 2: editable api.* leaves no longer live on APISettings
+                # (and so no longer come from the environment) -- their
+                # fallback is the catalog default table instead.
+                raw = API_DEFAULTS[entry.path]
+                default_value = raw.get_secret_value() if hasattr(raw, "get_secret_value") else raw
             else:
                 raw = getattr(api_settings, entry.path)
-                env_value = raw.get_secret_value() if hasattr(raw, "get_secret_value") else raw
+                default_value = raw.get_secret_value() if hasattr(raw, "get_secret_value") else raw
             if entry.key == SERVER_MAP_KEY:
-                stored_map: Any = row.value if row is not None else env_value
-                shown = self._masked_server_map(dict(stored_map or {}), env_core.mcp.servers, rows)
-                src = (
-                    "ui"
-                    if row is not None
-                    else effective_source(
-                        overridden=False, env_value=env_value, default_value=entry.default
-                    )
+                stored_map: Any = row.value if row is not None else default_value
+                shown = self._masked_server_map(
+                    dict(stored_map or {}), core_defaults.mcp.servers, rows
                 )
+                src = "ui" if row is not None else effective_source(overridden=False)
                 out[key] = ValueInfo(
                     shown,
                     None,
                     None,
                     src,
+                    row.updated_at if row is not None else None,
+                    row.updated_by if row is not None else None,
+                )
+                continue
+            if entry.key == ARMS_KEY:
+                # Same split as the server map: the composite row never holds a
+                # key, each set one is its own encrypted row, and what the
+                # editor shows is the mask -- which ``split_arm_secrets`` reads
+                # back as "leave the row alone".
+                stored_arms: Any = row.value if row is not None else default_value
+                out[key] = ValueInfo(
+                    masked_arms(dict(stored_arms or {}), rows),
+                    None,
+                    None,
+                    "ui" if row is not None else effective_source(overridden=False),
                     row.updated_at if row is not None else None,
                     row.updated_by if row is not None else None,
                 )
@@ -150,14 +186,15 @@ class SettingsService:
                     )
                 else:
                     # No row: whatever the secret's effective value is comes
-                    # straight from the environment. For a core secret,
-                    # `core_env` was built from `Settings().model_dump(mode=
-                    # "json")`, and pydantic's default SecretStr JSON dump
-                    # masks any non-empty secret to the literal "**********" --
-                    # useless for a hint. Read the live Settings instance by
-                    # attribute instead and unwrap SecretStr directly.
+                    # from the model default. For a core secret,
+                    # `core_defaults` was built from `build_settings({})
+                    # .model_dump(mode="json")`, and pydantic's default
+                    # SecretStr JSON dump masks any non-empty secret to the
+                    # literal "**********" -- useless for a hint. Read the
+                    # live Settings instance by attribute instead and unwrap
+                    # SecretStr directly.
                     if entry.namespace == "core":
-                        obj: Any = env_core
+                        obj: Any = core_defaults
                         for part in entry.path.split("."):
                             obj = getattr(obj, part)
                         plain = (
@@ -166,10 +203,8 @@ class SettingsService:
                             else (obj or "")
                         )
                     else:
-                        plain = env_value or ""
-                    src = effective_source(
-                        overridden=False, env_value=bool(plain), default_value=False
-                    )
+                        plain = default_value or ""
+                    src = effective_source(overridden=False)
                     out[key] = ValueInfo(
                         None,
                         bool(plain),
@@ -182,29 +217,30 @@ class SettingsService:
             if row is not None:
                 out[key] = ValueInfo(row.value, None, None, "ui", row.updated_at, row.updated_by)
             else:
-                # Ruling: a read-only (API_READONLY) entry shows its live
-                # environment value, not the code default -- an operator
-                # needs to see what is actually in effect. URL-shaped values
-                # go through the same credential mask the catalog's default
-                # uses, so a password never reaches the response either way.
-                shown = env_value if entry.editable else _masked(entry.path, env_value)
-                src = effective_source(
-                    overridden=False, env_value=env_value, default_value=entry.default
-                )
+                # A read-only (API_READONLY) entry shows what is actually in
+                # effect: for a core leaf, the model default resolved through
+                # build_settings({}) above; for an api.* leaf, its live
+                # bootstrap value (``getattr(api_settings, entry.path)`` --
+                # APISettings is still process-environment-only by design,
+                # Task 1). URL-shaped values go through the same credential
+                # mask the catalog's default uses, so a password never
+                # reaches the response either way.
+                shown = default_value if entry.editable else _masked(entry.path, default_value)
+                src = effective_source(overridden=False)
                 out[key] = ValueInfo(shown, None, None, src)
         return out
 
     def _masked_server_map(
-        self, stored_map: dict[str, Any], env_servers: dict[str, Any], rows: dict[str, Any]
+        self, stored_map: dict[str, Any], default_servers: dict[str, Any], rows: dict[str, Any]
     ) -> dict[str, Any]:
         """The map as the UI may see it: every token a mask, never a value.
 
         ``auth_token_source`` rides along beside it for the same reason every
-        other row carries ``source``: "set in .env" and "set from the UI" are
-        different facts, and an operator deciding whether to type a new token
-        needs to know which one they are looking at. The editor sends the mask
-        straight back for an unchanged field, and ``split_server_secrets``
-        reads that as "leave the row alone".
+        other row carries ``source``: "set from the UI" and "the built-in
+        default" are different facts, and an operator deciding whether to
+        type a new token needs to know which one they are looking at. The
+        editor sends the mask straight back for an unchanged field, and
+        ``split_server_secrets`` reads that as "leave the row alone".
         """
         out: dict[str, Any] = {}
         for name, entry in stored_map.items():
@@ -212,10 +248,18 @@ class SettingsService:
             if server_token_key(name) in rows:
                 shown["auth_token"], shown["auth_token_source"] = TOKEN_MASK, "ui"
             else:
-                env_entry = env_servers.get(name)
-                from_env = bool(env_entry is not None and env_entry.auth_token.get_secret_value())
-                shown["auth_token"] = TOKEN_MASK if from_env else ""
-                shown["auth_token_source"] = "env" if from_env else "default"
+                # No built-in server ships with a non-empty default
+                # auth_token today, so has_default_token is always False in
+                # practice and this always shows "" -- kept as a real check
+                # rather than a hardcoded "" so a future built-in server that
+                # does ship one still masks correctly instead of silently
+                # showing empty.
+                default_entry = default_servers.get(name)
+                has_default_token = bool(
+                    default_entry is not None and default_entry.auth_token.get_secret_value()
+                )
+                shown["auth_token"] = TOKEN_MASK if has_default_token else ""
+                shown["auth_token_source"] = "default"
             out[name] = shown
         return out
 
@@ -229,8 +273,6 @@ class SettingsService:
                 errors[key] = "unknown setting"
             elif not entry.editable:
                 errors[key] = entry.reason or "read-only"
-            elif entry.secret and changes[key] is not None and not box.is_available():
-                errors[key] = "secrets cannot be stored: SETTINGS_ENCRYPTION_KEY is not set"
         if errors:
             raise SettingsValidationError(errors)
 
@@ -241,11 +283,21 @@ class SettingsService:
         except ValidationError as exc:
             for err in exc.errors():
                 errors[_loc_to_key("core", err["loc"])] = err["msg"]
-        try:
-            APISettings(**nest(merged_api))
-        except ValidationError as exc:
-            for err in exc.errors():
-                errors[_loc_to_key("api", err["loc"])] = err["msg"]
+        # No ``APISettings(**nest(merged_api))`` here: ``extra="ignore"`` drops
+        # everything a catalog ``api.*`` key could supply (Task 2 moved every
+        # one of them off the model), so the call could only ever have failed
+        # on the process environment -- which bootstrap already validated.
+        # Each editable api leaf is checked against its catalog entry below.
+        index = catalog_index()
+        for name, value in merged_api.items():
+            if name not in API_DEFAULTS:
+                continue
+            entry = index.get(f"api.{name}")
+            if entry is None:
+                continue
+            msg = validate_editable_api_value(entry, value)
+            if msg:
+                errors[f"api.{name}"] = msg
         if errors:
             raise SettingsValidationError(errors)
 
@@ -256,7 +308,11 @@ class SettingsService:
         self.check_keys(changes)
         index = catalog_index()
         current = await self.load_overrides()
-        changes = dict(changes)
+        # An import document carries the mask wherever a secret was omitted.
+        # For a secret leaf the mask means "unchanged", exactly as it does in
+        # a composite editor -- never a credential whose literal characters
+        # are ten asterisks.
+        changes = {k: v for k, v in changes.items() if not (index[k].secret and v == TOKEN_MASK)}
         tokens: dict[str, str | None] = {}
         server_map_kept: set[str] | None = None
         if SERVER_MAP_KEY in changes:
@@ -295,6 +351,34 @@ class SettingsService:
                         }
                     )
                 server_map_kept = set(changes[SERVER_MAP_KEY])
+
+        arm_keys: dict[str, str | None] = {}
+        arms_kept: set[str] | None = None
+        if ARMS_KEY in changes:
+            if changes[ARMS_KEY] is None:
+                # An explicit null drops the override like every other key
+                # (handled below); every per-arm key row goes with it.
+                arms_kept = set()
+            else:
+                stored_arms_map = current.get(ARMS_KEY)
+                changes[ARMS_KEY], arm_keys = split_arm_secrets(
+                    changes[ARMS_KEY],
+                    stored=stored_arms_map if isinstance(stored_arms_map, dict) else None,
+                )
+                unstorable = [
+                    arm_key_key(name)
+                    for name, api_key in arm_keys.items()
+                    if api_key and not box.is_available()
+                ]
+                if unstorable:
+                    raise SettingsValidationError(
+                        {
+                            key: "secrets cannot be stored: SETTINGS_ENCRYPTION_KEY is not set"
+                            for key in unstorable
+                        }
+                    )
+                if isinstance(changes[ARMS_KEY], dict):
+                    arms_kept = set(changes[ARMS_KEY])
 
         from app.services.agent_map import (
             AGENT_DEFINITIONS_KEY,
@@ -358,13 +442,35 @@ class SettingsService:
             result.applies[entry.applies] = result.applies.get(entry.applies, 0) + 1
         if server_map_kept is not None:
             await self._save_server_tokens(tokens, server_map_kept)
+        if arms_kept is not None:
+            await self._save_runtime_secrets(
+                arm_keys, arms_kept, prefix=f"{ARMS_KEY}.", suffix=".api_key", key_of=arm_key_key
+            )
         await self.db.commit()
         details = {"changed": list(changes), "before": before, "after": after}
         await _audit(user_id, "settings.update", details, ip)
         return result
 
     async def _save_server_tokens(self, tokens: dict[str, str | None], kept: set[str]) -> None:
-        """One encrypted row per server that has a token, and none for one that does not.
+        """One encrypted row per server that has a token, and none for one that does not."""
+        await self._save_runtime_secrets(
+            tokens,
+            kept,
+            prefix=f"{SERVER_MAP_KEY}.",
+            suffix=".auth_token",
+            key_of=server_token_key,
+        )
+
+    async def _save_runtime_secrets(
+        self,
+        secrets: dict[str, str | None],
+        kept: set[str],
+        *,
+        prefix: str,
+        suffix: str,
+        key_of: Callable[[str], str],
+    ) -> None:
+        """The encrypted rows behind one composite map, written and pruned.
 
         Runtime-keyed rows: the catalog is a static list and cannot hold a name
         an operator invents, so these are written here rather than through the
@@ -373,26 +479,24 @@ class SettingsService:
         behaviour in ``load_overrides`` — so a rotated key degrades them the
         same way it degrades every other secret.
 
-        ``kept`` is the set of servers the new map still holds; a token row for
-        a server that is gone is deleted with it, so a re-created server never
-        inherits a predecessor's credential.
+        ``kept`` is the set of names the new map still holds; a row for a name
+        that is gone is deleted with it, so a re-created server or frontier arm
+        never inherits a predecessor's credential.
         """
         rows = {r.key: r for r in await self._rows()}
-        prefix = f"{SERVER_MAP_KEY}."
         for key, row in rows.items():
-            if not (key.startswith(prefix) and key.endswith(".auth_token")):
+            if not (key.startswith(prefix) and key.endswith(suffix)):
                 continue
-            name = key[len(prefix) : -len(".auth_token")]
-            if name not in kept:
+            if key[len(prefix) : -len(suffix)] not in kept:
                 await self.db.delete(row)
-        for name, token in tokens.items():
-            key = server_token_key(name)
+        for name, secret in secrets.items():
+            key = key_of(name)
             existing = rows.get(key)
-            if not token:
+            if not secret:
                 if existing is not None:
                     await self.db.delete(existing)
                 continue
-            stored = box.encrypt(token)
+            stored = box.encrypt(secret)
             if existing is None:
                 self.db.add(RuntimeSetting(key=key, value=stored, is_secret=True))
             else:
@@ -402,9 +506,27 @@ class SettingsService:
     async def reset(
         self, keys: list[str], *, user_id: uuid.UUID | None, ip: str | None
     ) -> list[str]:
+        """Drop the stored rows for ``keys``, credentials nested in them included.
+
+        Resetting a composite takes its per-name secret rows with it. Leaving
+        them behind is what ``_save_runtime_secrets`` already refuses to do for
+        a name that leaves the map, and for the same reason: a re-created
+        server or frontier arm of the same name would have a predecessor's
+        credential folded straight back in by ``merge_server_secrets`` /
+        ``merge_arm_secrets``, and ``values()`` would show it as set.
+        """
         rows = {r.key: r for r in await self._rows()}
-        removed = []
+        targets = dict.fromkeys(keys)
         for key in keys:
+            suffix = _COMPOSITE_SECRET_SUFFIX.get(key)
+            if suffix is None:
+                continue
+            prefix = f"{key}."
+            targets.update(
+                dict.fromkeys(k for k in rows if k.startswith(prefix) and k.endswith(suffix))
+            )
+        removed = []
+        for key in targets:
             if key in rows:
                 await self.db.delete(rows[key])
                 removed.append(key)
@@ -431,3 +553,54 @@ async def load_core_overrides(db: AsyncSession) -> dict[str, Any]:
     """For the worker: core paths without the namespace prefix."""
     overrides = await SettingsService(db).load_overrides()
     return {split_key(k)[1]: v for k, v in overrides.items() if k.startswith("core.")}
+
+
+class _CoreSettingsCache:
+    """Short-TTL cache of ``build_settings(await load_core_overrides(db))``.
+
+    Mirrors ``app.runtime_config.RuntimeConfig``'s TTL cache, but for the one
+    whole core ``Settings`` object a request-path handler needs (the sandbox
+    upload size/format gates today -- see ``effective_core_settings``) rather
+    than a single ``api.*`` knob. A request handler must never build this from
+    the store on every call: that would be a DB round trip per request for a
+    value that changes only when an admin saves a setting.
+    """
+
+    def __init__(
+        self, ttl_seconds: float = 5.0, clock: Callable[[], float] = time.monotonic
+    ) -> None:
+        self._ttl = ttl_seconds
+        self._clock = clock
+        self._cached: Settings | None = None
+        self._loaded_at: float | None = None
+
+    async def get(self, db: AsyncSession) -> Settings:
+        now = self._clock()
+        if (
+            self._cached is not None
+            and self._loaded_at is not None
+            and now - self._loaded_at < self._ttl
+        ):
+            return self._cached
+        self._cached = build_settings(await load_core_overrides(db))
+        self._loaded_at = now
+        return self._cached
+
+    def invalidate(self) -> None:
+        self._cached = None
+        self._loaded_at = None
+
+
+core_settings_cache = _CoreSettingsCache()
+
+
+async def effective_core_settings(db: AsyncSession) -> Settings:
+    """The application's core settings as they stand right now: store overrides
+    over model defaults, cached for a few seconds so a request-path handler
+    (e.g. an upload route reading ``sandbox.upload.*``) does not read the
+    database on every request. ``core_settings_cache.invalidate()`` is called
+    from the same PATCH/DELETE routes that already invalidate
+    ``runtime_config`` (``app.api.v1.settings``), so a saved override is
+    visible within one TTL window either way.
+    """
+    return await core_settings_cache.get(db)

@@ -13,10 +13,8 @@ import AgentDefinitionsEditor, {
 } from "./AgentDefinitionsEditor";
 import ProfilesEditor from "./ProfilesEditor";
 import ServerMapEditor from "./ServerMapEditor";
-import { APPLIES_LABEL } from "./vocabulary";
+import { APPLIES_LABEL, SOURCE_LABEL } from "./vocabulary";
 import { Widget } from "./widgets";
-
-const SOURCE: Record<string, string> = { default: "default", env: "env", ui: "ui" };
 
 /** Types whose control is short enough to sit beside the title. Everything
  *  else — lists, JSON, and every composite editor — drops below it. */
@@ -256,17 +254,21 @@ export default function FieldRow({
       {!guide && (
         <div className="flex items-center gap-2 flex-wrap mt-0.5">
           <CopyKeyButton settingKey={entry.key} />
-          <span
-            className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${
-              source === "ui"
-                ? "bg-accent/20 text-accent-strong"
-                : source === "env"
-                  ? "bg-status-orange/10 text-status-orange"
+          {/* A read-only row carries no source badge: its value comes from the
+              deployment environment, and "DEFAULT" says the opposite of that.
+              The `reason` line under the description is what names the source
+              for these rows (walkthrough finding W4). */}
+          {entry.editable && (
+            <span
+              className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${
+                source === "ui"
+                  ? "bg-accent/20 text-accent-strong"
                   : "bg-border text-text-muted"
-            }`}
-          >
-            {SOURCE[source]}
-          </span>
+              }`}
+            >
+              {SOURCE_LABEL[source]}
+            </span>
+          )}
           <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-border text-text-muted">
             {APPLIES_LABEL[entry.applies]}
           </span>

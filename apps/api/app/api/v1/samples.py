@@ -36,6 +36,7 @@ from app.models.user import User
 from app.runtime_config import runtime_config
 from app.schemas.job import SampleListResponse, SampleResponse
 from app.services import audit
+from app.services.settings_service import effective_core_settings
 
 logger = get_logger("api.samples")
 
@@ -279,8 +280,9 @@ async def upload_sample(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
 
         detected_mime = _detect_mime(tmp_path)
-        if settings.upload_allowed_mime_types:
-            allowed = set(settings.upload_allowed_mime_types)
+        allowed_mime_types = await runtime_config.get("upload_allowed_mime_types")
+        if allowed_mime_types:
+            allowed = set(allowed_mime_types)
             if detected_mime is not None and detected_mime not in allowed:
                 logger.warning("Upload rejected: MIME %s not in allow-list", detected_mime)
                 raise HTTPException(
@@ -567,7 +569,12 @@ async def delete_sample(
 
         from app.worker import sample_files
 
-        for removed in sample_files.remove_for_sha(sha256):
+        mirror_dir = None
+        try:
+            mirror_dir = (await effective_core_settings(db)).static.r2.mirror_dir
+        except Exception as exc:  # noqa: BLE001 - cleanup must not fail the delete
+            logger.warning("Could not read the mirror directory setting: %s", exc)
+        for removed in sample_files.remove_for_sha(sha256, mirror_dir=mirror_dir):
             logger.info("Removed local copy %s", removed, extra={"sample_id": str(sample_id)})
 
     logger.info(

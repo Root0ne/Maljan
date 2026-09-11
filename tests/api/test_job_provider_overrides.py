@@ -74,11 +74,10 @@ def test_omitting_the_keys_leaves_todays_payload_untouched():
     assert req.config == {"max_iterations": 2}
 
 
-def test_the_choice_shows_up_in_the_settings_snapshot(monkeypatch):
-    # The dev box's own .env may point sandbox.provider at a live backend;
-    # pin the untouched leg to its documented default so the assertion is
-    # about the override, not this box's local configuration.
-    monkeypatch.setenv("SANDBOX__PROVIDER", "mock")
+def test_the_choice_shows_up_in_the_settings_snapshot():
+    # Task 3: build_job_settings is store-only, so the dev box's own .env
+    # (which may point sandbox.provider at a live backend) never reaches it
+    # -- the untouched leg is always the model default ("mock").
     from app.worker.analysis_worker import build_job_settings, settings_snapshot
 
     snap = settings_snapshot(build_job_settings({}, {"static_provider": "capa_yara"}))

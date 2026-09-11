@@ -186,7 +186,7 @@ export const MOCK_API_KEY = {
  * shapes in "negotiation" (plain int, a second int pre-seeded with a `"ui"`
  * source in `MOCK_SETTINGS_VALUES` below so per-row / group reset visibility
  * — shown only for a `"ui"`-sourced value — has something to contrast
- * against the `"default"`/`"env"` rows that must not show it, an
+ * against the `"default"` rows that must not show it, an
  * `advanced: true` int also `"ui"`-sourced so the "Advanced" fold has a
  * reason to default open, and a `list` field defaulting to `[]` for
  * `ListWidget` coverage), one secret in
@@ -198,7 +198,6 @@ export const MOCK_API_KEY = {
  * "mcp_servers"`).
  */
 export const MOCK_SETTINGS_SCHEMA = {
-  secrets_available: true,
   groups: [
     {
       key: "negotiation",
@@ -611,7 +610,7 @@ export const MOCK_SETTINGS_VALUES = {
       value: null,
       is_set: true,
       hint: "1234",
-      source: "env",
+      source: "ui",
       updated_at: null,
       updated_by: null,
     },
@@ -724,7 +723,7 @@ export const MOCK_SETTINGS_VALUES = {
           enabled: true, transport: "stdio", command: "python",
           args: ["services/threatintel-mcp/server.py"], env: {}, cwd: "services/threatintel-mcp",
           env_allow: ["VIRUSTOTAL_API_KEY", "ABUSEIPDB_API_KEY"], url: "",
-          auth_token: "**********", auth_token_source: "env",
+          auth_token: "**********", auth_token_source: "ui",
           tool_selection: "dynamic", use_all_tools: false, tools: null,
           agents: ["judge"], label: "Threat intel MCP",
         },
@@ -829,7 +828,6 @@ export const MOCK_SETTINGS_VALUES = {
  * "Providers" (the three ollama fields), never a combined count on one.
  */
 export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
-  secrets_available: true,
   groups: [
     {
       key: "llm",
@@ -1205,10 +1203,10 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
   ],
 };
 
-function unset(source: "default" | "env" | "ui" = "default"): {
+function unset(source: "default" | "ui" = "default"): {
   is_set: null;
   hint: null;
-  source: "default" | "env" | "ui";
+  source: "default" | "ui";
   updated_at: null;
   updated_by: null;
 } {
@@ -1467,10 +1465,27 @@ export async function installApiMocks(
   await page.route("**/api/v1/settings/export", (route) =>
     route.fulfill({
       status: 200,
-      contentType: "text/plain",
-      body: "CORE_NEGOTIATION_RETRY_DELAY=10\n",
+      contentType: "application/json",
+      headers: { "content-disposition": "attachment; filename=maljan-settings.json" },
+      body: JSON.stringify({
+        format: "maljan-settings/1",
+        exported_at: "2026-08-01T00:00:00Z",
+        values: { "core.negotiation.retry_delay": 10 },
+        secrets_omitted: ["core.llm.openai.api_key"],
+      }),
     })
   );
+  // A spec that wants a 422 (an unsupported format, an unknown/read-only
+  // key) overrides this with its own `page.route(...)`, same as every other
+  // mutating settings route.
+  await page.route("**/api/v1/settings/import", (route) => {
+    const body = route.request().postDataJSON() as {
+      format: string;
+      values: Record<string, unknown>;
+    };
+    const keys = Object.keys(body.values ?? {});
+    return json(route, { applied: keys, applies: { next_job: keys.length } });
+  });
   await page.route("**/api/v1/settings/test/*", (route) =>
     json(route, { ok: true, latency_ms: 42, detail: "mock probe ok", models: null, tools: null })
   );
