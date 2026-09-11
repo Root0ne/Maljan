@@ -62,8 +62,9 @@ export default function SecretField({
   onCancel: () => void;
   labels?: { replace?: string };
   /** Wording a caller's own contract pins, in place of the computed line: the
-   *  tool-server token says where it comes from (`set in .env`) rather than
-   *  `set · …hint · source`, and that text is asserted by the servers spec. */
+   *  tool-server token says where it comes from (`set from the UI`) rather
+   *  than `set · …hint · source`, and that text is asserted by the servers
+   *  spec. */
   statusText?: string;
   /** Attributes for the element the status line is rendered in, so a caller
    *  can keep a hook it already published — `data-token-state` on the server
