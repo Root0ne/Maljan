@@ -540,8 +540,8 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # Mock-mode resolution (audit 2026-05-17: W-01 permanent fix).
             # Two independent toggles must agree before the pipeline runs
             # in mock mode:
-            #   1. ``settings.mock_mode_allowed`` — operator-level gate
-            #      (defaults False; must be flipped via API config).
+            #   1. ``api.mock_mode_allowed`` — operator-level gate
+            #      (defaults False; must be flipped via the settings store).
             #   2. Either the per-job ``config.mock_mode`` flag OR the
             #      ``MALJAN_MOCK_MODE`` env var.
             # A leaked env var alone is no longer sufficient — production
@@ -555,7 +555,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             if _mock_requested and not _mock_active:
                 logger.warning(
                     "Pipeline mock requested (env=%s, job=%s) but blocked: "
-                    "settings.mock_mode_allowed=False. Running real pipeline.",
+                    "api.mock_mode_allowed=False. Running real pipeline.",
                     _env_mock,
                     _job_mock,
                 )

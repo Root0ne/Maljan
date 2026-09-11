@@ -16,6 +16,7 @@ from jose import JWTError, jwt
 from pydantic import SecretStr
 
 from app.config import settings
+from app.runtime_config import runtime_config
 
 
 def _secret() -> str:
@@ -53,9 +54,16 @@ def _encode_headers() -> dict[str, str]:
 
 
 def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
-    """Create a JWT access token."""
+    """Create a JWT access token.
+
+    The expiry minutes come from ``runtime_config.get_cached`` rather than a
+    static setting (Task 2): this function stays sync because both a sync
+    and an async caller create tokens, so the async login/refresh route reads
+    ``runtime_config.get(...)`` once beforehand to warm the cache.
+    """
     expire = datetime.now(UTC) + (
-        expires_delta or timedelta(minutes=settings.jwt_access_token_expire_minutes)
+        expires_delta
+        or timedelta(minutes=runtime_config.get_cached("jwt_access_token_expire_minutes"))
     )
     payload = {**data, **_base_claims("access", expire)}
     return cast(
@@ -75,7 +83,9 @@ def create_refresh_token(data: dict) -> tuple[str, str]:
     Callers should persist the ``jti`` so they can later detect reuse and
     rotate the token at the next ``/auth/refresh`` request.
     """
-    expire = datetime.now(UTC) + timedelta(days=settings.jwt_refresh_token_expire_days)
+    expire = datetime.now(UTC) + timedelta(
+        days=runtime_config.get_cached("jwt_refresh_token_expire_days")
+    )
     claims = _base_claims("refresh", expire)
     payload = {**data, **claims}
     token = cast(

@@ -23,6 +23,7 @@ from redis.asyncio import Redis
 
 from app.config import settings as api_settings
 from app.services.server_map import TOKEN_MASK as _TOKEN_MASK
+from app.services.settings_catalog_api import API_DEFAULTS
 
 TIMEOUT = 10.0
 
@@ -996,6 +997,10 @@ async def run_probe(name: str, values: dict[str, Any], stored: dict[str, Any]) -
             for part in path.split("."):
                 cursor = getattr(cursor, part)
             resolved[short] = _unwrap(cursor)
+        elif path in API_DEFAULTS:
+            # Task 2: editable api.* leaves no longer live on APISettings;
+            # their probe-time default comes from the catalog table instead.
+            resolved[short] = _unwrap(API_DEFAULTS[path])
         else:
             resolved[short] = _unwrap(getattr(api_settings, path))
     return await in_probe_loop(lambda: probe(resolved))

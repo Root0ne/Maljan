@@ -67,8 +67,11 @@ async def _probe_minio() -> None:
 async def _probe_qdrant() -> None:
     import httpx
 
+    from app.runtime_config import runtime_config
+
+    qdrant_url = await runtime_config.get("qdrant_url")
     async with httpx.AsyncClient(timeout=_PROBE_TIMEOUT_SECONDS) as client:
-        resp = await client.get(f"{settings.qdrant_url.rstrip('/')}/readyz")
+        resp = await client.get(f"{qdrant_url.rstrip('/')}/readyz")
         resp.raise_for_status()
 
 
@@ -275,7 +278,6 @@ def create_app() -> FastAPI:
     app.add_middleware(
         RateLimitMiddleware,
         redis_url=settings.redis_url,
-        whitelist=settings.rate_limit_whitelist,
     )
 
     # ── CORS ─────────────────────────────────────────────────

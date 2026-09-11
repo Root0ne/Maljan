@@ -36,6 +36,7 @@ from app.database import get_db
 from app.deps import get_current_user
 from app.logging_config import get_logger
 from app.models.user import User
+from app.runtime_config import runtime_config
 from app.schemas.auth import (
     TokenResponse,
     UserLoginRequest,
@@ -54,6 +55,11 @@ REFRESH_COOKIE_PATH = "/api/v1/auth"
 
 
 def _set_refresh_cookie(response: Response, token: str) -> None:
+    # ``get_cached`` returns the value the caller warmed with an ``await
+    # runtime_config.get("jwt_refresh_token_expire_days")`` just beforehand
+    # (see ``login`` / ``refresh_token`` below) — this function itself stays
+    # sync so it can be called from both the response-building code paths.
+    refresh_days = runtime_config.get_cached("jwt_refresh_token_expire_days")
     response.set_cookie(
         REFRESH_COOKIE,
         token,
@@ -61,7 +67,7 @@ def _set_refresh_cookie(response: Response, token: str) -> None:
         samesite="lax",
         secure=bool(settings.cookie_secure),
         path=REFRESH_COOKIE_PATH,
-        max_age=settings.jwt_refresh_token_expire_days * 86400,
+        max_age=refresh_days * 86400,
     )
 
 
@@ -194,6 +200,13 @@ async def login(
 
     await clear_login_throttle(body.email)
 
+    # Warm runtime_config's sync cache before create_access_token /
+    # create_refresh_token read it via get_cached() — those two stay sync
+    # because they are also called from non-async paths, so the one place
+    # that can await a settings read does it here, once per issuance.
+    await runtime_config.get("jwt_access_token_expire_minutes")
+    await runtime_config.get("jwt_refresh_token_expire_days")
+
     token_data = {"sub": str(user.id)}
     refresh, jti = create_refresh_token(token_data)
     await refresh_token_register(str(user.id), jti)
@@ -266,6 +279,9 @@ async def refresh_token(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found or deactivated",
         )
+
+    await runtime_config.get("jwt_access_token_expire_minutes")
+    await runtime_config.get("jwt_refresh_token_expire_days")
 
     token_data = {"sub": str(user.id)}
     new_refresh, new_jti = create_refresh_token(token_data)

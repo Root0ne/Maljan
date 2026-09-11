@@ -32,7 +32,12 @@ from app.services.server_map import (
     server_token_key,
     split_server_secrets,
 )
-from app.services.settings_catalog_api import _masked, catalog_index
+from app.services.settings_catalog_api import (
+    API_DEFAULTS,
+    _masked,
+    catalog_index,
+    validate_editable_api_value,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +113,12 @@ class SettingsService:
             row = rows.get(key)
             if entry.namespace == "core":
                 env_value = core_env[entry.path]
+            elif entry.path in API_DEFAULTS:
+                # Task 2: editable api.* leaves no longer live on APISettings
+                # (and so no longer come from the environment) -- their
+                # fallback is the catalog default table instead.
+                raw = API_DEFAULTS[entry.path]
+                env_value = raw.get_secret_value() if hasattr(raw, "get_secret_value") else raw
             else:
                 raw = getattr(api_settings, entry.path)
                 env_value = raw.get_secret_value() if hasattr(raw, "get_secret_value") else raw
@@ -242,10 +253,23 @@ class SettingsService:
             for err in exc.errors():
                 errors[_loc_to_key("core", err["loc"])] = err["msg"]
         try:
+            # ``extra="ignore"`` means this silently skips every leaf that
+            # Task 2 moved off APISettings; the fields that remain on the
+            # model (db_pool_size and friends) are still validated here.
             APISettings(**nest(merged_api))
         except ValidationError as exc:
             for err in exc.errors():
                 errors[_loc_to_key("api", err["loc"])] = err["msg"]
+        index = catalog_index()
+        for name, value in merged_api.items():
+            if name not in API_DEFAULTS:
+                continue
+            entry = index.get(f"api.{name}")
+            if entry is None:
+                continue
+            msg = validate_editable_api_value(entry, value)
+            if msg:
+                errors[f"api.{name}"] = msg
         if errors:
             raise SettingsValidationError(errors)
 

@@ -104,7 +104,7 @@ async def refresh_token_register(user_id: str, jti: str) -> None:
     if r is None:
         return
     key = _REFRESH_KEY.format(user_id=user_id, jti=jti)
-    ttl = settings.jwt_refresh_token_expire_days * 86400
+    ttl = await runtime_config.get("jwt_refresh_token_expire_days") * 86400
     try:
         await r.set(key, "1", ex=ttl)
     except Exception as exc:  # noqa: BLE001

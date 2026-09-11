@@ -279,8 +279,9 @@ async def upload_sample(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
 
         detected_mime = _detect_mime(tmp_path)
-        if settings.upload_allowed_mime_types:
-            allowed = set(settings.upload_allowed_mime_types)
+        allowed_mime_types = await runtime_config.get("upload_allowed_mime_types")
+        if allowed_mime_types:
+            allowed = set(allowed_mime_types)
             if detected_mime is not None and detected_mime not in allowed:
                 logger.warning("Upload rejected: MIME %s not in allow-list", detected_mime)
                 raise HTTPException(
