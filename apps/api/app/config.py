@@ -33,7 +33,7 @@ _PLACEHOLDER_MINIO_KEYS = {"minioadmin", ""}
 # this repository, so nothing outside a test run may ever receive it: the
 # substitution is gated on ``_is_test_env`` and ``validate_bootstrap`` reads
 # the environment rather than the substituted field.
-TEST_JWT_SECRET = "test-secret-do-not-use-in-prod-0123456789ab"
+TEST_JWT_SECRET = "pytest-only-jwt-secret-00000000000000000000"
 
 
 def _is_test_env() -> bool:

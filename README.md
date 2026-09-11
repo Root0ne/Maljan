@@ -679,7 +679,7 @@ setting**, edited from the web UI, not the environment.
 for the full, commented list; the short version:
 
 ```bash
-DATABASE_URL=postgresql+asyncpg://maljan:maljan_dev@localhost:5432/maljan
+DATABASE_URL=postgresql+asyncpg://maljan:<postgres-password>@localhost:5432/maljan
 REDIS_URL=redis://localhost:6379/0
 MINIO_ENDPOINT=localhost:9000
 MINIO_ACCESS_KEY=minioadmin
