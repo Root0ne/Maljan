@@ -116,6 +116,53 @@ def test_export_of_the_server_map_strips_the_token_mask(client):
     assert "core.mcp.servers.custom.auth_token" in body["secrets_omitted"]
 
 
+def test_export_of_the_frontier_arms_strips_every_arm_key(client):
+    """W2/W3: each arm's ``api_key`` reaches ``values()`` as the mask, and the
+    export must carry neither it nor the mask -- a re-import would otherwise
+    configure ten asterisks as the arm's credential."""
+    fake = {
+        "core.llm.frontier.arms": ValueInfo(
+            {
+                "glm": {"base_url": "https://f", "model": "m", "api_key": "**********"},
+                "free": {"base_url": "https://g", "model": "n", "api_key": None},
+            },
+            None,
+            None,
+            "ui",
+        ),
+    }
+    with patch("app.api.v1.settings.SettingsService.values", AsyncMock(return_value=fake)):
+        r = client.get("/api/v1/settings/export")
+    body = r.json()
+    arms = body["values"]["core.llm.frontier.arms"]
+    assert "api_key" not in arms["glm"]
+    assert arms["glm"]["model"] == "m"
+    assert arms["free"]["api_key"] is None
+    assert body["secrets_omitted"] == ["core.llm.frontier.arms.glm.api_key"]
+    assert "**********" not in r.text
+
+
+def test_export_strips_a_mask_nested_at_any_depth(client):
+    """Defence in depth: the sanitiser is not a list of known secret leaves.
+
+    A composite that grows a new credential field is covered the day it is
+    added rather than the day someone remembers to extend the export.
+    """
+    fake = {
+        "core.mcp.servers": ValueInfo(
+            {"custom": {"nested": {"deeper": [{"secret": "**********"}]}}},
+            None,
+            None,
+            "ui",
+        ),
+    }
+    with patch("app.api.v1.settings.SettingsService.values", AsyncMock(return_value=fake)):
+        r = client.get("/api/v1/settings/export")
+    body = r.json()
+    assert body["values"]["core.mcp.servers"]["custom"]["nested"]["deeper"][0] == {}
+    assert body["secrets_omitted"] == ["core.mcp.servers.custom.nested.deeper.0.secret"]
+
+
 def test_export_is_admin_only():
     r = TestClient(_app(UserRole.ANALYST)).get("/api/v1/settings/export")
     assert r.status_code == 403

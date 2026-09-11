@@ -192,3 +192,38 @@ async def test_an_api_editable_env_var_is_imported(tmp_path, encryption_key, no_
     added = [call.args[0] for call in db.add.call_args_list]
     row = next(r for r in added if getattr(r, "key", None) == "api.login_max_attempts")
     assert row.value == 3
+
+
+@pytest.mark.asyncio
+async def test_frontier_arm_keys_are_imported_as_encrypted_rows(
+    tmp_path, encryption_key, no_op_audit
+):
+    """W3: the arm map row must never carry a key, in clear or as the mask."""
+    env_file = _env_file(
+        tmp_path,
+        [
+            "LLM__FRONTIER__ARMS__GLM__MODEL=glm-4",
+            "LLM__FRONTIER__ARMS__GLM__API_KEY=sk-real",
+            "LLM__FRONTIER__ARMS__GLM__BASE_URL=https://f",
+        ],
+    )
+    legacy_core = Settings(_env_file=env_file)
+    legacy_api = LegacyAPIView(_env_file=env_file)
+    db = make_db()
+
+    keys = await run_legacy_import(db, legacy_core=legacy_core, legacy_api=legacy_api)
+
+    added = [call.args[0] for call in db.add.call_args_list]
+    composite = next(r for r in added if getattr(r, "key", None) == "core.llm.frontier.arms")
+    assert composite.is_secret is False
+    assert "api_key" not in composite.value["glm"]
+
+    key_row = next(
+        r for r in added if getattr(r, "key", None) == "core.llm.frontier.arms.glm.api_key"
+    )
+    assert key_row.is_secret is True
+    assert box.decrypt(key_row.value) == "sk-real"
+    assert "core.llm.frontier.arms.glm.api_key" in keys
+    # Never the value, in the audit trail or in the composite row.
+    assert "sk-real" not in str(no_op_audit)
+    assert "sk-real" not in str(composite.value)

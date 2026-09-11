@@ -214,11 +214,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     from app.database import async_session_factory
     from app.models.settings_meta import SettingsMeta
-    from app.services.legacy_env_import import MARKER_KEY, run_legacy_import
+    from app.services.legacy_env_import import (
+        MARKER_KEY,
+        repair_frontier_arm_keys,
+        run_legacy_import,
+    )
 
     try:
         async with async_session_factory() as _legacy_session:
             imported_keys = await run_legacy_import(_legacy_session)
+            # W3: an earlier import left per-arm frontier API keys in clear
+            # inside the composite row. Idempotent, and a no-op on a store
+            # that never held one.
+            await repair_frontier_arm_keys(_legacy_session)
             # The marker is immutable once written (see the module docstring),
             # so this one read -- whether this call just wrote it or found it
             # already there -- is all ``/health`` will ever need; cached below

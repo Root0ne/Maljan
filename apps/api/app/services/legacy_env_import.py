@@ -43,6 +43,7 @@ from app.logging_config import get_logger
 from app.models import RuntimeSetting
 from app.models.settings_meta import SettingsMeta
 from app.services import audit
+from app.services.frontier_arms import ARMS_KEY, arm_key_key, split_arm_secrets
 from app.services.settings_catalog_api import (
     API_DEFAULTS,
     catalog_index,
@@ -99,6 +100,24 @@ class LegacyAPIView(BaseSettings):
 
 def _unwrap(value: Any) -> Any:
     return value.get_secret_value() if hasattr(value, "get_secret_value") else value
+
+
+def _arms_with_keys(model: Settings) -> dict[str, Any]:
+    """The frontier arms as JSON, with each arm's real ``api_key`` in place.
+
+    ``flatten_leaves`` dumps the map through ``model_dump(mode="json")``, which
+    masks every non-empty ``SecretStr`` -- fine for "is this set", useless as a
+    value to import, and actively wrong to store (walkthrough finding W3: the
+    masks were what the old import left behind, beside real keys in clear).
+    The keys read here are split back out by ``split_arm_secrets`` and stored
+    encrypted, one row per arm.
+    """
+    out: dict[str, Any] = {}
+    for name, arm in (model.llm.frontier.arms or {}).items():
+        entry = arm.model_dump(mode="json")
+        entry["api_key"] = _unwrap(arm.api_key) if arm.api_key is not None else None
+        out[name] = entry
+    return out
 
 
 def _plain_leaf(model: Any, dotted_path: str) -> Any:
@@ -158,6 +177,9 @@ async def run_legacy_import(
             if entry.secret:
                 legacy_value = _plain_leaf(legacy_core, entry.path)
                 default_value = _plain_leaf(default_core, entry.path)
+            elif entry.key == ARMS_KEY:
+                legacy_value = _arms_with_keys(legacy_core)
+                default_value = _arms_with_keys(default_core)
             else:
                 legacy_value = legacy_core_flat[entry.path]
                 default_value = default_core_flat[entry.path]
@@ -169,6 +191,21 @@ async def run_legacy_import(
 
         if legacy_value == default_value:
             continue
+
+        if entry.key == ARMS_KEY:
+            # Per-arm keys never enter the composite row; each becomes its own
+            # encrypted row, exactly as an arm saved from the UI does.
+            legacy_value, arm_keys = split_arm_secrets(legacy_value)
+            for arm_name, api_key in arm_keys.items():
+                row_key = arm_key_key(arm_name)
+                if not api_key or row_key in existing_keys:
+                    continue
+                rows.append(
+                    RuntimeSetting(
+                        key=row_key, value=box.encrypt(api_key), is_secret=True, updated_by=None
+                    )
+                )
+                keys.append(row_key)
 
         if entry.namespace == "core":
             try:
@@ -214,3 +251,50 @@ async def run_legacy_import(
             details={"keys": keys, "count": len(keys), "skipped_invalid": skipped_invalid},
         )
     return keys
+
+
+async def repair_frontier_arm_keys(db: AsyncSession) -> int:
+    """Move any clear-text arm API key out of the composite row, once.
+
+    Walkthrough finding W3: the ``core.llm.frontier.arms`` row an earlier
+    import wrote is plain JSONB with each arm's ``api_key`` inside it --
+    ``is_secret=false``, never through the Fernet box, sitting in the database
+    in clear beside values the UI echoes back. This moves every such key into
+    its own encrypted ``core.llm.frontier.arms.<arm>.api_key`` row and rewrites
+    the composite without them.
+
+    Idempotent: a composite that carries no ``api_key`` field is left alone, so
+    a second start does nothing. An arm that already has its own row keeps it
+    (whatever the operator saved wins). Only the count is logged, never a key.
+    """
+    row = (
+        await db.execute(select(RuntimeSetting).where(RuntimeSetting.key == ARMS_KEY))
+    ).scalar_one_or_none()
+    if row is None or not isinstance(row.value, dict):
+        return 0
+
+    cleaned, arm_keys = split_arm_secrets(row.value)
+    if cleaned == row.value:
+        return 0
+
+    existing_keys = {r[0] for r in (await db.execute(select(RuntimeSetting.key))).all()}
+    to_store = {
+        arm_key_key(name): api_key
+        for name, api_key in arm_keys.items()
+        if api_key and arm_key_key(name) not in existing_keys
+    }
+    if to_store and not box.is_available():
+        # Rewriting the composite now would destroy the only copy of a key
+        # that cannot yet be encrypted; leave everything as it is and say so.
+        logger.warning(
+            "Frontier arm API keys are stored in clear but SETTINGS_ENCRYPTION_KEY "
+            "is unusable; the repair will run again on the next start."
+        )
+        return 0
+
+    for key, api_key in to_store.items():
+        db.add(RuntimeSetting(key=key, value=box.encrypt(str(api_key)), is_secret=True))
+    row.value = cleaned
+    await db.commit()
+    logger.info("Frontier arm API keys moved into encrypted rows: %d", len(to_store))
+    return len(to_store)

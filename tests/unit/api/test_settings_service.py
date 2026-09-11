@@ -278,3 +278,31 @@ async def test_save_rejects_values_the_pipeline_could_not_use():
             ip=None,
         )
     assert set(exc.value.errors) == {"core.llm.provider", "core.negotiation.max_iterations"}
+
+
+@pytest.mark.asyncio
+async def test_the_mask_for_a_secret_leaf_means_unchanged(key):
+    """An import document carries the mask wherever a secret was omitted.
+
+    Storing it would set the credential to ten literal asterisks; the key is
+    dropped from the change set instead, so the stored row survives untouched.
+    """
+    from app.services.server_map import TOKEN_MASK
+
+    stored = RuntimeSetting(
+        key="core.llm.openai.api_key",
+        value=svc.box.encrypt("sk-real"),
+        is_secret=True,
+    )
+    db = make_db([stored])
+    service = svc.SettingsService(db)
+    service.load_overrides = AsyncMock(return_value={})  # type: ignore[method-assign]
+
+    result = await service.save(
+        {"core.llm.openai.api_key": TOKEN_MASK, "core.llm.provider": "anthropic"},
+        user_id=None,
+        ip=None,
+    )
+
+    assert result.applied == ["core.llm.provider"]
+    assert svc.box.decrypt(stored.value) == "sk-real"
