@@ -84,7 +84,8 @@ export default function ImportDialog({ onClose }: { onClose: () => void }) {
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
       const active = document.activeElement;
-      if (e.shiftKey ? active === first || !panelRef.current.contains(active) : active === last) {
+      const outside = !panelRef.current.contains(active);
+      if (e.shiftKey ? active === first || outside : active === last || outside) {
         e.preventDefault();
         (e.shiftKey ? last : first).focus();
       }
