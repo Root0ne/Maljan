@@ -22,8 +22,6 @@ environment in one command, and where the design record is kept.
 | `tests/evaluation/` | The measured corpus, its per-sample artefacts and the scripts that recompute the paper's numbers. Treated as read-only by feature work. |
 | `data/` | Tracked knowledge assets. Loaded lazily, cached per path, each degrading to a built-in fallback when absent. |
 | `docker/` | The Dockerfiles and the compose stack, production plus a development overlay. |
-| `docs/specs/` | One design document per sub-project: the problem, the decisions and the invariants, approved before implementation. |
-| `docs/plans/` | One implementation plan per design: tasks, exact commands, verification. |
 | `docs/assets/` | The images the top-level README embeds. |
 
 ## One-command setup
@@ -46,16 +44,8 @@ make migrate     # apply the API's Alembic migrations; run it after a pull that 
 
 ## The design record
 
-Read the spec before the plan, and the plan before the code. Specs are approved
-designs; plans are the task-by-task execution of one spec; both are kept as
-written, including the paths they named at the time.
-
-- `docs/specs/2026-09-02-runtime-settings-design.md` and `docs/plans/2026-09-02-runtime-settings.md`
-- `docs/specs/2026-09-03-provider-layer-design.md` and `docs/plans/2026-09-03-provider-layer.md`
-- `docs/specs/2026-09-03-security-hardening-design.md` and `docs/plans/2026-09-03-security-hardening.md`
-- `docs/specs/2026-09-04-tool-servers-design.md` and `docs/plans/2026-09-04-tool-servers.md`
-- `docs/specs/2026-09-05-agent-composition-design.md` and `docs/plans/2026-09-05-agent-composition.md`
-- `docs/specs/2026-09-06-repository-layout-design.md` and `docs/plans/2026-09-06-repository-layout.md`
+The specs and plans that once lived under `docs/specs/`, `docs/plans/` and
+`docs/superpowers/` are retired from the working tree; find them with `git log -- docs/plans docs/specs docs/superpowers`.
 
 The top-level `README.md` is the product-facing document: what Maljan does, how
 to run it and how it is configured. This file is the repository-facing one.
