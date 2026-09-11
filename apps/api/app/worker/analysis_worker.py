@@ -59,7 +59,7 @@ def attached_report_stmt(report_id: uuid.UUID, sample_id: uuid.UUID) -> Select[A
 def build_job_settings(
     overrides: dict[str, Any], job_config: dict[str, Any] | None
 ) -> _CoreSettings:
-    """UI overrides layered over the environment, then the job's own config on top.
+    """UI overrides layered over the model defaults, then the job's own config on top.
 
     The job's values are folded into the override dict rather than assigned
     afterwards, so the model's Literal choices and bounds apply to them too
@@ -468,11 +468,12 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 extra={"job_id": job_id, "component": "pipeline"},
             )
 
-            # Build this job's Settings from env + any stored UI overrides
-            # (UI > env > default; see settings_overrides.build_settings),
-            # then the job's own config on top. A DB error loading overrides
-            # must not fail the job -- fall back to env-only settings and
-            # say so, without ever logging a secret value.
+            # Build this job's Settings from any stored UI overrides plus
+            # model defaults (UI > default; see settings_overrides.
+            # build_settings -- the environment is not a layer here), then
+            # the job's own config on top. A DB error loading overrides must
+            # not fail the job -- fall back to default-only settings and say
+            # so, without ever logging a secret value.
             from maljan.core.config import install_settings
 
             from app.services.settings_service import load_core_overrides
@@ -482,7 +483,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             except Exception as exc:  # noqa: BLE001 — overrides are best-effort
                 logger.warning(
                     "Failed to load runtime setting overrides (%s); "
-                    "running job %s on environment settings only.",
+                    "running job %s on default settings only.",
                     type(exc).__name__,
                     job_id,
                     extra={"job_id": job_id},
@@ -494,7 +495,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 # Stored overrides that validated when saved can stop validating
                 # after a deploy narrows a field, and two orphan rows can nest
                 # into a conflict. One job must not take the queue down: run on
-                # environment settings, name the fields.
+                # default settings, name the fields.
                 bad = (
                     sorted({".".join(str(x) for x in e["loc"]) for e in exc.errors()})
                     if isinstance(exc, ValidationError)
@@ -515,8 +516,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     # stored override (the API validates it at submit time,
                     # but a row written another way still reaches here).
                     logger.warning(
-                        "Job %s config rejected by the model; "
-                        "running on environment settings only.",
+                        "Job %s config rejected by the model; running on default settings only.",
                         job_id,
                         extra={"job_id": job_id},
                     )

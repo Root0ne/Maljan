@@ -53,9 +53,9 @@ async def _effective_servers(db: AsyncSession) -> list[str]:
     servers = stored.get("core.mcp.servers")
     if isinstance(servers, dict) and servers:
         return list(servers)
-    from maljan.core.config import Settings
+    from maljan.core.settings_overrides import build_settings
 
-    return list(Settings().mcp.servers)
+    return list(build_settings({}).mcp.servers)
 
 
 async def _effective_agents(db: AsyncSession) -> tuple[list[str], list[str]]:

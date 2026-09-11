@@ -477,11 +477,9 @@ async def run_mcp_probe(server: str, values: dict[str, Any], stored: dict[str, A
     stored_map = stored_candidate if isinstance(stored_candidate, dict) else {}
     staged_map = staged_candidate if isinstance(staged_candidate, dict) else {}
     if server not in stored_map and server not in staged_map:
-        # Fall back to the effective settings: a built-in the operator has
+        # Fall back to the default settings: a built-in the operator has
         # never edited has no stored row at all.
-        from maljan.core.config import Settings
-
-        effective = Settings().mcp.servers
+        effective = build_settings({}).mcp.servers
         if server not in effective:
             available = (
                 ", ".join(sorted(set(stored_map) | set(staged_map) | set(effective))) or "(none)"

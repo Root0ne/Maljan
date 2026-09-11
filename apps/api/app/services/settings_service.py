@@ -9,7 +9,6 @@ from datetime import datetime
 from typing import Any
 
 from maljan.core import settings_secrets as box
-from maljan.core.config import Settings
 from maljan.core.settings_overrides import (
     build_settings,
     effective_source,
@@ -105,33 +104,29 @@ class SettingsService:
     async def values(self) -> dict[str, ValueInfo]:
         index = catalog_index()
         rows = {r.key: r for r in await self._rows()}
-        env_core = Settings()
+        core_defaults = build_settings({})
         core_paths = [e.path for e in index.values() if e.namespace == "core"]
-        core_env = flatten_leaves(env_core, core_paths)
+        core_defaults_by_path = flatten_leaves(core_defaults, core_paths)
         out: dict[str, ValueInfo] = {}
         for key, entry in index.items():
             row = rows.get(key)
             if entry.namespace == "core":
-                env_value = core_env[entry.path]
+                default_value = core_defaults_by_path[entry.path]
             elif entry.path in API_DEFAULTS:
                 # Task 2: editable api.* leaves no longer live on APISettings
                 # (and so no longer come from the environment) -- their
                 # fallback is the catalog default table instead.
                 raw = API_DEFAULTS[entry.path]
-                env_value = raw.get_secret_value() if hasattr(raw, "get_secret_value") else raw
+                default_value = raw.get_secret_value() if hasattr(raw, "get_secret_value") else raw
             else:
                 raw = getattr(api_settings, entry.path)
-                env_value = raw.get_secret_value() if hasattr(raw, "get_secret_value") else raw
+                default_value = raw.get_secret_value() if hasattr(raw, "get_secret_value") else raw
             if entry.key == SERVER_MAP_KEY:
-                stored_map: Any = row.value if row is not None else env_value
-                shown = self._masked_server_map(dict(stored_map or {}), env_core.mcp.servers, rows)
-                src = (
-                    "ui"
-                    if row is not None
-                    else effective_source(
-                        overridden=False, env_value=env_value, default_value=entry.default
-                    )
+                stored_map: Any = row.value if row is not None else default_value
+                shown = self._masked_server_map(
+                    dict(stored_map or {}), core_defaults.mcp.servers, rows
                 )
+                src = "ui" if row is not None else effective_source(overridden=False)
                 out[key] = ValueInfo(
                     shown,
                     None,
@@ -161,14 +156,15 @@ class SettingsService:
                     )
                 else:
                     # No row: whatever the secret's effective value is comes
-                    # straight from the environment. For a core secret,
-                    # `core_env` was built from `Settings().model_dump(mode=
-                    # "json")`, and pydantic's default SecretStr JSON dump
-                    # masks any non-empty secret to the literal "**********" --
-                    # useless for a hint. Read the live Settings instance by
-                    # attribute instead and unwrap SecretStr directly.
+                    # from the model default. For a core secret,
+                    # `core_defaults` was built from `build_settings({})
+                    # .model_dump(mode="json")`, and pydantic's default
+                    # SecretStr JSON dump masks any non-empty secret to the
+                    # literal "**********" -- useless for a hint. Read the
+                    # live Settings instance by attribute instead and unwrap
+                    # SecretStr directly.
                     if entry.namespace == "core":
-                        obj: Any = env_core
+                        obj: Any = core_defaults
                         for part in entry.path.split("."):
                             obj = getattr(obj, part)
                         plain = (
@@ -177,10 +173,8 @@ class SettingsService:
                             else (obj or "")
                         )
                     else:
-                        plain = env_value or ""
-                    src = effective_source(
-                        overridden=False, env_value=bool(plain), default_value=False
-                    )
+                        plain = default_value or ""
+                    src = effective_source(overridden=False)
                     out[key] = ValueInfo(
                         None,
                         bool(plain),
@@ -193,29 +187,27 @@ class SettingsService:
             if row is not None:
                 out[key] = ValueInfo(row.value, None, None, "ui", row.updated_at, row.updated_by)
             else:
-                # Ruling: a read-only (API_READONLY) entry shows its live
-                # environment value, not the code default -- an operator
-                # needs to see what is actually in effect. URL-shaped values
-                # go through the same credential mask the catalog's default
-                # uses, so a password never reaches the response either way.
-                shown = env_value if entry.editable else _masked(entry.path, env_value)
-                src = effective_source(
-                    overridden=False, env_value=env_value, default_value=entry.default
-                )
+                # A read-only (API_READONLY) entry shows its live default
+                # value -- an operator needs to see what is actually in
+                # effect. URL-shaped values go through the same credential
+                # mask the catalog's default uses, so a password never
+                # reaches the response either way.
+                shown = default_value if entry.editable else _masked(entry.path, default_value)
+                src = effective_source(overridden=False)
                 out[key] = ValueInfo(shown, None, None, src)
         return out
 
     def _masked_server_map(
-        self, stored_map: dict[str, Any], env_servers: dict[str, Any], rows: dict[str, Any]
+        self, stored_map: dict[str, Any], default_servers: dict[str, Any], rows: dict[str, Any]
     ) -> dict[str, Any]:
         """The map as the UI may see it: every token a mask, never a value.
 
         ``auth_token_source`` rides along beside it for the same reason every
-        other row carries ``source``: "set in .env" and "set from the UI" are
-        different facts, and an operator deciding whether to type a new token
-        needs to know which one they are looking at. The editor sends the mask
-        straight back for an unchanged field, and ``split_server_secrets``
-        reads that as "leave the row alone".
+        other row carries ``source``: "set from the UI" and "the built-in
+        default" are different facts, and an operator deciding whether to
+        type a new token needs to know which one they are looking at. The
+        editor sends the mask straight back for an unchanged field, and
+        ``split_server_secrets`` reads that as "leave the row alone".
         """
         out: dict[str, Any] = {}
         for name, entry in stored_map.items():
@@ -223,10 +215,12 @@ class SettingsService:
             if server_token_key(name) in rows:
                 shown["auth_token"], shown["auth_token_source"] = TOKEN_MASK, "ui"
             else:
-                env_entry = env_servers.get(name)
-                from_env = bool(env_entry is not None and env_entry.auth_token.get_secret_value())
-                shown["auth_token"] = TOKEN_MASK if from_env else ""
-                shown["auth_token_source"] = "env" if from_env else "default"
+                default_entry = default_servers.get(name)
+                has_default_token = bool(
+                    default_entry is not None and default_entry.auth_token.get_secret_value()
+                )
+                shown["auth_token"] = TOKEN_MASK if has_default_token else ""
+                shown["auth_token_source"] = "default"
             out[name] = shown
         return out
 
@@ -254,8 +248,9 @@ class SettingsService:
                 errors[_loc_to_key("core", err["loc"])] = err["msg"]
         try:
             # ``extra="ignore"`` means this silently skips every leaf that
-            # Task 2 moved off APISettings; the fields that remain on the
-            # model (db_pool_size and friends) are still validated here.
+            # Task 2 moved off APISettings; the ``db_*`` pool settings stayed
+            # on the model (deployment-shaped, not store-editable through the
+            # catalog) and are still validated here.
             APISettings(**nest(merged_api))
         except ValidationError as exc:
             for err in exc.errors():

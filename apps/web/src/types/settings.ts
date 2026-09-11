@@ -86,8 +86,8 @@ export interface McpServerEntry {
    *  alone"; sending a new string replaces it; sending `null` clears it. */
   auth_token: string;
   /** Where the effective token comes from, reported the way every other
-   *  row's `source` is: a UI-saved secret row, `.env`, or nothing set. */
-  auth_token_source: "ui" | "env" | "default";
+   *  row's `source` is: a UI-saved secret row, or the built-in default. */
+  auth_token_source: "ui" | "default";
   tool_selection: string;
   use_all_tools: boolean;
   tools: string[] | null;
@@ -161,7 +161,7 @@ export interface SettingValue {
   value: unknown;
   is_set: boolean | null;
   hint: string | null;
-  source: "default" | "env" | "ui";
+  source: "default" | "ui";
   updated_at: string | null;
   updated_by: string | null;
 }
