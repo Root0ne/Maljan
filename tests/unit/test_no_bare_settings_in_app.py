@@ -60,7 +60,8 @@ _ALLOWED_FILES = {
 # ``get_settings()``-call check -- so that call, wherever it is imported
 # from, is never flagged as the core one by mistake.
 _IMPORTS_CORE_GET_SETTINGS = re.compile(
-    r"from maljan\.core\.config import[^\n]*\bget_settings\b|core\.config\.get_settings"
+    r"from maljan\.core\.config import(?:[^\n]*|\s*\([^)]*)\bget_settings\b"
+    r"|core\.config\.get_settings"
 )
 _BARE_GET_SETTINGS_CALL = re.compile(r"\bget_settings\(\)")
 

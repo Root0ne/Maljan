@@ -569,8 +569,12 @@ async def delete_sample(
 
         from app.worker import sample_files
 
-        core = await effective_core_settings(db)
-        for removed in sample_files.remove_for_sha(sha256, mirror_dir=core.static.r2.mirror_dir):
+        mirror_dir = None
+        try:
+            mirror_dir = (await effective_core_settings(db)).static.r2.mirror_dir
+        except Exception as exc:  # noqa: BLE001 - cleanup must not fail the delete
+            logger.warning("Could not read the mirror directory setting: %s", exc)
+        for removed in sample_files.remove_for_sha(sha256, mirror_dir=mirror_dir):
             logger.info("Removed local copy %s", removed, extra={"sample_id": str(sample_id)})
 
     logger.info(
