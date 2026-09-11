@@ -11,6 +11,7 @@ from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import select
 
 from app.config import get_settings, settings
 from app.logging_config import get_logger, setup_logging
@@ -100,6 +101,34 @@ async def _probe_components() -> dict[str, dict[str, Any]]:
 
     results = await asyncio.gather(*(_run(n, f) for n, f in probes.items()))
     return dict(results)
+
+
+async def _config_readiness() -> dict[str, str]:
+    """The three facts ``/health`` reports about configuration state.
+
+    ``bootstrap`` and ``encryption`` are static "ok" here: the process
+    already passed ``require_bootstrap`` (which checks both) before it could
+    ever start serving this endpoint, so there is nothing left to probe.
+    ``legacy_import`` is the one fact that can only be known by asking the
+    database, hence the one cheap ``SELECT`` -- reported as ``"unknown"``
+    rather than failing the request when that read itself fails.
+    """
+    from app.database import async_session_factory
+    from app.models.settings_meta import SettingsMeta
+    from app.services.legacy_env_import import MARKER_KEY
+
+    legacy_import = "unknown"
+    try:
+        async with async_session_factory() as session:
+            marker = (
+                await session.execute(select(SettingsMeta).where(SettingsMeta.key == MARKER_KEY))
+            ).scalar_one_or_none()
+        marker_value = marker.value if marker is not None else None
+        imported = marker_value.get("imported", 0) if isinstance(marker_value, dict) else 0
+        legacy_import = "done" if imported > 0 else "not-needed"
+    except Exception as exc:  # noqa: BLE001 — reported as data, never a 500
+        logger.warning("Could not read the legacy-import marker: %s", exc)
+    return {"bootstrap": "ok", "encryption": "ok", "legacy_import": legacy_import}
 
 
 @asynccontextmanager
@@ -194,6 +223,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "Skipping Alembic auto-upgrade (run_migrations_on_startup=False). "
             "Run `alembic upgrade head` from your deploy pipeline instead."
         )
+
+    from app.database import async_session_factory
+    from app.services.legacy_env_import import run_legacy_import
+
+    try:
+        async with async_session_factory() as _legacy_session:
+            imported = await run_legacy_import(_legacy_session)
+        if imported:
+            logger.info("Legacy configuration import: %d key(s)", len(imported))
+        else:
+            logger.debug("Legacy configuration import: %d key(s)", 0)
+    except Exception:
+        # Best effort, like the audit trail: the marker is only written on
+        # success, so a failure here just means the next start tries again --
+        # it must never take an otherwise-healthy API down.
+        logger.exception("Legacy configuration import failed")
 
     if settings.auth_disabled:
         try:
@@ -351,6 +396,7 @@ def create_app() -> FastAPI:
             "status": "healthy",
             "service": settings.app_name,
             "version": settings.app_version,
+            "config": await _config_readiness(),
         }
         if not deep:
             return body
