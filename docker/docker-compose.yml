@@ -151,10 +151,9 @@ services:
   # -────────────────────────────────────────────
   # A fresh stack has an empty database, and the API does not migrate on
   # startup (RUN_MIGRATIONS_ON_STARTUP stays false: a multi-replica deployment
-  # must not have every replica racing the same upgrade). Without this step the
-  # settings_meta table never exists, so the one-time legacy import fails on
-  # every start and /health reports configuration readiness as "unknown"
-  # forever. Runs to completion once; api and worker wait for its exit code.
+  # must not have every replica racing the same upgrade). Without this step no
+  # table the API reads exists and every request fails until someone migrates
+  # by hand. Runs to completion once; api and worker wait for its exit code.
   migrate:
     <<: *backend-image
     container_name: maljan-migrate

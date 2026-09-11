@@ -17,6 +17,7 @@ import pytest
 from cryptography.fernet import Fernet
 
 from app.models import RuntimeSetting
+from app.services.composite_secrets import repair_frontier_arm_keys
 from app.services.frontier_arms import (
     ARMS_KEY,
     arm_key_key,
@@ -24,7 +25,6 @@ from app.services.frontier_arms import (
     merge_arm_secrets,
     split_arm_secrets,
 )
-from app.services.legacy_env_import import repair_frontier_arm_keys
 from app.services.server_map import TOKEN_MASK
 from app.services.settings_service import SettingsService, SettingsValidationError
 from maljan.core import settings_secrets as box

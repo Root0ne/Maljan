@@ -7,9 +7,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 ALLOWED = {
-    "src/maljan/core/config.py",  # the alias table
+    "src/maljan/core/config.py",  # the read-only compatibility view on MCPConfig
     "src/maljan/providers/static/ghidra.py",
     "src/maljan/providers/sandbox/cape2.py",
+    # A released migration carries its own frozen copy of the 2026-09-03 renames.
+    "apps/api/alembic/versions/20260903000000_rename_provider_setting_keys.py",
 }
 
 

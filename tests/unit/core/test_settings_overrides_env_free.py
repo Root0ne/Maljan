@@ -5,8 +5,7 @@ for the application. ``build_settings`` is the one construction path the
 application (API, worker) may use -- see
 ``tests/unit/test_no_bare_settings_in_app.py`` for the architecture guard.
 The bare ``Settings()`` constructor is untouched by this and stays
-environment- and dotenv-capable, which ``test_settings_aliases.py`` and
-``test_generic_server_aliases.py`` already document.
+environment- and dotenv-capable.
 """
 
 from __future__ import annotations

@@ -288,7 +288,7 @@ def _server(**over):
 @pytest.mark.asyncio
 async def test_the_repair_moves_a_clear_token_into_an_encrypted_row(encryption_key):
     from app.models import RuntimeSetting
-    from app.services.legacy_env_import import repair_server_auth_tokens
+    from app.services.composite_secrets import repair_server_auth_tokens
 
     row = RuntimeSetting(
         key="core.mcp.servers", value={"x": _server(auth_token="tok-real")}, is_secret=False
@@ -316,7 +316,7 @@ async def test_the_repair_never_strips_a_token_it_did_not_store(encryption_key, 
     without a word would hand a job the literal bearer token.
     """
     from app.models import RuntimeSetting
-    from app.services.legacy_env_import import repair_server_auth_tokens
+    from app.services.composite_secrets import repair_server_auth_tokens
 
     row = RuntimeSetting(
         key="core.mcp.servers", value={"generic": _server(auth_token=TOKEN_MASK)}, is_secret=False
@@ -336,7 +336,7 @@ async def test_the_repair_never_strips_a_token_it_did_not_store(encryption_key, 
 @pytest.mark.asyncio
 async def test_the_server_repair_is_idempotent(encryption_key):
     from app.models import RuntimeSetting
-    from app.services.legacy_env_import import repair_server_auth_tokens
+    from app.services.composite_secrets import repair_server_auth_tokens
 
     row = RuntimeSetting(key="core.mcp.servers", value={"x": _server()}, is_secret=False)
     db = _RepairDB(row)
@@ -350,7 +350,7 @@ async def test_the_server_repair_is_idempotent(encryption_key):
 async def test_the_server_repair_leaves_the_row_alone_without_an_encryption_key(monkeypatch):
     monkeypatch.delenv(box.ENV_VAR, raising=False)
     from app.models import RuntimeSetting
-    from app.services.legacy_env_import import repair_server_auth_tokens
+    from app.services.composite_secrets import repair_server_auth_tokens
 
     row = RuntimeSetting(
         key="core.mcp.servers", value={"x": _server(auth_token="tok-real")}, is_secret=False

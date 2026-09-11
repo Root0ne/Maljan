@@ -4,15 +4,11 @@ Task 3 of the env-free configuration work makes the environment stop being a
 layer for the application: the API and the worker build their core settings
 through ``build_settings`` (store overrides + model defaults only), never
 through a bare ``Settings()``/``Settings(_env_file=...)``/``APISettings()``
-call. Two places are allowed to construct bare regardless:
+call. One place is allowed to construct bare regardless:
 
 - ``apps/api/app/config.py`` -- the lazy ``APISettings()`` singleton
   (``get_settings()``'s memoised factory); it is process-environment-only by
   design (Task 1) and is not the core-settings path this task narrows.
-- ``apps/api/app/services/legacy_env_import.py`` (landed in Task 4) -- the
-  one-shot import of the legacy ``.env`` into the store; it necessarily
-  constructs a bare, environment-reading ``Settings``/``LegacyAPIView`` to do
-  that.
 
 The check is bare-call-only (``Settings()``, ``Settings(_env_file=...)``,
 ``APISettings()``) so a kwargs construction does not trip it -- that is
@@ -63,7 +59,6 @@ def _constructs_bare_settings(text: str) -> bool:
 
 _ALLOWED_FILES = {
     "config.py",
-    "services/legacy_env_import.py",
 }
 
 # A file matches this only when it actually names *the core module's*
