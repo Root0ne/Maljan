@@ -9,7 +9,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-maljan}
       POSTGRES_USER: ${POSTGRES_USER:-maljan}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-maljan_dev}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in docker/.env (see README)}
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
     volumes:
@@ -138,6 +138,34 @@ services:
       start_period: 60s
 
   # -────────────────────────────────────────────
+  # Migrations — one-shot Alembic upgrade, before api and worker
+  # -────────────────────────────────────────────
+  # A fresh stack has an empty database, and the API does not migrate on
+  # startup (RUN_MIGRATIONS_ON_STARTUP stays false: a multi-replica deployment
+  # must not have every replica racing the same upgrade). Without this step the
+  # settings_meta table never exists, so the one-time legacy import fails on
+  # every start and /health reports configuration readiness as "unknown"
+  # forever. Runs to completion once; api and worker wait for its exit code.
+  migrate:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend
+    container_name: maljan-migrate
+    restart: "no"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-maljan}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in docker/.env (see README)}@postgres:5432/${POSTGRES_DB:-maljan}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set JWT_SECRET_KEY in docker/.env}
+      SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:?set SETTINGS_ENCRYPTION_KEY in docker/.env}
+    volumes:
+      - ../src:/app/src
+      - ../apps:/app/apps
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: >
+      uv run --directory apps/api alembic upgrade head
+
+  # -────────────────────────────────────────────
   # Backend API — FastAPI application server
   # -────────────────────────────────────────────
   backend-api:
@@ -151,7 +179,7 @@ services:
     # servers, Qdrant access, rate limits, ...) lives in the settings store
     # and is edited from Settings -> Configuration, not passed as env.
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-maljan}:${POSTGRES_PASSWORD:-maljan_dev}@postgres:5432/${POSTGRES_DB:-maljan}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-maljan}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in docker/.env (see README)}@postgres:5432/${POSTGRES_DB:-maljan}
       REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in docker/.env}@redis:6379/0
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in docker/.env}
@@ -184,6 +212,8 @@ services:
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${API_PORT:-8000}:8000"
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -192,6 +222,15 @@ services:
         condition: service_started
       ghidra-mcp:
         condition: service_healthy
+    # The worker waits on this: the API's lifespan runs the one-time legacy
+    # configuration import, and a job taken before it finishes would run on
+    # catalog defaults instead of the operator's configuration.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     command: >
       uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
@@ -210,7 +249,7 @@ services:
     # passed as env. The allocator/embedding knobs below are process-level
     # tuning outside the settings catalog and stay here.
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-maljan}:${POSTGRES_PASSWORD:-maljan_dev}@postgres:5432/${POSTGRES_DB:-maljan}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-maljan}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in docker/.env (see README)}@postgres:5432/${POSTGRES_DB:-maljan}
       REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in docker/.env}@redis:6379/0
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in docker/.env}
@@ -272,6 +311,10 @@ services:
       # discards it.
       - attck_cache:/root/.cache/maljan
     depends_on:
+      migrate:
+        condition: service_completed_successfully
+      backend-api:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       redis:

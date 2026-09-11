@@ -168,16 +168,17 @@ cp docker/.env.example docker/.env
 #   GHIDRA_MCP_AUTH_TOKEN     bearer token the ghidra-mcp container requires
 #   REDIS_PASSWORD            --requirepass on the redis container
 #   QDRANT_API_KEY            QDRANT__SERVICE__API_KEY on the qdrant container
+#   POSTGRES_PASSWORD         the database password compose builds DATABASE_URL from
 #   MINIO_ROOT_USER            MinIO root account (also MINIO_ACCESS_KEY for the API)
 #   MINIO_ROOT_PASSWORD        MinIO root password (also MINIO_SECRET_KEY for the API)
 #   SETTINGS_ENCRYPTION_KEY   encrypts secrets in the settings store
 #   JWT_SECRET_KEY            signs API session tokens
-# Generate the three infrastructure secrets and the MinIO password:
-python -c "import secrets; [print(f'{k}={secrets.token_urlsafe(32)}') for k in ('GHIDRA_MCP_AUTH_TOKEN','REDIS_PASSWORD','QDRANT_API_KEY','MINIO_ROOT_PASSWORD')]"
+# Generate the infrastructure secrets, the database and the MinIO password:
+python -c "import secrets; [print(f'{k}={secrets.token_urlsafe(32)}') for k in ('GHIDRA_MCP_AUTH_TOKEN','REDIS_PASSWORD','QDRANT_API_KEY','POSTGRES_PASSWORD','MINIO_ROOT_PASSWORD')]"
 # pick a MINIO_ROOT_USER of your own, and generate the two application secrets:
 python -c "from cryptography.fernet import Fernet; print('SETTINGS_ENCRYPTION_KEY=' + Fernet.generate_key().decode())"
 python -c "import secrets; print('JWT_SECRET_KEY=' + secrets.token_hex(32))"
-# paste all six into docker/.env.
+# paste all seven into docker/.env.
 #
 # Every published port binds to BIND_ADDRESS, which docker/.env.example
 # defaults to 127.0.0.1 — the stack is unreachable from the network unless
@@ -187,13 +188,21 @@ python -c "import secrets; print('JWT_SECRET_KEY=' + secrets.token_hex(32))"
 # The ghidra-mcp image is built from external/, which git does not carry
 make external
 
-# If host port 5432 is already taken, publish Postgres elsewhere and point
-# DATABASE_URL at the same port
+# If host port 5432 is already taken, publish Postgres elsewhere. This changes
+# only the host-side publish: DATABASE_URL is assembled by compose and always
+# targets postgres:5432 inside the network.
 export POSTGRES_PORT=5433
 
-# Start all 8 services
+# Start the stack. The one-shot `migrate` service runs `alembic upgrade head`
+# against a healthy Postgres first, and the api and worker services wait for
+# it to finish: the API does not migrate on startup, and without the schema
+# the one-time configuration import has nowhere to record that it ran.
 cd docker
 docker compose up -d --build
+
+# A later pull that adds a revision is applied the same way -- the step reruns
+# on the next `up` and exits immediately when there is nothing to apply:
+docker compose up migrate
 
 # Access points (loopback only, per BIND_ADDRESS above)
 # Frontend:      http://localhost:3000
@@ -201,6 +210,12 @@ docker compose up -d --build
 # Ghidra MCP:    http://localhost:8089/check_connection
 # MinIO Console: http://localhost:9001
 ```
+
+Outside compose, apply the same migrations with `make migrate` from the
+repository root. `DATABASE_URL` comes from the process environment only (there
+is no `.env` discovery any more), and the target has to be reachable from the
+host, so keep it in the gitignored `bootstrap.env` the target sources — the
+compose-internal `postgres:5432` will not resolve there.
 
 On a **fresh** deployment, set the Docker-network-only application values from
 Settings → Configuration before relying on Ghidra, CAPE or enrichment — compose

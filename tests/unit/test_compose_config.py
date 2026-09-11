@@ -21,6 +21,7 @@ REQUIRED_ENV = {
     "MINIO_ROOT_PASSWORD": "m" * 32,
     "JWT_SECRET_KEY": "j" * 32,
     "SETTINGS_ENCRYPTION_KEY": "s" * 32,
+    "POSTGRES_PASSWORD": "d" * 32,
 }
 
 
@@ -96,3 +97,42 @@ def test_compose_binds_loopback_and_requires_the_secrets(tmp_path):
         )
         assert result.returncode != 0, var
         assert var in result.stderr, (var, result.stderr)
+
+
+@pytest.mark.skipif(shutil.which("docker") is None, reason="docker not installed")
+def test_migrations_run_once_before_the_api_and_the_worker(tmp_path):
+    """A fresh compose deploy has an empty database and the API does not
+    migrate on startup, so without this step ``settings_meta`` never exists:
+    the one-time legacy import raises on every start and ``/health`` reports
+    configuration readiness as "unknown" forever."""
+    compose_dir = tmp_path / "docker"
+    compose_dir.mkdir()
+    copy = compose_dir / "docker-compose.yml"
+    shutil.copy(ROOT / "docker" / "docker-compose.yml", copy)
+    empty_env = tmp_path / ".env"
+    empty_env.write_text("")
+
+    out = subprocess.run(
+        ["docker", "compose", "--env-file", str(empty_env), "-f", str(copy), "config"],
+        env={**REQUIRED_ENV, "PATH": "/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    config = yaml.safe_load(out)
+
+    migrate = config["services"]["migrate"]
+    assert "alembic upgrade head" in " ".join(migrate["command"])
+    assert migrate["depends_on"]["postgres"]["condition"] == "service_healthy"
+
+    api = config["services"]["backend-api"]
+    worker = config["services"]["backend-worker"]
+    assert api["depends_on"]["migrate"]["condition"] == "service_completed_successfully"
+    assert worker["depends_on"]["migrate"]["condition"] == "service_completed_successfully"
+    # The API's lifespan runs the one-time configuration import; a job taken
+    # before it finishes would run on catalog defaults (final review I4).
+    assert worker["depends_on"]["backend-api"]["condition"] == "service_healthy"
+    assert "/health" in " ".join(api["healthcheck"]["test"])
+    # Migrating on startup stays off: a multi-replica deployment must not have
+    # every replica racing the same upgrade.
+    assert api["environment"]["RUN_MIGRATIONS_ON_STARTUP"] == "false"
