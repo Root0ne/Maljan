@@ -16,16 +16,21 @@ from maljan.core.settings_overrides import (
     build_settings,
     effective_source,
     flatten_leaves,
-    nest,
     split_key,
 )
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import APISettings
 from app.config import settings as api_settings
 from app.models import RuntimeSetting
+from app.services.frontier_arms import (
+    ARMS_KEY,
+    arm_key_key,
+    masked_arms,
+    merge_arm_secrets,
+    split_arm_secrets,
+)
 from app.services.server_map import (
     SERVER_MAP_KEY,
     TOKEN_MASK,
@@ -66,6 +71,12 @@ class SaveResult:
     applies: dict[str, int] = field(default_factory=dict)
 
 
+# The composite catalog leaves whose nested credential is stored as its own
+# runtime-keyed row, and the suffix those rows carry. Resetting the composite
+# resets them; ``save`` prunes the ones whose name left the map.
+_COMPOSITE_SECRET_SUFFIX = {SERVER_MAP_KEY: ".auth_token", ARMS_KEY: ".api_key"}
+
+
 def _loc_to_key(ns: str, loc: tuple[Any, ...]) -> str:
     return f"{ns}." + ".".join(str(p) for p in loc if not isinstance(p, int))
 
@@ -86,7 +97,8 @@ class SettingsService:
         (see ``server_map``); they are merged back into the ``core.mcp.servers``
         map here, so every caller downstream — the worker's ``Settings``, the
         probes, ``runtime_config`` — sees one map with the tokens in place and
-        never has to know the storage was split.
+        never has to know the storage was split. The per-arm frontier API keys
+        (see ``frontier_arms``) are stored and merged the same way.
         """
         out: dict[str, Any] = {}
         for row in await self._rows():
@@ -102,7 +114,7 @@ class SettingsService:
                     continue
             else:
                 out[row.key] = row.value
-        return merge_server_secrets(out)
+        return merge_arm_secrets(merge_server_secrets(out))
 
     async def values(self) -> dict[str, ValueInfo]:
         index = catalog_index()
@@ -135,6 +147,21 @@ class SettingsService:
                     None,
                     None,
                     src,
+                    row.updated_at if row is not None else None,
+                    row.updated_by if row is not None else None,
+                )
+                continue
+            if entry.key == ARMS_KEY:
+                # Same split as the server map: the composite row never holds a
+                # key, each set one is its own encrypted row, and what the
+                # editor shows is the mask -- which ``split_arm_secrets`` reads
+                # back as "leave the row alone".
+                stored_arms: Any = row.value if row is not None else default_value
+                out[key] = ValueInfo(
+                    masked_arms(dict(stored_arms or {}), rows),
+                    None,
+                    None,
+                    "ui" if row is not None else effective_source(overridden=False),
                     row.updated_at if row is not None else None,
                     row.updated_by if row is not None else None,
                 )
@@ -246,8 +273,6 @@ class SettingsService:
                 errors[key] = "unknown setting"
             elif not entry.editable:
                 errors[key] = entry.reason or "read-only"
-            elif entry.secret and changes[key] is not None and not box.is_available():
-                errors[key] = "secrets cannot be stored: SETTINGS_ENCRYPTION_KEY is not set"
         if errors:
             raise SettingsValidationError(errors)
 
@@ -258,15 +283,11 @@ class SettingsService:
         except ValidationError as exc:
             for err in exc.errors():
                 errors[_loc_to_key("core", err["loc"])] = err["msg"]
-        try:
-            # ``extra="ignore"`` means this silently skips every leaf that
-            # Task 2 moved off APISettings; the ``db_*`` pool settings stayed
-            # on the model (deployment-shaped, not store-editable through the
-            # catalog) and are still validated here.
-            APISettings(**nest(merged_api))
-        except ValidationError as exc:
-            for err in exc.errors():
-                errors[_loc_to_key("api", err["loc"])] = err["msg"]
+        # No ``APISettings(**nest(merged_api))`` here: ``extra="ignore"`` drops
+        # everything a catalog ``api.*`` key could supply (Task 2 moved every
+        # one of them off the model), so the call could only ever have failed
+        # on the process environment -- which bootstrap already validated.
+        # Each editable api leaf is checked against its catalog entry below.
         index = catalog_index()
         for name, value in merged_api.items():
             if name not in API_DEFAULTS:
@@ -287,7 +308,11 @@ class SettingsService:
         self.check_keys(changes)
         index = catalog_index()
         current = await self.load_overrides()
-        changes = dict(changes)
+        # An import document carries the mask wherever a secret was omitted.
+        # For a secret leaf the mask means "unchanged", exactly as it does in
+        # a composite editor -- never a credential whose literal characters
+        # are ten asterisks.
+        changes = {k: v for k, v in changes.items() if not (index[k].secret and v == TOKEN_MASK)}
         tokens: dict[str, str | None] = {}
         server_map_kept: set[str] | None = None
         if SERVER_MAP_KEY in changes:
@@ -326,6 +351,34 @@ class SettingsService:
                         }
                     )
                 server_map_kept = set(changes[SERVER_MAP_KEY])
+
+        arm_keys: dict[str, str | None] = {}
+        arms_kept: set[str] | None = None
+        if ARMS_KEY in changes:
+            if changes[ARMS_KEY] is None:
+                # An explicit null drops the override like every other key
+                # (handled below); every per-arm key row goes with it.
+                arms_kept = set()
+            else:
+                stored_arms_map = current.get(ARMS_KEY)
+                changes[ARMS_KEY], arm_keys = split_arm_secrets(
+                    changes[ARMS_KEY],
+                    stored=stored_arms_map if isinstance(stored_arms_map, dict) else None,
+                )
+                unstorable = [
+                    arm_key_key(name)
+                    for name, api_key in arm_keys.items()
+                    if api_key and not box.is_available()
+                ]
+                if unstorable:
+                    raise SettingsValidationError(
+                        {
+                            key: "secrets cannot be stored: SETTINGS_ENCRYPTION_KEY is not set"
+                            for key in unstorable
+                        }
+                    )
+                if isinstance(changes[ARMS_KEY], dict):
+                    arms_kept = set(changes[ARMS_KEY])
 
         from app.services.agent_map import (
             AGENT_DEFINITIONS_KEY,
@@ -389,13 +442,35 @@ class SettingsService:
             result.applies[entry.applies] = result.applies.get(entry.applies, 0) + 1
         if server_map_kept is not None:
             await self._save_server_tokens(tokens, server_map_kept)
+        if arms_kept is not None:
+            await self._save_runtime_secrets(
+                arm_keys, arms_kept, prefix=f"{ARMS_KEY}.", suffix=".api_key", key_of=arm_key_key
+            )
         await self.db.commit()
         details = {"changed": list(changes), "before": before, "after": after}
         await _audit(user_id, "settings.update", details, ip)
         return result
 
     async def _save_server_tokens(self, tokens: dict[str, str | None], kept: set[str]) -> None:
-        """One encrypted row per server that has a token, and none for one that does not.
+        """One encrypted row per server that has a token, and none for one that does not."""
+        await self._save_runtime_secrets(
+            tokens,
+            kept,
+            prefix=f"{SERVER_MAP_KEY}.",
+            suffix=".auth_token",
+            key_of=server_token_key,
+        )
+
+    async def _save_runtime_secrets(
+        self,
+        secrets: dict[str, str | None],
+        kept: set[str],
+        *,
+        prefix: str,
+        suffix: str,
+        key_of: Callable[[str], str],
+    ) -> None:
+        """The encrypted rows behind one composite map, written and pruned.
 
         Runtime-keyed rows: the catalog is a static list and cannot hold a name
         an operator invents, so these are written here rather than through the
@@ -404,26 +479,24 @@ class SettingsService:
         behaviour in ``load_overrides`` — so a rotated key degrades them the
         same way it degrades every other secret.
 
-        ``kept`` is the set of servers the new map still holds; a token row for
-        a server that is gone is deleted with it, so a re-created server never
-        inherits a predecessor's credential.
+        ``kept`` is the set of names the new map still holds; a row for a name
+        that is gone is deleted with it, so a re-created server or frontier arm
+        never inherits a predecessor's credential.
         """
         rows = {r.key: r for r in await self._rows()}
-        prefix = f"{SERVER_MAP_KEY}."
         for key, row in rows.items():
-            if not (key.startswith(prefix) and key.endswith(".auth_token")):
+            if not (key.startswith(prefix) and key.endswith(suffix)):
                 continue
-            name = key[len(prefix) : -len(".auth_token")]
-            if name not in kept:
+            if key[len(prefix) : -len(suffix)] not in kept:
                 await self.db.delete(row)
-        for name, token in tokens.items():
-            key = server_token_key(name)
+        for name, secret in secrets.items():
+            key = key_of(name)
             existing = rows.get(key)
-            if not token:
+            if not secret:
                 if existing is not None:
                     await self.db.delete(existing)
                 continue
-            stored = box.encrypt(token)
+            stored = box.encrypt(secret)
             if existing is None:
                 self.db.add(RuntimeSetting(key=key, value=stored, is_secret=True))
             else:
@@ -433,9 +506,27 @@ class SettingsService:
     async def reset(
         self, keys: list[str], *, user_id: uuid.UUID | None, ip: str | None
     ) -> list[str]:
+        """Drop the stored rows for ``keys``, credentials nested in them included.
+
+        Resetting a composite takes its per-name secret rows with it. Leaving
+        them behind is what ``_save_runtime_secrets`` already refuses to do for
+        a name that leaves the map, and for the same reason: a re-created
+        server or frontier arm of the same name would have a predecessor's
+        credential folded straight back in by ``merge_server_secrets`` /
+        ``merge_arm_secrets``, and ``values()`` would show it as set.
+        """
         rows = {r.key: r for r in await self._rows()}
-        removed = []
+        targets = dict.fromkeys(keys)
         for key in keys:
+            suffix = _COMPOSITE_SECRET_SUFFIX.get(key)
+            if suffix is None:
+                continue
+            prefix = f"{key}."
+            targets.update(
+                dict.fromkeys(k for k in rows if k.startswith(prefix) and k.endswith(suffix))
+            )
+        removed = []
+        for key in targets:
             if key in rows:
                 await self.db.delete(rows[key])
                 removed.append(key)

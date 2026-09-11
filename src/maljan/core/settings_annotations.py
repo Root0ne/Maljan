@@ -1,7 +1,9 @@
 """What each setting means, in words a person can act on.
 
-Titles and descriptions were seeded from the comments in ``.env.example`` by
-``scripts/settings/seed_settings_annotations.py`` and then edited. Groups come from
+Titles and descriptions were seeded from the comments in the root ``.env.example``
+(deleted 2026-09-11, when application settings moved into the settings store) by
+``scripts/settings/seed_settings_annotations.py`` and then edited; that script is now
+retired, and a new leaf's title and description are written by hand here. Groups come from
 the key prefix (``group_for``); an entry may override its group. ``applies``
 defaults to ``next_job`` for every core setting. ``probe`` names the
 connection test in apps/api/app/services/settings_probes.py that exercises
@@ -255,10 +257,10 @@ ANNOTATIONS: dict[str, Annotation] = {
     "llm.frontier.arms": {
         "title": "Frontier arms",
         "description": (
-            "Named additional frontier comparison endpoints "
-            "(LLM__FRONTIER__ARMS__<NAME>__...), each with its own model, pricing and "
-            "spend ceiling, used to test a parameter-size series rather than a single "
-            "comparison point. Evaluation only."
+            "Named additional frontier comparison endpoints, each with its own model, "
+            "pricing and spend ceiling, used to test a parameter-size series rather than "
+            "a single comparison point. Each arm's API key is stored encrypted on its own "
+            "and shown here masked. Evaluation only."
         ),
     },
     "llm.frontier.base_url": {

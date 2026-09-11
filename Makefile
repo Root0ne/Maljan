@@ -58,7 +58,10 @@ setup:
 # Applies the API's Alembic migrations to the configured database. The API
 # does not run them on startup unless RUN_MIGRATIONS_ON_STARTUP is set, so
 # run this after every pull that adds a revision under apps/api/alembic/.
+# DATABASE_URL comes from the process environment only (no .env discovery);
+# source bootstrap.env first if you keep it there.
 migrate:
+	set -a; [ -f bootstrap.env ] && . ./bootstrap.env; set +a; \
 	uv run --directory apps/api alembic upgrade head
 
 # The third-party trees, at the refs this project was built and measured
@@ -115,13 +118,21 @@ docker-logs:
 
 # Live source for both: `next dev` for the frontend, watchfiles-supervised arq
 # for the worker. Use this while developing.
+#
+# The bootstrap secrets (JWT_SECRET_KEY, SETTINGS_ENCRYPTION_KEY) still come
+# from docker/.env for compose variable substitution; bootstrap.env (repo
+# root, gitignored) is sourced here too so the same file also covers `make
+# migrate` and any bare host process you run outside Docker.
 dev-up:
+	set -a; [ -f bootstrap.env ] && . ./bootstrap.env; set +a; \
 	docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml up -d
 
 dev-down:
+	set -a; [ -f bootstrap.env ] && . ./bootstrap.env; set +a; \
 	docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml down
 
 dev-logs:
+	set -a; [ -f bootstrap.env ] && . ./bootstrap.env; set +a; \
 	docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml logs -f
 
 # On the production stack, these are the two commands that make an edit real.

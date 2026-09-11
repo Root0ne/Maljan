@@ -116,6 +116,99 @@ def test_export_of_the_server_map_strips_the_token_mask(client):
     assert "core.mcp.servers.custom.auth_token" in body["secrets_omitted"]
 
 
+def test_export_of_the_frontier_arms_strips_every_arm_key(client):
+    """W2/W3: each arm's ``api_key`` reaches ``values()`` as the mask, and the
+    export must carry neither it nor the mask -- a re-import would otherwise
+    configure ten asterisks as the arm's credential."""
+    fake = {
+        "core.llm.frontier.arms": ValueInfo(
+            {
+                "glm": {"base_url": "https://f", "model": "m", "api_key": "**********"},
+                "free": {"base_url": "https://g", "model": "n", "api_key": None},
+            },
+            None,
+            None,
+            "ui",
+        ),
+    }
+    with patch("app.api.v1.settings.SettingsService.values", AsyncMock(return_value=fake)):
+        r = client.get("/api/v1/settings/export")
+    body = r.json()
+    arms = body["values"]["core.llm.frontier.arms"]
+    assert "api_key" not in arms["glm"]
+    assert arms["glm"]["model"] == "m"
+    assert arms["free"]["api_key"] is None
+    assert body["secrets_omitted"] == ["core.llm.frontier.arms.glm.api_key"]
+    assert "**********" not in r.text
+
+
+def test_export_strips_a_mask_nested_at_any_depth(client):
+    """Defence in depth: the sanitiser is not a list of known secret leaves.
+
+    A composite that grows a new credential field is covered the day it is
+    added rather than the day someone remembers to extend the export.
+    """
+    fake = {
+        "core.mcp.servers": ValueInfo(
+            {"custom": {"nested": {"deeper": [{"secret": "**********"}]}}},
+            None,
+            None,
+            "ui",
+        ),
+    }
+    with patch("app.api.v1.settings.SettingsService.values", AsyncMock(return_value=fake)):
+        r = client.get("/api/v1/settings/export")
+    body = r.json()
+    assert body["values"]["core.mcp.servers"]["custom"]["nested"]["deeper"][0] == {}
+    assert body["secrets_omitted"] == ["core.mcp.servers.custom.nested.deeper.0.secret"]
+
+
+def test_export_lists_one_path_per_arm_whose_key_is_stored(client):
+    """Once the repair has written the leaves, ``values()`` masks all four arms
+    and the export names each one it did not carry -- exactly once."""
+    arms = {
+        name: {"base_url": "https://f", "model": name, "api_key": "**********"}
+        for name in ("dsk", "glm", "nim", "or")
+    }
+    fake = {"core.llm.frontier.arms": ValueInfo(arms, None, None, "ui")}
+    with patch("app.api.v1.settings.SettingsService.values", AsyncMock(return_value=fake)):
+        r = client.get("/api/v1/settings/export")
+    body = r.json()
+    assert body["secrets_omitted"] == [
+        f"core.llm.frontier.arms.{name}.api_key" for name in ("dsk", "glm", "nim", "or")
+    ]
+    assert all("api_key" not in arm for arm in body["values"]["core.llm.frontier.arms"].values())
+
+
+def test_export_masks_every_server_env_value(client):
+    """SEC-1: a server's ``env`` map is where its own credential lives, so the
+    export carries the variable names and the mask, never the values; each one
+    is named under ``secrets_omitted`` so an operator can see what is missing."""
+    fake = {
+        "core.mcp.servers": ValueInfo(
+            {
+                "custom": {
+                    "command": "my-mcp",
+                    "env": {"API_TOKEN": "s3cr3t", "MODE": "fast"},
+                }
+            },
+            None,
+            None,
+            "ui",
+        ),
+    }
+    with patch("app.api.v1.settings.SettingsService.values", AsyncMock(return_value=fake)):
+        r = client.get("/api/v1/settings/export")
+    body = r.json()
+    env = body["values"]["core.mcp.servers"]["custom"]["env"]
+    assert env == {"API_TOKEN": "**********", "MODE": "**********"}
+    assert body["secrets_omitted"] == [
+        "core.mcp.servers.custom.env.API_TOKEN",
+        "core.mcp.servers.custom.env.MODE",
+    ]
+    assert "s3cr3t" not in r.text
+
+
 def test_export_is_admin_only():
     r = TestClient(_app(UserRole.ANALYST)).get("/api/v1/settings/export")
     assert r.status_code == 403

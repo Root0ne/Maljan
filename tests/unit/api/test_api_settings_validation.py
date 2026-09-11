@@ -85,7 +85,12 @@ def test_a_catalog_editable_leaf_refuses_a_value_below_its_floor(name, bounds):
         assert f"api.{name}" in exc.value.errors
 
 
-@pytest.mark.parametrize("name", sorted(_MODEL_BOUNDED) + sorted(_CATALOG_BOUNDED))
+# Only the catalog-editable leaves: a ``db_*`` name is not a catalog key, so
+# ``save`` rejects it in ``check_keys`` and it can never reach ``validate`` in
+# the first place (final review M1, which removed the dead
+# ``APISettings(**nest(merged_api))`` call that used to answer for it). Their
+# floor is tested directly against the model above.
+@pytest.mark.parametrize("name", sorted(_CATALOG_BOUNDED))
 def test_the_settings_service_reports_an_out_of_range_leaf_under_its_own_key(name):
     service = SettingsService.__new__(SettingsService)
     with pytest.raises(SettingsValidationError) as exc:

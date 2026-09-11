@@ -4,9 +4,11 @@ Loads from the process environment only, with sensible defaults for local
 development. No ``.env`` file is discovered or read — set variables in the
 process environment (or the container/orchestrator config) instead.
 
-Security-sensitive defaults (JWT secret, MinIO credentials) refuse to boot
-the API in non-debug mode unless the operator provided real values; see
-``app.bootstrap`` for the full startup validation contract.
+Construction never refuses. Security-sensitive defaults (JWT secret, MinIO
+credentials, the auth bypass) are checked at startup instead, by
+``app.bootstrap.validate_bootstrap``, so a misconfigured deployment dies with
+one ``bootstrap: ...`` line naming every problem rather than a traceback from
+whichever import built the settings singleton first.
 """
 
 from __future__ import annotations
@@ -26,17 +28,28 @@ _PLACEHOLDER_JWT_SECRETS = {
 
 _PLACEHOLDER_MINIO_KEYS = {"minioadmin", ""}
 
+# Substituted for an unset ``JWT_SECRET_KEY`` under pytest only, so suite
+# collection does not need a secret in the environment. It is published in
+# this repository, so nothing outside a test run may ever receive it: the
+# substitution is gated on ``_is_test_env`` and ``validate_bootstrap`` reads
+# the environment rather than the substituted field.
+TEST_JWT_SECRET = "pytest-only-jwt-secret-00000000000000000000"
+
 
 def _is_test_env() -> bool:
-    """Return True when running under pytest or with the explicit skip flag set."""
-    import os as _os
+    """Return True when running under pytest.
+
+    Read from the interpreter state alone. Nothing in the environment may
+    answer this question: a variable that turns a boot refusal off is a
+    variable that ships to production with it turned off, and
+    ``PYTEST_CURRENT_TEST=1`` would have handed a real deployment the
+    published ``TEST_JWT_SECRET`` exactly the way
+    ``MALJAN_API_SKIP_SECRET_CHECK`` did. The import is what every real run
+    has: pytest imports itself in the main process and in each xdist worker.
+    """
     import sys as _sys
 
-    return (
-        "pytest" in _sys.modules
-        or "PYTEST_CURRENT_TEST" in _os.environ
-        or _os.environ.get("MALJAN_API_SKIP_SECRET_CHECK") == "1"
-    )
+    return "pytest" in _sys.modules
 
 
 class APISettings(BaseSettings):
@@ -164,26 +177,19 @@ class APISettings(BaseSettings):
     @field_validator("jwt_secret_key")
     @classmethod
     def _enforce_jwt_secret(cls, value: SecretStr) -> SecretStr:
-        secret = value.get_secret_value() if isinstance(value, SecretStr) else str(value)
-        # Allow weak/empty secrets in test runs so suite collection doesn't fail.
-        if _is_test_env():
-            return value if secret else SecretStr("test-secret-do-not-use-in-prod-0123456789ab")
-        if secret in _PLACEHOLDER_JWT_SECRETS or len(secret) < 32:
-            raise ValueError(
-                "JWT_SECRET_KEY is unset or too weak. Generate one with "
-                "`openssl rand -hex 32` and set it via the JWT_SECRET_KEY env var."
-            )
-        return value
+        """Fill in the in-repo test secret under pytest, and never refuse.
 
-    @field_validator("minio_secret_key")
-    @classmethod
-    def _enforce_minio_secret(cls, value: SecretStr) -> SecretStr:
+        Constructing settings is not the place a misconfigured deployment
+        dies: a refusal raised here surfaces as a pydantic traceback from
+        whichever import happened to build the singleton first, instead of
+        the single ``bootstrap: ...`` line naming every problem at once.
+        Every JWT refusal lives in ``app.bootstrap.validate_bootstrap``, and
+        it reads the environment rather than this (possibly substituted)
+        field, so the substitution below cannot satisfy a real check.
+        """
         secret = value.get_secret_value() if isinstance(value, SecretStr) else str(value)
-        if secret in _PLACEHOLDER_MINIO_KEYS:
-            # Soft-fail in tests: only raise when DEBUG is False; the validator
-            # itself cannot see other fields, so we leave the assertion to a
-            # post-init hook (model_post_init).
-            return SecretStr(secret)
+        if not secret and _is_test_env():
+            return SecretStr(TEST_JWT_SECRET)
         return value
 
     @model_validator(mode="after")
@@ -196,40 +202,16 @@ class APISettings(BaseSettings):
         # The auth-bypass flag is for interactive local development only;
         # never let it leak into the test suite, where it would mask real
         # 401 / 403 assertions. Force it off whenever pytest is active.
+        #
+        # This is the only thing construction decides. The refusals that used
+        # to live here -- the auth bypass outside debug, the MinIO placeholder
+        # outside debug -- are bootstrap problems now
+        # (``app.bootstrap.validate_bootstrap``), so a misconfigured process
+        # dies with one ``bootstrap: ...`` line listing every problem rather
+        # than a pydantic traceback naming whichever one pydantic reached
+        # first.
         if _is_test_env() and self.auth_disabled:
             object.__setattr__(self, "auth_disabled", False)
-
-        # Skip the strict placeholder check when pytest is running or when
-        # the caller has explicitly opted out (e.g. local Docker compose
-        # with the default minioadmin bootstrap). Production deployments
-        # MUST set DEBUG=False *and* a real MinIO secret.
-        if self.debug or _is_test_env():
-            return
-
-        # Same contract as the MinIO placeholder below, and it was the one
-        # missing: ``auth_disabled`` makes ``get_current_user`` return the dev
-        # admin for *every* request without inspecting the token at all
-        # (deps.py). The pytest guard above is not a production guard — a
-        # ``.env`` carried from a dev box to a real deployment would serve an
-        # unauthenticated admin API and nothing would say so.
-        if self.auth_disabled:
-            raise ValueError(
-                "AUTH_DISABLED is set with DEBUG=False. The auth bypass serves "
-                "every request as the dev admin user and is for local "
-                "development only. Unset AUTH_DISABLED before running in "
-                "non-debug mode."
-            )
-
-        secret = (
-            self.minio_secret_key.get_secret_value()
-            if isinstance(self.minio_secret_key, SecretStr)
-            else str(self.minio_secret_key)
-        )
-        if secret in _PLACEHOLDER_MINIO_KEYS:
-            raise ValueError(
-                "MINIO_SECRET_KEY is using the default placeholder. "
-                "Set a real value before running in non-debug mode."
-            )
 
 
 _settings: APISettings | None = None

@@ -152,39 +152,101 @@ async def reset_key(
     return ResetResponse(reset=removed)
 
 
+def _strip_masks(value: Any, path: str) -> tuple[Any, list[str]]:
+    """``value`` with every nested mask removed, plus the path of each one.
+
+    ``values()`` replaces a stored credential with ``TOKEN_MASK`` wherever one
+    is nested inside a composite leaf -- a server's ``auth_token``, a frontier
+    arm's ``api_key`` -- so the UI never echoes a real one. Writing that mask
+    into the export would configure it as the literal credential on the next
+    import (the failure mode F8 fixed for the old ``.env`` export), so it is
+    dropped here instead, at any depth: a composite that grows a new secret
+    leaf is covered the day it is added rather than the day someone remembers
+    to extend this function.
+    """
+    if isinstance(value, dict):
+        out: dict[str, Any] = {}
+        omitted: list[str] = []
+        for name, item in value.items():
+            child = f"{path}.{name}"
+            if item == TOKEN_MASK:
+                omitted.append(child)
+                continue
+            cleaned, paths = _strip_masks(item, child)
+            out[name] = cleaned
+            omitted.extend(paths)
+        return out, omitted
+    if isinstance(value, list):
+        items: list[Any] = []
+        omitted = []
+        for i, item in enumerate(value):
+            child = f"{path}.{i}"
+            if item == TOKEN_MASK:
+                omitted.append(child)
+                continue
+            cleaned, paths = _strip_masks(item, child)
+            items.append(cleaned)
+            omitted.extend(paths)
+        return items, omitted
+    return value, []
+
+
 def _export_value(key: str, value: Any) -> tuple[Any, list[str]]:
     """The value as it goes into the export document, plus any paths it cost.
 
-    Only ``core.mcp.servers`` needs sanitizing: ``values()`` masks every
-    server's token to ten literal asterisks (``TOKEN_MASK``) so the UI never
-    echoes a real credential, and embedding that mask in the export would
-    configure it as the actual token on re-import (the same failure mode F8
-    fixed for the old ``.env`` export). The token and the synthetic
-    ``auth_token_source`` (not an ``MCPServerConfig`` field) are dropped
-    instead; an operator who wants the server usable again adds a fresh
-    token by hand, through the UI or directly in the imported file.
+    Two composite leaves carry credentials inside them: ``core.mcp.servers``
+    (one ``auth_token`` per server) and ``core.llm.frontier.arms`` (one
+    ``api_key`` per arm). Both reach here as the mask, and both are stripped by
+    ``_strip_masks`` above, together with anything else masked at any depth.
+    The server map additionally carries the synthetic ``auth_token_source``
+    (not an ``MCPServerConfig`` field, so it would not import back), which is
+    dropped without being listed.
 
-    The second return value names ``core.mcp.servers.<name>.auth_token`` for
-    every server whose token was actually the mask (a present-but-empty
-    field, or one with no default token to protect, costs nothing and is not
-    listed). These paths are informational only, not catalog keys: importing
-    a document that includes one back as a top-level key is rejected as
-    ``unknown key``, the same as any other stray field. They exist so an
-    operator reading the export can see which servers lost their token,
-    rather than silently ending up with none on the next import.
+    The paths returned name every credential the export did not carry, e.g.
+    ``core.mcp.servers.<name>.auth_token`` or
+    ``core.llm.frontier.arms.<arm>.api_key``. They are informational only, not
+    catalog keys: importing a document that includes one back as a top-level
+    key is rejected as ``unknown key``, the same as any other stray field.
+    They exist so an operator reading the export can see which servers and
+    arms lost their credential, rather than silently ending up with none on
+    the next import.
     """
     if key != SERVER_MAP_KEY or not isinstance(value, dict):
-        return value, []
-    sanitized: dict[str, Any] = {}
-    omitted: list[str] = []
-    for name, entry in value.items():
-        clean = dict(entry)
-        had_token = clean.pop("auth_token", None) == TOKEN_MASK
-        clean.pop("auth_token_source", None)
-        sanitized[name] = clean
-        if had_token:
-            omitted.append(f"{SERVER_MAP_KEY}.{name}.auth_token")
-    return sanitized, omitted
+        return _strip_masks(value, key)
+    value = {
+        name: (
+            {k: v for k, v in entry.items() if k != "auth_token_source"}
+            if isinstance(entry, dict)
+            else entry
+        )
+        for name, entry in value.items()
+    }
+    sanitized, omitted = _strip_masks(value, key)
+    return _mask_server_env(sanitized, omitted)
+
+
+def _mask_server_env(servers: Any, omitted: list[str]) -> tuple[Any, list[str]]:
+    """Every ``env`` value masked, and its variable named in ``omitted``.
+
+    SEC-1 (dev audit 2026-09-06) established a server's ``env`` map as the one
+    place a credential can live without being typed as one, which is why
+    ``public_snapshot`` masks it in run summaries. An export is a file on an
+    operator's disk and the weaker of the two paths, so it masks them too. The
+    variable names stay -- an operator reading the document needs to see what
+    the server was handed -- and only the values go; a masked value coming
+    back on import means "keep the stored one" (``split_server_secrets``).
+    """
+    if not isinstance(servers, dict):
+        return servers, omitted
+    out: dict[str, Any] = {}
+    for name, entry in servers.items():
+        if not isinstance(entry, dict) or not isinstance(entry.get("env"), dict):
+            out[name] = entry
+            continue
+        env = entry["env"]
+        out[name] = {**entry, "env": {var: TOKEN_MASK for var in env}}
+        omitted.extend(f"{SERVER_MAP_KEY}.{name}.env.{var}" for var in env)
+    return out, omitted
 
 
 @router.get("/export", response_model=ExportResponse)

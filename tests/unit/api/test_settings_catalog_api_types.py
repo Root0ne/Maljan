@@ -1,5 +1,10 @@
 from app.config import APISettings
-from app.services.settings_catalog_api import API_DEFAULTS, api_catalog, full_catalog
+from app.services.settings_catalog_api import (
+    API_DEFAULTS,
+    api_catalog,
+    catalog_index,
+    full_catalog,
+)
 
 _KNOWN_WIDGET_TYPES = {"bool", "int", "float", "str", "secret", "enum", "list", "dict", "json"}
 
@@ -109,3 +114,31 @@ def test_schema_dto_carries_subgroup_advanced_and_group_description() -> None:
     assert CatalogEntryDTO.model_fields["subgroup"].default is None
     assert CatalogEntryDTO.model_fields["advanced"].default is False
     assert GroupDTO.model_fields["description"].default == ""
+
+
+def test_no_catalog_text_points_an_operator_at_a_dotenv_file() -> None:
+    """The ``.env`` layer is gone, and the catalog is what the UI reads aloud.
+
+    The read-only ``reason`` is wire-visible beyond the UI too: it is the 422
+    message ``POST /settings/import`` and ``check_keys`` return for a
+    read-only key.
+    """
+    offenders = [
+        (e.key, text)
+        for e in full_catalog()
+        for text in (e.description or "", e.reason or "")
+        if ".env" in text
+    ]
+    assert offenders == []
+
+
+def test_the_read_only_group_names_the_deployment_environment() -> None:
+    entry = catalog_index()["api.debug"]
+    assert entry.editable is False
+    assert entry.reason == "set in the deployment environment; restart required"
+    assert "Set in the deployment environment." in entry.description
+
+
+def test_the_frontier_arms_description_drops_the_environment_variable_hint() -> None:
+    """W5: there is no environment form of this setting to hint at any more."""
+    assert "LLM__FRONTIER__ARMS" not in catalog_index()["core.llm.frontier.arms"].description

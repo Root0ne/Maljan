@@ -296,6 +296,43 @@ class ApiClient {
     return res.json();
   }
 
+  /**
+   * One settings request, with the three answers all three callers share: a
+   * 401 clears the stored token, a 422 arrives as a `SettingsValidationError`
+   * carrying the per-key error map, and any other failure is an `ApiError`.
+   * Returns the `Response` rather than parsed JSON because the export reads
+   * it as text -- the document is downloaded byte-for-byte as the API sent
+   * it, not re-serialised.
+   */
+  private async settingsFetch(path: string, options: RequestInit = {}): Promise<Response> {
+    const token = this.getToken();
+    const res = await fetch(`${this.baseUrl}${path}`, {
+      ...options,
+      headers: {
+        ...(options.body ? { "Content-Type": "application/json" } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(options.headers as Record<string, string>),
+      },
+    });
+    if (res.status === 401) {
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("access_token");
+      }
+      throw new ApiError("Unauthorized", res.status);
+    }
+    if (res.status === 422) {
+      const body = (await res.json().catch(() => ({}))) as {
+        errors?: Record<string, string>;
+      };
+      throw new SettingsValidationError(body.errors ?? {});
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new ApiError(body.detail || `Request failed: ${res.status}`, res.status);
+    }
+    return res;
+  }
+
   private async textRequest(
     path: string,
     options: RequestInit = {}
@@ -466,25 +503,10 @@ class ApiClient {
   }
 
   async patchSettings(changes: Record<string, unknown>): Promise<PatchResult> {
-    const token = this.getToken();
-    const res = await fetch(`${this.baseUrl}/api/v1/settings`, {
+    const res = await this.settingsFetch("/api/v1/settings", {
       method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
       body: JSON.stringify({ changes }),
     });
-    if (res.status === 422) {
-      const body = (await res.json().catch(() => ({}))) as {
-        errors?: Record<string, string>;
-      };
-      throw new SettingsValidationError(body.errors ?? {});
-    }
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new ApiError(body.detail || `Request failed: ${res.status}`, res.status);
-    }
     return res.json();
   }
 
@@ -543,20 +565,7 @@ class ApiClient {
    * /settings/export` returned.
    */
   async exportSettings(): Promise<void> {
-    const token = this.getToken();
-    const res = await fetch(`${this.baseUrl}/api/v1/settings/export`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
-    if (res.status === 401) {
-      if (typeof window !== "undefined") {
-        localStorage.removeItem("access_token");
-      }
-      throw new ApiError("Unauthorized", res.status);
-    }
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new ApiError(body.detail || `Request failed: ${res.status}`, res.status);
-    }
+    const res = await this.settingsFetch("/api/v1/settings/export");
     const text = await res.text();
     const blob = new Blob([text], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -575,31 +584,10 @@ class ApiClient {
    *  `SettingsValidationError` carrying the per-key error map, exactly like
    *  `patchSettings`. */
   async importSettings(body: ImportRequest): Promise<PatchResult> {
-    const token = this.getToken();
-    const res = await fetch(`${this.baseUrl}/api/v1/settings/import`, {
+    const res = await this.settingsFetch("/api/v1/settings/import", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
       body: JSON.stringify(body),
     });
-    if (res.status === 401) {
-      if (typeof window !== "undefined") {
-        localStorage.removeItem("access_token");
-      }
-      throw new ApiError("Unauthorized", res.status);
-    }
-    if (res.status === 422) {
-      const errBody = (await res.json().catch(() => ({}))) as {
-        errors?: Record<string, string>;
-      };
-      throw new SettingsValidationError(errBody.errors ?? {});
-    }
-    if (!res.ok) {
-      const errBody = await res.json().catch(() => ({}));
-      throw new ApiError(errBody.detail || `Request failed: ${res.status}`, res.status);
-    }
     return res.json();
   }
 
