@@ -1,8 +1,8 @@
 """Stored UI overrides survive the provider rename.
 
-The alembic revision renames ``runtime_settings.key`` in place. It is derived
-from the same alias table the config uses, is idempotent (running it twice is a
-no-op), and never overwrites a row that already carries the new key.
+The alembic revision renames ``runtime_settings.key`` in place. It carries its
+own frozen copy of the renames it was written against, is idempotent (running it
+twice is a no-op), and never overwrites a row that already carries the new key.
 """
 
 from __future__ import annotations
@@ -23,12 +23,10 @@ def _load():
 
 
 def test_the_rename_table_covers_every_moved_key():
-    from maljan.core.config import SETTINGS_ALIASES
-
     mod = _load()
-    for old, new in SETTINGS_ALIASES:
+    for old, new in mod._RENAMES:
         if old in ("mcp.ghidra", "mcp.cape"):
-            # Sub-tree aliases: the stored keys are leaves under them.
+            # Sub-tree renames: the stored keys are leaves under them.
             assert any(k.startswith(f"core.{old}.") for k in mod.KEY_RENAMES), old
         elif old.startswith("static.generic."):
             # Folded into core.mcp.servers by 20260905000000, not a rename.

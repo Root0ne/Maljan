@@ -95,7 +95,7 @@ class GhidraHTTPClient:
         description: str = tool_def.get("description", f"Call {path}")
         params: list[dict[str, Any]] = tool_def.get("params", [])
 
-        # Phase 2: Compress tool descriptions to reduce context bloat.
+        # Compress tool descriptions to reduce context bloat.
         # 165 Ghidra tools were consuming ~15K-25K tokens per ReAct step.
         # We add a category tag + truncate to ~120 chars max.
         description = self._compress_description(path, description)

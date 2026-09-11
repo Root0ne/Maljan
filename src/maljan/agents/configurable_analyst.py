@@ -8,7 +8,7 @@ same for every analyst: send the prompt, run the ReAct loop when there are
 tools and a plain call when there are none, and wrap whatever comes back into
 an ISR under the agent's own key.
 
-The degradation policy is the one sub-project B applies to custom servers: a
+The degradation policy is the one applied to custom servers: a
 custom analyst never fails a job. A tool server that would not attach, a tool
 that is not there, an LLM call that raises — each becomes a reason on
 ``degradation_reasons`` and a ``[WARN]`` report, so the run summary says the

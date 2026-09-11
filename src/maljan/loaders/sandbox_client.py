@@ -1,4 +1,4 @@
-"""SandboxClient abstraction layer — Phase 6: CAPEv2 Sandbox Integration.
+"""SandboxClient abstraction layer for CAPEv2 sandbox integration.
 
 Defines the SandboxClient Protocol and SubmissionResult dataclass that all
 sandbox backend implementations must satisfy.
@@ -54,13 +54,11 @@ class SubmissionResult:
         normalized:    The provider's neutral ``SandboxReport`` view of this
                        same run, when the backend producing this result has
                        one. ``None`` for every caller that predates the
-                       provider layer — a legacy ``SandboxClient`` still
-                       returns a ``SubmissionResult`` with this unset, and
-                       every existing reader of ``report`` keeps working
-                       untouched. Populated by
-                       ``maljan.providers.sandbox._legacy.as_sandbox_client``
-                       so a caller that wants the neutral shape no longer has
-                       to re-derive it from ``report``.
+                       provider layer — ``FileDataLoader.load_from_sandbox``
+                       drives a plain ``SandboxClient`` and leaves this unset,
+                       and every existing reader of ``report`` keeps working
+                       untouched. Populated on the provider-backed path in
+                       ``MaljanApp._submit_to_sandbox``.
     """
 
     task_id: str

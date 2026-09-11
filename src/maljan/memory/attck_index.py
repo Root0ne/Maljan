@@ -7,7 +7,7 @@ Provides two capabilities:
 Design notes:
   - Pure Python + stdlib: no numpy, scipy, or vector DB required at development time.
   - The index is built once and kept in memory. For production scale, this module's
-    interface is intentionally compatible with a Qdrant backend (Phase 5).
+    interface is intentionally compatible with a Qdrant backend.
   - Thread-safety: the index is read-only after build() — safe for concurrent access.
 
 Usage:

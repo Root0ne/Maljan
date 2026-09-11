@@ -1,7 +1,7 @@
 /**
  * What the three keyed-map editors all had a copy of.
  *
- * WEB-3 (dev audit 2026-09-06): `ServerMapEditor`, `AgentDefinitionsEditor` and
+ * `ServerMapEditor`, `AgentDefinitionsEditor` and
  * `ProfilesEditor` each carried the same slug regex, the same "already exists"
  * branch, the same merge-one-entry helper and the same clone-key arithmetic,
  * near-verbatim. Three copies of one rule drift; this is the rule.
@@ -35,7 +35,7 @@ export function mapKeyError(
 /**
  * The name a clone of `source` takes when the operator did not type one.
  *
- * B5 (dev audit 2026-09-06): Clone used to do nothing at all with an empty
+ * Clone used to do nothing at all with an empty
  * name box — no card, no message, no request — so the documented "clone an
  * agent" flow looked broken. `<source>_copy`, then `_copy2`, `_copy3`… so
  * cloning twice does not collide, truncated to the 32 characters the key rule
@@ -68,7 +68,7 @@ export function removeEntry<T>(map: Record<string, T>, key: string): Record<stri
 /**
  * Which button an inline message belongs under.
  *
- * B5: the editors set one `keyError` string and rendered it beside the name
+ * The editors used to set one `keyError` string and render it beside the name
  * box at the bottom of the editor, far from the Clone button on the card that
  * was actually pressed. The message now travels with the place it came from —
  * `"add"` for the name box, otherwise the key of the card whose Clone was
@@ -81,17 +81,4 @@ export interface KeyError {
 
 export const ADD_BUTTON = "add";
 
-/**
- * Whether two staged entries are the same value.
- *
- * The master–detail editors mark a list row as "changed" by comparing the
- * staged entry with the saved one; entry values are plain JSON built by these
- * editors themselves, so a stringify comparison over stable key order is
- * enough — the objects are always spread from the same shapes.
- */
-export function deepEqual(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (a === null || a === undefined || b === null || b === undefined) return a === b;
-  if (typeof a !== "object" || typeof b !== "object") return false;
-  return JSON.stringify(a) === JSON.stringify(b);
-}
+export { deepEqual } from "./deepEqual";

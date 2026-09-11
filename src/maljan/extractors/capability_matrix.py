@@ -62,7 +62,7 @@ _TACTIC_BY_SLUG: dict[str, tuple[str, str]] = {
 _TACTIC_NAME_BY_ID: dict[str, str] = {tid: name for tid, _slug, name in _TACTIC_TABLE}
 
 
-# 2026-07 round 3 — deterministic cap for LLM-only over-claims.
+# Deterministic cap for LLM-only over-claims.
 _LOW_CONF_CAP = 0.40
 # Base technique ids gated by obfuscation evidence (+ their sub-techniques).
 # A packer identification below this is a hint, not corroboration. String-only

@@ -314,7 +314,7 @@ def apply_mapping(
             sha256, reason = _normalize_sha256(found[0])
             if reason:
                 # ``target.sha256`` stays empty rather than carry a value that
-                # cannot key a CTI lookup. The REST provider (Task 11) reads
+                # cannot key a CTI lookup. The REST provider reads
                 # this same field into ``SandboxRun.sample_sha256`` — with it
                 # empty, that provider falls back to the sha256 of the file it
                 # itself submitted rather than trust an unmatched value.

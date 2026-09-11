@@ -1,4 +1,4 @@
-"""Render a ``MalwareReport`` to PDF by printing the HTML export (Phase 6).
+"""Render a ``MalwareReport`` to PDF by printing the HTML export.
 
 There is no second layout here on purpose: the PDF is exactly what
 ``HtmlRenderer`` produces, run through WeasyPrint, so the two exports can never

@@ -1,7 +1,7 @@
 /**
- * Wave 10 W10-LINT-DEBT-01 (2026-05-30): typed narrowing helper for the
+ * Typed narrowing helper for the
  * ``catch (err) { ... err.message ... }`` pattern that the ESLint v9
- * migration (W10-LINT-07) exposed across the app router pages.
+ * migration exposed across the app router pages.
  *
  * Previously the pages used ``catch (err: any)`` which silently
  * permitted every property access. Switching to the implicit

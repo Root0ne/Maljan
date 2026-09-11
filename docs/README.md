@@ -11,7 +11,7 @@ environment in one command, and where the design record is kept.
 | `apps/api/` | The FastAPI application and the arq worker, as the workspace member `maljan-api`. Alembic migrations sit beside it; its bootstrap contract is documented at the repository root (`bootstrap.env.example`), not here. |
 | `apps/web/` | The Next.js interface. Route-local components stay in their route folder; a component two routes use lives in `src/components/`. |
 | `services/` | Deployable sidecar processes. Each is one `server.py` speaking stdio MCP, launched by `maljan.core.config._builtin_servers()` and bound to one agent. |
-| `scripts/dev/` | Running the system locally: the LLM server launcher, the overnight memory guard, the restart wrapper, the Ghidra MCP manager, the CAPE wrapper, the third-party fetcher. |
+| `scripts/dev/` | Running the system locally: the LLM server launcher, the overnight memory guard, the restart wrapper, the Ghidra MCP manager, the third-party fetcher. |
 | `scripts/goldens/` | One-off capture scripts. Each writes a fixture under `tests/fixtures/golden/` and is committed so a reviewer can re-run it and diff the result. |
 | `scripts/knowledge/` | Builders for the tracked data assets under `data/` and for the evaluation ground truth. The curated lists live in the builder; the JSON is the artefact. |
 | `scripts/paper/` | The paper's machine-checkable rubric and the cohort completer. |
@@ -22,8 +22,6 @@ environment in one command, and where the design record is kept.
 | `tests/evaluation/` | The measured corpus, its per-sample artefacts and the scripts that recompute the paper's numbers. Treated as read-only by feature work. |
 | `data/` | Tracked knowledge assets. Loaded lazily, cached per path, each degrading to a built-in fallback when absent. |
 | `docker/` | The Dockerfiles and the compose stack, production plus a development overlay. |
-| `docs/specs/` | One design document per sub-project: the problem, the decisions and the invariants, approved before implementation. |
-| `docs/plans/` | One implementation plan per design: tasks, exact commands, verification. |
 | `docs/assets/` | The images the top-level README embeds. |
 
 ## One-command setup
@@ -46,16 +44,8 @@ make migrate     # apply the API's Alembic migrations; run it after a pull that 
 
 ## The design record
 
-Read the spec before the plan, and the plan before the code. Specs are approved
-designs; plans are the task-by-task execution of one spec; both are kept as
-written, including the paths they named at the time.
-
-- `docs/specs/2026-09-02-runtime-settings-design.md` and `docs/plans/2026-09-02-runtime-settings.md`
-- `docs/specs/2026-09-03-provider-layer-design.md` and `docs/plans/2026-09-03-provider-layer.md`
-- `docs/specs/2026-09-03-security-hardening-design.md` and `docs/plans/2026-09-03-security-hardening.md`
-- `docs/specs/2026-09-04-tool-servers-design.md` and `docs/plans/2026-09-04-tool-servers.md`
-- `docs/specs/2026-09-05-agent-composition-design.md` and `docs/plans/2026-09-05-agent-composition.md`
-- `docs/specs/2026-09-06-repository-layout-design.md` and `docs/plans/2026-09-06-repository-layout.md`
+The specs and plans that once lived under `docs/specs/`, `docs/plans/` and
+`docs/superpowers/` are retired from the working tree; find them with `git log -- docs/plans docs/specs docs/superpowers`.
 
 The top-level `README.md` is the product-facing document: what Maljan does, how
 to run it and how it is configured. This file is the repository-facing one.

@@ -1,6 +1,6 @@
 """CAPEv2Client — live CAPEv2 REST API sandbox backend.
 
-Phase 6: CAPEv2 Sandbox Integration
+Part of the CAPEv2 sandbox integration.
 
 Submits samples to a running CAPEv2 instance, polls for completion, and
 fetches the full JSON report. The report structure is identical to the

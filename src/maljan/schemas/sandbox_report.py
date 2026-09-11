@@ -311,7 +311,7 @@ def triage_overview_to_sandbox_report(
     file sample) no screenshot. Those five sections are listed in
     ``unavailable`` rather than left empty and silent, because an empty
     dynamic section reads exactly like a clean sample — and the report
-    renderers say so out loud (Task 17).
+    renderers say so out loud.
 
     Every other channel a consumer reads is populated straight from the
     fixture shape confirmed against Triage's "Dynamic Report" docs page on

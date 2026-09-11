@@ -1,6 +1,6 @@
 """QdrantStore — Qdrant vector database backend for long-term memory.
 
-Phase 5 production backend. Uses the shared ``maljan.memory.embeddings``
+Production backend. Uses the shared ``maljan.memory.embeddings``
 module to encode text with a real semantic model (``BAAI/bge-small-en-v1.5``,
 384-dim) instead of the previous MD5-hash projection. This lets the judge
 retrieve "behaviorally similar" cases even when the wording differs.

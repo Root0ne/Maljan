@@ -179,7 +179,7 @@ class MalwareReportBuilder:
             stix_bundle_extended=self.stix_output,
             references=references,
         )
-        # Report-reshaping Phase 3: deterministic front-matter, version history,
+        # Deterministic front-matter, version history,
         # and consolidated IOC table (the professional-report scaffolding the
         # Composer's prose sits inside). All derived from already-built fields.
         report.front_matter = self._build_front_matter(report)
@@ -226,7 +226,7 @@ class MalwareReportBuilder:
             rec.category = _derive_recommendation_category(  # type: ignore[assignment]
                 rec.action, rec.rationale
             )
-            # 2026-07 round 2: when the LLM omits technique_id, recover it from a
+            # When the LLM omits technique_id, recover it from a
             # T#### cited in the action/rationale/detection text, preferring one
             # that is actually mapped in this report.
             if not rec.technique_id:

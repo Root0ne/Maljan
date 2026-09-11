@@ -19,7 +19,7 @@ Design:
   * Metric: aggregate technique-level precision / recall / F1 / hallucination delta.
 
 Prerequisites (operator): llama-server up (LLM) + Ghidra MCP up (decompilation);
-SANDBOX__BACKEND=mock recommended (static-only A/B, no live-malware upload). Cost ~= 2 x
+SANDBOX__PROVIDER=mock recommended (static-only A/B, no live-malware upload). Cost ~= 2 x
 N x per-sample pipeline time.
 
 Run:
@@ -58,7 +58,7 @@ def _run_condition(checkpoint: Path, rag_on: bool) -> int:
     # mock sandbox so the dynamic analyst never detonates/uploads these live
     # malware samples to a public sandbox service — and so the only variable
     # between OFF and ON is the RAG evidence, not sandbox nondeterminism.
-    env["SANDBOX__BACKEND"] = "mock"
+    env["SANDBOX__PROVIDER"] = "mock"
     # Cap the negotiation to a single round. With the mock sandbox the dynamic /
     # network analysts run on empty inputs, so they routinely register dissent;
     # the judge then enters its ReAct verdict loop, which the local 35B model

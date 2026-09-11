@@ -255,7 +255,7 @@ class RestSandboxProvider(SandboxProvider):
             triage_overview_to_sandbox_report,
         )
 
-        # Streamed rather than fetched whole (CORE-1): a report is the one
+        # Streamed rather than fetched whole: a report is the one
         # body a sandbox legitimately sends by the hundreds of megabytes, and
         # this is the only place the size of the answer is the remote end's
         # choice alone.
@@ -308,7 +308,7 @@ class RestSandboxProvider(SandboxProvider):
             with self._get_http().stream("GET", url) as response:
                 if response.status_code >= 400:
                     return None
-                # CORE-1: a capture past the cap degrades this call the way
+                # A capture past the cap degrades this call the way
                 # every other pcap failure does, rather than filling the disk.
                 stream_to_file_capped(response, out, what="The sandbox capture")
         except Exception:  # noqa: BLE001 — never a hard failure, as for every sandbox

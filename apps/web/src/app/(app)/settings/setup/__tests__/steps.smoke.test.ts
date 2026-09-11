@@ -7,7 +7,7 @@ import ServerFormStep, { serverStepSection } from "../steps/ServerFormStep";
 
 /**
  * The four step components are reachable code before any guide declares them
- * (Task 18 writes those guides), so nothing else would notice if one of them
+ * (the guides declare them later), so nothing else would notice if one of them
  * stopped compiling or lost its default export. This mounts nothing — there
  * is no jsdom here — it only proves each module loads and still exports the
  * component `GuidePage`'s switch renders.

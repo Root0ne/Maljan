@@ -43,7 +43,7 @@ _SECRET_PATHS = [e.path for e in core_catalog() if e.secret]
 def attached_report_stmt(report_id: uuid.UUID, sample_id: uuid.UUID) -> Select[Any]:
     """The one attached sandbox report a job may read: its own sample's.
 
-    API-1 (dev audit 2026-09-06): this used to select by report id alone and
+    This used to select by report id alone and
     compare ``row.sample_id`` afterwards. Asking the ownership question in SQL
     keeps the two from ever drifting apart, and a report belonging to another
     sample is not read out of the database on the way to being refused.
@@ -119,7 +119,7 @@ def mirror_target_for(provider: Any, *, sha256: str, extension: str) -> tuple[Pa
 def global_mirror_path(paths: dict[str, str], static_settings: Any) -> str | None:
     """``state["static_sample_path"]``: the globally configured provider's mirror.
 
-    Sub-project A froze that key as *the* static sample path and every
+    That key is *the* static sample path and every
     single-provider reader still means the global provider by it, so it is
     ``None`` when that provider needed no copy — even if a clone on another
     provider mirrored. Taking whichever provider happened to mirror first
@@ -133,8 +133,8 @@ def profile_static_providers(container: Any) -> list[str]:
 
     Order matters for the mirror log and for ``global_mirror_path``, which
     reads the global provider's entry back out of the per-provider map to fill
-    ``state["static_sample_path"]`` — the key sub-project A froze and every
-    single-provider reader still uses. The globally configured provider is
+    ``state["static_sample_path"]`` — the frozen key every single-provider
+    reader still uses. The globally configured provider is
     always in the list even when no analyst names it, because that provider is
     the one that key means.
     """
@@ -392,7 +392,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         # cancelled) — those paths never reach the download but still run
         # this function's one ``finally``, which references both names.
         temp_path: str | None = None
-        # One entry per provider actually mirrored (Task 9: a profile with two
+        # One entry per provider actually mirrored (a profile with two
         # static analysts on two providers mirrors twice); the ``finally``
         # below removes every one of them, symmetric with today's single-path
         # cleanup.
@@ -699,11 +699,9 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 # (``.elf`` → Linux, ``.exe`` → Windows, etc.). Otherwise
                 # the bare sha256 would be treated as an unknown blob.
                 _orig_ext = Path(sample.original_filename or "").suffix
-                # Wave 9 (2026-05-29): use the Defender-excluded upload
-                # tmp dir instead of the system temp dir. See
-                # ``APISettings.upload_temp_dir``.
-                # Wave 9 HOTFIX-08 (2026-05-29): ``.resolve()`` is critical
-                # here — the 2026-05-29 ELF smoke test (job f4a1fee9)
+                # Use the Defender-excluded upload tmp dir instead of the
+                # system temp dir. See ``APISettings.upload_temp_dir``.
+                # ``.resolve()`` is critical here — an ELF smoke test
                 # produced a relative ``data\uploads\.tmp\<sha>.elf`` path
                 # which then broke the sandbox client's submit path with
                 # ``[Errno 22] Invalid argument`` when its httpx coroutine
@@ -731,10 +729,10 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     extra={"job_id": job_id, "component": "minio"},
                 )
 
-                # Wave 6 (2026-05-28, GHIDRA-DELIVERY-01) mirrored every
-                # sample into ``<samples_dir>/.work/<sha256><ext>`` for the
-                # Ghidra container unconditionally. Task 12 (provider
-                # capabilities) turned that into a capability read: a
+                # Every sample used to be mirrored into
+                # ``<samples_dir>/.work/<sha256><ext>`` for the Ghidra
+                # container unconditionally. Provider capabilities turned
+                # that into a capability read: a
                 # capa/YARA or radare2 provider reads the bytes in place and
                 # needs no copy at all, so ``mirror_target_for`` asks the
                 # configured static provider first and returns None when it
@@ -742,12 +740,12 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 # path still mirrors the bind mount in
                 # docker/docker-compose.yml (``../data/samples:/data/samples``).
                 #
-                # Wave 10 (security hardening, H3): the mirror is a private
+                # The mirror is a private
                 # 0o600 copy under a 0o700 ``.work`` subdirectory of
                 # ``samples_dir`` — never the operator's own corpus directory
                 # itself — and is removed by the ``finally`` below when the
                 # job ends, whichever way it ends.
-                # Task 9 mirrors once per distinct static provider host path;
+                # The mirror runs once per distinct static provider host path;
                 # ``mirror_static_samples`` is the tested unit for that loop,
                 # including the dedup that keeps two providers sharing one
                 # host path (e.g. Ghidra and a co-located r2mcp) from copying
@@ -1171,7 +1169,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 extra={"job_id": job_id, "component": "lifecycle"},
             )
 
-            # ── 6. Auto-enqueue threat-intel enrichment (Faz 6) ────────
+            # ── 6. Auto-enqueue threat-intel enrichment ───────────────
             # The enrichment job is post-hoc; pipeline latency is unaffected.
             # ARQ enforces the unique ``_job_id`` so duplicate triggers
             # (e.g. operator also calling /enrich manually) are coalesced.
@@ -1423,7 +1421,7 @@ _ORPHAN_GRACE_SECONDS = int(os.environ.get("ORPHAN_JOB_GRACE_SECONDS", "300"))
 async def _sweep_orphan_jobs(db_session: async_sessionmaker) -> None:
     """Mark abandoned ``running`` rows as ``failed`` at worker startup.
 
-    Wave 8 ORPHAN-JOBS-01 (2026-05-28). When the worker process is killed
+    When the worker process is killed
     mid-flight (e.g. operator ``Stop-Process`` during development, OOM
     kill, deploy rollover) the ``run_analysis`` task has no chance to
     flip the row from ``running`` → ``failed`` in its ``except`` block.
@@ -1499,43 +1497,6 @@ async def _sweep_orphan_jobs(db_session: async_sessionmaker) -> None:
             )
 
 
-async def _warn_if_configuration_import_has_not_run() -> None:
-    """Say so when the store has not been populated from the legacy environment yet.
-
-    The worker never imports -- by design, it only reads the store -- so on an
-    upgrading deployment a job taken in the seconds before the API's lifespan
-    finishes its one-time import would run on catalog defaults: the wrong LLM
-    provider, the wrong sandbox, and nothing anywhere saying why. Compose makes
-    the worker wait for a healthy API; this covers every other way the two are
-    started, and it never blocks -- a warning an operator can correlate with a
-    surprising run is the whole point.
-    """
-    from sqlalchemy import select
-
-    from app.database import async_session_factory
-    from app.models.settings_meta import SettingsMeta
-    from app.services.legacy_env_import import MARKER_KEY
-
-    try:
-        async with async_session_factory() as session:
-            marker = (
-                await session.execute(select(SettingsMeta).where(SettingsMeta.key == MARKER_KEY))
-            ).scalar_one_or_none()
-    except Exception as exc:  # noqa: BLE001 - reported, never fatal
-        logger.warning(
-            "Could not read the configuration import marker (%s); continuing.",
-            type(exc).__name__,
-            extra={"component": "worker.lifecycle"},
-        )
-        return
-    if marker is None:
-        logger.warning(
-            "Configuration import has not run yet; jobs started now use catalog "
-            "defaults rather than this deployment's configuration.",
-            extra={"component": "worker.lifecycle"},
-        )
-
-
 async def startup(ctx: dict) -> None:
     """Called when the ARQ worker starts up."""
     # Initialize logging for the worker process first: the CRITICAL bootstrap
@@ -1551,8 +1512,6 @@ async def startup(ctx: dict) -> None:
     except BootstrapProblem as exc:
         logger.critical(str(exc))
         raise
-
-    await _warn_if_configuration_import_has_not_run()
 
     # Clear stale private sample copies left behind by a worker that was
     # killed mid-job (no finally ran) before this one starts taking jobs.
@@ -1584,7 +1543,7 @@ async def startup(ctx: dict) -> None:
     # Store a Redis connection for PubSub
     ctx["redis"] = aioredis.from_url(settings.redis_url)
 
-    # Wave 8 ORPHAN-JOBS-01: clean up phantom 'running' rows left behind
+    # Clean up phantom 'running' rows left behind
     # when the previous worker was killed mid-flight (no shutdown hook
     # fired). Without this, the dashboard accumulates fake in-flight
     # jobs every time the operator restarts the worker.

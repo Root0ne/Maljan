@@ -1,1 +1,1 @@
-"""Post-pipeline QA helpers (Wave 4)."""
+"""Post-pipeline QA helpers."""

@@ -284,8 +284,8 @@ def _failure_detail(exc: BaseException) -> str:
 def _probe_in_fresh_loop(factory: Callable[[], Awaitable[ProbeResult]]) -> ProbeResult:
     """Run one probe start to finish on an event loop of its own.
 
-    B1 (dev audit 2026-09-06): a staged stdio entry whose command was not an
-    MCP server answered HTTP 500. ``ServerHandle.aopen`` re-raises whatever
+    A staged stdio entry whose command is not an MCP server used to answer
+    HTTP 500. ``ServerHandle.aopen`` re-raises whatever
     ended the handshake unchanged, and a child that dies inside the transport's
     anyio task group ends it with a cancellation -- bare, or wrapped in the
     group's ``BaseExceptionGroup``. Neither is an ``Exception``, so the
@@ -337,7 +337,7 @@ def _detach_cleanup(coro: Any, label: str) -> None:
     ``handle.aclose()`` is already internally bounded (``_acleanup``'s own
     20 s timeout); awaiting it here on top of a failed/timed-out ``aopen``
     re-adds that whole budget to a probe the operator's own click is
-    documented at 5 s (F9). A strong reference is kept in
+    documented at 5 s. A strong reference is kept in
     ``_PROBE_CLEANUP_TASKS`` until it finishes so the task is not garbage
     collected mid-flight.
     """
@@ -362,7 +362,7 @@ async def handshake_tools(config: MCPServerConfig, name: str) -> list[str]:
     of subprocesses, which is exactly what a person clicking "Test" twice
     would produce.
 
-    Regression (F9): a plain ``asyncio.wait_for(handle.aopen(...), 5.0)``
+    A plain ``asyncio.wait_for(handle.aopen(...), 5.0)``
     does not give up after 5 s when ``aopen`` is wedged. ``wait_for`` cancels
     the inner coroutine and then *waits for the cancellation to finish* before
     raising ``TimeoutError`` — and ``aopen``'s own cancellation handler awaits
@@ -544,7 +544,7 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
     # provider. The model is reported from the settings instead, below.
     container = ServiceContainer(settings, mock=True)
 
-    # F9's own fix, reused rather than re-derived: ``asyncio.wait_for`` waits
+    # The same fix, reused rather than re-derived: ``asyncio.wait_for`` waits
     # for the cancelled coroutine's own cleanup before raising, and a wedged
     # server open's cleanup is exactly the wait a 5 s-per-server probe budget
     # cannot afford. ``asyncio.wait`` stops waiting at the budget and lets a
@@ -996,7 +996,7 @@ async def run_probe(name: str, values: dict[str, Any], stored: dict[str, Any]) -
                 cursor = getattr(cursor, part)
             resolved[short] = _unwrap(cursor)
         elif path in API_DEFAULTS:
-            # Task 2: editable api.* leaves no longer live on APISettings;
+            # Editable api.* leaves no longer live on APISettings;
             # their probe-time default comes from the catalog table instead.
             resolved[short] = _unwrap(API_DEFAULTS[path])
         else:

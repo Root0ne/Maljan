@@ -1,6 +1,6 @@
 """InMemoryStore — pure-Python long-term memory backend.
 
-Phase 5 default backend for ephemeral / single-run analyses. Uses the shared
+Default backend for ephemeral / single-run analyses. Uses the shared
 ``maljan.memory.embeddings`` module so the similarity model matches whatever
 ``QdrantStore`` would use in production:
 

@@ -9,7 +9,7 @@ import { ApiError, getErrorMessage, isNetworkFailure } from "@/lib/errors";
 /**
  * What to tell someone whose sign-in did not work.
  *
- * A3 (dev audit 2026-09-06): the form printed `err.message`, so a wrong
+ * The form used to print `err.message`, so a wrong
  * password read as the single word "Unauthorized" — the client's own name for
  * a 401, not an explanation. A rejected credential and an unreachable server
  * are different problems and now say so; anything else the server explains in

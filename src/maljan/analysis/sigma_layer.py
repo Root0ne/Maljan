@@ -79,7 +79,7 @@ class SigmaMatch:
     ``"T0000"``, which polluted the STIX bundle with an invalid MITRE
     AttackPattern SDO. (2026-05-19 audit SIG-T0000-01.)
 
-    ``rule_platforms`` (Wave 4): the canonical platform bucket(s) the rule
+    ``rule_platforms``: the canonical platform bucket(s) the rule
     declared via ``logsource.product``. Empty when the rule is generic.
     Carried into the ISR so the TTP cascade can do platform-aware filtering.
     """
@@ -238,7 +238,7 @@ def _classify_log_source(log_source: str, product: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Platform compatibility (Wave 4, 2026-05-28)
+# Platform compatibility
 # ---------------------------------------------------------------------------
 
 
@@ -279,7 +279,7 @@ def _is_rule_compatible(rule_product: str | None, sample_platform: str | None) -
     * ``"unknown"`` → caller explicitly declared "platform inference
       failed" (Step 1 bootstrap couldn't disambiguate). Drop
       non-generic rules to avoid the platform-blind cascade FPs that
-      motivated Wave 4. Generic rules still run.
+      motivated the filter. Generic rules still run.
     * any concrete platform string → exact match against the rule's
       ``logsource.product``.
 
@@ -334,7 +334,7 @@ class SigmaLayer:
             for rule in collection.rules
             if isinstance(rule, SigmaRule)
         ]
-        # Wave 4 (2026-05-28) platform filter telemetry.
+        # Platform filter telemetry.
         self._filtered_count: int = 0
 
     @classmethod
@@ -421,7 +421,7 @@ class SigmaLayer:
         log_source: str = "generic",
         sample_platform: str | None = None,
     ) -> list[SigmaMatch]:
-        """Scan structured (JSON/dict) logs. Platform-aware (Wave 4)."""
+        """Scan structured (JSON/dict) logs. Platform-aware."""
         if not self._collection.rules or not events:
             return []
 

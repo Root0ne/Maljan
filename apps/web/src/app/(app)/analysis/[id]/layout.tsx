@@ -74,7 +74,7 @@ interface TabDef {
   key: string;
   label: string;
   group: "overview" | "analysis" | "intel" | "advanced";
-  // 2026-07 round 2: LIVE is only meaningful while the job runs.
+  // LIVE is only meaningful while the job runs.
   liveOnly?: boolean;
 }
 
@@ -87,11 +87,11 @@ const TABS: TabDef[] = [
   { key: "/persistence", label: "PERSISTENCE", group: "analysis" },
   { key: "/capabilities", label: "ATT&CK", group: "intel" },
   { key: "/attribution", label: "ATTRIBUTION", group: "intel" },
-  // 2026-07 audit (Bulgu #1): SIGNATURES + RULES merged into one DETECTION tab
-  // (round 2 also folds the STIX export bundle in as a third section).
+  // SIGNATURES + RULES merged into one DETECTION tab, which also folds the
+  // STIX export bundle in as a third section.
   { key: "/detection", label: "DETECTION", group: "intel" },
   { key: "/defense", label: "DEFENSE", group: "intel" },
-  // 2026-07 round 2: AGENTS + PIPELINE + TIMELINE merged into one PROCESS tab.
+  // AGENTS + PIPELINE + TIMELINE merged into one PROCESS tab.
   { key: "/process", label: "PROCESS", group: "advanced" },
   // LIVE shown only while the job is running (see filter below).
   { key: "/live", label: "LIVE", group: "advanced", liveOnly: true },
@@ -114,7 +114,7 @@ export default function AnalysisLayout({
   const [loading, setLoading] = useState(true);
   const [apiAvailable, setApiAvailable] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
-  /* A1 (dev audit 2026-09-06): a 404 from `GET /jobs/{id}` is an answer, not
+  /* A 404 from `GET /jobs/{id}` is an answer, not
    * an outage. Kept apart from `apiError` so the page can say the job does not
    * exist instead of blaming the backend for a reply the backend gave. */
   const [notFound, setNotFound] = useState(false);
@@ -234,7 +234,7 @@ export default function AnalysisLayout({
   const family = report?.malware_report?.attribution?.family;
   const headerSubtitle = family || category || "";
 
-  /* C3 (dev audit 2026-09-06): nothing on this page said which analyst
+  /* Nothing on this page said which analyst
    * line-up produced the report, so a `lean` run — network only — read as a
    * full one, the deterministic static layers being present either way. A
    * report written before profiles existed has no such key and shows nothing,

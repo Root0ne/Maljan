@@ -55,7 +55,7 @@ export function useWebSocket(jobId: string | null) {
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const attemptRef = useRef(0);
   const cancelledRef = useRef(false);
-  // Wave 10 W10-LINT-DEBT-02 (2026-05-30): ``connect`` referenced itself
+  // ``connect`` referenced itself
   // inside the ws.onclose reconnect handler, which the ESLint
   // ``react-hooks/immutability`` rule flags as access-before-declared
   // (the inner closure captures whichever ``connect`` exists at

@@ -4,15 +4,16 @@ import pytest
 
 from maljan.core.config import Settings
 from maljan.core.container import ServiceContainer
-from maljan.loaders.sandbox_client import SandboxClient
+from maljan.providers.base import SandboxProvider
 
 
 def test_cape2_settings_select_the_cape2_provider():
     cfg = Settings(_env_file=None)
     cfg.sandbox.provider = "cape2"
     container = ServiceContainer(config=cfg, mock=False)
-    assert container.get_sandbox_provider().id == "cape2"
-    assert isinstance(container.get_sandbox_client(), SandboxClient)
+    provider = container.get_sandbox_provider()
+    assert provider.id == "cape2"
+    assert isinstance(provider, SandboxProvider)
 
 
 def test_mock_mode_overrides_the_configured_provider():

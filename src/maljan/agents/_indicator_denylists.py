@@ -1,4 +1,4 @@
-"""Curated denylists / allowlists for indicator filtering (Wave 4).
+"""Curated denylists / allowlists for indicator filtering.
 
 A 2026-05-28 noise audit surfaced ~50 hallucinated indicator SDOs whose
 pattern values were toolchain/build paths, bundled bytecode class refs,
@@ -159,8 +159,8 @@ URL_DENY_HOSTS: tuple[str, ...] = (
 # truncate, sorted by surviving evidence corroboration.
 MAX_FILE_NAME_INDICATORS: int = 10
 
-# Wave 9 (2026-05-29): hard cap on the total number of indicator SDOs in
-# the STIX bundle. The 2026-05-29 Linux ELF audit hit 19 indicators (4
+# Hard cap on the total number of indicator SDOs in the STIX bundle.
+# A Linux ELF audit hit 19 indicators (4
 # hashes + 5 network + 10 file:name) and broke G-FP-4's downstream-
 # tractability assertion. Applied by the STIX renderer with priority
 # order: hashes (sha256 always) -> network IOCs -> file:name.

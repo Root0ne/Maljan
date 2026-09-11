@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 class UploadSandboxProvider(SandboxProvider):
     """A sandbox that runs nothing and reads what the operator already has.
 
-    This is sub-project A's answer to "any sandbox": whatever your shop runs,
+    This is the answer to "any sandbox": whatever your shop runs,
     export its report and attach it to the sample. The format is sniffed again
     here rather than trusted from the upload row, because the row is metadata
     and the bytes are the evidence.

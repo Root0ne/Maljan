@@ -81,7 +81,7 @@ export interface AgentFindingDTO {
   dissent_items: unknown[] | null;
   revision_rounds: number;
   final_confidence: number;
-  // D15+D16 (Wave 3, 2026-05-24): lifecycle status the worker derives
+  // Lifecycle status the worker derives
   // from the ISR shape. Defaults server-side to ``"complete"`` for legacy
   // rows so this is non-optional on the wire.
   status: "complete" | "no_data" | "failed" | "timeout";
@@ -98,7 +98,7 @@ export interface ReportDetailDTO {
   mitre_techniques: unknown[] | null;
   agent_reports: Record<string, unknown> | null;
   negotiation_log: Record<string, unknown> | null;
-  // Wave 9 (2026-05-29): narrowed from ``Record<string, unknown>`` so
+  // Narrowed from ``Record<string, unknown>`` so
   // the SUMMARY tab can render the FP WARNINGS banner and the
   // CAPABILITIES tab can read platform_filter_summary without casts.
   run_summary: RunSummary | null;
@@ -708,8 +708,8 @@ class ApiClient {
     );
   }
 
-  /** Every IOC the report holds, flat. C4 (dev audit 2026-09-06): the endpoint
-   *  existed and nothing in the UI reached it. */
+  /** Every IOC the report holds, flat. The endpoint existed long before
+   *  anything in the UI reached it. */
   getReportIOCs(reportId: string) {
     return this.request<Record<string, unknown>>(
       `/api/v1/reports/${reportId}/iocs`

@@ -43,7 +43,7 @@ class AgentMapError(Exception):
 def _qualified(leaf: str, errors: dict[str, str]) -> dict[str, str]:
     """Every error key rooted at the settings leaf it belongs to.
 
-    B2 (dev audit 2026-09-06): these came out relative -- ``uiaudit_gen.prompt``
+    These used to come out relative -- ``uiaudit_gen.prompt``
     where the server map returns ``core.mcp.servers.Bad Key`` -- so the editor,
     which routes a nested error to a card by the ``core.agents.definitions.
     <key>.<field>`` prefix, could not find the card the message belonged to and

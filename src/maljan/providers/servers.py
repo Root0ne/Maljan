@@ -1,6 +1,6 @@
 """Every MCP server Maljan attaches, and the one lifecycle they share.
 
-Before sub-project B there were three copies of "start an MCP server and take
+There used to be three copies of "start an MCP server and take
 its tools": ``GhidraStaticProvider.open``, ``GenericMCPStaticProvider.open``,
 and a hand-rolled pair inside the network analyst and the judge. They drifted
 — only one of them honoured an output guardrail, only one closed its child on
@@ -126,9 +126,9 @@ def _run_async(coro: Any, label: str) -> None:
     has to run there too rather than on a throwaway loop. A module-level
     function rather than a method so a test can replace it in one place.
     """
-    from maljan.agents.base_agent import _run_coro_blocking
+    from maljan.agents.base_agent import run_coro_blocking
 
-    _run_coro_blocking(coro, hard_timeout=120.0, label=label)
+    run_coro_blocking(coro, hard_timeout=120.0, label=label)
 
 
 # Every handle that still exists, so a retired agent loop can be told which of
@@ -206,7 +206,7 @@ class ServerHandle:
         self._job_id: str = ""
         # True once ``aopen`` has attached this handle: its exit stack was
         # wound on whichever loop called it, so it must be unwound there too
-        # (see F6 / ``close``).
+        # (see ``close``).
         self._opened_async = False
         # *Which* loop that was. ``_opened_async`` alone was not enough: it
         # says "not the synchronous path" and the close paths then assumed the
@@ -785,7 +785,7 @@ class ServerHandle:
         closer = getattr(toolkit, "cleanup", None) or getattr(toolkit, "aclose", None)
         if closer is None:
             return
-        from maljan.agents.base_agent import _get_agent_loop, _run_coro_blocking
+        from maljan.agents.base_agent import _get_agent_loop, run_coro_blocking
 
         owner = self._owner_loop
         budget = SYNC_CLOSE_TIMEOUT
@@ -798,7 +798,7 @@ class ServerHandle:
         inner = budget - CHILD_EXIT_GRACE - CROSS_LOOP_GRACE
         try:
             if owner is None or owner is _get_agent_loop():
-                _run_coro_blocking(
+                run_coro_blocking(
                     self._close_bounded(closer, inner),
                     hard_timeout=budget,
                     label=f"{self.name}-mcp-close",
@@ -830,7 +830,7 @@ class ServerHandle:
         """Release the client or subprocess. Never raises.
 
         A handle ``aopen`` attached must be released through ``aclose`` on the
-        loop that opened it (F6): the synchronous path here runs the toolkit's
+        loop that opened it: the synchronous path here runs the toolkit's
         exit stack through ``_run_coro_blocking`` on the *shared agent loop*,
         which is not the graph loop ``aopen`` wound it on, and produces
         anyio's "cancel scope in a different task" on unwind. Skip it here and
@@ -1198,7 +1198,7 @@ class ServerRegistry:
         """Close every handle this job attached synchronously.
 
         Returns the handles ``close()`` could not touch because ``aopen``
-        attached them (F6) — still open, so the caller must ``await
+        attached them — still open, so the caller must ``await
         handle.aclose()``, which routes each one back to the loop that opened
         it; ``ServiceContainer.aclose`` does exactly that. Per-loop handles
         are included: a job that attached the same server from two loops has

@@ -1,6 +1,6 @@
 """Pin the compiled graph of the default profile, before the profile exists.
 
-Sub-project C replaces ``AgentRegistry.list_agents()`` as the builder's
+Agent composition replaces ``AgentRegistry.list_agents()`` as the builder's
 topology source. The replacement is only free if the graph it produces is the
 graph it produced before, so the node names, the edge set, the conditional
 edge's path map and the analyst order are captured here from a live

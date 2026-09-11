@@ -178,7 +178,7 @@ class CascadeResult:
 class DroppedTechnique:
     """One technique the cascade rejected for platform-incompatibility.
 
-    Carried forward (Wave 4) under ``CascadeSummary.dropped_by_platform``
+    Carried forward under ``CascadeSummary.dropped_by_platform``
     so the UI/FP-linter can render forensic transparency rather than
     silently swallowing claims.
     """
@@ -199,7 +199,7 @@ class CascadeSummary:
         total_techniques: Count of unique techniques.
         corroborated_count: Count of techniques with 2+ layers.
         consensus_count: Count of techniques with all 3 layers.
-        dropped_by_platform: Wave 4 (2026-05-28) audit trail of claims
+        dropped_by_platform: Audit trail of claims
             rejected because the source rule's platform didn't match the
             sample. Empty for legacy runs that didn't supply a platform.
     """
@@ -289,7 +289,7 @@ class TTPCascadeEngine:
             isr_reports: Mapping of agent_id to AgentISR from pipeline state.
             layer_weights: Optional override for domain weights. Defaults to
                            LAYER_WEIGHTS (dynamic=0.45, static=0.35, network=0.20).
-            sample_platform: Wave 4 (2026-05-28) — when set, the cascade
+            sample_platform: When set, the cascade
                 drops claims whose source rule explicitly declared an
                 incompatible platform. ``None`` preserves legacy behaviour.
             empty_domains: 2026-07 audit — domains that had NO real input data
@@ -324,9 +324,9 @@ class TTPCascadeEngine:
                     logger.debug("Skipping invalid technique_id '%s' from cascade.", tid)
                     continue
 
-                # Wave 4: platform-compatibility check via source-layer
-                # declaration first, then MITRE catalog with a mobile-enterprise
-                # overlap allowlist. See plan ``Step 4`` for resolution order.
+                # Platform-compatibility check via source-layer declaration
+                # first, then MITRE catalog with a mobile-enterprise overlap
+                # allowlist.
                 if not _is_claim_platform_compatible(
                     claim_platforms=claim.rule_platforms,
                     sample_platform=sample_platform,
@@ -480,7 +480,7 @@ class TTPCascadeEngine:
 
 
 # ---------------------------------------------------------------------------
-# Wave 4 — platform-aware compatibility resolver
+# Platform-aware compatibility resolver
 # ---------------------------------------------------------------------------
 
 
@@ -496,7 +496,7 @@ def _is_claim_platform_compatible(
          Keep everything.
       2. ``sample_platform`` is ``"unknown"`` → bootstrap couldn't
          disambiguate. Fall open (keep everything, log via the parent).
-      3. ``claim_platforms`` provided by source rule (Sigma/YARA Wave 4):
+      3. ``claim_platforms`` provided by source rule (Sigma/YARA):
          keep iff ``"any" in claim_platforms`` or the sample's platform
          is in the list.
       4. No ``claim_platforms`` (analyst LLM claim or legacy rule):
@@ -508,7 +508,7 @@ def _is_claim_platform_compatible(
     if sp == "" or sp == "unknown":
         return True  # fall open on inference failure
 
-    # Path 1: source-layer-declared platforms (Sigma/YARA after Wave 4).
+    # Path 1: source-layer-declared platforms (Sigma/YARA).
     if claim_platforms:
         norm = {p.strip().lower() for p in claim_platforms if p}
         if "any" in norm:

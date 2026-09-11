@@ -77,7 +77,7 @@ class YaraTTPRule:
         confidence:   Match confidence in [0.70, 1.0].
         description:  Human-readable description of what the rule detects.
         patterns:     List of string patterns (case-insensitive, literal match).
-        platform:     Wave 4 (2026-05-28) sample-platform allowlist. Tuple
+        platform:     Sample-platform allowlist. Tuple
                       such as ``("windows",)`` for rules whose patterns are
                       Windows-only APIs/strings, ``("any",)`` for
                       cross-platform concepts. Empty / missing in the YAML
@@ -114,7 +114,7 @@ class YaraTTPRule:
 
 
 # ---------------------------------------------------------------------------
-# Platform compatibility (Wave 4)
+# Platform compatibility
 # ---------------------------------------------------------------------------
 
 
@@ -148,7 +148,7 @@ class YaraMatch:
         confidence:   Rule-specified confidence value.
         description:  Human-readable rule description.
         matched_patterns: Specific patterns from the rule that were found.
-        rule_platforms: Source rule's declared platform tuple (Wave 4) —
+        rule_platforms: Source rule's declared platform tuple —
                         ``("any",)`` for cross-platform rules. Propagated
                         into the ISR so the TTP cascade can honour the
                         layer-declared platform over the MITRE catalog.
@@ -212,7 +212,7 @@ class YaraLayer:
         self._yara_rules: Any = None
         self._yara_id_map: dict[str, str] = {}
         self._compiled: dict[str, list[re.Pattern[str]]] = {}
-        # Wave 4 platform-filter telemetry (parallel to SigmaLayer).
+        # Platform-filter telemetry (parallel to SigmaLayer).
         self._filtered_count: int = 0
 
         if _YARA_AVAILABLE and rules:
@@ -453,7 +453,7 @@ class YaraLayer:
 
         Args:
             data: Raw sample bytes (preferred) or text.
-            sample_platform: Wave 4 — drop rules whose declared
+            sample_platform: Drop rules whose declared
                 ``platform`` field doesn't intersect the sample's
                 canonical platform. ``None`` keeps legacy callers green.
 
@@ -465,7 +465,7 @@ class YaraLayer:
 
         data_bytes = data if isinstance(data, bytes) else data.encode("utf-8", errors="replace")
 
-        # Wave 4: pre-filter the rule list by platform compatibility.
+        # Pre-filter the rule list by platform compatibility.
         # We keep _rules as the canonical full set so callers querying
         # ``rule_count`` see the corpus; only the scan loop is filtered.
         if sample_platform is None:

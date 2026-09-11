@@ -102,9 +102,8 @@ def test_compose_binds_loopback_and_requires_the_secrets(tmp_path):
 @pytest.mark.skipif(shutil.which("docker") is None, reason="docker not installed")
 def test_migrations_run_once_before_the_api_and_the_worker(tmp_path):
     """A fresh compose deploy has an empty database and the API does not
-    migrate on startup, so without this step ``settings_meta`` never exists:
-    the one-time legacy import raises on every start and ``/health`` reports
-    configuration readiness as "unknown" forever."""
+    migrate on startup, so without this step no table the API reads exists
+    and every request fails until someone migrates by hand."""
     compose_dir = tmp_path / "docker"
     compose_dir.mkdir()
     copy = compose_dir / "docker-compose.yml"

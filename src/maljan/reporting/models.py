@@ -104,7 +104,7 @@ class SampleIdentity(BaseModel):
     file_name: str | None = None
     file_size_bytes: int = 0
     file_type: str = "unknown"
-    # Wave 4 (2026-05-28): the canonical platform inferred from
+    # The canonical platform inferred from
     # file_type with sandbox fallback. Drives Sigma/YARA rule filtering
     # and TTP cascade platform-aware drop decisions.
     platform: Platform = "unknown"
@@ -344,9 +344,8 @@ class PersistenceMechanism(BaseModel):
 
     model_config = _STRICT_CONFIG
 
-    # Wave 9 (2026-05-29): Linux ELF persistence kinds added so the
-    # 2026-05-29 Mirai ELF audit's PERSISTENCE tab renders real signal
-    # instead of empty. Windows kinds remain canonical for PE.
+    # Linux ELF persistence kinds, so the Mirai ELF audit's PERSISTENCE
+    # tab renders real signal instead of empty. Windows kinds remain canonical for PE.
     kind: Literal[
         # ── Windows (PE) ─────────────────────────────────────
         "registry_run",
@@ -361,7 +360,7 @@ class PersistenceMechanism(BaseModel):
         "appinit_dll",
         "lsa_provider",
         "winlogon_helper",
-        # ── Linux (ELF) — Wave 9 ─────────────────────────────
+        # ── Linux (ELF) ──────────────────────────────────────
         "systemd_service",
         "systemd_timer",
         "cron_job",
@@ -497,7 +496,7 @@ class DefensiveRecommendation(BaseModel):
     action: str
     rationale: str
     priority: Literal["P0", "P1", "P2"]
-    # 2026-07 round 2: link each recommendation to the ATT&CK technique it
+    # Link each recommendation to the ATT&CK technique it
     # defends against, and carry concrete detection guidance (specific API /
     # registry key / telemetry source / sigma-yara pointer) rather than prose.
     technique_id: str | None = None
@@ -515,13 +514,13 @@ class ExternalReference(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Professional-report front-matter & technical spine (report-reshaping Phase 2)
+# Professional-report front-matter & technical spine
 # ---------------------------------------------------------------------------
 #
 # Additive, all-optional containers modelled on the reference spec at
 # other/docs/report-reference/malware-analysis-report-reference.md. Deterministic
-# extractors (Phase 3) fill the front-matter / IOC / fingerprint fields; the
-# section-wise Composer (Phase 4) fills the prose subsections, each grounded in
+# extractors fill the front-matter / IOC / fingerprint fields; the
+# section-wise Composer fills the prose subsections, each grounded in
 # captured tool evidence. Every field defaults empty so a report never regresses
 # when a section has no evidence — the renderer states absence explicitly.
 
@@ -766,7 +765,7 @@ class MalwareReport(BaseModel):
     # --- References ---
     references: list[ExternalReference] = Field(default_factory=list)
 
-    # --- Captured tool evidence (report-reshaping Phase 1) ---
+    # --- Captured tool evidence ---
     # Per-agent list of captured ReAct tool outputs (decompiled functions,
     # crypto constants, emulation/dataflow traces) — the durable raw material
     # the report Composer grounds the deep technical spine in. Size-capped
@@ -774,11 +773,11 @@ class MalwareReport(BaseModel):
     # paths. Empty on legacy rows and mock runs.
     technical_evidence: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
 
-    # --- Professional-report front-matter & spine (report-reshaping Phase 2) ---
+    # --- Professional-report front-matter & spine ---
     # All additive/optional. Deterministic extractors fill front_matter /
     # version_history / consolidated_iocs; the section-wise Composer fills the
-    # prose (technical spine, intro, conclusion, C2). Empty/None until Phase 3-4
-    # populate them — legacy consumers ignore unknown fields.
+    # prose (technical spine, intro, conclusion, C2). Empty/None until those
+    # steps populate them — legacy consumers ignore unknown fields.
     front_matter: ReportFrontMatter | None = None
     version_history: list[VersionHistoryEntry] = Field(default_factory=list)
     tlp: TLPLevel = "CLEAR"

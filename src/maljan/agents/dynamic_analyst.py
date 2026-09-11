@@ -1,6 +1,6 @@
 """Dynamic Analyst agent — evaluates sandbox behavioral logs (CAPEv2/Cuckoo).
 
-Phase 1b: Overrides analyze_isr() and revise_isr() to extract structured
+Overrides analyze_isr() and revise_isr() to extract structured
 ClaimEvidence objects. Focuses on API call sequences, process injection
 chains, and persistence mechanisms observable from sandbox JSON output.
 """
@@ -32,8 +32,9 @@ _DYN_HEAD = (
     "T1059 (Command Execution), T1112 (Registry Modification).\n\n"
 )
 
-# Empty today. Declared because the assembly order is the contract sub-projects
-# B and C build agent prompts from, and an implicit empty tail is a trap.
+# Empty today. Declared because the assembly order is the contract the tool
+# server and agent-composition layers build agent prompts from, and an
+# implicit empty tail is a trap.
 _DYN_TAIL = ""
 
 # Back-compat: several modules and tests import this name. It is the default
@@ -160,7 +161,7 @@ class DynamicAnalyst(BaseAnalyst):
         return str(response.content)
 
     # ------------------------------------------------------------------
-    # ISR interface (Phase 1b)
+    # ISR interface
     # ------------------------------------------------------------------
 
     def analyze_isr(self, data: str) -> AgentISR:

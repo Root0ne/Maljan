@@ -38,7 +38,7 @@ class MarkdownRenderer:
     # a block with one or two headings.
 
     def render(self, report: MalwareReport) -> str:
-        # Wave 9 (2026-05-29): each section is wrapped in _safe_section so a
+        # Each section is wrapped in _safe_section so a
         # single malformed subtree (e.g. degraded-mode runs where
         # ``dynamic.notable_apis`` contains non-dict entries) cannot 500 the
         # entire ``/reports/{id}/markdown`` endpoint. The 2026-05-29 Linux

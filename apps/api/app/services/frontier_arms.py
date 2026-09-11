@@ -53,7 +53,7 @@ def split_arm_secrets(
     encrypted row already merged back in). It exists for one rule: the
     composite must never lose a key that was never stored anywhere else. An
     upgraded deployment can still have a key sitting in the composite in clear
-    -- that is what the repair in ``legacy_env_import`` is for -- and an
+    -- that is what the repair in ``composite_secrets`` is for -- and an
     import document, which omits ``api_key`` entirely, would otherwise strip
     it on the way past. Such a key is carried into the instruction set instead,
     so the save writes the encrypted row the strip assumes exists.

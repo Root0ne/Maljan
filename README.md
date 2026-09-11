@@ -106,7 +106,7 @@ maljan/
 │   └── evaluation/          the measured corpus and its analysis scripts
 ├── data/                    tracked knowledge assets, loaded lazily, each with a fallback
 ├── docker/                  Dockerfiles and the compose stack
-├── docs/                    README.md (this tree explained), assets/, specs/, plans/
+├── docs/                    README.md (this tree explained), assets/
 ├── Makefile                 every gate and every generator
 └── pyproject.toml uv.lock   one uv workspace: maljan plus apps/api
 ```
@@ -157,9 +157,8 @@ environment (database, Redis, MinIO, the two secrets below, a handful of
 mount paths); every other application setting — LLM provider, sandbox,
 static analyst, tool servers, agents, rate limits — lives in the settings
 store and is edited from the web UI (Settings → Configuration) once the
-stack is up. The first API start imports a legacy `.env`, if one exists in
-the repository root, into the store once; a fresh checkout with no `.env`
-starts with the catalog defaults instead.
+stack is up. A new deployment starts with the catalog defaults and is
+configured from there.
 
 ```bash
 cp docker/.env.example docker/.env
@@ -225,8 +224,8 @@ URL `http://ghidra-mcp:8089`, the CAPE sandbox base URL (your host's, e.g.
 `http://host.docker.internal:18000`), and the enrichment Qdrant URL
 `http://qdrant:6333` with its `QDRANT_API_KEY` (the same value you generated
 into `docker/.env` above). An **existing** deployment upgrading onto this
-design gets all three from the one-time legacy `.env` import instead, so
-nothing to do there.
+design enters the same three values the same way, or brings them in with a
+JSON export from its previous instance.
 
 > **Local LLM:** Containers reach the host's LLM via `host.docker.internal:8080/v1` (OpenAI-compatible: typically `ik_llama.cpp`'s `llama-server`) — set this from Settings → Configuration. The legacy Ollama path on `:11434` is also wired up as a fallback. `make external` fetches `ik_llama.cpp` at the commit this project was measured against; the model is `Qwen3.6-35B-A3B` quantised to `IQ3_K_R4`, which fits on an 8 GB GPU with a hybrid MoE offload.
 
@@ -692,7 +691,7 @@ A missing required variable, an empty or placeholder JWT secret outside
 debug, or an invalid `SETTINGS_ENCRYPTION_KEY` aborts the process at
 startup with one message naming every problem
 (`apps/api/app/bootstrap.py`). `/health` reports `config: {bootstrap,
-encryption, legacy_import}` once the process is up. For Docker, these
+encryption}` once the process is up. For Docker, these
 variables are supplied by `docker/docker-compose.yml` (built from
 `docker/.env`'s infrastructure secrets) and never read from a `.env` file
 directly; for a bare `uvicorn`/`arq` process, export them into the shell
@@ -739,14 +738,10 @@ between environments; there is no `.env` export or import any more. Every
 analysis still records the settings that were actually in effect, and
 which of them came from a stored override, in its run summary.
 
-**Legacy `.env` (one-time only).** The first API start after this design
-imports a legacy root `.env`, if one is present, into the settings store:
-for every catalog key whose old value differs from the default and has no
-stored row yet, it writes one, encrypting secrets, and records a single
-audit entry naming the keys (never the values). A later start is a no-op;
-the store is authoritative from then on. The standalone CLI is the one
-remaining consumer that still reads `.env` and the environment directly —
-see the Quick Start section above.
+**Upgrading from a `.env` deployment.** There is no automatic import. Enter
+the settings in Settings → Configuration, or import a JSON export. The
+standalone CLI is the one remaining consumer that still reads `.env` and the
+environment directly — see the Quick Start section above.
 
 ---
 

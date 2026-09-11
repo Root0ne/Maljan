@@ -331,8 +331,8 @@ ANNOTATIONS: dict[str, Annotation] = {
     "llm.frontier.model": {
         "title": "Frontier model",
         "description": (
-            "Model identifier for the single frontier comparison arm (the one the B8 "
-            "evaluation originally ran). Additional arms are configured under "
+            "Model identifier for the single frontier comparison arm used by the "
+            "original evaluation. Additional arms are configured under "
             "llm.frontier.arms."
         ),
     },
@@ -1125,7 +1125,7 @@ def mcp_server_annotations(
     """The fourteen leaves of an ``MCPServerConfig`` block, described for ``label``.
 
     Every MCP server in the settings has the same nine transport/tool-selection
-    knobs, plus five sub-project-B fields (``cwd``, ``env_allow``, ``tools``,
+    knobs, plus five tool-server fields (``cwd``, ``env_allow``, ``tools``,
     ``agents``, ``label``); writing them out six times invites drift between
     blocks that must behave identically. The per-field wording is fixed, the
     server's name is the only variable.

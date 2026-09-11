@@ -1,6 +1,6 @@
 """Deterministic import-capability detection (Layer 0).
 
-2026-07 audit (round 2): after the round-1 fix stopped YARA/Sigma from scanning
+After the earlier fix stopped YARA/Sigma from scanning
 analyst prose, the pipeline swung to *under*-reporting — a sample's strongest
 real signal could go unmapped. The audited MFC sample is a WS2_32 network client
 that resolves and connects to a hard-coded domain (``888kafa.com``), yet no

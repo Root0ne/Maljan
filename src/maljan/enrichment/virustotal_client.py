@@ -154,7 +154,13 @@ def _is_whitelisted_host(url: str, expected_host: str) -> bool:
 
 
 def _redact_url(url: str) -> str:
-    """Strip the IOC value from the URL before logging."""
+    """Strip the IOC from a VT URL's path before logging, returning
+    ``"<invalid>"`` if the URL fails to parse.
+
+    This is not a credential redactor: it discards the last path segment
+    (the indicator VT looks up), not a ``user:pass@`` component. For that,
+    see ``maljan.core.settings_overrides.redact_url``.
+    """
     try:
         parsed = urlparse(url)
     except ValueError:

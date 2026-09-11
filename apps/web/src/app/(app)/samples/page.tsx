@@ -48,7 +48,7 @@ function SamplesPageContent() {
   const [toast, setToast] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  /* ── Task 22: the submit dialog ─────────────────────── */
+  /* ── The submit dialog ──────────────────────────────── */
   const [submitFor, setSubmitFor] = useState<SampleRow | null>(null);
   const [staticProvider, setStaticProvider] = useState("");
   const [sandboxProvider, setSandboxProvider] = useState("");

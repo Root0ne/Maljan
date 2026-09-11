@@ -30,7 +30,7 @@ const TOKEN_SOURCE_LABEL: Record<string, string> = {
 const TRANSPORTS = ["stdio", "http", "streamable-http", "sse"];
 const TOOL_SELECTIONS = ["curated", "dynamic", "all"];
 
-/* B6 (dev audit 2026-09-06): a probe result describes the server as it was
+/* A probe result describes the server as it was
  * configured when the button was pressed. Editing what the probe dialled —
  * the transport and its connection fields — leaves the green "3 tools: …"
  * line describing a server that no longer exists, so the result is dropped
@@ -476,7 +476,7 @@ export function ServerDetail({
         </fieldset>
       )}
 
-      {/* WEB-2 (dev audit 2026-09-06): both of these are on every server
+      {/* Both of these are on every server
           the editor creates, both are read by the providers that drive a
           server (`providers/static/generic_mcp.py`, `ghidra.py`), and
           neither had a control anywhere on this screen — a new server
@@ -608,7 +608,7 @@ export function ServerDetail({
  *
  * One staged value for the whole map, not one per card: the PATCH body is the
  * full dict, so the apply bar, the hidden-dirty count and the reset behaviour
- * from sub-project A all apply unchanged, and a half-applied map — three
+ * all apply unchanged, and a half-applied map — three
  * servers saved and the fourth rejected — cannot happen.
  *
  * The token field rides inside that same dict and behaves the way every other

@@ -24,6 +24,7 @@ from maljan.loaders.sandbox_client import SubmissionResult
 from maljan.pipeline.builder import build_graph
 from maljan.pipeline.events import EventSink
 from maljan.pipeline.state import AnalysisState
+from maljan.providers.cape_view import to_cape_shaped_dict
 
 
 class MaljanApp:
@@ -142,7 +143,7 @@ class MaljanApp:
     def _poll_budget(self, provider: Any) -> tuple[int, int]:
         """How long to wait for this provider, and how often to ask.
 
-        Sub-project A threaded ``sandbox.cape2.*`` into every provider's poll
+        The provider layer used to thread ``sandbox.cape2.*`` into every provider's poll
         loop, which was harmless while every provider that polled was CAPE.
         A provider with its own configured budget reads it; everything else
         keeps CAPE's values, so the cape2, mock, upload and triage paths are
@@ -172,7 +173,6 @@ class MaljanApp:
             return None
 
         try:
-            client = self.container.get_sandbox_client()
             provider = self.container.get_sandbox_provider()
             caps = provider.capabilities
             if not caps.can_submit and caps.accepts_uploaded_report:
@@ -182,66 +182,66 @@ class MaljanApp:
                 except Exception as exc:  # noqa: BLE001 — same degrade contract as a failed submit
                     logger.error("Attached sandbox report unusable: %s", exc)
                     return None
-                from maljan.providers.cape_view import to_cape_shaped_dict
-
                 return to_cape_shaped_dict(run.report)
             logger.info("Submitting sample to sandbox: %s", sample_path)
 
-            # ``submit_and_wait`` is an optional convenience method some
-            # SandboxClient implementations expose; fall back to the
-            # Protocol triad (submit + wait + fetch_report) when missing.
-            if hasattr(client, "submit_and_wait"):
-                result = await client.submit_and_wait(path)
-            else:
-                # Every call on this branch is synchronous: the Triage provider
-                # drives an ``httpx.Client`` and polls with ``time.sleep``, so
-                # awaited bare they stop the worker's event loop — and its
-                # heartbeat — for the whole detonation (OBS 4). The provider
-                # objects are plain HTTP clients with no loop affinity, so a
-                # thread changes nothing but where the blocking happens.
-                task_id = await asyncio.to_thread(client.submit, sample_path)
-                # Thread the active provider's own completion timeout + poll
-                # interval into the poll loop (see ``_poll_budget``). Without
-                # this the client's 300s default — or another provider's
-                # config read from the wrong block — was used regardless of
-                # which sandbox was configured, and a real CAPE detonation
-                # (win10 guest run alone is ~280s + processing) timed out
-                # before the report was ready — silently degrading every run
-                # to static-only. All SandboxClient impls share this signature.
-                timeout_seconds, poll_interval_seconds = self._poll_budget(provider)
-                status = await asyncio.to_thread(
-                    client.wait_for_completion,
-                    task_id,
-                    timeout_seconds=timeout_seconds,
-                    poll_interval_seconds=poll_interval_seconds,
+            # Every provider call below is synchronous: the Triage provider
+            # drives an ``httpx.Client`` and polls with ``time.sleep``, so
+            # awaited bare they stop the worker's event loop — and its
+            # heartbeat — for the whole detonation. The provider
+            # objects are plain HTTP clients with no loop affinity, so a
+            # thread changes nothing but where the blocking happens.
+            task_id = await asyncio.to_thread(provider.submit, str(path))
+            # Thread the active provider's own completion timeout + poll
+            # interval into the poll loop (see ``_poll_budget``). Without
+            # this the ABC's 300s default — or another provider's config read
+            # from the wrong block — was used regardless of which sandbox was
+            # configured, and a real CAPE detonation (win10 guest run alone is
+            # ~280s + processing) timed out before the report was ready —
+            # silently degrading every run to static-only.
+            timeout_seconds, poll_interval_seconds = self._poll_budget(provider)
+            status = await asyncio.to_thread(
+                provider.wait_for_completion,
+                task_id,
+                timeout_seconds=timeout_seconds,
+                poll_interval_seconds=poll_interval_seconds,
+            )
+            if status == "reported":
+                run = await asyncio.to_thread(provider.fetch, task_id)
+                result = SubmissionResult(
+                    task_id=run.task_id,
+                    sample_sha256=run.sample_sha256,
+                    sample_name=run.sample_name,
+                    status=run.status,
+                    report=to_cape_shaped_dict(run.report),
+                    error=run.error,
+                    normalized=run.report,
                 )
-                if status == "reported":
-                    result = await asyncio.to_thread(client.fetch_report, task_id)
-                    # Pull the raw PCAP alongside the JSON report so the network
-                    # analyst can deep-inspect the capture with its local PCAP
-                    # MCP (per-packet beaconing / tunnelling / TLS-SNI) — the
-                    # structured ``network`` block can't express that. Best
-                    # effort: a missing/failed PCAP just leaves the analyst on
-                    # the structured IOCs. Only CAPEv2Client exposes fetch_pcap.
-                    if hasattr(client, "fetch_pcap") and isinstance(result.report, dict):
-                        try:
-                            import tempfile
+                # Pull the raw PCAP alongside the JSON report so the network
+                # analyst can deep-inspect the capture with its local PCAP
+                # MCP (per-packet beaconing / tunnelling / TLS-SNI) — the
+                # structured ``network`` block can't express that. Best
+                # effort: a missing/failed PCAP just leaves the analyst on
+                # the structured IOCs. Only CAPE-style providers declare it.
+                if caps.can_fetch_pcap and isinstance(result.report, dict):
+                    try:
+                        import tempfile
 
-                            pcap_dir = Path(tempfile.gettempdir()) / "maljan-cape-pcap"
-                            pcap_path = client.fetch_pcap(task_id, pcap_dir)
-                            if pcap_path:
-                                net = result.report.setdefault("network", {})
-                                if isinstance(net, dict):
-                                    net["pcap_local_path"] = pcap_path
-                        except Exception as exc:
-                            logger.warning("PCAP fetch/attach failed (non-fatal): %s", exc)
-                else:
-                    result = SubmissionResult(
-                        task_id=task_id,
-                        status=status,
-                        report={},
-                        error=f"Sandbox status: {status}",
-                    )
+                        pcap_dir = Path(tempfile.gettempdir()) / "maljan-cape-pcap"
+                        pcap_path = provider.fetch_pcap(task_id, str(pcap_dir))
+                        if pcap_path:
+                            net = result.report.setdefault("network", {})
+                            if isinstance(net, dict):
+                                net["pcap_local_path"] = pcap_path
+                    except Exception as exc:
+                        logger.warning("PCAP fetch/attach failed (non-fatal): %s", exc)
+            else:
+                result = SubmissionResult(
+                    task_id=task_id,
+                    status=status,
+                    report={},
+                    error=f"Sandbox status: {status}",
+                )
 
             if result.status in ("reported", "partial") and result.report:
                 if not isinstance(result.report, dict):
@@ -319,10 +319,10 @@ class MaljanApp:
                 f"Unsupported sample OS: {unsupported}. Only Windows and Linux are supported."
             )
 
-        # Phase 2: Submit to sandbox if sample_path is provided
+        # Submit to sandbox if sample_path is provided
         sandbox_report = await self._submit_to_sandbox(sample_path)
 
-        # Wave 4 (2026-05-28): compute file_type + canonical platform up
+        # Compute file_type + canonical platform up
         # front so the judge node's Sigma/YARA scanners + TTP cascade can
         # filter platform-incompatible rules. Without this the pipeline is
         # platform-blind and yields cross-OS FPs (e.g. a Windows-only rule

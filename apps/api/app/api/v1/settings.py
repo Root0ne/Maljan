@@ -159,7 +159,7 @@ def _strip_masks(value: Any, path: str) -> tuple[Any, list[str]]:
     is nested inside a composite leaf -- a server's ``auth_token``, a frontier
     arm's ``api_key`` -- so the UI never echoes a real one. Writing that mask
     into the export would configure it as the literal credential on the next
-    import (the failure mode F8 fixed for the old ``.env`` export), so it is
+    import (the failure mode fixed for the old ``.env`` export), so it is
     dropped here instead, at any depth: a composite that grows a new secret
     leaf is covered the day it is added rather than the day someone remembers
     to extend this function.
@@ -228,8 +228,8 @@ def _export_value(key: str, value: Any) -> tuple[Any, list[str]]:
 def _mask_server_env(servers: Any, omitted: list[str]) -> tuple[Any, list[str]]:
     """Every ``env`` value masked, and its variable named in ``omitted``.
 
-    SEC-1 (dev audit 2026-09-06) established a server's ``env`` map as the one
-    place a credential can live without being typed as one, which is why
+    A server's ``env`` map is the one place a credential can live without
+    being typed as one, which is why
     ``public_snapshot`` masks it in run summaries. An export is a file on an
     operator's disk and the weaker of the two paths, so it masks them too. The
     variable names stay -- an operator reading the document needs to see what
@@ -325,7 +325,7 @@ async def import_values(
 async def _probe_response(coro: Awaitable[Any]) -> ProbeResponse:
     """One probe's answer, as a 200 whatever happens.
 
-    B1 (dev audit 2026-09-06): a connection test that fails is an answer, not
+    A connection test that fails is an answer, not
     an error -- an operator staging a command that turns out not to be an MCP
     server needs to read why, and a 500 (or a cancelled handler that sends
     nothing at all, which is what this endpoint did) reaches the browser as a
