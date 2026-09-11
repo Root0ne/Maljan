@@ -132,12 +132,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # silently. See APISettings.upload_temp_dir.
     from pathlib import Path as _Path
 
-    # Resolve to absolute BEFORE writing so
-    # downstream consumers (worker MinIO download, sandbox submit) don't
-    # inherit a CWD-dependent relative path. An ELF smoke test
-    # hit ``[Errno 22] Invalid argument`` from the sandbox client's submit
-    # path when its httpx coroutine context tried to open
-    # ``data\uploads\.tmp\<sha>.elf`` from a CWD that wasn't the project root.
+    # Resolve to absolute BEFORE writing so downstream consumers (worker
+    # MinIO download, sandbox submit) don't inherit a CWD-dependent relative
+    # path. An ELF smoke test hit ``[Errno 22] Invalid argument`` from the
+    # sandbox client's submit path when its httpx coroutine context tried to
+    # open ``data\uploads\.tmp\<sha>.elf`` from a CWD that wasn't the project
+    # root.
     _upload_tmp = _Path(settings.upload_temp_dir).resolve()
     try:
         _upload_tmp.mkdir(parents=True, exist_ok=True)
@@ -325,11 +325,11 @@ def create_app() -> FastAPI:
     )
 
     # ── Security Headers ─────────────────────────────────────
-    # Bare CORS leaves browsers
-    # without the standard hardening header set. The middleware below
-    # installs OWASP-recommended defaults (CSP / X-Frame-Options /
-    # X-Content-Type-Options / Referrer-Policy / Permissions-Policy)
-    # without touching API semantics. HSTS stays off in dev (HTTP).
+    # Bare CORS leaves browsers without the standard hardening header set.
+    # The middleware below installs OWASP-recommended defaults (CSP /
+    # X-Frame-Options / X-Content-Type-Options / Referrer-Policy /
+    # Permissions-Policy) without touching API semantics. HSTS stays off in
+    # dev (HTTP).
     from app.middleware.security_headers_middleware import SecurityHeadersMiddleware
 
     app.add_middleware(
