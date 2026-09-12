@@ -37,6 +37,13 @@ change landed on `main`.
 
 ### Changed
 
+- **Dependencies brought current.** The uv workspace is relocked to today's
+  releases (cryptography 50, starlette 1.6, langchain-core 1.6, mcp 1.30 with
+  2.x held back as a separate migration, pillow 12.3, pyjwt 2.14, urllib3 2.7,
+  weasyprint 70 and the rest), and the console moves to Next.js 16.3.5 and
+  vitest 4 with a regenerated lockfile. This clears every Dependabot alert
+  that has a fix; the two without one (`ecdsa`, `diskcache`) are recorded in
+  the alert list with the reason.
 - The process refuses to start without a valid `SETTINGS_ENCRYPTION_KEY`, so
   there is no mode in which stored secrets sit unencrypted
   ([#31](https://github.com/Root0ne/Maljan/pull/31)).

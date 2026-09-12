@@ -87,7 +87,7 @@ def _streaming_hashes(file: UploadFile, dest: Path, max_bytes: int) -> tuple[str
             total += len(chunk)
             if total > max_bytes:
                 raise HTTPException(
-                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                     detail=(f"File too large. Maximum: {max_bytes // (1024 * 1024)} MB"),
                 )
             sha256.update(chunk)

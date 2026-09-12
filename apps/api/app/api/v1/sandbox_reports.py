@@ -128,7 +128,7 @@ async def _read_payload(file: UploadFile, db: AsyncSession) -> tuple[bytes, dict
         raw.extend(chunk)
         if len(raw) > limit:
             raise HTTPException(
-                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                status.HTTP_413_CONTENT_TOO_LARGE,
                 f"Report too large. Maximum: {limit // (1024 * 1024)} MB",
             )
     body = bytes(raw)
@@ -141,7 +141,7 @@ async def _read_payload(file: UploadFile, db: AsyncSession) -> tuple[bytes, dict
                 inflated.extend(decompressor.decompress(body[offset : offset + _CHUNK], limit + 1))
                 if len(inflated) > limit:
                     raise HTTPException(
-                        status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        status.HTTP_413_CONTENT_TOO_LARGE,
                         f"Report too large once decompressed. Maximum: {limit // (1024 * 1024)} MB",
                     )
             inflated.extend(decompressor.flush())

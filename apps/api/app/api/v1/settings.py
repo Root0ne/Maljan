@@ -405,7 +405,7 @@ async def _capped_body(request: Request) -> dict[str, Any]:
         with suppress(ValueError):
             if int(content_length) > PREVIEW_MAX_BYTES:
                 raise HTTPException(
-                    status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    status.HTTP_413_CONTENT_TOO_LARGE,
                     f"the pasted response exceeds {PREVIEW_MAX_BYTES} bytes",
                 )
     limit = PREVIEW_MAX_BYTES + 1
@@ -419,7 +419,7 @@ async def _capped_body(request: Request) -> dict[str, Any]:
         size += len(piece)
     if size > PREVIEW_MAX_BYTES:
         raise HTTPException(
-            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status.HTTP_413_CONTENT_TOO_LARGE,
             f"the pasted response exceeds {PREVIEW_MAX_BYTES} bytes",
         )
     try:
