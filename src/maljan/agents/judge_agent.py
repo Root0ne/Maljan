@@ -31,6 +31,7 @@ import uuid
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 
 from maljan.agents.base_agent import retry_on_connection_error
@@ -606,18 +607,19 @@ class JudgeAgent:
         if memory_block:
             reports_text = f"{reports_text}\n\n{memory_block}"
 
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", JUDGE_VERDICT_SYSTEM),
-                (
-                    "human",
-                    "Expert Reports:\n{reports}\n\n"
-                    "Negotiation History:\n{history}\n\n"
-                    "Return a JSON STIX 2.1 Bundle.",
-                ),
-            ]
-        )
-        messages = list(prompt.format_messages(reports=reports_text, history=str(history)[:800]))
+        # Built as messages rather than through ``ChatPromptTemplate``: the
+        # system turn now contains a JSON skeleton, and a template would read
+        # its braces as placeholders and refuse the prompt outright.
+        messages: list[Any] = [
+            SystemMessage(content=JUDGE_VERDICT_SYSTEM),
+            HumanMessage(
+                content=(
+                    f"Expert Reports:\n{reports_text}\n\n"
+                    f"Negotiation History:\n{str(history)[:800]}\n\n"
+                    "Return a JSON STIX 2.1 Bundle."
+                )
+            ),
+        ]
 
         # Resolve the judge-specific timeout via the same override mechanism
         # the analyst agents use. ``react_agent_timeout_overrides`` ships

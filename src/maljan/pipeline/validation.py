@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from maljan.core.logger import logger
+from maljan.schemas.judgement import SEVERITY_RATINGS
 
 # How many alternatives a suggestion list carries. Three is what fits in one
 # line of feedback; a longer list reads as a menu and the model picks from the
@@ -224,8 +225,6 @@ def _claim_index(path: str) -> int | None:
 # The judge's bundle
 # ---------------------------------------------------------------------------
 
-_SEVERITY_RATINGS = ("Critical", "High", "Medium", "Low", "Informational")
-
 
 def validate_verdict_bundle(
     bundle: Any, evidence_corpus: set[str] | None = None
@@ -269,13 +268,13 @@ def validate_verdict_bundle(
     assessment = getattr(bundle, "x_maljan_assessment", None)
     severity = getattr(assessment, "severity", None) if assessment is not None else None
     rating = str(getattr(severity, "rating", "") or "") if severity is not None else ""
-    if rating and rating not in _SEVERITY_RATINGS:
+    if rating and rating not in SEVERITY_RATINGS:
         violations.append(
             Violation(
                 code="verdict.severity_enum",
                 message=(
                     f"severity.rating is {rating!r}; it must be one of "
-                    f"{', '.join(_SEVERITY_RATINGS)}."
+                    f"{', '.join(SEVERITY_RATINGS)}."
                 ),
                 path="severity.rating",
             )

@@ -18,19 +18,23 @@ an ``x_``-prefixed name is how the spec says to add to it.
 
 from __future__ import annotations
 
-from typing import Literal
-
 from pydantic import BaseModel, Field
 
-SeverityRating = Literal["Critical", "High", "Medium", "Low", "Informational"]
+SEVERITY_RATINGS: tuple[str, ...] = ("Critical", "High", "Medium", "Low", "Informational")
 
 
 class SeverityVerdict(BaseModel):
-    """How bad this is, and why the judge says so."""
+    """How bad this is, and why the judge says so.
 
-    rating: SeverityRating = Field(
-        ..., description="Critical | High | Medium | Low | Informational."
-    )
+    ``rating`` is a plain string and not a ``Literal``, deliberately. A model
+    that answers "Catastrophic" has made a mistake worth telling it about, and
+    a Literal would instead make the whole bundle fail to parse — the judge
+    would silently fall back to a text verdict and nobody would learn that one
+    word was wrong. ``pipeline.validation`` enforces the vocabulary and hands
+    the judge the list; the schema carries what the judge actually said.
+    """
+
+    rating: str = Field(..., description=" | ".join(SEVERITY_RATINGS) + ".")
     rationale: str = Field(
         "", description="Why the evidence supports that rating, in one or two sentences."
     )
