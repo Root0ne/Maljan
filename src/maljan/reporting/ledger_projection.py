@@ -375,18 +375,19 @@ def dynamic_from_ledger(
     seen = False
 
     for _entry, data in _payloads(ledger, "sandbox_processes"):
-        for row in data.get("processes") or []:
-            if not isinstance(row, dict):
-                continue
-            seen = True
-            dynamic.process_tree.append(
-                ProcessNode(
-                    pid=_int(row.get("pid")),
-                    ppid=_int(row.get("ppid")),
-                    name=str(row.get("name") or ""),
-                    command_line=str(row.get("command_line") or ""),
-                )
+        nodes = [
+            ProcessNode(
+                pid=_int(row.get("pid")),
+                ppid=_int(row.get("ppid")),
+                name=str(row.get("name") or ""),
+                command_line=str(row.get("command_line") or ""),
             )
+            for row in data.get("processes") or []
+            if isinstance(row, dict)
+        ]
+        if nodes:
+            seen = True
+            dynamic.process_tree.extend(_as_tree(nodes))
 
     for _entry, data in _payloads(ledger, "sandbox_signatures"):
         for row in data.get("signatures") or []:
@@ -427,6 +428,26 @@ def dynamic_from_ledger(
                 )
 
     return dynamic if seen else None
+
+
+def _as_tree(nodes: list[ProcessNode]) -> list[ProcessNode]:
+    """The flat process list nested by parent, roots first.
+
+    The tool answers a list because a list is what the sandbox recorded; the
+    report shows a tree because "what spawned what" is the question a reader
+    asks of it. A process whose parent is not in the list is a root — the
+    sandbox did not watch the parent, and hiding the child under nothing would
+    lose it.
+    """
+    by_pid = {node.pid: node for node in nodes}
+    roots: list[ProcessNode] = []
+    for node in nodes:
+        parent = by_pid.get(node.ppid)
+        if parent is not None and parent is not node:
+            parent.children.append(node)
+        else:
+            roots.append(node)
+    return roots
 
 
 # ---------------------------------------------------------------------------
