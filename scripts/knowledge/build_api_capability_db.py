@@ -57,8 +57,7 @@ INFO = "informational"
 # Windows behaviour categories
 # ---------------------------------------------------------------------------
 # The eight existing category names are frozen and must not be renamed: they are
-# consumed by capability_matrix.py, ghidra_tool_selector.py,
-# import_capability_layer.py, and — invisibly — by the vendored
+# consumed by capability_matrix.py, import_capability_layer.py, and — invisibly — by the vendored
 # data/family_fingerprints_v1.json, whose description text embeds this exact
 # vocabulary. A rename desynchronises the family-RAG query from its catalog
 # inside one embedding space, with no exception and no test failure.

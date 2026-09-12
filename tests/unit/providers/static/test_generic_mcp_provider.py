@@ -34,24 +34,9 @@ def _cfg(**over):
 
 def test_capabilities():
     caps = GenericMCPStaticProvider.from_settings(_cfg()).capabilities
-    assert caps.provides_tools and caps.supports_tool_curation and caps.needs_sample_mirror
+    assert caps.provides_tools and caps.needs_sample_mirror
     assert caps.degrade_on_failure is True, "an operator's own server must not fail a run"
     assert caps.provides_function_hashes is False
-
-
-def test_curated_mode_without_an_allow_list_keeps_everything():
-    provider = GenericMCPStaticProvider.from_settings(_cfg(tool_selection="curated"))
-    tools = [_T("a"), _T("b")]
-    assert len(provider.select_tools(tools)) == 2
-
-
-def test_an_allow_list_narrows_the_manifest():
-    provider = GenericMCPStaticProvider(
-        MCPServerConfig(enabled=True, command="my-mcp"),
-        label="Test MCP",
-        allowed_tools=frozenset({"keep"}),
-    )
-    assert [t.name for t in provider.select_tools([_T("keep"), _T("drop")])] == ["keep"]
 
 
 def test_a_disabled_server_attaches_nothing():

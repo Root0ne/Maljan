@@ -59,9 +59,6 @@ class _Provider:
     def get_tools(self) -> list[Any]:
         return [_tool("r2_open"), _tool("r2_analyze")]
 
-    def select_tools(self, pool: list[Any], categories: Any) -> list[Any]:
-        return list(pool)
-
 
 class _Registry:
     """A stand-in ``ServerRegistry`` with a scripted answer per call."""

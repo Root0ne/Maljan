@@ -1,13 +1,12 @@
 """radare2 static analysis over ``radareorg/radare2-mcp``, stdio.
 
-Structurally this is ``GenericMCPStaticProvider`` with three r2-specific
-defaults: the command comes from ``static.r2.binary_path``, the allow-list is
-the pinned tool set below, and the prompt fragment describes an r2 workflow
-rather than a Ghidra one. ``enumerate_r2_tools`` delegates to ``ServerHandle``,
-the one stdio handshake a job itself uses: ``scripts/goldens/probe_r2_tools.py``
-(which pins the allow-list's source fixture) and ``probe_r2`` in the settings
-API's connection test both go through it, so none of the three can report a
-different tool set than the others.
+Structurally this is ``GenericMCPStaticProvider`` with two r2-specific
+defaults: the command comes from ``static.r2.binary_path`` and the prompt
+fragment describes an r2 workflow rather than a Ghidra one. Every tool r2mcp
+offers reaches the model, minus whatever the operator unticks in
+``static.r2.tools``. ``enumerate_r2_tools`` delegates to ``ServerHandle``, the
+one stdio handshake a job itself uses, so ``probe_r2`` in the settings API's
+connection test cannot report a different tool set than a job sees.
 """
 
 from __future__ import annotations
@@ -26,7 +25,7 @@ if TYPE_CHECKING:
 async def enumerate_r2_tools(command: str) -> list[str]:
     """Names of the tools an r2mcp at ``command`` offers, over one stdio handshake.
 
-    Used both to pin the golden fixture (``scripts/goldens/probe_r2_tools.py``) and to
+    Used by the settings API's connection test (``probe_r2``) and by anything else that needs to
     answer the settings-page connection test: the same ``ServerHandle`` either
     way, which is now the same one a job uses, so none of the three can report
     a different tool set than the others.
@@ -46,47 +45,15 @@ async def enumerate_r2_tools(command: str) -> list[str]:
 class R2StaticProvider(GenericMCPStaticProvider):
     """radare2 over ``radareorg/radare2-mcp``, stdio.
 
-    Structurally this is the generic MCP adapter with three defaults: the
-    command comes from ``static.r2.binary_path``, the allow-list is the pinned
-    tool set below, and the prompt fragment describes an r2 workflow rather than
-    a Ghidra one. The tool names were enumerated from a running r2mcp with
-    ``scripts/goldens/probe_r2_tools.py`` and pinned in
-    ``tests/fixtures/golden/r2_tools.json``; if a future r2mcp renames one, this
-    constant changes and nothing else does.
+    Structurally this is the generic MCP adapter with two defaults: the
+    command comes from ``static.r2.binary_path`` and the prompt fragment
+    describes an r2 workflow rather than a Ghidra one.
 
     ``degrade_on_failure`` is True, unlike Ghidra's: r2 is an alternative here,
     not the profile this project's evaluation was measured on, so an operator
     whose r2mcp is missing gets a degraded run and a legible probe failure
     rather than a failed job.
     """
-
-    # Read-only analysis core: open/analyse/enumerate/decompile/xref. Nothing
-    # that writes, renames, or otherwise changes server state (rename_flag,
-    # rename_function, set_comment, set_function_prototype, use_decompiler,
-    # close_file, ...) is pinned here. A future r2mcp rename is a one-line
-    # edit to this constant; nothing else in the provider changes.
-    R2_ALLOWED_TOOLS: ClassVar[frozenset[str]] = frozenset(
-        {
-            "open_file",
-            "analyze",
-            "show_info",
-            "list_entrypoints",
-            "list_sections",
-            "list_imports",
-            "list_exports",
-            "list_symbols",
-            "list_libraries",
-            "list_functions",
-            "list_strings",
-            "list_all_strings",
-            "show_function_details",
-            "get_function_prototype",
-            "disassemble_function",
-            "decompile_function",
-            "xrefs_to",
-            "list_memory_maps",
-        }
-    )
 
     R2_PROMPT_FRAGMENT: ClassVar[str] = (
         "Analyze binary files (e.g. PE, ELF) utilizing radare2 through your available tools. "
@@ -124,7 +91,6 @@ class R2StaticProvider(GenericMCPStaticProvider):
         provider = cls(
             handle,
             label="radare2 MCP",
-            allowed_tools=cls.R2_ALLOWED_TOOLS,
             prompt_fragment_text=cls.R2_PROMPT_FRAGMENT,
         )
         provider._mirror_dir = r2.mirror_dir

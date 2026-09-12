@@ -506,19 +506,6 @@ def make_analyst_node(
                     provider_id=agent._resolved.static_provider_id,
                 )
 
-                # Hand the static analyst the sample's capability
-                # categories (from the PE import classification) so dynamic Ghidra
-                # tool selection works regardless of whether the chunk carried a
-                # readable path. state["sample_path"] is reliably host-readable.
-                try:
-                    from maljan.analysis.import_capability_layer import _imports_by_category
-
-                    agent._sample_categories = (  # type: ignore[attr-defined]
-                        set(_imports_by_category(_st).keys()) if _st else set()
-                    )
-                except Exception as _e:  # noqa: BLE001
-                    logger.debug("static category hint skipped: %s", _e)
-
             if not chunks or _is_placeholder_only(chunks, role):
                 # A Linux ELF audit found that an ELF sample with no PCAP / sandbox network
                 # trace caused the network analyst to fail-hard with an

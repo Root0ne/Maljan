@@ -56,6 +56,14 @@ change landed on `main`.
 
 ### Removed
 
+- **Tool-count limits on MCP servers.** The Ghidra tool-selection modes
+  (`curated`, a fixed 20-tool allow-list; `dynamic`, a per-sample relevance cut
+  capped at 40) and the `use_all_tools` override are gone, as are the radare2
+  read-only allow-list and the 13-tool "essential" list for the CAPE MCP
+  server. Every tool a server offers now reaches the model, minus whatever the
+  operator unticks in that server's own tool list. Tool descriptions are no
+  longer cut at 100 characters. A migration removes the two retired settings
+  from stored server entries. Expect larger per-step prompts on a local model.
 - **Legacy settings-name aliases.** The compatibility layer that translated old
   setting names into current ones is gone; the Alembic revision that renames
   operator data carries its own frozen table, as a migration should
@@ -86,3 +94,9 @@ Configuration — or import a JSON export from another instance. Keep
 `SETTINGS_ENCRYPTION_KEY` stable: there is no re-encryption step, and a changed
 key makes every stored secret unreadable. See
 [docs/configuration.md](docs/configuration.md).
+
+A JSON export taken before the tool-selection modes were removed may carry
+`core.static.ghidra.tool_selection`, `core.static.r2.tool_selection` or the
+`use_all_tools` counterparts; the import refuses keys the catalog no longer
+knows, so delete those entries from the file first. Stored overrides are
+cleaned up by the migration.

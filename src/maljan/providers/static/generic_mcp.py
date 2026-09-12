@@ -4,18 +4,15 @@ This is the whole point of the provider layer — how somebody plugs in a
 reverse-engineering (or any other) MCP tool Maljan has never heard of, with
 nothing more than ``static.generic.server`` naming an entry in
 ``mcp.servers``. It is also the class ``R2StaticProvider`` subclasses with
-radare2-specific defaults (command, allow-list, prompt fragment): everything
-below is deliberately ignorant of what its server's tools are called.
+radare2-specific defaults (command, prompt fragment): everything below is
+deliberately ignorant of what its server's tools are called.
 
-The tool allow-list is ``MCPServerConfig.tools`` now: ``None`` exposes every
+The only tool allow-list is ``MCPServerConfig.tools``: ``None`` exposes every
 tool the server advertises (what the built-ins do, and what a server attached
 purely from ``static.generic.server`` keeps until the operator narrows it
 from its probe result), and a list narrows to those names.
-``ServerHandle.tools()`` applies that setting; the constructor's own
-``allowed_tools`` is a second, class-level allow-list a subclass (like
-``R2StaticProvider``) supplies as its own default, applied on top by
-``select_tools`` — a belt the operator's own setting does not need to know
-about.
+``ServerHandle.tools()`` applies that setting; the provider adds no narrowing
+of its own.
 
 Unlike Ghidra, this provider degrades rather than raising
 (``StaticCapabilities.degrade_on_failure=True``): an operator's own MCP
@@ -52,9 +49,6 @@ class GenericMCPStaticProvider(StaticProvider):
     """Any MCP tool server, attached through a ``ServerHandle``.
 
     ``label`` names the server in logs and in the generated prompt fragment.
-    ``allowed_tools`` is the curated/dynamic-mode allow-list a subclass
-    supplies as its own default — empty or ``None`` applies no extra
-    narrowing beyond the handle's own ``MCPServerConfig.tools`` setting.
     ``prompt_fragment_text`` lets a caller supply real tool-specific guidance
     instead of the generated, tool-name-listing paragraph.
 
@@ -71,7 +65,6 @@ class GenericMCPStaticProvider(StaticProvider):
         cfg: MCPServerConfig | ServerHandle,
         *,
         label: str = "MCP",
-        allowed_tools: frozenset[str] | None = None,
         prompt_fragment_text: str = "",
     ) -> None:
         if isinstance(cfg, ServerHandle):
@@ -81,7 +74,6 @@ class GenericMCPStaticProvider(StaticProvider):
             self._cfg = cfg
             self._handle = self._build_handle(label or "generic", cfg)
         self._label = label
-        self._allowed_tools = allowed_tools or frozenset()
         self._prompt_fragment_text = prompt_fragment_text
         self._job = StaticJobContext()
         self.tools: list[Any] = []
@@ -132,7 +124,6 @@ class GenericMCPStaticProvider(StaticProvider):
             provides_evidence=False,
             provides_function_hashes=False,
             needs_sample_mirror=True,
-            supports_tool_curation=True,
             degrade_on_failure=True,
         )
 
@@ -196,34 +187,10 @@ class GenericMCPStaticProvider(StaticProvider):
             max_output_chars=job.max_output_chars,
             truncation_ledger=job.truncation_ledger,
         )
-        self.tools = self.select_tools(self._handle.tools())
+        self.tools = self._handle.tools()
 
     def get_tools(self) -> list[BaseTool]:
         return self._handle.tools()
-
-    def select_tools(self, tools: list[Any], categories: set[str] | None = None) -> list[Any]:
-        """``all`` keeps everything; ``curated`` and ``dynamic`` apply the allow-list.
-
-        A generic server carries no capability-keyword map for ``dynamic`` to
-        key off — that map is specific to Ghidra's own tool names — so
-        ``dynamic`` falls back to the same allow-list narrowing as
-        ``curated``. The allow-list is empty unless the caller supplied one
-        (a subclass default; ``static.generic``'s own narrowing already
-        happened in ``ServerHandle.tools()``), so both modes keep everything
-        by default.
-        """
-        if self._tool_mode() == "all":
-            return list(tools)
-        if not self._allowed_tools:
-            return list(tools)
-        return [t for t in tools if getattr(t, "name", "") in self._allowed_tools]
-
-    def _tool_mode(self) -> str:
-        """Resolve the effective tool-selection mode from config (back-compat)."""
-        cfg = self._handle.config
-        if getattr(cfg, "use_all_tools", False):
-            return "all"
-        return str(getattr(cfg, "tool_selection", "curated"))
 
     def mirror_spec(self) -> MirrorSpec:
         """Where the sample is mirrored, and under which path the server sees it.

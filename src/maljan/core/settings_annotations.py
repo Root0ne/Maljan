@@ -1213,20 +1213,6 @@ def mcp_server_annotations(
             with_probe=True,
             subgroup="Connection",
         ),
-        f"{prefix}.tool_selection": ann(
-            f"{label} tool selection",
-            "How many of the server's tools the analyst sees per run: curated is "
-            "a fixed allow-list (fastest, narrowest); dynamic shows a core triage "
-            "set plus the tools relevant to the sample's inferred capabilities; "
-            "all exposes every tool, which is measurably slower and noisier.",
-            subgroup="Tool selection",
-        ),
-        f"{prefix}.use_all_tools": ann(
-            f"{label} force all tools",
-            "Back-compat flag: when true, forces tool selection to all regardless "
-            "of its own value.",
-            subgroup="Tool selection",
-        ),
         f"{prefix}.cwd": ann(
             f"{label} working directory",
             "Working directory for the stdio subprocess; empty means the repository root.",

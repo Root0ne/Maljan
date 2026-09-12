@@ -89,31 +89,10 @@ class StaticAnalyst(BaseAnalyst):
     # ------------------------------------------------------------------
 
     # Container-visible path of the current sample, assigned per-run by the
-    # pipeline (nodes.py) alongside ``_sample_categories``. Read at CALL time
-    # by the load_program wrapper (late binding — the agent is cached across
-    # samples and tools may be selected before the pipeline sets the path).
+    # pipeline (nodes.py). Read at CALL time by the load_program wrapper (late
+    # binding — the agent is cached across samples and tools may be attached
+    # before the pipeline sets the path).
     _analysis_file_path: str | None = None
-
-    def _refine_tools_for_sample(self, host_path: str | None) -> None:
-        """Narrow ``self.tools`` to this sample's relevant tools.
-
-        Cheaply derives capability categories from the PE import classification
-        (no Ghidra call) and lets the provider re-select from the full pool it
-        already selected once at attach time. No-op unless the full pool was
-        captured. Fail-safe.
-        """
-        pool = getattr(self, "_all_ghidra_tools", None)
-        if not pool or not host_path:
-            return
-        try:
-            from maljan.analysis.import_capability_layer import _imports_by_category
-            from maljan.extractors.pe_extractor import build_static_analysis
-
-            static = build_static_analysis(sample_path=host_path)
-            categories = set(_imports_by_category(static).keys()) if static else set()
-            self.tools = self._provider().select_tools(pool, categories)
-        except Exception as e:  # noqa: BLE001
-            self.logger.warning("Dynamic tool selection failed (%s); keeping current set.", e)
 
     def _provider(self) -> Any:
         """The static provider for *this agent*: its own, the container's, or an ad hoc one.
@@ -141,7 +120,7 @@ class StaticAnalyst(BaseAnalyst):
 
         Everything this used to do — transports, clients, guardrails, the shared
         agent loop — moved into ``GhidraStaticProvider.open``. What is left is
-        the analyst's half of the contract: ask, and narrow.
+        the analyst's half of the contract: ask.
         """
         provider = self._provider()
         if not provider.capabilities.provides_tools:
@@ -156,14 +135,12 @@ class StaticAnalyst(BaseAnalyst):
         # ``get_static_provider().close()``), so there is nothing for this
         # analyst's ``close_tools()`` to release on the static path.
         self.tools = [
-            *provider.select_tools(pool, getattr(self, "_sample_categories", None)),
+            *pool,
             *self._attach_registry_tools(
                 "static", exclude=str(getattr(provider, "server_name", ""))
             ),
         ]
-        self.logger.info(
-            "Static provider '%s': %d/%d tools attached.", provider.id, len(self.tools), len(pool)
-        )
+        self.logger.info("Static provider '%s': %d tools attached.", provider.id, len(self.tools))
 
     def _job_context(self) -> StaticJobContext:
         from maljan.core.config import get_settings
@@ -183,7 +160,6 @@ class StaticAnalyst(BaseAnalyst):
         return StaticJobContext(
             host_sample_path=getattr(self, "_host_sample_path", None),
             mirror_sample_path=getattr(self, "_analysis_file_path", None),
-            capability_categories=frozenset(getattr(self, "_sample_categories", None) or ()),
             output_guardrail=guardrail,
             max_output_chars=cfg.preprocessing.max_tool_output_chars,
             truncation_ledger=getattr(self, "truncation_ledger", None),
@@ -525,10 +501,6 @@ class StaticAnalyst(BaseAnalyst):
         else:
             target_info = f"Static output:\n{data}"
 
-        # Dynamic-mode tool narrowing when data is a file path.
-        if len(data.strip()) < 512 and os.path.exists(data.strip()):
-            self._refine_tools_for_sample(data.strip())
-
         prompt_messages = [
             ("system", _static_prompt(self._provider())),
             (
@@ -676,11 +648,6 @@ class StaticAnalyst(BaseAnalyst):
             # own long-term memory. Same host profile as the family RAG, different KB
             # (prior cases -> recurring techniques). Fail-safe and gated OFF by default.
             attck_hint = self._compute_attck_case_hint(host_path)
-        # In dynamic mode, narrow the Ghidra tool manifest to the
-        # tools relevant to THIS sample's capability categories before the ReAct
-        # loop (all tools stay reachable; only the relevant subset is shown).
-        self._refine_tools_for_sample(host_path)
-
         prompt_messages = [
             ("system", _static_prompt(self._provider())),
             (

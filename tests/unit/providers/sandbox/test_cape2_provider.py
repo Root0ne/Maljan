@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -95,13 +94,6 @@ def test_the_configured_timeout_and_interval_reach_the_client(raw_report):
     assert client.waited == [("42", 1200, 15)]
 
 
-def test_the_essential_tool_names_match_the_golden():
-    golden = json.loads(
-        (ROOT / "tests" / "fixtures" / "golden" / "allowlists.json").read_text(encoding="utf-8")
-    )
-    assert sorted(CAPE2SandboxProvider.CAPE_ESSENTIAL_TOOLS) == golden["cape_essential_tools"]
-
-
 def test_notable_apis_survives_the_identity_short_circuit_for_persistence_extractor():
     """Carried finding: ``persistence_extractor`` reads ``behavior.notable_apis``
     straight off the raw sandbox dict for Linux LD_PRELOAD detection. Neither
@@ -132,22 +124,24 @@ def test_notable_apis_survives_the_identity_short_circuit_for_persistence_extrac
     assert any(m.kind == "ld_preload" for m in mechanisms)
 
 
-def test_dynamic_tools_are_the_thirteen_essentials():
+def test_dynamic_tools_are_every_tool_the_toolkit_offers():
     class _T:
         def __init__(self, name):
             self.name = name
 
     class _Toolkit:
         def get_tools(self):
-            return [_T(n) for n in CAPE2SandboxProvider.CAPE_ESSENTIAL_TOOLS] + [_T("extra_tool")]
+            return [_T("submit_file"), _T("get_task_report"), _T("extra_tool")]
 
     cfg = Settings(_env_file=None)
     cfg.sandbox.cape2.mcp.enabled = True
     provider = CAPE2SandboxProvider.from_settings(cfg)
     provider._toolkit = _Toolkit()
-    assert {t.name for t in provider.dynamic_tools()} == set(
-        CAPE2SandboxProvider.CAPE_ESSENTIAL_TOOLS
-    )
+    assert {t.name for t in provider.dynamic_tools()} == {
+        "submit_file",
+        "get_task_report",
+        "extra_tool",
+    }
 
 
 def test_a_disabled_cape_mcp_yields_no_tools_and_no_workflow():
@@ -192,7 +186,7 @@ def test_dynamic_tools_is_idempotent_for_a_repeat_call(monkeypatch):
             return None
 
         def get_tools(self):
-            return [_T(n) for n in CAPE2SandboxProvider.CAPE_ESSENTIAL_TOOLS]
+            return [_T("submit_file"), _T("get_task_report")]
 
     monkeypatch.setattr(mc, "MCPLangChainToolkit", _FakeToolkit)
 
@@ -206,7 +200,7 @@ def test_dynamic_tools_is_idempotent_for_a_repeat_call(monkeypatch):
 
     assert len(constructions) == 1, "a repeat call must not rebuild the toolkit"
     assert provider._toolkit is toolkit_after_first_call
-    expected_names = set(CAPE2SandboxProvider.CAPE_ESSENTIAL_TOOLS)
+    expected_names = {"submit_file", "get_task_report"}
     assert {t.name for t in first} == expected_names
     assert {t.name for t in second} == expected_names
 

@@ -294,9 +294,6 @@ class MCPLangChainToolkit:
         cat = category_map.get(prefix, "TOOL")
 
         clean = " ".join(description.split())
-        if len(clean) > 100:
-            clean = clean[:97] + "..."
-
         return f"[{cat}] {clean}"
 
     def _apply_output_guardrail(self, output: str) -> str:

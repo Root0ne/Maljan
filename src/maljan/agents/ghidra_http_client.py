@@ -95,9 +95,8 @@ class GhidraHTTPClient:
         description: str = tool_def.get("description", f"Call {path}")
         params: list[dict[str, Any]] = tool_def.get("params", [])
 
-        # Compress tool descriptions to reduce context bloat.
-        # 165 Ghidra tools were consuming ~15K-25K tokens per ReAct step.
-        # We add a category tag + truncate to ~120 chars max.
+        # A category tag in front of the full description lets the model scan
+        # tool families quickly.
         description = self._compress_description(path, description)
 
         # Build Pydantic args schema
@@ -236,11 +235,7 @@ class GhidraHTTPClient:
             logger.warning("Ghidra switch_program failed for '%s' (non-fatal): %s", name, exc)
 
     def _compress_description(self, path: str, description: str) -> str:
-        """Add a category tag and truncate to keep ReAct context lean.
-
-        Category prefixes help the LLM quickly identify tool families
-        without reading full prose descriptions for all 165 tools.
-        """
+        """Prefix the description with a category tag; the text itself is kept whole."""
         name = path.lstrip("/").replace("/", "_")
         prefix = name.split("_")[0]
 
@@ -289,9 +284,6 @@ class GhidraHTTPClient:
 
         # Strip existing newlines and collapse whitespace
         clean = " ".join(description.split())
-        if len(clean) > 100:
-            clean = clean[:97] + "..."
-
         return f"[{cat}] {clean}"
 
     def _apply_output_guardrail(self, output: str) -> str:

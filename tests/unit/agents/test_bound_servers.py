@@ -65,9 +65,6 @@ class _StubProvider:
     def get_tools(self):
         return [_T("ghidra_tool")]
 
-    def select_tools(self, tools, categories=None):
-        return list(tools)
-
 
 def test_the_server_the_provider_already_owns_is_not_attached_twice(monkeypatch):
     container = _container(

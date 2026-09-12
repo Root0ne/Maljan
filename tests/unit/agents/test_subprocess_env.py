@@ -98,8 +98,6 @@ class TestStaticAnalystEnv:
             command = "ghidra-mcp"
             args: list[str] = []
             env: dict[str, str] = {}
-            use_all_tools = False
-            tool_selection = "curated"
 
         recorder = MagicMock()
         monkeypatch.setattr("mcp.StdioServerParameters", recorder)

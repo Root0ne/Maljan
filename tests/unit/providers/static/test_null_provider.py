@@ -28,7 +28,6 @@ def test_every_capability_is_off():
     assert caps.provides_evidence is False
     assert caps.provides_function_hashes is False
     assert caps.needs_sample_mirror is False
-    assert caps.supports_tool_curation is False
 
 
 def test_it_degrades_rather_than_raising():

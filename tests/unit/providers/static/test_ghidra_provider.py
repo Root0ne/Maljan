@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import httpx
@@ -10,7 +9,7 @@ import pytest
 
 from maljan.core.config import Settings
 from maljan.providers.base import StaticJobContext
-from maljan.providers.static.ghidra import GHIDRA_ALLOWED_TOOLS, GhidraStaticProvider
+from maljan.providers.static.ghidra import GhidraStaticProvider
 
 ROOT = Path(__file__).resolve().parents[4]
 
@@ -30,33 +29,19 @@ def _provider(**over):
     return GhidraStaticProvider.from_settings(cfg)
 
 
-def test_the_allow_list_is_the_golden_one():
-    golden = json.loads(
-        (ROOT / "tests" / "fixtures" / "golden" / "allowlists.json").read_text(encoding="utf-8")
-    )
-    assert sorted(GHIDRA_ALLOWED_TOOLS) == golden["ghidra_allowed_tools"]
-
-
 def test_capabilities_track_the_transport():
     http = _provider().capabilities
-    assert http.provides_tools and http.supports_tool_curation and http.needs_sample_mirror
+    assert http.provides_tools and http.needs_sample_mirror
     assert http.provides_function_hashes is True
     assert http.degrade_on_failure is False, "Ghidra is the static evidence; it fails loudly"
     stdio = _provider(transport="stdio").capabilities
     assert stdio.provides_function_hashes is False, "the hash pre-pass speaks the REST API"
 
 
-def test_curated_mode_keeps_exactly_the_allow_list():
-    provider = _provider(tool_selection="curated")
-    tools = [_Tool(n) for n in sorted(GHIDRA_ALLOWED_TOOLS)] + [_Tool("unrelated_tool")]
-    kept = {t.name for t in provider.select_tools(tools)}
-    assert kept == set(GHIDRA_ALLOWED_TOOLS)
-
-
-def test_all_mode_keeps_everything():
-    provider = _provider(tool_selection="all")
-    tools = [_Tool(f"t{i}") for i in range(50)]
-    assert len(provider.select_tools(tools)) == 50
+def test_every_tool_the_server_offers_is_exposed():
+    provider = _provider()
+    tools = [_Tool(f"t{i}") for i in range(200)]
+    assert [t.name for t in provider._pin_load_program_path(tools)] == [t.name for t in tools]
 
 
 def test_a_failed_attach_raises_instead_of_degrading():
@@ -72,27 +57,6 @@ def test_a_failed_attach_raises_instead_of_degrading():
     provider = _provider()
     with pytest.raises(httpx.HTTPError):
         provider.open(StaticJobContext())
-
-
-def test_dynamic_mode_uses_the_categories_from_the_job():
-    provider = _provider(tool_selection="dynamic")
-    # The attach itself fails (unreachable host, see the test above) but
-    # ``self._job`` is assigned before the attach is attempted, so it is
-    # still set by the time the exception propagates — exercise that here
-    # rather than reaching into the private attribute directly.
-    with pytest.raises(httpx.HTTPError):
-        provider.open(StaticJobContext(capability_categories=frozenset({"crypto"})))
-    tools = [_Tool(f"filler_{i}") for i in range(80)] + [
-        _Tool("detect_crypto_constants", "find AES and RC4 constants")
-    ]
-    names = {t.name for t in provider.select_tools(tools)}
-    assert "detect_crypto_constants" in names
-    assert len(names) <= 40
-
-
-def test_use_all_tools_still_forces_all():
-    provider = _provider(tool_selection="curated", use_all_tools=True)
-    assert len(provider.select_tools([_Tool(f"t{i}") for i in range(30)])) == 30
 
 
 def test_load_program_is_pinned_to_the_mirror_path():
@@ -119,7 +83,7 @@ def test_load_program_is_pinned_to_the_mirror_path():
     # is set first, so the pin is still exercised past the raised error.
     with pytest.raises(httpx.HTTPError):
         provider.open(StaticJobContext(mirror_sample_path="/data/samples/.work/abc.exe"))
-    pinned = provider.select_tools([tool])[0]
+    pinned = provider._pin_load_program_path([tool])[0]
     asyncio.run(pinned.coroutine(file="/home/user/invented.exe"))
     assert seen["file"] == "/data/samples/.work/abc.exe"
 
@@ -149,7 +113,7 @@ def test_the_analyst_asks_the_provider_for_tools(monkeypatch):
 
     class _Provider:
         id = "ghidra"
-        capabilities = StaticCapabilities(provides_tools=True, supports_tool_curation=True)
+        capabilities = StaticCapabilities(provides_tools=True)
 
         def open(self, job):
             calls.append("open")
@@ -158,17 +122,13 @@ def test_the_analyst_asks_the_provider_for_tools(monkeypatch):
             calls.append("get_tools")
             return [_Tool("load_program"), _Tool("list_imports")]
 
-        def select_tools(self, tools, categories=None):
-            calls.append("select_tools")
-            return list(tools)
-
     analyst = StaticAnalyst(llm=MagicMock(), name="static")
     container = MagicMock()
     container.get_static_provider.return_value = _Provider()
     container.get_server_registry.return_value = None
     analyst._container = container
     analyst._initialize_mcp_client()
-    assert calls == ["open", "get_tools", "select_tools"]
+    assert calls == ["open", "get_tools"]
     assert [t.name for t in analyst.tools] == ["load_program", "list_imports"]
 
 
