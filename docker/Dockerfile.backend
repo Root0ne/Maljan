@@ -34,7 +34,10 @@ COPY apps/api/pyproject.toml apps/api/pyproject.toml
 # backend image — otherwise detection_signatures._validate_yara reports
 # "yara-python not installed; rule body not validated" for every generated rule.
 # The manylinux wheel bundles libyara, so no system package is required.
-RUN uv sync --frozen --no-dev --all-packages --extra yara --no-install-workspace
+# The ``tools`` extra carries the per-format parsers the analysis sidecar's
+# apk/macho/document/7z tools need; without them those four tools answer
+# "<module> is not installed" in the image while every other tool still works.
+RUN uv sync --frozen --no-dev --all-packages --extra yara --extra tools --no-install-workspace
 
 # Sources. Both members are installed editable from here, so `maljan` and `app`
 # import with no PYTHONPATH: the ENV that used to set it is gone, and so is the
@@ -44,7 +47,12 @@ COPY apps/ apps/
 COPY data/ data/
 COPY services/ services/
 
-RUN uv sync --frozen --no-dev --all-packages --extra yara
+# The extras must match the first sync exactly. ``uv sync`` is exact by
+# default, so a second sync naming fewer extras *prunes* the ones it left out —
+# this line without ``--extra tools`` uninstalled androguard, macholib, olefile
+# and py7zr immediately after the layer above installed them, and the shipped
+# analysis sidecar answered "not installed" for four of its tools.
+RUN uv sync --frozen --no-dev --all-packages --extra yara --extra tools
 
 # The workspace venv is the image's interpreter. Without this, a bare `python`
 # is the system one, which sees neither the dependencies nor the two editable

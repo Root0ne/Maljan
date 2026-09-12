@@ -87,7 +87,11 @@ class DynamicAnalyst(BaseAnalyst):
             self.toolkit = getattr(provider, "_toolkit", None)
         else:
             self.logger.info("Sandbox provider '%s' exposes no tools.", provider.id)
-        self.tools = [*sandbox_tools, *self._attach_registry_tools("dynamic")]
+        self.tools = [
+            *sandbox_tools,
+            *self._definition_sandbox_tools(),
+            *self._attach_registry_tools("dynamic"),
+        ]
 
     # ------------------------------------------------------------------
     # Text interface (backward compatible)

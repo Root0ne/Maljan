@@ -19,9 +19,7 @@ this morning.
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
-from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
@@ -65,24 +63,6 @@ _PATH_HEADER = (
     "resolves a bare name against its own working directory, not ours.\n\n"
 )
 
-# An argument whose *name* looks like it takes a file. Substring matches cover
-# ``file``, ``file_path``, ``filepath``, ``filename``, ``path``, ``target_file``;
-# the exact set covers the few path arguments that are named for what they hold
-# rather than for being a path.
-#
-# The name test is the narrowing half of the rule, not an extra: value equality
-# on its own would rewrite ``{"query": "<sha>.exe"}`` too, turning a model that
-# legitimately names the file in prose into one that passes a path. ``input``
-# was dropped from the exact set for the same reason — a lookup tool taking free
-# text as ``input`` is the one plausible false positive here.
-_PATH_ARG_SUBSTRINGS = ("path", "file")
-_PATH_ARG_NAMES = frozenset({"binary", "sample", "target", "program"})
-
-
-def _is_path_argument(name: str) -> bool:
-    lowered = name.lower()
-    return any(s in lowered for s in _PATH_ARG_SUBSTRINGS) or lowered in _PATH_ARG_NAMES
-
 
 def _analysis_path_in(data: str) -> str | None:
     """The ``analysis_file_path`` spliced into a head chunk, when there is one.
@@ -115,11 +95,6 @@ class _Run:
 class ConfigurableAnalyst(BaseAnalyst):
     """A ``BaseAnalyst`` whose prompt, tools and LLM come from configuration."""
 
-    # Set per-sample by ``pipeline.nodes._pin_sample_path``. The path this
-    # agent's tools must be given; ``None`` when the run has no sample path at
-    # all, in which case both guards below are silently inert.
-    _analysis_file_path: str | None = None
-
     def __init__(self, definition_key: str, resolved: ResolvedAgent, llm: BaseChatModel) -> None:
         super().__init__(llm=llm, name=definition_key, tools=list(resolved.tools))
         self._resolved = resolved
@@ -145,95 +120,6 @@ class ConfigurableAnalyst(BaseAnalyst):
         """The definition key. A custom agent's domain is its own name."""
         return self.name
 
-    def pinned_tools(self) -> list[Any]:
-        """This agent's tools, each guarded against the bare-filename call.
-
-        Second layer of the BUG 11 fix. The header below tells the model the
-        path; a 7-9B local model told the path will still send the file name,
-        and there is no recovering from that downstream — the tool answers
-        "File not found" and the agent spends its whole step budget retrying.
-        So when an argument that is named like a path arrives holding exactly
-        the sample's own file name, it is replaced with the pinned absolute
-        path before the call, and the substitution is logged.
-
-        Deliberately narrow. Only the sample's own basename is rewritten, and
-        only when it arrives bare: a model that supplied a directory meant that
-        directory, and a tool reading a dropped file or a rule file keeps the
-        name it was given. With no pin the resolved tools are returned as they
-        are, unwrapped.
-        """
-        pinned = self._analysis_file_path
-        if not pinned:
-            return list(self.tools)
-        return [self._pin_tool(tool, pinned) for tool in self.tools]
-
-    def _pin_tool(self, tool: Any, pinned: str) -> Any:
-        """Rebuild one tool with its path arguments corrected.
-
-        A fresh tool is built rather than mutating the original: the resolved
-        tool object is shared with the server registry, and an in-place wrap
-        would leak this sample's path into the next agent that borrows it.
-        Fail-safe — anything unexpected keeps the original tool.
-        """
-        from langchain_core.tools import StructuredTool
-
-        func = getattr(tool, "func", None)
-        coroutine = getattr(tool, "coroutine", None)
-        if func is None and coroutine is None:
-            return tool
-        args_schema = getattr(tool, "args_schema", None)
-        if args_schema is None:
-            # Rebuilding with ``infer_schema=False`` and no schema does not
-            # raise — the non-empty description short-circuits the only
-            # ValueError — it silently yields a schema-less tool that binds
-            # badly. A tool the guard cannot rebuild faithfully is better left
-            # exactly as it is.
-            return tool
-
-        name = getattr(tool, "name", "")
-        base = os.path.basename(pinned)
-
-        def _correct(kwargs: dict[str, Any]) -> dict[str, Any]:
-            out = dict(kwargs)
-            for key, value in kwargs.items():
-                if value == base and isinstance(value, str) and _is_path_argument(key):
-                    self.logger.warning(
-                        "%s: tool '%s' was called with the bare sample name %r for "
-                        "argument '%s'; substituting the known absolute path %r.",
-                        self.name,
-                        name,
-                        value,
-                        key,
-                        pinned,
-                    )
-                    out[key] = pinned
-            return out
-
-        wrapped_func = None
-        wrapped_coroutine = None
-        if func is not None:
-
-            def wrapped_func(**kwargs: Any) -> Any:  # noqa: F811
-                return func(**_correct(kwargs))
-
-        if coroutine is not None:
-
-            async def wrapped_coroutine(**kwargs: Any) -> Any:  # noqa: F811
-                return await coroutine(**_correct(kwargs))
-
-        try:
-            return StructuredTool.from_function(
-                func=wrapped_func,
-                coroutine=wrapped_coroutine,
-                name=name,
-                description=getattr(tool, "description", ""),
-                args_schema=args_schema,
-                infer_schema=False,
-            )
-        except Exception as exc:  # noqa: BLE001 — a guardrail never costs a tool
-            self.logger.warning("%s: path guard skipped for tool '%s': %s", self.name, name, exc)
-            return tool
-
     def _with_path_header(self, data: str) -> str:
         """The data, preceded by an explicit statement of the sample path.
 
@@ -248,19 +134,6 @@ class ConfigurableAnalyst(BaseAnalyst):
         if not path:
             return data
         return _PATH_HEADER.format(path=path) + data
-
-    def execute_tool_loop(self, prompt_messages: list) -> str:
-        """The inherited loop, run against the path-guarded tools.
-
-        ``self.tools`` keeps the resolved objects — what the agent reports it
-        has is what resolution gave it — and only the loop sees the wrappers.
-        """
-        original = self.tools
-        self.tools = self.pinned_tools()
-        try:
-            return str(super().execute_tool_loop(prompt_messages))
-        finally:
-            self.tools = original
 
     # ------------------------------------------------------------------
     # Text interface

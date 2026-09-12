@@ -405,3 +405,128 @@ class TestBuildEventsFromSandbox:
         }
         events = build_events_from_sandbox(sandbox)
         assert any(e.get("TargetObject") == "HKLM\\Software\\Evil" for e in events)
+
+
+# ---------------------------------------------------------------------------
+# A corpus is third-party data, and one unreadable rule in it used to be fatal.
+#
+# 272 of the 4241 rules shipped under ``data/sigma_rules`` parse into a
+# ``SigmaDetections`` stand-in with no ``parsed_condition``, and reading that
+# attribute raised ``AttributeError`` out of the first such rule the scan
+# reached. ``pipeline/nodes`` caught it and logged "Sigma Layer 0 scan failed",
+# so no job ever failed — and Sigma Layer 0 contributed nothing on every run
+# with sandbox telemetry, silently, for as long as those rules have shipped.
+# ---------------------------------------------------------------------------
+
+UNPARSABLE_RULE_CONTENT = """\
+title: Rule With No Usable Detection
+id: 8f9d2c31-77aa-4c1e-9d61-2b0f5f4a1c22
+status: test
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    condition: selection
+"""
+
+GOOD_RULE_CONTENT = """\
+title: Suspicious Rundll32 Script Execution
+id: 3c9b1a44-55ee-4a20-8f11-9c7de2a04d13
+status: test
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection:
+        Image|endswith: '\\rundll32.exe'
+        CommandLine|contains: 'javascript:'
+    condition: selection
+tags:
+    - attack.defense_evasion
+    - attack.t1218.011
+"""
+
+RUNDLL32_EVENT = {
+    "Image": "C:\\Windows\\System32\\rundll32.exe",
+    "CommandLine": 'rundll32.exe javascript:"\\..\\mshtml,RunHTMLApplication "',
+}
+
+
+class TestAnUnreadableRuleDoesNotSilenceTheCorpus:
+    def test_the_good_rule_still_matches_alongside_a_broken_one(self, tmp_rules_dir):
+        _write_rule(tmp_rules_dir, "broken.yml", UNPARSABLE_RULE_CONTENT)
+        _write_rule(tmp_rules_dir, "good.yml", GOOD_RULE_CONTENT)
+        layer = SigmaLayer.from_rules_dir(tmp_rules_dir)
+
+        matches = layer.scan_events([RUNDLL32_EVENT], sample_platform="windows")
+
+        assert [m.rule_title for m in matches] == ["Suspicious Rundll32 Script Execution"]
+
+    def test_the_known_bad_shape_is_a_miss_and_not_an_error(self, tmp_rules_dir):
+        """``EmptySigmaDetections`` is the shape the 272 shipped rules take,
+        and it is now read with ``getattr`` rather than an attribute access —
+        so it evaluates to "no match" and never reaches the error counter."""
+        _write_rule(tmp_rules_dir, "broken.yml", UNPARSABLE_RULE_CONTENT)
+        layer = SigmaLayer.from_rules_dir(tmp_rules_dir)
+
+        detection = layer._evaluators[0][0].detection
+        assert not hasattr(detection, "parsed_condition"), (
+            "the fixture must reproduce the shape the shipped corpus carries"
+        )
+        assert layer.scan_events([RUNDLL32_EVENT], sample_platform="windows") == []
+        assert layer.last_rule_errors == 0
+
+    def test_a_rule_that_raises_is_counted_and_the_scan_carries_on(self, tmp_rules_dir):
+        """The backstop for a shape nobody has seen yet. One rule raising must
+        cost that rule, not the corpus — and must leave a number behind, or the
+        next silent failure looks exactly like a clean sample."""
+        _write_rule(tmp_rules_dir, "good.yml", GOOD_RULE_CONTENT)
+        _write_rule(tmp_rules_dir, "other.yml", UNPARSABLE_RULE_CONTENT)
+        layer = SigmaLayer.from_rules_dir(tmp_rules_dir)
+
+        exploding, good = None, None
+        for rule, evaluator in layer._evaluators:
+            if rule.title == "Suspicious Rundll32 Script Execution":
+                good = evaluator
+            else:
+                exploding = evaluator
+        assert good is not None and exploding is not None
+
+        def _raise(event, strict=True):
+            raise RuntimeError("a shape pySigma cannot evaluate")
+
+        exploding.evaluate = _raise
+
+        matches = layer.scan_events([RUNDLL32_EVENT], sample_platform="windows")
+
+        assert [m.rule_title for m in matches] == ["Suspicious Rundll32 Script Execution"]
+        assert layer.last_rule_errors == 1
+
+    def test_a_clean_corpus_reports_no_rule_errors(self, tmp_rules_dir):
+        _write_rule(tmp_rules_dir, "good.yml", GOOD_RULE_CONTENT)
+        layer = SigmaLayer.from_rules_dir(tmp_rules_dir)
+
+        matches = layer.scan_events([RUNDLL32_EVENT], sample_platform="windows")
+
+        assert len(matches) == 1
+        assert layer.last_rule_errors == 0
+
+    def test_the_counters_reset_between_scan_suites(self, tmp_rules_dir):
+        _write_rule(tmp_rules_dir, "broken.yml", UNPARSABLE_RULE_CONTENT)
+        layer = SigmaLayer.from_rules_dir(tmp_rules_dir)
+
+        layer._rule_errors = 3
+        layer.reset_filter_stats()
+
+        assert layer.last_rule_errors == 0
+
+    def test_the_shipped_corpus_contributes_matches_rather_than_raising(self):
+        """The live regression. Against ``data/sigma_rules`` with a real
+        Sysmon-shaped event, this used to raise before producing anything."""
+        layer = SigmaLayer.from_default_rules()
+        if layer.rule_count == 0:
+            pytest.skip("no sigma corpus vendored in this checkout")
+
+        matches = layer.scan_events([RUNDLL32_EVENT], sample_platform="windows")
+
+        assert matches, "the corpus must contribute matches, not abort on a bad rule"

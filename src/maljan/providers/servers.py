@@ -942,15 +942,26 @@ class ServerRegistry:
         name a tool ``extract_dns`` is the one that gets renamed, and the
         pinned built-in tool names never move.
 
-        ``exclude`` drops one handle by name — the server a provider already
-        opened itself, so the registry does not hand the same tools out twice.
+        ``exclude`` drops handles by name — the server a provider already
+        opened itself, so the registry does not hand the same tools out twice,
+        and the set a profile withholds (``ProfileDefinition.exclude_servers``,
+        which is how the ``measurement`` baseline runs the same analysts with
+        no tools). One name or several comma-separated; the single-name form is
+        the older caller and stays exactly what it was. ``*`` among them means
+        every server, so a baseline stays tool-free against servers that did
+        not exist when it was written.
         """
-        from maljan.core.config import BUILTIN_SERVER_KEYS
+        from maljan.core.config import ALL_SERVERS, BUILTIN_SERVER_KEYS
 
+        excluded = {name.strip() for name in exclude.split(",") if name.strip()}
+        if ALL_SERVERS in excluded:
+            return []
         bound = [
             handle
             for handle in self._handles.values()
-            if handle.config.enabled and role in handle.config.agents and handle.name != exclude
+            if handle.config.enabled
+            and role in handle.config.agents
+            and handle.name not in excluded
         ]
         return sorted(bound, key=lambda h: (h.name not in BUILTIN_SERVER_KEYS, h.name))
 
@@ -971,6 +982,12 @@ class ServerRegistry:
         ``ToolRef`` — collapses to one copy. Nothing is dropped for a
         collision; only an exact repeat of one server's own tool is.
 
+        Every merged tool is stamped with the server it came from
+        (``metadata["maljan_server"]``). ``agents.tool_pinning`` reads that to
+        pick the right sample path per server: a remote tool server was handed
+        the bytes at a path of its own, and a wrapper that pinned one path for
+        every tool would send the local one to the remote server.
+
         Returns how many tools were renamed, so the caller can log it once
         per server instead of per tool.
         """
@@ -980,12 +997,16 @@ class ServerRegistry:
             owner = seen.get(name)
             if owner == server:
                 continue
+            update: dict[str, Any] = {
+                "metadata": {**(getattr(tool, "metadata", None) or {}), "maljan_server": server}
+            }
             if owner is not None:
                 name = f"{server}__{name}"
                 if seen.get(name) == server:
                     continue
-                tool = tool.model_copy(update={"name": name})
+                update["name"] = name
                 renamed += 1
+            tool = tool.model_copy(update=update)
             seen[name] = server
             tools.append(tool)
         return renamed

@@ -325,7 +325,7 @@ class TestABareFilenameToolArgIsRewritten:
     def test_a_free_text_input_argument_is_no_longer_treated_as_a_path(self):
         """``input`` names free text as often as it names a file; a lookup tool
         asked about the sample by name must keep the name it was given."""
-        from maljan.agents.configurable_analyst import _is_path_argument
+        from maljan.agents.tool_pinning import is_path_argument as _is_path_argument
 
         assert _is_path_argument("input") is False
         assert _is_path_argument("query") is False

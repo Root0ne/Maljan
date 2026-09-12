@@ -1,0 +1,126 @@
+{
+  "arguments": {
+    "apk_info": [
+      "certs",
+      "components",
+      "dex_strings",
+      "limit",
+      "manifest",
+      "native_libs",
+      "path",
+      "permissions"
+    ],
+    "archive_list": [
+      "limit",
+      "path"
+    ],
+    "capa": [
+      "backend",
+      "path",
+      "timeout_s"
+    ],
+    "carve_payloads": [
+      "out_dir",
+      "path"
+    ],
+    "document_info": [
+      "path"
+    ],
+    "elf_info": [
+      "path"
+    ],
+    "hashes": [
+      "path"
+    ],
+    "identify_file": [
+      "path"
+    ],
+    "iocs_from_file": [
+      "kinds",
+      "path"
+    ],
+    "iocs_from_text": [
+      "kinds",
+      "text"
+    ],
+    "macho_info": [
+      "path"
+    ],
+    "pe_info": [
+      "exports",
+      "imports",
+      "overlay",
+      "path",
+      "pdb",
+      "resources",
+      "sections"
+    ],
+    "put_sample": [
+      "content_b64",
+      "filename",
+      "sha256"
+    ],
+    "put_sample_begin": [
+      "filename",
+      "sha256",
+      "size"
+    ],
+    "put_sample_chunk": [
+      "content_b64",
+      "seq",
+      "upload_id"
+    ],
+    "put_sample_finish": [
+      "upload_id"
+    ],
+    "sigma_match": [
+      "events",
+      "ruleset"
+    ],
+    "sigma_match_sandbox": [
+      "report",
+      "ruleset"
+    ],
+    "signing_info": [
+      "path"
+    ],
+    "strings": [
+      "encodings",
+      "limit",
+      "min_len",
+      "offset",
+      "path"
+    ],
+    "yara_scan": [
+      "path",
+      "ruleset",
+      "text",
+      "timeout_s"
+    ]
+  },
+  "server": "analysis",
+  "source": "live handshake",
+  "tools": [
+    "apk_info",
+    "archive_list",
+    "capa",
+    "carve_payloads",
+    "document_info",
+    "elf_info",
+    "hashes",
+    "identify_file",
+    "iocs_from_file",
+    "iocs_from_text",
+    "macho_info",
+    "pe_info",
+    "put_sample",
+    "put_sample_begin",
+    "put_sample_chunk",
+    "put_sample_finish",
+    "sigma_match",
+    "sigma_match_sandbox",
+    "signing_info",
+    "strings",
+    "yara_scan"
+  ]
+}

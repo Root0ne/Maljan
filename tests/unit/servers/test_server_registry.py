@@ -106,11 +106,35 @@ def test_a_cwd_outside_the_repository_is_refused():
 def test_for_agent_returns_only_enabled_servers_bound_to_that_role():
     cfg = Settings(_env_file=None)
     registry = ServerRegistry(cfg)
+    # ``analysis`` and ``knowledge`` carry ``agents=[]`` and reach an agent
+    # only through its definition's tool references, so role binding sees
+    # neither of them.
     assert [h.name for h in registry.for_agent("network")] == ["network"]
     assert [h.name for h in registry.for_agent("judge")] == ["threatintel"]
     assert registry.for_agent("static") == []
     cfg.mcp.servers["threatintel"].enabled = False
     assert ServerRegistry(cfg).for_agent("judge") == []
+
+
+def test_for_agent_drops_every_name_the_caller_excludes():
+    """A profile withholds several servers at once, comma-separated.
+
+    ``exclude`` grew for the single case of an analyst that must not see its
+    own provider's server; the ``measurement`` profile needs to withhold four,
+    and the single-name form has to keep working unchanged.
+    """
+    cfg = Settings(_env_file=None)
+    cfg.mcp.servers["one"] = MCPServerConfig(enabled=True, command="mcp", agents=["static"])
+    cfg.mcp.servers["two"] = MCPServerConfig(enabled=True, command="mcp", agents=["static"])
+    registry = ServerRegistry(cfg)
+
+    assert [h.name for h in registry.for_agent("static")] == ["one", "two"]
+    assert [h.name for h in registry.for_agent("static", exclude="one")] == ["two"]
+    assert registry.for_agent("static", exclude="one,two") == []
+    assert registry.for_agent("static", exclude=" one , two ") == []
+    # ``*`` is what the measurement baseline uses: it withholds servers that
+    # did not exist when the profile was written.
+    assert registry.for_agent("static", exclude="*") == []
 
 
 def test_get_names_the_servers_that_exist():
@@ -399,7 +423,11 @@ class _LoopBoundToolkit:
 
 
 def _registry_with_fake_toolkits(monkeypatch, made: list) -> ServerRegistry:
-    """A registry whose handles build `_LoopBoundToolkit`s instead of children."""
+    """A registry whose handles build `_LoopBoundToolkit`s instead of children.
+
+    ``threatintel`` is the only server bound to the judge by role, which is
+    what keeps these two tests counting one toolkit per loop.
+    """
 
     def factory(*args, **kwargs):
         made.append(_LoopBoundToolkit())

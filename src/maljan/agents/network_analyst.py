@@ -109,9 +109,10 @@ class NetworkAnalyst(BaseAnalyst):
         registry = self._server_registry()
         if registry is None:
             return
-        tools, reasons = registry.tools_for("network", self._job_key())
-        self.tools = tools
-        self.degradation_reasons = reasons
+        # ``_attach_registry_tools`` records its own degradation reasons on the
+        # analyst, so nothing here may reassign ``degradation_reasons`` — doing
+        # so would erase the reason for the very server that failed to attach.
+        self.tools = self._attach_registry_tools("network")
         self.logger.info("Network tool servers: %d tools attached.", len(self.tools))
 
     # ``_try_initialize_mcp`` used to live here. It now lives on ``BaseAnalyst``
