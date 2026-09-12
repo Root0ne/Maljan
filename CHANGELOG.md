@@ -68,6 +68,11 @@ change landed on `main`.
 
 ### Changed
 
+- **Built-in analysts honour a definition's own prompt.** The static, dynamic and
+  network analysts now take their system prompt from the resolved agent
+  definition on every run, so an operator's explicit `prompt` on a built-in
+  role applies, and the format fragment for the sample's platform reaches the
+  model. The module constants remain only as the neutral fallback.
 - **The platform vocabulary is open.** `reporting.models.Platform` is a plain
   string with `KNOWN_PLATFORMS` beside it — `windows`, `linux`, `macos`,
   `android`, `ios`, `multi`, `unknown` — rather than a three-value literal.
