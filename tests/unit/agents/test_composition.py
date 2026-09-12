@@ -68,6 +68,12 @@ class _Registry:
         self.degradation_reasons: list[str] = []
 
     def tools_for(self, role, job_id, *, exclude="", **context):  # type: ignore[no-untyped-def]
+        # ``exclude`` is honoured here for the same reason the real registry
+        # honours it: a fake that ignored it would let a profile's exclusions
+        # pass a test they do not pass in production.
+        excluded = {name.strip() for name in exclude.split(",") if name.strip()}
+        if "*" in excluded:
+            return [], []
         return list(self.bound.get(role, [])), []
 
     def tools_for_ref(self, ref, job_id, **context):  # type: ignore[no-untyped-def]
@@ -429,3 +435,127 @@ def test_the_awaited_resolution_prefixes_the_same_way(real_registry):
 
     resolved = asyncio.run(aresolve_agent("x", _registry_container(_two_server_settings())))
     assert [t.name for t in resolved.tools] == ["open_file", "s2__open_file"]
+
+
+# ---------------------------------------------------------------------------
+# The built-in definitions carry tool references now, and one profile takes
+# every tool away. Both are settings the pipeline reads on every run, so both
+# need a behavioural test rather than a shape assertion.
+# ---------------------------------------------------------------------------
+
+
+def test_the_built_in_definitions_name_the_servers_their_role_reads():
+    definitions = Settings(_env_file=None).agents.definitions
+
+    def _servers(key: str) -> list[str]:
+        return [str(r.server) for r in definitions[key].tools if r.kind == "mcp"]
+
+    assert _servers("static") == ["analysis", "knowledge"]
+    assert _servers("network") == ["network", "knowledge"]
+    assert _servers("judge") == ["knowledge"]
+    # The dynamic analyst's report is already in this process, so its first
+    # reference is the in-process kind rather than a server.
+    assert [r.kind for r in definitions["dynamic"].tools] == ["sandbox", "mcp"]
+
+
+def test_the_tool_sidecars_bind_by_reference_and_not_by_role():
+    """``agents=[]`` is what makes a definition's tool list authoritative: a
+    clone that drops the ``analysis`` reference must really lose those tools,
+    which cannot be true while the server also binds itself to the role."""
+    servers = Settings(_env_file=None).mcp.servers
+    assert servers["analysis"].agents == []
+    assert servers["knowledge"].agents == []
+
+
+def test_a_definition_that_drops_a_reference_loses_exactly_those_tools():
+    cfg = Settings(_env_file=None)
+    registry = _Registry(
+        {},
+        {
+            "analysis.None": [_tool("pe_info")],
+            "knowledge.None": [_tool("attck_lookup")],
+        },
+    )
+    container = _Container(cfg, registry=registry)
+
+    full = resolve_agent("static", container)
+    assert sorted(t.name for t in full.tools) == ["attck_lookup", "pe_info"]
+
+    cfg.agents.definitions["static_bare"] = cfg.agents.definitions["static"].model_copy(
+        update={"tools": [ToolRef(kind="mcp", server="knowledge")]}
+    )
+    trimmed = resolve_agent("static_bare", container)
+    assert [t.name for t in trimmed.tools] == ["attck_lookup"]
+
+
+def test_the_measurement_profile_withholds_every_server_reference():
+    cfg = Settings(_env_file=None)
+    cfg.agents.profile = "measurement"
+    registry = _Registry({}, {"analysis.None": [_tool("pe_info")]})
+
+    resolved = resolve_agent("static", _Container(cfg, registry=registry))
+
+    assert resolved.tools == []
+    assert resolved.static_provider_id == "none"
+
+
+def test_the_measurement_profile_withholds_a_server_added_after_it_was_written():
+    """The reason the exclusion is ``["*"]`` and not the four built-in keys.
+    A fixed list would hand the baseline every server an operator adds, and
+    the built-in identity check would refuse the edit that repaired it."""
+    cfg = Settings(_env_file=None)
+    cfg.agents.profile = "measurement"
+    cfg.agents.definitions["static"] = cfg.agents.definitions["static"].model_copy(
+        update={"tools": [ToolRef(kind="mcp", server="operators_own")]}
+    )
+    registry = _Registry({"static": [_tool("bound_tool")]}, {"operators_own.None": [_tool("x")]})
+
+    resolved = resolve_agent("static", _Container(cfg, registry=registry))
+
+    assert resolved.tools == []
+
+
+def test_the_measurement_profile_withholds_the_in_process_sandbox_tools():
+    cfg = Settings(_env_file=None)
+    cfg.agents.profile = "measurement"
+    container = _Container(cfg)
+    container.sandbox_report = {"behavior": {"processes": [{"pid": 1}]}}
+
+    assert resolve_agent("dynamic", container).tools == []
+
+
+def test_the_default_profile_keeps_the_sandbox_tools_the_dynamic_agent_asks_for():
+    cfg = Settings(_env_file=None)
+    container = _Container(cfg)
+    container.sandbox_report = {"behavior": {"processes": [{"pid": 1}]}}
+
+    names = [t.name for t in resolve_agent("dynamic", container).tools]
+
+    assert "sandbox_processes" in names
+
+
+def test_only_exclude_servers_may_differ_on_a_built_in_profile():
+    """It names servers, and the set of servers is the operator's own — a
+    baseline that cannot be told about a new server is a baseline that quietly
+    stops being one. Every other field stays locked."""
+    cfg = Settings(
+        _env_file=None,
+        agents={
+            "profiles": {
+                "measurement": {
+                    "label": "Measurement baseline",
+                    "analysts": ["static", "dynamic", "network"],
+                    "exclude_servers": ["*", "extra"],
+                    "exclude_sandbox_tools": True,
+                    "static_provider": "none",
+                }
+            }
+        },
+    )
+    assert cfg.agents.profiles["measurement"].exclude_servers == ["*", "extra"]
+
+    with pytest.raises(ValueError, match="built in"):
+        Settings(
+            _env_file=None,
+            agents={"profiles": {"measurement": {"analysts": ["static"]}}},
+        )

@@ -88,6 +88,16 @@ yara = [
 capa = [
     "flare-capa>=9.0.0",
 ]
+# The format parsers the analysis sidecar's per-format tools need. Optional
+# because each one costs a single tool and nothing else: without androguard
+# ``apk_info`` reports the zip-level facts, without macholib ``macho_info``
+# says so, and the server starts either way.
+tools = [
+    "androguard>=4.1.2",
+    "macholib>=1.16.3",
+    "olefile>=0.47",
+    "py7zr>=1.0.0",
+]
 
 [dependency-groups]
 dev = [

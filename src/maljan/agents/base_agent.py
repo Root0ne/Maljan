@@ -1128,6 +1128,14 @@ class BaseAnalyst(ABC):
         # building a new one per chunk.
         self.toolkit: Any = None
         self._container: Any = None
+        # The path this agent's tools must be given, and the per-server
+        # override for a tool server that was handed the sample somewhere else
+        # (``agents.sample_staging``). Both are assigned per sample — by
+        # ``pipeline.nodes._pin_sample_path`` and by resolution respectively —
+        # and both are inert while unset, which is what keeps an analyst built
+        # in a test or a script exactly what it was.
+        self._analysis_file_path: str | None = None
+        self._path_by_server: dict[str, str] = {}
         # The ``ResolvedAgent`` the container built this agent from — its own
         # prompt, tools and static provider id, so a clone never has to
         # re-derive what it already knows about itself.
@@ -1272,13 +1280,69 @@ class BaseAnalyst(ABC):
         """A per-job identity for the handles' same-job short circuit."""
         return str(getattr(self, "_job_id", "") or "job")
 
+    def _definition_tool_refs(self) -> list[Any]:
+        """This agent definition's ``ToolRef``s, under the active profile.
+
+        The built-in analysts attach their own tools rather than reading the
+        ``ResolvedAgent`` the container built for them, so without this the
+        ``tools`` list on a definition would bind nothing and the two tool
+        sidecars — which carry ``agents=[]`` precisely so the definition is
+        the only binding — would never reach an analyst.
+        """
+        container = getattr(self, "_container", None)
+        if container is None:
+            return []
+        from maljan.agents.composition import mcp_refs_for
+
+        return list(mcp_refs_for(container.config, self.name))
+
+    def _definition_sandbox_tools(self) -> list[Any]:
+        """The job's sandbox-report tools, when this definition asks for them.
+
+        ``ToolRef(kind="sandbox")`` is the one in-process tool source, so there
+        is nothing to open and nothing that can hang — the report is already on
+        the container. Withheld by a profile that sets
+        ``exclude_sandbox_tools``, which is how the measurement baseline stays
+        tool-free without the definitions having to change.
+        """
+        container = getattr(self, "_container", None)
+        if container is None:
+            return []
+        definition = container.config.agents.definitions.get(self.name)
+        if definition is None or not any(ref.kind == "sandbox" for ref in definition.tools):
+            return []
+        from maljan.agents.composition import active_profile
+
+        if active_profile(container.config).exclude_sandbox_tools:
+            return []
+        from maljan.providers.sandbox_tools import sandbox_tools
+
+        return list(sandbox_tools(container))
+
+    def _profile_excluded_servers(self) -> str:
+        """The servers the active profile withholds, as ``for_agent``'s argument."""
+        container = getattr(self, "_container", None)
+        if container is None:
+            return ""
+        from maljan.agents.composition import _excluded_servers
+
+        return _excluded_servers(container.config)
+
     def _attach_registry_tools(self, role: str, *, exclude: str = "", **context: Any) -> list[Any]:
-        """Tools from every server bound to ``role``, minus one this agent owns.
+        """Tools from every server this agent is bound to, minus one it owns.
+
+        Two bindings, the same two resolution composes: servers bound to
+        ``role`` by ``MCPServerConfig.agents``, then the servers the agent's
+        own definition names by ``ToolRef``. One ``seen`` map spans both, so
+        the collision rule holds across them and a server named twice
+        contributes one copy.
 
         ``exclude`` is the static provider's own server: a ``generic_mcp``
         provider driving ``mcp.servers["mine"]`` and an ``agents: ["static"]``
         binding on that same entry are two ways of saying the same thing, and
-        attaching it twice would show the model two copies of every tool.
+        attaching it twice would show the model two copies of every tool. The
+        active profile's own exclusions are added to it, which is how the
+        ``measurement`` baseline runs these analysts with no tools at all.
 
         A failure here never raises. Whether a *provider* failure degrades or
         fails is the provider's capability flag; a registry server is always
@@ -1288,13 +1352,42 @@ class BaseAnalyst(ABC):
         registry = self._server_registry()
         if registry is None:
             return []
-        tools, reasons = registry.tools_for(role, self._job_key(), exclude=exclude, **context)
+        withheld = ",".join(x for x in (exclude, self._profile_excluded_servers()) if x)
+        seen: dict[str, str] = {}
+        tools, reasons = registry.tools_for(
+            role, self._job_key(), exclude=withheld, seen=seen, **context
+        )
+        for ref in self._definition_tool_refs():
+            if str(ref.server) == exclude:
+                continue
+            picked, ref_reasons = registry.tools_for_ref(ref, self._job_key(), seen=seen, **context)
+            tools.extend(picked)
+            reasons.extend(ref_reasons)
         if reasons:
             self.degradation_reasons = [*self.degradation_reasons, *reasons]
         return list(tools)
 
+    def pinned_tools(self) -> list[Any]:
+        """This agent's tools, each guarded against the bare-filename call.
+
+        See ``agents.tool_pinning`` for what the guard does and why it is this
+        narrow. With no pinned path the resolved tools come back unwrapped.
+        """
+        from maljan.agents.tool_pinning import pin_paths
+
+        return pin_paths(
+            list(self.tools),
+            default_path=self._analysis_file_path,
+            path_by_server=self._path_by_server,
+            agent_name=self.name,
+        )
+
     def execute_tool_loop(self, prompt_messages: list) -> str:
         """Executes a tool-calling ReAct loop if tools are available.
+
+        The loop runs against ``pinned_tools()``; ``self.tools`` keeps the
+        resolved objects, so what an agent reports it has is what resolution
+        gave it and only the loop sees the wrappers.
 
         Runs the async ReAct agent in a dedicated **daemon** thread with its own
         event loop. This avoids the nest_asyncio + anyio cancel scope
@@ -1349,7 +1442,7 @@ class BaseAnalyst(ABC):
         # loop populates it from the ReAct message stream (see below).
         self._last_tool_evidence = []
 
-        agent_executor = create_react_agent(self.llm, self.tools)
+        agent_executor = create_react_agent(self.llm, self.pinned_tools())
 
         messages = prebuilt
 

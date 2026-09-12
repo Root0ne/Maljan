@@ -99,15 +99,16 @@ async def test_the_judge_agent_the_container_hands_out_can_reach_the_registry(mo
     judge = container.get_judge_agent()
     await asyncio.wait_for(judge._initialize_mcp_client(), timeout=20.0)
     try:
-        golden_path = (
-            Path(__file__).resolve().parents[2]
-            / "fixtures"
-            / "golden"
-            / "mcp_tools"
-            / "threatintel.json"
+        # Both servers bound to the judge, each contributing its whole pinned
+        # manifest: the point of the regression is that the registry is
+        # reachable at all, so every server it binds has to arrive.
+        goldens = Path(__file__).resolve().parents[2] / "fixtures" / "golden" / "mcp_tools"
+        expected = sorted(
+            name
+            for key in ("knowledge", "threatintel")
+            for name in json.loads((goldens / f"{key}.json").read_text(encoding="utf-8"))["tools"]
         )
-        golden = sorted(json.loads(golden_path.read_text(encoding="utf-8"))["tools"])
-        assert sorted(t.name for t in judge.tools) == golden
+        assert sorted(t.name for t in judge.tools) == expected
     finally:
         await judge.aclose()
 

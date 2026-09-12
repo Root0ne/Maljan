@@ -42,7 +42,14 @@ def test_the_two_sidecars_are_seeded_with_todays_launch_parameters():
 
 def test_builtin_keys_are_reserved_and_the_key_pattern_is_a_slug():
     assert set(BUILTIN_SERVER_KEYS) <= set(RESERVED_SERVER_KEYS)
-    assert set(RESERVED_SERVER_KEYS) == {"network", "threatintel", "ghidra", "cape"}
+    assert set(RESERVED_SERVER_KEYS) == {
+        "analysis",
+        "knowledge",
+        "network",
+        "threatintel",
+        "ghidra",
+        "cape",
+    }
     pattern = re.compile(SERVER_KEY_PATTERN)
     assert pattern.match("r2custom") and pattern.match("a")
     assert not pattern.match("R2") and not pattern.match("1a") and not pattern.match("a" * 33)

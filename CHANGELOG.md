@@ -8,6 +8,69 @@ change landed on `main`.
 
 ### Added
 
+- **Every analysis capability is a tool.** `src/maljan/tools/` holds the
+  implementations as plain functions — identity and hashes, strings and typed
+  IOCs, PE/ELF/Mach-O/APK structure, archives, documents, payload carving,
+  YARA, Sigma, capa, PCAP summaries and the ATT&CK / API-behaviour / LOLBin /
+  retrieval lookups — and two new built-in stdio sidecars expose them:
+  `analysis` (bound to the static analyst) and `knowledge` (bound to every
+  analyst and the judge). Both carry `agents: []` and are bound only by the
+  `ToolRef`s in the agent definitions, so a definition's tool list is what
+  decides which tools an agent gets. `network-mcp` gains `pcap_summary`. They report facts
+  rather than verdicts, and a missing optional library costs one tool's answer
+  rather than the server. Install the per-format parsers with
+  `uv sync --extra tools`.
+- **The sandbox report as tools.** `ToolRef(kind="sandbox")` resolves to
+  in-process tools over the job's report — processes, network, signatures,
+  dropped files, platform channels and a raw section reader — so the dynamic
+  analyst can ask for what it needs instead of being handed the whole report as
+  chunked text.
+- **A measurement baseline profile.** `measurement` runs the same three
+  analysts as `default` with every tool server withheld, the in-process sandbox
+  tools withheld and the static provider forced to `none`.
+  `ProfileDefinition.exclude_servers`, `exclude_sandbox_tools` and
+  `static_provider` make that a profile rather than three cloned definitions
+  that could drift from the ones being measured. The exclusion is `["*"]`, so a
+  server an operator adds later cannot quietly rejoin the baseline, and
+  `exclude_servers` is the one field editable on a built-in profile.
+- **Remote sample delivery.** A tool server that cannot see the worker's
+  filesystem advertises `put_sample` (with `put_sample_begin` /
+  `put_sample_chunk` / `put_sample_finish` above 8 MiB) and is handed the bytes
+  before the first tool call; the path it returns is what its own tools are
+  then called with, per server. Staging never fails a run — a failure is a
+  degradation reason and the local path is used — and the paths used are
+  recorded on the run as `remote_sample_paths`, which stays empty on a default
+  install. Only HTTP transports stage — a stdio sidecar shares the worker's
+  filesystem and is handed the path — so nothing is copied unless a server is
+  genuinely remote. The `analysis` sidecar implements the convention for the
+  operator who runs it behind HTTP, writing under `MALJAN_STAGING_DIR` with
+  `MALJAN_STAGING_TTL_HOURS` pruning.
+
+### Fixed
+
+- **Sigma Layer 0 was contributing nothing.** 272 of the 4241 rules under
+  `data/sigma_rules` parse into a detection object with no `parsed_condition`,
+  and reading that attribute raised out of the first such rule every scan
+  reached; the pipeline caught the error, logged "scan failed" and carried on,
+  so the layer had been silently dead on every run with sandbox telemetry. The
+  evaluator now reads the attribute defensively, `scan_events` and
+  `scan_log_lines` skip a rule that raises rather than abandoning the corpus,
+  and the count is exposed as `SigmaLayer.last_rule_errors`, as `rule_errors`
+  in the `sigma_match` tool, and logged once per scan.
+
+### Changed
+
+- **Tool-argument path pinning is shared.** The bare-filename guard moved from
+  `ConfigurableAnalyst` to `agents/tool_pinning.pin_paths`, called by every
+  analyst through `BaseAnalyst`, and now substitutes a different path per
+  server. It matches three spellings of the sample — the worker path, its
+  basename, and the basename of the staged copy — because a server that stored
+  the sample under a name of its own would otherwise only be corrected for a
+  name the model was never shown. `ServerRegistry.merge_tools` stamps each tool
+  with the server it came from so the right path can be chosen.
+- **The string and IOC scan moved** from `extractors/pe_extractor` to
+  `maljan.tools.strings`; the extractor imports it and its output is unchanged.
+
 - **Per-format sandbox submission options.** `sandbox.cape2.package_by_format`
   maps a detected file type to a CAPE analysis package (`*` is the fallback)
   and `sandbox.cape2.submit_options` is sent verbatim as further form fields;

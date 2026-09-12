@@ -245,9 +245,10 @@ def test_clearing_the_definitions_that_a_stored_profile_uses_is_refused():
 
 
 def test_the_effective_maps_layer_stored_over_seeded():
-    assert set(effective_profiles({})) == {"default"}
+    assert set(effective_profiles({})) == {"default", "measurement"}
     assert set(effective_profiles({AGENT_PROFILES_KEY: {"lean": {"analysts": ["network"]}}})) == {
         "default",
+        "measurement",
         "lean",
     }
 

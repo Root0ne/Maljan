@@ -173,6 +173,29 @@ class JudgeAgent:
         """A per-job identity for the handles' same-job short circuit."""
         return str(getattr(self, "_job_id", "") or "job")
 
+    def _definition_tool_refs(self) -> list[Any]:
+        """The judge definition's ``ToolRef``s, under the active profile.
+
+        ``JudgeAgent`` is not a ``BaseAnalyst`` and has no ``ResolvedAgent``,
+        so it reads its definition itself. The key is always ``judge``: the
+        settings validator refuses a second definition with that role.
+        """
+        container = getattr(self, "_container", None)
+        if container is None:
+            return []
+        from maljan.agents.composition import mcp_refs_for
+
+        return list(mcp_refs_for(container.config, "judge"))
+
+    def _profile_excluded_servers(self) -> str:
+        """The servers the active profile withholds, as ``atools_for``'s argument."""
+        container = getattr(self, "_container", None)
+        if container is None:
+            return ""
+        from maljan.agents.composition import _excluded_servers
+
+        return _excluded_servers(container.config)
+
     async def _initialize_mcp_client(self) -> None:
         """Attach every tool server bound to the ``judge`` role, on this loop.
 
@@ -185,7 +208,19 @@ class JudgeAgent:
         registry = self._server_registry()
         if registry is None:
             return
-        tools, reasons = await registry.atools_for("judge", self._job_key())
+        seen: dict[str, str] = {}
+        tools, reasons = await registry.atools_for(
+            "judge", self._job_key(), exclude=self._profile_excluded_servers(), seen=seen
+        )
+        # The judge's definition names its servers the same way an analyst's
+        # does, and ``knowledge`` reaches it by that reference alone — it is
+        # bound to no role. Awaited here rather than taken from a
+        # ``ResolvedAgent`` for the reason ``aclose`` spells out: whichever
+        # loop enters a toolkit's exit stack has to be the one that unwinds it.
+        for ref in self._definition_tool_refs():
+            picked, ref_reasons = await registry.atools_for_ref(ref, self._job_key(), seen=seen)
+            tools.extend(picked)
+            reasons.extend(ref_reasons)
         self.tools = tools
         self.degradation_reasons = reasons
         self.logger.info("Judge tool servers: %s", [t.name for t in self.tools])
