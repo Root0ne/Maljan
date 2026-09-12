@@ -23,6 +23,9 @@ jobs:
         with:
           fail-on-severity: high
           comment-summary-in-pr: on-failure
-          # Copyleft licences would bind the distribution of a private
+          # Strong copyleft would bind the distribution of a private
           # deployment; a maintainer may allow one deliberately in a review.
-          deny-licenses: "GPL-2.0, GPL-3.0, AGPL-3.0, LGPL-3.0, SSPL-1.0"
+          # LGPL is not listed: it permits use as a library, and two
+          # dependencies carry it (sharp's libvips binaries behind Next.js
+          # image optimisation, and cairosvg in the dev group).
+          deny-licenses: "GPL-2.0, GPL-3.0, AGPL-3.0, SSPL-1.0"
