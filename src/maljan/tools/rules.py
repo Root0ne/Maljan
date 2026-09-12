@@ -227,15 +227,17 @@ def sigma_match(events: list[dict[str, Any]], ruleset: str = "default") -> dict[
         {str(k): str(v) for k, v in row.items()} for row in events if isinstance(row, dict)
     ]
     rows: list[dict[str, Any]] = []
+    rule_errors = 0
     for rule, evaluator in getattr(layer, "_evaluators", []) or []:
         for event in normalised:
             # A rule the corpus carries with no parseable detection block
             # raises inside pySigma rather than evaluating to "no match". One
             # such rule must not take the whole corpus down with it, so the
-            # rule is skipped and the scan continues.
+            # rule is skipped, counted, and the scan continues.
             try:
                 matched = evaluator.evaluate(event, strict=True)
             except Exception as exc:  # noqa: BLE001
+                rule_errors += 1
                 logger.debug("sigma_match: rule %s could not be evaluated (%s).", rule.id, exc)
                 break
             if matched is None:
@@ -256,7 +258,17 @@ def sigma_match(events: list[dict[str, Any]], ruleset: str = "default") -> dict[
                 }
             )
             break  # a rule fires at most once per batch
-    return {"matches": rows, "rule_count": int(getattr(layer, "rule_count", 0))}
+    if rule_errors:
+        logger.warning(
+            "sigma_match: %d of %d rules could not be evaluated; the scan used the rest.",
+            rule_errors,
+            int(getattr(layer, "rule_count", 0)),
+        )
+    return {
+        "matches": rows,
+        "rule_count": int(getattr(layer, "rule_count", 0)),
+        "rule_errors": rule_errors,
+    }
 
 
 def sandbox_events(report: dict[str, Any] | None) -> list[dict[str, str]]:

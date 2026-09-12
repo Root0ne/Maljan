@@ -132,11 +132,17 @@ class SigmaMemoryEvaluator:
         Returns:
             Matched-fields dict on hit, otherwise None.
         """
-        if not self.rule.detection or not self.rule.detection.parsed_condition:
+        # ``getattr``, not attribute access. A rule whose detection block does
+        # not parse gets an ``EmptySigmaDetections``, which has no
+        # ``parsed_condition`` at all — 272 of the 4241 rules under
+        # ``data/sigma_rules`` are in that state, and reading the attribute
+        # raised ``AttributeError`` out of the first one the scan reached.
+        parsed = getattr(self.rule.detection, "parsed_condition", None) or []
+        if not self.rule.detection or not parsed:
             return None
 
         # Multiple conditions are rare; any one matching is enough.
-        for cond_tree in self.rule.detection.parsed_condition:
+        for cond_tree in parsed:
             match_dict = self._eval_node(cond_tree.parsed, event, strict)
             if match_dict is not None:
                 return match_dict
@@ -335,6 +341,12 @@ class SigmaLayer:
         ]
         # Platform filter telemetry.
         self._filtered_count: int = 0
+        # Rules that raised while being evaluated. A corpus is third-party data
+        # and a rule in it can be malformed in ways pySigma only discovers at
+        # evaluation time; before this counter existed one such rule aborted
+        # the whole scan and the layer contributed nothing, which reads exactly
+        # like a sample that matched no rules.
+        self._rule_errors: int = 0
 
     @classmethod
     def from_rules_dir(cls, rules_dir: Path) -> SigmaLayer:
@@ -433,7 +445,12 @@ class SigmaLayer:
                 self._filtered_count += 1
                 continue
             for event in events:
-                matched_fields = evaluator.evaluate(event, strict=True)
+                try:
+                    matched_fields = evaluator.evaluate(event, strict=True)
+                except Exception as exc:  # noqa: BLE001 — one bad rule, not the corpus
+                    self._rule_errors += 1
+                    logger.debug("SigmaLayer: rule %s could not be evaluated (%s).", rule.id, exc)
+                    break
                 if matched_fields is not None:
                     canonical_src = _classify_log_source(log_source, product)
                     matches.append(
@@ -449,6 +466,7 @@ class SigmaLayer:
                     )
                     break  # Each rule fires at most once per event batch.
 
+        self._warn_on_rule_errors("scan_events")
         return matches
 
     def scan_log_lines(
@@ -471,7 +489,12 @@ class SigmaLayer:
                 continue
             for line in log_lines:
                 event = {"_raw": line}
-                matched_fields = evaluator.evaluate(event, strict=False)
+                try:
+                    matched_fields = evaluator.evaluate(event, strict=False)
+                except Exception as exc:  # noqa: BLE001 — one bad rule, not the corpus
+                    self._rule_errors += 1
+                    logger.debug("SigmaLayer: rule %s could not be evaluated (%s).", rule.id, exc)
+                    break
                 if matched_fields is not None:
                     canonical_src = _classify_log_source(log_source, product)
                     matches.append(
@@ -487,6 +510,7 @@ class SigmaLayer:
                     )
                     break  # Each rule fires at most once per log batch.
 
+        self._warn_on_rule_errors("scan_log_lines")
         return matches
 
     def scan_report_text(
@@ -498,6 +522,30 @@ class SigmaLayer:
             return []
         lines = report_text.split("\n")
         return self.scan_log_lines(lines, log_source="generic", sample_platform=sample_platform)
+
+    def _warn_on_rule_errors(self, what: str) -> None:
+        """One warning per scan, not one per rule.
+
+        272 unparsable rules would otherwise be 272 log lines per scan, which
+        is how a real signal gets filtered out by whoever reads the logs.
+        """
+        if self._rule_errors:
+            logger.warning(
+                "SigmaLayer: %d of %d rules could not be evaluated during %s; "
+                "the scan used the rest of the corpus.",
+                self._rule_errors,
+                self.rule_count,
+                what,
+            )
+
+    @property
+    def last_rule_errors(self) -> int:
+        """How many rules raised during the most-recent scan suite.
+
+        Non-zero means the corpus contains rules this evaluator cannot read;
+        the scan still contributes what the rest of the corpus matched.
+        """
+        return self._rule_errors
 
     @property
     def last_filtered_count(self) -> int:
@@ -511,8 +559,9 @@ class SigmaLayer:
         return self._filtered_count
 
     def reset_filter_stats(self) -> None:
-        """Zero the rule-drop counter before a fresh scan suite."""
+        """Zero the rule-drop and rule-error counters before a fresh scan suite."""
         self._filtered_count = 0
+        self._rule_errors = 0
 
     def to_isr(self, matches: list[SigmaMatch]) -> AgentISR:
         from maljan.schemas.isr_models import AgentISR, ClaimEvidence
