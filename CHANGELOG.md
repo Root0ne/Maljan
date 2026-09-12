@@ -85,6 +85,13 @@ change landed on `main`.
   phase labels. The reasoning stays, the bookkeeping goes
   ([#38](https://github.com/Root0ne/Maljan/pull/38)).
 
+### Fixed
+
+- **The Ghidra connection test proves the token.** The probe read the
+  unauthenticated health endpoint, so a wrong bearer token passed the test and
+  every job then failed with 401 on the tool schema. It now fetches the schema
+  itself and lists the tools it found.
+
 ### Upgrading
 
 An existing `.env` deployment is not migrated automatically. Move the bootstrap

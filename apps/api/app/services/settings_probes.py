@@ -258,11 +258,40 @@ async def _ollama_tag_is_absent(base_url: str, model: str) -> bool:
     return model not in names
 
 
+def _ghidra_tool_names(schema: Any) -> list[str]:
+    """The tool names ``GhidraHTTPClient`` derives from the server's schema.
+
+    Same rule as ``_create_langchain_tool``: a tool is its ``path`` with the
+    leading slash dropped and the remaining slashes joined by underscores, so
+    the names the probe lists are the names the model will call.
+    """
+    entries = schema.get("tools", []) if isinstance(schema, dict) else []
+    names: list[str] = []
+    for entry in entries:
+        path = str(entry.get("path", "")) if isinstance(entry, dict) else ""
+        if path:
+            names.append(path.lstrip("/").replace("/", "_"))
+    return names
+
+
 async def probe_ghidra(v: dict[str, Any]) -> ProbeResult:
+    """Fetch the tool schema, which is the authenticated endpoint a job uses first.
+
+    ``/check_connection`` answers 200 without a token, so a probe against it
+    reported a server as reachable while every job then failed with 401 on
+    ``/mcp/schema``. Probing the schema proves the token as well as the
+    address, and hands the editor the manifest for its tick boxes.
+    """
     t0 = time.perf_counter()
     headers = {"Authorization": f"Bearer {v['auth_token']}"} if v.get("auth_token") else None
-    ok, detail, _ = await _get(f"{str(v.get('url') or '').rstrip('/')}/check_connection", headers)
-    return ProbeResult(ok, _ms(t0), detail)
+    ok, detail, r = await _get(f"{str(v.get('url') or '').rstrip('/')}/mcp/schema", headers)
+    if not ok or r is None:
+        return ProbeResult(ok, _ms(t0), detail)
+    try:
+        names = _ghidra_tool_names(r.json())
+    except ValueError:
+        return ProbeResult(False, _ms(t0), f"{detail}; the schema was not JSON")
+    return ProbeResult(True, _ms(t0), f"{len(names)} tools", None, names)
 
 
 def _failure_detail(exc: BaseException) -> str:

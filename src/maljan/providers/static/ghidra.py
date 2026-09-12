@@ -340,7 +340,12 @@ class GhidraStaticProvider(StaticProvider):
         )
 
     async def probe(self) -> ProviderProbe:
-        """The headless server's own health endpoint, with the configured token."""
+        """The tool schema, with the configured token.
+
+        ``/check_connection`` answers without a token, so it proved the address
+        and nothing else; ``/mcp/schema`` is the first authenticated call a job
+        makes, so a token the server rejects fails here as it would there.
+        """
         import time
 
         import httpx
@@ -348,7 +353,7 @@ class GhidraStaticProvider(StaticProvider):
         t0 = time.perf_counter()
         token = self._cfg.auth_token.get_secret_value()
         headers = {"Authorization": f"Bearer {token}"} if token else {}
-        url = f"{self._cfg.url.rstrip('/')}/check_connection"
+        url = f"{self._cfg.url.rstrip('/')}/mcp/schema"
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.get(url, headers=headers)
