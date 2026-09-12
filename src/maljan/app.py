@@ -115,7 +115,7 @@ class MaljanApp:
         sandbox-OS fallback. Returns ``("unknown", "unknown")`` when the
         sample bytes are unreachable AND the sandbox didn't disambiguate.
         """
-        from maljan.extractors.sample_identity import _detect_file_type, _infer_platform
+        from maljan.extractors.sample_identity import detect_file_type, infer_platform
 
         file_type = "unknown"
         mime_type: str | None = None
@@ -124,7 +124,7 @@ class MaljanApp:
                 path = Path(sample_path)
                 if path.exists() and path.is_file():
                     blob = path.read_bytes()
-                    file_type = _detect_file_type(path, blob)
+                    file_type = detect_file_type(path, blob)
             except OSError as exc:
                 logger.warning("_infer_sample_platform: could not read %s (%s)", sample_path, exc)
 
@@ -137,7 +137,7 @@ class MaljanApp:
             if isinstance(mt, str):
                 mime_type = mt
 
-        platform = _infer_platform(file_type, mime_type, sandbox_report)
+        platform = infer_platform(file_type, mime_type, sandbox_report)
         return file_type, platform
 
     def _poll_budget(self, provider: Any) -> tuple[int, int]:

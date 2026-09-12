@@ -86,10 +86,6 @@ _BY_FILE_TYPE: dict[str, str] = {
     ),
 }
 
-_SCRIPT_TYPES: frozenset[str] = frozenset(
-    {"ps1", "bat", "cmd", "vbs", "js", "hta", "wsf", "sh", "py", "pl"}
-)
-
 _SCRIPT_FRAGMENT = (
     "This sample is a script, so the payload is the text itself. Work through "
     "each layer of obfuscation and decoding in order — string concatenation "
@@ -98,8 +94,6 @@ _SCRIPT_FRAGMENT = (
     "that a stage exists. Name the commands and the endpoints the final stage "
     "reaches."
 )
-
-_ARCHIVE_TYPES: frozenset[str] = frozenset({"zip", "7z", "rar", "gz", "bz2", "xz", "iso"})
 
 _ARCHIVE_FRAGMENT = (
     "This sample is an archive: the evidence is what it carries. Name the "
@@ -124,15 +118,18 @@ def format_fragment(file_type: str, platform: str) -> str:
     document, a script and an archive each need their own instruction whatever
     host they land on — and the platform answers for everything else.
     """
+    from maljan.extractors.sample_identity import file_type_category
+
     ft = (file_type or "").strip().lower()
     plat = (platform or "").strip().lower()
 
     specific = _BY_FILE_TYPE.get(ft)
     if specific:
         return specific
-    if ft in _SCRIPT_TYPES:
+    category = file_type_category(ft)
+    if category == "script":
         by_platform = _BY_PLATFORM.get(plat)
         return f"{_SCRIPT_FRAGMENT} {by_platform}" if by_platform else _SCRIPT_FRAGMENT
-    if ft in _ARCHIVE_TYPES:
+    if category == "archive":
         return _ARCHIVE_FRAGMENT
     return _BY_PLATFORM.get(plat, _NEUTRAL)

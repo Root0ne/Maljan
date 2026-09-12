@@ -109,22 +109,33 @@ def _infer_platform(
     """
     ft = (file_type or "").lower()
     mapped = PLATFORM_BY_FILE_TYPE.get(ft)
-    if mapped:
+    # A format that binds to one OS is the end of the question. ``multi`` is
+    # not: a macro document or a JAR runs anywhere, and the guest it was
+    # detonated on is real information about which one it ran on here. So a
+    # ``multi`` mapping falls through to the hints below and is only the answer
+    # when nothing else says otherwise.
+    if mapped and mapped != "multi":
         return mapped
 
-    # Sandbox fallback when file_type is "unknown" or a generic container.
+    # Sandbox fallback when file_type is "unknown", cross-platform, or a
+    # generic container.
     target = (sandbox_report or {}).get("target", {})
     if isinstance(target, dict):
         sandbox_os = str(target.get("os") or target.get("platform") or "").lower()
         for needle, platform in _SANDBOX_OS_HINTS:
             if needle in sandbox_os:
                 return platform
+        if sandbox_os.startswith("win"):
+            return "windows"
 
     # MIME hint as last resort.
     mime = (mime_type or "").lower()
     for needle, platform in _MIME_HINTS:
         if needle in mime:
             return platform
+
+    if mapped:
+        return mapped
 
     # Toolchain hint, last of all, and only over an ``unknown`` platform. This
     # matters more than its position suggests: ``unknown`` is not a neutral
@@ -294,18 +305,22 @@ PLATFORM_BY_FILE_TYPE: dict[str, Platform] = {
     "pl": "multi",
 }
 
-# Sandbox ``target.os`` / ``target.platform`` substrings, most specific first.
+# Sandbox ``target.os`` / ``target.platform`` substrings. Every entry here is a
+# word no other platform's name contains; the bare ``win`` prefix is checked
+# separately, after these, because ``"win" in "darwin"`` is true and a macOS
+# guest must not read as a Windows one.
 _SANDBOX_OS_HINTS: tuple[tuple[str, Platform], ...] = (
     ("windows", "windows"),
-    ("win", "windows"),
+    ("darwin", "macos"),
+    ("macos", "macos"),
+    ("mac os", "macos"),
+    ("osx", "macos"),
+    ("android", "android"),
+    ("ios", "ios"),
+    ("iphone", "ios"),
     ("linux", "linux"),
     ("ubuntu", "linux"),
     ("debian", "linux"),
-    ("android", "android"),
-    ("macos", "macos"),
-    ("darwin", "macos"),
-    ("osx", "macos"),
-    ("ios", "ios"),
 )
 
 _MIME_HINTS: tuple[tuple[str, Platform], ...] = (
@@ -373,7 +388,10 @@ def _shebang_type(blob: bytes) -> str | None:
     for needle, label in _SHEBANG_TYPES:
         if needle in line:
             return label
-    return "sh"
+    # An interpreter this table does not name says nothing about the format —
+    # ``#!/usr/bin/env node`` is not a shell script — so the extension table
+    # answers instead, and ``unknown`` is better than a wrong label.
+    return None
 
 
 def _detect_file_type(path: Path, blob: bytes) -> str:
@@ -407,6 +425,23 @@ def _detect_file_type(path: Path, blob: bytes) -> str:
     if shebang:
         return shebang
     return _EXTENSION_TYPES.get(path.suffix.lower(), "unknown")
+
+
+# The public name. ``_detect_file_type`` stays for the callers that grew up
+# around it; new code across package boundaries reads this one.
+def detect_file_type(path: Path, blob: bytes) -> str:
+    """Return the lowercase routing label for a sample: ``pe``, ``apk``, ``pdf``..."""
+    return _detect_file_type(path, blob)
+
+
+def infer_platform(
+    file_type: str,
+    mime_type: str | None = None,
+    sandbox_report: dict[str, Any] | None = None,
+    language_or_compiler: str | None = None,
+) -> Platform:
+    """Return the platform a detected file type binds the sample to."""
+    return _infer_platform(file_type, mime_type, sandbox_report, language_or_compiler)
 
 
 # Formats the pipeline accepts but has no format-aware extractor for. No sample

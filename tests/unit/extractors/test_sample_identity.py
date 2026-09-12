@@ -95,9 +95,50 @@ def test_infer_platform_sandbox_fallback_windows() -> None:
     assert _infer_platform("unknown", None, sb) == "windows"
 
 
-def test_infer_platform_sandbox_hint_names_a_mobile_guest() -> None:
-    sb = {"target": {"platform": "android-11"}}
-    assert _infer_platform("unknown", None, sb) == "android"
+@pytest.mark.parametrize(
+    ("hint", "expected"),
+    [
+        ("android-11", "android"),
+        # "win" is a substring of "darwin"; a macOS guest must not read as one.
+        ("darwin-22", "macos"),
+        ("macos-14", "macos"),
+        ("osx-10.15", "macos"),
+        ("ios-17", "ios"),
+        ("ubuntu-22.04", "linux"),
+        ("windows10", "windows"),
+        ("win7x64", "windows"),
+        ("winxp", "windows"),
+    ],
+)
+def test_infer_platform_sandbox_hint_names_the_guest(hint: str, expected: str) -> None:
+    assert _infer_platform("unknown", None, {"target": {"platform": hint}}) == expected
+
+
+class TestACrossPlatformFormatDefersToTheGuest:
+    """A macro document or a JAR binds to no OS by format, but it ran on one.
+
+    Returning "multi" before consulting the sandbox threw that away, and
+    downstream that cost a .docm detonated on Windows its whole registry,
+    service and scheduled-task persistence sweep.
+    """
+
+    @pytest.mark.parametrize("file_type", ["ole2", "ooxml", "pdf", "jar", "py", "pl"])
+    def test_the_guest_refines_a_cross_platform_format(self, file_type: str) -> None:
+        sb = {"target": {"os": "windows7"}}
+        assert _infer_platform(file_type, None, sb) == "windows"
+
+    def test_a_linux_guest_refines_it_too(self) -> None:
+        assert _infer_platform("jar", None, {"target": {"os": "ubuntu-22"}}) == "linux"
+
+    def test_multi_is_the_answer_when_nothing_else_says_otherwise(self) -> None:
+        assert _infer_platform("ole2", None, None) == "multi"
+        assert _infer_platform("ole2", None, {"target": {}}) == "multi"
+
+    def test_a_single_os_format_still_beats_the_guest(self) -> None:
+        # Magic bytes remain authoritative for a format that names one OS.
+        sb = {"target": {"os": "windows10"}}
+        assert _infer_platform("elf", None, sb) == "linux"
+        assert _infer_platform("apk", None, sb) == "android"
 
 
 def test_infer_platform_mime_fallback_windows() -> None:
@@ -169,6 +210,10 @@ def _write(tmp_path: Path, name: str, blob: bytes) -> Path:
         ("a.txt", b"#!/bin/bash\necho hi\n", "sh", "linux"),
         ("a.txt", b"#!/usr/bin/env python3\nprint(1)\n", "py", "multi"),
         ("a.txt", b"#!/usr/bin/perl\nprint 1;\n", "pl", "multi"),
+        # An interpreter the table does not name falls through to the
+        # extension rather than being labelled a shell script.
+        ("a.dat", b"#!/usr/bin/env node\nrequire(1)\n", "unknown", "unknown"),
+        ("a.js", b"#!/usr/bin/env node\nrequire(1)\n", "js", "windows"),
         ("a.sh", b"echo hi\n", "sh", "linux"),
         ("a.dat", b"\x00\x01\x02\x03" + b"\x00" * 32, "unknown", "unknown"),
     ],

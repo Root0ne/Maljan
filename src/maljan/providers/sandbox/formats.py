@@ -37,15 +37,15 @@ def detect_sample_format(sample_path: str | Path) -> tuple[str, str]:
     The same detector the pipeline routes on, so the package a sandbox is asked
     for and the analysis the report is read as agree by construction.
     """
-    from maljan.extractors.sample_identity import _detect_file_type, _infer_platform
+    from maljan.extractors.sample_identity import detect_file_type, infer_platform
 
     path = Path(sample_path)
     try:
         blob = path.read_bytes()
     except OSError:
         return "unknown", "unknown"
-    file_type = _detect_file_type(path, blob)
-    return file_type, _infer_platform(file_type, None, None)
+    file_type = detect_file_type(path, blob)
+    return file_type, infer_platform(file_type)
 
 
 def option_for_format(options: dict[str, str], file_type: str, fallback: str = "") -> str:
