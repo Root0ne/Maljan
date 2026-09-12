@@ -56,7 +56,7 @@ def restart_llama() -> None:
     16.1 GB after one arm — so a long paired run drifts into the host's
     memory floor. temp 0 makes the restart measurement-neutral.
     """
-    # Tell the guard this drop is declared, not runaway (see night_guard.sh).
+    # Tell the host's memory guard this drop is declared, not runaway.
     grace = str(ROOT / "logs" / "night-job.grace")
     open(grace, "w").close()
     subprocess.run(["pkill", "-f", "llama-server"], capture_output=True)
