@@ -35,12 +35,20 @@ def test_the_rename_table_covers_every_moved_key():
             assert mod.KEY_RENAMES[f"core.{old}"] == f"core.{new}"
 
 
+# Leaves a later revision retired again (``20260913000000_drop_tool_selection_settings``
+# removes the tool-selection modes). The rename table is frozen history, so its
+# targets for these two are no longer catalog keys and are skipped here.
+_RETIRED_LEAVES = ("tool_selection", "use_all_tools")
+
+
 def test_every_renamed_key_is_a_real_catalog_key():
     from app.services.settings_catalog_api import catalog_index
 
     mod = _load()
     index = catalog_index()
     for old, new in mod.KEY_RENAMES.items():
+        if new.rsplit(".", 1)[-1] in _RETIRED_LEAVES:
+            continue
         assert new in index, f"{old} renames to unknown {new}"
 
 

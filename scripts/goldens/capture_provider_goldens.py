@@ -1,4 +1,4 @@
-"""Freeze today's prompts, allow-lists and extractor outputs as golden fixtures.
+"""Freeze today's prompts and extractor outputs as golden fixtures.
 
 Run once, on `dev`, before the provider refactor begins:
 
@@ -19,31 +19,11 @@ from maljan.agents.dynamic_analyst import _ISR_SYSTEM as DYNAMIC_ISR_SYSTEM
 from maljan.agents.static_analyst import _ISR_SYSTEM as STATIC_ISR_SYSTEM
 from maljan.extractors.dynamic_extractor import build_dynamic_behavior
 from maljan.extractors.network_extractor import build_network_iocs
-from maljan.providers.static.ghidra import GHIDRA_ALLOWED_TOOLS
-from maljan.providers.static.ghidra_tool_selector import _CORE_TOOLS
 
 ROOT = Path(__file__).resolve().parents[2]
 PROMPTS = ROOT / "tests" / "fixtures" / "prompts"
 GOLDEN = ROOT / "tests" / "fixtures" / "golden"
 CAPE_GLOBS = ("data/cape_reports/*.json", "data/samples/dynamic/sample_1.json")
-
-# The 13 CAPE MCP tool names the dynamic analyst keeps when
-# ``mcp.cape.tools`` is empty (dynamic_analyst.py:121-135).
-CAPE_ESSENTIALS = [
-    "get_cuckoo_status",
-    "search_task",
-    "extended_search",
-    "submit_file",
-    "submit_static",
-    "get_task_status",
-    "get_task_report",
-    "get_task_iocs",
-    "get_task_config",
-    "list_tasks",
-    "view_task",
-    "get_latest_tasks",
-    "verify_auth",
-]
 
 
 def main() -> None:
@@ -52,20 +32,6 @@ def main() -> None:
 
     (PROMPTS / "static_isr_system_ghidra.txt").write_text(STATIC_ISR_SYSTEM, encoding="utf-8")
     (PROMPTS / "dynamic_system_cape2.txt").write_text(DYNAMIC_ISR_SYSTEM, encoding="utf-8")
-
-    (GOLDEN / "allowlists.json").write_text(
-        json.dumps(
-            {
-                "ghidra_allowed_tools": sorted(GHIDRA_ALLOWED_TOOLS),
-                "ghidra_core_tools": sorted(_CORE_TOOLS),
-                "cape_essential_tools": sorted(CAPE_ESSENTIALS),
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
 
     for pattern in CAPE_GLOBS:
         for path in sorted(ROOT.glob(pattern)):

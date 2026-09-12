@@ -38,7 +38,7 @@ _BEHAVIOUR = str(resolve_data("data/api_behaviour_map_v1.json"))
 _ATTCK = str(resolve_data("data/api_attck_map_v1.json"))
 
 # The eight names that existed before the enlargement. Frozen on purpose: they
-# are consumed by capability_matrix, ghidra_tool_selector, the import layer and
+# are consumed by capability_matrix, the import layer and
 # — invisibly — by the vendored family fingerprints, whose description text
 # embeds this exact vocabulary. Renaming one desynchronises the family-RAG query
 # from its catalog inside a single embedding space, with no exception and no

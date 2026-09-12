@@ -1127,7 +1127,6 @@ class BaseAnalyst(ABC):
         # created this agent, so the static analyst can reuse it instead of
         # building a new one per chunk.
         self.toolkit: Any = None
-        self._all_ghidra_tools: list[Any] = []
         self._container: Any = None
         # The ``ResolvedAgent`` the container built this agent from — its own
         # prompt, tools and static provider id, so a clone never has to
@@ -1205,7 +1204,6 @@ class BaseAnalyst(ABC):
         # half-closed session — or its captured tool output — alive.
         self.toolkit = None
         self.tools = []
-        self._all_ghidra_tools = []
         self._last_tool_evidence = []
 
     def _try_initialize_mcp(self) -> bool:

@@ -22,7 +22,7 @@ def _provider(tmp_path=None):
 def test_capabilities_are_evidence_only():
     caps = _provider().capabilities
     assert caps.provides_evidence is True
-    assert caps.provides_tools is False and caps.supports_tool_curation is False
+    assert caps.provides_tools is False
     assert caps.needs_sample_mirror is False, "capa and YARA read the host bytes in place"
     assert caps.degrade_on_failure is True
 

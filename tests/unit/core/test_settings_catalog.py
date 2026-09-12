@@ -178,7 +178,6 @@ def test_subgroup_and_advanced_assignments_follow_the_design() -> None:
     assert e["core.llm.agents"].advanced
     assert e["core.llm.view_decomposition_mode"].subgroup == "View decomposition"
     assert e["core.static.r2.binary_path"].subgroup == "Connection"
-    assert e["core.static.r2.tool_selection"].subgroup == "Tool selection"
     assert e["core.static.r2.env"].advanced and e["core.static.ghidra.env_allow"].advanced
     assert e["core.static.capa.rules_dir"].subgroup == "Rules"
     assert e["core.sandbox.cape2.mcp.transport"].subgroup == "Connection"

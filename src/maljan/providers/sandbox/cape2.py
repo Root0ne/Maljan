@@ -36,21 +36,6 @@ class CAPE2SandboxProvider(SandboxProvider):
     re-implemented here.
     """
 
-    CAPE_ESSENTIAL_TOOLS: ClassVar[tuple[str, ...]] = (
-        "get_cuckoo_status",
-        "search_task",
-        "extended_search",
-        "submit_file",
-        "submit_static",
-        "get_task_status",
-        "get_task_report",
-        "get_task_iocs",
-        "get_task_config",
-        "list_tasks",
-        "view_task",
-        "get_latest_tasks",
-        "verify_auth",
-    )
     # The tool-facing body of the dynamic system prompt: verbatim lines 25-36 of
     # the old ``_ISR_SYSTEM`` in ``dynamic_analyst.py``, moved rather than
     # retyped so a golden test can pin the assembled prompt byte for byte.
@@ -107,14 +92,14 @@ class CAPE2SandboxProvider(SandboxProvider):
         return self.CAPE_PROMPT_FRAGMENT
 
     def dynamic_tools(self) -> list[BaseTool]:
-        """The 13 essential CAPE MCP tools, or none while MCP is disabled.
+        """The CAPE MCP server's tools, narrowed only by ``mcp.tools``; none while disabled.
 
-        Moved from ``DynamicAnalyst._initialize_mcp_client`` unchanged apart
-        from reading ``self._cfg.mcp`` (this provider's own config slice)
-        instead of a module-level ``get_settings().mcp.cape``, and the
-        allow-list itself, which is always ``CAPE_ESSENTIAL_TOOLS`` now — the
-        dead ``mcp.cape.tools`` config-driven branch is not carried forward
-        (``MCPServerConfig`` had no such field at the time).
+        ``mcp.tools`` follows the ``ServerHandle.tools()`` contract: ``None``
+        exposes every tool the server advertises, a list keeps those names.
+
+        Moved from ``DynamicAnalyst._initialize_mcp_client``, reading
+        ``self._cfg.mcp`` (this provider's own config slice) instead of a
+        module-level ``get_settings().mcp.cape``.
 
         Idempotent: a toolkit already attached — by an earlier call, or by a
         caller that assigned ``_toolkit`` directly, as tests do — is reused
@@ -122,9 +107,8 @@ class CAPE2SandboxProvider(SandboxProvider):
         hard way: a live subprocess or transport opened a second time leaks
         the first one instead of replacing it.
         """
-        essential = set(self.CAPE_ESSENTIAL_TOOLS)
         if self._toolkit is not None:
-            return [t for t in self._toolkit.get_tools() if t.name in essential]
+            return self._allowed(self._toolkit.get_tools())
 
         if not self._cfg.mcp.enabled:
             logger.info("CAPEv2 MCP is disabled in config.")
@@ -184,15 +168,20 @@ class CAPE2SandboxProvider(SandboxProvider):
         run_coro_blocking(toolkit.initialize(), hard_timeout=120.0, label="cape-mcp-init")
 
         self._toolkit = toolkit
-        all_tools = toolkit.get_tools()
-        tools = [t for t in all_tools if t.name in essential]
+        tools = self._allowed(toolkit.get_tools())
         logger.info(
-            "Initialized CAPEv2 MCP tools: %d/%d (essential only): %s",
+            "Initialized CAPEv2 MCP tools: %d: %s",
             len(tools),
-            len(all_tools),
             [t.name for t in tools],
         )
         return tools
+
+    def _allowed(self, tools: list[BaseTool]) -> list[BaseTool]:
+        allowed = self._cfg.mcp.tools
+        if allowed is None:
+            return list(tools)
+        keep = set(allowed)
+        return [t for t in tools if t.name in keep]
 
     def _get_client(self) -> Any:
         if self._client is None:

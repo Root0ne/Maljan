@@ -28,7 +28,6 @@ const TOKEN_SOURCE_LABEL: Record<string, string> = {
 };
 
 const TRANSPORTS = ["stdio", "http", "streamable-http", "sse"];
-const TOOL_SELECTIONS = ["curated", "dynamic", "all"];
 
 /* A probe result describes the server as it was
  * configured when the button was pressed. Editing what the probe dialled —
@@ -53,8 +52,6 @@ export const EMPTY_SERVER: McpServerEntry = {
   url: "",
   auth_token: "",
   auth_token_source: "default",
-  tool_selection: "dynamic",
-  use_all_tools: false,
   // A new server exposes nothing until its tools are ticked off a probe.
   tools: [],
   agents: [],
@@ -476,41 +473,10 @@ export function ServerDetail({
         </fieldset>
       )}
 
-      {/* Both of these are on every server
-          the editor creates, both are read by the providers that drive a
-          server (`providers/static/generic_mcp.py`, `ghidra.py`), and
-          neither had a control anywhere on this screen — a new server
-          kept whatever the default happened to be with no way to change
-          it. */}
       {has("tools") && (
         <fieldset className="border border-border rounded p-2">
           <legend className="text-xs text-text-muted px-1">Tools</legend>
           {!showHeader && status}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-            <label className="block">
-              <span className="text-text-muted">Tool selection</span>
-              <select
-                className={input}
-                aria-label={`${serverKey} tool selection`}
-                disabled={server.use_all_tools}
-                value={server.tool_selection}
-                onChange={(e) => put(serverKey, { tool_selection: e.target.value })}
-              >
-                {TOOL_SELECTIONS.map((t) => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
-            </label>
-            <label className="text-xs text-text-secondary flex items-center gap-1 self-end pb-1.5">
-              <input
-                type="checkbox"
-                aria-label={`${serverKey} force all tools`}
-                checked={server.use_all_tools}
-                onChange={(e) => put(serverKey, { use_all_tools: e.target.checked })}
-              />
-              force every tool, whatever the selection says
-            </label>
-          </div>
 
           {manifest && manifest.length > 0 ? (
             <div className="mt-2">

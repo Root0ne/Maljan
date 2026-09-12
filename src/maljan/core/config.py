@@ -720,17 +720,6 @@ class MCPServerConfig(BaseModel):
     # http transport settings
     url: str = ""
     auth_token: SecretStr = SecretStr("")
-    # How many Ghidra MCP tools the static analyst exposes to the
-    # model (MCP__GHIDRA__TOOL_SELECTION):
-    #   "curated" — fixed ~20-tool allowlist (fastest, narrowest).
-    #   "dynamic" — CORE triage set + tools relevant to the sample's capability
-    #               categories (~30-40 tools). All ~165 stay reachable; only the
-    #               relevant subset is shown per run. RECOMMENDED DEFAULT.
-    #   "all"     — every tool the server offers (~165). Maximum coverage but a
-    #               large per-step prompt; measured 5-6x slower + noisier locally.
-    tool_selection: Literal["curated", "dynamic", "all"] = "dynamic"
-    # When true, forces "all" regardless of ``tool_selection``.
-    use_all_tools: bool = False
     # Working directory for the stdio child; empty means the repository root.
     cwd: str = ""
     # Names copied out of the API process's own environment into the child.

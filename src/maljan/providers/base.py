@@ -30,7 +30,6 @@ class StaticCapabilities:
     provides_evidence: bool = False
     provides_function_hashes: bool = False
     needs_sample_mirror: bool = False
-    supports_tool_curation: bool = False
     degrade_on_failure: bool = False
 
 
@@ -59,7 +58,6 @@ class StaticJobContext:
     sha256: str = ""
     file_type: str = "unknown"
     platform: str = "unknown"
-    capability_categories: frozenset[str] = frozenset()
     output_guardrail: Callable[[str], str] | None = None
     max_output_chars: int = 8000
     truncation_ledger: Any | None = None
@@ -108,11 +106,6 @@ class StaticProvider(ABC):
 
     def get_tools(self) -> list[BaseTool]:
         return []
-
-    def select_tools(
-        self, tools: list[BaseTool], categories: set[str] | None = None
-    ) -> list[BaseTool]:
-        return list(tools)
 
     def prompt_fragment(self) -> str:
         """The tool-facing body of the static system prompt for this provider."""
