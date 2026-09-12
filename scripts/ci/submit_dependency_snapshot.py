@@ -105,7 +105,9 @@ def submit(snapshot: dict[str, object], *, repository: str, token: str, api_url:
             "Content-Type": "application/json",
         },
     )
-    with urllib.request.urlopen(request, timeout=60) as response:  # noqa: S310 - fixed https host
+    # The host is the runner's own API endpoint (GITHUB_API_URL, https), never a
+    # value from the tree or a request, so the dynamic-URL audit does not apply.
+    with urllib.request.urlopen(request, timeout=60) as response:  # nosemgrep
         return response.read().decode()
 
 
