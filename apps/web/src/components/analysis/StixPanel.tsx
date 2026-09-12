@@ -108,7 +108,7 @@ export default function StixPanel() {
   const { report, job, loading } = useReport();
   const [stixData, setStixData] = useState<Record<string, unknown> | null>(null);
   const [copied, setCopied] = useState(false);
-  // audit 2026-07-26 (§4 "sessizce yutulan hatalar"): the fetch and the copy
+  // The fetch and the copy
   // button both used to fail silently.
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -146,7 +146,7 @@ export default function StixPanel() {
 
   return (
     <div className="bg-bg-surface border border-border rounded">
-      {/* audit 2026-07-26: the heading used to be repeated here, directly under
+      {/* The heading used to be repeated here, directly under
           the parent DETECTION tab's "STIX 2.1 bundle (export)" heading. */}
       <div className="flex items-center justify-end gap-2 px-4 py-3 border-b border-border">
         <button

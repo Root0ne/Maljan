@@ -128,9 +128,9 @@ class TestDynamicParser:
         assert "443" in result
 
     def test_network_indicators_empty(self) -> None:
-        """Empty sandbox report short-circuits to the DYN-SAND-01 hint.
+        """Empty sandbox report short-circuits to the anti-sandbox hint.
 
-        Audit 2026-05-19 DYN-SAND-01 changed the contract: instead of
+        The contract changed: instead of
         emitting an empty "Network Indicators" table when the sandbox
         captured zero events (which the analyst LLM previously treated
         as 'no analysis to do'), the parser now emits a structured

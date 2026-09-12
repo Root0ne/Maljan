@@ -3,8 +3,8 @@
 import { useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 
-/* audit 2026-07-26 (§5 "7 orphan rota"): this route had zero links anywhere in
- * the tab bar and rendered a bare, unlabelled panel when opened directly. The
+/* This route had zero links anywhere in the tab bar and rendered a bare,
+ * unlabelled panel when opened directly. The
  * panel itself now lives in @/components/analysis/StixPanel and is composed into the DETECTION tab;
  * this file exists only so bookmarked/stale URLs land somewhere coherent
  * instead of on a headless panel. Mirrors the ttps/ redirect. */

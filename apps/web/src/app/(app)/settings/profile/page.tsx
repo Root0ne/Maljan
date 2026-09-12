@@ -39,7 +39,7 @@ export default function SettingsProfilePage() {
   const passwordRequested = password.length > 0 || passwordConfirm.length > 0;
   const passwordValid = !passwordRequested || (password.length >= 8 && passwordsMatch);
   // Hoisted so the inputs can point `aria-describedby` at the messages only
-  // while they are actually rendered (audit 2026-07-26, §4 accessibility).
+  // while they are actually rendered.
   const passwordTooShort = passwordRequested && password.length > 0 && password.length < 8;
   const passwordMismatch = passwordRequested && !passwordsMatch;
   const canSave = !saving && !!user && passwordValid;

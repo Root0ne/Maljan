@@ -143,9 +143,10 @@ def record_judge_response(ledger: object | None, response: object, cap: int | No
     no ``stopped_limit``, no ``length`` — so a counter keyed on the finish reason
     alone reads zero however often the cap binds.
 
-    That mattered twice over. Before OUTPUT-CAP-01 the cap never reached the
-    server at all (§3.35), so the counter was measuring an event that could not
-    occur; after the fix it can occur and the counter still could not see it.
+    That mattered twice over. Before the cap was re-sent under the key the
+    server actually reads it never reached the server at all (§3.35), so the
+    counter was measuring an event that could not occur; after the fix it can
+    occur and the counter still could not see it.
     Comparing the generated-token count against the cap that was requested is the
     signal the server actually leaves behind.
     """

@@ -372,7 +372,7 @@ def create_app() -> FastAPI:
         Two paths so both bare ("/health") and Kubernetes-style ("/healthz")
         liveness probes succeed without extra config.
 
-        Audit 2026-07-26 (Ö1): this used to return a hard-coded
+        This used to return a hard-coded
         ``{"status": "healthy"}`` with **no I/O at all**, so it reported a
         perfectly healthy system while dependencies were dead — verified live
         with the sandbox down. ``?deep=true`` now actually probes the backing

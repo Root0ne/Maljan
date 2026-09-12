@@ -1,7 +1,7 @@
 /* Shared label/value pair used by the report detail tabs.
  *
- * audit 2026-07-26 (§5 "yinelenen yardımcılar"): IDENTITY and ATTRIBUTION each
- * carried their own copy; the ATTRIBUTION one was a superset (it accepts
+ * IDENTITY and ATTRIBUTION each carried their own copy; the ATTRIBUTION one
+ * was a superset (it accepts
  * `valueClassName` so an ungrounded family can render muted + struck through).
  * That superset is kept here as the single definition.
  */

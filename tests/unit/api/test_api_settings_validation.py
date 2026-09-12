@@ -33,7 +33,7 @@ def test_a_list_settings_leaf_rejects_a_non_string_item(name, bad_value):
     assert f"api.{name}" in exc.value.errors
 
 
-# B4 (dev audit 2026-09-06): a negative ``login_lockout_seconds`` was accepted
+# A negative ``login_lockout_seconds`` was accepted
 # and applied. It reaches Redis as an expiry, and a negative expiry deletes the
 # key instead of setting it -- an operator who typed "-300" silently turned the
 # brute-force lockout off. Every numeric API leaf an admin can PATCH is bounded

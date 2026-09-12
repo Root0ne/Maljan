@@ -507,9 +507,8 @@ export default function PipelineTab() {
                             <span className="text-[11px] text-text-muted uppercase tracking-wider">
                               Verdict
                             </span>
-                            {/* audit 2026-07-26 (T2): the backend emits
-                                "Malware"; every surface must show the
-                                normalised "Malicious". */}
+                            {/* The backend emits "Malware"; every surface
+                                must show the normalised "Malicious". */}
                             <p className="text-sm font-medium text-text-primary mt-0.5">
                               {verdictLabel(report.verdict)}
                             </p>

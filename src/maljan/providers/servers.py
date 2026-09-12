@@ -462,7 +462,7 @@ class ServerHandle:
         abandoned — the caller reaps the child in that case, once, from a
         place a cancellation cannot skip.
 
-        Bounded by ``_close_bounded``, which is where the BUG-7 fix lives.
+        Bounded by ``_close_bounded``.
         """
         closer = getattr(toolkit, "cleanup", None) or getattr(toolkit, "aclose", None)
         if closer is None:
@@ -473,7 +473,7 @@ class ServerHandle:
         """Await ``closer()`` under ``budget``, killing its child before any cancel.
 
         **The child dies first; only then may the unwind be cancelled.** That
-        is the BUG-7 fix, and it is the opposite of what the bound used to do.
+        is the opposite of what the bound used to do.
         A stdio transport's exit stack waits on its child process, and a child
         that does not exit waits forever; the obvious answer — a plain
         ``asyncio.wait_for`` — cancels the unwind while the child is still

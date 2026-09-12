@@ -541,8 +541,8 @@ async def _audit(
 ) -> None:
     """Independent transaction, same reasoning as auth._audit; best effort.
 
-    Dev audit 2026-09-06 (A2): the write itself is ``services.audit.record``,
-    shared with auth and with the sample, job and sandbox-report endpoints.
+    The write itself is ``services.audit.record``, shared with auth and with
+    the sample, job and sandbox-report endpoints.
     """
     from app.services import audit
 

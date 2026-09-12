@@ -62,8 +62,7 @@ class StoredCase:
         corroborated_count: How many TTPs were corroborated across multiple
                             analysts at write time. Persisted so retroactive
                             quality purges can identify low-signal runs even
-                            after the LTM-01 write-time gate (audit
-                            2026-05-17).
+                            after the write-time quality gate.
         total_techniques:   Total distinct technique_ids recorded for this run.
         has_analyst_errors: Whether any analyst returned an ``[ERROR]`` prefix
                             during this analysis. Strong indicator of a
@@ -115,9 +114,9 @@ class MemoryStore(Protocol):
             query:  Free-text search query (typically the ISR summary text).
             top_k:  Maximum number of cases to return. May return fewer when
                     the store contains fewer than top_k entries.
-            exclude_sample_id: Optional sha256 to filter out (audit
-                2026-05-17, LTM-01): prevents a sample's prior run from
-                being injected as a "weighted prior" for itself.
+            exclude_sample_id: Optional sha256 to filter out; prevents a
+                sample's prior run from being injected as a "weighted
+                prior" for itself.
 
         Returns:
             List of StoredCase objects, ordered by descending relevance.
@@ -140,7 +139,7 @@ class MemoryStore(Protocol):
         require_uncorroborated: bool = True,
         include_analyst_errors: bool = True,
     ) -> int:
-        """Delete stored cases that fall below the LTM-01 quality gate.
+        """Delete stored cases that fall below the write-time quality gate.
 
         A case is considered low-quality (and therefore purged) when **any**
         of the following hold:

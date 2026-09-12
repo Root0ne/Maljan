@@ -47,7 +47,7 @@ class AnalysisJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     created_by_user = relationship("User", back_populates="jobs")
     report = relationship("AnalysisReport", back_populates="job", uselist=False, lazy="selectin")
 
-    # BUG-02 (2026-06-23 live-UI audit): the job API exposed only the opaque
+    # The job API exposed only the opaque
     # ``sample_id`` UUID, so the live analysis header showed a UUID instead of
     # the sample hash/name until the report landed. These read-only properties
     # surface the linked sample's hash + filename on ``JobResponse``. Callers

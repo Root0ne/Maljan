@@ -20,7 +20,7 @@ export default function NetworkTab() {
 
   const mr = report?.malware_report;
   const net = mr?.network;
-  // 2026-07 audit (Bulgu #4): network IOCs recovered from the PE's static
+  // Network IOCs recovered from the PE's static
   // strings (e.g. a hard-coded C2 domain) live on ``static.interesting_strings``,
   // not on the (sandbox-only) ``network`` block. Surface them here — clearly
   // labelled as static-derived — so a domain like 888kafa.com is no longer
@@ -43,7 +43,7 @@ export default function NetworkTab() {
     setEnrichBusy(true);
     setEnrichMsg(null);
     try {
-      // audit 2026-07-26 (§4): the endpoint distinguishes queued /
+      // The endpoint distinguishes queued /
       // already_queued / skipped_no_network_iocs — say which one happened
       // instead of always promising a refresh.
       const res = await api.enrichReport(reportId);

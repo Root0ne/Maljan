@@ -1,6 +1,6 @@
 """Concurrency contract for the LangGraph analyst fan-out.
 
-Audit 2026-05-19 PERF-PARALLEL-ANALYSTS-01: the pipeline relies on
+The pipeline relies on
 LangGraph's "multiple edges from START" semantics to run static /
 dynamic / network analysts in parallel. If a future refactor accidentally
 serialises them via an intermediate router we would 3x our pipeline

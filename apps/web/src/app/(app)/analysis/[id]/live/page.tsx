@@ -41,7 +41,7 @@ function buildMessage(type: string, data: Record<string, unknown>): string {
     case "phase_change":
       return `Pipeline phase: ${data.phase}`;
     case "completed":
-      // audit 2026-07-26 (T2): the WS payload carries the raw backend verdict
+      // The WS payload carries the raw backend verdict
       // ("Malware"); show the same normalised label as every other surface.
       return `Analysis complete — verdict: ${verdictLabel(String(data.verdict ?? ""))} (confidence: ${data.confidence})`;
     case "error":
@@ -60,7 +60,7 @@ const PHASE_CONFIG: Record<PipelinePhase, { banner: string; label: string }> = {
   },
   analyzing: {
     banner: "bg-status-blue/10 border-status-blue/20 text-status-blue",
-    // audit 2026-07-26 (T1): the old copy claimed the analysts run in
+    // The old copy claimed the analysts run in
     // parallel, but `parallel_analysts=False` is the default — they run one
     // after another. Keep the label topology-neutral so it stays true under
     // either setting.
@@ -103,7 +103,7 @@ export default function LiveAnalysisPage() {
   const [eventLog, setEventLog] = useState<EventEntry[]>([]);
   const [phase, setPhase] = useState<PipelinePhase>("waiting");
   const [jobMockMode, setJobMockMode] = useState<boolean | null>(null);
-  // audit 2026-07-26 (§4 "sessizce yutulan hatalar"): the backfill, the job
+  // The backfill, the job
   // fetch and the polling fallback all failed silently, so a page that had
   // quietly stopped tracking the run looked identical to a healthy one.
   const [feedError, setFeedError] = useState<string | null>(null);
@@ -196,8 +196,8 @@ export default function LiveAnalysisPage() {
     []
   );
 
-  // One-shot backfill of historical events when the tab mounts mid-run
-  // (audit 2026-05-17, LIVE-01). Events come back in chronological order
+  // One-shot backfill of historical events when the tab mounts mid-run.
+  // Events come back in chronological order
   // — feed them through ``applyEvent`` so the state machine and event
   // log replay the same way they would have if WS had been attached.
   useEffect(() => {
@@ -225,7 +225,7 @@ export default function LiveAnalysisPage() {
   }, [jobId, applyEvent]);
 
   // Fetch the job once so we can surface whether THIS run was queued in
-  // mock mode (audit 2026-05-17, W-01 follow-up). Mock verdicts must be
+  // mock mode. Mock verdicts must be
   // visually distinct from real ones; otherwise operators copy the
   // misleading "Malware 0.95" out of the UI into reports.
   useEffect(() => {

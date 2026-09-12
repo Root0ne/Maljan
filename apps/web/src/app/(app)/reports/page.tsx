@@ -60,7 +60,7 @@ export default function ReportsPage() {
 
   // Normalize the backend verdict ("Malware"/…) to a bucket before comparing —
   // otherwise the "malicious" filter never matched a "Malware" verdict and the
-  // list showed nothing while All(n) had rows (audit M1).
+  // list showed nothing while All(n) had rows.
   const filtered =
     filter === "all"
       ? reports

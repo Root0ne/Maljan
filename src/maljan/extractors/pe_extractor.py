@@ -447,8 +447,8 @@ def _pe_exports(pe: Any) -> list[str]:
     return out
 
 
-# Standard Win32 resource-type IDs (RT_*). 2026-07 audit (Bulgu #16): the
-# report showed raw "TYPE_3 / TYPE_5" which carry no meaning; map the well-known
+# Standard Win32 resource-type IDs (RT_*). The report showed raw
+# "TYPE_3 / TYPE_5" which carry no meaning; map the well-known
 # ids to their symbolic names so the STATIC tab reads "RT_ICON (…)" etc.
 _RT_NAMES: dict[int, str] = {
     1: "RT_CURSOR",
@@ -1183,7 +1183,7 @@ def _extract_string_iocs(blob: bytes) -> list[StringIOC]:
 def _is_meaningful_ip(ip: str) -> bool:
     """Heuristic filter: only keep IPs that *look like* real public hosts.
 
-    Audit 2026-05-17 (IOC-01) tightened this from the original RFC1918 +
+    This was tightened from the original RFC1918 +
     loopback filter — the IPv4 regex matched a flood of false positives
     on Go binaries (X.509 ASN.1 OIDs ``2.5.4.62``, the well-known
     ``1.1.1.1`` test constant, etc.). The full picture:

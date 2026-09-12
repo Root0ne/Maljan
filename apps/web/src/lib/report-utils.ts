@@ -38,7 +38,7 @@ export function copyToClipboard(text: string): Promise<boolean> {
 
 /* ── Time / duration formatting ─────────────────────────
  *
- * audit 2026-07-26 (T3): `formatDate` existed in four slightly different
+ * `formatDate` existed in four slightly different
  * shapes and `formatDuration` in three, so the same timestamp rendered
  * differently on every page. These are the single canonical implementations;
  * every page imports from here.

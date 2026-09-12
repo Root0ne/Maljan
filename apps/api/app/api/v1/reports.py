@@ -360,7 +360,7 @@ async def delete_report(
 ) -> None:
     """Delete a single analysis report.
 
-    Audit 2026-07-26 (Ö4): reports could be created but never removed, so a
+    Reports could be created but never removed, so a
     mis-run or duplicate analysis stayed in the list forever. The owning job is
     kept — only its report (and the agent findings that cascade from it) is
     removed, so the job history stays intact and the sample can be re-analysed.

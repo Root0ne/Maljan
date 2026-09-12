@@ -209,8 +209,8 @@ class TestTheJudgeCloseIsBounded:
         ``servers.CLEANUP_TIMEOUT`` plus ``servers.CHILD_EXIT_GRACE``, module
         constants rather than settings, so shortening them here shortens only
         the handle's own fences and nothing else in the test. They are set
-        rather than intercepted through ``asyncio.wait_for``: since the BUG-7
-        fix the first budget is a ``loop.call_later`` that kills the child, and
+        rather than intercepted through ``asyncio.wait_for``: the first budget
+        is a ``loop.call_later`` that kills the child, and
         no ``wait_for`` is armed with ``CLEANUP_TIMEOUT`` for an interceptor to
         recognise.
         """

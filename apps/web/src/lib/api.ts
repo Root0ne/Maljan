@@ -39,7 +39,7 @@ export interface SampleDTO {
 export interface JobDTO {
   id: string;
   sample_id: string;
-  // BUG-02: readable sample identity so the live view shows a hash/name instead
+  // Readable sample identity so the live view shows a hash/name instead
   // of the opaque sample_id UUID before the report exists.
   sample_sha256?: string | null;
   sample_filename?: string | null;
@@ -157,7 +157,7 @@ export interface ApiKeyCreateDTO extends ApiKeyDTO {
 
 /* ── Runtime schema drift detection ───────────────────────
  *
- * FE-TYPE-SAFETY-DRIFT-01 (audit 2026-05-19): TypeScript types are
+ * TypeScript types are
  * compile-time only; nothing stops the API from returning a field with
  * the wrong type at runtime. ``assertShape`` walks an "expected" sample
  * once per response and emits a console.warn (with a Sentry breadcrumb
@@ -673,7 +673,7 @@ class ApiClient {
   /**
    * Replay historical pipeline events for a job from the Redis stream.
    * Used by the Live tab on mount to back-fill events that fired before
-   * the WebSocket subscribed (audit 2026-05-17, LIVE-01).
+   * the WebSocket subscribed.
    */
   getJobEvents(jobId: string, limit = 500) {
     return this.request<{
@@ -689,9 +689,9 @@ class ApiClient {
   }
 
   /* ── Reports ───────────────────────────────────────────
-   * audit 2026-07-26 (§5 "çağrılmayan API istemci metodları"): ``getReport``,
-   * ``getReportFull``, ``getReportIOCs`` and ``ltmPurge`` had zero call sites
-   * and were removed. The pages reach a report through its job id. */
+   * ``getReport``, ``getReportFull``, ``getReportIOCs`` and ``ltmPurge`` had
+   * zero call sites and were removed. The pages reach a report through its
+   * job id. */
   getReportByJobId(jobId: string) {
     return this.request<ReportDetailDTO>(`/api/v1/reports/job/${jobId}`);
   }

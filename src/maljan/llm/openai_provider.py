@@ -62,7 +62,7 @@ class OpenAIProvider:
             extra.setdefault("repetition_penalty", rp)
             build_kwargs["extra_body"] = extra
 
-        # OUTPUT-CAP-01 (2026-08-15): re-send the output cap under the key a
+        # Re-send the output cap under the key a
         # llama.cpp-derived server actually reads.
         #
         # ``ChatOpenAI(max_tokens=N)`` does not put ``max_tokens`` on the wire.

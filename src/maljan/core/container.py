@@ -204,8 +204,8 @@ class ServiceContainer:
     def _expert_token_cap(self) -> dict[str, Any]:
         """``max_tokens`` kwargs for analyst-role models, or ``{}`` when unset.
 
-        Audit 2026-07-26 (Ö3): the analyst path was the only unbounded LLM call
-        in the system while judge/narrative/composer were all capped. MEASURED:
+        The analyst path was the only unbounded LLM call in the system while
+        judge/narrative/composer were all capped. MEASURED:
         a 19-tool-call static loop produced a forced-synthesis call that ran 19+
         minutes against its 25-minute wall clock. Mirrors ``get_judge_llm``.
         """
@@ -254,7 +254,7 @@ class ServiceContainer:
             if cached is None:
                 # Analysts share the expert budget cap — this is the path the
                 # static/dynamic/network ReAct loops and their forced-synthesis
-                # fallback actually use (audit 2026-07-26, Ö3).
+                # fallback actually use.
                 cached = self._llm_registry.build_model_for_agent(
                     agent_name, **self._expert_token_cap()
                 )

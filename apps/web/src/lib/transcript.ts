@@ -344,7 +344,7 @@ export function messagesFromReport(
       role: "judge",
       round: Number(negotiationLog?.iteration_count ?? 0),
       status: "complete",
-      // audit 2026-07-26 (T2): the backend spells this "Malware"; every user-
+      // The backend spells this "Malware"; every user-
       // facing surface says "Malicious". Normalise here or the transcript
       // contradicts the header two inches above it.
       text: `Final verdict: ${verdictLabel(verdict)}.${

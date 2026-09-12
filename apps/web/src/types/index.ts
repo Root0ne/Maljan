@@ -1,6 +1,6 @@
 /* ── API / Domain Types ─────────────────────────────────
  *
- * audit 2026-07-26 (§5 "ölü kod"): this module used to mirror most of the API
+ * This module used to mirror most of the API
  * surface, but the pages consume the DTOs exported from ``@/lib/api`` and the
  * rich payload types from ``@/types/malware-report`` instead. Only the four
  * types below are actually imported anywhere; the rest were removed so this

@@ -157,7 +157,7 @@ class TestAttributionGrounding:
         assert report.attribution.family_grounded is True
 
     def test_category_not_surfaced_as_family(self) -> None:
-        # 2026-07 audit (Bulgu #6/#7): the behavioural category is never echoed
+        # The behavioural category is never echoed
         # into the family attribution; family stays unset without a CTI source.
         report = _build(category="rat", confidence=0.6)
         assert report.attribution.family is None

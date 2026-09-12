@@ -1,8 +1,8 @@
 """The one place an audit row is written.
 
-Audit 2026-07-26 (K1) established the rule: an audit row goes on a session of
-its own, never the request-scoped one. ``database.get_db`` commits only when
-the endpoint returns successfully, so a row added to the request's session is
+An audit row goes on a session of its own, never the request-scoped one.
+``database.get_db`` commits only when the endpoint returns successfully, so a
+row added to the request's session is
 rolled back with the ``HTTPException`` that ended it -- which silently
 discarded exactly the security-relevant events (a failed login, a refused
 delete). A separate session decouples the record from the request
@@ -11,8 +11,8 @@ transaction's fate.
 Best effort by design: an audit failure must never turn a handled 4xx into a
 500, so every error is logged at ERROR and counted for operator visibility.
 
-Dev audit 2026-09-06 (A2) gave this its own module. ``auth`` and ``settings``
-each had a private copy of the same twelve lines, and the sample, job and
+This has a module of its own because ``auth`` and ``settings`` each had a
+private copy of the same twelve lines, and the sample, job and
 sandbox-report endpoints -- the actions that put malware and its analysis into
 the system -- had no copy at all and wrote nothing.
 """

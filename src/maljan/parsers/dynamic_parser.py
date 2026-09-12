@@ -17,7 +17,7 @@ class DynamicParser(BaseParser):
         generic_events = behavior.get("generic", [])
         apistats = behavior.get("apistats", {})
 
-        # DYN-SAND-01 (2026-05-19 audit): when the sandbox reports completion
+        # When the sandbox reports completion
         # but produced zero behavioral events AND zero network indicators,
         # this is itself a strong signal — likely T1497 anti-sandbox evasion,
         # a platform mismatch (an ELF in a Windows VM), or a zero-byte sample. The

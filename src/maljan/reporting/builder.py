@@ -217,7 +217,7 @@ class MalwareReportBuilder:
                     recs.append(DefensiveRecommendation.model_validate(item))
                 except Exception:  # noqa: BLE001
                     continue
-        # 2026-07 audit (Bulgu #13): the narrative LLM gets no guidance on the
+        # The narrative LLM gets no guidance on the
         # ``category`` enum and collapses every recommendation to "patching"
         # (none of which were patches). Re-derive the category deterministically
         # from the action/rationale text so the label matches the advice.
@@ -364,7 +364,7 @@ class MalwareReportBuilder:
         if dynamic is not None and dynamic.process_tree:
             platforms.append("Windows")  # behavior almost always Windows sandbox
 
-        # 2026-07 audit (Bulgu #9): infer Windows from the PE format itself so a
+        # Infer Windows from the PE format itself so a
         # Windows PE with no dynamic run no longer falls through to "Unknown".
         # file_type "PE" or the MS-download MIME is a definitive Windows signal.
         if identity is not None and "Windows" not in platforms:
@@ -400,7 +400,7 @@ class MalwareReportBuilder:
                     ),
                 ]
             )
-        # 2026-07 audit (Bulgu #17): one ExternalReference per technique produced
+        # One ExternalReference per technique produced
         # the "MITRE ATT&CK" source label repeated 7×. Emit a single grouped
         # ATT&CK reference (pointing at the matrix landing page) whose note lists
         # the techniques, plus deduped per-technique links keyed by technique id.
@@ -569,7 +569,7 @@ def build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
 def _derive_recommendation_category(action: str, rationale: str) -> str:
     """Map a recommendation's free text to the correct ``category`` enum value.
 
-    2026-07 audit (Bulgu #13): the narrative LLM labelled every recommendation
+    The narrative LLM labelled every recommendation
     "patching" regardless of content. This deterministic mapper inspects the
     action/rationale wording and returns one of the ``DefensiveRecommendation``
     enum members, defaulting to ``other`` when nothing matches. Order matters —
@@ -657,7 +657,7 @@ def _first_report_technique(text: str, valid_tids: set[str]) -> str | None:
 def _ioc_count(report: MalwareReport) -> int:
     """Total network-flavoured IOC count.
 
-    2026-07 audit (Bulgu #4): also count network IOCs recovered from static
+    Also count network IOCs recovered from static
     strings (``static.interesting_strings`` with kind domain/ip/url), so a
     hard-coded C2 domain like ``888kafa.com`` is no longer reported as "0
     domains" just because the sandbox never observed it on the wire.

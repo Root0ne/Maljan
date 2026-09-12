@@ -1,13 +1,13 @@
 """Every action that creates or destroys evidence leaves an audit row.
 
-A2 (dev audit 2026-09-06): only auth and settings wrote ``AuditLog`` rows, so
+Only auth and settings wrote ``AuditLog`` rows, so
 the trail said who logged in and what they configured but never who uploaded a
 sample, who submitted or cancelled a job, or who attached and removed a
 sandbox report -- the actions that put malware and its analysis into the
 system in the first place.
 
 Each row is written on a session of its own, the way ``auth`` has written its
-rows since the 2026-07-26 audit, so a handled 4xx (which rolls the request's
+rows from the beginning, so a handled 4xx (which rolls the request's
 own transaction back) still leaves the record behind, and a failing audit
 write never turns that 4xx into a 500.
 """

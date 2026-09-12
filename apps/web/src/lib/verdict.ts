@@ -8,9 +8,9 @@
  *
  * Left unmapped, a raw "Malware" verdict matched none of the "malicious"
  * filter buckets — every report fell into Malicious(0) and the filter showed
- * nothing (audit M1) — and the analysis summary card rendered the bare
- * "Malware" string while the header showed "Malicious" for the same report
- * (audit L1). These helpers are the single normalization point so every
+ * nothing — and the analysis summary card rendered the bare "Malware"
+ * string while the header showed "Malicious" for the same report. These
+ * helpers are the single normalization point so every
  * surface agrees.
  */
 

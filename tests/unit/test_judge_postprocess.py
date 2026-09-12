@@ -1,4 +1,4 @@
-"""Unit tests for the tightened J-02 indicator filter (Wave 4)."""
+"""Unit tests for the tightened indicator filter."""
 
 from __future__ import annotations
 
@@ -144,7 +144,7 @@ class TestLegacyKindsUnchanged:
 
 
 # ---------------------------------------------------------------------------
-# REP-02 (Wave 9) — orphan attack-pattern dropping
+# Orphan attack-pattern dropping
 # ---------------------------------------------------------------------------
 
 
@@ -181,7 +181,8 @@ class TestRep02OrphanDrop:
         )
         aps = [o for o in result["objects"] if o.get("type") == "attack-pattern"]
         assert len(aps) == 1
-        # REP-01 may promote the bare ID to the canonical MITRE name; check
+        # The reference back-fill may promote the bare ID to the canonical
+        # MITRE name; check
         # via the external_references TID instead.
         refs = aps[0].get("external_references") or []
         assert any(r.get("external_id") == "T1497" for r in refs)

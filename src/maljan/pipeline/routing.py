@@ -112,7 +112,7 @@ class ConsensusRouter:
             logger.info("Hard iteration limit (%d) reached. Proceeding to judge.", max_iter)
             return "judge"
 
-        # BUG-05 fix (2026-06-23 live-UI audit): a mediation round that ERRORED
+        # A mediation round that ERRORED
         # (a transient llama blip / timeout, signalled by the mediator argument
         # finding starting with "[ERROR] Mediation") is NOT a substantive
         # "no consensus". Routing it to "revision" makes EVERY analyst re-invoke

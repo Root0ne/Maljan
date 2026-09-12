@@ -1,6 +1,6 @@
 """The attached report is fetched by owner, not fetched and then checked.
 
-API-1 (dev audit 2026-09-06): the worker selected a sandbox report by id alone
+The worker selected a sandbox report by id alone
 and compared ``row.sample_id`` to the job's sample afterwards. The refusal was
 correct, but the row of somebody else's sample was read out of the database
 first, and a check that lives beside the query rather than inside it is one

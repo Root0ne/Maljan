@@ -27,8 +27,7 @@ from maljan.core.logger import logger
 _PROVIDER_REGISTRY: dict[str, type] = {}
 
 
-# PORTABLE-RESPONSE-FORMAT-01 + PORTABLE-TIMEOUT-QUIRKS-01 (audit
-# 2026-05-19): centralise per-provider capability flags so callers can
+# Centralise per-provider capability flags so callers can
 # branch on "does this provider support langchain ``with_structured_output``"
 # / "what's the right place to set timeout?" without sniffing internal
 # state. Conservative defaults match the providers we ship today.

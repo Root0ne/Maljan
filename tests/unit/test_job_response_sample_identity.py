@@ -1,4 +1,4 @@
-"""BUG-02 regression: JobResponse surfaces the sample hash + filename.
+"""Regression: JobResponse surfaces the sample hash + filename.
 
 The job API used to expose only the opaque ``sample_id`` UUID, so the live
 analysis header showed a UUID until the rich report landed. ``JobResponse`` now

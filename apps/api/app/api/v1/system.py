@@ -2,7 +2,7 @@
 
 Lightweight endpoints that expose pipeline-mode gates (so dashboards can
 render warning banners) and admin-only memory maintenance (so operators
-can purge low-signal LTM entries that pre-date the LTM-01 quality gate).
+can purge low-signal LTM entries that pre-date the write-time quality gate).
 """
 
 from __future__ import annotations
@@ -94,7 +94,7 @@ async def system_status(
 
 # ---------------------------------------------------------------------------
 # /system/ltm/purge — admin-only retrospective cleanup of low-quality LTM
-# entries that pre-date the LTM-01 write-time gate (audit 2026-05-17).
+# entries that pre-date the write-time quality gate.
 # ---------------------------------------------------------------------------
 
 

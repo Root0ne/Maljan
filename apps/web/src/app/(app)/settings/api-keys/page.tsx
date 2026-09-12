@@ -12,7 +12,7 @@ export default function SettingsApiKeysPage() {
   const [apiKeysError, setApiKeysError] = useState<string | null>(null);
   const [newKeyName, setNewKeyName] = useState("");
   const [createdKey, setCreatedKey] = useState<ApiKeyCreateDTO | null>(null);
-  /* audit 2026-07-26 (T5): native alert()/confirm() replaced by the in-page
+  /* Native alert()/confirm() replaced by the in-page
    * banner + toast + confirm-modal pattern already used by jobs/page.tsx. */
   const [keyActionError, setKeyActionError] = useState<string | null>(null);
   const [keyToast, setKeyToast] = useState<string | null>(null);

@@ -52,7 +52,7 @@ def _minio_client() -> Any:
     """Build a MinIO client from settings.
 
     Single construction point so the upload and delete paths cannot drift apart
-    (audit 2026-07-26 — the client used to be hand-built inline at every site).
+    (the client used to be hand-built inline at every site).
     """
     from minio import Minio
 
@@ -483,7 +483,7 @@ async def delete_sample(
 ) -> None:
     """Delete a sample, its stored object and every analysis derived from it.
 
-    Audit 2026-07-26 (Ö4): there was no way to remove an uploaded sample through
+    There was no way to remove an uploaded sample through
     the API or the UI, so malware binaries accumulated forever with no retention
     or cleanup path.
 

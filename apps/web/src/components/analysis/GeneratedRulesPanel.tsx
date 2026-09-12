@@ -25,7 +25,7 @@ const KIND_MIME: Record<DetectionKind, string> = {
 export default function GeneratedRulesPanel() {
   const { report, loading } = useReport();
   const [activeKind, setActiveKind] = useState<DetectionKind | "all">("all");
-  // audit 2026-07-26 (§4 "sessizce yutulan hatalar"): a failed bundle download
+  // A failed bundle download
   // used to do nothing at all — the button just felt broken.
   const [downloadError, setDownloadError] = useState<string | null>(null);
 

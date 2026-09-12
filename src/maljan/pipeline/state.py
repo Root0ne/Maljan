@@ -66,7 +66,7 @@ class AnalysisState(TypedDict):
     # that actually resolves on the Ghidra side. ``None`` when no host
     # mirror is available (e.g. legacy state or worker-side download
     # failure); the static analyst then short-circuits to a zero-claim
-    # ISR via the existing PIPE-ANA-01 guard.
+    # ISR via the existing missing-path guard.
     static_sample_path: str | None
 
     # One container-visible path per static provider a profile
@@ -130,7 +130,7 @@ class AnalysisState(TypedDict):
     # a quietly successful run.
     report_error: str | None
 
-    # CONF-INFL-01 (2026-05-19 audit): flag set by the judge node when a
+    # Flag set by the judge node when a
     # run produced TTPs but zero LLM analyst corroboration, or when one
     # or more analyst reports are tagged ``[ERROR]``. Consumers (report
     # node + dashboard) cap ``overall_confidence`` and surface a clear

@@ -41,7 +41,7 @@ function SamplesPageContent() {
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [detailSample, setDetailSample] = useState<SampleDTO | null>(null);
-  /* audit 2026-07-26 (T5 + §4): native alert() replaced by the same in-page
+  /* Native alert() replaced by the same in-page
    * banner + toast pattern jobs/page.tsx uses, and the previously silent
    * deep-link failure now reports itself here too. */
   const [actionError, setActionError] = useState<string | null>(null);

@@ -1,6 +1,6 @@
 """A probe reports a failure; it never takes the request down with it.
 
-B1 (dev audit 2026-09-06): a staged stdio entry whose command is not an MCP
+A staged stdio entry whose command is not an MCP
 server made ``POST /settings/test/mcp`` answer 500. The stdio handshake runs
 inside an anyio task group, and a child that dies during the handshake
 cancels that group -- the cancel scope reached the *request* task, so the

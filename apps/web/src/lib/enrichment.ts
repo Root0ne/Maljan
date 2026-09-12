@@ -1,6 +1,6 @@
 /* Shared user-facing copy for the threat-intel enrichment trigger.
  *
- * audit 2026-07-26 (T8 + §4): the NETWORK and ATTRIBUTION tabs both POST
+ * The NETWORK and ATTRIBUTION tabs both POST
  * `/reports/{id}/enrich` but were labelled differently ("trigger threat-intel
  * enrichment" vs "trigger LTM lookup"), and both showed the same
  * "Enrichment queued" message regardless of which of the three statuses the

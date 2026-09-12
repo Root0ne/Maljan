@@ -4,15 +4,15 @@ Single helper that runs after the verdict LLM returns a parsed bundle
 ``dict`` and before :class:`maljan.schemas.stix_models.Bundle` validation.
 Three jobs, all defensive:
 
-* ``J-01`` — replace placeholder / non-UUID STIX IDs the LLM smuggled in
+* STIX ID rewrite — replace placeholder / non-UUID STIX IDs the LLM smuggled in
   from the example schema (``malware--12345678-1234-1234-1234-123456789012``
   or non-UUID ``attack-pattern--T1497``) with spec-compliant UUIDs and
   rewrite every cross-reference so the bundle stays internally consistent.
-* ``J-02`` — drop ``Indicator`` SDOs whose STIX pattern value does not
+* Indicator corpus filter — drop ``Indicator`` SDOs whose STIX pattern value does not
   appear verbatim in the deterministic evidence corpus (interesting
   strings + sandbox observations). Eliminates the hallucinated
   ``[domain-name:value = 'c2-beacon.net']`` class of artefact.
-* ``REP-01`` — back-fill ``external_references`` on each ``AttackPattern``
+* Reference back-fill — add ``external_references`` to each ``AttackPattern``
   SDO with the canonical MITRE ATT&CK URL when the LLM left it empty.
 """
 
@@ -80,8 +80,8 @@ def _technique_display_name(tid: str) -> str | None:
 
     Reuses the ATTCKValidator singleton ONLY when it is already initialized —
     never forces an index build, so unit tests stay offline/fast. Fail-safe.
-    Lets REP-01 give correct names for all ~700 techniques, not just the curated
-    fallback table below.
+    Lets the reference back-fill give correct names for all ~700 techniques,
+    not just the curated fallback table below.
     """
     try:
         from maljan.memory.attck_validator import ATTCKValidator
@@ -102,7 +102,7 @@ def postprocess_judge_bundle(
     *,
     ledger: Any | None = None,
 ) -> dict[str, Any]:
-    """Apply J-01 / J-02 / REP-01 fixes in place; return the same dict.
+    """Apply the defensive bundle fixes in place; return the same dict.
 
     ``bundle_dict`` is the parsed JSON Bundle returned by the verdict LLM
     (and already filtered for hallucinated technique IDs upstream).
@@ -114,8 +114,8 @@ def postprocess_judge_bundle(
 
     ``valid_technique_ids`` is the set of TIDs that
     survived the cascade and are present in the report's
-    capability_matrix. When provided, REP-01 drops AttackPattern SDOs
-    whose technique_id is not in the set (orphan attack-patterns), along
+    capability_matrix. When provided, the orphan-pattern drop removes
+    AttackPattern SDOs whose technique_id is not in the set, along
     with any Relationship SDOs that referenced them. This prevents the
     judge LLM from synthesizing a TTP the deterministic pipeline
     rejected and giving it MITRE legitimacy via external_references.
@@ -124,7 +124,7 @@ def postprocess_judge_bundle(
     if not isinstance(objects, list):
         return bundle_dict
 
-    # ── J-01: rewrite invalid / placeholder STIX IDs ────────────────
+    # ── rewrite invalid / placeholder STIX IDs ──────────────────────
     id_remap: dict[str, str] = {}
     for obj in objects:
         if not isinstance(obj, dict):
@@ -146,7 +146,7 @@ def postprocess_judge_bundle(
         )
         _rewrite_references(objects, id_remap)
 
-    # ── J-02: drop hallucinated indicators ─────────────────────────
+    # ── drop hallucinated indicators ───────────────────────────────
     if evidence_corpus is not None:
         haystack = " ".join(evidence_corpus).lower()
         # Sandbox-derived "real activity" corpus for tightened file:name
@@ -196,7 +196,7 @@ def postprocess_judge_bundle(
             objects = kept
             bundle_dict["objects"] = kept
 
-    # ── REP-02: drop orphan attack-patterns absent from the
+    # ── drop orphan attack-patterns absent from the
     # report's capability_matrix. Sweep relationships pointing to them.
     if valid_technique_ids is not None:
         orphan_ap_ids: set[str] = set()
@@ -233,7 +233,7 @@ def postprocess_judge_bundle(
             ]
             bundle_dict["objects"] = objects
 
-    # ── REP-01: back-fill external_references on AttackPatterns ────
+    # ── back-fill external_references on AttackPatterns ────────────
     _VALID_TID_RE_LOCAL = re.compile(r"^T\d{4}(?:\.\d{3})?$")
     _CURATED_PLACEHOLDERS = frozenset({"T0000", "T0000.000", "T9999", "T1234"})
     for obj in objects:
@@ -243,7 +243,7 @@ def postprocess_judge_bundle(
         if refs:
             continue
         tid = _attack_pattern_technique_id(obj)
-        # FILT-COVERAGE-01 follow-up: never back-fill external_references
+        # Never back-fill external_references
         # with a placeholder or non-MITRE-shaped value. Without this guard,
         # ``attack-pattern--<uuid>(name=T0000)`` would gain a synthesized
         # MITRE reference that links to a non-existent technique page.
@@ -263,7 +263,7 @@ def postprocess_judge_bundle(
         if not obj.get("name") or obj.get("name") == tid:
             obj["name"] = name
 
-    # ── REP-03: reconcile the bundle against the cascade ────────────
+    # ── reconcile the bundle against the cascade ────────────────────
     if valid_technique_ids is not None:
         objects = _reconcile_with_cascade(objects, valid_technique_ids)
         bundle_dict["objects"] = objects
@@ -295,7 +295,7 @@ def _admit_indicator(
     runtime_paths: set[str],
     file_name_kept: int,
 ) -> str:
-    """Return ``"keep"`` or a short reason string for J-02 logging.
+    """Return ``"keep"`` or a short reason string for indicator-filter logging.
 
     Acceptance-based filter for ``file:name`` indicators (tightened after
     a noise audit found ~45 noisy SDOs); falls back to the
@@ -631,7 +631,7 @@ def build_evidence_corpus(
     sandbox_report: dict[str, Any] | None = None,
     extra: list[str] | None = None,
 ) -> set[str]:
-    """Build the lower-cased token set used by the J-02 filter.
+    """Build the lower-cased token set used by the indicator filter.
 
     The output deliberately overcollects (whole strings, parts split on
     ``/`` or ``.``) so a substring check inside :func:`postprocess_judge_bundle`
@@ -665,10 +665,10 @@ def build_evidence_corpus(
 
 
 def _reconcile_with_cascade(objects: list[Any], valid_technique_ids: frozenset[str]) -> list[Any]:
-    """REP-03 — make the bundle carry exactly the cascade's technique set.
+    """Make the bundle carry exactly the cascade's technique set.
 
-    REP-01 and REP-02 both key off a technique ID the LLM has to have supplied:
-    the orphan drop is ``if tid and tid not in valid_ids``, so a ``None`` tid
+    The reference back-fill and the orphan-pattern drop both key off a
+    technique ID the LLM has to have supplied: the orphan drop is ``if tid and tid not in valid_ids``, so a ``None`` tid
     survives, and the reference back-fill only runs once a tid resolves. When
     the model answers with prose names and no IDs anywhere, both are no-ops —
     and nothing in the pipeline ever *added* the techniques it left out, so the
