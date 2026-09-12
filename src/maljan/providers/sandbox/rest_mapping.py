@@ -25,6 +25,11 @@ Three channels are not settings the operator can point anywhere:
 * ``apistats`` has no path of its own — it is tallied from ``calls`` as calls
   are attached to their process, so it is populated exactly when ``calls``
   is, and named unavailable exactly when ``calls`` is.
+* Anything else a sandbox publishes goes through ``mapping.channels``, an
+  operator-named ``<name> -> JSONPath`` map landing in
+  ``SandboxReport.channels``. Those rows are carried close to the shape the
+  sandbox published them in, because this module has no consumer to coerce
+  them for.
 * ``generic_events`` and ``screenshots`` have no ``RestMappingConfig`` field
   at all. No REST sandbox this mapping has been built against publishes
   either through a documented API, so both are named unavailable
@@ -119,6 +124,9 @@ class CompiledMapping:
     config: RestMappingConfig
     target_sha256: Any | None
     paths: dict[str, Any]
+    # ``channels.<name>`` paths, compiled the same way as the fixed channels
+    # but named by the operator rather than by this module.
+    channel_paths: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -150,8 +158,15 @@ def compile_mapping(cfg: RestMappingConfig) -> CompiledMapping:
         for channel in CHANNELS
         if getattr(cfg, channel)
     }
+    channel_paths = {
+        name: _compile_one(expression, f"channels.{name}")
+        for name, expression in cfg.channels.items()
+        if expression
+    }
     target = _compile_one(cfg.target_sha256, "target_sha256") if cfg.target_sha256 else None
-    return CompiledMapping(config=cfg, target_sha256=target, paths=paths)
+    return CompiledMapping(
+        config=cfg, target_sha256=target, paths=paths, channel_paths=channel_paths
+    )
 
 
 def _rename(channel: str, names: dict[str, str], row: dict[str, Any], want: str) -> Any:
@@ -188,6 +203,42 @@ def _normalize_sha256(value: Any) -> tuple[str, str]:
     if _SHA256_RE.match(text):
         return text, ""
     return "", f"{value!r} is not a 64-character lowercase hex sha256"
+
+
+def _select_open_channels(
+    compiled: CompiledMapping, payload: dict[str, Any]
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, ChannelStats]]:
+    """Run the operator's own ``channels.<name>`` paths.
+
+    These have no consumer field to require and no row shape to coerce into:
+    the point of an open channel is that this module does not know what a
+    sandbox publishes there. A mapping is kept as it is, anything else is
+    wrapped so every row is still a mapping, and the cap applies as it does to
+    every other channel.
+    """
+    rows: dict[str, list[dict[str, Any]]] = {}
+    stats: dict[str, ChannelStats] = {}
+    for name, path in compiled.channel_paths.items():
+        label = f"channels.{name}"
+        try:
+            values = (node.value for node in path.finditer(payload))
+            peeked = list(islice(values, MAX_ROWS_PER_CHANNEL + 1))
+        except Exception as exc:  # noqa: BLE001 — a path valid in isolation can still fail on data
+            stats[label] = ChannelStats(error=f"{type(exc).__name__}: {exc}")
+            continue
+        truncated = len(peeked) > MAX_ROWS_PER_CHANNEL
+        matches = peeked[:MAX_ROWS_PER_CHANNEL]
+        kept = [m if isinstance(m, dict) else {"value": m} for m in matches if m not in (None, "")]
+        stats[label] = ChannelStats(
+            matched=len(matches),
+            kept=len(kept),
+            dropped=len(matches) - len(kept),
+            sample_rows=kept[:3],
+            truncated=truncated,
+        )
+        if kept:
+            rows[name] = kept
+    return rows, stats
 
 
 def _select(
@@ -254,6 +305,8 @@ def apply_mapping(
     selected = {channel: _select(compiled, channel, payload) for channel in CHANNELS}
     stats: dict[str, ChannelStats] = {c: s for c, (s, _rows) in selected.items()}
     rows: dict[str, list[Any]] = {c: list(r) for c, (_s, r) in selected.items()}
+    open_channels, open_stats = _select_open_channels(compiled, payload)
+    stats.update(open_stats)
 
     processes = [
         SandboxProcess(
@@ -353,6 +406,7 @@ def apply_mapping(
         network=network,
         dropped_files=rows["dropped_files"],
         registry=rows["registry"],
+        channels=open_channels,
         unavailable=unavailable,
         raw=payload,
     )

@@ -15,8 +15,7 @@ downstream caller (ATTCKValidator, correct_isr_reports) works unchanged.
 
 NOTE: semantic cosine scores live on a different scale than TF-IDF (BGE puts even
 loosely related text around 0.3-0.5), so the alignment thresholds tuned for the
-TF-IDF backend do NOT transfer. Pick a semantic threshold empirically — see
-``tests/evaluation/eval_technique_mapping.py``.
+TF-IDF backend do NOT transfer. Pick a semantic threshold empirically.
 """
 
 from __future__ import annotations

@@ -1,7 +1,6 @@
 """What ``resolve_agent`` hands one agent, and where each piece came from.
 
-The four built-in resolutions are pinned in ``test_prompt_byte_identity.py``
-because they are byte-identity statements. These are the composition rules:
+These are the composition rules:
 a clone follows its own provider, a generic agent starts tool-less, an
 explicit provider reference is the only way a generic agent gets provider
 tools, duplicates collapse by name, and a tool a server does not have is a
@@ -115,8 +114,12 @@ def test_a_clone_on_r2_gets_the_r2_fragment_in_the_built_in_assembly():
             "profile": "two",
         },
     )
+    from maljan.agents.prompt_fragments import format_fragment
+
     resolved = resolve_agent("static_r2", _Container(cfg))
-    assert resolved.prompt == _ISR_HEAD + "R2-FRAGMENT " + _ISR_TAIL
+    assert resolved.prompt == (
+        _ISR_HEAD + format_fragment("unknown", "unknown") + "\n\n" + "R2-FRAGMENT " + _ISR_TAIL
+    )
     assert resolved.static_provider_id == "r2"
     assert resolved.role == "static"
 

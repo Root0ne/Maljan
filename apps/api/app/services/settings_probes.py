@@ -853,6 +853,7 @@ async def probe_rest(v: dict[str, Any]) -> ProbeResult:
     from maljan.providers.sandbox.rest import RestSandboxProvider
 
     field_names = v.get("mapping_field_names")
+    open_channels = v.get("mapping_channels")
     try:
         rest = SandboxRestConfig(
             base_url=_str(v, "base_url", ""),
@@ -883,6 +884,7 @@ async def probe_rest(v: dict[str, Any]) -> ProbeResult:
                 dropped_files=_str(v, "mapping_dropped_files", ""),
                 registry=_str(v, "mapping_registry", ""),
                 field_names=field_names if isinstance(field_names, dict) else {},
+                channels=open_channels if isinstance(open_channels, dict) else {},
             ),
             timeout_seconds=int(v.get("timeout_seconds") or 900),
             poll_interval_seconds=int(v.get("poll_interval_seconds") or 15),
@@ -997,6 +999,7 @@ _INPUTS: dict[str, dict[str, str]] = {
         "core.sandbox.rest.mapping.dropped_files": "mapping_dropped_files",
         "core.sandbox.rest.mapping.registry": "mapping_registry",
         "core.sandbox.rest.mapping.field_names": "mapping_field_names",
+        "core.sandbox.rest.mapping.channels": "mapping_channels",
     },
     "agent": {},
 }

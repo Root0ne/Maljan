@@ -12,7 +12,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-from jose import JWTError, jwt
+import jwt
 from pydantic import SecretStr
 
 from app.config import settings
@@ -139,6 +139,6 @@ def decode_token(token: str) -> dict[str, Any] | None:
                     issuer=settings.jwt_issuer,
                 ),
             )
-        except JWTError:
+        except jwt.PyJWTError:
             continue
     return None

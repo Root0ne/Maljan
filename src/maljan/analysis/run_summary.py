@@ -78,11 +78,9 @@ class ISRAgentStats:
     # were reported identically until BUG 12.
     #
     # A flag rather than a second degradation-reason string, deliberately:
-    # ``tests/evaluation/eval_dynamic_vs_static.incidental_reasons`` partitions
-    # on the literal "analysts produced no claims:" to strip the starved
-    # analysts out of the static-only arm, and that tree is read-only. A new
-    # reason string would have made every static-only arm record an
-    # unexplained incidental degradation and moved the E.1 numbers silently.
+    # readers partition on the literal "analysts produced no claims:" to strip
+    # the starved analysts out of a static-only run. A new reason string would
+    # have made every such run record an unexplained incidental degradation.
     no_data: bool = False
 
 

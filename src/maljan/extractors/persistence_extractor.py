@@ -79,30 +79,34 @@ _SIGNATURE_HINTS: tuple[tuple[str, str, str], ...] = (
 )
 
 
-# OS-support scope (2026-06-02): Windows + Linux only; "linux" is the sole
-# non-Windows platform that gates off the Windows registry/service/task scan.
-_NON_WINDOWS_PLATFORMS: frozenset[str] = frozenset({"linux"})
-
-
 def build_persistence_list(
     sandbox_report: dict[str, Any] | None,
     sample_platform: str | None = None,
 ) -> list[PersistenceMechanism]:
     """Return a deduplicated list of persistence mechanisms.
 
-    ``sample_platform`` gates platform-specific scanners so a Linux sample
-    is not flagged with Windows registry-run persistence (and vice versa).
-    The Windows scanners run unless the platform is an explicit non-Windows
-    one; the Linux scanner runs unless the platform is Windows.
-    Signature-based detection is platform-agnostic and always runs. When the
-    platform is unknown/None, all scanners run (backward-compatible).
+    ``sample_platform`` selects the platform-specific scanners, so an Android
+    or macOS sample is not flagged with Windows registry-run persistence and a
+    Linux sample is not flagged with a scheduled task. Selection is positive:
+    a scanner runs for the platform it was written against and for a sample
+    whose platform is undetermined, never for a platform it knows nothing
+    about. Signature-based detection is platform-agnostic and always runs.
+
+    ``multi`` counts as undetermined here, and deliberately. A macro document,
+    a JAR or a Python script binds to no OS by format, but it was detonated on
+    one, and those are among the commonest Windows carriers: refusing the
+    registry, service and scheduled-task scanners for them would lose the
+    persistence they most often have. Platform inference already lets a sandbox
+    guest hint resolve such a sample to a concrete OS; ``multi`` is what is
+    left when even that said nothing.
     """
     if not sandbox_report:
         return []
 
     plat = (sample_platform or "").strip().lower()
-    run_windows = plat not in _NON_WINDOWS_PLATFORMS
-    run_linux = plat != "windows"
+    undetermined = plat in ("", "unknown", "multi")
+    run_windows = undetermined or plat == "windows"
+    run_linux = undetermined or plat == "linux"
 
     found: dict[tuple[str, str], PersistenceMechanism] = {}
 

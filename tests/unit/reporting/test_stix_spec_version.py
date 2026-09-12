@@ -6,9 +6,9 @@ was therefore not identifiable as 2.1 — a consumer applying the spec falls bac
 semantics, and the OASIS ``cti-stix-validator`` rejects the object with "Cannot locate a
 schema for the object's type".
 
-Found on 2026-08-08 by pointing that validator at four bundles from real runs while
-measuring the integrity pass (``tests/evaluation/eval_stix_integrity.py``). The point
-worth keeping is *how* it was found: our own integrity pass checks empty patterns,
+Found by pointing that validator at four bundles from real runs while measuring the
+STIX integrity pass. The point worth keeping is *how* it was found: our own
+integrity pass checks empty patterns,
 duplicate attack-patterns and dangling references, and has no opinion about this at all.
 It took someone else's instrument to see it, which is the same argument §3.4 makes about
 measurement instruments, arriving this time at our own expense.

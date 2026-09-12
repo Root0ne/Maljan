@@ -103,11 +103,10 @@ def test_entries_sort_by_order_then_path_within_a_group():
     assert static == sorted(static, key=lambda e: (e.order, e.path))
 
 
-def test_the_deprecated_mcp_view_is_not_in_the_catalog():
-    """I5: ``mcp.ghidra`` / ``mcp.cape`` are properties on a compatibility
-    view for ``tests/evaluation/``, not ``Settings`` fields — the catalog
-    walks ``model_fields`` and must never surface them as settings an
-    operator can configure through the UI."""
+def test_the_mcp_group_exposes_only_the_server_registry():
+    """``mcp.servers`` is the whole of the operator-configurable MCP surface;
+    the catalog walks ``model_fields`` and must not grow a second ``mcp.*``
+    leaf without a deliberate decision."""
     paths = {e.path for e in cat.core_catalog()}
     assert not any(p.startswith("mcp.") and p != "mcp.servers" for p in paths), sorted(
         p for p in paths if p.startswith("mcp.")

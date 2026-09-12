@@ -115,7 +115,7 @@ class MaljanApp:
         sandbox-OS fallback. Returns ``("unknown", "unknown")`` when the
         sample bytes are unreachable AND the sandbox didn't disambiguate.
         """
-        from maljan.extractors.sample_identity import _detect_file_type, _infer_platform
+        from maljan.extractors.sample_identity import detect_file_type, infer_platform
 
         file_type = "unknown"
         mime_type: str | None = None
@@ -124,7 +124,7 @@ class MaljanApp:
                 path = Path(sample_path)
                 if path.exists() and path.is_file():
                     blob = path.read_bytes()
-                    file_type = _detect_file_type(path, blob)
+                    file_type = detect_file_type(path, blob)
             except OSError as exc:
                 logger.warning("_infer_sample_platform: could not read %s (%s)", sample_path, exc)
 
@@ -137,7 +137,7 @@ class MaljanApp:
             if isinstance(mt, str):
                 mime_type = mt
 
-        platform = _infer_platform(file_type, mime_type, sandbox_report)
+        platform = infer_platform(file_type, mime_type, sandbox_report)
         return file_type, platform
 
     def _poll_budget(self, provider: Any) -> tuple[int, int]:
@@ -304,21 +304,6 @@ class MaljanApp:
         logger.info("Max iterations: %d", self.config.negotiation.max_iterations)
         logger.info("-" * 60)
 
-        # OS-support scope (2026-06-02): Windows + Linux only. Reject a
-        # definitely-foreign sample (a non-Win/Linux executable format) up
-        # front — before any sandbox submission, so no run is wasted — rather
-        # than routing it to an unsupported sandbox. Magic-byte based, so a
-        # legitimate Win/Linux sample is never blocked.
-        from maljan.core.exceptions import UnsupportedSampleError
-        from maljan.extractors.sample_identity import unsupported_os_reason
-
-        unsupported = unsupported_os_reason(sample_path)
-        if unsupported:
-            logger.warning("Rejecting unsupported-OS sample (%s): %s", unsupported, sample_path)
-            raise UnsupportedSampleError(
-                f"Unsupported sample OS: {unsupported}. Only Windows and Linux are supported."
-            )
-
         # Submit to sandbox if sample_path is provided
         sandbox_report = await self._submit_to_sandbox(sample_path)
 
@@ -332,6 +317,11 @@ class MaljanApp:
         # fall-open).
         file_type, platform = self._infer_sample_platform(sample_path, sandbox_report)
         logger.info("Sample platform inferred: file_type=%s platform=%s", file_type, platform)
+        # The analysts are built lazily by the container, from nodes that do
+        # not all carry the graph state, so the routing answer is handed to the
+        # container as well: it is what their prompts' format fragment is
+        # assembled from.
+        self.container.sample_format = (file_type, platform)
 
         initial_state: AnalysisState = {
             "file_hash": file_hash,

@@ -133,10 +133,10 @@ class STIXObject(_SpecConformantModel):
     a consumer applying the spec falls back to 2.0 semantics, and the OASIS
     ``cti-stix-validator`` refuses the object outright.
 
-    Found on 2026-08-08 by running that validator over four bundles from real runs,
-    while measuring something else entirely (`tests/evaluation/eval_stix_integrity.py`).
-    Our own integrity pass has opinions about empty patterns, duplicate
-    attack-patterns and dangling references, and no opinion at all about this — which
+    Found by running that validator over four bundles from real runs, while
+    measuring something else entirely. Our own integrity pass has opinions about
+    empty patterns, duplicate attack-patterns and dangling references, and no
+    opinion at all about this — which
     is the argument for grading output with someone else's instrument, demonstrated
     on ourselves.
     """

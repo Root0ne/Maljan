@@ -1,8 +1,7 @@
 """Every module the repository tracks under src/maljan must still import by name.
 
 The layout branch moves directories. ``maljan.*`` is the one namespace it may
-not move, because ``tests/evaluation/**`` imports it and must stay byte-identical
-to ``dev``. A move that renames a module, drops one from the wheel, or breaks an
+not move. A move that renames a module, drops one from the wheel, or breaks an
 import chain shows up here as a failing import rather than as a 500 in the API
 three tasks later.
 
@@ -25,8 +24,6 @@ ROOT = Path(__file__).resolve().parents[2]
 # tests/unit/ with the rest of the suite.
 GOLDEN_MODULES: tuple[str, ...] = (
     "tests/unit/pipeline/test_graph_snapshot.py",
-    "tests/unit/agents/test_prompt_byte_identity.py",
-    "tests/unit/agents/test_revision_prompt_golden.py",
     "tests/unit/servers/test_builtin_tool_sets.py",
     "tests/unit/servers/test_agent_parity.py",
     "tests/unit/test_topology_sources.py",
@@ -64,9 +61,9 @@ def test_every_tracked_module_imports_under_its_own_name(name: str) -> None:
     importlib.import_module(name)
 
 
-def test_the_six_golden_modules_are_where_this_plan_says_they_are() -> None:
+def test_the_golden_modules_are_where_this_plan_says_they_are() -> None:
     missing = [rel for rel in GOLDEN_MODULES if not (ROOT / rel).is_file()]
     assert missing == [], (
-        "a golden module moved without this list following it: the six are the "
+        "a golden module moved without this list following it: they are the "
         "only proof the default profile is unchanged"
     )

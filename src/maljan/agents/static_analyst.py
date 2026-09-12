@@ -18,10 +18,10 @@ from maljan.agents.registry import register_agent
 from maljan.providers.base import StaticJobContext
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
-# The provider-independent head of the static system prompt. Everything that
-# names a tool lives in the provider's fragment, so attaching radare2 or capa
-# changes the middle and nothing else. A golden test pins the assembled result
-# byte for byte against the prompt this project measured its evaluation on.
+# The provider- and platform-independent head of the static system prompt.
+# Everything that names a tool lives in the provider's fragment and everything
+# that names an operating system lives in the sample's format fragment, so
+# attaching radare2 or handing it an APK changes the middle and nothing else.
 _ISR_HEAD = (
     "You are an expert Static Malware Analyst with 15 years of reverse engineering experience. "
 )
@@ -33,17 +33,34 @@ _ISR_TAIL = ""
 
 
 def _static_prompt(provider: Any | None = None) -> str:
-    """Assemble the static system prompt for ``provider`` (the configured one by default)."""
+    """The neutral static system prompt for ``provider`` (the configured one by default).
+
+    Neutral because it carries the format fragment for a sample nothing has
+    identified. A running job does not use this: the container resolves the
+    agent's prompt with the job's own format (``composition.builtin_prompt``)
+    and ``BaseAnalyst._system_prompt`` reads it. This is the fallback for an
+    analyst built outside a container.
+    """
     if provider is None:
         from maljan.core.config import get_settings
         from maljan.providers.registry import get_static_provider
 
         provider = get_static_provider(get_settings())
-    return _ISR_HEAD + provider.prompt_fragment() + _ISR_TAIL
+    from maljan.agents.prompt_fragments import format_fragment
+
+    return (
+        _ISR_HEAD
+        + format_fragment("unknown", "unknown")
+        + "\n\n"
+        + provider.prompt_fragment()
+        + _ISR_TAIL
+    )
 
 
 # Back-compat: several modules and tests import this name. It is the default
-# profile's assembled prompt, which is what it always was.
+# profile's neutral assembly; a running job sends the container's resolved
+# prompt instead (``composition.builtin_prompt`` and
+# ``BaseAnalyst._system_prompt``).
 _ISR_SYSTEM = _static_prompt()
 
 
@@ -501,7 +518,7 @@ class StaticAnalyst(BaseAnalyst):
             target_info = f"Static output:\n{data}"
 
         prompt_messages = [
-            ("system", _static_prompt(self._provider())),
+            ("system", self._system_prompt(lambda: _static_prompt(self._provider()))),
             (
                 "human",
                 "Analyze the following target for obfuscation, "
@@ -648,7 +665,7 @@ class StaticAnalyst(BaseAnalyst):
             # (prior cases -> recurring techniques). Fail-safe and gated OFF by default.
             attck_hint = self._compute_attck_case_hint(host_path)
         prompt_messages = [
-            ("system", _static_prompt(self._provider())),
+            ("system", self._system_prompt(lambda: _static_prompt(self._provider()))),
             (
                 "human",
                 "Analyze the target binary and return a structured list of findings.\n"
@@ -721,7 +738,7 @@ class StaticAnalyst(BaseAnalyst):
             [
                 (
                     "system",
-                    _ISR_SYSTEM + "\n\n"
+                    self._system_prompt(lambda: _static_prompt(self._provider())) + "\n\n"
                     "You are in a negotiation round. You MUST:\n"
                     "1. List any peer claims you still DISPUTE in a DISPUTES section.\n"
                     "2. Revise your own claims based on new evidence.\n"

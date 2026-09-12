@@ -7,9 +7,8 @@ directory sources for that one construction (see
 ``maljan.core.config.Settings.settings_customise_sources``). Precedence is
 therefore ``UI > default`` — the environment is no longer a layer for the
 application. The bare ``Settings()`` constructor is unaffected by this
-module and stays environment- and dotenv-capable; it is a library behaviour
-used by the frozen ``tests/evaluation/**`` scripts and by the legacy
-one-shot environment import.
+module and stays environment- and dotenv-capable; it is a documented library
+behaviour, relied on by the legacy one-shot environment import.
 """
 
 from __future__ import annotations

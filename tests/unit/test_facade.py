@@ -128,23 +128,34 @@ class TestInitialState:
         assert result["iteration_count"] > 0
 
 
-class TestUnsupportedSampleRejection:
-    """OS-support scope (2026-06-02): Windows + Linux only — arun rejects a
-    definitely-foreign sample up front, before the pipeline runs."""
+class TestFormatRouting:
+    """No format is refused: every sample reaches the pipeline and is routed."""
 
-    def test_arun_rejects_foreign_sample(self, tmp_path):
+    def test_arun_accepts_a_mach_o_sample(self, tmp_path):
         from pathlib import Path
-
-        from maljan.core.exceptions import UnsupportedSampleError
 
         macho = Path(tmp_path) / "evil.bin"
         macho.write_bytes(b"\xcf\xfa\xed\xfe" + b"\x00" * 64)  # Mach-O magic
         app = MaljanApp(mock=True)
-        with pytest.raises(UnsupportedSampleError):
-            app.run("deadbeef", file_name="evil.bin", sample_path=str(macho))
+        result = app.run("deadbeef", file_name="evil.bin", sample_path=str(macho))
+        assert result["file_type"] == "mach-o"
+        assert result["platform"] == "macos"
+
+    def test_arun_accepts_an_apk_sample(self, tmp_path):
+        import zipfile
+        from pathlib import Path
+
+        apk = Path(tmp_path) / "evil.apk"
+        with zipfile.ZipFile(apk, "w") as archive:
+            archive.writestr("AndroidManifest.xml", "x")
+            archive.writestr("classes.dex", "dex\n035\x00")
+        app = MaljanApp(mock=True)
+        result = app.run("deadbeef", file_name="evil.apk", sample_path=str(apk))
+        assert result["file_type"] == "apk"
+        assert result["platform"] == "android"
 
     def test_arun_accepts_windows_sample(self, tmp_path):
-        # A PE sample is not rejected by the guard (pipeline proceeds in mock mode).
+        # A PE sample routes to Windows and the pipeline proceeds in mock mode.
         from pathlib import Path
 
         pe = Path(tmp_path) / "evil.exe"

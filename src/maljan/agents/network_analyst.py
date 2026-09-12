@@ -26,19 +26,32 @@ import re
 from langchain_core.prompts import ChatPromptTemplate
 
 from maljan.agents.base_agent import BaseAnalyst, prompt_to_messages, revision_messages
+from maljan.agents.prompt_fragments import format_fragment
 from maljan.agents.registry import register_agent
 from maljan.agents.static_analyst import _parse_claim_blocks, _parse_disputes
 from maljan.schemas.isr_models import AgentISR
 
-_ISR_SYSTEM = (
+# The platform-independent head of the network system prompt. Traffic looks the
+# same from every guest, but what reached the wire does not, so the sample's
+# format fragment is appended by ``composition.builtin_prompt``.
+_NET_HEAD = (
     "You are an expert Network Security Analyst with deep knowledge of malware C2 communication. "
     "Analyze DNS queries, HTTP/HTTPS flows, SSL certificates, and PCAP captures for "
     "beaconing patterns, DGA domains, tunneling, and exfiltration channels. "
     "For EVERY claim, cite a concrete artifact: 'DNS query: abc.evil.com', "
     "'PCAP frame 42: src=10.0.0.5 dst=185.220.x.x:443', 'TLS SNI: suspicious.tld'. "
     "Focus on MITRE ATT&CK: T1071 (Application Layer Protocol), T1571 (Non-Standard Port), "
-    "T1048 (Exfiltration), T1568 (Dynamic Resolution)."
+    "T1048 (Exfiltration), T1568 (Dynamic Resolution).\n\n"
 )
+
+# Empty today, declared for the same reason the other analysts declare theirs:
+# the assembly order is a contract, and an implicit empty tail is a trap.
+_NET_TAIL = ""
+
+# Back-compat, and the fallback for an analyst built outside a container: the
+# neutral assembly. A running job sends the container's resolved prompt
+# (``composition.builtin_prompt`` and ``BaseAnalyst._system_prompt``).
+_ISR_SYSTEM = _NET_HEAD + format_fragment("unknown", "unknown") + _NET_TAIL
 
 # The text revision path's own system prompt. It is not ``_ISR_SYSTEM`` plus a
 # suffix — it is a different prompt, and it was inline in ``revise`` until the
@@ -122,7 +135,7 @@ class NetworkAnalyst(BaseAnalyst):
 
             if mcp_ready:
                 prompt_messages = [
-                    ("system", _ISR_SYSTEM),
+                    ("system", self._system_prompt(_ISR_SYSTEM)),
                     (
                         "human",
                         "A PCAP capture file is available for analysis.\n\n"
@@ -146,7 +159,7 @@ class NetworkAnalyst(BaseAnalyst):
         )
 
         prompt_messages = [
-            ("system", _ISR_SYSTEM),
+            ("system", self._system_prompt(_ISR_SYSTEM)),
             (
                 "human",
                 "Analyze DNS queries, HTTPS SSL flows, and potential C2 beacons "
@@ -222,7 +235,7 @@ class NetworkAnalyst(BaseAnalyst):
                 # aborted, so we hand the analyst the structured evidence up front
                 # and cap the PCAP peek (react_agent_max_steps_overrides.network).
                 prompt_messages = [
-                    ("system", _ISR_SYSTEM),
+                    ("system", self._system_prompt(_ISR_SYSTEM)),
                     (
                         "human",
                         "Analyze the network activity below and return a structured "
@@ -268,7 +281,7 @@ class NetworkAnalyst(BaseAnalyst):
         )
 
         prompt_messages = [
-            ("system", _ISR_SYSTEM),
+            ("system", self._system_prompt(_ISR_SYSTEM)),
             (
                 "human",
                 "Analyze the network data and return a structured list of findings.\n"
@@ -319,7 +332,7 @@ class NetworkAnalyst(BaseAnalyst):
         self.logger.info("Executing network ISR revision (round %d)...", revision_round)
 
         messages = revision_messages(
-            _ISR_SYSTEM,
+            self._system_prompt(_ISR_SYSTEM),
             original_data,
             own_report,
             peer_reports,

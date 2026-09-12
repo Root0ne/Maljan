@@ -79,20 +79,27 @@ class SignatureInfo(BaseModel):
     signature_valid: bool | None = None
 
 
-# Canonical platform taxonomy. Used by SampleIdentity, the rule layers
-# (Sigma/YARA), the TTP cascade, and the FP linter. "crossplatform"
-# is for samples that don't bind to one OS (e.g. JAR). "unknown" is
-# the conservative default when magic bytes don't identify the format
-# and the sandbox couldn't disambiguate either.
-# OS-support scope (2026-06-02): the pipeline supports Windows and Linux only —
-# the CAPEv2 sandbox produces dynamic reports for those two guests, and the
-# ATT&CK mapping / static identity layers were narrowed to match. Foreign
-# (non-Win/Linux) samples resolve to "unknown" — there is no broader taxonomy.
-Platform = Literal[
+# Canonical platform vocabulary. Used by SampleIdentity, the rule layers
+# (Sigma/YARA), the TTP cascade, and the FP linter. "multi" is for samples
+# that don't bind to one OS (a JAR, a macro document, a PDF). "unknown" is the
+# conservative default when magic bytes don't identify the format and the
+# sandbox couldn't disambiguate either.
+#
+# The type is a plain ``str`` rather than a Literal: routing must never refuse
+# a sample because its platform is not in a closed set, so an operator's own
+# vocabulary passes through and only degrades the rule filtering that reads it.
+# ``KNOWN_PLATFORMS`` is what the inference layer emits and what the UI labels.
+Platform = str
+
+KNOWN_PLATFORMS: tuple[str, ...] = (
     "windows",
     "linux",
+    "macos",
+    "android",
+    "ios",
+    "multi",
     "unknown",
-]
+)
 
 
 class SampleIdentity(BaseModel):
