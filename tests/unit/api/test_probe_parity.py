@@ -45,6 +45,7 @@ def test_rest_inputs_cover_the_rest_leaves_the_probe_actually_reads():
         "core.sandbox.rest.submit.file_field",
         "core.sandbox.rest.submit.task_id_path",
         "core.sandbox.rest.submit.extra_fields",
+        "core.sandbox.rest.submit.submit_fields",
         "core.sandbox.rest.status.done_values",
         "core.sandbox.rest.status.failed_values",
         "core.sandbox.rest.report.pcap_path",

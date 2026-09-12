@@ -1418,6 +1418,26 @@ ANNOTATIONS.update(
             "description": "Seconds between polls of the CAPEv2 API while a task runs.",
             "applies_when": _SANDBOX_CAPE2,
         },
+        "sandbox.cape2.package_by_format": {
+            "title": "CAPEv2 package per format",
+            "description": (
+                "Which CAPE analysis package each file type is detonated with, as "
+                "name/value pairs keyed by the detected type: apk, elf, pdf, ooxml, "
+                "ole2, dex, jar, script and so on. Use * for the fallback. A format "
+                "with no entry is submitted without a package, so CAPE picks one."
+            ),
+            "applies_when": _SANDBOX_CAPE2,
+        },
+        "sandbox.cape2.submit_options": {
+            "title": "CAPEv2 submit options",
+            "description": (
+                "Extra form fields sent verbatim with every submission, as "
+                "name/value pairs: machine, tags, options, timeout and anything "
+                "else tasks/create/file accepts."
+            ),
+            "applies_when": _SANDBOX_CAPE2,
+            "advanced": True,
+        },
         "sandbox.triage.base_url": {
             "title": "Triage API base URL",
             "description": (
@@ -1441,6 +1461,16 @@ ANNOTATIONS.update(
             "description": (
                 "Name of the Triage analysis profile to request. Empty means the "
                 "account's default profile."
+            ),
+            "applies_when": _SANDBOX_TRIAGE,
+        },
+        "sandbox.triage.profile_by_format": {
+            "title": "Triage profile per format",
+            "description": (
+                "Which Triage VM profile each file type is analysed on, as "
+                "name/value pairs keyed by the detected type (apk, elf, macho and "
+                "so on). Use * for the fallback; a format with no entry falls back "
+                "to the profile above."
             ),
             "applies_when": _SANDBOX_TRIAGE,
         },
@@ -1620,6 +1650,10 @@ ANNOTATIONS.update(
         "sandbox.rest.submit.extra_fields": _rest(
             "Submit extra fields",
             "Additional multipart fields sent with the sample, as name/value pairs.",
+        ),
+        "sandbox.rest.submit.submit_fields": _rest(
+            "Submit fields",
+            "Further multipart fields sent verbatim with the sample, as name/value pairs.",
         ),
         "sandbox.rest.submit.task_id_path": _rest(
             "Task id path",

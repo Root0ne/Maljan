@@ -225,10 +225,23 @@ class TriageSandboxProvider(SandboxProvider):
                 f"Triage {operation} failed (HTTP {response.status_code}): {response.text[:200]}"
             )
 
+    def _profile_for(self, path: Path) -> str:
+        """The VM profile this sample's format asks for, else the plain default.
+
+        ``profile_by_format`` is keyed by detected file type with ``"*"`` as
+        its fallback, and ``profile`` is the fallback behind that — so an
+        operator who never touches the map keeps the profile they configured.
+        """
+        from maljan.providers.sandbox.formats import detect_sample_format, option_for_format
+
+        file_type, _platform = detect_sample_format(path)
+        return option_for_format(self._cfg.profile_by_format, file_type, self._cfg.profile)
+
     def _post_sample(self, path: Path, headers: dict[str, str]) -> httpx.Response:
         payload: dict[str, Any] = {"kind": "file", "interactive": False}
-        if self._cfg.profile:
-            payload["profiles"] = [{"profile": self._cfg.profile, "pick": "default"}]
+        profile = self._profile_for(path)
+        if profile:
+            payload["profiles"] = [{"profile": profile, "pick": "default"}]
         with open(path, "rb") as fh:
             return self._get_http().post(
                 SUBMIT_PATH,

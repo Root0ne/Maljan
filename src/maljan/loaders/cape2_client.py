@@ -102,13 +102,35 @@ class CAPEv2Client:
             timeout=self._timeout,
         )
 
-    def submit(self, sample_path: str | Path) -> str:
+    def submit(
+        self,
+        sample_path: str | Path,
+        *,
+        package: str | None = None,
+        platform: str | None = None,
+        machine: str | None = None,
+        tags: str | None = None,
+        options: str | None = None,
+        timeout: int | None = None,
+        extra_fields: dict[str, str] | None = None,
+    ) -> str:
         """Submit a sample file to CAPEv2 and return the task ID.
 
         POST /apiv2/tasks/create/file/
 
+        Every keyword is one of the form fields ``tasks/create/file`` accepts,
+        and each is sent only when it is set: an unset field is CAPE choosing
+        for itself, which is not the same request as an empty one.
+
         Args:
             sample_path: Local path to the sample binary.
+            package: CAPE analysis package, e.g. ``exe``, ``apk``, ``doc``.
+            platform: Guest platform to detonate on, e.g. ``windows``.
+            machine: A named guest, when the analysis needs that exact one.
+            tags: Comma-separated machine tags CAPE selects a guest by.
+            options: CAPE's own ``key=value,key=value`` option string.
+            timeout: Detonation budget in seconds, in the guest.
+            extra_fields: Any further form fields, sent verbatim.
 
         Returns:
             Task ID string.
@@ -120,7 +142,27 @@ class CAPEv2Client:
         if not path.exists():
             raise SandboxError(f"Sample file not found: {path}")
 
-        logger.info("CAPEv2Client: submitting '%s' to %s", path.name, self._base_url)
+        form: dict[str, str] = {}
+        for name, value in (
+            ("package", package),
+            ("platform", platform),
+            ("machine", machine),
+            ("tags", tags),
+            ("options", options),
+            ("timeout", None if timeout is None else str(timeout)),
+        ):
+            if value:
+                form[name] = str(value)
+        for name, value in (extra_fields or {}).items():
+            if value:
+                form[str(name)] = str(value)
+
+        logger.info(
+            "CAPEv2Client: submitting '%s' to %s%s",
+            path.name,
+            self._base_url,
+            f" ({', '.join(f'{k}={v}' for k, v in sorted(form.items()))})" if form else "",
+        )
         with open(path, "rb") as f:
             try:
                 # Its own deadline. The client-wide ``timeout`` is sized for
@@ -134,9 +176,11 @@ class CAPEv2Client:
                 # POST is not idempotent, a request that timed out client-side
                 # may still have been accepted, and a blind retry would burn a
                 # second detonation slot on a one-VM instance.
+                files: dict[str, Any] = {"file": (path.name, f, "application/octet-stream")}
+                files.update({name: (None, value) for name, value in form.items()})
                 response = self._http.post(
                     "/apiv2/tasks/create/file/",
-                    files={"file": (path.name, f, "application/octet-stream")},
+                    files=files,
                     timeout=self._upload_timeout,
                 )
             except Exception as exc:

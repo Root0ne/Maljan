@@ -1163,26 +1163,40 @@ class StaticConfig(BaseModel):
 
 
 class SandboxCape2Config(BaseModel):
-    """CAPEv2 REST endpoint plus the optional CAPE MCP server beside it."""
+    """CAPEv2 REST endpoint plus the optional CAPE MCP server beside it.
+
+    ``package_by_format`` routes a sample to the CAPE analysis package its
+    format needs — an APK detonated with the ``exe`` package produces nothing.
+    Keys are the file types ``sample_identity`` detects (``apk``, ``elf``,
+    ``pdf``, ``ooxml``, ...); ``"*"`` is the fallback for every other format,
+    and no entry at all leaves the package unset so CAPE picks for itself.
+    ``submit_options`` is sent verbatim as extra form fields on every
+    submission, for the CAPE settings this model does not name.
+    """
 
     base_url: str = "http://localhost:8000"
     api_token: SecretStr = SecretStr("")
     timeout_seconds: Annotated[int, Field(ge=1)] = 300
     poll_interval_seconds: Annotated[int, Field(ge=1)] = 10
+    submit_options: dict[str, str] = Field(default_factory=dict)
+    package_by_format: dict[str, str] = Field(default_factory=dict)
     mcp: MCPServerConfig = Field(default_factory=MCPServerConfig)
 
 
 class SandboxTriageConfig(BaseModel):
     """Hatching Triage cloud API.
 
-    ``profile`` names a Triage VM profile; empty means the account default.
-    ``timeout_seconds`` is generous because a Triage run queues behind other
-    tenants' work.
+    ``profile`` names a Triage VM profile and is the ``"*"`` fallback; empty
+    means the account default. ``profile_by_format`` overrides it per detected
+    file type, so an APK reaches an Android profile rather than the Windows
+    one every other sample uses. ``timeout_seconds`` is generous because a
+    Triage run queues behind other tenants' work.
     """
 
     base_url: str = "https://tria.ge/api/v0"
     api_token: SecretStr = SecretStr("")
     profile: str = ""
+    profile_by_format: dict[str, str] = Field(default_factory=dict)
     timeout_seconds: Annotated[int, Field(ge=1)] = 900
     poll_interval_seconds: Annotated[int, Field(ge=1)] = 15
     fetch_pcap: bool = True
@@ -1210,6 +1224,10 @@ class RestSubmitConfig(BaseModel):
     path: str = "/samples"
     file_field: str = "file"
     extra_fields: dict[str, str] = Field(default_factory=dict)
+    # Sent verbatim beside ``extra_fields``. The two are separate so an
+    # operator can keep the fields the sandbox always needs apart from the
+    # per-format ones they are still tuning.
+    submit_fields: dict[str, str] = Field(default_factory=dict)
     task_id_path: str = "$.id"
 
 
