@@ -11,9 +11,8 @@ import { getErrorMessage } from "@/lib/errors";
    and TA0112 (Defense Impairment, added in v19) are both listed so the columns
    stay matrix-accurate as the bundle updates.
 
-   OS-support scope (2026-06-02): the pipeline supports Windows + Linux only, so
-   the capabilities view renders the Enterprise matrix exclusively (the Mobile /
-   ICS matrices were removed alongside the non-Win/Linux taxonomy).
+   The capabilities view renders the Enterprise matrix; the Mobile and ICS
+   matrices are catalogued server-side and are not drawn here yet.
 
    NOTE: this is the interim STATIC catalogue. The MITRE auto-update work
    (runtime-refreshed STIX bundle + dynamic taxonomy) replaces it with the live

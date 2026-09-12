@@ -7,9 +7,10 @@ from pathlib import Path
 import pytest
 
 from maljan.extractors.sample_identity import (
+    _detect_file_type,
     _detect_language_or_compiler,
     _infer_platform,
-    unsupported_os_reason,
+    file_type_category,
 )
 
 
@@ -59,20 +60,28 @@ class TestCompilerDetection:
         assert "MFC" in result
 
 
-# OS-support scope (2026-06-02): Windows + Linux only. Every other executable
-# format (Mach-O, APK/DEX, IPA, jar) resolves to "unknown".
+# Every recognised format routes to a platform; nothing is refused.
 @pytest.mark.parametrize(
     ("file_type", "expected"),
     [
         ("PE", "windows"),
         ("pe", "windows"),
         ("ELF", "linux"),
-        ("Mach-O", "unknown"),
-        ("ZIP/APK", "unknown"),
-        ("ZIP/IPA", "unknown"),
-        ("ZIP/JAR", "unknown"),
-        ("PDF", "unknown"),
-        ("ZIP", "unknown"),
+        ("mach-o", "macos"),
+        ("apk", "android"),
+        ("dex", "android"),
+        ("ipa", "ios"),
+        ("jar", "multi"),
+        ("ole2", "multi"),
+        ("ooxml", "multi"),
+        ("pdf", "multi"),
+        ("lnk", "windows"),
+        ("ps1", "windows"),
+        ("sh", "linux"),
+        ("py", "multi"),
+        ("zip", "unknown"),
+        ("7z", "unknown"),
+        ("iso", "unknown"),
         ("unknown", "unknown"),
         ("", "unknown"),
     ],
@@ -86,10 +95,9 @@ def test_infer_platform_sandbox_fallback_windows() -> None:
     assert _infer_platform("unknown", None, sb) == "windows"
 
 
-def test_infer_platform_foreign_sandbox_hint_is_unknown() -> None:
-    # A foreign (non-Win/Linux) sandbox hint resolves to unknown / out of scope.
+def test_infer_platform_sandbox_hint_names_a_mobile_guest() -> None:
     sb = {"target": {"platform": "android-11"}}
-    assert _infer_platform("unknown", None, sb) == "unknown"
+    assert _infer_platform("unknown", None, sb) == "android"
 
 
 def test_infer_platform_mime_fallback_windows() -> None:
@@ -103,54 +111,137 @@ def test_infer_platform_file_type_wins_over_sandbox() -> None:
     assert _infer_platform("ELF", None, sb) == "linux"
 
 
+def test_toolchain_hint_never_overrides_a_detected_platform() -> None:
+    # A .NET marker may upgrade an undetermined platform, never a detected one.
+    assert _infer_platform("unknown", None, None, ".NET") == "windows"
+    assert _infer_platform("mach-o", None, None, ".NET") == "macos"
+    assert _infer_platform("apk", None, None, "Delphi") == "android"
+
+
 def test_infer_platform_unknown_when_nothing_disambiguates() -> None:
     assert _infer_platform("unknown", None, None) == "unknown"
     assert _infer_platform("unknown", "application/octet-stream", {}) == "unknown"
 
 
 # ---------------------------------------------------------------------------
-# unsupported_os_reason — OS-support scope (2026-06-02): Windows + Linux only.
-# Definitely-foreign samples are rejected; Win/Linux samples are never blocked.
+# File-type detection: synthetic headers for every routed format.
 # ---------------------------------------------------------------------------
-class TestUnsupportedOsReason:
-    def _write(self, tmp_path: Path, name: str, magic: bytes) -> Path:
-        p = tmp_path / name
-        p.write_bytes(magic + b"\x00" * 32)
-        return p
+def _write(tmp_path: Path, name: str, blob: bytes) -> Path:
+    target = tmp_path / name
+    target.write_bytes(blob)
+    return target
 
-    def test_mach_o_magic_rejected(self, tmp_path: Path) -> None:
-        p = self._write(tmp_path, "evil.bin", b"\xcf\xfa\xed\xfe")
-        assert unsupported_os_reason(p) == "unsupported format (Mach-O)"
 
-    def test_apk_magic_rejected(self, tmp_path: Path) -> None:
-        # PK zip magic + .apk suffix -> ZIP/APK.
-        p = self._write(tmp_path, "evil.apk", b"PK\x03\x04")
-        assert unsupported_os_reason(p) == "unsupported format (APK)"
+@pytest.mark.parametrize(
+    ("name", "blob", "file_type", "platform"),
+    [
+        ("a.exe", b"MZ" + b"\x00" * 64, "pe", "windows"),
+        ("a.bin", b"\x7fELF" + b"\x00" * 64, "elf", "linux"),
+        ("a.bin", b"\xfe\xed\xfa\xce" + b"\x00" * 64, "mach-o", "macos"),
+        ("a.bin", b"\xfe\xed\xfa\xcf" + b"\x00" * 64, "mach-o", "macos"),
+        ("a.bin", b"\xce\xfa\xed\xfe" + b"\x00" * 64, "mach-o", "macos"),
+        ("a.bin", b"\xcf\xfa\xed\xfe" + b"\x00" * 64, "mach-o", "macos"),
+        # Fat Mach-O: 0xCAFEBABE plus a small architecture count.
+        ("a.bin", b"\xca\xfe\xba\xbe\x00\x00\x00\x02" + b"\x00" * 32, "mach-o", "macos"),
+        # A Java class file shares the magic; its version field is far larger.
+        ("a.class", b"\xca\xfe\xba\xbe\x00\x00\x00\x41" + b"\x00" * 32, "unknown", "unknown"),
+        ("a.dex", b"dex\n035\x00" + b"\x00" * 32, "dex", "android"),
+        ("a.pdf", b"%PDF-1.7\n" + b"\x00" * 32, "pdf", "multi"),
+        ("a.doc", b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 32, "ole2", "multi"),
+        (
+            "a.lnk",
+            b"\x4c\x00\x00\x00\x01\x14\x02\x00" + b"\x00" * 32,
+            "lnk",
+            "windows",
+        ),
+        ("a.bin", b"7z\xbc\xaf\x27\x1c" + b"\x00" * 32, "7z", "unknown"),
+        ("a.bin", b"Rar!\x1a\x07\x00" + b"\x00" * 32, "rar", "unknown"),
+        ("a.bin", b"\x1f\x8b\x08" + b"\x00" * 32, "gz", "unknown"),
+        ("a.bin", b"BZh9" + b"\x00" * 32, "bz2", "unknown"),
+        ("a.bin", b"\xfd7zXZ\x00" + b"\x00" * 32, "xz", "unknown"),
+        ("a.ps1", b"Write-Host hi\n", "ps1", "windows"),
+        ("a.bat", b"@echo off\n", "bat", "windows"),
+        ("a.cmd", b"@echo off\n", "cmd", "windows"),
+        ("a.vbs", b"WScript.Echo 1\n", "vbs", "windows"),
+        ("a.js", b"eval(1)\n", "js", "windows"),
+        ("a.hta", b"<html></html>\n", "hta", "windows"),
+        ("a.wsf", b"<job></job>\n", "wsf", "windows"),
+        ("a.txt", b"#!/bin/bash\necho hi\n", "sh", "linux"),
+        ("a.txt", b"#!/usr/bin/env python3\nprint(1)\n", "py", "multi"),
+        ("a.txt", b"#!/usr/bin/perl\nprint 1;\n", "pl", "multi"),
+        ("a.sh", b"echo hi\n", "sh", "linux"),
+        ("a.dat", b"\x00\x01\x02\x03" + b"\x00" * 32, "unknown", "unknown"),
+    ],
+)
+def test_detect_file_type_table(
+    tmp_path: Path, name: str, blob: bytes, file_type: str, platform: str
+) -> None:
+    path = _write(tmp_path, name, blob)
+    detected = _detect_file_type(path, blob)
+    assert detected == file_type
+    assert _infer_platform(detected, None, None) == platform
 
-    def test_dmg_by_extension_rejected(self, tmp_path: Path) -> None:
-        # No distinctive header -> extension fallback.
-        p = self._write(tmp_path, "evil.dmg", b"\x00\x01\x02\x03")
-        assert unsupported_os_reason(p) == "unsupported format (.dmg)"
 
-    def test_dex_by_extension_rejected(self, tmp_path: Path) -> None:
-        p = self._write(tmp_path, "evil.dex", b"dex\n")
-        assert unsupported_os_reason(p) == "unsupported format (.dex)"
+def test_iso_is_recognised_by_its_volume_descriptor(tmp_path: Path) -> None:
+    blob = bytearray(b"\x00" * 40000)
+    blob[32769:32774] = b"CD001"
+    path = _write(tmp_path, "image.bin", bytes(blob))
+    assert _detect_file_type(path, bytes(blob)) == "iso"
+    assert _infer_platform("iso", None, None) == "unknown"
 
-    def test_pe_accepted(self, tmp_path: Path) -> None:
-        p = self._write(tmp_path, "evil.exe", b"MZ")
-        assert unsupported_os_reason(p) is None
 
-    def test_elf_accepted(self, tmp_path: Path) -> None:
-        p = self._write(tmp_path, "evil.elf", b"\x7fELF")
-        assert unsupported_os_reason(p) is None
+def _zip_with(tmp_path: Path, name: str, entries: dict[str, str]) -> Path:
+    import zipfile
 
-    def test_unknown_windowsish_accepted(self, tmp_path: Path) -> None:
-        # Unknown magic + non-foreign extension must NOT be rejected.
-        p = self._write(tmp_path, "evil.dat", b"\x00\x01\x02\x03")
-        assert unsupported_os_reason(p) is None
+    path = tmp_path / name
+    with zipfile.ZipFile(path, "w") as archive:
+        for entry, content in entries.items():
+            archive.writestr(entry, content)
+    return path
 
-    def test_none_and_phantom_path_return_none(self, tmp_path: Path) -> None:
-        assert unsupported_os_reason(None) is None
-        # A non-existent .apk path is not a file -> not rejected here (the
-        # metadata-only path handles missing samples).
-        assert unsupported_os_reason(tmp_path / "ghost.apk") is None
+
+@pytest.mark.parametrize(
+    ("entries", "file_type", "platform"),
+    [
+        ({"AndroidManifest.xml": "x", "classes.dex": "x"}, "apk", "android"),
+        ({"classes.dex": "x"}, "apk", "android"),
+        ({"[Content_Types].xml": "x", "word/document.xml": "x"}, "ooxml", "multi"),
+        ({"META-INF/MANIFEST.MF": "x", "Main.class": "x"}, "jar", "multi"),
+        ({"Payload/Evil.app/Info.plist": "x"}, "ipa", "ios"),
+        ({"readme.txt": "x"}, "zip", "unknown"),
+    ],
+)
+def test_zip_containers_route_by_their_entries(
+    tmp_path: Path, entries: dict[str, str], file_type: str, platform: str
+) -> None:
+    path = _zip_with(tmp_path, "sample.zip", entries)
+    blob = path.read_bytes()
+    detected = _detect_file_type(path, blob)
+    assert detected == file_type
+    assert _infer_platform(detected, None, None) == platform
+
+
+def test_an_apk_wins_over_the_jar_manifest_it_also_carries(tmp_path: Path) -> None:
+    path = _zip_with(
+        tmp_path,
+        "sample.apk",
+        {"META-INF/MANIFEST.MF": "x", "AndroidManifest.xml": "x"},
+    )
+    assert _detect_file_type(path, path.read_bytes()) == "apk"
+
+
+@pytest.mark.parametrize(
+    ("file_type", "category"),
+    [
+        ("pe", "executable"),
+        ("apk", "executable"),
+        ("pdf", "document"),
+        ("ooxml", "document"),
+        ("ps1", "script"),
+        ("7z", "archive"),
+        ("iso", "archive"),
+        ("nonsense", "unknown"),
+    ],
+)
+def test_file_type_category(file_type: str, category: str) -> None:
+    assert file_type_category(file_type) == category
