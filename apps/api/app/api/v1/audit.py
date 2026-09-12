@@ -66,7 +66,7 @@ async def list_audit_logs(
 
     logger.debug(
         f"Admin {log_safe(admin.id)} listed audit logs: "
-        f"page={page} count={len(logs)} total={total}",
+        f"page={log_safe(page)} count={len(logs)} total={log_safe(total)}",
         extra={"user_id": log_safe(admin.id)},
     )
 
