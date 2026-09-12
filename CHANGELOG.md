@@ -49,6 +49,10 @@ change landed on `main`.
 
 ### Changed
 
+- **PyJWT signs and verifies the API's tokens.** `python-jose` is gone from both
+  projects; it was the only route by which `ecdsa` (an unfixed timing-attack
+  advisory) reached the lockfile. Token format, claims and the dual-secret
+  rotation window are unchanged.
 - **Request-derived values are sanitised before they are logged.** Every job,
   sample, report and audit identifier that reaches a log line from a path, a
   query string or a request body now passes through `log_safe`, which escapes
