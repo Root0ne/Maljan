@@ -25,6 +25,10 @@ _SANDBOX_TOOLS = (
     "sandbox_network",
     "sandbox_signatures",
     "sandbox_dropped_files",
+    "sandbox_registry_ops",
+    "sandbox_api_calls",
+    "sandbox_mutexes",
+    "sandbox_services_and_tasks",
 )
 
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
 from langchain_core.tools import StructuredTool
 
 from maljan.agents.base_agent import BaseAnalyst
@@ -71,6 +72,26 @@ class TestRecordedCalls:
         result = wrapped.invoke({"path": "/samples/evil.exe"})
         assert result.startswith("[ev_0001]\n")
         assert "hello" in result
+
+    def test_the_model_reads_the_whole_result_and_the_ledger_keeps_a_trimmed_copy(
+        self,
+    ) -> None:
+        # The ledger trims what it stores; what a tool result costs in a prompt
+        # is decided where it always was — llm.max_tool_output_chars and the
+        # summariser guardrail — not silently here.
+        big = "A" * 20000
+
+        def dump(path: str) -> str:
+            """Return a lot of text."""
+            return big
+
+        recorder = EvidenceRecorder("static")
+        wrapped = record_tools([_tool(dump, "dump")], recorder)[0]
+        result = wrapped.invoke({"path": "/samples/evil.exe"})
+
+        assert result == f"[ev_0001]\n{big}"
+        assert len(recorder.entries[0].output) < len(big)
+        assert recorder.entries[0].output.endswith("…")
 
     def test_a_raising_tool_is_recorded_as_a_failure(self) -> None:
         def pe_info(path: str) -> dict[str, str]:
@@ -171,6 +192,41 @@ class TestPublishing:
         assert snapshot["evidence_entries"] == 4
         assert snapshot["evidence_trimmed"] == 3
         assert agent.get_last_evidence_entries()[3].truncated is True
+
+    def test_a_loop_that_raises_still_publishes_what_it_gathered(self) -> None:
+        # The run whose evidence is worth the most is the one that died.
+        from unittest.mock import MagicMock, patch
+
+        def probe() -> str:
+            """Probe."""
+            return "ok"
+
+        agent = _agent()
+        agent.llm = MagicMock()
+        agent.tools = [_tool(probe, "probe")]
+
+        def _boom(coro, timeout, label=""):
+            # Make the calls the loop would have made, then die the way the
+            # hard cap does.
+            coro.close()
+            for wrapped in captured_tools[0]:
+                wrapped.invoke({})
+            raise TimeoutError("hard cap")
+
+        captured_tools: list = []
+
+        def _create(llm, tools):
+            captured_tools.append(tools)
+            return MagicMock()
+
+        with (
+            patch("langgraph.prebuilt.create_react_agent", _create),
+            patch("maljan.agents.base_agent._run_coro_blocking", _boom),
+            pytest.raises(TimeoutError),
+        ):
+            agent.execute_tool_loop([("system", "s"), ("human", "h")])
+
+        assert [e.tool for e in agent.get_last_evidence_entries()] == ["probe"]
 
     def test_no_calls_publishes_nothing(self) -> None:
         agent = _agent()

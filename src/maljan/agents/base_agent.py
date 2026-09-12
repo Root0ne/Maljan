@@ -1121,6 +1121,11 @@ class BaseAnalyst(ABC):
         # node writes these to ``evidence_ledger``; the captured view above is
         # derived from them and goes when its last reader does.
         self._last_evidence_entries: list[LedgerEntry] = []
+        # Bytes of tool output this agent has already kept. The budget is the
+        # agent's, not the loop's: a chunked analysis re-enters the loop once
+        # per chunk and would otherwise be handed the whole budget again on
+        # each of them.
+        self._evidence_bytes_spent = 0
         # The per-job id source, attached by the container next to the token
         # and truncation ledgers. None outside a job: the recorder then counts
         # within its own loop.
@@ -1546,27 +1551,33 @@ class BaseAnalyst(ABC):
         _t0 = _time.monotonic()
         hard_timeout = timeout + 30
         try:
-            thread_result: dict | None = _run_coro_blocking(
-                _invoke(), hard_timeout, label=f"react:{self.name}"
-            )
-        except TimeoutError:
-            self.logger.critical(
-                "%s ReAct agent exceeded the %ds hard cap; aborting this analyst.",
-                self.name,
-                hard_timeout,
-            )
-            raise
-        except AnalystError:
-            raise
-        except Exception as exc:
-            self.logger.error("ReAct agent failed: %s (%s)", type(exc).__name__, exc)
-            raise AnalystError(f"{self.name} ReAct agent failed: {exc}") from exc
+            try:
+                thread_result: dict | None = _run_coro_blocking(
+                    _invoke(), hard_timeout, label=f"react:{self.name}"
+                )
+            except TimeoutError:
+                self.logger.critical(
+                    "%s ReAct agent exceeded the %ds hard cap; aborting this analyst.",
+                    self.name,
+                    hard_timeout,
+                )
+                raise
+            except AnalystError:
+                raise
+            except Exception as exc:
+                self.logger.error("ReAct agent failed: %s (%s)", type(exc).__name__, exc)
+                raise AnalystError(f"{self.name} ReAct agent failed: {exc}") from exc
+        finally:
+            # In a ``finally`` because the run whose evidence is worth the most
+            # is the one that died: an analyst that hit the hard cap after
+            # thirty Ghidra calls made thirty calls, and losing all of them
+            # because the last one timed out is the opposite of a ledger.
+            self._finish_evidence(recorder)
 
         if thread_result is None:
             raise AnalystError(f"{self.name} ReAct agent returned no result")
 
         msgs = thread_result.get("messages", []) or []
-        self._finish_evidence(recorder)
         # Tool calls are AIMessage instances whose ``tool_calls`` attribute
         # is a non-empty list. Counting them is cheap and the most useful
         # single metric for "did this analyst overspend on Ghidra".
@@ -1673,7 +1684,9 @@ class BaseAnalyst(ABC):
         try:
             entries = list(recorder.entries)
             budget = int(getattr(get_settings().reporting, "evidence_budget_bytes", 0) or 0)
-            trimmed = apply_budget(entries, budget)
+            trimmed, self._evidence_bytes_spent = apply_budget(
+                entries, budget, already_spent=self._evidence_bytes_spent
+            )
             if trimmed:
                 self.logger.warning(
                     "%s: %d of %d evidence entries exceeded the %d-byte budget and "

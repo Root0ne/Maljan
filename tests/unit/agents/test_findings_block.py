@@ -121,3 +121,69 @@ class TestPrompts:
             assert tail == FINDINGS_BLOCK_FRAGMENT
             assert "maljan-findings" in tail
             assert "ev_0007" in tail
+
+
+_REVISION_ANSWER = """CLAIM: The sample injects into a remote process
+EVIDENCE: import KERNEL32.dll!VirtualAllocEx
+CONFIDENCE: 0.8
+TECHNIQUE: T1055
+---
+
+DISPUTES: NONE
+
+```maljan-findings
+{"findings": [{"title": "Injects into a remote process", "confidence": 0.8,
+  "evidence_ids": ["ev_0004"]}]}
+```
+"""
+
+
+class _FixedLLM:
+    """Answers every revision with the same block-carrying text."""
+
+    def invoke(self, *_args: object, **_kwargs: object) -> object:
+        from unittest.mock import MagicMock
+
+        return MagicMock(content=_REVISION_ANSWER)
+
+
+class TestRevisionPathsStripTheBlock:
+    """Every built-in analyst's revision goes through the findings capture.
+
+    The resolved system prompt ends with the findings-block instruction, so a
+    model that obeys it puts a JSON fence into the revised report — and that
+    report reaches the claim parser, the transcript and the Composer.
+    """
+
+    def _revise(self, agent):
+        return agent.safe_revise_isr(
+            original_data="raw data",
+            own_report="CLAIM: something\nEVIDENCE: somewhere\nCONFIDENCE: 0.5\n",
+            peer_reports={"dynamic": "found persistence"},
+            mediator_feedback="static disputed",
+            revision_round=1,
+        )
+
+    def test_the_static_analyst_strips_it(self) -> None:
+        from maljan.agents.static_analyst import StaticAnalyst
+
+        agent = StaticAnalyst(llm=_FixedLLM(), name="static")  # type: ignore[arg-type]
+        text, isr = self._revise(agent)
+        assert "maljan-findings" not in text
+        assert [f.title for f in isr.findings] == ["Injects into a remote process"]
+
+    def test_the_dynamic_analyst_strips_it(self) -> None:
+        from maljan.agents.dynamic_analyst import DynamicAnalyst
+
+        agent = DynamicAnalyst(llm=_FixedLLM(), name="dynamic")  # type: ignore[arg-type]
+        text, isr = self._revise(agent)
+        assert "maljan-findings" not in text
+        assert [f.title for f in isr.findings] == ["Injects into a remote process"]
+
+    def test_the_network_analyst_strips_it(self) -> None:
+        from maljan.agents.network_analyst import NetworkAnalyst
+
+        agent = NetworkAnalyst(llm=_FixedLLM(), name="network")  # type: ignore[arg-type]
+        text, isr = self._revise(agent)
+        assert "maljan-findings" not in text
+        assert [f.title for f in isr.findings] == ["Injects into a remote process"]

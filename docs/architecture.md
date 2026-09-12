@@ -148,7 +148,10 @@ dependency that is missing costs one tool's answer, never the server.
 The `dynamic` analyst's tools are the exception: its sandbox report is already
 in the worker's memory, so `ToolRef(kind="sandbox")` resolves to in-process
 tools over that report (`src/maljan/providers/sandbox_tools.py`) with no
-transport to open.
+transport to open — the process tree, the network activity, the sandbox's own
+signatures, the files written, the registry keys touched, the API-call
+histogram, the mutexes held, the services and scheduled tasks arranged, the
+platform channels, and a bounded reader for any section the rest do not model.
 
 A tool server reached over HTTP does not share the worker's filesystem, so it
 is handed the sample rather than a path to it; a stdio sidecar is handed the

@@ -51,9 +51,13 @@ change landed on `main`.
   `uv sync --extra tools`.
 - **The sandbox report as tools.** `ToolRef(kind="sandbox")` resolves to
   in-process tools over the job's report — processes, network, signatures,
-  dropped files, platform channels and a raw section reader — so the dynamic
-  analyst can ask for what it needs instead of being handed the whole report as
-  chunked text.
+  dropped files, registry operations, the categorised API-call histogram,
+  mutexes, services and scheduled tasks, platform channels and a raw section
+  reader — so the dynamic analyst can ask for what it needs instead of being
+  handed the whole report as chunked text. The registry, API, mutex and
+  service answers project into `report.dynamic.registry_mods`,
+  `notable_apis` and the persistence list, which is what feeds the persistence
+  tab and the generated Sigma rule's registry selection.
 - **A measurement baseline profile.** `measurement` runs the same three
   analysts as `default` with every tool server withheld, the in-process sandbox
   tools withheld and the static provider forced to `none`.

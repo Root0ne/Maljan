@@ -1,4 +1,23 @@
 {
+  "sandbox_api_calls": {
+    "apis": [
+      {
+        "api": "NtCreateFile",
+        "category": "filesystem",
+        "count": 1,
+        "first_args": "",
+        "suspicious": false
+      },
+      {
+        "api": "NtWriteFile",
+        "category": "filesystem",
+        "count": 1,
+        "first_args": "",
+        "suspicious": false
+      }
+    ],
+    "total": 2
+  },
   "sandbox_dropped_files": {
     "dropped": [
       {
@@ -10,6 +29,10 @@
       }
     ],
     "total": 1
+  },
+  "sandbox_mutexes": {
+    "mutexes": [],
+    "total": 0
   },
   "sandbox_network": {
     "dns": [
@@ -54,6 +77,22 @@
       }
     ],
     "total": 2
+  },
+  "sandbox_registry_ops": {
+    "registry": [
+      {
+        "key": "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\svc",
+        "operation": "access",
+        "value": null
+      }
+    ],
+    "total": 1
+  },
+  "sandbox_services_and_tasks": {
+    "commands": [],
+    "services": [],
+    "tasks": [],
+    "total": 0
   },
   "sandbox_signatures": {
     "signatures": [

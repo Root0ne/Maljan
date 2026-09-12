@@ -1,6 +1,14 @@
 {
+  "sandbox_api_calls": {
+    "apis": [],
+    "total": 0
+  },
   "sandbox_dropped_files": {
     "dropped": [],
+    "total": 0
+  },
+  "sandbox_mutexes": {
+    "mutexes": [],
     "total": 0
   },
   "sandbox_network": {
@@ -1974,6 +1982,16 @@
   },
   "sandbox_processes": {
     "processes": [],
+    "total": 0
+  },
+  "sandbox_registry_ops": {
+    "registry": [],
+    "total": 0
+  },
+  "sandbox_services_and_tasks": {
+    "commands": [],
+    "services": [],
+    "tasks": [],
     "total": 0
   },
   "sandbox_signatures": {

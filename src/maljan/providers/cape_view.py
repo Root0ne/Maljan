@@ -49,6 +49,10 @@ def to_cape_shaped_dict(report: SandboxReport) -> dict[str, Any]:
             "write_files": list(report.summary.get("write_files", [])),
             "modified_files": list(report.summary.get("modified_files", [])),
             "wrote_files": list(report.summary.get("wrote_files", [])),
+            "mutexes": list(report.summary.get("mutexes", [])),
+            "executed_commands": list(report.summary.get("executed_commands", [])),
+            "created_services": list(report.summary.get("created_services", [])),
+            "started_services": list(report.summary.get("started_services", [])),
         },
     }
     rendered: dict[str, Any] = {

@@ -1,7 +1,7 @@
 """The sandbox report as tools, and what they say when there is no report.
 
 The dynamic analyst has always been handed the report as chunked text. These
-six tools let it ask instead, and the answer that matters most is the one for a
+tools let it ask instead, and the answer that matters most is the one for a
 job with no report at all: an explicit error, not an empty list. A tool that
 returned ``{"processes": []}`` for a run where the sandbox never answered would
 be telling the model the sample did nothing.
@@ -184,12 +184,16 @@ class TestNoReport:
             lambda: sandbox_tools.sandbox_dropped_files(None),
             lambda: sandbox_tools.sandbox_channels(None),
             lambda: sandbox_tools.sandbox_report_section(None, "target"),
+            lambda: sandbox_tools.sandbox_registry_ops(None),
+            lambda: sandbox_tools.sandbox_api_calls(None),
+            lambda: sandbox_tools.sandbox_mutexes(None),
+            lambda: sandbox_tools.sandbox_services_and_tasks(None),
         ):
             assert call() == {"error": "no sandbox report for this job", "tool": "sandbox"}
 
 
 class TestToolSet:
-    def test_the_six_tools_are_built_over_the_container_s_report(self) -> None:
+    def test_the_tools_are_built_over_the_container_s_report(self) -> None:
         tools = sandbox_tools.sandbox_tools(_Container(REPORT))
 
         assert [t.name for t in tools] == [
@@ -198,6 +202,10 @@ class TestToolSet:
             "sandbox_network",
             "sandbox_signatures",
             "sandbox_dropped_files",
+            "sandbox_registry_ops",
+            "sandbox_api_calls",
+            "sandbox_mutexes",
+            "sandbox_services_and_tasks",
             "sandbox_channels",
         ]
         processes = next(t for t in tools if t.name == "sandbox_processes")
@@ -205,7 +213,7 @@ class TestToolSet:
 
     def test_a_container_with_no_report_still_offers_every_tool(self) -> None:
         tools = sandbox_tools.sandbox_tools(_Container(None))
-        assert len(tools) == 6
+        assert len(tools) == 10
         processes = next(t for t in tools if t.name == "sandbox_processes")
         assert processes.invoke({})["error"] == "no sandbox report for this job"
 

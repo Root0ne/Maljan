@@ -15,7 +15,8 @@ from typing import Any
 import pytest
 
 from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.ledger_report import build_sections
+from maljan.reporting.ledger_report import build_sections, section_is_grounded
+from maljan.reporting.models import EvidenceSection
 from maljan.reporting.renderers.markdown import MarkdownRenderer
 from maljan.schemas.evidence import EvidenceCounter
 from maljan.schemas.isr_models import AgentISR, Artifact, Finding
@@ -81,12 +82,7 @@ def report():
 
 
 def test_every_section_names_its_evidence_or_its_source(report) -> None:
-    ungrounded = [
-        section.key
-        for section in report.sections
-        if not section.evidence_ids and not section.source
-    ]
-    assert ungrounded == []
+    assert [s.key for s in report.sections if not section_is_grounded(s)] == []
 
 
 def test_every_tool_section_cites_an_entry_the_index_knows(report) -> None:
@@ -109,3 +105,33 @@ def test_a_section_built_from_nothing_is_not_produced() -> None:
     sections = build_sections([], {}, "PE", "windows")
     assert [section.key for section in sections] == ["identity"]
     assert sections[0].source == "routing"
+
+
+class TestTheCheckCanFail:
+    """The number is only worth reading if something can make it non-zero."""
+
+    def _section(self, **over) -> EvidenceSection:
+        return EvidenceSection(key="k", title="T", kind="table", rows=[["a"]], **over)
+
+    def test_a_section_that_names_nothing_is_ungrounded(self) -> None:
+        assert section_is_grounded(self._section()) is False
+
+    def test_naming_a_tool_is_not_grounding(self) -> None:
+        # A builder that produced rows without recording which call they came
+        # from is exactly the defect this counter exists to surface.
+        assert section_is_grounded(self._section(source="tool:pe_info")) is False
+
+    def test_citing_an_entry_is_grounding(self) -> None:
+        assert section_is_grounded(self._section(evidence_ids=["ev_0001"])) is True
+
+    def test_a_finding_an_artifact_and_the_routing_minimum_are_grounding(self) -> None:
+        for source in ("finding", "artifact:static", "routing"):
+            assert section_is_grounded(self._section(source=source)) is True, source
+
+    def test_the_run_summary_counts_an_ungrounded_section(self, report) -> None:
+        report.sections.append(self._section())
+        ungrounded = sum(1 for s in report.sections if not section_is_grounded(s))
+        assert ungrounded == 1
+
+    def test_a_real_run_leaves_the_count_at_zero(self, report) -> None:
+        assert sum(1 for s in report.sections if not section_is_grounded(s)) == 0

@@ -81,6 +81,17 @@ class _Sections:
         if entry_id and entry_id not in section.evidence_ids:
             section.evidence_ids.append(entry_id)
 
+    def credit(self, section: EvidenceSection, entry: LedgerEntry) -> None:
+        """Cite one entry and record which tool the section came from.
+
+        First writer wins: two tools that both contribute to a merged section
+        are both cited, and the section is named after the one that opened it
+        rather than whichever happened to run last.
+        """
+        if not section.source:
+            section.source = f"tool:{entry.tool}"
+        self.cite(section, entry.id)
+
     def add_row(self, section: EvidenceSection, row: list[str]) -> None:
         if len(section.rows) >= MAX_ROWS:
             return
@@ -106,6 +117,26 @@ class _Sections:
         ]
 
 
+# What a section's ``source`` may say and still count as grounded on its own.
+# A tool section is grounded by the entry ids it cites, never by naming a tool:
+# a builder that produced rows without recording which call they came from is
+# the defect ``sections_without_evidence`` exists to surface.
+_GROUNDED_SOURCES = frozenset({"routing", "finding"})
+
+
+def section_is_grounded(section: EvidenceSection) -> bool:
+    """Whether a section can name what it was built from.
+
+    Either it cites ledger entries, or it came from something that is itself an
+    answer rather than a derivation: the routing minimum, an agent's finding,
+    or an artifact an agent established.
+    """
+    if section.evidence_ids:
+        return True
+    source = section.source or ""
+    return source in _GROUNDED_SOURCES or source.startswith("artifact:")
+
+
 def _text(value: Any) -> str:
     """One cell, as a string a table can hold."""
     if value is None:
@@ -126,12 +157,11 @@ def _text(value: Any) -> str:
 
 def _identity(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
     section = acc.get("identity", "Sample identity", "kv", columns=["Field", "Value"])
-    section.source = "tool"
     for key, value in data.items():
         if key in {"error", "tool"} or value in (None, "", [], {}):
             continue
         acc.add_row(section, [key.replace("_", " "), _text(value)])
-    acc.cite(section, entry.id)
+    acc.credit(section, entry)
 
 
 def _binary_info(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
@@ -139,7 +169,6 @@ def _binary_info(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> No
     prefix = entry.tool.split("_")[0]
 
     header = acc.get(f"{prefix}_header", f"{prefix.upper()} header", "kv")
-    header.source = "tool"
     for key in (
         "machine",
         "timestamp",
@@ -160,7 +189,7 @@ def _binary_info(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> No
     ):
         if key in data and data[key] not in (None, "", [], {}):
             acc.add_row(header, [key.replace("_", " "), _text(data[key])])
-    acc.cite(header, entry.id)
+    acc.credit(header, entry)
 
     sections = data.get("sections")
     if isinstance(sections, list) and sections:
@@ -170,7 +199,6 @@ def _binary_info(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> No
             "table",
             columns=["Name", "Virtual address", "Virtual size", "Raw size", "Entropy"],
         )
-        table.source = "tool"
         for row in sections[:MAX_ROWS]:
             if not isinstance(row, dict):
                 continue
@@ -184,7 +212,7 @@ def _binary_info(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> No
                     _text(row.get("entropy")),
                 ],
             )
-        acc.cite(table, entry.id)
+        acc.credit(table, entry)
 
     imports = data.get("imports")
     if isinstance(imports, list) and imports:
@@ -194,7 +222,6 @@ def _binary_info(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> No
             "table",
             columns=["Library", "Function", "Category"],
         )
-        table.source = "tool"
         for row in imports[:MAX_ROWS]:
             if not isinstance(row, dict):
                 continue
@@ -202,45 +229,41 @@ def _binary_info(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> No
                 table,
                 [_text(row.get("dll")), _text(row.get("function")), _text(row.get("category"))],
             )
-        acc.cite(table, entry.id)
+        acc.credit(table, entry)
 
     exports = data.get("exports")
     if isinstance(exports, list) and exports:
         listing = acc.get(f"{prefix}_exports", f"{prefix.upper()} exports", "list")
-        listing.source = "tool"
         for name in exports[:MAX_ROWS]:
             acc.add_item(listing, _text(name))
-        acc.cite(listing, entry.id)
+        acc.credit(listing, entry)
 
     permissions = data.get("permissions")
     if isinstance(permissions, list) and permissions:
         listing = acc.get("apk_permissions", "Declared permissions", "list")
-        listing.source = "tool"
         for name in permissions[:MAX_ROWS]:
             acc.add_item(listing, _text(name))
-        acc.cite(listing, entry.id)
+        acc.credit(listing, entry)
 
     component_keys = ("activities", "services", "receivers", "providers")
     if any(isinstance(data.get(k), list) and data.get(k) for k in component_keys):
         table = acc.get("apk_components", "Declared components", "table", columns=["Kind", "Name"])
-        table.source = "tool"
         for kind in component_keys:
             for name in (data.get(kind) or [])[:MAX_ROWS]:
                 acc.add_row(table, [kind[:-1], _text(name)])
-        acc.cite(table, entry.id)
+        acc.credit(table, entry)
 
     packers = data.get("packer_signatures")
     if isinstance(packers, list) and packers:
         table = acc.get(
             "packer_signatures", "Packer section matches", "table", columns=["Packer", "Sections"]
         )
-        table.source = "tool"
         for row in packers[:MAX_ROWS]:
             if isinstance(row, dict):
                 acc.add_row(table, [_text(row.get("name")), _text(row.get("sections"))])
             else:
                 acc.add_row(table, [_text(row), ""])
-        acc.cite(table, entry.id)
+        acc.credit(table, entry)
 
 
 def _iocs(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
@@ -250,7 +273,6 @@ def _iocs(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
     table = acc.get(
         "iocs", "Indicators recovered from the sample", "table", columns=["Kind", "Value", "Notes"]
     )
-    table.source = "tool"
     for row in rows[:MAX_ROWS]:
         if not isinstance(row, dict):
             continue
@@ -258,7 +280,7 @@ def _iocs(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
             table,
             [_text(row.get("kind")), _text(row.get("value")), _text(row.get("notes"))],
         )
-    acc.cite(table, entry.id)
+    acc.credit(table, entry)
 
 
 def _strings(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
@@ -266,14 +288,13 @@ def _strings(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
     if not isinstance(rows, list) or not rows:
         return
     table = acc.get("strings", "Printable strings", "table", columns=["Offset", "Encoding", "Text"])
-    table.source = "tool"
     for row in rows[:MAX_ROWS]:
         if not isinstance(row, dict):
             continue
         acc.add_row(
             table, [_text(row.get("offset")), _text(row.get("enc")), _text(row.get("text"))]
         )
-    acc.cite(table, entry.id)
+    acc.credit(table, entry)
 
 
 def _yara(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
@@ -281,7 +302,6 @@ def _yara(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
     if not isinstance(matches, list) or not matches:
         return
     table = acc.get("yara_matches", "YARA rule matches", "table", columns=["Rule", "Tags", "Where"])
-    table.source = "tool"
     for row in matches[:MAX_ROWS]:
         if not isinstance(row, dict):
             continue
@@ -293,7 +313,7 @@ def _yara(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
                 _text(row.get("strings") or row.get("offsets") or row.get("meta")),
             ],
         )
-    acc.cite(table, entry.id)
+    acc.credit(table, entry)
 
 
 def _sigma(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
@@ -306,7 +326,6 @@ def _sigma(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
         "table",
         columns=["Rule", "Level", "Technique", "Matched fields"],
     )
-    table.source = "tool"
     for row in matches[:MAX_ROWS]:
         if not isinstance(row, dict):
             continue
@@ -321,7 +340,7 @@ def _sigma(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
                 _text(row.get("matched_fields")),
             ],
         )
-    acc.cite(table, entry.id)
+    acc.credit(table, entry)
 
 
 def _capa(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
@@ -334,7 +353,6 @@ def _capa(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
         "table",
         columns=["Namespace", "Rule", "ATT&CK", "MBC"],
     )
-    table.source = "tool"
     for row in rows[:MAX_ROWS]:
         if not isinstance(row, dict):
             continue
@@ -347,7 +365,7 @@ def _capa(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
                 _text(row.get("mbc")),
             ],
         )
-    acc.cite(table, entry.id)
+    acc.credit(table, entry)
 
 
 def _sandbox_processes(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
@@ -360,7 +378,6 @@ def _sandbox_processes(acc: _Sections, entry: LedgerEntry, data: dict[str, Any])
         "table",
         columns=["PID", "Parent", "Name", "Command line"],
     )
-    table.source = "tool"
     for row in rows[:MAX_ROWS]:
         if not isinstance(row, dict):
             continue
@@ -373,7 +390,7 @@ def _sandbox_processes(acc: _Sections, entry: LedgerEntry, data: dict[str, Any])
                 _text(row.get("command_line")),
             ],
         )
-    acc.cite(table, entry.id)
+    acc.credit(table, entry)
 
 
 def _sandbox_network(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
@@ -383,7 +400,6 @@ def _sandbox_network(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -
         "table",
         columns=["Kind", "Endpoint", "Detail"],
     )
-    table.source = "tool"
     added = False
     for kind in ("dns", "domains", "hosts", "http", "tcp", "udp", "icmp", "tls"):
         rows = data.get(kind)
@@ -396,7 +412,7 @@ def _sandbox_network(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -
             acc.add_row(table, [kind, endpoint, detail])
             added = True
     if added:
-        acc.cite(table, entry.id)
+        acc.credit(table, entry)
 
 
 def _endpoint_of(kind: str, row: Any) -> tuple[str, str]:
@@ -423,7 +439,6 @@ def _sandbox_signatures(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]
         "table",
         columns=["Name", "Severity", "Description"],
     )
-    table.source = "tool"
     for row in rows[:MAX_ROWS]:
         if not isinstance(row, dict):
             continue
@@ -431,7 +446,7 @@ def _sandbox_signatures(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]
             table,
             [_text(row.get("name")), _text(row.get("severity")), _text(row.get("description"))],
         )
-    acc.cite(table, entry.id)
+    acc.credit(table, entry)
 
 
 def _sandbox_dropped(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
@@ -444,7 +459,6 @@ def _sandbox_dropped(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -
         "table",
         columns=["Name", "Path", "Size", "SHA-256"],
     )
-    table.source = "tool"
     for row in rows[:MAX_ROWS]:
         if not isinstance(row, dict):
             continue
@@ -457,7 +471,78 @@ def _sandbox_dropped(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -
                 _text(row.get("sha256")),
             ],
         )
-    acc.cite(table, entry.id)
+    acc.credit(table, entry)
+
+
+def _sandbox_registry(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
+    rows = data.get("registry")
+    if not isinstance(rows, list) or not rows:
+        return
+    table = acc.get(
+        "sandbox_registry",
+        "Registry activity",
+        "table",
+        columns=["Key", "Operation", "Value"],
+    )
+    for row in rows[:MAX_ROWS]:
+        if not isinstance(row, dict):
+            continue
+        acc.add_row(
+            table,
+            [_text(row.get("key")), _text(row.get("operation")), _text(row.get("value"))],
+        )
+    acc.credit(table, entry)
+
+
+def _sandbox_apis(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
+    rows = data.get("apis")
+    if not isinstance(rows, list) or not rows:
+        return
+    table = acc.get(
+        "sandbox_api_calls",
+        "API calls observed",
+        "table",
+        columns=["API", "Calls", "Category", "First arguments"],
+    )
+    for row in rows[:MAX_ROWS]:
+        if not isinstance(row, dict):
+            continue
+        acc.add_row(
+            table,
+            [
+                _text(row.get("api")),
+                _text(row.get("count")),
+                _text(row.get("category")),
+                _text(row.get("first_args")),
+            ],
+        )
+    acc.credit(table, entry)
+
+
+def _sandbox_mutexes(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
+    names = data.get("mutexes")
+    if not isinstance(names, list) or not names:
+        return
+    listing = acc.get("sandbox_mutexes", "Mutexes", "list")
+    for name in names[:MAX_ROWS]:
+        acc.add_item(listing, _text(name))
+    acc.credit(listing, entry)
+
+
+def _sandbox_services(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
+    table = acc.get(
+        "sandbox_services_and_tasks",
+        "Services, tasks and commands",
+        "table",
+        columns=["Kind", "Value"],
+    )
+    added = False
+    for kind in ("services", "tasks", "commands"):
+        for value in data.get(kind) or []:
+            acc.add_row(table, [kind[:-1] if kind != "commands" else "command", _text(value)])
+            added = True
+    if added:
+        acc.credit(table, entry)
 
 
 def _sandbox_section(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
@@ -473,9 +558,8 @@ def _sandbox_section(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -
         return
     if rows or value:
         section = acc.get(f"sandbox_{name}", f"Sandbox: {name}", "text")
-        section.source = "tool"
         section.text = _text(rows or value)[:MAX_TEXT_CHARS]
-        acc.cite(section, entry.id)
+        acc.credit(section, entry)
 
 
 def _pcap(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
@@ -483,9 +567,8 @@ def _pcap(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
     if not summary:
         return
     section = acc.get("pcap_summary", "Capture summary", "text")
-    section.source = "tool"
     section.text = str(summary)[:MAX_TEXT_CHARS]
-    acc.cite(section, entry.id)
+    acc.credit(section, entry)
 
 
 # Reverse-engineering tools name a function and answer about it. The report
@@ -507,10 +590,9 @@ _FUNCTION_LIST_TOOLS = frozenset({"list_functions", "get_functions", "afl", "lis
 
 def _functions_examined(acc: _Sections, entry: LedgerEntry, _data: Any) -> None:
     section = acc.get("functions_examined", "Functions examined", "list")
-    section.source = "tool"
     label = entry.symbol or entry.tool
     acc.add_item(section, f"{label} ({entry.tool})")
-    acc.cite(section, entry.id)
+    acc.credit(section, entry)
 
 
 _BUILDERS: dict[str, Any] = {
@@ -532,6 +614,10 @@ _BUILDERS: dict[str, Any] = {
     "sandbox_network": _sandbox_network,
     "sandbox_signatures": _sandbox_signatures,
     "sandbox_dropped_files": _sandbox_dropped,
+    "sandbox_registry_ops": _sandbox_registry,
+    "sandbox_api_calls": _sandbox_apis,
+    "sandbox_mutexes": _sandbox_mutexes,
+    "sandbox_services_and_tasks": _sandbox_services,
     "sandbox_report_section": _sandbox_section,
     "pcap_summary": _pcap,
 }
@@ -565,13 +651,12 @@ def _generic_table(
         "table",
         columns=columns,
     )
-    section.source = "tool"
     for column in columns:
         if column not in section.columns:
             section.columns.append(column)
     for row in dicts[:MAX_ROWS]:
         acc.add_row(section, [_text(row.get(column)) for column in section.columns])
-    acc.cite(section, entry.id)
+    acc.credit(section, entry)
 
 
 def _generic_kv(
@@ -588,7 +673,6 @@ def _generic_kv(
         "kv",
         columns=["Field", "Value"],
     )
-    section.source = "tool"
     for name, value in data.items():
         if name in {"tool"} or value in (None, "", [], {}):
             continue
@@ -602,17 +686,16 @@ def _generic_kv(
             )
             continue
         acc.add_row(section, [str(name).replace("_", " "), _text(value)])
-    acc.cite(section, entry.id)
+    acc.credit(section, entry)
 
 
 def _generic_text(acc: _Sections, entry: LedgerEntry) -> None:
     if not entry.output.strip():
         return
     section = acc.get(f"tool_{entry.tool}", entry.tool.replace("_", " ").capitalize(), "text")
-    section.source = "tool"
     if not section.text:
         section.text = entry.output[:MAX_TEXT_CHARS]
-    acc.cite(section, entry.id)
+    acc.credit(section, entry)
 
 
 def _fallback(acc: _Sections, entry: LedgerEntry) -> None:
@@ -627,10 +710,9 @@ def _fallback(acc: _Sections, entry: LedgerEntry) -> None:
             section = acc.get(
                 f"tool_{entry.tool}", entry.tool.replace("_", " ").capitalize(), "list"
             )
-            section.source = "tool"
             for item in data[:MAX_ROWS]:
                 acc.add_item(section, _text(item))
-            acc.cite(section, entry.id)
+            acc.credit(section, entry)
         return
     _generic_text(acc, entry)
 
@@ -656,7 +738,7 @@ def _artifact_sections(acc: _Sections, isrs: dict[str, Any]) -> None:
                     "table",
                     columns=columns or ["Value"],
                 )
-                section.source = f"agent:{source}"
+                section.source = f"artifact:{source}"
                 for row in rows[:MAX_ROWS]:
                     acc.add_row(section, [_text(cell) for cell in row])
             else:
@@ -666,7 +748,7 @@ def _artifact_sections(acc: _Sections, isrs: dict[str, Any]) -> None:
                     "table",
                     columns=["Label", "Value"],
                 )
-                section.source = f"agent:{source}"
+                section.source = f"artifact:{source}"
                 acc.add_row(section, [_text(label), _text(getattr(artifact, "value", ""))])
             for entry_id in getattr(artifact, "evidence_ids", None) or []:
                 acc.cite(section, str(entry_id))
@@ -683,7 +765,7 @@ def _findings_section(acc: _Sections, isrs: dict[str, Any]) -> None:
                     "Findings",
                     "table",
                     columns=["Agent", "Finding", "Techniques", "Confidence", "Evidence"],
-                    source="agent",
+                    source="finding",
                 )
             acc.add_row(
                 section,

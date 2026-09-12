@@ -22,9 +22,13 @@ from pathlib import Path
 from maljan.agents.dynamic_analyst import _ISR_SYSTEM as DYNAMIC_ISR_SYSTEM
 from maljan.agents.static_analyst import _ISR_SYSTEM as STATIC_ISR_SYSTEM
 from maljan.providers.sandbox_tools import (
+    sandbox_api_calls,
     sandbox_dropped_files,
+    sandbox_mutexes,
     sandbox_network,
     sandbox_processes,
+    sandbox_registry_ops,
+    sandbox_services_and_tasks,
     sandbox_signatures,
 )
 
@@ -38,8 +42,15 @@ def main() -> None:
     PROMPTS.mkdir(parents=True, exist_ok=True)
     (GOLDEN / "sandbox_tools").mkdir(parents=True, exist_ok=True)
 
-    (PROMPTS / "static_isr_system_ghidra.txt").write_text(STATIC_ISR_SYSTEM, encoding="utf-8")
-    (PROMPTS / "dynamic_system_cape2.txt").write_text(DYNAMIC_ISR_SYSTEM, encoding="utf-8")
+    # With the trailing newline the repository's own end-of-file hook would
+    # add anyway; without it every run of this script and every commit after
+    # it flip the same two bytes back and forth.
+    (PROMPTS / "static_isr_system_ghidra.txt").write_text(
+        STATIC_ISR_SYSTEM.rstrip("\n") + "\n", encoding="utf-8"
+    )
+    (PROMPTS / "dynamic_system_cape2.txt").write_text(
+        DYNAMIC_ISR_SYSTEM.rstrip("\n") + "\n", encoding="utf-8"
+    )
 
     for pattern in CAPE_GLOBS:
         for path in sorted(ROOT.glob(pattern)):
@@ -51,6 +62,10 @@ def main() -> None:
                 "sandbox_network": sandbox_network(raw),
                 "sandbox_signatures": sandbox_signatures(raw),
                 "sandbox_dropped_files": sandbox_dropped_files(raw),
+                "sandbox_registry_ops": sandbox_registry_ops(raw),
+                "sandbox_api_calls": sandbox_api_calls(raw),
+                "sandbox_mutexes": sandbox_mutexes(raw),
+                "sandbox_services_and_tasks": sandbox_services_and_tasks(raw),
             }
             dest = GOLDEN / "sandbox_tools" / f"{path.stem}.json"
             dest.write_text(

@@ -26,6 +26,7 @@ showing fewer.
 from __future__ import annotations
 
 import json
+import threading
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -60,17 +61,25 @@ class EvidenceCounter:
     """
 
     def __init__(self) -> None:
+        # Locked because ``parallel_analysts`` runs the analysts on threads
+        # against this one counter, and two agents handed the same id would be
+        # two different calls answering to one citation — exactly what the
+        # counter exists to prevent. ``TruncationLedger`` locks for the same
+        # reason.
+        self._lock = threading.Lock()
         self._seq = 0
 
     def next_id(self) -> tuple[str, int]:
         """The next ``(entry_id, seq)`` pair, seq being 1-based."""
-        self._seq += 1
-        return format_entry_id(self._seq), self._seq
+        with self._lock:
+            self._seq += 1
+            return format_entry_id(self._seq), self._seq
 
     @property
     def issued(self) -> int:
         """How many ids this counter has handed out."""
-        return self._seq
+        with self._lock:
+            return self._seq
 
 
 def parse_structured(output: str) -> dict[str, Any] | list[Any] | None:
@@ -189,16 +198,23 @@ def build_entry(
     )
 
 
-def apply_budget(entries: list[LedgerEntry], budget_bytes: int) -> int:
+def apply_budget(
+    entries: list[LedgerEntry], budget_bytes: int, *, already_spent: int = 0
+) -> tuple[int, int]:
     """Drop the outputs that overrun ``budget_bytes``, in call order.
 
-    Returns how many entries lost their output. The entries themselves stay:
-    which tool was called, with what, and whether it worked is the cheap half
-    of the record and the half a reader needs to know something is missing.
+    Returns ``(trimmed, spent)`` — how many entries lost their output, and how
+    many bytes of output are now kept in total. ``already_spent`` carries the
+    running total forward, because the budget belongs to the agent and an agent
+    that runs two loops must not get the budget twice.
+
+    The entries themselves stay: which tool was called, with what, and whether
+    it worked is the cheap half of the record and the half a reader needs in
+    order to know something is missing.
     """
     if budget_bytes <= 0:
-        return 0
-    spent = 0
+        return 0, already_spent
+    spent = max(0, already_spent)
     trimmed = 0
     for entry in entries:
         size = len(entry.output.encode("utf-8", errors="ignore"))
@@ -209,4 +225,4 @@ def apply_budget(entries: list[LedgerEntry], budget_bytes: int) -> int:
         entry.structured = None
         entry.truncated = True
         trimmed += 1
-    return trimmed
+    return trimmed, spent

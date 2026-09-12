@@ -31,6 +31,7 @@ from maljan.pipeline.events import (
 from maljan.pipeline.state import AgentArgument, AnalysisState
 from maljan.pipeline.sycophancy_detector import build_revision_directive, detect_sycophancy
 from maljan.reporting.ledger_projection import network_from_sandbox_report
+from maljan.reporting.ledger_report import section_is_grounded
 from maljan.schemas.evidence import LedgerEntry
 from maljan.schemas.isr_models import AgentISR
 from maljan.schemas.stix_models import Bundle
@@ -1004,6 +1005,11 @@ def make_revision_node(container: ServiceContainer) -> Any:
 
         revised: dict[str, str] = {}
         revised_isrs: dict[str, AgentISR] = {}
+        # A revision round that used tools issued ids from the job counter, so
+        # leaving its entries behind puts holes in the persisted ledger and
+        # makes anything the revised answer cites unresolvable. Built-in
+        # analysts revise without tools; a composed agent does not.
+        revision_ledger: list[dict[str, Any]] = []
 
         # strict=True: agent_names and results MUST be equal length; mismatch
         # is a programming error and must surface, not be silently truncated.
@@ -1024,6 +1030,13 @@ def make_revision_node(container: ServiceContainer) -> Any:
                 revised_text, isr = result
                 revised[name] = revised_text
                 revised_isrs[name] = isr
+                try:
+                    revision_ledger.extend(
+                        entry.model_dump(mode="json")
+                        for entry in container.get_agent(name).get_last_evidence_entries()
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("evidence ledger read skipped for %s: %s", name, exc)
                 emit_agent_message(
                     container.event_sink,
                     speaker=name,
@@ -1040,7 +1053,10 @@ def make_revision_node(container: ServiceContainer) -> Any:
                     report=revised_text,
                 )
 
-        return {"revised_reports": revised, "isr_reports": revised_isrs}
+        out: dict[str, Any] = {"revised_reports": revised, "isr_reports": revised_isrs}
+        if revision_ledger:
+            out["evidence_ledger"] = revision_ledger
+        return out
 
     node_fn.__name__ = "revision_node"
     return node_fn
@@ -2044,13 +2060,19 @@ def make_report_node(container: ServiceContainer) -> Any:
                 _ledger.append(LedgerEntry.model_validate(_row))
             except Exception as exc:  # noqa: BLE001 — one bad row is not a lost report
                 logger.debug("report_node: unreadable ledger row skipped (%s).", exc)
+        # The entries the evidence-only static provider could not write itself.
+        # They go back onto the state channel below, not only into this local
+        # list: the report cites their ids, and a citation the evidence
+        # endpoint cannot resolve is worse than no citation.
+        _capa_entries: list[LedgerEntry] = []
         if _static_bundle is not None:
             try:
                 from maljan.providers.static.capa_yara import ledger_entries
 
-                _ledger.extend(ledger_entries(_static_bundle, container.get_evidence_counter()))
+                _capa_entries = ledger_entries(_static_bundle, container.get_evidence_counter())
             except Exception as exc:  # noqa: BLE001
                 logger.warning("report_node: capa/YARA evidence not recorded (%s).", exc)
+        _ledger.extend(_capa_entries)
         _ledger.sort(key=lambda entry: entry.seq)
 
         try:
@@ -2157,7 +2179,7 @@ def make_report_node(container: ServiceContainer) -> Any:
             "by_tool": dict(sorted(_by_tool.items())),
         }
         _summary["sections_without_evidence"] = sum(
-            1 for section in report.sections if not section.evidence_ids and not section.source
+            1 for section in report.sections if not section_is_grounded(section)
         )
         report.run_summary = _summary
         if _summary["sections_without_evidence"]:
@@ -2356,6 +2378,10 @@ def make_report_node(container: ServiceContainer) -> Any:
             "malware_report_markdown": markdown,
             "stix_bundle_extended": extended_dump,
         }
+        if _capa_entries:
+            # ``evidence_ledger`` is append-only, so this adds the provider's
+            # entries to the run's rather than replacing it.
+            result["evidence_ledger"] = [e.model_dump(mode="json") for e in _capa_entries]
         if fp_warnings:
             result["run_summary"] = {
                 **(state.get("run_summary") or {}),

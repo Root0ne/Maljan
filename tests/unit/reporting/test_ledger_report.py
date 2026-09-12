@@ -125,6 +125,20 @@ class TestOtherToolBuilders:
         assert sections["sandbox_signatures"].rows[0][0] == "injection_runpe"
         assert sections["sandbox_dropped_files"].rows[0][0] == "svchost.exe"
 
+    def test_registry_api_mutex_and_service_tables(self) -> None:
+        entries = [
+            _entry("sandbox_registry_ops", seq=1, agent="dynamic"),
+            _entry("sandbox_api_calls", seq=2, agent="dynamic"),
+            _entry("sandbox_mutexes", seq=3, agent="dynamic"),
+            _entry("sandbox_services_and_tasks", seq=4, agent="dynamic"),
+        ]
+        sections = _by_key(build_sections(entries))
+        assert sections["sandbox_registry"].rows[0][1] == "modify"
+        assert sections["sandbox_api_calls"].rows[0][0] == "VirtualAllocEx"
+        assert sections["sandbox_mutexes"].items == ["Global\\LockBitMutex"]
+        kinds = {row[0] for row in sections["sandbox_services_and_tasks"].rows}
+        assert kinds == {"service", "task", "command"}
+
     def test_a_named_sandbox_section_becomes_a_kv_block(self) -> None:
         sections = _by_key(build_sections([_entry("sandbox_report_section", agent="dynamic")]))
         assert dict(sections["sandbox_target"].rows)["category"] == "file"

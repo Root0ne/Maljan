@@ -342,8 +342,13 @@ class NetworkAnalyst(BaseAnalyst):
             isr=True,
             revision_round=revision_round,
         )
+        # Through the findings capture like every other answer: the resolved
+        # system prompt ends with the findings-block instruction, so a model
+        # that obeys it puts a JSON fence into the revised report, and nothing
+        # downstream of here — the claim parser, the transcript, the Composer —
+        # should ever see it.
         response = self.llm.invoke(prompt_to_messages(messages))
-        content = str(response.content)
+        content = self._capture_findings(str(response.content))
 
         claims = _parse_claim_blocks(content)
         dissent = _parse_disputes(content)

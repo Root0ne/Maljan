@@ -1,8 +1,10 @@
 """The sandbox tools' answers, frozen over every CAPE fixture.
 
-These four answers are the whole downstream contract of a sandbox report now:
-what an agent sees when it asks what ran, what it talked to, what the sandbox's
-own signatures said and what was written to disk. The report is assembled from
+These answers are the whole downstream contract of a sandbox report now: what
+an agent sees when it asks what ran, what it talked to, what the sandbox's own
+signatures said, what was written to disk, which registry keys were touched,
+which APIs were called, which mutexes were held and what was arranged to run
+again. The report is assembled from
 those answers, so freezing them over the real corpus
 (``data/cape_reports/*.json``, 97 detonations) is what makes a change to the
 provider layer visible instead of quietly reshaping every report.
@@ -25,9 +27,13 @@ from typing import Any
 import pytest
 
 from maljan.providers.sandbox_tools import (
+    sandbox_api_calls,
     sandbox_dropped_files,
+    sandbox_mutexes,
     sandbox_network,
     sandbox_processes,
+    sandbox_registry_ops,
+    sandbox_services_and_tasks,
     sandbox_signatures,
 )
 
@@ -92,3 +98,27 @@ def test_signatures_match_the_golden(name: str):
 def test_dropped_files_match_the_golden(name: str):
     raw, expected = _load_case(name)
     assert sandbox_dropped_files(raw) == expected["sandbox_dropped_files"]
+
+
+@pytest.mark.parametrize("name", _ALL_NAMES, ids=_ALL_NAMES)
+def test_registry_ops_match_the_golden(name: str):
+    raw, expected = _load_case(name)
+    assert sandbox_registry_ops(raw) == expected["sandbox_registry_ops"]
+
+
+@pytest.mark.parametrize("name", _ALL_NAMES, ids=_ALL_NAMES)
+def test_api_calls_match_the_golden(name: str):
+    raw, expected = _load_case(name)
+    assert sandbox_api_calls(raw) == expected["sandbox_api_calls"]
+
+
+@pytest.mark.parametrize("name", _ALL_NAMES, ids=_ALL_NAMES)
+def test_mutexes_match_the_golden(name: str):
+    raw, expected = _load_case(name)
+    assert sandbox_mutexes(raw) == expected["sandbox_mutexes"]
+
+
+@pytest.mark.parametrize("name", _ALL_NAMES, ids=_ALL_NAMES)
+def test_services_and_tasks_match_the_golden(name: str):
+    raw, expected = _load_case(name)
+    assert sandbox_services_and_tasks(raw) == expected["sandbox_services_and_tasks"]

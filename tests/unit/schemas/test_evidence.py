@@ -70,12 +70,12 @@ class TestBudget:
 
     def test_entries_inside_the_budget_are_untouched(self) -> None:
         entries = self._entries(3, 100)
-        assert apply_budget(entries, 1000) == 0
+        assert apply_budget(entries, 1000) == (0, 300)
         assert all(entry.output and not entry.truncated for entry in entries)
 
     def test_entries_past_the_budget_keep_the_call_and_lose_the_output(self) -> None:
         entries = self._entries(4, 100)
-        assert apply_budget(entries, 250) == 2
+        assert apply_budget(entries, 250) == (2, 200)
         assert [entry.truncated for entry in entries] == [False, False, True, True]
         assert entries[3].output == ""
         assert entries[3].structured is None
@@ -83,9 +83,22 @@ class TestBudget:
         assert entries[3].tool == "strings"
         assert entries[3].ok is True
 
+    def test_the_budget_belongs_to_the_agent_across_loops(self) -> None:
+        # A chunked analysis re-enters the loop per chunk; the second loop
+        # must not be handed the whole budget again.
+        first = self._entries(2, 100)
+        trimmed, spent = apply_budget(first, 250)
+        assert (trimmed, spent) == (0, 200)
+
+        second = self._entries(2, 100)
+        trimmed, spent = apply_budget(second, 250, already_spent=spent)
+        assert trimmed == 2
+        assert spent == 200
+        assert all(entry.truncated for entry in second)
+
     def test_a_zero_budget_keeps_everything(self) -> None:
         entries = self._entries(3, 100)
-        assert apply_budget(entries, 0) == 0
+        assert apply_budget(entries, 0) == (0, 0)
         assert all(entry.output for entry in entries)
 
 

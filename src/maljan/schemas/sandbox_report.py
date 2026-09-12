@@ -196,7 +196,21 @@ class SandboxRun(BaseModel):
     error: str = ""
 
 
-_SUMMARY_KEYS: tuple[str, ...] = ("files", "write_files", "modified_files", "wrote_files")
+_SUMMARY_KEYS: tuple[str, ...] = (
+    "files",
+    "write_files",
+    "modified_files",
+    "wrote_files",
+    # The three channels an agent asks about when it is hunting persistence
+    # and host artefacts. They were passed over while the report's dynamic
+    # section was recomputed from ``behavior`` inside the report builder; now
+    # that an agent has to ask, a channel the render drops is a question the
+    # agent cannot get an answer to.
+    "mutexes",
+    "executed_commands",
+    "created_services",
+    "started_services",
+)
 
 # Blocks a CAPE guest other than Windows publishes, and the namespaced channel
 # each one lands in. ``behavior.processes`` is shared across every guest and

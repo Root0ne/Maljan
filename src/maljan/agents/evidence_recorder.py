@@ -123,18 +123,27 @@ def _record_tool(tool: Any, recorder: EvidenceRecorder) -> Any:
     name = str(getattr(tool, "name", "") or "unknown")
     server = server_of(tool) or None
 
-    def _stamp(kwargs: dict[str, Any], started: float, value: Any) -> str:
+    def _stamp(kwargs: dict[str, Any], started: float, wall_clock: float, value: Any) -> str:
+        text = result_text(value)
         entry = recorder.record(
             tool=name,
             args=kwargs,
             server=server,
-            output=result_text(value),
-            started_at=started,
+            output=text,
+            started_at=wall_clock,
             duration_ms=int((time.monotonic() - started) * 1000),
         )
-        return f"[{entry.id}]\n{entry.output}"
+        # ``text``, not ``entry.output``: the ledger trims what it stores, and
+        # what the model reads is not the ledger's business. The size of a tool
+        # result in a prompt is decided where it has always been decided —
+        # ``llm.max_tool_output_chars`` and the summariser guardrail the MCP
+        # toolkit applies before the tool ever returns — and a second, silent
+        # cut here would make raising that setting do nothing.
+        return f"[{entry.id}]\n{text}"
 
-    def _stamp_error(kwargs: dict[str, Any], started: float, exc: Exception) -> str:
+    def _stamp_error(
+        kwargs: dict[str, Any], started: float, wall_clock: float, exc: Exception
+    ) -> str:
         message = f"{type(exc).__name__}: {exc}"
         entry = recorder.record(
             tool=name,
@@ -143,7 +152,7 @@ def _record_tool(tool: Any, recorder: EvidenceRecorder) -> Any:
             output=message,
             ok=False,
             error=message,
-            started_at=started,
+            started_at=wall_clock,
             duration_ms=int((time.monotonic() - started) * 1000),
         )
         return f"[{entry.id}] tool call failed: {message}"
@@ -153,20 +162,23 @@ def _record_tool(tool: Any, recorder: EvidenceRecorder) -> Any:
     if func is not None:
 
         def wrapped_func(**kwargs: Any) -> str:  # noqa: F811
-            started = time.monotonic()
+            # Two clocks: the wall clock says when the call happened and
+            # correlates with a log line, the monotonic one measures how long
+            # it took and cannot go backwards.
+            started, wall_clock = time.monotonic(), time.time()
             try:
-                return _stamp(kwargs, started, func(**kwargs))
+                return _stamp(kwargs, started, wall_clock, func(**kwargs))
             except Exception as exc:  # noqa: BLE001 — a failed call is evidence
-                return _stamp_error(kwargs, started, exc)
+                return _stamp_error(kwargs, started, wall_clock, exc)
 
     if coroutine is not None:
 
         async def wrapped_coroutine(**kwargs: Any) -> str:  # noqa: F811
-            started = time.monotonic()
+            started, wall_clock = time.monotonic(), time.time()
             try:
-                return _stamp(kwargs, started, await coroutine(**kwargs))
+                return _stamp(kwargs, started, wall_clock, await coroutine(**kwargs))
             except Exception as exc:  # noqa: BLE001 — a failed call is evidence
-                return _stamp_error(kwargs, started, exc)
+                return _stamp_error(kwargs, started, wall_clock, exc)
 
     try:
         return StructuredTool.from_function(

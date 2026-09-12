@@ -1,0 +1,11 @@
+{
+  "registry": [
+    {
+      "key": "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+      "operation": "modify",
+      "value": "C:\\Users\\Public\\lockbit.exe"
+    },
+    {"key": "HKCU\\Software\\Evil\\Config", "operation": "create", "value": null}
+  ],
+  "total": 2
+}

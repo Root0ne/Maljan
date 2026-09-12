@@ -132,6 +132,48 @@ class TestTypedBlocks:
         assert [d.fqdn for d in report.network.domains] == ["c2.evil.tld"]
         assert [i.address for i in report.network.ips] == ["185.220.101.5"]
 
+    def test_the_host_tools_fill_the_registry_and_api_channels(self) -> None:
+        counter = EvidenceCounter()
+        ledger = [
+            entry(
+                "sandbox_registry_ops",
+                {
+                    "registry": [
+                        {
+                            "key": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                            "operation": "modify",
+                            "value": "C:\\evil.exe",
+                        }
+                    ]
+                },
+                counter,
+                agent="dynamic",
+            ),
+            entry(
+                "sandbox_api_calls",
+                {"apis": [{"api": "VirtualAllocEx", "count": 4, "category": "process_injection"}]},
+                counter,
+                agent="dynamic",
+            ),
+            entry(
+                "sandbox_services_and_tasks",
+                {"services": ["EvilUpdater"], "tasks": ["schtasks /create /tn Evil"]},
+                counter,
+                agent="dynamic",
+            ),
+        ]
+        report = _build(ledger)
+        assert report.dynamic is not None
+        assert [(m.hive, m.operation) for m in report.dynamic.registry_mods] == [("HKCU", "modify")]
+        assert report.dynamic.notable_apis[0]["api"] == "VirtualAllocEx"
+        # The persistence tab and the Sigma registry selection are fed by the
+        # same calls, without an analyst having to restate them.
+        assert {p.kind for p in report.persistence} == {
+            "registry_run",
+            "service",
+            "scheduled_task",
+        }
+
     def test_a_run_that_gathered_nothing_leaves_every_block_empty(self) -> None:
         report = _build([])
         assert report.static is None

@@ -771,8 +771,13 @@ class StaticAnalyst(BaseAnalyst):
             ]
         )
 
+        # Through the findings capture like every other answer: the resolved
+        # system prompt ends with the findings-block instruction, so a model
+        # that obeys it puts a JSON fence into the revised report, and nothing
+        # downstream of here — the claim parser, the transcript, the Composer —
+        # should ever see it.
         response = self.llm.invoke(messages)
-        content = str(response.content)
+        content = self._capture_findings(str(response.content))
 
         parsed = _parse_claim_blocks(content)
         # Drop defeatist meta-claims ("could not be performed / missing

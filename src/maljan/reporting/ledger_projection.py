@@ -39,6 +39,7 @@ from maljan.reporting.models import (
     PersistenceMechanism,
     PESection,
     ProcessNode,
+    RegistryMod,
     SampleIdentity,
     SandboxSignature,
     StaticAnalysis,
@@ -402,6 +403,43 @@ def dynamic_from_ledger(
                 )
             )
 
+    for _entry, data in _payloads(ledger, "sandbox_registry_ops"):
+        for row in data.get("registry") or []:
+            if not isinstance(row, dict):
+                continue
+            key = str(row.get("key") or "")
+            if not key:
+                continue
+            seen = True
+            dynamic.registry_mods.append(
+                RegistryMod(
+                    hive=_hive_of(key),  # type: ignore[arg-type]
+                    key=key,
+                    operation=_registry_operation(row.get("operation")),  # type: ignore[arg-type]
+                    new_value=_opt(row.get("value")),
+                )
+            )
+
+    for _entry, data in _payloads(ledger, "sandbox_api_calls"):
+        for row in data.get("apis") or []:
+            if not isinstance(row, dict):
+                continue
+            seen = True
+            dynamic.notable_apis.append(
+                {
+                    "api": str(row.get("api") or ""),
+                    "count": _int(row.get("count")),
+                    "category": row.get("category"),
+                    "arguments": str(row.get("first_args") or ""),
+                }
+            )
+
+    for _entry, data in _payloads(ledger, "sandbox_mutexes"):
+        names = [str(name) for name in data.get("mutexes") or [] if name]
+        if names:
+            seen = True
+            dynamic.file_operations.extend({"operation": "mutex", "name": name} for name in names)
+
     for _entry, data in _payloads(ledger, "sandbox_dropped_files"):
         for row in data.get("dropped") or []:
             if isinstance(row, dict):
@@ -428,6 +466,40 @@ def dynamic_from_ledger(
                 )
 
     return dynamic if seen else None
+
+
+# The registry hives a key path can name, and the label the typed model uses.
+_HIVES: tuple[tuple[str, str], ...] = (
+    ("hklm", "HKLM"),
+    ("hkey_local_machine", "HKLM"),
+    ("hkcu", "HKCU"),
+    ("hkey_current_user", "HKCU"),
+    ("hkcr", "HKCR"),
+    ("hkey_classes_root", "HKCR"),
+    ("hku", "HKU"),
+    ("hkey_users", "HKU"),
+    ("hkcc", "HKCC"),
+    ("hkey_current_config", "HKCC"),
+    ("\\registry\\machine", "HKLM"),
+    ("\\registry\\user", "HKU"),
+)
+
+_REGISTRY_OPERATIONS = {"create", "modify", "delete", "query"}
+
+
+def _hive_of(key: str) -> str:
+    """The hive a registry path names, or ``UNKNOWN`` when it names none."""
+    lowered = key.strip().lower()
+    for prefix, hive in _HIVES:
+        if lowered.startswith(prefix):
+            return hive
+    return "UNKNOWN"
+
+
+def _registry_operation(value: Any) -> str:
+    """One of the four operations the typed model knows; anything else is a query."""
+    operation = str(value or "").strip().lower()
+    return operation if operation in _REGISTRY_OPERATIONS else "query"
 
 
 def _as_tree(nodes: list[ProcessNode]) -> list[ProcessNode]:
@@ -602,6 +674,28 @@ def _first_str(row: Any, *keys: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+# Registry paths that mean "run this again", and the mechanism each one is.
+_AUTOSTART_MARKERS: tuple[tuple[str, str], ...] = (
+    ("\\currentversion\\run", "registry_run"),
+    ("\\currentversion\\runonce", "registry_run"),
+    ("\\currentversion\\runservices", "registry_run"),
+    ("\\currentversion\\windows\\load", "registry_run"),
+    ("\\image file execution options", "image_hijack"),
+    ("\\windows nt\\currentversion\\windows\\appinit_dlls", "appinit_dll"),
+    ("\\winlogon", "winlogon_helper"),
+    ("\\currentcontrolset\\services", "service"),
+)
+
+
+def _autostart_kind(key: str) -> str | None:
+    """The persistence mechanism a registry path names, or None when it names none."""
+    lowered = key.strip().lower()
+    for marker, kind in _AUTOSTART_MARKERS:
+        if marker in lowered:
+            return kind
+    return None
+
+
 def persistence_from_ledger(
     ledger: list[LedgerEntry], isrs: dict[str, AgentISR] | None = None
 ) -> list[PersistenceMechanism]:
@@ -647,6 +741,24 @@ def persistence_from_ledger(
                 )
         elif getattr(artifact, "value", None):
             _add("other", str(artifact.value), "", None, ref)
+
+    # A Run key an agent read through ``sandbox_registry_ops`` is persistence
+    # whether or not the agent thought to write an artifact about it.
+    for entry, data in _payloads(ledger, "sandbox_registry_ops"):
+        for row in data.get("registry") or []:
+            if not isinstance(row, dict):
+                continue
+            key = str(row.get("key") or "")
+            autostart = _autostart_kind(key)
+            if autostart is None or row.get("operation") == "query":
+                continue
+            _add(autostart, key, str(row.get("value") or ""), None, entry.id)
+
+    for entry, data in _payloads(ledger, "sandbox_services_and_tasks"):
+        for name in data.get("services") or []:
+            _add("service", str(name), "", "T1543.003", entry.id)
+        for command in data.get("tasks") or []:
+            _add("scheduled_task", str(command), "", "T1053.005", entry.id)
 
     for entry, data in _payloads(ledger, "sigma_match", "sigma_match_sandbox"):
         for row in data.get("matches") or []:
