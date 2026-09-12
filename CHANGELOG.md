@@ -8,6 +8,9 @@ change landed on `main`.
 
 ### Added
 
+- **Dependency submission for `uv.lock`.** A workflow posts the resolved Python
+  packages to GitHub's dependency graph on every push to `main`, so Dependabot
+  alerts close when the lockfile moves instead of lingering on the first parse.
 - **Repository security posture.** CodeQL (Python, TypeScript, Actions;
   `security-extended`), dependency review on pull requests, OpenSSF Scorecard,
   Dependabot updates for every dependency surface, actions pinned by commit,

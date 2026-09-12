@@ -14,6 +14,7 @@ Maljan/
 │                      providers, memory, reporting, core (config, container)
 ├── services/          stdio MCP sidecars, one server.py each
 ├── scripts/
+│   ├── ci/            the uv.lock dependency-graph submission the workflow runs
 │   ├── dev/           fetch_external.sh and the Ghidra image manager
 │   ├── goldens/       one-off capture scripts that write tests/fixtures/golden/
 │   ├── knowledge/     builders for the data/ assets and the evaluation fixtures
@@ -106,7 +107,10 @@ weekly update pull requests against `dev` for the uv workspace, the web
 console, the pinned GitHub Actions and the Docker base images; security
 updates arrive as soon as an advisory matches. Every action in a workflow is
 pinned to a commit with its version in a comment, which Dependabot keeps
-current. Secret scanning with push protection is on for the repository, and
+current. A **dependency submission** workflow posts the packages resolved in
+`uv.lock` to the dependency graph on every push to `main`, so Dependabot's
+Python alerts follow the lockfile the way the console's follow
+`package-lock.json`. Secret scanning with push protection is on for the repository, and
 vulnerabilities are reported through private vulnerability reporting (see
 [SECURITY.md](../SECURITY.md)).
 

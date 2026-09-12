@@ -1,0 +1,37 @@
+name: Dependency submission
+
+# The dependency graph re-reads apps/web/package-lock.json on every push to
+# main but did not re-read uv.lock after a relock, so its Python view and the
+# Dependabot alerts built on it went stale. This submits the lock's resolved
+# packages through the Dependency Submission API on every push to main.
+on:
+  push:
+    branches: ["main"]
+    paths: ["uv.lock", "pyproject.toml", "apps/api/pyproject.toml", "scripts/ci/submit_dependency_snapshot.py", ".github/workflows/dependency-submission.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  uv-lock:
+    name: Submit uv.lock
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+
+      - name: Submit the resolved packages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/ci/submit_dependency_snapshot.py
