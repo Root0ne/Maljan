@@ -68,8 +68,10 @@ async def test_a_built_in_agent_resolves_to_its_prompt_and_its_tools():
     assert len(result.details["prompt_sha256"]) == 64
     assert result.details["static_provider"] == "ghidra"
     assert result.details["llm"]["provider"] == "openai"
-    assert [s["key"] for s in result.details["servers"]] == ["network"]
-    assert result.details["servers"][0]["status"] == "ok"
+    # ``knowledge`` is bound to every built-in role, so the network analyst
+    # sees it alongside its own PCAP sidecar.
+    assert [s["key"] for s in result.details["servers"]] == ["knowledge", "network"]
+    assert {s["status"] for s in result.details["servers"]} == {"ok"}
 
 
 @pytest.mark.asyncio
@@ -108,7 +110,8 @@ async def test_a_degraded_server_is_reported_per_server_rather_than_failing_the_
     monkeypatch.setattr("maljan.providers.servers.ServerRegistry.atools_for", _atools_for)
     result = await probe_agent({"name": "network", "settings": {}})
     assert result.ok is True
-    assert result.details["servers"][0]["status"] == "mcp server 'network' unavailable"
+    statuses = {s["key"]: s["status"] for s in result.details["servers"]}
+    assert statuses["network"] == "mcp server 'network' unavailable"
 
 
 @pytest.mark.asyncio

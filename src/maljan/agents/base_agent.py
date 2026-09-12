@@ -1128,6 +1128,14 @@ class BaseAnalyst(ABC):
         # building a new one per chunk.
         self.toolkit: Any = None
         self._container: Any = None
+        # The path this agent's tools must be given, and the per-server
+        # override for a tool server that was handed the sample somewhere else
+        # (``agents.sample_staging``). Both are assigned per sample — by
+        # ``pipeline.nodes._pin_sample_path`` and by resolution respectively —
+        # and both are inert while unset, which is what keeps an analyst built
+        # in a test or a script exactly what it was.
+        self._analysis_file_path: str | None = None
+        self._path_by_server: dict[str, str] = {}
         # The ``ResolvedAgent`` the container built this agent from — its own
         # prompt, tools and static provider id, so a clone never has to
         # re-derive what it already knows about itself.
@@ -1293,8 +1301,27 @@ class BaseAnalyst(ABC):
             self.degradation_reasons = [*self.degradation_reasons, *reasons]
         return list(tools)
 
+    def pinned_tools(self) -> list[Any]:
+        """This agent's tools, each guarded against the bare-filename call.
+
+        See ``agents.tool_pinning`` for what the guard does and why it is this
+        narrow. With no pinned path the resolved tools come back unwrapped.
+        """
+        from maljan.agents.tool_pinning import pin_paths
+
+        return pin_paths(
+            list(self.tools),
+            default_path=self._analysis_file_path,
+            path_by_server=self._path_by_server,
+            agent_name=self.name,
+        )
+
     def execute_tool_loop(self, prompt_messages: list) -> str:
         """Executes a tool-calling ReAct loop if tools are available.
+
+        The loop runs against ``pinned_tools()``; ``self.tools`` keeps the
+        resolved objects, so what an agent reports it has is what resolution
+        gave it and only the loop sees the wrappers.
 
         Runs the async ReAct agent in a dedicated **daemon** thread with its own
         event loop. This avoids the nest_asyncio + anyio cancel scope
@@ -1349,7 +1376,7 @@ class BaseAnalyst(ABC):
         # loop populates it from the ReAct message stream (see below).
         self._last_tool_evidence = []
 
-        agent_executor = create_react_agent(self.llm, self.tools)
+        agent_executor = create_react_agent(self.llm, self.pinned_tools())
 
         messages = prebuilt
 

@@ -19,17 +19,37 @@ from maljan.core.config import (
     ToolRef,
 )
 
+
+def _mcp(server: str) -> dict:
+    return {"kind": "mcp", "server": server, "name": None}
+
+
 DEFAULT_AGENTS = {
     "profile": "default",
     "profiles": {
-        "default": {"label": "Default", "analysts": ["static", "dynamic", "network"]},
+        "default": {
+            "label": "Default",
+            "analysts": ["static", "dynamic", "network"],
+            "exclude_servers": [],
+            "exclude_sandbox_tools": False,
+            "static_provider": None,
+        },
+        # The tool-free baseline: the same analysts, every server withheld and
+        # the static provider forced off, so a run measures the ensemble alone.
+        "measurement": {
+            "label": "Measurement baseline",
+            "analysts": ["static", "dynamic", "network"],
+            "exclude_servers": ["analysis", "knowledge", "network", "threatintel"],
+            "exclude_sandbox_tools": True,
+            "static_provider": "none",
+        },
     },
     "definitions": {
         "static": {
             "role": "static",
             "label": "Static analyst",
             "prompt": None,
-            "tools": [],
+            "tools": [_mcp("analysis"), _mcp("knowledge")],
             "static_provider": None,
             "enabled": True,
         },
@@ -37,7 +57,7 @@ DEFAULT_AGENTS = {
             "role": "dynamic",
             "label": "Dynamic analyst",
             "prompt": None,
-            "tools": [],
+            "tools": [{"kind": "sandbox", "server": None, "name": None}, _mcp("knowledge")],
             "static_provider": None,
             "enabled": True,
         },
@@ -45,7 +65,7 @@ DEFAULT_AGENTS = {
             "role": "network",
             "label": "Network analyst",
             "prompt": None,
-            "tools": [],
+            "tools": [_mcp("network"), _mcp("knowledge")],
             "static_provider": None,
             "enabled": True,
         },
@@ -53,7 +73,7 @@ DEFAULT_AGENTS = {
             "role": "judge",
             "label": "Judge",
             "prompt": None,
-            "tools": [],
+            "tools": [_mcp("knowledge")],
             "static_provider": None,
             "enabled": True,
         },

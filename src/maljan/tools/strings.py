@@ -18,6 +18,7 @@ from __future__ import annotations
 import re
 from collections import Counter
 from collections.abc import Iterator
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -658,13 +659,28 @@ def _looks_like_domain(text: str) -> bool:
 # The encodings ``strings`` knows how to walk. ``utf16le`` is not a nicety on a
 # Windows binary: every wide API call site and every resource string lives
 # there, and an ASCII-only scan cannot see any of it.
-_ENCODERS: dict[str, re.Pattern[bytes]] = {
-    "ascii": _PRINTABLE_RE,
-    "utf16le": _WIDE_RE,
-}
+_ENCODINGS: tuple[str, ...] = ("ascii", "utf16le")
 
 # One tool call must not try to return a whole binary's worth of text.
 _MAX_STRINGS_LIMIT = 20_000
+
+# The shortest run the caller may ask for. Below three characters the scan
+# returns essentially every byte of a binary as a "string".
+_MIN_REQUESTABLE_LENGTH = 3
+
+
+@lru_cache(maxsize=32)
+def _run_pattern(encoding: str, min_len: int) -> re.Pattern[bytes]:
+    """The run regex for one encoding at one minimum length.
+
+    Compiled per requested length rather than filtered after the fact: the
+    module-level patterns are fixed at ``_MIN_STRING_LENGTH``, so a caller
+    asking for shorter runs than that would silently get the default's — the
+    argument would appear to work while only ever narrowing.
+    """
+    if encoding == "utf16le":
+        return re.compile(rb"(?:[\x20-\x7e]\x00){%d,}" % min_len)
+    return re.compile(rb"[\x20-\x7e]{%d,}" % min_len)
 
 
 def strings(
@@ -684,24 +700,22 @@ def strings(
     target = Path(path)
     if not target.is_file():
         return {"error": f"no such file: {path}", "tool": "strings"}
-    minimum = max(1, int(min_len))
+    minimum = max(_MIN_REQUESTABLE_LENGTH, int(min_len))
     limit = max(0, min(int(limit), _MAX_STRINGS_LIMIT))
     offset = max(0, int(offset))
-    wanted = [enc for enc in encodings if enc in _ENCODERS]
+    wanted = [enc for enc in encodings if enc in _ENCODINGS]
     if not wanted:
-        known = ", ".join(sorted(_ENCODERS))
+        known = ", ".join(_ENCODINGS)
         return {"error": f"unknown encodings {list(encodings)}; known: {known}", "tool": "strings"}
 
     blob = target.read_bytes()
     rows: list[dict[str, Any]] = []
     total = 0
     for enc in wanted:
-        for match in _ENCODERS[enc].finditer(blob):
+        for match in _run_pattern(enc, minimum).finditer(blob):
             raw = match.group()
             text = raw[::2] if enc == "utf16le" else raw
             decoded = text.decode("ascii", errors="ignore")
-            if len(decoded) < minimum:
-                continue
             total += 1
             if total <= offset or len(rows) >= limit:
                 continue

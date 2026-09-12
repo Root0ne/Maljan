@@ -183,6 +183,13 @@ class ServiceContainer:
         # outside a job, and the tools then say so rather than answering empty.
         self.sandbox_report: dict[str, Any] | None = None
 
+        # The job's sample, for the one step that needs the bytes rather than
+        # a report: staging the sample to a tool server that does not share
+        # this filesystem (``agents.sample_staging``). Both ``None``/empty
+        # outside a job, and staging is then a no-op.
+        self.sample_path: str | None = None
+        self.sample_sha256: str = ""
+
         # Per-run LLM token/cost ledger (findings-log §4 Item 1). Agents and the
         # judge add each call's usage; the judge node snapshots it into RunSummary.
         self._token_ledger = TokenLedger()

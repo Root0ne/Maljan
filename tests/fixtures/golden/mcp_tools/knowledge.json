@@ -1,0 +1,40 @@
+{
+  "arguments": {
+    "api_capability": [
+      "api_names"
+    ],
+    "attck_lookup": [
+      "technique_id"
+    ],
+    "attck_validate": [
+      "ids"
+    ],
+    "family_lookup": [
+      "k",
+      "query"
+    ],
+    "lolbin_lookup": [
+      "command_lines"
+    ],
+    "resolve_technique": [
+      "domain",
+      "k",
+      "text"
+    ],
+    "similar_cases": [
+      "k",
+      "text"
+    ]
+  },
+  "server": "knowledge",
+  "source": "live handshake",
+  "tools": [
+    "api_capability",
+    "attck_lookup",
+    "attck_validate",
+    "family_lookup",
+    "lolbin_lookup",
+    "resolve_technique",
+    "similar_cases"
+  ]
+}

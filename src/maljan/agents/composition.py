@@ -29,7 +29,7 @@ built here with nothing to open and nothing that can hang.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from maljan.core.config import AgentDefinition, ProfileDefinition, Settings, ToolRef
@@ -56,6 +56,12 @@ class ResolvedAgent:
     static_provider_id: str
     llm: Any | None
     degradation_reasons: tuple[str, ...] = ()
+    # Where each tool server was handed the sample, for the servers that were
+    # handed it at all (``agents.sample_staging``). Empty on the common case:
+    # every server is a local stdio sidecar reading the same filesystem the
+    # worker does. An analyst passes this to ``pin_paths`` so a tool call goes
+    # out with the path its own server can open.
+    path_by_server: dict[str, str] = field(default_factory=dict)
 
 
 def active_profile(settings: Settings) -> ProfileDefinition:
@@ -277,6 +283,66 @@ def _agent_llm(container: Any, key: str) -> Any:
     return container.get_agent_llm(key)
 
 
+def _staging_inputs(container: Any) -> tuple[str | None, str]:
+    """The job's sample path and digest, as ``app.arun`` left them on the container.
+
+    Resolution has neither the graph state nor a job argument carrying these,
+    for the same reason it has neither the sample format nor the sandbox
+    report: agents are built lazily, from nodes that do not all carry the
+    state. A container that was never told stages nothing.
+    """
+    path = getattr(container, "sample_path", None)
+    digest = str(getattr(container, "sample_sha256", "") or "")
+    return (str(path) if path else None), digest
+
+
+async def _astage(
+    container: Any, tools: list[Any], job_key: str
+) -> tuple[dict[str, str], list[str]]:
+    """Upload the sample to every bound server that wants it. Never raises.
+
+    Staging records its own failures on the registry, which is the union
+    across every agent in the job; this agent's own reasons are the ones that
+    appeared while *it* was staging, so the slice is taken rather than the
+    whole list — an agent must not report a failure another agent caused.
+    """
+    sample_path, digest = _staging_inputs(container)
+    if not sample_path:
+        return {}, []
+    from maljan.agents.sample_staging import stage_for_agent
+
+    registry = container.get_server_registry()
+    before = len(registry.degradation_reasons)
+    try:
+        staged = await stage_for_agent(registry, tools, sample_path, sha256=digest, job_id=job_key)
+    except Exception as exc:  # noqa: BLE001 — staging never fails a run
+        logger.warning("sample staging skipped for job %s: %s", job_key, exc)
+        return {}, []
+    return dict(staged), list(registry.degradation_reasons[before:])
+
+
+def _stage(container: Any, tools: list[Any], job_key: str) -> tuple[dict[str, str], list[str]]:
+    """``_astage`` for the synchronous resolver, on the shared agent loop.
+
+    The same loop the handles were opened on, which is the loop their
+    transports are bound to: uploading on any other one is the cross-loop
+    failure ``ServerHandle`` exists to avoid.
+    """
+    sample_path, _ = _staging_inputs(container)
+    if not sample_path:
+        return {}, []
+    from maljan.agents.base_agent import run_coro_blocking
+
+    try:
+        staged, reasons = run_coro_blocking(
+            _astage(container, tools, job_key), hard_timeout=120.0, label="sample-staging"
+        )
+    except Exception as exc:  # noqa: BLE001 — staging never fails a run
+        logger.warning("sample staging skipped for job %s: %s", job_key, exc)
+        return {}, []
+    return dict(staged or {}), list(reasons or [])
+
+
 def resolve_agent(key: str, container: Any, job_key: str = "job") -> ResolvedAgent:
     """Everything agent ``key`` gets under this container's settings."""
     settings: Settings = container.config
@@ -311,14 +377,18 @@ def resolve_agent(key: str, container: Any, job_key: str = "job") -> ResolvedAge
         tools.extend(referenced)
         reasons.extend(ref_reasons)
 
+    deduped = _dedupe(tools)
+    staged, staging_reasons = _stage(container, deduped, job_key)
+    reasons.extend(staging_reasons)
     return ResolvedAgent(
         key=key,
         role=definition.role,
         prompt=prompt,
-        tools=_dedupe(tools),
+        tools=deduped,
         static_provider_id=provider_id,
         llm=_agent_llm(container, key),
         degradation_reasons=tuple(dict.fromkeys(reasons)),
+        path_by_server=staged,
     )
 
 
@@ -362,12 +432,16 @@ async def aresolve_agent(key: str, container: Any, job_key: str = "job") -> Reso
         tools.extend(referenced)
         reasons.extend(ref_reasons)
 
+    deduped = _dedupe(tools)
+    staged, staging_reasons = await _astage(container, deduped, job_key)
+    reasons.extend(staging_reasons)
     return ResolvedAgent(
         key=key,
         role=definition.role,
         prompt=prompt,
-        tools=_dedupe(tools),
+        tools=deduped,
         static_provider_id=provider_id,
         llm=_agent_llm(container, key),
         degradation_reasons=tuple(dict.fromkeys(reasons)),
+        path_by_server=staged,
     )

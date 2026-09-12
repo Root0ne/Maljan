@@ -1,4 +1,5 @@
 import os
+from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 from scapy.all import (  # type: ignore[attr-defined]
@@ -77,6 +78,22 @@ def extract_http(pcap_path: str) -> str:
         return "\n".join(requests) if requests else "No HTTP requests found."
     except Exception as e:
         return f"Error extracting HTTP: {str(e)}"
+
+
+@mcp.tool()
+def pcap_summary(pcap_path: str, packet_limit: int = 5000) -> dict[str, Any]:
+    """Summarise a capture: conversations, TLS SNI destinations and beaconing.
+
+    The whole-capture view, next to the three packet-level tools above. An
+    agent that reads this first knows which conversation to go and read
+    individual packets from, instead of walking the capture to find out.
+    """
+    from maljan.tools.pcap import pcap_summary as summarize
+
+    try:
+        return dict(summarize(pcap_path, packet_limit=packet_limit))
+    except Exception as exc:  # noqa: BLE001 - a tool server answers, it does not raise
+        return {"error": f"{type(exc).__name__}: {exc}", "tool": "pcap_summary"}
 
 
 if __name__ == "__main__":

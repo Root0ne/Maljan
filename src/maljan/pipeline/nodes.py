@@ -210,6 +210,10 @@ def _pin_sample_path(agent: Any, state: AnalysisState) -> None:
         or _absolute_host_sample_path(state)
         or None
     )
+    # And the per-server overrides, for a tool server that was handed the
+    # bytes instead of sharing this filesystem. Assigned unconditionally for
+    # the same reason the path above is: an agent is cached across samples.
+    agent._path_by_server = dict(getattr(agent._resolved, "path_by_server", {}) or {})
 
 
 def _augment_static_chunks_with_path(
@@ -625,6 +629,12 @@ def make_analyst_node(
                 "reports": {agent_name: report},
                 "isr_reports": {agent_name: isr},
             }
+            # Where this agent's tool servers were handed the sample, when any
+            # of them were. The reducer merges across agents, so a server two
+            # analysts share is recorded once.
+            staged = dict(getattr(agent, "_path_by_server", {}) or {})
+            if staged:
+                node_out["remote_sample_paths"] = staged
             try:
                 _ev = agent.get_last_tool_evidence()
                 if _ev:

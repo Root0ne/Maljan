@@ -28,7 +28,14 @@ def test_the_default_profile_is_every_built_in_analyst_and_not_the_judge():
     profile = Settings(_env_file=None).agents.profiles["default"]
     assert set(profile.analysts) == set(BUILTIN_AGENTS) - {"judge"}
     assert profile.analysts == ["static", "dynamic", "network"]
-    assert BUILTIN_PROFILES == ("default",)
+    # ``measurement`` is the second built-in: the same three analysts with
+    # every tool server withheld, which is the baseline the tool sidecars are
+    # measured against.
+    assert BUILTIN_PROFILES == ("default", "measurement")
+    baseline = Settings(_env_file=None).agents.profiles["measurement"]
+    assert baseline.analysts == profile.analysts
+    assert baseline.static_provider == "none"
+    assert baseline.exclude_sandbox_tools is True
 
 
 def test_agent_roles_resolves_to_the_effective_definition_keys():
@@ -44,7 +51,7 @@ def test_the_job_schemas_profile_accepts_exactly_the_effective_profile_keys():
 
     assert set(effective_profiles({})) == set(BUILTIN_PROFILES)
     stored = {AGENT_PROFILES_KEY: {"lean": {"analysts": ["network"]}}}
-    assert set(effective_profiles(stored)) == {"default", "lean"}
+    assert set(effective_profiles(stored)) == {"default", "measurement", "lean"}
 
 
 def test_a_definition_key_and_a_server_key_obey_the_same_rule():

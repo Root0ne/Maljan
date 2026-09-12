@@ -98,7 +98,13 @@ def test_a_job_shaped_attach_tears_down_inside_the_budget() -> None:
     async def scenario() -> None:
         from maljan.agents.base_agent import run_on_agent_loop
 
-        container = ServiceContainer(config=Settings(_env_file=None), mock=True)
+        # Two sidecars, not four: this measures the teardown *order* of one
+        # sync-opened and one async-opened handle, and the two tool sidecars
+        # bound to the same roles would only make the child count noisier.
+        config = Settings(_env_file=None)
+        config.mcp.servers["analysis"].enabled = False
+        config.mcp.servers["knowledge"].enabled = False
+        container = ServiceContainer(config=config, mock=True)
         registry = container.get_server_registry()
 
         # The network analyst's path: `open` on the shared agent loop.

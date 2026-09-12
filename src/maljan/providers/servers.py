@@ -978,6 +978,12 @@ class ServerRegistry:
         ``ToolRef`` — collapses to one copy. Nothing is dropped for a
         collision; only an exact repeat of one server's own tool is.
 
+        Every merged tool is stamped with the server it came from
+        (``metadata["maljan_server"]``). ``agents.tool_pinning`` reads that to
+        pick the right sample path per server: a remote tool server was handed
+        the bytes at a path of its own, and a wrapper that pinned one path for
+        every tool would send the local one to the remote server.
+
         Returns how many tools were renamed, so the caller can log it once
         per server instead of per tool.
         """
@@ -987,12 +993,16 @@ class ServerRegistry:
             owner = seen.get(name)
             if owner == server:
                 continue
+            update: dict[str, Any] = {
+                "metadata": {**(getattr(tool, "metadata", None) or {}), "maljan_server": server}
+            }
             if owner is not None:
                 name = f"{server}__{name}"
                 if seen.get(name) == server:
                     continue
-                tool = tool.model_copy(update={"name": name})
+                update["name"] = name
                 renamed += 1
+            tool = tool.model_copy(update=update)
             seen[name] = server
             tools.append(tool)
         return renamed
