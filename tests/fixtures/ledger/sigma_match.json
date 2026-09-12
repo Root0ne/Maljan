@@ -1,0 +1,9 @@
+{
+  "matches": [
+    {"id": "abc-123", "title": "Suspicious Run Key",
+     "meta": {"level": "high", "technique_ids": ["T1547.001"]},
+     "matched_fields": ["TargetObject"]}
+  ],
+  "rule_count": 200,
+  "rule_errors": 0
+}

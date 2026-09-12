@@ -1,0 +1,7 @@
+{
+  "signatures": [
+    {"name": "injection_runpe", "description": "Injects into a suspended process",
+     "severity": 3, "confidence": 100, "references": []}
+  ],
+  "total": 1
+}

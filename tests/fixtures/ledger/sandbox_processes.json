@@ -1,0 +1,7 @@
+{
+  "processes": [
+    {"pid": 1234, "ppid": 800, "name": "evil.exe", "command_line": "evil.exe -install",
+     "first_seen": 1.0, "call_count": 900}
+  ],
+  "total": 1
+}

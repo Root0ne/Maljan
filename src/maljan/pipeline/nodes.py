@@ -33,6 +33,7 @@ from maljan.pipeline.events import (
 )
 from maljan.pipeline.state import AgentArgument, AnalysisState
 from maljan.pipeline.sycophancy_detector import build_revision_directive, detect_sycophancy
+from maljan.schemas.evidence import LedgerEntry
 from maljan.schemas.isr_models import AgentISR
 from maljan.schemas.stix_models import Bundle
 
@@ -2087,11 +2088,11 @@ def make_report_node(container: ServiceContainer) -> Any:
         ]
 
         # Evidence-only static providers (capa_yara) have no ISR and no tool
-        # loop: the report is the only place their findings reach, so the
-        # bundle is collected once here and threaded through the builder
-        # (into ``report.static``) and into ``tool_evidence`` (into
-        # ``report.technical_evidence``) below. Best-effort — a provider
-        # failure here must never fail the report.
+        # loop, so nothing writes their passes to the evidence ledger as they
+        # run. The bundle is collected once here, turned into ledger entries
+        # below, and its rendered tables still reach the Composer through
+        # ``report.technical_evidence``. Best-effort — a provider failure here
+        # must never fail the report.
         _static_bundle = None
         try:
             _static_provider = container.get_static_provider()
@@ -2110,6 +2111,23 @@ def make_report_node(container: ServiceContainer) -> Any:
                 exc,
             )
             _static_bundle = None
+
+        # The run's evidence, in the order the ids were issued, plus the
+        # entries the evidence-only static provider could not write itself.
+        _ledger: list[LedgerEntry] = []
+        for _row in state.get("evidence_ledger") or []:
+            try:
+                _ledger.append(LedgerEntry.model_validate(_row))
+            except Exception as exc:  # noqa: BLE001 — one bad row is not a lost report
+                logger.debug("report_node: unreadable ledger row skipped (%s).", exc)
+        if _static_bundle is not None:
+            try:
+                from maljan.providers.static.capa_yara import ledger_entries
+
+                _ledger.extend(ledger_entries(_static_bundle, container.get_evidence_counter()))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("report_node: capa/YARA evidence not recorded (%s).", exc)
+        _ledger.sort(key=lambda entry: entry.seq)
 
         try:
             builder = MalwareReportBuilder(
@@ -2130,10 +2148,11 @@ def make_report_node(container: ServiceContainer) -> Any:
                 # high verdict/severity on a low-data run is not read as authoritative.
                 degraded_mode=bool(state.get("degraded_mode")),
                 degradation_reasons=cast("list[str]", state.get("degradation_reasons") or []),
-                # Platform-gate persistence scanners (no Windows registry
-                # persistence on a Linux sample, and vice versa).
+                # The routing minimum, which stands in for the identity block
+                # when no agent called an identification tool.
                 sample_platform=state.get("platform"),
-                static_evidence=_static_bundle,
+                sample_file_type=state.get("file_type"),
+                evidence_ledger=_ledger,
             )
             # Deterministic and self-contained — every input is already in the
             # builder — so a thread changes when it runs, never what it
@@ -2196,6 +2215,32 @@ def make_report_node(container: ServiceContainer) -> Any:
         except Exception as exc:  # noqa: BLE001
             logger.error("report_node: deterministic build failed (%s).", exc, exc_info=True)
             return {"report_error": f"{type(exc).__name__}: {exc}"}
+
+        # What the report is standing on, counted. ``sections_without_evidence``
+        # is the number that matters: a section that can name neither a ledger
+        # entry nor the finding it came from is ungrounded, and a run where
+        # that number is not zero has a defect worth seeing rather than a
+        # report worth reading.
+        _by_tool: dict[str, int] = {}
+        for _entry in _ledger:
+            _by_tool[_entry.tool] = _by_tool.get(_entry.tool, 0) + 1
+        _summary = dict(report.run_summary or {})
+        _summary["evidence"] = {
+            "entries": len(_ledger),
+            "ok": sum(1 for e in _ledger if e.ok),
+            "failed": sum(1 for e in _ledger if not e.ok),
+            "trimmed": sum(1 for e in _ledger if e.truncated),
+            "by_tool": dict(sorted(_by_tool.items())),
+        }
+        _summary["sections_without_evidence"] = sum(
+            1 for section in report.sections if not section.evidence_ids and not section.source
+        )
+        report.run_summary = _summary
+        if _summary["sections_without_evidence"]:
+            logger.warning(
+                "report_node: %d report section(s) carry no evidence id and no source.",
+                _summary["sections_without_evidence"],
+            )
 
         # Narrative LLM round. NarrativeAgent is None in mock mode;
         # also returns None when the structured-output and manual-parse

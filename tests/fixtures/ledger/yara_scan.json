@@ -1,0 +1,7 @@
+{
+  "matches": [
+    {"rule": "Win32_Loader_Generic", "tags": ["loader"], "strings": ["$a at 0x1040"]}
+  ],
+  "rule_count": 412,
+  "filtered": 0
+}

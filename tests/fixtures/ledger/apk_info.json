@@ -1,0 +1,10 @@
+{
+  "package": "com.example.evil",
+  "version_name": "1.2",
+  "min_sdk": "21",
+  "permissions": ["android.permission.INTERNET", "android.permission.READ_SMS"],
+  "activities": ["com.example.evil.MainActivity"],
+  "services": ["com.example.evil.Beacon"],
+  "receivers": [],
+  "providers": []
+}

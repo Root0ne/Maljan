@@ -1,0 +1,7 @@
+{
+  "dropped": [
+    {"name": "svchost.exe", "path": "C:\\Users\\admin\\AppData\\svchost.exe",
+     "size": 51200, "sha256": "aa", "type": "PE32 executable"}
+  ],
+  "total": 1
+}

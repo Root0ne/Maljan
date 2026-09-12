@@ -1,0 +1,8 @@
+{
+  "file_type": "PE",
+  "platform": "windows",
+  "mime": "application/x-dosexec",
+  "size": 204800,
+  "magic_hex": "4d5a90000300000004000000ffff0000",
+  "category": "executable"
+}

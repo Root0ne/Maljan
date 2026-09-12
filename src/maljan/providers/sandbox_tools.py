@@ -112,7 +112,7 @@ def sandbox_processes(report: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def sandbox_network(report: dict[str, Any] | None) -> dict[str, Any]:
-    """DNS lookups, hosts, HTTP requests and TCP/UDP endpoints, bounded per kind.
+    """DNS lookups, hosts, HTTP requests, TCP/UDP endpoints and TLS, per kind.
 
     Per-kind bounds rather than one shared budget: a sample that made a
     thousand DNS lookups must not push its two HTTP requests out of the answer.
@@ -123,7 +123,7 @@ def sandbox_network(report: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(network, dict):
         return {"dns": [], "hosts": [], "http": [], "tcp": [], "udp": []}
     out: dict[str, Any] = {}
-    for key in ("dns", "hosts", "http", "tcp", "udp", "domains", "icmp"):
+    for key in ("dns", "hosts", "http", "tcp", "udp", "domains", "icmp", "tls"):
         rows = network.get(key)
         if isinstance(rows, list):
             out[key] = rows[:_ROW_LIMIT]

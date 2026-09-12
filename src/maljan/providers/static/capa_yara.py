@@ -2,11 +2,12 @@
 
 No tool server and no ReAct loop — this provider runs two deterministic
 passes over the sample's bytes and hands the pipeline a
-``StaticEvidenceBundle`` that ``ReportBuilder`` folds into the same
-``StaticAnalysis`` the PE extractor fills. capa namespaces become capability
-counters, capa's ATT&CK metadata becomes technique hits with the matching
-rule as evidence, and the rendered tables plus any YARA hits become
-``technical_evidence`` for the report's technical spine.
+``StaticEvidenceBundle``. Because there is no loop, there is nothing to write
+its calls to the evidence ledger, so ``ledger_entries`` does it here: the capa
+rule hits and the YARA matches become entries in the shape the ``capa`` and
+``yara_scan`` tools return, under the agent id ``capa_yara``, and reach the
+report's sections the same way every other tool call does. The rendered
+tables stay for the Composer's evidence bundles.
 
 Both libraries are optional. A missing one lowers ``provides_evidence`` to
 False with one warning — the same shape as ``SandboxNotAvailableError`` —
@@ -34,6 +35,7 @@ this environment via ``uv sync --extra capa``); a few names moved since the
 
 from __future__ import annotations
 
+import json
 import multiprocessing as mp
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
@@ -42,7 +44,6 @@ from maljan.core.logger import logger
 from maljan.core.paths import resolve_data
 from maljan.providers.base import StaticCapabilities, StaticEvidenceBundle, StaticProvider
 from maljan.providers.registry import register_static_provider
-from maljan.reporting.models import StaticAnalysis
 from maljan.schemas.tool_evidence import MAX_OUTPUT_CHARS, trim_output
 
 if TYPE_CHECKING:
@@ -248,12 +249,26 @@ class CapaYaraStaticProvider(StaticProvider):
         capabilities: dict[str, int] = {}
         hits: list[dict[str, Any]] = []
         rows: list[dict[str, str]] = []
+        capa_rows: list[dict[str, Any]] = []
         for name, rule in ((capa_result or {}).get("rules") or {}).items():
             meta = rule.get("meta") or {}
             namespace = str(meta.get("namespace") or "")
             top = namespace.split("/", 1)[0] if namespace else "uncategorised"
             capabilities[top] = capabilities.get(top, 0) + 1
             rows.append({"rule": str(name), "namespace": namespace})
+            capa_rows.append(
+                {
+                    "namespace": namespace,
+                    "rule": str(name),
+                    "attck": [
+                        str((attack or {}).get("id") or "")
+                        for attack in meta.get("attack") or []
+                        if (attack or {}).get("id")
+                    ],
+                    "mbc": [],
+                    "match_count": len(rule.get("matches") or []),
+                }
+            )
             for attack in meta.get("attack") or []:
                 tid = str((attack or {}).get("id") or "")
                 if not tid:
@@ -279,6 +294,8 @@ class CapaYaraStaticProvider(StaticProvider):
             technique_hits=hits,
             strings=[],
             technical_evidence=evidence,
+            capa_rules=capa_rows,
+            yara_matches=list(yara_hits),
         )
 
     # ------------------------------------------------------------------
@@ -408,18 +425,42 @@ def _render_yara(hits: list[dict[str, Any]]) -> str:
     return trim_output("\n".join(lines), MAX_OUTPUT_CHARS)
 
 
-def merge_static_evidence(static: StaticAnalysis, bundle: StaticEvidenceBundle) -> StaticAnalysis:
-    """Fold a ``StaticEvidenceBundle`` into an existing ``StaticAnalysis``.
+def ledger_entries(bundle: StaticEvidenceBundle, counter: Any) -> list[Any]:
+    """The bundle as evidence-ledger entries, one per pass that found anything.
 
-    Returns a new object (``model_copy``) — the caller's ``static`` is never
-    mutated. Counters are summed key-by-key; technique hits are appended,
-    never deduplicated (the PE extractor's and capa's hits are independent
-    evidence for the same technique, not the same claim twice).
+    A provider without a tool loop has no seam that records its calls, so it
+    records them itself. Timing is not available after the fact and is left at
+    zero rather than invented; what matters is that the rows are citable and
+    reach the report's sections through the same path a tool call does.
     """
-    if not bundle.api_capabilities and not bundle.technique_hits:
-        return static
-    capabilities = dict(static.api_capabilities)
-    for key, count in bundle.api_capabilities.items():
-        capabilities[key] = capabilities.get(key, 0) + count
-    hits = [*static.api_technique_hits, *bundle.technique_hits]
-    return static.model_copy(update={"api_capabilities": capabilities, "api_technique_hits": hits})
+    from maljan.schemas.evidence import build_entry
+
+    out: list[Any] = []
+    for tool, payload in (
+        ("capa", {"capabilities": bundle.capa_rules} if bundle.capa_rules else None),
+        (
+            "yara_scan",
+            {
+                "matches": bundle.yara_matches,
+                "rule_count": len(bundle.yara_matches),
+                "filtered": 0,
+            }
+            if bundle.yara_matches
+            else None,
+        ),
+    ):
+        if payload is None:
+            continue
+        entry_id, seq = counter.next_id()
+        out.append(
+            build_entry(
+                entry_id=entry_id,
+                seq=seq,
+                agent="capa_yara",
+                tool=tool,
+                args={},
+                server=None,
+                output=json.dumps(payload),
+            )
+        )
+    return out

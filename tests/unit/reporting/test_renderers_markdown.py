@@ -15,17 +15,15 @@ import pytest
 from maljan.reporting.builder import MalwareReportBuilder
 from maljan.reporting.models import MalwareReport
 from maljan.reporting.renderers.markdown import MarkdownRenderer
+from tests.unit.reporting._ledger_helpers import ledger_from_sandbox, persistence_isr
 
+# The headings every report carries, whatever the run gathered.
 REQUIRED_HEADINGS = [
     "# Malware Analysis Report",
     "## Sample Identification",
     "## Severity & Impact",
     "## Executive Summary",
     "## Capabilities Narrative",
-    "## Static Analysis",
-    "## Dynamic Behavior",
-    "## Network IOCs",
-    "## Persistence Mechanisms",
     "## MITRE ATT&CK Matrix",
     "## Family Attribution",
     "## Detection Signatures",
@@ -34,13 +32,27 @@ REQUIRED_HEADINGS = [
     "## Run Summary",
 ]
 
+# The headings that appear only when the run filled the block behind them. An
+# empty "Dynamic Behavior" section used to print a sentence apologising for
+# itself, which reads as a gap in the sample rather than a run that never
+# called a sandbox tool.
+EVIDENCE_DEPENDENT_HEADINGS = [
+    "## Static Analysis",
+    "## Dynamic Behavior",
+    "## Network IOCs",
+    "## Persistence Mechanisms",
+]
+
 
 def _build(**kwargs: Any) -> MalwareReport:
+    # A sandbox fixture reaches the report through the tools a dynamic analyst
+    # would have called on it, which is the only route there is now.
+    _sandbox = kwargs.pop("sandbox_report", {})
     return MalwareReportBuilder(
         file_hash=kwargs.pop("file_hash", "a" * 64),
         file_name=kwargs.pop("file_name", "fixture.bin"),
         sample_path=kwargs.pop("sample_path", None),
-        sandbox_report=kwargs.pop("sandbox_report", {}),
+        sandbox_report=_sandbox,
         reports=kwargs.pop("reports", {}),
         isr_reports=kwargs.pop("isr_reports", {}),
         stix_output=kwargs.pop("stix_output", {"objects": []}),
@@ -61,6 +73,8 @@ def _build(**kwargs: Any) -> MalwareReport:
         overall_confidence=kwargs.pop("overall_confidence", 0.85),
         cascade_summary=kwargs.pop("cascade_summary", None),
         malware_category=kwargs.pop("malware_category", None),
+        evidence_ledger=kwargs.pop("evidence_ledger", None)
+        or (ledger_from_sandbox(_sandbox) if _sandbox else []),
     ).build_deterministic()
 
 
@@ -71,6 +85,12 @@ class TestMinimalReport:
         markdown = MarkdownRenderer().render(report)
         for heading in REQUIRED_HEADINGS:
             assert heading in markdown, f"missing heading: {heading}"
+
+    def test_empty_typed_blocks_are_left_out(self) -> None:
+        report = MalwareReportBuilder.apply_fallback_narrative(_build())
+        markdown = MarkdownRenderer().render(report)
+        for heading in EVIDENCE_DEPENDENT_HEADINGS:
+            assert heading not in markdown, f"empty section printed: {heading}"
 
     def test_markdown_is_long_enough(self) -> None:
         report = _build()
@@ -219,6 +239,17 @@ class TestRansomwareReport:
             sandbox_report=sandbox,
             malware_category="ransomware",
             overall_confidence=0.92,
+            isr_reports={
+                "dynamic": persistence_isr(
+                    [
+                        [
+                            "registry_run",
+                            "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                            "C:\\Users\\Public\\lockbit.exe",
+                        ]
+                    ]
+                )
+            },
         )
         return MalwareReportBuilder.apply_fallback_narrative(report)
 
@@ -228,10 +259,11 @@ class TestRansomwareReport:
         assert "1.2.3.4" in markdown
 
     def test_ja3_and_ja3s_fingerprints_rendered(self, report: MalwareReport) -> None:
+        # The TLS rows have no typed home in ``NetworkIOCs`` any more; they
+        # reach the report as the evidence section built from the sandbox
+        # network call, which is where a reader can also see the call id.
         markdown = MarkdownRenderer().render(report)
-        assert "### JA3 Fingerprints" in markdown
         assert "client-fp-1" in markdown
-        assert "### JA3S Fingerprints" in markdown
         assert "server-fp-1" in markdown
 
     def test_persistence_table_present(self, report: MalwareReport) -> None:
