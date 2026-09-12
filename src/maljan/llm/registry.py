@@ -223,18 +223,20 @@ def structured_output_supported(config: Any | None = None, llm: Any | None = Non
     endpoint is not a reason to gamble half an hour of a job on it.
     """
     try:
+        # A per-agent endpoint is as local as a global one, and the model
+        # object is the only place it survives: ChatOpenAI keeps it as
+        # ``openai_api_base`` (``base_url`` is the constructor alias). It is
+        # checked before the global provider name because the agent that owns
+        # this model may run on ``openai`` while the global provider is not.
+        # Only a real non-empty string counts — anything else is an object
+        # that answers every attribute, not a configured endpoint.
+        if llm is not None:
+            candidate = getattr(llm, "openai_api_base", None)
+            if isinstance(candidate, str) and candidate.strip():
+                return False
         if config is not None:
             provider_name = str(config.llm.provider)
             base_url = getattr(config.llm.openai, "base_url", None)
-            # A per-agent endpoint is as local as a global one, and the model
-            # object is the only place it survives: ChatOpenAI keeps it as
-            # ``openai_api_base`` (``base_url`` is the constructor alias).
-            # Only a real non-empty string counts — anything else is an object
-            # that answers every attribute, not a configured endpoint.
-            if not base_url and llm is not None:
-                candidate = getattr(llm, "openai_api_base", None)
-                if isinstance(candidate, str) and candidate.strip():
-                    base_url = candidate
             if provider_name == "openai" and base_url:
                 return False
         elif llm is not None:

@@ -65,6 +65,15 @@ class TestALocalServerIsNotTheVendorAPI:
             is False
         )
 
+    def test_the_model_endpoint_wins_over_a_different_global_provider(self) -> None:
+        """An ``openai`` agent on a local server while the global provider is not."""
+        assert (
+            structured_output_supported(
+                _config("anthropic", None), _llm(openai_api_base="http://127.0.0.1:8081/v1")
+            )
+            is False
+        )
+
     def test_a_model_object_without_an_endpoint_changes_nothing(self) -> None:
         assert (
             structured_output_supported(_config("openai", None), _llm(openai_api_base=None)) is True
