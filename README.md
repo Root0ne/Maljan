@@ -6,6 +6,8 @@
 <p align="center"><em>Multi-Agent Malware Analysis Framework</em></p>
 
 [![CI](https://github.com/Root0ne/Maljan/actions/workflows/ci.yml/badge.svg)](https://github.com/Root0ne/Maljan/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/Root0ne/Maljan/actions/workflows/codeql.yml/badge.svg)](https://github.com/Root0ne/Maljan/actions/workflows/codeql.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Root0ne/Maljan/badge)](https://scorecard.dev/viewer/?uri=github.com/Root0ne/Maljan)
 [![Python](https://img.shields.io/badge/python-3.13-blue)](https://www.python.org/)
 [![Licence](https://img.shields.io/badge/licence-MIT-blue)](LICENSE)
 

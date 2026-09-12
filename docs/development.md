@@ -90,6 +90,20 @@ one subdirectory per subpackage, and is where a new test starts.
 | `frontend` | `tsc --noEmit`, eslint, vitest and a production `next build`. |
 | `e2e` | Playwright, through the same `npm run test:e2e` entry point developers use. |
 
+Three more workflows run beside CI. **CodeQL** analyses Python, TypeScript and
+the workflow files themselves on every push and pull request to `main` and
+`dev`, with the `security-extended` query suite, and weekly. **Dependency
+review** blocks a pull request that introduces a dependency with a known high
+or critical vulnerability or a copyleft licence. **OpenSSF Scorecard** runs on
+`main` weekly and publishes its findings to code scanning. Dependabot opens
+weekly update pull requests against `dev` for the uv workspace, the web
+console, the pinned GitHub Actions and the Docker base images; security
+updates arrive as soon as an advisory matches. Every action in a workflow is
+pinned to a commit with its version in a comment, which Dependabot keeps
+current. Secret scanning with push protection is on for the repository, and
+vulnerabilities are reported through private vulnerability reporting (see
+[SECURITY.md](../SECURITY.md)).
+
 ## Conventions
 
 - Conventional commits, one logical slice per commit.
