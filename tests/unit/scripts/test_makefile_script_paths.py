@@ -1,8 +1,8 @@
 """Every scripts/... path the Makefile names must exist.
 
-Task 4 regroups twenty scripts into five directories. A target that still names
-the old path fails only when somebody runs that target, which for a rarely used
-generator can be weeks later. Reading the Makefile and stat-ing what it names
+The scripts live in five directories. A target that still names an old path
+fails only when somebody runs that target, which for a rarely used generator
+can be weeks later. Reading the Makefile and stat-ing what it names
 turns that into a test failure in the same commit as the move.
 """
 
