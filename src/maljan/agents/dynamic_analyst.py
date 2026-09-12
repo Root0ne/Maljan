@@ -11,8 +11,8 @@ from typing import Any
 
 from langchain_core.prompts import ChatPromptTemplate
 
-from maljan.agents.base_agent import BaseAnalyst
-from maljan.agents.prompt_fragments import format_fragment
+from maljan.agents.base_agent import BaseAnalyst, prompt_to_messages
+from maljan.agents.prompt_fragments import FINDINGS_BLOCK_FRAGMENT, format_fragment
 from maljan.agents.registry import register_agent
 from maljan.agents.static_analyst import _parse_claim_blocks, _parse_disputes
 from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
@@ -33,10 +33,10 @@ _DYN_HEAD = (
     "T1059 (Command Execution).\n\n"
 )
 
-# Empty today. Declared because the assembly order is the contract the tool
-# server and agent-composition layers build agent prompts from, and an
-# implicit empty tail is a trap.
-_DYN_TAIL = ""
+# The optional structured channel, appended after the provider fragment so it
+# is the last thing the analyst reads before it answers. The assembly order is
+# the contract the tool-server and agent-composition layers build prompts from.
+_DYN_TAIL = FINDINGS_BLOCK_FRAGMENT
 
 # Back-compat, and the fallback for an analyst built outside a container: the
 # neutral assembly, against CAPEv2 — the sandbox this project has always
@@ -239,7 +239,10 @@ class DynamicAnalyst(BaseAnalyst):
             or "No peer reports available."
         )
 
-        prompt = ChatPromptTemplate.from_messages(
+        # Built as messages rather than through a template: the resolved system
+        # prompt carries a literal JSON example (the findings block), and a
+        # ``ChatPromptTemplate`` reads every ``{...}`` in it as a variable.
+        messages = prompt_to_messages(
             [
                 (
                     "system",
@@ -251,27 +254,22 @@ class DynamicAnalyst(BaseAnalyst):
                 ),
                 (
                     "human",
-                    "YOUR ORIGINAL REPORT:\n{own_report}\n\n"
-                    "PEER REPORTS:\n{peer_section}\n\n"
-                    "MEDIATOR FEEDBACK:\n{mediator_feedback}\n\n"
-                    "RAW DATA:\n{data}\n\n"
-                    "Format your response as structured claims (CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE)\n"
+                    f"YOUR ORIGINAL REPORT:\n{own_report}\n\n"
+                    f"PEER REPORTS:\n{peer_isr_summaries}\n\n"
+                    f"MEDIATOR FEEDBACK:\n{mediator_feedback}\n\n"
+                    f"RAW DATA:\n{original_data}\n\n"
+                    "Format your response as structured claims "
+                    "(CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE)\n"
                     "followed by a DISPUTES section listing peer claims you reject.\n"
                     "Example:\n"
                     "CLAIM: ...\nEVIDENCE: ...\nCONFIDENCE: 0.8\nTECHNIQUE: T1055\n---\n"
-                    "DISPUTES:\n- Static analyst claims no API injection but I see WriteProcessMemory.\n",
+                    "DISPUTES:\n- Static analyst claims no API injection but I see "
+                    "WriteProcessMemory.\n",
                 ),
             ]
         )
 
-        response = (prompt | self.llm).invoke(
-            {
-                "own_report": own_report,
-                "peer_section": peer_isr_summaries,
-                "mediator_feedback": mediator_feedback,
-                "data": original_data,
-            }
-        )
+        response = self.llm.invoke(messages)
         content = str(response.content)
 
         claims = _parse_claim_blocks(content)

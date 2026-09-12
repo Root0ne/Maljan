@@ -33,7 +33,7 @@ from maljan.core.exceptions import AgentLoopCancelled, AnalystError
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger, record_response_usage
 from maljan.schemas.evidence import EvidenceCounter, LedgerEntry, apply_budget
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from maljan.schemas.isr_models import AgentISR, Artifact, ClaimEvidence, Finding
 from maljan.schemas.tool_evidence import CapturedToolOutput
 
 # Regex: matches MITRE ATT&CK technique IDs like T1055 or T1055.001.
@@ -1125,6 +1125,13 @@ class BaseAnalyst(ABC):
         # and truncation ledgers. None outside a job: the recorder then counts
         # within its own loop.
         self.evidence_counter: EvidenceCounter | None = None
+        # What the optional ``maljan-findings`` block carried, accumulated as
+        # the loop answers and drained onto the ISR the analyst returns. A
+        # buffer rather than a return value because the block arrives with the
+        # model's prose, several turns before the ISR is assembled, and on a
+        # chunked run it arrives once per chunk.
+        self._findings_buffer: list[Finding] = []
+        self._artifacts_buffer: list[Artifact] = []
         # Declared here rather than only in the subclasses that populate them,
         # because ``close_tools`` below has to be able to release them for any
         # analyst. ``toolkit`` is an MCP toolkit or a Ghidra HTTP client
@@ -1438,7 +1445,7 @@ class BaseAnalyst(ABC):
         no_tools_timeout = _timeout_overrides.get(self.name, cfg_for_timeout.react_agent_timeout)
 
         if not self.tools:
-            return self._invoke_llm_with_timeout(prebuilt, no_tools_timeout)
+            return self._capture_findings(self._invoke_llm_with_timeout(prebuilt, no_tools_timeout))
 
         from langgraph.prebuilt import create_react_agent
 
@@ -1639,8 +1646,8 @@ class BaseAnalyst(ABC):
             # 1,530 s cap, and zero techniques out the other side.
             synthesized = self._force_final_synthesis(msgs, timeout, elapsed)
             if synthesized.strip() and not _RECURSION_STOP_RE.search(synthesized):
-                return synthesized
-        return content
+                return self._capture_findings(synthesized)
+        return self._capture_findings(content)
 
     def _record_react_loop(self, *, hit_step_cap: bool) -> None:
         """Count one ReAct loop and whether it exhausted its step budget.
@@ -1688,6 +1695,42 @@ class BaseAnalyst(ABC):
             self.logger.debug("evidence ledger not published: %s", exc)
             self._last_evidence_entries = []
             self._last_tool_evidence = []
+
+    def _capture_findings(self, content: str) -> str:
+        """Take the structured block out of an answer and keep what it carried.
+
+        The prose comes back without the block, so the ISR parser, the
+        transcript and the report all see what a person would read. Never
+        raises: an agent that emitted a malformed block still wrote an answer.
+        """
+        try:
+            from maljan.agents.findings_block import parse_findings_block
+
+            block = parse_findings_block(content)
+            if not block:
+                return content
+            self._findings_buffer.extend(block.findings)
+            self._artifacts_buffer.extend(block.artifacts)
+            self.logger.info(
+                "%s: findings block carried %d finding(s) and %d artifact(s).",
+                self.name,
+                len(block.findings),
+                len(block.artifacts),
+            )
+            return block.prose
+        except Exception as exc:  # noqa: BLE001
+            self.logger.debug("findings block not read: %s", exc)
+            return content
+
+    def _drain_findings(self, isr: AgentISR) -> AgentISR:
+        """Move the buffered structured channel onto ``isr`` and clear it."""
+        if self._findings_buffer:
+            isr.findings = list(self._findings_buffer)
+        if self._artifacts_buffer:
+            isr.artifacts = list(self._artifacts_buffer)
+        self._findings_buffer = []
+        self._artifacts_buffer = []
+        return isr
 
     def get_last_evidence_entries(self) -> list[LedgerEntry]:
         """The ledger entries the most recent ReAct loop wrote."""
@@ -2177,6 +2220,7 @@ class BaseAnalyst(ABC):
         or no evidence is available. Never raises (a gate failure must not lose
         the run).
         """
+        self._drain_findings(isr)
         try:
             if not get_settings().preprocessing.use_claim_consistency_gate:
                 return isr
@@ -2211,9 +2255,10 @@ class BaseAnalyst(ABC):
         """Wrapper around revise_isr() with error handling."""
         try:
             truncated = self._truncate_input(original_data)
-            return self.revise_isr(
+            text, isr = self.revise_isr(
                 truncated, own_report, peer_reports, mediator_feedback, revision_round
             )
+            return text, self._drain_findings(isr)
         except AnalystError:
             raise
         except Exception as e:
