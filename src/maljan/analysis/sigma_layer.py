@@ -1,38 +1,34 @@
-"""Sigma rule-based log analysis — ATT&CK Layer 0 deterministic detection.
+"""Sigma rule matching over sandbox telemetry, behind ``tools.rules.sigma_match``.
 
-Sigma and YARA are complementary layers:
+Sigma and YARA are complementary:
   - YARA: looks at the sample's binary content.
   - Sigma: looks at structured telemetry events (process creation, registry
     writes) built from the sandbox report (Sysmon/Windows-Event-Log shaped).
 
-The pipeline feeds Sigma structured events built from real
-sandbox telemetry via ``build_events_from_sandbox`` + ``scan_events`` (strict
-field matching). The legacy ``scan_report_text``/``scan_log_lines`` prose path
-is retained only for tests/back-compat — it must NOT be used on analyst prose,
-because ``strict=False`` matches rule values against arbitrary text and
-manufactures false detections.
+An agent reaches this through the ``analysis`` sidecar and decides what a match
+means. It is no longer a pipeline stage that mints claims of its own: a rule
+firing is a fact a tool reports, and whether it supports a technique is the
+analyst's reading of it.
 
-Together they cover the full deterministic-signal surface. Without Sigma,
-log-based attack patterns (e.g. LSASS access, unnecessary LOLBin usage)
-have to be handed entirely to the LLM.
+The tool feeds Sigma structured events built from real sandbox telemetry via
+``build_events_from_sandbox`` + ``scan_events`` (strict field matching). The
+``scan_report_text``/``scan_log_lines`` prose path is retained only for
+tests/back-compat — it must NOT be used on analyst prose, because
+``strict=False`` matches rule values against arbitrary text and manufactures
+false detections.
 
 Design decisions:
   - Self-contained: rules are parsed via pySigma into an AST and evaluated
     in-process; no out-of-process Sigma backend is required.
   - Graceful degradation: if the rules directory is missing, an empty
-    instance is returned and the pipeline keeps running.
-  - Singleton: accessed via ServiceContainer.get_sigma_layer().
-  - to_isr(): matches are converted directly into AgentISR with
-    domain="sigma".
+    instance is returned and the caller keeps running.
 
-Rule set source: data/sigma_rules/**/*.yml
+Rule set source: data/sigma_rules/**/*.yml, or ``MALJAN_SIGMA_RULES_DIR``.
     Sigma YAML format: https://sigmahq.io/docs/basics/rules.html
 
 Usage:
     layer = SigmaLayer.from_default_rules()
-    matches = layer.scan_log_lines(log_lines, log_source="sysmon")
-    matches += layer.scan_report_text(report_text)
-    isr = layer.to_isr(matches)
+    matches = layer.scan_events(events, log_source="sandbox")
 """
 
 from __future__ import annotations
@@ -40,7 +36,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 # pySigma imports
 from sigma.collection import SigmaCollection
@@ -54,9 +50,6 @@ from sigma.rule import SigmaRule
 from sigma.types import SigmaNumber, SigmaRegularExpression, SigmaString, SpecialChars
 
 from maljan.core.logger import logger
-
-if TYPE_CHECKING:
-    from maljan.schemas.isr_models import AgentISR
 
 # ---------------------------------------------------------------------------
 # Default rules directory
@@ -562,29 +555,6 @@ class SigmaLayer:
         """Zero the rule-drop and rule-error counters before a fresh scan suite."""
         self._filtered_count = 0
         self._rule_errors = 0
-
-    def to_isr(self, matches: list[SigmaMatch]) -> AgentISR:
-        from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-
-        claims: list[ClaimEvidence] = []
-        for match in matches:
-            claims.append(
-                ClaimEvidence(
-                    claim=match.claim_text,
-                    evidence_ref=match.evidence_ref,
-                    confidence=match.confidence,
-                    technique_id=match.technique_id,
-                    rule_platforms=list(match.rule_platforms) if match.rule_platforms else None,
-                )
-            )
-
-        return AgentISR(
-            agent_id="sigma_layer",
-            domain="sigma",
-            claims=claims,
-            dissent_items=[],
-            revision_round=0,
-        )
 
 
 # ---------------------------------------------------------------------------

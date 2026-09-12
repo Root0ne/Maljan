@@ -1,4 +1,4 @@
-"""Score a domain, and turn the algorithmic ones into a claim.
+"""Score a domain, and decide whether an address is worth reporting.
 
 This module used to pull the whole network section out of a sandbox report
 inside the report builder. It does not any more — the report is assembled from
@@ -7,10 +7,9 @@ extraction: the DGA scorer, the IDN homograph check and the emittable-address
 rules that decide whether an observed indicator is worth reporting at all.
 
 ``reporting.ledger_projection`` applies the scorer to the domains a run
-actually observed, and ``build_dga_isr`` turns the algorithmic ones into a
-Layer-0 claim. Both go in the next phase, when the judgement layers are
-reworked; the scorer lives here until then so there is one definition of what
-"looks generated" means.
+actually observed, and the score reaches the report as the ``is_suspicious``
+flag on an observed domain — a described property of something a tool saw, not
+a technique claim asserted over an analyst's head.
 """
 
 from __future__ import annotations
@@ -19,12 +18,6 @@ import ipaddress
 import math
 import unicodedata
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
-
-from maljan.reporting.models import NetworkIOCs
-
-if TYPE_CHECKING:
-    from maljan.schemas.isr_models import AgentISR
 
 # Domains we never want to flag as suspicious — common SaaS / OS update
 # infrastructure. Extend rather than replace.
@@ -89,10 +82,6 @@ _SUSPICIOUS_DOMAIN_TOKENS: tuple[str, ...] = (
 # signals) clears this threshold is treated as algorithmically generated
 # (surfaced as ``is_suspicious`` in the NETWORK tab).
 _DGA_SCORE_THRESHOLD: float = 0.55
-# Asserting a deterministic ATT&CK technique (T1568.002) demands more certainty
-# than a surface suspicion flag, so the claim is only emitted above this higher
-# bar. Borderline domains (0.55..0.65) stay flagged but assert no technique.
-_DGA_CLAIM_THRESHOLD: float = 0.65
 # Labels shorter than this are never scored as DGA. Short brandable names
 # (e.g. "facebook", "telegram") have inflated normalised entropy simply
 # because they have few repeated characters, so scoring them invites false
@@ -491,52 +480,6 @@ def _is_latin(ch: str) -> bool:
         return "LATIN" in unicodedata.name(ch)
     except ValueError:
         return False
-
-
-def build_dga_isr(network_iocs: NetworkIOCs | None) -> AgentISR | None:
-    """Turn high-confidence DGA domains into a deterministic ATT&CK claim.
-
-    Mirrors ``SigmaLayer.to_isr`` / ``YaraLayer.to_isr``: emits one
-    ``AgentISR`` (domain ``"network"``) carrying a ``T1568.002`` (Dynamic
-    Resolution: Domain Generation Algorithms) claim per domain whose
-    ``dga_score`` clears :data:`_DGA_CLAIM_THRESHOLD` — a higher bar than the
-    suspicion threshold, so only strong signals assert the technique.
-
-    Confidence is the domain's own score capped at 0.75: a lone heuristic must
-    not by itself drive a high-confidence verdict (the TTP cascade boosts it
-    only when another layer corroborates). Returns ``None`` when nothing
-    qualifies.
-    """
-    if network_iocs is None:
-        return None
-    from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-
-    claims: list[ClaimEvidence] = []
-    for domain in network_iocs.domains:
-        score = domain.dga_score
-        if score is None or score < _DGA_CLAIM_THRESHOLD:
-            continue
-        claims.append(
-            ClaimEvidence(
-                claim=(
-                    f"Algorithmically-generated domain (DGA): {domain.fqdn} (score {score:.2f})"
-                ),
-                evidence_ref=f"network_extractor: dga_score={score:.3f} for {domain.fqdn}",
-                confidence=round(min(score, 0.75), 2),
-                technique_id="T1568.002",
-                rule_platforms=["any"],
-            )
-        )
-
-    if not claims:
-        return None
-    return AgentISR(
-        agent_id="network_dga",
-        domain="network",
-        claims=claims,
-        dissent_items=[],
-        revision_round=0,
-    )
 
 
 # ---------------------------------------------------------------------------

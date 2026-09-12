@@ -1,30 +1,27 @@
-"""Deterministic LOLBin signed-binary-proxy-execution detection (Layer 0).
+"""Deterministic LOLBin signed-binary-proxy-execution detection.
 
-Flags **suspicious** use of the common living-off-the-land binaries
-``regsvr32`` / ``rundll32`` / ``mshta`` from process command lines and emits an
-``AgentISR`` carrying the matching MITRE ATT&CK technique:
+Classifies **suspicious** use of the common living-off-the-land binaries
+``regsvr32`` / ``rundll32`` / ``mshta`` in a process command line, and names the
+matching MITRE ATT&CK technique:
 
   * ``regsvr32`` -> T1218.010
   * ``rundll32`` -> T1218.011
   * ``mshta``    -> T1218.005
 
-These binaries are ubiquitous and overwhelmingly benign, so detection requires a
+These binaries are ubiquitous and overwhelmingly benign, so a hit requires a
 *suspicious indicator* (remote URL, scriptlet, script protocol, ordinal export,
 or a payload under a user-writable directory) — never mere presence. This is the
 execution counterpart to COM-hijack persistence (T1546.015): ``regsvr32`` /
 ``rundll32`` are the canonical COM-payload launchers.
 
-Mirrors the Sigma/YARA Layer-0 pattern: produces a deterministic
-``AgentISR(domain="dynamic", revision_round=0)`` consumed by the TTP cascade.
+A lookup, not a layer: ``tools.knowledge.lolbin_lookup`` is how an agent asks,
+and the answer is a technique id the agent may cite or ignore.
 """
 
 from __future__ import annotations
 
 import re
 from typing import Any
-
-from maljan.core.logger import logger
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
 # A remote/script indicator turns an otherwise-benign LOLBin invocation into a
 # signed-proxy-execution signal (squiblydoo, scriptlet COM, HTA download, ...).
@@ -99,48 +96,3 @@ def _iter_command_lines(sandbox_report: dict[str, Any]) -> list[str]:
             if cmd:
                 out.append(cmd)
     return out
-
-
-def build_lolbin_isr(sandbox_report: dict[str, Any] | None) -> AgentISR | None:
-    """Scan process command lines for suspicious LOLBin execution and return a
-    deterministic ``AgentISR`` (domain ``"dynamic"``), or ``None`` when nothing
-    qualifies. Windows-only: claims carry ``rule_platforms=["windows"]`` so the
-    cascade drops them for non-Windows samples.
-    """
-    if not isinstance(sandbox_report, dict):
-        return None
-
-    claims: list[ClaimEvidence] = []
-    seen: set[tuple[str, str]] = set()
-    for cmd in _iter_command_lines(sandbox_report):
-        hit = classify_lolbin(cmd)
-        if hit is None:
-            continue
-        tid, binary = hit
-        key = (tid, cmd.lower()[:120])
-        if key in seen:
-            continue
-        seen.add(key)
-        claims.append(
-            ClaimEvidence(
-                claim=f"LOLBin signed-proxy execution via {binary}: {_truncate(cmd)}",
-                evidence_ref=f"lolbin: command_line='{_truncate(cmd)}'",
-                confidence=_CONFIDENCE,
-                technique_id=tid,
-                rule_platforms=["windows"],
-            )
-        )
-
-    if not claims:
-        return None
-    logger.info(
-        "LOLBin Layer 0: %d suspicious invocation(s) -> cascade domain='dynamic'.",
-        len(claims),
-    )
-    return AgentISR(
-        agent_id="lolbin",
-        domain="dynamic",
-        claims=claims,
-        dissent_items=[],
-        revision_round=0,
-    )

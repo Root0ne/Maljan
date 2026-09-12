@@ -1,23 +1,21 @@
-"""YARA-TTP Layer 0 — Deterministic signature-based ATT&CK technique detection.
+"""YARA matching over the sample's bytes, behind ``tools.rules.yara_scan``.
 
-This module implements the Layer 0 (pre-LLM) grounding step of the Maljan
-TTP cascade pipeline. It scans the **sample's raw bytes** against a
-YAML-configured rule set and produces a synthetic AgentISR with domain="yara".
+Scans the **sample's raw bytes** against a YAML-configured rule set and reports
+what matched, where. An agent asks for the scan and decides what a hit means;
+this module asserts no technique of its own.
 
-The scan target was changed from concatenated analyst prose to
-the actual sample bytes. Scanning prose let a rule fire whenever an analyst
-merely *mentioned* an API name (e.g. "no evidence of WriteProcessMemory"),
-manufacturing high-confidence false T1055/T1497 evidence. Matching against the
-binary keeps every hit grounded in what the sample actually contains.
+The scan target is the bytes and not analyst prose. Scanning prose let a rule
+fire whenever an analyst merely *mentioned* an API name (e.g. "no evidence of
+WriteProcessMemory"), manufacturing high-confidence false T1055/T1497 evidence.
+Matching against the binary keeps every hit grounded in what the sample
+actually contains.
 
 Key design decisions:
   - Zero hard dependencies: pure Python string matching (no yara-python required).
   - Optional yara-python integration: if the package is importable, compiled YARA
     rules are preferred over simple string matching for performance and accuracy.
-  - Confidence floor: YARA matches are deterministic, so base confidence is always
-    at least 0.70, independent of the LLM agents.
-  - Domain weight: the cascade engine assigns LAYER_WEIGHTS["yara"] = 0.90,
-    meaning YARA evidence outweighs all probabilistic LLM-derived signals.
+  - Each rule carries the confidence its author wrote down, reported as the
+    rule's own number rather than folded into anything.
 
 Rule file format (YAML):
     version: "1.0"
@@ -28,13 +26,11 @@ Rule file format (YAML):
         description: "Classic process injection indicators"
         patterns: ["VirtualAllocEx", "WriteProcessMemory"]
 
+Rule set source: data/yara_ttp_rules.yaml, or ``MALJAN_YARA_RULES_DIR``.
+
 Integration:
-    yara_layer = YaraLayer.from_default_rules()
-    matches = yara_layer.scan(sample_bytes)
-    if matches:
-        isr = yara_layer.to_isr(matches)
-        # Merge into isr_reports before cascade computation
-        isr_reports["yara_layer"] = isr
+    layer = YaraLayer.from_default_rules()
+    matches = layer.scan(sample_bytes)
 """
 
 from __future__ import annotations
@@ -544,47 +540,6 @@ class YaraLayer:
     def reset_filter_stats(self) -> None:
         """Zero the rule-drop counter before a fresh scan."""
         self._filtered_count = 0
-
-    # ------------------------------------------------------------------
-    # ISR conversion
-    # ------------------------------------------------------------------
-
-    def to_isr(self, matches: list[YaraMatch]) -> Any:
-        """Convert YARA matches into a synthetic AgentISR.
-
-        The ISR has domain="yara" and agent_id="yara_layer". Each match
-        becomes one ClaimEvidence entry with deterministic confidence.
-
-        The ISR is injected into isr_reports before cascade computation,
-        where it contributes as an independent high-confidence layer.
-
-        Args:
-            matches: List of YaraMatch objects from scan().
-
-        Returns:
-            AgentISR with domain="yara" and one claim per match.
-        """
-        from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-
-        claims: list[ClaimEvidence] = []
-        for match in matches:
-            claims.append(
-                ClaimEvidence(
-                    claim=match.claim_text,
-                    evidence_ref=match.evidence_ref,
-                    confidence=match.confidence,
-                    technique_id=match.technique_id,
-                    rule_platforms=list(match.rule_platforms) if match.rule_platforms else None,
-                )
-            )
-
-        return AgentISR(
-            agent_id="yara_layer",
-            domain="yara",  # type: ignore[arg-type]
-            claims=claims,
-            dissent_items=[],
-            revision_round=0,
-        )
 
     # ------------------------------------------------------------------
     # Introspection

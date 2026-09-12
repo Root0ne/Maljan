@@ -4,9 +4,8 @@ Every bug this file pins had the same shape: a value was **correct in the
 layer that computed it and wrong in the layer the user actually reads**. The
 1710 unit tests all passed, because each one checked a single layer.
 
-* The degraded-run confidence cap was applied while building the
-  ``MalwareReport`` and then discarded when the worker wrote the DB column, so
-  the UI showed "DEGRADED RUN" next to "Confidence: 91/100".
+* The report's confidence was one number and the DB column another, so the UI
+  showed "DEGRADED RUN" next to a confidence the report did not carry.
 * View-decomposition produced ATT&CK technique IDs that the free-text parser
   then dropped, so the report shipped with none.
 * The D11 guardrail let a rule through and the namer fell back to
@@ -26,7 +25,6 @@ from typing import Any
 import pytest
 
 from app.worker.analysis_worker import _extract_confidence
-from maljan.pipeline.nodes import DEGRADED_CONFIDENCE_CAP
 from maljan.reporting.detection_signatures import build_detection_rules
 from maljan.reporting.figures import build_figures
 from maljan.reporting.models import (
@@ -88,7 +86,6 @@ def _report(*, degraded: bool = False, confidence: float = 0.91) -> MalwareRepor
         report.degradation_reasons = [
             "no sandbox report (dynamic detonation unavailable) — static-only evidence"
         ]
-        report.overall_confidence = min(confidence, DEGRADED_CONFIDENCE_CAP)
     report.figures = build_figures(report)
     # The renderers print ``generated_at`` to the microsecond, and a test below
     # asserts that a number is *absent* from the rendered page. Left at "now",
@@ -101,9 +98,7 @@ def _report(*, degraded: bool = False, confidence: float = 0.91) -> MalwareRepor
 def _persisted_confidence(report: MalwareReport, *, raw_judge_value: float) -> float:
     """What the worker would write to ``analysis_reports.overall_confidence``.
 
-    ``raw_judge_value`` is deliberately the *uncapped* number, mirroring the
-    real pipeline result where ``run_summary`` keeps the judge's original
-    figure — that divergence is what K4 was.
+    ``raw_judge_value`` is what ``run_summary`` kept; the two must agree.
     """
     return _extract_confidence(
         {
@@ -115,18 +110,27 @@ def _persisted_confidence(report: MalwareReport, *, raw_judge_value: float) -> f
 
 
 class TestDegradedConfidenceAgreesAcrossLayers:
-    """K4: the cap must survive from the report object to the rendered page."""
+    """The report's number and the persisted column must be the same number.
 
-    def test_persisted_value_matches_the_report_not_the_raw_judge_score(self) -> None:
-        report = _report(degraded=True, confidence=0.91)
-        persisted = _persisted_confidence(report, raw_judge_value=0.91)
-        assert persisted == pytest.approx(report.overall_confidence)
-        assert persisted <= DEGRADED_CONFIDENCE_CAP
+    Nothing caps a degraded run any more. The judge is told why the run is thin
+    and sets its own confidence; what this pins is that whatever it set travels
+    intact, and that the degradation is stated on every surface rather than
+    encoded as a suspiciously round 0.60.
+    """
 
-    def test_a_healthy_run_is_not_capped(self) -> None:
-        """The guard must not silently flatten good runs — that would be worse."""
+    def test_the_persisted_value_is_the_reports_own(self) -> None:
+        report = _report(degraded=True, confidence=0.42)
+        assert _persisted_confidence(report, raw_judge_value=0.42) == pytest.approx(0.42)
+
+    def test_a_healthy_run_is_not_flattened(self) -> None:
         report = _report(degraded=False, confidence=0.91)
         assert _persisted_confidence(report, raw_judge_value=0.91) == pytest.approx(0.91)
+
+    def test_a_degraded_run_is_not_silently_capped(self) -> None:
+        """The cap was the thing that made every thin run look identically thin."""
+        report = _report(degraded=True, confidence=0.91)
+        assert report.overall_confidence == pytest.approx(0.91)
+        assert "0.91" in MarkdownRenderer().render(report)
 
     @pytest.mark.parametrize("renderer", ["markdown", "html"])
     def test_no_export_shows_a_degraded_run_without_its_warning(self, renderer: str) -> None:
@@ -138,12 +142,6 @@ class TestDegradedConfidenceAgreesAcrossLayers:
         )
         assert "[DEGRADED RUN]" in body
         assert "no sandbox report" in body
-
-    def test_capped_confidence_is_what_the_exports_print(self) -> None:
-        report = _report(degraded=True, confidence=0.91)
-        markdown = MarkdownRenderer().render(report)
-        assert f"{DEGRADED_CONFIDENCE_CAP:.2f}" in markdown
-        assert "0.91" not in markdown
 
 
 class TestTechniqueIdsSurviveToEveryExport:

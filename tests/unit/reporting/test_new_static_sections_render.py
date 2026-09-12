@@ -145,32 +145,6 @@ class TestCarvedPayloadsAreLocatable:
         assert "Carved payloads" in md
 
 
-class TestTheFamilyEvidenceIsShown:
-    def test_tool_artifact_markers_are_rendered(self) -> None:
-        """Without them the reader sees a family name and nothing to check."""
-        md = _render(
-            None,
-            family="CobaltStrike",
-            family_confidence=0.75,
-            tool_artifact_matches=[
-                {
-                    "tool": "Cobalt Strike",
-                    "family": "CobaltStrike",
-                    "kind": "c2_framework",
-                    "confidence": 0.75,
-                    "markers": ["beacon.x64.dll", "ReflectiveLoader"],
-                }
-            ],
-        )
-        assert "Cobalt Strike" in md
-        assert "beacon.x64.dll" in md
-        assert "ReflectiveLoader" in md
-
-    def test_no_artifacts_means_no_empty_table(self) -> None:
-        md = _render(None, family="Emotet", family_confidence=0.8)
-        assert "Offensive-tool artifacts" not in md
-
-
 class TestASectionCanBeFoundInTheFile:
     """``PESection.raw_offset`` is PointerToRawData. It was extracted, stored
     on the model and declared in the TypeScript interface, and printed by

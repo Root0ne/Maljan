@@ -50,14 +50,6 @@ class ClaimEvidence(BaseModel):
         default=True,
         description="False when the technique id is not in the ATT&CK catalogue.",
     )
-    # The platforms the source rule/layer explicitly declared (``["windows"]``
-    # for a Sigma rule with ``logsource.product=windows``, ``["any"]`` for a
-    # YARA rule annotated cross-platform). ``None`` means the producing layer
-    # declared nothing, which is every analyst claim.
-    rule_platforms: list[str] | None = Field(
-        default=None,
-        description="Platform tags the source rule declared, when it declared any.",
-    )
 
 
 class Artifact(BaseModel):

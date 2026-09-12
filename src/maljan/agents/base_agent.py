@@ -32,6 +32,12 @@ from maljan.core.config import get_settings
 from maljan.core.exceptions import AgentLoopCancelled, AnalystError
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger, record_response_usage
+from maljan.pipeline.validation import (
+    Violation,
+    mark_invalid_technique_ids,
+    retry_with_feedback_sync,
+    validate_isr,
+)
 from maljan.schemas.evidence import EvidenceCounter, LedgerEntry, apply_budget
 from maljan.schemas.isr_models import AgentISR, Artifact, ClaimEvidence, Finding
 from maljan.schemas.tool_evidence import CapturedToolOutput
@@ -1097,6 +1103,20 @@ def revision_messages(
     ]
 
 
+class _PriorAnswer:
+    """The answer the analyst already gave, in the shape the retry loop reads.
+
+    ``retry_with_feedback_sync`` runs its callable once before validating, and
+    the analyst has already run. Handing the loop the finished ISR back on the
+    first call keeps one implementation of the feedback turn instead of a
+    second copy that drifts.
+    """
+
+    def __init__(self, isr: AgentISR) -> None:
+        self.isr = isr
+        self.content = isr.to_text_summary()
+
+
 class BaseAnalyst(ABC):
     """Abstract base class for expert agents."""
 
@@ -1164,6 +1184,11 @@ class BaseAnalyst(ABC):
         # the source of truth across every agent in a job), so this exists
         # only for an agent inspected directly (tests, scripts).
         self.degradation_reasons: list[str] = []
+        # What this analyst was told was wrong with its answer and did not fix,
+        # after its one retry, and how many retries the run spent on it. Drained
+        # by the analyst node onto the state's validation channels.
+        self.validation_findings: list[Violation] = []
+        self.validation_retries: int = 0
 
     def _system_prompt(self, fallback: str | Callable[[], str]) -> str:
         """This analyst's system turn for the job it is actually running.
@@ -1964,7 +1989,7 @@ class BaseAnalyst(ABC):
         try:
             truncated = self._truncate_input(data)
             isr = self.analyze_isr(truncated)
-            return self._apply_consistency_gate(isr, truncated)
+            return self._validate_isr(self._apply_consistency_gate(isr, truncated), truncated)
         except AnalystError:
             raise
         except Exception as e:
@@ -2026,7 +2051,7 @@ class BaseAnalyst(ABC):
         # multi-chunk evidence (a claim from one chunk grounded by another is
         # still grounded in the sample). No-op when the gate is off.
         evidence = "\n".join(c.content for c in chunks)
-        return self._apply_consistency_gate(merged, evidence)
+        return self._validate_isr(self._apply_consistency_gate(merged, evidence), evidence)
 
     # ------------------------------------------------------------------
     # View-decomposition (findings-log §3.6) — text path only
@@ -2235,6 +2260,90 @@ class BaseAnalyst(ABC):
     # ------------------------------------------------------------------
     # Inline consistency gate (findings-log §4 Item 4)
     # ------------------------------------------------------------------
+
+    def _validate_isr(self, isr: AgentISR, evidence: str) -> AgentISR:
+        """Tell the analyst what is wrong with its own answer, once.
+
+        The ATT&CK check that used to run in the judge node, as a pass that
+        rewrote each claim's ``technique_id`` against a TF-IDF index, runs here
+        instead — as feedback, in this analyst's own conversation, with one
+        turn to fix it. An id that survives that turn keeps the analyst's
+        spelling and is flagged ``technique_id_valid=False``; the report and
+        the FP linter read the flag, and nothing substitutes an id.
+
+        Never raises: a validation loop that could fail a run would be a worse
+        failure mode than the one it replaces.
+        """
+        try:
+            from maljan.tools import knowledge
+        except Exception as exc:  # noqa: BLE001 — no catalogue, no check
+            self.logger.debug("Validation skipped, the knowledge tools are unavailable: %s", exc)
+            return isr
+
+        def _validator(candidate: AgentISR) -> list[Violation]:
+            return validate_isr(candidate, attck=knowledge)
+
+        try:
+            if not _validator(isr):
+                return isr
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning("Validation skipped (%s).", exc)
+            return isr
+
+        from langchain_core.messages import HumanMessage, SystemMessage
+
+        prompt = self._system_prompt("")
+        messages: list[BaseMessage] = []
+        if prompt:
+            messages.append(SystemMessage(content=prompt))
+        messages.append(HumanMessage(content=self._truncate_input(evidence)))
+
+        cfg = get_settings()
+        timeout = int(
+            (getattr(cfg, "react_agent_timeout_overrides", {}) or {}).get(
+                self.name, cfg.react_agent_timeout
+            )
+        )
+        first: list[Any] = [_PriorAnswer(isr)]
+
+        def _run(turns: list[Any]) -> Any:
+            if first:
+                return first.pop()
+            return self._invoke_llm_with_timeout(turns, timeout)
+
+        def _parse(answer: Any) -> AgentISR:
+            if isinstance(answer, _PriorAnswer):
+                return answer.isr
+            text = str(getattr(answer, "content", answer))
+            return self._text_to_isr(self._capture_findings(text), isr.revision_round)
+
+        try:
+            revised, violations, retries = retry_with_feedback_sync(
+                _run, messages, [_validator], parse=_parse
+            )
+        except Exception as exc:  # noqa: BLE001 — a retry that fails keeps the first answer
+            self.logger.warning("Validation retry failed (%s); keeping the first answer.", exc)
+            return isr
+
+        self.validation_retries += retries
+        if violations:
+            mark_invalid_technique_ids(revised, violations)
+            self.validation_findings.extend(violations)
+            self.logger.info(
+                "Validation: %d finding(s) survived the retry for '%s' (%s).",
+                len(violations),
+                self.name,
+                ", ".join(sorted({v.code for v in violations})),
+            )
+        return revised
+
+    def drain_validation_findings(self) -> tuple[list[dict[str, str]], int]:
+        """What this analyst was told and did not fix, and how many retries it cost."""
+        rows = [v.to_dict() for v in self.validation_findings]
+        retries = self.validation_retries
+        self.validation_findings = []
+        self.validation_retries = 0
+        return rows, retries
 
     def _apply_consistency_gate(self, isr: AgentISR, evidence: str) -> AgentISR:
         """LAMD foundational-tier consistency gate (findings-log §4 Item 4).

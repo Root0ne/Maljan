@@ -426,19 +426,6 @@ class MemoryConfig(BaseModel):
     qdrant_api_key: SecretStr | None = None
 
 
-class AnalysisConfig(BaseModel):
-    """Analysis layer configuration.
-
-    Controls deterministic analysis layer settings (YARA, Sigma).
-
-    sigma_rules_dir:
-        Directory containing Sigma rule YAML files. Loaded recursively.
-        Set to a non-existent path to disable Sigma layer (graceful degradation).
-    """
-
-    sigma_rules_dir: str = "data/sigma_rules"
-
-
 class PreprocessingConfig(BaseModel):
     """Optional preprocessing pipeline configuration.
 
@@ -569,17 +556,6 @@ class PreprocessingConfig(BaseModel):
     use_api_attck_map: bool = True
     api_attck_map_path: str = "data/api_attck_map_v1.json"
 
-    # Offensive-tool / commodity-RAT byte markers (Cobalt Strike, Mimikatz,
-    # Sliver, AsyncRAT, ...). The only source of a malware family name on a run
-    # with no sandbox: FamilyAttribution otherwise draws it solely from CAPE's
-    # cti.family[], so a static-only report knew its verdict but not what it was
-    # looking at. Emits on the existing cascade domain "yara" so it inherits
-    # that weight and cannot manufacture cross-layer corroboration with the
-    # real YARA layer. Every entry needs two distinct markers to fire — one is
-    # enough to flag an EDR agent or the defenders' own tooling.
-    use_tool_artifacts: bool = True
-    tool_artifacts_path: str = "data/tool_artifacts_v1.json"
-
     # Packer / protector signatures, replacing four hardcoded section-name
     # checks. Ranks its evidence: a section name is strong, an entry point in
     # an unexpected section is strong, a string is weak — "UPX!" appears in
@@ -645,23 +621,6 @@ class PreprocessingConfig(BaseModel):
     attck_case_rag_min_score: Annotated[float, Field(ge=0, le=1)] = 0.35
     attck_case_rag_max_techniques: Annotated[int, Field(ge=1)] = 8
 
-    # Deterministic ATT&CK technique-ID correction. When enabled, the judge node
-    # runs a pre-cascade pass that re-grounds each LLM analyst claim's technique_id
-    # against the in-memory TF-IDF ATT&CK index: invalid IDs are replaced with the
-    # top evidence-derived suggestion, and valid-but-poorly-aligned IDs are swapped
-    # only when a strictly better-aligned suggestion exists. This removes the small
-    # model's loop-prone ID-recall sub-task from the critical path; the model just
-    # describes behaviour and the index assigns the ID. Layer-0 deterministic
-    # sources (yara/sigma) are skipped — their IDs are rule-authoritative. Fail-safe.
-    use_attck_autocorrect: bool = True
-    attck_autocorrect_min_alignment: Annotated[float, Field(ge=0, le=1)] = 0.08
-    # Whether to also swap VALID-but-low-alignment technique IDs (not just fix
-    # invalid ones). The TRAM2 ablation (findings-log §1.5.2) found this path
-    # damages ~38% of already-correct IDs while recovering only ~21% of wrong
-    # ones, and the two cannot be separated by the alignment gate — net negative.
-    # Default False: autocorrect only fixes invalid/hallucinated IDs, which is a
-    # provably zero-regression operation. Enable only for offline experiments.
-    attck_autocorrect_swap_valid: bool = False
     # ATT&CK index backend for technique-ID grounding (§1.5). One of:
     #   "tfidf"    keyword bag-of-words (clean alignment gate, weaker ranking)
     #   "semantic" dense BGE-384 embeddings (better ranking, poor gate)
@@ -670,37 +629,11 @@ class PreprocessingConfig(BaseModel):
     # matches semantic's ranking (+6pp
     # top-3 over TF-IDF) AND gives the cleanest alignment gate (correct-vs-wrong
     # separation +0.108 vs TF-IDF +0.068 vs semantic +0.020). Its gate is TF-IDF,
-    # so the existing 0.08 threshold applies. fastembed is already loaded in
+    # ``tools.knowledge.resolve_technique`` returns both numbers per candidate
+    # and says which one is safe to threshold on. fastembed is already loaded in
     # production for long-term memory, so the marginal cost is one catalog embed
     # at startup. Set to "tfidf" to skip embeddings entirely (air-gapped/minimal).
     attck_index_backend: Literal["tfidf", "semantic", "hybrid"] = "hybrid"
-    # Semantic threshold is intentionally 0.0: the eval showed absolute semantic
-    # scores do not separate correct from wrong, so the absolute low-alignment
-    # gate is disabled for that backend (it still fixes invalid IDs and applies
-    # strictly-better relative swaps, which need no absolute threshold).
-    attck_autocorrect_min_alignment_semantic: Annotated[float, Field(ge=0, le=1)] = 0.0
-
-    # Backend for malware-category inference (drives the §7.1 STIX schema-pruning
-    # hint). Default "keyword" = the deterministic substring classifier
-    # (schema_pruner.infer_malware_category) — zero-dependency and, critically,
-    # it *abstains* (UNKNOWN -> no hint) rather than guessing, which is the safe
-    # failure mode for an advisory hint.
-    #
-    # The category-inference eval (101 ATT&CK families labelled by
-    # self-declared type) measured:
-    #   * keyword:               full 0.792 acc / behavioral 0.327 (abstains 38%)
-    #   * semantic (zero-shot):  full 0.376 / behavioral 0.168  (NOT recommended —
-    #                            averaged technique prototypes are too blurry)
-    #   * hybrid (kw->semantic): full 0.812 / behavioral 0.386  (small lift; no
-    #                            new data, fastembed already loaded for memory)
-    # The strongest variant (keyword -> *few-shot* fallback: full 0.832 /
-    # behavioral 0.525) needs a labelled prototype corpus (e.g. LTM stored cases)
-    # and is therefore not a config-only switch. Keyword stays the default
-    # because on realistic analyst text (which names the category, ~the "full"
-    # regime) it is competitive AND safe-abstaining; the hint is advisory anyway,
-    # so the marginal category-accuracy gain has limited end-to-end effect.
-    # Set to "hybrid" to recover keyword's abstentions via the semantic fallback.
-    category_inference_backend: Literal["keyword", "semantic", "hybrid"] = "keyword"
 
 
 # ---------------------------------------------------------------------------
@@ -1572,7 +1505,6 @@ class Settings(BaseSettings):
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     static: StaticConfig = Field(default_factory=StaticConfig)
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
-    analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
     preprocessing: PreprocessingConfig = Field(default_factory=PreprocessingConfig)
     # See ``MCPConfig``'s own docstring; the transitional ``static.ghidra`` /
     # ``sandbox.cape2.mcp`` mirror that used to live here for not-yet-migrated

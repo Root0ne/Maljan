@@ -34,8 +34,8 @@ class _Attck:
 
     known = {"T1055", "T1071"}
 
-    def attck_lookup(self, technique_id: str) -> dict[str, object]:
-        return {"valid": technique_id in self.known, "name": technique_id}
+    def attck_validate(self, ids: list[str]) -> dict[str, object]:
+        return {"invalid": [{"id": t} for t in ids if t not in self.known], "checked": len(ids)}
 
     def resolve_technique(self, text: str, k: int = 5) -> dict[str, object]:
         return {"candidates": [{"technique_id": tid} for tid in sorted(self.known)][:k]}
@@ -91,7 +91,7 @@ class TestValidateISR:
 
     def test_a_knowledge_backend_that_raises_produces_no_violation(self):
         class _Broken:
-            def attck_lookup(self, technique_id: str) -> dict[str, object]:
+            def attck_validate(self, ids: list[str]) -> dict[str, object]:
                 raise RuntimeError("the catalogue is not readable")
 
         assert validate_isr(_isr([_claim(technique_id="T9999")]), attck=_Broken()) == []
@@ -159,6 +159,75 @@ class TestValidateVerdictBundle:
         )
 
         assert validate_verdict_bundle(bundle) == []
+
+
+class TestIndicatorAdmission:
+    """The rules the post-processor used to apply silently, said out loud.
+
+    Each case was a real false positive in a shipped bundle. What changed is
+    what happens to it: the judge is told which value is not evidence and why,
+    and the drop only happens if it insists.
+    """
+
+    def _violation(self, pattern: str, corpus: set[str]) -> Violation | None:
+        bundle = Bundle(objects=[Indicator(pattern=pattern)])  # type: ignore[list-item]
+        found = validate_verdict_bundle(bundle, corpus)
+        return found[0] if found else None
+
+    def test_a_path_with_a_real_extension_is_admitted(self):
+        assert self._violation("[file:name = '/data/local/tmp/payload.so']", {"payload.so"}) is None
+
+    def test_a_path_under_a_known_os_prefix_is_admitted(self):
+        assert self._violation("[file:name = '/sdcard/Download/dropper']", {"dropper"}) is None
+
+    def test_a_toolchain_build_path_is_reported_as_an_artefact(self):
+        ndk = "/buildbot/src/android/ndk-r25-release/toolchain/llvm-project/libcxx/include/string"
+        violation = self._violation(f"[file:name = '{ndk}']", {ndk.lower()})
+
+        assert violation is not None
+        assert "compiler or toolchain artefact" in violation.message
+
+    def test_a_bytecode_class_reference_is_reported_as_such(self):
+        violation = self._violation(
+            "[file:name = '/lang/ClassCastException']", {"/lang/classcastexception"}
+        )
+
+        assert violation is not None
+        assert "class reference" in violation.message
+
+    def test_a_random_short_string_is_not_a_path(self):
+        violation = self._violation("[file:name = '/I FyD']", {"/i fyd"})
+
+        assert violation is not None
+        assert "no filesystem anchor" in violation.message
+
+    def test_a_vendor_documentation_url_is_reported(self):
+        violation = self._violation(
+            "[url:value = 'https://android.googlesource.com/toolchain/llvm-project']",
+            {"https://android.googlesource.com/toolchain/llvm-project"},
+        )
+
+        assert violation is not None
+        assert "documentation or vendor infrastructure" in violation.message
+
+    def test_an_arbitrary_c2_url_the_corpus_saw_is_admitted(self):
+        assert (
+            self._violation(
+                "[url:value = 'http://evil.example.com/beacon']",
+                {"http://evil.example.com/beacon"},
+            )
+            is None
+        )
+
+    def test_a_hash_the_corpus_saw_is_admitted(self):
+        digest = "95236ef71738807ce60ef7d042699decb7156931931682cf46e6ad" + "0" * 10
+        assert self._violation(f"[file:hashes.'SHA-256' = '{digest}']", {digest}) is None
+
+    def test_an_empty_pattern_is_reported(self):
+        violation = self._violation("", set())
+
+        assert violation is not None
+        assert "empty pattern" in violation.message
 
 
 class TestDropUngroundedIndicators:

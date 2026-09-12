@@ -71,7 +71,9 @@ class TestDynamicParser:
         assert "CreateRemoteThread" in result
         assert "NtReadFile" not in result
 
-    def test_severity_high_on_injection(self) -> None:
+    def test_the_observation_is_reported_without_a_severity_of_its_own(self) -> None:
+        """A keyword table in a formatter deciding what is "HIGH" was a verdict
+        the analyst then read back as evidence."""
         data = {
             "behavior": {
                 "generic": [{"category": "injection", "description": "Code injection detected."}],
@@ -79,19 +81,9 @@ class TestDynamicParser:
             }
         }
         result = self.parser.parse(data)
-        assert "HIGH" in result
-
-    def test_severity_medium_on_generic(self) -> None:
-        data = {
-            "behavior": {
-                "generic": [
-                    {"category": "file_operations", "description": "File created in temp."}
-                ],
-                "apistats": {},
-            }
-        }
-        result = self.parser.parse(data)
-        assert "MEDIUM" in result
+        assert "Code injection detected." in result
+        assert "HIGH" not in result
+        assert "Severity" not in result
 
     def test_invalid_data_returns_message(self) -> None:
         result = self.parser.parse("not_a_dict")
@@ -128,14 +120,11 @@ class TestDynamicParser:
         assert "443" in result
 
     def test_network_indicators_empty(self) -> None:
-        """Empty sandbox report short-circuits to the anti-sandbox hint.
+        """An empty sandbox report is stated as an observation, not as a table.
 
-        The contract changed: instead of
-        emitting an empty "Network Indicators" table when the sandbox
-        captured zero events (which the analyst LLM previously treated
-        as 'no analysis to do'), the parser now emits a structured
-        anti-sandbox hint so the analyst produces a real claim. See
-        ``src/maljan/parsers/dynamic_parser.py``.
+        What it means — evasion, a platform mismatch, an empty file — is the
+        analyst's reading. The parser naming a technique here would be this
+        formatter deciding the finding.
         """
         data = {
             "behavior": {"generic": [], "apistats": {}},
@@ -143,7 +132,7 @@ class TestDynamicParser:
         }
         result = self.parser.parse(data)
         assert "SANDBOX COMPLETED WITH ZERO OBSERVED EVENTS" in result
-        assert "T1497" in result
+        assert "T1497" not in result
 
 
 class TestNetworkParser:
@@ -171,21 +160,9 @@ class TestNetworkParser:
         assert "malware-c2.example" in result
         assert "185.199.110.153" in result
 
-    def test_dga_detection_flags_algorithmic_domain(self) -> None:
-        # Unified with network_extractor._assess_domain (entropy + bigram scorer),
-        # replacing the old len>25 proof-of-concept heuristic.
-        parser = NetworkParser()
-        assert parser._is_suspicious_dns("kq3x9zjptlvbq.top") is True
-        assert parser._is_suspicious_dns("google.com") is False
-
-    def test_suspicious_dns_covers_homograph(self) -> None:
-        # The unified scorer also catches punycode/IDN homographs and C2 tokens.
-        parser = NetworkParser()
-        assert parser._is_suspicious_dns("xn--pypal-4ve.com") is True
-        assert parser._is_suspicious_dns("evil.duckdns.org") is True
-        assert parser._is_suspicious_dns("example.com") is False
-
-    def test_suspicious_flag_in_output(self) -> None:
+    def test_the_query_is_listed_without_a_verdict_beside_it(self) -> None:
+        """The parser formats. Whether a domain looks generated is a finding,
+        and the report's own network block carries it, scored once."""
         data = [
             {
                 "service": "dns",
@@ -195,7 +172,8 @@ class TestNetworkParser:
             }
         ]
         result = self.parser.parse(data)
-        assert "Suspicious" in result
+        assert "kq3x9zjptlvbq.top" in result
+        assert "Suspicious" not in result
 
     def test_invalid_data_returns_message(self) -> None:
         result = self.parser.parse("not a dict or list")

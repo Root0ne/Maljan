@@ -49,6 +49,17 @@ from maljan.reporting.models import (
 if TYPE_CHECKING:
     from maljan.schemas.evidence import LedgerEntry
 
+# The score a rating prints as. A rating is what the judge decided; the score is
+# a rendering of it, kept because the header and the dashboard sort on a number.
+# Deliberately coarse: a value like 8.3 would imply a measurement.
+_SEVERITY_SCORES: dict[str, float] = {
+    "Critical": 9.5,
+    "High": 7.5,
+    "Medium": 5.0,
+    "Low": 2.5,
+    "Informational": 0.5,
+}
+
 
 class MalwareReportBuilder:
     """Stateful builder — instantiate per analysis run, call ``build_*`` methods.
@@ -77,7 +88,7 @@ class MalwareReportBuilder:
         discussion_history: list[dict[str, Any]] | None,
         final_decision: str,
         overall_confidence: float = 0.0,
-        cascade_summary: Any | None = None,
+        judge_assessment: Any | None = None,
         malware_category: str | None = None,
         degraded_mode: bool = False,
         degradation_reasons: list[str] | None = None,
@@ -96,7 +107,10 @@ class MalwareReportBuilder:
         self.discussion_history = discussion_history or []
         self.final_decision = final_decision
         self.overall_confidence = overall_confidence
-        self.cascade_summary = cascade_summary
+        # The judge's severity / category / family, or ``None`` when the judge
+        # produced none. Nothing here computes a replacement: a report that
+        # cannot say what the judge decided says "not assessed".
+        self.judge_assessment = judge_assessment
         self.malware_category = malware_category
         self.degraded_mode = degraded_mode
         self.degradation_reasons = degradation_reasons or []
@@ -131,17 +145,14 @@ class MalwareReportBuilder:
         network = network_from_ledger(self.evidence_ledger, self.isr_reports)
         persistence = persistence_from_ledger(self.evidence_ledger, self.isr_reports)
         cells, mappings = build_capability_matrix(
-            cascade_summary=self.cascade_summary,
+            stix_output=self.stix_output,
             isr_reports=self.isr_reports,
-            static=static,
         )
-        severity = self._severity_assessment(static, dynamic, network, persistence, cells, identity)
+        severity = self._severity_from_judge(static, dynamic, identity)
         verdict = self._verdict_literal(self.final_decision)
         attribution = build_family_attribution(
-            malware_category=self.malware_category,
+            judge_family=getattr(self.judge_assessment, "family", None),
             sandbox_report=self.sandbox_report,
-            isr_reports=self.isr_reports,
-            overall_confidence=self.overall_confidence,
         )
 
         # Negotiation summary — compact projection of run_summary fields most
@@ -222,7 +233,7 @@ class MalwareReportBuilder:
             "(verdict=%s, severity=%s, TTPs=%d, persistence=%d, IOCs=%d, "
             "sections=%d, evidence=%d)",
             report.verdict,
-            report.severity.rating,
+            report.severity.rating if report.severity else "not assessed",
             len(report.ttp_mappings),
             len(report.persistence),
             _ioc_count(report),
@@ -334,60 +345,35 @@ class MalwareReportBuilder:
             return "Benign"
         return "Suspicious"
 
-    def _severity_assessment(
+    def _severity_from_judge(
         self,
         static: Any | None,
         dynamic: Any | None,
-        network: Any | None,
-        persistence: list[Any],
-        cells: list[Any],
-        identity: Any | None = None,
-    ) -> SeverityAssessment:
-        """Heuristic CVSS-style score from deterministic signal density."""
-        confidence = max(0.0, min(1.0, float(self.overall_confidence)))
-        score = 1.0 + 9.0 * confidence  # baseline anchored to verdict confidence
+        identity: Any | None,
+    ) -> SeverityAssessment | None:
+        """The judge's rating, or ``None`` when the judge did not give one.
 
-        # Persistence boosts severity
-        score += min(2.0, 0.5 * len(persistence))
-        # Network IOCs (with suspicion) boost severity
-        if network is not None:
-            sus_domains = sum(1 for d in network.domains if d.is_suspicious)
-            score += min(1.5, 0.3 * sus_domains)
-        # Anti-analysis indicators
-        if static is not None:
-            score += 0.2 * len(static.obfuscation_indicators)
-            score += 0.3 if static.packer_hint else 0.0
-        # Multi-tactic ATT&CK coverage
-        distinct_tactics = len({c.tactic for c in cells if c.tactic})
-        score += min(1.5, 0.2 * distinct_tactics)
+        What this replaces was a CVSS-shaped sum — a baseline anchored to the
+        verdict confidence, plus 0.5 per persistence entry, plus 0.3 per
+        suspicious domain, plus 0.2 per obfuscation indicator — presented in the
+        report header as a severity score out of ten. Every constant in it was
+        chosen here, by a builder that had read no evidence, and the number it
+        produced was the most authoritative-looking thing on the page.
 
-        # Clamp & rate
-        score = max(0.0, min(10.0, score))
-        if score >= 9.0:
-            rating = "Critical"
-        elif score >= 7.0:
-            rating = "High"
-        elif score >= 4.0:
-            rating = "Medium"
-        elif score >= 1.0:
-            rating = "Low"
-        else:
-            rating = "Informational"
-
-        impact = (
-            "Sample exhibits malicious capabilities likely to cause direct harm "
-            "to affected endpoints; immediate containment is advised."
-            if rating in ("Critical", "High")
-            else "Sample displays suspicious behaviour consistent with malware; "
-            "isolate and analyse further before allowing execution."
-        )
-        platforms = self._guess_platforms(static, dynamic, identity)
-
+        ``overall_score`` is derived from the rating rather than the other way
+        round, because a rating is what the judge actually decided and a score
+        to one decimal place would claim a precision nobody has.
+        """
+        verdict = getattr(self.judge_assessment, "severity", None)
+        rating = str(getattr(verdict, "rating", "") or "")
+        if rating not in _SEVERITY_SCORES:
+            logger.info("MalwareReportBuilder: the judge assessed no severity.")
+            return None
         return SeverityAssessment(
-            overall_score=round(score, 1),
+            overall_score=_SEVERITY_SCORES[rating],
             rating=rating,  # type: ignore[arg-type]
-            business_impact=impact,
-            affected_platforms=platforms,
+            business_impact=str(getattr(verdict, "rationale", "") or ""),
+            affected_platforms=self._guess_platforms(static, dynamic, identity),
             likely_targets=[],
         )
 

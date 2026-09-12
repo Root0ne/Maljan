@@ -11,7 +11,7 @@ rather than an error, and nothing points at the new field.
 Both directions matter and both are tested here:
 
 * **Forward** — a report written today, carrying carved payloads, packer
-  matches, the ATT&CK audit trail and tool artifacts, must validate on the way
+  matches and the ATT&CK audit trail, must validate on the way
   back out with every field intact.
 * **Backward** — a report written *before* those fields existed must still
   validate. Rows persisted by the previous version are the common case, not the
@@ -107,15 +107,6 @@ def _with_new_fields() -> dict[str, Any]:
         "family": "CobaltStrike",
         "family_confidence": 0.75,
         "family_grounded": True,
-        "tool_artifact_matches": [
-            {
-                "tool": "Cobalt Strike",
-                "family": "CobaltStrike",
-                "kind": "c2_framework",
-                "confidence": 0.75,
-                "markers": ["beacon.x64.dll", "ReflectiveLoader"],
-            }
-        ],
     }
     return doc
 
@@ -136,7 +127,7 @@ class TestTheNewFieldsSurviveValidation:
         assert report.static.packer_matches[0]["confidence"] == 0.85
         assert report.static.sections[0].raw_offset == 1024
         assert report.static.embedded_resources[0]["carved"] is True
-        assert report.attribution.tool_artifact_matches[0]["family"] == "CobaltStrike"
+        assert report.attribution.family == "CobaltStrike"
 
     def test_the_new_ioc_kinds_validate(self) -> None:
         """`secret` and `crypto_wallet` are Literal members; a stale enum here
@@ -163,7 +154,7 @@ class TestTheNewFieldsSurviveValidation:
         assert md is not None
         assert "T1055" in md
         assert "overlay+0x1a400" in md, "carved payloads must reach the export"
-        assert "beacon.x64.dll" in md, "so must the family evidence"
+        assert "CobaltStrike" in md, "so must the family the judge named"
 
 
 class TestOldRowsStillLoad:

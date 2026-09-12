@@ -14,6 +14,7 @@ is the difference between a tool that is usable in a loop and one that is not.
 
 from __future__ import annotations
 
+import os
 import threading
 from pathlib import Path
 from typing import Any
@@ -39,8 +40,26 @@ _YARA_CACHE: dict[str, Any] = {}
 _SIGMA_CACHE: dict[str, Any] = {}
 
 
-def _resolve_ruleset(ruleset: str, default: str) -> Path:
-    return resolve_data(default if ruleset in ("", "default") else ruleset)
+# The environment names that override where "default" points. This is the whole
+# configuration surface for the rule corpora now: the sidecar that runs these
+# tools is handed them in ``core.mcp.servers.analysis.env``, so an operator with
+# their own rules points the server at them and nothing in the library reads
+# ``Settings`` to find a rule file.
+_YARA_RULES_ENV = "MALJAN_YARA_RULES_DIR"
+_SIGMA_RULES_ENV = "MALJAN_SIGMA_RULES_DIR"
+
+
+def _resolve_ruleset(ruleset: str, default: str, env_var: str = "") -> Path:
+    """The corpus path for a ``ruleset`` argument.
+
+    ``"default"`` means the environment's corpus when one is set, otherwise the
+    one the pipeline ships. Any other value is a path, resolved against the
+    repository root the same way every other data path is.
+    """
+    if ruleset not in ("", "default"):
+        return resolve_data(ruleset)
+    override = os.environ.get(env_var, "").strip() if env_var else ""
+    return resolve_data(override or default)
 
 
 # ---------------------------------------------------------------------------
@@ -50,7 +69,7 @@ def _resolve_ruleset(ruleset: str, default: str) -> Path:
 
 def _yara_layer(ruleset: str) -> Any:
     """The compiled layer for one corpus, built once per path."""
-    path = _resolve_ruleset(ruleset, DEFAULT_YARA_RULES)
+    path = _resolve_ruleset(ruleset, DEFAULT_YARA_RULES, _YARA_RULES_ENV)
     key = str(path)
     with _CACHE_LOCK:
         cached = _YARA_CACHE.get(key)
@@ -193,7 +212,7 @@ def _yara_regex_matches(layer: Any, data: bytes) -> list[dict[str, Any]]:
 
 
 def _sigma_layer(ruleset: str) -> Any:
-    path = _resolve_ruleset(ruleset, DEFAULT_SIGMA_RULES)
+    path = _resolve_ruleset(ruleset, DEFAULT_SIGMA_RULES, _SIGMA_RULES_ENV)
     key = str(path)
     with _CACHE_LOCK:
         cached = _SIGMA_CACHE.get(key)

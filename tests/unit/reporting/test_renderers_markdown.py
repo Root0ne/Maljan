@@ -71,7 +71,7 @@ def _build(**kwargs: Any) -> MalwareReport:
         discussion_history=kwargs.pop("discussion_history", []),
         final_decision=kwargs.pop("final_decision", "Malware"),
         overall_confidence=kwargs.pop("overall_confidence", 0.85),
-        cascade_summary=kwargs.pop("cascade_summary", None),
+        judge_assessment=kwargs.pop("judge_assessment", None),
         malware_category=kwargs.pop("malware_category", None),
         evidence_ledger=kwargs.pop("evidence_ledger", None)
         or (ledger_from_sandbox(_sandbox) if _sandbox else []),
@@ -271,10 +271,12 @@ class TestRansomwareReport:
         assert "registry_run" in markdown
         assert "lockbit" in markdown.lower()
 
-    def test_severity_badge_uppercase(self, report: MalwareReport) -> None:
+    def test_an_unassessed_severity_says_so_rather_than_printing_a_rating(
+        self, report: MalwareReport
+    ) -> None:
         markdown = MarkdownRenderer().render(report)
-        # severity badge is wrapped in square brackets and uppercased
-        assert "[CRITICAL]" in markdown or "[HIGH]" in markdown
+        assert "not assessed" in markdown
+        assert "[INFORMATIONAL]" not in markdown
 
 
 class TestSeverityBadge:

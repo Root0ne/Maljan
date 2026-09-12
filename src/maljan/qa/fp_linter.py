@@ -1,14 +1,11 @@
 """Post-pipeline false-positive linter.
 
-An audit found that the pipeline's deterministic layers + LLM
-narratives could agree on a confidently-wrong story (TTPs from the wrong
-platform attached to a sample, defensive recommendations to "block
-PowerShell" that didn't apply). The structural fixes (Sigma/YARA
-platform filters, cascade source-layer override, indicator denylists)
-close the direct path, but every refactor can regress.
+An audit found that the pipeline could agree with itself on a confidently-wrong
+story (TTPs from the wrong platform attached to a sample, defensive
+recommendations to "block PowerShell" that did not apply). Nothing here
+corrects any of it — the linter reports, and the report carries what it says.
 
-The FP linter is the belt-and-braces safety net. It runs after the
-cascade + NarrativeAgent have populated the MalwareReport and emits one
+It runs after the NarrativeAgent has populated the MalwareReport and emits one
 or more :class:`FPWarning` rows for any anomaly:
 
 * **C1** capability_matrix entry whose technique platform doesn't
@@ -21,9 +18,12 @@ or more :class:`FPWarning` rows for any anomaly:
   the sample (narrative cascade FP).
 * **C4** total ``file:name`` indicators above ``MAX_FILE_NAME_INDICATORS``
   (Step 5 cap escaped).
-* **C5** family attribution set with ``family_grounded=false`` (D11
-  zeroes confidence; the linter calls it out so a downstream consumer
-  doesn't read the string and assume it's verified).
+* **C5** family attribution set with ``family_grounded=false`` — the judge
+  named a family and cited no evidence ids for it.
+* **C6** a claim or finding that carries neither an evidence id nor a tool
+  entry behind it.
+* **C7** a technique id the ATT&CK catalogue does not have, kept on a claim
+  after the analyst was told and given a retry.
 
 Results land in ``run_summary.fp_warnings`` so the API + UI can render
 an audit banner without re-running the pipeline.
@@ -51,7 +51,7 @@ class FPWarning:
     surfaces actionable text instead of raw rule-engine output.
     """
 
-    rule: str  # "C1" / "C2" / "C3" / "C4" / "C5" / "C6"
+    rule: str  # "C1" .. "C7"
     severity: str  # "warn" / "error"
     message: str
     field: str | None = None  # dotted path into the report, when applicable
@@ -225,76 +225,100 @@ def lint_report(report: Any, sample_platform: str | None) -> list[FPWarning]:
                     rule="C5",
                     severity="warn",
                     message=(
-                        f"Family attribution '{family}' is ungrounded "
-                        f"(family_grounded=false); confidence already zeroed."
+                        f"Family attribution '{family}' cites no evidence ids "
+                        f"(family_grounded=false)."
                     ),
                     field="attribution.family",
                     explanation=(
-                        "D11 guardrail: the family "
-                        "name came from analyst LLM with no sandbox CTI, "
-                        "sandbox signature, or Qdrant ground match. The "
-                        "confidence has already been zeroed and the "
-                        "Sigma/YARA gates refuse auto-generation. UI "
-                        "renders the family with strikethrough and "
-                        "'(unverified)'."
+                        "The judge named this family and cited no ledger entry "
+                        "for it. The name is kept rather than deleted — a "
+                        "flagged attribution is more useful than a silently "
+                        "zeroed one — and the UI renders it as unverified."
                     ),
                 )
             )
 
-    # C6 — cascade.platform_filter_summary missing or zero.
-    # Only fire when there is evidence the cascade actually ran (a non-empty
-    # capability_matrix or an existing run_summary.cascade dict). Empty test
-    # reports with no cascade run must not trip this gate.
-    if sp and sp not in ("", "unknown"):
-        run_summary = getattr(report, "run_summary", None) or {}
-        cascade = run_summary.get("cascade") if isinstance(run_summary, dict) else None
-        cascade_evidence = bool(capability_ids) or isinstance(cascade, dict)
-        pfs = cascade.get("platform_filter_summary") if isinstance(cascade, dict) else None
-        if cascade_evidence and not isinstance(pfs, dict):
-            warnings.append(
-                FPWarning(
-                    rule="C6",
-                    severity="warn",
-                    message=(
-                        f"run_summary.cascade.platform_filter_summary is "
-                        f"missing for sample_platform={sp}; cannot prove the "
-                        f"Sigma/YARA platform filter actually ran."
-                    ),
-                    field="run_summary.cascade.platform_filter_summary",
-                    explanation=(
-                        "Per-layer dropped-rule counters are surfaced "
-                        "after Sigma/YARA's platform pre-filter so the "
-                        "audit gate can prove the filter executed. When "
-                        "this field is missing the Sigma/YARA layer didn't "
-                        "report counters back to the report_node."
-                    ),
-                )
+    # C6 — a claim or finding standing on nothing citable.
+    ungrounded = _ungrounded_claim_count(report)
+    if ungrounded:
+        warnings.append(
+            FPWarning(
+                rule="C6",
+                severity="warn",
+                message=(
+                    f"{ungrounded} claim(s) or finding(s) carry no evidence id and no "
+                    f"tool entry; nothing in the ledger can be opened to check them."
+                ),
+                field="run_summary.evidence",
+                explanation=(
+                    "Every tool call a run makes is written to the evidence "
+                    "ledger with a citable id. A claim that names none of them "
+                    "and was not produced by a tool is the analyst's assertion "
+                    "alone, which is allowed but should be visible as such."
+                ),
             )
-        elif isinstance(pfs, dict):
-            sigma_dropped = int(pfs.get("sigma_dropped") or 0)
-            yara_dropped = int(pfs.get("yara_dropped") or 0)
-            if sigma_dropped == 0 and yara_dropped == 0:
-                warnings.append(
-                    FPWarning(
-                        rule="C6",
-                        severity="warn",
-                        message=(
-                            f"Sigma+YARA platform filter dropped 0 rules for "
-                            f"sample_platform={sp}; expected at least one "
-                            f"incompatible rule to have been filtered."
-                        ),
-                        field="run_summary.cascade.platform_filter_summary",
-                        explanation=(
-                            "On a real-world sample at least one Sigma or "
-                            "YARA rule from another platform's ruleset "
-                            "should fire and be filtered. Zero drops can "
-                            "still be valid if the ruleset is small, but it "
-                            "is worth flagging."
-                        ),
-                    )
-                )
+        )
+
+    # C7 — a technique id that survived the validation retry unresolved.
+    invalid = _invalid_technique_ids(report)
+    if invalid:
+        warnings.append(
+            FPWarning(
+                rule="C7",
+                severity="warn",
+                message=(
+                    f"{len(invalid)} technique id(s) are not in the ATT&CK catalogue: "
+                    f"{', '.join(sorted(invalid))}."
+                ),
+                field="run_summary.validation",
+                explanation=(
+                    "The producer was shown the problem and given one turn to "
+                    "fix it, and kept the id. It is reported rather than "
+                    "substituted, so the report says what the analyst said and "
+                    "says that it does not resolve."
+                ),
+            )
+        )
 
     return warnings
+
+
+def _ungrounded_claim_count(report: Any) -> int:
+    """Report sections and TTP rows with nothing citable behind them.
+
+    A section that can name a ledger entry, an agent finding or an artifact is
+    grounded (``ledger_report.section_is_grounded``); a TTP row is grounded when
+    some source contributed it or some claim quoted it. Anything else was
+    written by the pipeline about itself.
+    """
+    from maljan.reporting.ledger_report import section_is_grounded
+
+    count = 0
+    for section in getattr(report, "sections", None) or []:
+        try:
+            if not section_is_grounded(section):
+                count += 1
+        except Exception:  # noqa: BLE001 — a linter never fails a report
+            continue
+    for mapping in getattr(report, "ttp_mappings", None) or []:
+        if not getattr(mapping, "contributing_layers", None) and not getattr(
+            mapping, "evidence_quotes", None
+        ):
+            count += 1
+    return count
+
+
+def _invalid_technique_ids(report: Any) -> set[str]:
+    """Technique ids the validation loop could not get resolved."""
+    found: set[str] = set()
+    for row in (getattr(report, "run_summary", None) or {}).get("validation", {}).get(
+        "unresolved", []
+    ) or []:
+        if isinstance(row, dict) and row.get("code") == "attck.unknown_id":
+            for token in _TID_RE.findall(str(row.get("message") or "")):
+                found.add(token)
+                break
+    return found
 
 
 def _capability_technique_ids(report: Any) -> set[str]:

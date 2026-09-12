@@ -179,7 +179,11 @@ def build_prompt_text(report: MalwareReport) -> str:
         "----------------------",
         f"Verdict: {report.verdict}",
         f"Overall confidence: {report.overall_confidence:.2f}",
-        f"Severity: {report.severity.rating} ({report.severity.overall_score:.1f}/10)",
+        (
+            f"Severity: {report.severity.rating} ({report.severity.overall_score:.1f}/10)"
+            if report.severity
+            else "Severity: not assessed"
+        ),
         f"Malware category: {report.malware_category or 'unknown'}",
         (
             f"Attribution family: {report.attribution.family or 'unknown'} "

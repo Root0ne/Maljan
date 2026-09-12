@@ -28,7 +28,9 @@ class TestMinimalConstruction:
         assert r.schema_version == "1.0"
         assert r.verdict == "Suspicious"
         assert r.overall_confidence == 0.0
-        assert r.severity.rating == "Informational"
+        # Not defaulted: an unassessed report and one assessed as harmless
+        # are different findings.
+        assert r.severity is None
         assert r.identity.hashes.sha256 == "a" * 64
         assert r.static is None and r.dynamic is None and r.network is None
         assert r.persistence == []

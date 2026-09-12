@@ -1,22 +1,20 @@
-"""Domain scoring, and the claim the algorithmic ones produce.
+"""Domain scoring, and what a score is allowed to be used for.
 
 The extraction half of this module is gone — the report's network block is
 projected from the calls a run made (``reporting.ledger_projection``) — so what
 is exercised here is the scorer itself, plus the projection where a rule about
-what may be emitted lives.
+what may be emitted lives. The score describes an observed domain; it no longer
+mints a technique claim of its own.
 """
 
 from __future__ import annotations
 
 from maljan.extractors.network_extractor import (
-    _DGA_CLAIM_THRESHOLD,
     _DGA_SCORE_THRESHOLD,
     _assess_domain,
     _dga_score,
-    build_dga_isr,
 )
 from maljan.reporting.ledger_projection import network_from_sandbox_report
-from maljan.reporting.models import NetworkDomain, NetworkIOCs
 
 # ---------------------------------------------------------------------------
 # DGA scoring (Shannon entropy + bigram rarity composite)
@@ -107,97 +105,3 @@ def test_dga_under_multilevel_tld_flagged() -> None:
     verdict = _assess_domain("cdn.kq3x9zjptlvbq.co.uk")
     assert verdict.suspicious is True
     assert verdict.dga_score is not None and verdict.dga_score >= _DGA_SCORE_THRESHOLD
-
-
-# ---------------------------------------------------------------------------
-# build_dga_isr — deterministic T1568.002 claim producer
-# ---------------------------------------------------------------------------
-
-
-def test_build_dga_isr_emits_t1568_002_for_high_score() -> None:
-    iocs = network_from_sandbox_report({"network": {"domains": ["kq3x9zjptlvbq.top"]}})
-    isr = build_dga_isr(iocs)
-    assert isr is not None
-    assert isr.domain == "network"
-    assert isr.agent_id == "network_dga"
-    assert len(isr.claims) == 1
-    claim = isr.claims[0]
-    assert claim.technique_id == "T1568.002"
-    assert claim.rule_platforms == ["any"]
-    # Confidence is capped at 0.75 so a lone heuristic can't dominate the verdict.
-    assert 0.0 < claim.confidence <= 0.75
-    assert "kq3x9zjptlvbq.top" in claim.evidence_ref
-
-
-def test_build_dga_isr_skips_borderline_below_claim_threshold() -> None:
-    """A domain suspicious enough to flag (>=0.55) but below the higher claim
-    bar (0.65) must NOT assert a technique."""
-    iocs = NetworkIOCs(
-        domains=[
-            NetworkDomain(fqdn="borderline.example", is_suspicious=True, dga_score=0.60),
-        ]
-    )
-    assert build_dga_isr(iocs) is None
-    # Sanity: the constant ordering the two-tier design depends on.
-    assert _DGA_CLAIM_THRESHOLD > _DGA_SCORE_THRESHOLD
-
-
-def test_build_dga_isr_none_for_empty_or_clean() -> None:
-    assert build_dga_isr(None) is None
-    assert build_dga_isr(NetworkIOCs()) is None
-    clean = network_from_sandbox_report({"network": {"domains": ["google.com"]}})
-    assert build_dga_isr(clean) is None
-
-
-# ---------------------------------------------------------------------------
-# Signal-quality hardening (FP reduction + validation)
-# ---------------------------------------------------------------------------
-
-
-def test_drops_reserved_and_private_ips() -> None:
-    report = {
-        "network": {
-            "tcp": [
-                {"dst": "8.8.8.8", "dport": 443},
-                {"dst": "127.0.0.1"},
-                {"dst": "10.0.0.5"},
-                {"dst": "169.254.1.1"},
-                {"dst": "0.0.0.0"},
-                {"dst": "255.255.255.255"},
-            ]
-        }
-    }
-    result = network_from_sandbox_report(report)
-    assert result is not None
-    assert {ip.address for ip in result.ips} == {"8.8.8.8"}
-
-
-def test_drops_reserved_and_single_label_domains() -> None:
-    report = {
-        "network": {
-            "dns": [
-                {"request": "evilsite.com"},
-                {"request": "localhost"},
-                {"request": "printer.local"},
-                {"request": "server"},  # single label
-                {"request": "doc.example"},  # reserved suffix
-            ]
-        }
-    }
-    result = network_from_sandbox_report(report)
-    assert result is not None
-    assert {d.fqdn for d in result.domains} == {"evilsite.com"}
-
-
-def test_url_host_lowercased_and_deduped() -> None:
-    report = {
-        "network": {
-            "http": [
-                {"host": "Example.COM", "uri": "/a"},
-                {"host": "example.com", "uri": "/a"},
-            ]
-        }
-    }
-    result = network_from_sandbox_report(report)
-    assert result is not None
-    assert [u.url for u in result.urls] == ["http://example.com/a"]

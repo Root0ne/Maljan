@@ -70,7 +70,7 @@ def _make_report(**overrides: Any) -> MalwareReport:
         discussion_history=overrides.pop("discussion_history", []),
         final_decision=overrides.pop("final_decision", "Malware"),
         overall_confidence=overrides.pop("overall_confidence", 0.9),
-        cascade_summary=overrides.pop("cascade_summary", None),
+        judge_assessment=overrides.pop("judge_assessment", None),
         malware_category=overrides.pop("malware_category", "ransomware"),
     ).build_deterministic()
 

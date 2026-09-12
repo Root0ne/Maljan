@@ -226,7 +226,11 @@ function LegacySummary() {
 function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
   const { report } = useReport();
   const reportId = report?.id ?? "";
-  const sevStyle = SEVERITY_STYLES[mr.severity.rating] ?? SEVERITY_STYLES.Informational;
+  // A report whose judge assessed no severity says so. Falling back to
+  // "Informational" would print a rating the run never established.
+  const sevStyle = mr.severity
+    ? (SEVERITY_STYLES[mr.severity.rating] ?? SEVERITY_STYLES.Informational)
+    : SEVERITY_STYLES.Informational;
   const confidence = pct(mr.overall_confidence);
   const verdict = lc(mr.verdict);
   const verdictText = VERDICT_TEXT[verdict] || VERDICT_TEXT.unknown;
@@ -368,12 +372,16 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
             <div className="text-[11px] text-text-muted uppercase tracking-wider mb-1">
               Severity
             </div>
-            <span
-              className={`inline-flex items-center gap-2 px-2 py-0.5 rounded text-xs font-medium ${sevStyle.bg} ${sevStyle.border} ${sevStyle.text} border`}
-            >
-              {mr.severity.rating}
-              <span className="font-mono">{mr.severity.overall_score.toFixed(1)}/10</span>
-            </span>
+            {mr.severity ? (
+              <span
+                className={`inline-flex items-center gap-2 px-2 py-0.5 rounded text-xs font-medium ${sevStyle.bg} ${sevStyle.border} ${sevStyle.text} border`}
+              >
+                {mr.severity.rating}
+                <span className="font-mono">{mr.severity.overall_score.toFixed(1)}/10</span>
+              </span>
+            ) : (
+              <span className="text-sm text-text-muted">not assessed</span>
+            )}
           </div>
           <div>
             <div className="text-[11px] text-text-muted uppercase tracking-wider mb-1">

@@ -191,8 +191,14 @@ class MarkdownRenderer:
                 lines.append(f"| {algo} | `{value}` |")
         return "\n".join(lines)
 
-    def _section_severity(self, severity: SeverityAssessment) -> str:
+    def _section_severity(self, severity: SeverityAssessment | None) -> str:
         lines = ["## Severity & Impact", ""]
+        if severity is None:
+            # Said, not defaulted. A report that prints "Informational" because
+            # the judge produced no rating is telling the reader something the
+            # run never established.
+            lines.append("**Rating**: not assessed — the judge produced no severity rating.")
+            return "\n".join(lines)
         lines.append(f"**Rating**: `[{severity.rating.upper()}]` ({severity.overall_score:.1f}/10)")
         if severity.business_impact:
             lines.extend(["", severity.business_impact])
@@ -567,30 +573,10 @@ class MarkdownRenderer:
             lines.append(f"**Actor**: {attr.actor}")
         if attr.campaign:
             lines.append(f"**Campaign**: {attr.campaign}")
-        # The evidence behind the family name on a run with no sandbox. Without
-        # it the reader sees "Family: CobaltStrike" and has nothing to check it
-        # against — which is the same position a sandbox-derived family left
-        # them in, and the reason to show the markers rather than just the
-        # conclusion.
-        if attr.tool_artifact_matches:
-            lines.append("")
-            lines.append("**Offensive-tool artifacts (static byte markers):**")
-            lines.append("")
-            lines.append("| Tool | Family | Kind | Confidence | Markers |")
-            lines.append("|---|---|---|---|---|")
-            for match in attr.tool_artifact_matches[:10]:
-                markers = ", ".join(f"`{m}`" for m in (match.get("markers") or [])[:4]) or "-"
-                lines.append(
-                    f"| {match.get('tool', '?')} | {match.get('family', '-')} "
-                    f"| {match.get('kind', '-')} "
-                    f"| {float(match.get('confidence') or 0.0):.2f} | {markers} |"
-                )
-        # The other three evidence sources behind the same name. All three were
-        # produced by the judge, carried through AnalysisState and stored on the
-        # model, and printed by no renderer — so the report showed a family and
-        # withheld every deterministic reason for it. Function-hash matches are
-        # the strongest of the four: an exact normalized-opcode hash shared with
-        # a previously analysed sample is code reuse, not resemblance.
+        # The evidence sources behind the same name, carried through
+        # AnalysisState and stored on the model. Function-hash matches are the
+        # strongest of the three: an exact normalized-opcode hash shared with a
+        # previously analysed sample is code reuse, not resemblance.
         if attr.function_hash_matches:
             lines.append("")
             lines.append("**Function-hash matches (shared code with prior samples):**")

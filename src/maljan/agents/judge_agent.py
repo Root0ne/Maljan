@@ -4,48 +4,23 @@ JudgeAgent is NOT an expert analyst — it does not inherit from BaseAnalyst.
 It has two distinct responsibilities:
   1. mediate(): Find contradictions between expert reports during the
      negotiation loop, using structured output for reliable confidence scoring.
-  2. give_verdict(): Produce the final STIX 2.1 Bundle after negotiation ends.
+  2. give_verdict(): Produce the final STIX 2.1 Bundle after negotiation ends,
+     together with the severity, malware category and family attribution the
+     report prints.
 
-ISR summaries:
-  - mediate() and give_verdict() optionally accept isr_reports to include
-    structured ISR summaries alongside the plain-text reports. This gives
-    the judge access to per-claim confidence scores and dissent signals.
+What the judge is shown:
+  - The analysts' reports and, compactly, their ISR summaries.
+  - An evidence summary (``pipeline.evidence_summary``): per technique id, the
+    sources that named it and each source's own confidence. No combined number
+    — the cascade that used to compute one is gone, and with it the judge's
+    habit of deferring to it.
+  - Why the run is degraded, when it is, so the judge can weigh its own
+    confidence accordingly rather than have a cap applied afterwards.
+  - Similar prior cases from long-term memory, as few-shot context.
 
-ATT&CK validation:
-  - give_verdict() optionally accepts an ATTCKValidator instance.
-  - Before generating the STIX Bundle, all TTP IDs in isr_reports are
-    validated against the authoritative ATT&CK dataset. A TTPValidationSummary
-    is injected into the prompt so the LLM can self-correct hallucinated TTPs.
-  - Graceful degradation: if no validator is provided (e.g., cache not built),
-    verdict generation continues without validation — no crash.
-
-TTP cascade:
-  - give_verdict() optionally accepts a CascadeSummary from TTPCascadeEngine.
-  - A three-layer cascade block is injected into the prompt, ranking TTPs by
-    cross-layer weighted confidence so the LLM prioritizes corroborated findings.
-
-STIX confidence intervals:
-  - System prompt now instructs the LLM to produce ConfidenceAnnotatedRelationship
-    objects instead of plain Relationship objects for all TTP mappings.
-  - Each relationship must be populated with:
-      x_maljan_confidence: float [0.0, 1.0] — derived from cascade score or
-          agent mean_confidence when cascade is unavailable.
-      x_maljan_evidence_basis: controlled vocab — "static", "dynamic",
-          "network", "static+dynamic", "all", etc.
-      x_maljan_contributing_agents: list of agent_ids that found the evidence.
-      x_maljan_technique_id: MITRE ATT&CK technique ID if applicable.
-  - _build_confidence_instruction() builds cascade-aware evidence basis hints
-    from the CascadeSummary so the LLM can ground confidence values rather
-    than infer them.
-Dynamic schema pruning:
-  - give_verdict() infers malware category (ransomware/RAT/dropper/worm/
-    infostealer/unknown) from ISR reports using keyword-weighted scoring.
-  - A schema pruning hint block is injected into the system prompt, guiding
-    the LLM to produce only STIX object types relevant to the detected
-    category. This implements the CTI-GEN (IEEE CSR 2025) methodology.
-  - _build_schema_hint() handles inference + block generation.
-  - Graceful degradation: UNKNOWN category returns empty string (no pruning);
-    any inference error silently skips pruning.
+What comes back is checked by ``pipeline.validation`` and, when something is
+wrong, put back to the judge once as feedback. What is still wrong after that
+is returned alongside the bundle for the run summary to record.
 """
 
 from __future__ import annotations
@@ -53,26 +28,29 @@ from __future__ import annotations
 import asyncio
 import re
 import uuid
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.prompts import ChatPromptTemplate
 
 from maljan.agents.base_agent import retry_on_connection_error
-from maljan.analysis.schema_pruner import get_pruned_schema_hint
-from maljan.analysis.semantic_category import infer_category
 from maljan.core.config import get_settings
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger, record_response_usage
 from maljan.core.truncation_ledger import TruncationLedger, record_judge_response
 from maljan.pipeline.mediation_models import MediatorVerdict
 from maljan.pipeline.state import AgentArgument
+from maljan.pipeline.validation import (
+    Violation,
+    drop_ungrounded_indicators,
+    retry_with_feedback,
+    validate_verdict_bundle,
+)
 from maljan.schemas.evidence import EvidenceCounter, LedgerEntry
 from maljan.schemas.isr_models import AgentISR
 from maljan.schemas.stix_models import Bundle
 
 if TYPE_CHECKING:
-    from maljan.analysis.ttp_cascade import CascadeSummary
     from maljan.memory.long_term_memory import MemoryStore
 
 # Consensus threshold: mediator confidence must reach this to stop negotiation early
@@ -97,6 +75,26 @@ _AGREEMENT_RE = re.compile(
 )
 
 
+# How much of the evidence summary reaches the prompt. The block is one line
+# per technique and the tail of it is the techniques one source mentioned once;
+# a bound keeps a chatty run from crowding out the analysts' own text.
+_EVIDENCE_SUMMARY_CHARS = 2000
+
+
+class JudgeVerdict(NamedTuple):
+    """What ``give_verdict`` produced, and what was still wrong with it.
+
+    The violations travel with the bundle rather than being logged and dropped:
+    they are what ``run_summary.validation.unresolved`` is made of, and a run
+    whose judge could not ground an indicator should say so where a reader
+    looks, not only in a worker log nobody keeps.
+    """
+
+    bundle: Bundle
+    violations: list[Violation]
+    retries: int
+
+
 # The judge's system prompt. A module constant so that
 # ``composition.builtin_prompt("judge")`` and ``give_verdict`` cannot disagree
 # about what the judge is told; the text is unchanged from the inline literal
@@ -118,6 +116,19 @@ JUDGE_VERDICT_SYSTEM = (
     "appear verbatim in the deterministic evidence (static strings, "
     "sandbox observations, or network IOCs). When in doubt, emit zero "
     "Indicators — the deterministic renderer will fill them in.\n"
+    "- You decide severity, malware category and family; nothing downstream "
+    "computes them for you and nothing overrides what you say. Add a top-level "
+    "``x_maljan_assessment`` object to the bundle:\n"
+    '    "x_maljan_assessment": {\n'
+    '      "severity": {"rating": "Critical|High|Medium|Low|Informational",\n'
+    '                   "rationale": "why the evidence supports that rating"},\n'
+    '      "malware_category": "free text, e.g. ransomware / loader / infostealer",\n'
+    '      "family": {"name": "...", "confidence": 0.0-1.0,\n'
+    '                 "evidence_ids": ["ev_0012"]}\n'
+    "    }\n"
+    "  Omit any of the three you cannot support. A family name MUST cite the "
+    "evidence ids it was read from; a family with no evidence ids is a guess, "
+    "and the report will say so.\n"
     "- Return ONLY a valid JSON STIX 2.1 Bundle. No markdown wrappers."
 )
 
@@ -134,7 +145,6 @@ class JudgeAgent:
     def __init__(
         self,
         llm: BaseChatModel,
-        category_backend: str = "keyword",
         config: Any | None = None,
     ) -> None:
         self.llm = llm
@@ -142,10 +152,6 @@ class JudgeAgent:
         # Read by ``_supports_structured_output``. Optional so standalone use
         # (tests, scripts) still works; the container passes the real one.
         self._config = config
-        # Backend for the §7.1 schema-pruning category inference. Default
-        # "keyword" keeps the deterministic substring path (zero behaviour
-        # change); "semantic"/"hybrid" route through the embedding classifier.
-        self.category_backend = category_backend
         # Per-run token ledger (findings-log §4 Item 1); attached by the
         # container in get_judge_agent(). None when run standalone.
         self.token_ledger: TokenLedger | None = None
@@ -542,44 +548,30 @@ class JudgeAgent:
         reports: dict[str, str],
         history: list[AgentArgument],
         isr_reports: dict[str, AgentISR] | None = None,
-        attck_validator: object | None = None,
-        cascade_summary: CascadeSummary | None = None,
+        evidence_summary: str = "",
+        degradation_note: str = "",
         memory_store: MemoryStore | None = None,
         evidence_corpus: set[str] | None = None,
         current_sample_id: str | None = None,
-    ) -> Bundle:
-        """Final judge decision returning a structured STIX 2.1 Bundle.
+    ) -> JudgeVerdict:
+        """The final decision: a STIX bundle plus the judge's own assessment.
 
-        When `attck_validator` is provided, all TTP IDs in
-        `isr_reports` are validated against the ATT&CK dataset BEFORE the
-        LLM call. The validation summary is injected into the prompt as a
-        grounding block so the LLM can self-correct hallucinated IDs.
+        ``evidence_summary`` is the block from ``pipeline.evidence_summary`` —
+        who named which technique and how sure each one was. ``degradation_note``
+        says why this run is thin, when it is; both go into the prompt because
+        the judge is the component that should be weighing them.
 
-        When `cascade_summary` (CascadeSummary) is provided, a
-        three-layer confidence ranking block is injected into the prompt so
-        the LLM prioritizes corroborated (multi-layer) TTPs over single-layer
-        evidence.
-
-        When `memory_store` (MemoryStore protocol) is provided, the
-        top-k most similar past analysis cases are retrieved and injected as
-        few-shot context before the verdict LLM call.
-
-        Args:
-            reports: Final expert reports (revised where applicable).
-            history: Full negotiation history.
-            isr_reports: Optional structured ISR objects for richer context.
-            attck_validator: Optional ATTCKValidator instance.
-            cascade_summary: Optional CascadeSummary from TTPCascadeEngine.
-            memory_store: Optional MemoryStore for long-term case retrieval.
-
-        Returns:
-            A valid STIX 2.1 Bundle with MITRE ATT&CK TTP mappings.
+        The answer is validated (``pipeline.validation.validate_verdict_bundle``)
+        and, when something is wrong, handed back once with the problems named.
+        Whatever is still wrong comes back in :class:`JudgeVerdict.violations`
+        rather than being fixed in place — except an ungrounded indicator, which
+        is dropped, because a STIX consumer has no way to read a caveat.
         """
         self.logger.info("Formulating final malware verdict with MITRE ATT&CK mapping...")
 
         # Build compact reports to avoid context bloat.
         # Full reports can exceed 15K tokens; we truncate each to ~500 chars
-        # and only keep ISR claims + cascade summary.
+        # and only keep ISR claims + the evidence summary.
         report_parts: list[str] = []
         for name, report in reports.items():
             truncated = report[:500] + "..." if len(report) > 500 else report
@@ -598,16 +590,11 @@ class JudgeAgent:
             if isr_block:
                 reports_text += f"\n\n=== ISR SUMMARIES ===\n{isr_block}"
 
-        # Three-layer TTP cascade block (compact)
-        cascade_block = self._build_cascade_block(cascade_summary)
-        if cascade_block:
-            # Cascade blocks can be huge; keep only first 800 chars
-            reports_text = f"{reports_text}\n\nCASCADE:\n{cascade_block[:800]}"
+        if evidence_summary:
+            reports_text = f"{reports_text}\n\n{evidence_summary[:_EVIDENCE_SUMMARY_CHARS]}"
 
-        # Schema hint (compact)
-        schema_hint = self._build_schema_hint(reports, isr_reports)
-        if schema_hint:
-            reports_text = f"{reports_text}\n\n{schema_hint[:400]}"
+        if degradation_note:
+            reports_text = f"{reports_text}\n\n{degradation_note}"
 
         # Long-term memory — inject top-K similar past cases as
         # weighted priors. The block is bounded (~1.2 KB worst case for
@@ -619,11 +606,9 @@ class JudgeAgent:
         if memory_block:
             reports_text = f"{reports_text}\n\n{memory_block}"
 
-        verdict_system = JUDGE_VERDICT_SYSTEM
-
         prompt = ChatPromptTemplate.from_messages(
             [
-                ("system", verdict_system),
+                ("system", JUDGE_VERDICT_SYSTEM),
                 (
                     "human",
                     "Expert Reports:\n{reports}\n\n"
@@ -632,6 +617,7 @@ class JudgeAgent:
                 ),
             ]
         )
+        messages = list(prompt.format_messages(reports=reports_text, history=str(history)[:800]))
 
         # Resolve the judge-specific timeout via the same override mechanism
         # the analyst agents use. ``react_agent_timeout_overrides`` ships
@@ -643,73 +629,79 @@ class JudgeAgent:
         _overrides = getattr(_settings, "react_agent_timeout_overrides", {}) or {}
         timeout = float(_overrides.get("judge", _settings.react_agent_timeout))
         self.logger.info("JudgeAgent invoking verdict LLM (timeout=%ds)...", timeout)
-        try:
-            result_text = await asyncio.wait_for(
-                retry_on_connection_error(
-                    lambda: (prompt | self.llm).ainvoke(
-                        {"reports": reports_text, "history": str(history)[:800]}
-                    ),
-                    what="Judge verdict",
-                    log=self.logger,
-                ),
-                timeout=timeout,
-            )
-        except TimeoutError:
-            self.logger.error("JudgeAgent verdict timed out after %ds.", timeout)
-            return self._fallback_bundle_from_text("[TIMEOUT]", reports, isr_reports)
 
-        # Extract JSON from markdown code blocks or raw text
-        raw = str(getattr(result_text, "content", result_text))
+        timed_out = False
+
+        async def _run(turns: list[Any]) -> Any:
+            nonlocal timed_out
+            try:
+                return await asyncio.wait_for(
+                    retry_on_connection_error(
+                        lambda: self.llm.ainvoke(turns),
+                        what="Judge verdict",
+                        log=self.logger,
+                    ),
+                    timeout=timeout,
+                )
+            except TimeoutError:
+                self.logger.error("JudgeAgent verdict timed out after %ds.", timeout)
+                timed_out = True
+                return "[TIMEOUT]"
+
+        def _parse(answer: Any) -> Bundle:
+            if timed_out:
+                return self._fallback_bundle_from_text("[TIMEOUT]", reports, isr_reports)
+            return self._bundle_from_response(answer, reports, isr_reports)
+
+        def _validate(bundle: Bundle) -> list[Violation]:
+            return validate_verdict_bundle(bundle, evidence_corpus)
+
+        bundle, violations, retries = await retry_with_feedback(
+            _run, messages, [_validate], parse=_parse
+        )
+        dropped = drop_ungrounded_indicators(bundle, violations)
+        if dropped:
+            self.logger.warning(
+                "Judge verdict: %d indicator(s) stayed ungrounded after the retry and were "
+                "dropped; they are recorded in the run summary.",
+                dropped,
+            )
+        return JudgeVerdict(bundle=bundle, violations=violations, retries=retries)
+
+    def _bundle_from_response(
+        self,
+        answer: Any,
+        reports: dict[str, str],
+        isr_reports: dict[str, AgentISR] | None,
+    ) -> Bundle:
+        """The model's raw answer as a Bundle, or the text fallback."""
+        raw = str(getattr(answer, "content", answer))
 
         from maljan.utils.json_cleaner import safe_parse_json
 
         data = safe_parse_json(raw)
-        if data is None:
-            self.logger.warning(
-                "LLM did not return valid JSON. Attempting text-based fallback Bundle."
-            )
-            bundle = self._fallback_bundle_from_text(raw, reports, isr_reports)
-            return bundle
-
         if not isinstance(data, dict):
             self.logger.warning(
-                "LLM returned JSON that is not a dict (type=%s). Falling back to text.",
+                "LLM did not return a JSON object (got %s). Attempting text-based fallback.",
                 type(data).__name__,
             )
-            bundle = self._fallback_bundle_from_text(raw, reports, isr_reports)
-            return bundle
+            return self._fallback_bundle_from_text(raw, reports, isr_reports)
 
         try:
-            # Filter out hallucinated / invalid technique IDs
+            # Structurally impossible technique ids (T123, T0000, ...) name
+            # objects a STIX consumer cannot resolve, so they are dropped
+            # rather than labelled. A *plausible but unknown* id is a different
+            # thing and comes back as a violation instead.
             data = self._filter_invalid_technique_ids(data)
-            # Rewrite placeholder/non-UUID STIX IDs, drop indicators whose
-            # pattern value isn't in the deterministic evidence, and
-            # back-fill ``attack-pattern.external_references``.
             from maljan.agents.judge_postprocess import postprocess_judge_bundle
 
-            # When a cascade summary is available,
-            # derive the set of TIDs that survived the cascade and pass it
-            # to the post-processor so orphan attack-patterns (TTPs the LLM emitted
-            # but the deterministic pipeline rejected) are dropped from
-            # the bundle before validation.
-            valid_tids: frozenset[str] | None = None
-            if cascade_summary is not None:
-                valid_tids = frozenset(
-                    r.technique_id for r in cascade_summary.results if r.technique_id
-                )
-            data = postprocess_judge_bundle(
-                data,
-                evidence_corpus=evidence_corpus,
-                valid_technique_ids=valid_tids,
-                ledger=getattr(self, "truncation_ledger", None),
-            )
+            data = postprocess_judge_bundle(data, ledger=getattr(self, "truncation_ledger", None))
             return Bundle.model_validate(data)
-        except Exception as e:
+        except Exception as exc:  # noqa: BLE001 — a malformed bundle degrades to the fallback
             self.logger.warning(
-                "LLM did not return a valid Bundle: %s. Attempting text-based fallback.", e
+                "LLM did not return a valid Bundle: %s. Attempting text-based fallback.", exc
             )
-            bundle = self._fallback_bundle_from_text(raw, reports, isr_reports)
-            return bundle
+            return self._fallback_bundle_from_text(raw, reports, isr_reports)
 
     async def _extract_mediator_verdict(
         self,
@@ -983,162 +975,6 @@ class JudgeAgent:
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
-
-    def _build_validation_block(
-        self,
-        isr_reports: dict[str, AgentISR] | None,
-        attck_validator: object | None,
-    ) -> str:
-        """Run ATT&CK TTP validation and return a prompt-ready block.
-
-        Returns an empty string if validation cannot be run (no validator,
-        no isr_reports, or any runtime error — always degrades gracefully).
-        """
-        if not attck_validator or not isr_reports:
-            return ""
-
-        # Runtime duck-type check — avoids circular import at module level
-        if not hasattr(attck_validator, "validate_isr_reports"):
-            self.logger.warning(
-                "attck_validator does not implement validate_isr_reports(). Skipping."
-            )
-            return ""
-
-        try:
-            summary = attck_validator.validate_isr_reports(isr_reports)  # type: ignore[union-attr]
-            if summary.total_claims == 0:
-                return ""
-            block = str(summary.to_prompt_block())
-            self.logger.info(
-                "ATT&CK validation: %d/%d valid, %d hallucinated, %d low-alignment.",
-                summary.valid_ids,
-                summary.total_claims,
-                summary.invalid_ids,
-                summary.low_alignment,
-            )
-            return block
-        except Exception as exc:
-            self.logger.warning("ATT&CK TTP validation failed (%s). Proceeding without it.", exc)
-            return ""
-
-    def _build_cascade_block(self, cascade_summary: CascadeSummary | None) -> str:
-        """Return a prompt-ready three-layer TTP cascade block.
-
-        Returns an empty string if no summary is provided or if it contains
-        no results. Always degrades gracefully on any error.
-        """
-        if cascade_summary is None:
-            return ""
-
-        if not hasattr(cascade_summary, "to_prompt_block"):
-            self.logger.warning("cascade_summary does not implement to_prompt_block(). Skipping.")
-            return ""
-
-        try:
-            if not getattr(cascade_summary, "total_techniques", 0):
-                return ""
-            block = cascade_summary.to_prompt_block()  # type: ignore[union-attr]
-            self.logger.info(
-                "TTP cascade: %d techniques, %d corroborated, %d consensus.",
-                getattr(cascade_summary, "total_techniques", 0),
-                getattr(cascade_summary, "corroborated_count", 0),
-                getattr(cascade_summary, "consensus_count", 0),
-            )
-            return block
-        except Exception as exc:
-            self.logger.warning("TTP cascade block failed (%s). Proceeding without it.", exc)
-            return ""
-
-    def _build_confidence_instruction(self, cascade_summary: CascadeSummary | None) -> str:
-        """Build cascade-derived x_maljan_confidence hint block for the verdict prompt.
-
-        When a CascadeSummary is available, the top techniques' weighted
-        confidence scores and contributing layers are extracted and rendered as
-        a reference table. The LLM uses this to populate x_maljan_confidence
-        and x_maljan_evidence_basis fields accurately rather than guessing.
-
-        Returns an empty string when cascade is unavailable or has no results.
-        Always degrades gracefully.
-        """
-        if cascade_summary is None:
-            return ""
-
-        try:
-            top = cascade_summary.top_techniques(n=10)
-            if not top:
-                return ""
-
-            from maljan.agents.composition import current_analyst_keys
-
-            analysts = set(current_analyst_keys())
-
-            lines = [
-                "CONFIDENCE REFERENCE TABLE (use these values for x_maljan_confidence):",
-                "Technique ID | Weighted Confidence | Layers | Evidence Basis",
-                "-" * 70,
-            ]
-            for r in top:
-                layers = r.contributing_layers
-                # Map layer set → evidence_basis controlled vocab
-                if analysts and set(layers) == analysts:
-                    basis = "all"
-                elif len(layers) == 2:  # noqa: PLR2004
-                    basis = "+".join(sorted(layers))
-                elif len(layers) == 1:
-                    basis = layers[0]
-                else:
-                    basis = "unknown"
-
-                lines.append(
-                    f"{r.technique_id:<14} | {r.weighted_confidence:.3f}              "
-                    f"| {', '.join(layers):<22} | {basis}"
-                )
-
-            return "\n".join(lines)
-        except Exception as exc:
-            self.logger.warning("_build_confidence_instruction failed (%s). Skipping.", exc)
-            return ""
-
-    def _build_schema_hint(
-        self,
-        reports: dict[str, str],
-        isr_reports: dict[str, AgentISR] | None,
-    ) -> str:
-        """Infer malware category and return a STIX schema pruning hint block.
-
-        Runs keyword-weighted inference
-        over the combined analyst reports and ISR claims to detect the malware
-        behavioral category (ransomware, RAT, dropper, worm, infostealer).
-
-        When a specific category is detected, returns a prompt block guiding
-        the LLM to focus on the STIX object types most relevant to that
-        category, implementing the CTI-GEN schema-pruning methodology.
-
-        Returns an empty string when category is UNKNOWN (no pruning) or on
-        any inference error. Always degrades gracefully.
-
-        Args:
-            reports:     Final expert reports.
-            isr_reports: Structured ISR objects (optional but improves signal).
-
-        Returns:
-            Prompt-ready schema pruning block, or empty string.
-        """
-        try:
-            category = infer_category(reports, isr_reports, backend=self.category_backend)
-            hint = get_pruned_schema_hint(category)
-            if hint:
-                self.logger.info(
-                    "Schema pruning: inferred category '%s' (backend=%s).",
-                    category.value,
-                    self.category_backend,
-                )
-            else:
-                self.logger.debug("Schema pruning: category UNKNOWN, no pruning applied.")
-            return hint
-        except Exception as exc:
-            self.logger.warning("_build_schema_hint failed (%s). Skipping schema pruning.", exc)
-            return ""
 
     def _consensus_threshold(self) -> float:
         """The confidence at which mediation counts as consensus.

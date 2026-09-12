@@ -148,7 +148,22 @@ def validate_isr(isr: Any, *, attck: Any = None) -> list[Violation]:
 
 
 def _technique_is_known(technique_id: str, attck: Any) -> bool:
-    """Whether the catalogue has this id. A lookup that fails is not a verdict."""
+    """Whether the id is a real technique. A lookup that fails is not a verdict.
+
+    ``attck_validate`` is the cheap question: it answers from the vendored id
+    universe and only touches the fifty-megabyte catalogue once an id has
+    already failed. That is what lets this run inside every analyst's loop
+    rather than once per job.
+    """
+    check = getattr(attck, "attck_validate", None)
+    if check is not None:
+        try:
+            answer = check([technique_id])
+        except Exception as exc:  # noqa: BLE001 — a knowledge failure is not a violation
+            logger.debug("validation: the ATT&CK check for %s failed (%s).", technique_id, exc)
+            return True
+        return not (answer or {}).get("invalid")
+
     lookup = getattr(attck, "attck_lookup", None)
     if lookup is None:
         return True
@@ -157,12 +172,7 @@ def _technique_is_known(technique_id: str, attck: Any) -> bool:
     except Exception as exc:  # noqa: BLE001 — a knowledge failure is not a violation
         logger.debug("validation: the ATT&CK lookup for %s failed (%s).", technique_id, exc)
         return True
-    if not isinstance(answer, dict):
-        return True
-    # An id the catalogue could not be consulted about is not an invalid id.
-    if answer.get("reason") and not answer.get("name"):
-        return bool(answer.get("valid"))
-    return bool(answer.get("valid"))
+    return not isinstance(answer, dict) or bool(answer.get("valid"))
 
 
 def _suggest_techniques(claim_text: str, attck: Any) -> list[str]:
@@ -225,21 +235,19 @@ def validate_verdict_bundle(
     objects = list(getattr(bundle, "objects", None) or [])
 
     haystack = " ".join(sorted(evidence_corpus)).lower() if evidence_corpus else ""
+    runtime_paths = _runtime_paths(evidence_corpus)
     for index, obj in enumerate(objects):
         kind = str(getattr(obj, "type", "") or "")
         if kind == "indicator" and evidence_corpus is not None:
-            ungrounded = _ungrounded_literals(str(getattr(obj, "pattern", "") or ""), haystack)
-            if ungrounded:
+            pattern = str(getattr(obj, "pattern", "") or "")
+            problem = _indicator_problem(pattern, haystack, runtime_paths)
+            if problem:
                 violations.append(
                     Violation(
                         code="stix.ungrounded_indicator",
                         message=(
-                            f"the indicator pattern names {', '.join(ungrounded)}, which "
-                            "appears nowhere in the evidence this run collected. Emit "
-                            "indicators only for values a tool actually saw, and prefer "
-                            "zero indicators to an invented one. Compiler artefacts, "
-                            "example domains and the analyst's own scratch paths are "
-                            "not evidence."
+                            f"{problem} Emit indicators only for values a tool in this run "
+                            "actually saw, and prefer zero indicators to an invented one."
                         ),
                         path=f"objects[{index}]",
                     )
@@ -290,20 +298,90 @@ def validate_verdict_bundle(
     return violations
 
 
-def _ungrounded_literals(pattern: str, haystack: str) -> list[str]:
-    """The literals of a STIX pattern that the evidence corpus never mentions."""
-    if not pattern:
-        return []
-    missing: list[str] = []
-    for literal in _PATTERN_LITERAL_RE.findall(pattern):
-        value = str(literal).strip()
-        if not value:
-            continue
-        if value.lower() in haystack:
-            continue
-        if value not in missing:
-            missing.append(value)
-    return missing
+def _runtime_paths(evidence_corpus: set[str] | None) -> set[str]:
+    """The corpus entries that look like a path something really touched."""
+    from maljan.agents._indicator_denylists import IOC_OS_RESOURCE_PREFIXES
+
+    found: set[str] = set()
+    for token in evidence_corpus or ():
+        value = str(token).strip()
+        if any(value.startswith(prefix.lower()) for prefix in IOC_OS_RESOURCE_PREFIXES):
+            found.add(value)
+    return found
+
+
+def _indicator_problem(pattern: str, haystack: str, runtime_paths: set[str]) -> str:
+    """Why this indicator is not grounded, in words the judge can act on, or "".
+
+    The rules are the ones the post-processor used to apply silently, said out
+    loud instead: the denylists in ``agents._indicator_denylists`` are what a
+    URL host, a compile artefact and a foreign class reference are checked
+    against, and here they become the sentence the judge reads rather than a
+    log line nobody sees.
+    """
+    from maljan.agents._indicator_denylists import (
+        COMPILE_ARTIFACT_RE,
+        FOREIGN_CLASS_REF_RE,
+        IOC_FILE_EXTENSIONS,
+        IOC_OS_RESOURCE_PREFIXES,
+        URL_DENY_HOSTS,
+    )
+
+    if not pattern.strip():
+        return "the indicator has an empty pattern."
+    literals = [str(v).strip() for v in _PATTERN_LITERAL_RE.findall(pattern) if str(v).strip()]
+    if not literals:
+        return "the indicator pattern quotes no value."
+    stripped = pattern.lstrip()
+
+    if stripped.startswith("[url:value"):
+        for literal in literals:
+            host = _url_host(literal)
+            if host and any(host.endswith(d) or d in host for d in URL_DENY_HOSTS):
+                return f"the URL host in {literal!r} is documentation or vendor infrastructure."
+        if not any(literal.lower() in haystack for literal in literals):
+            return f"the URL {literals[0]!r} appears nowhere in this run's evidence."
+        return ""
+
+    if stripped.startswith("[file:name"):
+        for literal in literals:
+            if COMPILE_ARTIFACT_RE.search(literal):
+                return f"{literal!r} is a compiler or toolchain artefact, not an indicator."
+            if FOREIGN_CLASS_REF_RE.match(literal):
+                return f"{literal!r} is a class reference from a library, not a file on disk."
+        for literal in literals:
+            lowered = literal.lower()
+            if (
+                any(lowered.endswith(ext) for ext in IOC_FILE_EXTENSIONS)
+                or any(literal.startswith(prefix) for prefix in IOC_OS_RESOURCE_PREFIXES)
+                or lowered in runtime_paths
+            ):
+                return ""
+        return (
+            f"{literals[0]!r} has no file extension, no filesystem anchor and was not "
+            "observed at runtime, so nothing says it is a real path."
+        )
+
+    # One literal is enough. A pattern like ``[file:hashes.'SHA-256' = '<hex>']``
+    # quotes the hash algorithm as well as the hash, and requiring every quoted
+    # string to appear in the corpus would reject the digest for the company it
+    # keeps.
+    if any(literal.lower() in haystack for literal in literals):
+        return ""
+    return (
+        f"the indicator pattern names {', '.join(literals)}, which appears nowhere "
+        "in the evidence this run collected."
+    )
+
+
+def _url_host(raw_url: str) -> str | None:
+    """Best-effort host extraction without a full URL parser."""
+    from urllib.parse import urlparse
+
+    try:
+        return (urlparse(raw_url).hostname or "").lower() or None
+    except (ValueError, TypeError):
+        return None
 
 
 def _attack_pattern_technique_id(obj: Any) -> str:

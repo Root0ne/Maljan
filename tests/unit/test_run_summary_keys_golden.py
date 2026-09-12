@@ -47,15 +47,6 @@ def _isr(agent_id: str, domain: str) -> AgentISR:
 
 def _default_profile_summary() -> RunSummary:
     """A default-profile run with every optional section filled in."""
-    from maljan.analysis.ttp_cascade import TTPCascadeEngine
-
-    class _Validation:
-        total_claims = 5
-        valid_ids = 4
-        invalid_ids = 1
-        low_alignment = 1
-        hallucination_rate = 0.2
-
     analysts = ["static", "dynamic", "network"]
     isr_reports = {key: _isr(key, key) for key in analysts}
 
@@ -75,9 +66,16 @@ def _default_profile_summary() -> RunSummary:
         }
     )
     builder.set_isr_stats(isr_reports)
-    builder.set_validation_summary(_Validation())
-    builder.set_cascade_summary(TTPCascadeEngine().compute(isr_reports))
-    builder.set_platform_filter_summary(1, 2, "windows")
+    builder.set_validation(
+        {
+            "retries": 1,
+            "by_code": {"attck.unknown_id": 1},
+            "unresolved": [
+                {"agent": "static", "code": "attck.unknown_id", "message": "no such id"}
+            ],
+        }
+    )
+    builder.set_corroboration({"T1055": ["static", "dynamic", "network"]})
     builder.set_profile("default", analysts, [])
     builder.set_degraded_mode(False, [])
     builder.set_failed_analysts([])
@@ -113,7 +111,9 @@ def _default_profile_summary() -> RunSummary:
 # one technique layer per layer that produced a technique, one integrity
 # counter per object kind that was dropped. Their contents are a property of
 # the run, not of the format, so they are pinned as present and opaque.
-_DATA_KEYED = frozenset({"techniques_by_layer", "truncation.integrity_dropped"})
+_DATA_KEYED = frozenset(
+    {"techniques_by_layer", "truncation.integrity_dropped", "corroboration", "validation.by_code"}
+)
 
 
 def _key_shape(value: Any, path: str = "") -> Any:

@@ -364,7 +364,8 @@ class MaljanApp:
             "function_hash_matches": [],
             "family_rag_candidates": [],
             "attck_case_candidates": [],
-            "tool_artifact_matches": [],
+            "validation_findings": {},
+            "validation_retries": 0,
         }
 
         result = await self.graph.ainvoke(initial_state)

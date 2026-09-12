@@ -182,7 +182,6 @@ def _write_markdown_report(result: dict, report_path: str) -> None:
 
     try:
         from maljan.analysis.run_summary import (
-            CascadeMetrics,
             ISRAgentStats,
             NegotiationMetrics,
             RunSummary,
@@ -212,26 +211,12 @@ def _write_markdown_report(result: dict, report_path: str) -> None:
             for s in run_summary_dict.get("agent_stats", [])
         ]
 
-        c_data = run_summary_dict.get("cascade")
-        cascade = (
-            CascadeMetrics(
-                total_techniques=c_data["total_techniques"],
-                corroborated_count=c_data["corroborated_count"],
-                consensus_count=c_data["consensus_count"],
-                top_techniques=c_data["top_techniques"],
-            )
-            if c_data
-            else None
-        )
-
         v_data = run_summary_dict.get("validation")
         validation = (
             ValidationMetrics(
-                total_claims=v_data["total_claims"],
-                valid_ids=v_data["valid_ids"],
-                invalid_ids=v_data["invalid_ids"],
-                low_alignment=v_data["low_alignment"],
-                hallucination_rate=v_data["hallucination_rate"],
+                retries=v_data.get("retries", 0),
+                by_code=dict(v_data.get("by_code") or {}),
+                unresolved=[dict(row) for row in v_data.get("unresolved") or []],
             )
             if v_data
             else None
@@ -245,8 +230,8 @@ def _write_markdown_report(result: dict, report_path: str) -> None:
             negotiation=negotiation,
             agent_stats=agent_stats,
             validation=validation,
-            cascade=cascade,
             elapsed_seconds=run_summary_dict.get("elapsed_seconds", 0.0),
+            corroboration=dict(run_summary_dict.get("corroboration") or {}),
             timestamp=run_summary_dict.get("timestamp", 0.0),
         )
 

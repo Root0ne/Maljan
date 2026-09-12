@@ -118,15 +118,6 @@ def group_for(path: str) -> str:
 
 
 ANNOTATIONS: dict[str, Annotation] = {
-    "analysis.sigma_rules_dir": {
-        "title": "Sigma rules directory",
-        "description": (
-            "Directory of Sigma rule YAML files, loaded recursively for the "
-            "deterministic Sigma detection layer. Pointing this at a non-existent path "
-            "disables the layer gracefully instead of failing."
-        ),
-        "subgroup": "Reference data",
-    },
     "anthropic_api_key": {
         "title": "Anthropic API key (shortcut)",
         "description": (
@@ -633,36 +624,6 @@ ANNOTATIONS: dict[str, Annotation] = {
         ),
         "subgroup": "Reference data",
     },
-    "preprocessing.attck_autocorrect_min_alignment": {
-        "title": "ATT&CK autocorrect min alignment",
-        "description": (
-            "Minimum alignment score required before the ATT&CK autocorrect pass "
-            "accepts a suggested technique-ID replacement (TF-IDF backend gate)."
-        ),
-        "subgroup": "Thresholds and limits",
-        "advanced": True,
-    },
-    "preprocessing.attck_autocorrect_min_alignment_semantic": {
-        "title": "ATT&CK autocorrect min alignment (semantic)",
-        "description": (
-            "Minimum alignment score for the semantic ATT&CK index backend's "
-            "low-alignment gate. Intentionally 0.0 (disabled) because evaluation showed "
-            "absolute semantic scores do not separate correct from wrong matches; "
-            "invalid-ID fixes and relative swaps still apply without it."
-        ),
-        "subgroup": "Thresholds and limits",
-        "advanced": True,
-    },
-    "preprocessing.attck_autocorrect_swap_valid": {
-        "title": "ATT&CK autocorrect swap valid IDs",
-        "description": (
-            "When true, autocorrect also swaps a VALID-but-poorly-aligned technique ID, "
-            "not just an invalid one. Off by default — an evaluation found this path "
-            "damages about 38% of already-correct IDs while recovering only about 21% "
-            "of wrong ones."
-        ),
-        "subgroup": "Thresholds and limits",
-    },
     "preprocessing.attck_case_corpus_path": {
         "title": "ATT&CK case corpus path",
         "description": (
@@ -703,17 +664,6 @@ ANNOTATIONS: dict[str, Annotation] = {
             "embeddings, better ranking but a poor gate), or hybrid (semantic ranking "
             "with a TF-IDF gate — the default and best-performing option in "
             "evaluation)."
-        ),
-        "subgroup": "Thresholds and limits",
-    },
-    "preprocessing.category_inference_backend": {
-        "title": "Category-inference backend",
-        "description": (
-            "Backend for malware-category inference, which drives an advisory STIX "
-            "schema-pruning hint. keyword is the deterministic substring classifier "
-            "that abstains rather than guesses (the safe default); hybrid falls back to "
-            "a semantic classifier to recover some of keyword's abstentions at a small "
-            "accuracy gain."
         ),
         "subgroup": "Thresholds and limits",
     },
@@ -836,14 +786,6 @@ ANNOTATIONS: dict[str, Annotation] = {
         ),
         "subgroup": "Function summarizer",
     },
-    "preprocessing.tool_artifacts_path": {
-        "title": "Tool-artifacts catalog path",
-        "description": (
-            "Path to the offensive-tool/commodity-RAT marker catalog JSON used when "
-            "use_tool_artifacts is enabled."
-        ),
-        "subgroup": "Reference data",
-    },
     "preprocessing.use_api_attck_map": {
         "title": "Use API-to-ATT&CK map",
         "description": (
@@ -861,17 +803,6 @@ ANNOTATIONS: dict[str, Annotation] = {
             "across 13 behaviour categories) in place of the small hardcoded "
             "suspicious-imports table. On by default and fail-safe: a missing or "
             "malformed catalog falls back to the built-in table."
-        ),
-        "subgroup": "Feature switches",
-    },
-    "preprocessing.use_attck_autocorrect": {
-        "title": "Use ATT&CK autocorrect",
-        "description": (
-            "Enables a deterministic pre-cascade pass that re-grounds each LLM analyst "
-            "claim's technique ID against the in-memory ATT&CK index, replacing invalid "
-            "IDs with the top evidence-derived suggestion. Rule-based (yara/sigma) "
-            "claims are skipped since their IDs are already authoritative. On by "
-            "default."
         ),
         "subgroup": "Feature switches",
     },
@@ -954,17 +885,6 @@ ANNOTATIONS: dict[str, Annotation] = {
             "functions reaching security-sensitive sink APIs and injects a 'priority "
             "functions' hint, focusing the static analyst's decompilation on the likely "
             "malicious core. Fails safe to no hint on error or a stripped binary."
-        ),
-        "subgroup": "Feature switches",
-    },
-    "preprocessing.use_tool_artifacts": {
-        "title": "Use tool-artifact markers",
-        "description": (
-            "Enables detection of offensive-tool / commodity-RAT byte markers (Cobalt "
-            "Strike, Mimikatz, Sliver, AsyncRAT, and similar), the only source of a "
-            "malware family name on a static-only run with no sandbox. Each entry "
-            "requires two distinct markers to fire, so a single coincidental string "
-            "cannot trigger it."
         ),
         "subgroup": "Feature switches",
     },

@@ -241,8 +241,11 @@ class ExtendedSTIXRenderer:
             name=f"Maljan analysis of {sha256[:12] if sha256 else 'sample'}",
             description=(
                 f"Verdict: {report.verdict}. "
-                f"Severity {report.severity.overall_score}/10 "
-                f"({report.severity.rating})."
+                + (
+                    f"Severity {report.severity.overall_score}/10 ({report.severity.rating})."
+                    if report.severity
+                    else "Severity not assessed."
+                )
             ),
             published=report.generated_at,
             report_types=["malware-analysis"],

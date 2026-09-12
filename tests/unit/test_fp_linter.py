@@ -19,6 +19,8 @@ def _stub_report(
     attribution=None,
     stix_bundle_extended=None,
     run_summary=None,
+    sections=None,
+    ttp_mappings=None,
 ):
     return _ns(
         capability_matrix=capability_matrix or [],
@@ -27,6 +29,8 @@ def _stub_report(
         attribution=attribution,
         stix_bundle_extended=stix_bundle_extended,
         run_summary=run_summary or {},
+        sections=sections or [],
+        ttp_mappings=ttp_mappings or [],
     )
 
 
@@ -199,7 +203,7 @@ class TestExplanationField:
         c5 = [w for w in warns if w.rule == "C5"]
         assert len(c5) == 1
         assert c5[0].explanation
-        assert "D11" in c5[0].explanation
+        assert "ledger entry" in c5[0].explanation
 
 
 # ---------------------------------------------------------------------------
@@ -225,57 +229,69 @@ class TestRuleC4Total:
 
 
 # ---------------------------------------------------------------------------
-# Wave 9 — C6 platform_filter_summary
+# C6 — a claim standing on nothing citable
 # ---------------------------------------------------------------------------
 
 
 class TestRuleC6:
-    def test_missing_platform_filter_summary_warns(self) -> None:
-        # Cascade dict exists (evidence) but no platform_filter_summary.
+    def test_a_ttp_row_with_no_source_and_no_quote_warns(self) -> None:
         report = _stub_report(
-            capability_matrix=[_ns(technique_id="T1497", platforms=None)],
-            run_summary={"cascade": {}},
+            ttp_mappings=[_ns(technique_id="T1055", contributing_layers=[], evidence_quotes=[])]
         )
-        warns = lint_report(report, "linux")
-        c6 = [w for w in warns if w.rule == "C6"]
+
+        c6 = [w for w in lint_report(report, "windows") if w.rule == "C6"]
         assert len(c6) == 1
-        assert "platform_filter_summary" in c6[0].message
+        assert "no evidence id and no tool entry" in c6[0].message
         assert c6[0].explanation
 
-    def test_zero_drops_warns(self) -> None:
+    def test_an_ungrounded_section_warns(self) -> None:
+        from maljan.reporting.models import EvidenceSection
+
+        report = _stub_report(
+            sections=[EvidenceSection(key="imports", title="Imports", source="", evidence_ids=[])]
+        )
+
+        assert [w.rule for w in lint_report(report, "windows") if w.rule == "C6"] == ["C6"]
+
+    def test_a_grounded_row_does_not_warn(self) -> None:
+        report = _stub_report(
+            ttp_mappings=[
+                _ns(technique_id="T1055", contributing_layers=["static"], evidence_quotes=["x"])
+            ]
+        )
+
+        assert not any(w.rule == "C6" for w in lint_report(report, "windows"))
+
+
+# ---------------------------------------------------------------------------
+# C7 — a technique id the validation loop could not get resolved
+# ---------------------------------------------------------------------------
+
+
+class TestRuleC7:
+    def test_an_unresolved_technique_id_is_named(self) -> None:
         report = _stub_report(
             run_summary={
-                "cascade": {
-                    "platform_filter_summary": {
-                        "sigma_dropped": 0,
-                        "yara_dropped": 0,
-                        "sample_platform": "linux",
-                    }
+                "validation": {
+                    "retries": 1,
+                    "by_code": {"attck.unknown_id": 1},
+                    "unresolved": [
+                        {
+                            "agent": "static",
+                            "code": "attck.unknown_id",
+                            "message": "TECHNIQUE T9999 is not in the MITRE ATT&CK catalogue.",
+                        }
+                    ],
                 }
             }
         )
-        warns = lint_report(report, "linux")
-        c6 = [w for w in warns if w.rule == "C6"]
-        assert len(c6) == 1
-        assert "dropped 0 rules" in c6[0].message
 
-    def test_nonzero_drops_no_warning(self) -> None:
-        report = _stub_report(
-            run_summary={
-                "cascade": {
-                    "platform_filter_summary": {
-                        "sigma_dropped": 12,
-                        "yara_dropped": 0,
-                        "sample_platform": "linux",
-                    }
-                }
-            }
-        )
-        warns = lint_report(report, "linux")
-        assert not any(w.rule == "C6" for w in warns)
+        c7 = [w for w in lint_report(report, "windows") if w.rule == "C7"]
+        assert len(c7) == 1
+        assert "T9999" in c7[0].message
+        assert c7[0].explanation
 
-    def test_unknown_platform_skips_c6(self) -> None:
-        # No platform → cannot validate, so skip.
-        report = _stub_report(run_summary={})
-        warns = lint_report(report, "unknown")
-        assert not any(w.rule == "C6" for w in warns)
+    def test_a_run_with_nothing_unresolved_does_not_warn(self) -> None:
+        report = _stub_report(run_summary={"validation": {"retries": 0, "unresolved": []}})
+
+        assert not any(w.rule == "C7" for w in lint_report(report, "windows"))

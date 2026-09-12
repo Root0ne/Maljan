@@ -451,7 +451,6 @@ class FamilyAttribution(BaseModel):
     # carved payload. Each row: family, tool, kind, confidence, markers.
     # Sibling of function_hash_matches, and the only family source that works
     # without a sandbox — cti.family[] is otherwise the sole producer.
-    tool_artifact_matches: list[dict[str, Any]] = Field(default_factory=list)
     # Family-feature RAG candidates — families retrieved by static-feature
     # similarity to a reference fingerprint KB, surfaced as evidence the LLM
     # weighed (sibling of function_hash_matches). Each row: family, similarity,
@@ -786,7 +785,10 @@ class MalwareReport(BaseModel):
     verdict: Literal["Malware", "Suspicious", "Benign"] = "Suspicious"
     overall_confidence: Annotated[float, Field(ge=0.0, le=1.0)] = 0.0
     malware_category: str | None = None
-    severity: SeverityAssessment = Field(default_factory=SeverityAssessment)
+    # ``None`` when the judge assessed no severity. It is not defaulted to
+    # "Informational": an unassessed report and a report assessed as harmless
+    # are different findings, and a default would print the second for the first.
+    severity: SeverityAssessment | None = None
 
     # --- Degraded-run signalling ---
     # True when the run had low/no analyst data (e.g. all LLM analysts errored,

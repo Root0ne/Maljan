@@ -12,15 +12,11 @@ import re
 import time
 from typing import TYPE_CHECKING, Any, cast
 
-from maljan.analysis.lolbin_layer import build_lolbin_isr
 from maljan.analysis.run_summary import RunSummaryBuilder
-from maljan.analysis.schema_pruner import infer_malware_category
-from maljan.analysis.ttp_cascade import TTPCascadeEngine
 from maljan.core.config import BUILTIN_AGENTS
 from maljan.core.container import ServiceContainer
 from maljan.core.exceptions import AnalystError, LLMError
 from maljan.core.logger import logger
-from maljan.extractors.network_extractor import build_dga_isr
 from maljan.memory.long_term_memory import build_stored_case
 from maljan.pipeline.events import (
     claims_to_payload,
@@ -28,9 +24,10 @@ from maljan.pipeline.events import (
     emit_agent_message,
     summarize_claims,
 )
+from maljan.pipeline.evidence_summary import summarise
 from maljan.pipeline.state import AgentArgument, AnalysisState
 from maljan.pipeline.sycophancy_detector import build_revision_directive, detect_sycophancy
-from maljan.reporting.ledger_projection import network_from_sandbox_report
+from maljan.pipeline.validation import Violation, corroboration, validation_metrics
 from maljan.reporting.ledger_report import section_is_grounded
 from maljan.schemas.evidence import LedgerEntry
 from maljan.schemas.isr_models import AgentISR
@@ -108,13 +105,55 @@ def _is_placeholder_only(chunks: list, role: str = "") -> bool:
     return bool(_STATIC_PLACEHOLDER_RE.match(content.strip()))
 
 
-# The confidence ceiling for a degraded run. Public, and
-# module-level, because it is a cross-layer contract rather than an
-# implementation detail of the report node: the worker persists whatever ends
-# up under it, the dashboard styles "low confidence" at the same threshold, and
-# the value was once found silently disagreeing between layers. One
-# name, so a change cannot land in only half of them.
-DEGRADED_CONFIDENCE_CAP = 0.60
+def _violations_from_rows(rows: Any) -> list[Violation]:
+    """Rebuild the violations an analyst node put on the state channel."""
+    out: list[Violation] = []
+    for row in rows or []:
+        if isinstance(row, dict) and row.get("code"):
+            out.append(
+                Violation(
+                    code=str(row.get("code")),
+                    message=str(row.get("message") or ""),
+                    path=str(row.get("path") or ""),
+                )
+            )
+    return out
+
+
+def _validation_update(agent: Any, agent_name: str) -> dict[str, Any]:
+    """What this analyst was told and did not fix, on the state's channels."""
+    drain = getattr(agent, "drain_validation_findings", None)
+    if drain is None:
+        return {}
+    try:
+        rows, retries = drain()
+    except Exception as exc:  # noqa: BLE001 — a metric is never worth a lost run
+        logger.debug("validation findings read skipped for %s: %s", agent_name, exc)
+        return {}
+    update: dict[str, Any] = {}
+    if rows:
+        update["validation_findings"] = {agent_name: rows}
+    if retries:
+        update["validation_retries"] = retries
+    return update
+
+
+def _assessment(bundle: Any) -> Any | None:
+    """The judge's own severity / category / family, when it produced one."""
+    return getattr(bundle, "x_maljan_assessment", None)
+
+
+def _assessed_category(bundle: Any) -> str | None:
+    assessment = _assessment(bundle)
+    value = str(getattr(assessment, "malware_category", "") or "").strip()
+    return value or None
+
+
+def _assessed_family(bundle: Any) -> str | None:
+    assessment = _assessment(bundle)
+    family = getattr(assessment, "family", None)
+    value = str(getattr(family, "name", "") or "").strip()
+    return value or None
 
 
 def _absolute_host_sample_path(state: AnalysisState) -> str:
@@ -370,12 +409,14 @@ def make_analyst_node(
             except Exception as exc:  # noqa: BLE001
                 logger.debug("evidence ledger read skipped for %s: %s", agent_name, exc)
                 return {}
-            if not entries:
-                return {}
-            return {
-                "evidence_ledger": [e.model_dump(mode="json") for e in entries],
-                "tool_evidence": {agent_name: [e.to_captured().model_dump() for e in entries]},
-            }
+            update: dict[str, Any] = {}
+            if entries:
+                update["evidence_ledger"] = [e.model_dump(mode="json") for e in entries]
+                update["tool_evidence"] = {
+                    agent_name: [e.to_captured().model_dump() for e in entries]
+                }
+            update.update(_validation_update(bound_agent, agent_name))
+            return update
 
         try:
             agent = container.get_agent(agent_name)
@@ -1145,304 +1186,24 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 for name in container.analyst_keys()
             }
 
-            attck_validator = None
-            try:
-                from maljan.memory.attck_validator import ATTCKValidator
-
-                attck_validator = ATTCKValidator.get_instance(
-                    backend=container.config.preprocessing.attck_index_backend
-                )
-            except Exception as e:
-                logger.warning("ATTCKValidator unavailable: %s. Skipping TTP validation.", e)
-
             isr_reports: dict[str, AgentISR] = dict(state.get("isr_reports") or {})
 
-            # Pick up the platform the bootstrap inferred. The
-            # rule layers + cascade use this to drop platform-mismatched
-            # signals (e.g. a Windows-only Sigma rule firing against a
-            # Linux sample).
-            sample_platform = state.get("platform") or "unknown"
-
-            # YARA scans the sample BYTES (not analyst prose) so
-            # an API-name pattern only fires when the string is really in the
-            # binary. Read from the worker-visible host path (same one the PE
-            # extractor / family RAG use), not the container Ghidra path.
-            def _read_sample_bytes() -> bytes | None:
-                from pathlib import Path as _Path
-
-                raw = state.get("sample_path") or state.get("static_sample_path")
-                if not raw:
-                    return None
+            # The run's tool calls, read back so the evidence summary can count
+            # a capa or YARA hit as a source alongside the analysts. Bad rows
+            # are skipped rather than failing the verdict.
+            _ledger: list[LedgerEntry] = []
+            for _row in state.get("evidence_ledger") or []:
                 try:
-                    return _Path(str(raw)).read_bytes()
-                except Exception as _e:  # noqa: BLE001
-                    logger.warning("YARA Layer 0: sample unreadable (%s). Skipping.", _e)
-                    return None
+                    _ledger.append(LedgerEntry.model_validate(_row))
+                except Exception as exc:  # noqa: BLE001 — one bad row is not a lost verdict
+                    logger.debug("judge_node: unreadable ledger row skipped (%s).", exc)
 
-            def _scan_targets() -> list[tuple[str, bytes]]:
-                """The sample, plus anything carved out of it.
-
-                A packed dropper's real payload lives in the overlay or a
-                resource, so a corpus scanned only against the outer shell
-                matches nothing — which reads in the report as "no signatures
-                fired" rather than "we never looked at the interesting part".
-                """
-                sample_bytes = _read_sample_bytes()
-                if not sample_bytes:
-                    return []
-                targets: list[tuple[str, bytes]] = [("sample", sample_bytes)]
-                try:
-                    from maljan.extractors.pe_extractor import carve_payloads
-
-                    targets.extend(carve_payloads(sample_bytes))
-                except Exception as _e:  # noqa: BLE001
-                    logger.warning("YARA Layer 0: carving skipped (%s).", _e)
-                return targets
-
-            async def _run_yara_scan() -> AgentISR | None:
-                try:
-                    # In a thread, like the scan below it. The getter *builds*
-                    # the layer on first use — compiling the whole rule corpus —
-                    # and the container caches behind a lock, so the whole cost
-                    # lands on whichever loop callback asked first.
-                    yara_layer = await asyncio.to_thread(container.get_yara_layer)
-                    if yara_layer.rule_count > 0:
-                        targets = await asyncio.to_thread(_scan_targets)
-                        if not targets:
-                            return None
-                        yara_layer.reset_filter_stats()
-                        yara_matches = []
-                        for label, payload in targets:
-                            hits = await asyncio.to_thread(
-                                yara_layer.scan, payload, sample_platform
-                            )
-                            if label != "sample":
-                                # Say *where* the rule fired: a match on a
-                                # carved child means "this dropper carries X",
-                                # not "this is X".
-                                for hit in hits:
-                                    hit.source_label = label
-                            yara_matches.extend(hits)
-                        if yara_matches:
-                            yara_isr: AgentISR = yara_layer.to_isr(yara_matches)
-                            logger.info(
-                                "YARA Layer 0: %d match(es) across %d target(s), "
-                                "%d rule(s) dropped by platform=%s -> cascade domain='yara'.",
-                                len(yara_matches),
-                                len(targets),
-                                yara_layer.last_filtered_count,
-                                sample_platform,
-                            )
-                            return yara_isr
-                except Exception as e:
-                    logger.warning("YARA Layer 0 scan failed: %s. Skipping.", e)
-                return None
-
-            # Sigma scans structured events built from real
-            # sandbox telemetry (strict field matching) instead of analyst
-            # prose. No telemetry -> no events -> no matches (correct for
-            # static-only runs).
-            async def _run_sigma_scan() -> AgentISR | None:
-                try:
-                    from maljan.analysis.sigma_layer import build_events_from_sandbox
-
-                    # The 209-second heartbeat gap of 2026-09-07 was caught
-                    # here: `from_rules_dir` reading and parsing 2902 rule
-                    # files, in a loop callback, with the worker's own thread
-                    # starved behind it. Building it is the slow part, not the
-                    # scan — and it is slow exactly once, on first use.
-                    sigma_layer = await asyncio.to_thread(container.get_sigma_layer)
-                    if sigma_layer.rule_count > 0:
-                        _sbx = state.get("sandbox_report")
-                        _sbx = _sbx if isinstance(_sbx, dict) else None
-                        # Walks every process/file/registry entry of a full
-                        # sandbox report; on a chatty detonation that is
-                        # seconds, and it is pure CPU.
-                        sigma_events = await asyncio.to_thread(build_events_from_sandbox, _sbx)
-                        if not sigma_events:
-                            return None
-                        sigma_layer.reset_filter_stats()
-                        sigma_matches = await asyncio.to_thread(
-                            sigma_layer.scan_events,
-                            sigma_events,
-                            "sandbox",
-                            sample_platform,
-                        )
-                        if sigma_matches or sigma_layer.last_filtered_count:
-                            logger.info(
-                                "Sigma Layer 0: %d match(es), %d rule(s) dropped "
-                                "by platform=%s -> cascade domain='sigma'.",
-                                len(sigma_matches),
-                                sigma_layer.last_filtered_count,
-                                sample_platform,
-                            )
-                        if sigma_matches:
-                            sigma_isr = sigma_layer.to_isr(sigma_matches)
-                            return sigma_isr
-                except Exception as e:
-                    logger.warning("Sigma Layer 0 scan failed: %s. Skipping.", e)
-                return None
-
-            yara_result, sigma_result = await asyncio.gather(_run_yara_scan(), _run_sigma_scan())
-            if yara_result is not None:
-                isr_reports["yara_layer"] = yara_result
-            if sigma_result is not None:
-                isr_reports["sigma_layer"] = sigma_result
-
-            # Deterministic network / command-line heuristic Layer 0 (2026-06-03):
-            # surface DGA domains as T1568.002 and suspicious LOLBin execution as
-            # T1218.x, mirroring the Sigma/YARA layers. Confidence is capped and
-            # evidence-cited so a lone heuristic can't drive the verdict — the
-            # cascade only boosts it on cross-layer corroboration. Both fail-safe.
-            _sandbox_report = state.get("sandbox_report")
-            _sandbox_report = _sandbox_report if isinstance(_sandbox_report, dict) else None
-            try:
-                dga_isr = build_dga_isr(network_from_sandbox_report(_sandbox_report))
-                if dga_isr is not None:
-                    isr_reports["network_dga"] = dga_isr
-                    logger.info(
-                        "Network DGA Layer 0: %d T1568.002 claim(s) -> cascade domain='network'.",
-                        len(dga_isr.claims),
-                    )
-            except Exception as e:  # noqa: BLE001
-                logger.warning("Network DGA Layer 0 failed: %s. Skipping.", e)
-            try:
-                lolbin_isr = build_lolbin_isr(_sandbox_report)
-                if lolbin_isr is not None:
-                    isr_reports["lolbin"] = lolbin_isr
-            except Exception as e:  # noqa: BLE001
-                logger.warning("LOLBin Layer 0 failed: %s. Skipping.", e)
-
-            # Import-capability Layer 0: turn the PE extractor's
-            # deterministic import classification (+ static-string IOCs) into
-            # grounded ATT&CK techniques (e.g. WS2_32 client + hard-coded domain
-            # -> T1071). Closes the under-reporting gap the byte-scan YARA corpus
-            # leaves. Fail-safe; builds static from the worker-readable path.
-            try:
-                from maljan.analysis.import_capability_layer import (
-                    build_import_capability_isr,
-                )
-                from maljan.extractors.pe_extractor import build_static_analysis
-
-                _host_imp = state.get("sample_path")
-                if _host_imp:
-                    _static_imp = build_static_analysis(sample_path=str(_host_imp))
-                    import_isr = build_import_capability_isr(_static_imp)
-                    if import_isr is not None:
-                        isr_reports["import_capability"] = import_isr
-            except Exception as e:  # noqa: BLE001
-                logger.warning("Import-capability Layer 0 failed: %s. Skipping.", e)
-
-            # Offensive-tool artifacts. The only source of a family name on a
-            # run with no sandbox — CAPE's cti.family[] is otherwise the sole
-            # producer, so a static-only report knew its verdict but not what it
-            # was looking at. Emits on domain="yara" so it shares the existing
-            # weight and cannot double-count against the YARA layer.
-            _tool_artifact_matches: list[dict[str, Any]] = []
-            try:
-                from maljan.analysis.tool_artifact_layer import build_tool_artifact_isr
-                from maljan.core.paths import resolve_data
-
-                _ta_cfg = container.config.preprocessing
-                if getattr(_ta_cfg, "use_tool_artifacts", False):
-                    _ta_bytes = await asyncio.to_thread(_read_sample_bytes)
-                    _ta_isr, _tool_artifact_matches = build_tool_artifact_isr(
-                        _ta_bytes,
-                        str(resolve_data(_ta_cfg.tool_artifacts_path)),
-                    )
-                    if _ta_isr is not None:
-                        isr_reports["tool_artifact"] = _ta_isr
-            except Exception as e:  # noqa: BLE001
-                logger.warning("Tool-artifact Layer 0 failed: %s. Skipping.", e)
-
-            # Deterministic ATT&CK technique-ID correction (2026-06-01). Run
-            # BEFORE the cascade so corrected IDs flow into corroboration, the
-            # judge's grounding, the report and the STIX bundle. Re-grounds each
-            # LLM analyst claim against the full-catalog TF-IDF index, replacing
-            # the small model's loop-prone ID-recall guess. Layer-0 yara/sigma
-            # ISRs are skipped (rule-authoritative). Fail-safe + config-gated.
-            if (
-                container.config.preprocessing.use_attck_autocorrect
-                and attck_validator is not None
-                and hasattr(attck_validator, "correct_isr_reports")
-            ):
-                try:
-                    # Semantic cosine scores on a different scale than TF-IDF, so
-                    # the backend selects which alignment threshold to apply.
-                    _prep = container.config.preprocessing
-                    _min_align = (
-                        _prep.attck_autocorrect_min_alignment_semantic
-                        if _prep.attck_index_backend == "semantic"
-                        else _prep.attck_autocorrect_min_alignment
-                    )
-                    # Mutates claim.technique_id in place on the shared AgentISR
-                    # objects, which this node already returns as "isr_reports"
-                    # (below), so report_node / LTM see the corrected IDs.
-                    # swap_valid defaults off (zero-regression: only fix invalid
-                    # IDs) per the §1.5.2 ablation.
-                    _n_corrected = attck_validator.correct_isr_reports(
-                        isr_reports,
-                        min_alignment=_min_align,
-                        swap_valid=_prep.attck_autocorrect_swap_valid,
-                    )
-                    if _n_corrected:
-                        logger.info(
-                            "ATT&CK autocorrect: %d technique id(s) re-grounded before cascade.",
-                            _n_corrected,
-                        )
-                except Exception as exc:  # noqa: BLE001
-                    logger.debug("ATT&CK autocorrect skipped: %s", exc, exc_info=True)
-
-            # Mark domains that had no real input data this run so
-            # the cascade can't count an absent layer as corroboration (the
-            # T1497 "1.00 across dynamic,network,static,yara" inflation).
-            _dyn_empty = True
-            if isinstance(_sandbox_report, dict):
-                _beh = _sandbox_report.get("behavior") or {}
-                _dyn_empty = not (
-                    (isinstance(_beh, dict) and (_beh.get("processes") or _beh.get("calls")))
-                    or _sandbox_report.get("signatures")
-                )
-            _net_empty = True
-            try:
-                _net_iocs = network_from_sandbox_report(_sandbox_report)
-                _net_empty = not (
-                    _net_iocs and (_net_iocs.domains or _net_iocs.ips or _net_iocs.urls)
-                )
-            except Exception as e:  # noqa: BLE001
-                logger.debug("network-empty probe failed: %s (treating as empty).", e)
-            _empty_domains = frozenset(
-                d for d, empty in (("dynamic", _dyn_empty), ("network", _net_empty)) if empty
-            )
-
-            cascade_summary = None
-            try:
-                cascade_summary = TTPCascadeEngine().compute(
-                    isr_reports,
-                    sample_platform=sample_platform,
-                    empty_domains=_empty_domains,
-                )
-            except Exception as e:
-                logger.warning("TTP cascade failed: %s. Skipping.", e)
-
-            # Capture pre-cascade platform-filter
-            # counters from both Layer 0 evaluators so a test can prove the
-            # filter ran even when the cascade has nothing to drop.
-            _sigma_dropped_total = 0
-            _yara_dropped_total = 0
-            try:
-                # Cached by the scans above on every ordinary run, but not on
-                # the paths that skipped them — and a getter that may build is
-                # a getter that runs in a thread.
-                _yara_layer = await asyncio.to_thread(container.get_yara_layer)
-                _yara_dropped_total = _yara_layer.last_filtered_count
-            except Exception as e:
-                logger.debug("Could not read yara_layer.last_filtered_count: %s", e)
-            try:
-                _sigma_layer = await asyncio.to_thread(container.get_sigma_layer)
-                _sigma_dropped_total = _sigma_layer.last_filtered_count
-            except Exception as e:
-                logger.debug("Could not read sigma_layer.last_filtered_count: %s", e)
+            # Who named which technique, and how sure each of them was. This is
+            # what the judge weighs; nothing here combines the numbers.
+            _corroboration = corroboration(isr_reports, _ledger)
+            _technique_count = len(_corroboration)
+            _corroborated = sum(1 for sources in _corroboration.values() if len(sources) > 1)
+            evidence_summary = summarise(isr_reports, _ledger)
 
             start_time = time.time()
 
@@ -1452,60 +1213,29 @@ def make_judge_node(container: ServiceContainer) -> Any:
             except Exception as e:
                 logger.warning("Memory store unavailable: %s. Skipping LTM context.", e)
 
-            # Build the evidence corpus so the judge
-            # post-processor can drop hallucinated indicators whose
-            # pattern values never appeared in deterministic findings.
+            # The corpus an indicator's pattern value has to appear in. It is
+            # no longer a filter: the judge is told which values are not in it
+            # and gets a turn to withdraw them.
             evidence_corpus: set[str] = set()
             try:
                 from maljan.agents.judge_postprocess import build_evidence_corpus
 
                 # Best-effort — interesting strings come from a partial
                 # MalwareReport build later in the pipeline, so we pull
-                # from the raw sandbox report and any pre-built static
-                # block that's already in state.
+                # from the raw sandbox report and the ledger's own outputs.
                 sandbox_report = state.get("sandbox_report") or {}
                 evidence_corpus = build_evidence_corpus(
                     interesting_strings=None,
                     sandbox_report=sandbox_report if isinstance(sandbox_report, dict) else None,
+                    extra=[entry.output for entry in _ledger if entry.output],
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.debug("Evidence corpus build skipped: %s", exc)
 
-            bundle = await judge.give_verdict(
-                reports=reports,
-                history=state.get("discussion_history") or [],
-                isr_reports=isr_reports,
-                attck_validator=attck_validator,
-                cascade_summary=cascade_summary,
-                memory_store=memory_store,
-                evidence_corpus=evidence_corpus or None,
-                current_sample_id=state.get("file_hash"),
-            )
-
-            stix_output: dict[str, Any] = {}
-            if isinstance(bundle, Bundle):
-                stix_output = bundle.model_dump()
-
-            decision = _decide_from_bundle(bundle) if isinstance(bundle, Bundle) else "Suspicious"
-
-            ttp_validation_summary = None
-            if attck_validator and hasattr(attck_validator, "validate_isr_reports") and isr_reports:
-                try:
-                    ttp_validation_summary = attck_validator.validate_isr_reports(isr_reports)
-                except Exception as exc:
-                    logger.debug("validate_isr_reports failed: %s", exc, exc_info=True)
-
-            # Compute corroboration / failure signals up front so we can
-            # feed the LTM quality gate (below) AND the run_summary
-            # builder. Without
-            # this, a run where every LLM analyst silently fails (zero
-            # claims, only YARA+Sigma layer matches) yields a 0.95+
-            # confidence verdict that visually matches a fully
-            # corroborated one.
-            _corroborated = cascade_summary.corroborated_count if cascade_summary is not None else 0
-            _technique_count = (
-                cascade_summary.total_techniques if cascade_summary is not None else 0
-            )
+            # Failure signals, computed before the verdict rather than after
+            # it: the judge is told why the run is thin so it can weigh its own
+            # confidence, which is the whole point of not capping the number
+            # afterwards.
             _failed_analysts = [
                 name
                 for name, text in (state.get("reports") or {}).items()
@@ -1640,11 +1370,45 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 )
             _degraded_mode = bool(_degradation_reasons)
             if _degraded_mode:
-                logger.warning(
-                    "Degraded run detected (%s). Final confidence will be "
-                    "capped in the report node.",
-                    "; ".join(_degradation_reasons),
+                logger.warning("Degraded run detected (%s).", "; ".join(_degradation_reasons))
+
+            # The degradation, said to the judge in the prompt. What used to
+            # happen instead was a fixed ceiling applied to the finished number
+            # in the report node, which told the reader the confidence was
+            # capped and told the judge nothing at all.
+            degradation_note = ""
+            if _degradation_reasons:
+                degradation_note = (
+                    "RUN QUALITY — this analysis is degraded because "
+                    + "; ".join(_degradation_reasons)
+                    + ". Weigh your confidence accordingly: a verdict drawn from thin "
+                    "evidence should say so in its numbers, not only in its prose."
                 )
+
+            verdict = await judge.give_verdict(
+                reports=reports,
+                history=state.get("discussion_history") or [],
+                isr_reports=isr_reports,
+                evidence_summary=evidence_summary,
+                degradation_note=degradation_note,
+                memory_store=memory_store,
+                evidence_corpus=evidence_corpus or None,
+                current_sample_id=state.get("file_hash"),
+            )
+            bundle = verdict.bundle
+            stix_output: dict[str, Any] = bundle.model_dump() if isinstance(bundle, Bundle) else {}
+            decision = _decide_from_bundle(bundle) if isinstance(bundle, Bundle) else "Suspicious"
+
+            # What the analysts and the judge were told and did not fix. Both
+            # are recorded rather than resolved, and both are what
+            # ``run_summary.validation`` is made of.
+            _unresolved: list[tuple[str, Violation]] = [
+                (name, violation)
+                for name, entries in (state.get("validation_findings") or {}).items()
+                for violation in _violations_from_rows(entries)
+            ]
+            _retries = int(state.get("validation_retries") or 0) + verdict.retries
+            _unresolved.extend(("judge", violation) for violation in verdict.violations)
 
             run_summary_dict = None
             try:
@@ -1662,13 +1426,8 @@ def make_judge_node(container: ServiceContainer) -> Any:
                     .set_verdict(decision, len(bundle.objects) if isinstance(bundle, Bundle) else 0)
                     .set_negotiation(negotiation_state, max_iterations=max_iters)
                     .set_isr_stats(isr_reports, no_data=_no_data_analysts)
-                    .set_validation_summary(ttp_validation_summary)
-                    .set_cascade_summary(cascade_summary)
-                    .set_platform_filter_summary(
-                        sigma_dropped=_sigma_dropped_total,
-                        yara_dropped=_yara_dropped_total,
-                        sample_platform=str(sample_platform),
-                    )
+                    .set_validation(validation_metrics(_retries, _unresolved))
+                    .set_corroboration(_corroboration)
                     .set_degraded_mode(_degraded_mode, _degradation_reasons)
                     .set_failed_analysts(_failed_analysts)
                     .set_profile(
@@ -1682,10 +1441,13 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 )
                 run_summary_dict = summary.to_dict()
                 logger.info(
-                    "RunSummary built: verdict=%s, rounds=%d, techniques=%d",
+                    "RunSummary built: verdict=%s, rounds=%d, techniques=%d, "
+                    "validation retries=%d, unresolved=%d",
                     decision,
                     summary.negotiation.rounds_completed,
-                    summary.cascade.total_techniques if summary.cascade else 0,
+                    _technique_count,
+                    _retries,
+                    len(_unresolved),
                 )
             except Exception as exc:
                 logger.warning("RunSummary build failed (%s). Skipping.", exc)
@@ -1698,7 +1460,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 _ltm_skip_reason: str | None = None
                 if _corroborated == 0 and _technique_count <= 1:
                     _ltm_skip_reason = (
-                        f"low-quality cascade: corroborated={_corroborated}, "
+                        f"thin evidence: corroborated={_corroborated}, "
                         f"techniques={_technique_count}"
                     )
                 elif _failed_analysts:
@@ -1714,10 +1476,10 @@ def make_judge_node(container: ServiceContainer) -> Any:
                     )
                 else:
                     try:
-                        category = infer_malware_category(
-                            reports=state.get("reports") or {},
-                            isr_reports=isr_reports,
-                        ).value
+                        # The judge's own category, or nothing. A keyword
+                        # classifier used to fill this in over the judge's head
+                        # and the stored case then taught the next run its guess.
+                        category = _assessed_category(bundle) or "unknown"
                         case = build_stored_case(
                             sample_id=state.get("file_hash", "unknown"),
                             isr_reports=isr_reports,
@@ -1795,11 +1557,8 @@ def make_judge_node(container: ServiceContainer) -> Any:
                         )
                         # Write side: only persist under a grounded family so an
                         # UNKNOWN verdict cannot pollute the attribution corpus.
-                        _family = infer_malware_category(
-                            reports=state.get("reports") or {},
-                            isr_reports=isr_reports,
-                        ).value
-                        if _family and _family.upper() != "UNKNOWN":
+                        _family = _assessed_family(bundle)
+                        if _family:
                             _fh_store.upsert_sample(_sample_id, _family, _funcs)
             except Exception as _e:
                 logger.warning("Function-hash attribution skipped (%s). Verdict unaffected.", _e)
@@ -1912,7 +1671,6 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 # channel the analysts use, so a verdict that leans on one can
                 # cite it and the citation resolves.
                 "evidence_ledger": _judge_evidence(),
-                # Persist YARA/Sigma layer ISRs so callers can inspect them.
                 "isr_reports": isr_reports,
                 # Surface the degraded-mode signal to the report
                 # node and downstream consumers (API/dashboard).
@@ -1921,10 +1679,6 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 # Exact opcode-hash family overlap, surfaced into the report's
                 # FamilyAttribution.function_hash_matches by the report node.
                 "function_hash_matches": _func_hash_report,
-                # Offensive-tool markers, surfaced into
-                # FamilyAttribution.tool_artifact_matches by the report node.
-                # This is what lets a sandbox-less run name a family at all.
-                "tool_artifact_matches": _tool_artifact_matches,
                 # Family-feature RAG candidates (retrieved by static-feature
                 # similarity), surfaced into FamilyAttribution.family_rag_candidates
                 # by the report node. Empty unless the RAG is enabled with a catalog.
@@ -2003,18 +1757,7 @@ def make_report_node(container: ServiceContainer) -> Any:
 
         isr_reports = dict(state.get("isr_reports") or {})
 
-        # Re-run the cascade with the same sample_platform the judge
-        # node used, so the report_node's cascade output stays consistent
-        # with what the verdict + STIX bundle saw.
         report_sample_platform = state.get("platform") or "unknown"
-
-        cascade_summary = None
-        try:
-            cascade_summary = TTPCascadeEngine().compute(
-                isr_reports, sample_platform=report_sample_platform
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("report_node: cascade recompute skipped (%s).", exc)
 
         # Derive overall confidence — last entry of the confidence history if
         # available, otherwise the negotiation block of run_summary, otherwise
@@ -2035,54 +1778,26 @@ def make_report_node(container: ServiceContainer) -> Any:
             except (TypeError, ValueError):
                 overall_confidence = 0.0
 
-        # Cap confidence when the judge
-        # node flagged the run as degraded. Without this, a verdict drawn
-        # entirely from YARA/Sigma deterministic layers (with all three
-        # LLM analysts silently producing zero claims) lands at 0.98+ and
-        # is indistinguishable in the UI from a fully corroborated finding.
-        if state.get("degraded_mode") and overall_confidence > DEGRADED_CONFIDENCE_CAP:
-            logger.warning(
-                "report_node: capping overall_confidence %.3f -> %.2f (degraded run: %s).",
-                overall_confidence,
-                DEGRADED_CONFIDENCE_CAP,
-                "; ".join(state.get("degradation_reasons") or []) or "no reason recorded",
-            )
-            overall_confidence = DEGRADED_CONFIDENCE_CAP
+        # A degraded run is not capped here. It is said to the judge in the
+        # verdict prompt and printed in the report header, and the confidence
+        # is whatever the run actually reached — a number silently pulled down
+        # to 0.60 told the reader the same thing for every kind of thinness.
 
-        # Best-effort malware category — cheap and fully deterministic.
-        #
-        # The previous implementation
-        # swallowed every exception at DEBUG level, so a silently-failing
-        # ``.value`` access (e.g. when the inference returned a string
-        # instead of an enum, or when the schema_pruner module raised on a
-        # malformed ISR) left the DB row with ``malware_category = NULL``
-        # despite the worker log claiming "Schema pruning: inferred
-        # category 'rat'." in the judge phase. Promote the failure to
-        # WARNING and coerce non-enum returns to ``str`` so the field
-        # actually lands.
-        malware_category: str | None = None
+        # Severity, category and family come off the judge's bundle. Nothing
+        # here computes them: a report that cannot say what the judge decided
+        # says "not assessed" rather than substituting an arithmetic.
+        _bundle_assessment = None
         try:
-            inferred = infer_malware_category(
-                reports=state.get("reports") or {},
-                isr_reports=isr_reports,
-            )
-            # ``infer_malware_category`` returns ``MalwareCategory`` (Enum)
-            # but a custom override could return a bare str; accept both.
-            raw_value = getattr(inferred, "value", inferred)
-            if isinstance(raw_value, str) and raw_value:
-                malware_category = raw_value
-            else:
-                logger.warning(
-                    "report_node: malware_category inference returned non-string %r;"
-                    " field will stay NULL.",
-                    raw_value,
+            _judge_bundle = state.get("stix_output") or {}
+            if isinstance(_judge_bundle, dict) and _judge_bundle.get("x_maljan_assessment"):
+                from maljan.schemas.judgement import JudgeAssessment
+
+                _bundle_assessment = JudgeAssessment.model_validate(
+                    _judge_bundle["x_maljan_assessment"]
                 )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "report_node: malware_category inference failed (%s: %s).",
-                type(exc).__name__,
-                exc,
-            )
+        except Exception as exc:  # noqa: BLE001 — an unreadable assessment is "not assessed"
+            logger.warning("report_node: the judge's assessment could not be read (%s).", exc)
+        malware_category = getattr(_bundle_assessment, "malware_category", None)
 
         discussion_history = [
             arg.model_dump() if hasattr(arg, "model_dump") else dict(arg)
@@ -2150,7 +1865,7 @@ def make_report_node(container: ServiceContainer) -> Any:
                 discussion_history=discussion_history,
                 final_decision=state.get("final_decision") or "Suspicious",
                 overall_confidence=overall_confidence,
-                cascade_summary=cascade_summary,
+                judge_assessment=_bundle_assessment,
                 malware_category=malware_category,
                 # Degraded-run signalling: surfaced as a banner so a numerically
                 # high verdict/severity on a low-data run is not read as authoritative.
@@ -2181,19 +1896,6 @@ def make_report_node(container: ServiceContainer) -> Any:
             _attck_cands = cast("list[dict[str, Any]]", state.get("attck_case_candidates") or [])
             if _attck_cands and getattr(report, "attribution", None) is not None:
                 report.attribution.attck_case_candidates = _attck_cands
-            # Offensive-tool markers, and — when the sandbox named nothing — the
-            # family itself. Sandbox CTI keeps precedence: a real detonation
-            # outranks a string match, so this only fills a gap, never overrides.
-            _tool_matches = cast("list[dict[str, Any]]", state.get("tool_artifact_matches") or [])
-            if _tool_matches and getattr(report, "attribution", None) is not None:
-                report.attribution.tool_artifact_matches = _tool_matches
-                if not report.attribution.family:
-                    _best = max(_tool_matches, key=lambda m: float(m.get("confidence") or 0.0))
-                    report.attribution.family = str(_best.get("family") or "") or None
-                    report.attribution.family_confidence = float(_best.get("confidence") or 0.0)
-                    # Grounded by construction: the claim text naming this family
-                    # is in the ISR the cascade already consumed.
-                    report.attribution.family_grounded = bool(report.attribution.family)
             # Attach the captured tool-loop evidence so
             # the Composer can ground the deep technical spine. Already size-
             # capped upstream (schemas.tool_evidence); stored verbatim here.
@@ -2377,7 +2079,7 @@ def make_report_node(container: ServiceContainer) -> Any:
             _final_desc = (
                 f"Verdict: {report.verdict} "
                 f"(confidence={report.overall_confidence:.2f}; "
-                f"severity={report.severity.rating})"
+                f"severity={report.severity.rating if report.severity else 'not assessed'})"
             )
             for obj in extended_dump.get("objects", []) or []:
                 if obj.get("type") != "malware":
@@ -2416,7 +2118,7 @@ def make_report_node(container: ServiceContainer) -> Any:
             "report_node: built MalwareReport (verdict=%s, severity=%s, "
             "markdown_chars=%d, extended_objects=%d, fp_warnings=%d).",
             report.verdict,
-            report.severity.rating,
+            report.severity.rating if report.severity else "not assessed",
             len(markdown),
             len(extended_dump.get("objects", [])) if extended_dump else 0,
             len(fp_warnings),
