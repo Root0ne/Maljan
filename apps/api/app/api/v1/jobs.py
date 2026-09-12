@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.deps import get_current_user
 from app.logging_config import get_logger
+from app.logsafe import log_safe
 from app.models.user import User
 from app.schemas.job import JobCreateRequest, JobListResponse, JobResponse
 from app.services import audit
@@ -87,8 +88,8 @@ async def create_job(
 ) -> Any:
     """Start a new analysis job for an uploaded sample."""
     logger.info(
-        f"Creating analysis job for sample={body.sample_id}",
-        extra={"sample_id": str(body.sample_id), "user_id": str(user.id)},
+        f"Creating analysis job for sample={log_safe(body.sample_id)}",
+        extra={"sample_id": log_safe(body.sample_id), "user_id": log_safe(user.id)},
     )
     profile = (body.config or {}).get("profile")
     if profile is not None:
@@ -157,8 +158,8 @@ async def list_jobs(
         status_filter=status_filter,
     )
     logger.debug(
-        f"Listed jobs: page={page} filter={status_filter} total={result.get('total', 0)}",
-        extra={"user_id": str(user.id)},
+        f"Listed jobs: page={page} filter={log_safe(status_filter)} total={result.get('total', 0)}",
+        extra={"user_id": log_safe(user.id)},
     )
     return result
 
@@ -173,8 +174,8 @@ async def get_job(
     job = await svc.get_job(job_id, user)
     if not job:
         logger.warning(
-            f"Job not found: {job_id}",
-            extra={"job_id": str(job_id), "user_id": str(user.id)},
+            f"Job not found: {log_safe(job_id)}",
+            extra={"job_id": log_safe(job_id), "user_id": log_safe(user.id)},
         )
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
     return job
@@ -211,7 +212,7 @@ async def get_job_events(
             f"analysis:{job_id}:events", min="-", max="+", count=limit
         )
     except Exception as exc:  # noqa: BLE001
-        logger.warning(f"Event stream read failed for job={job_id}: {exc}")
+        logger.warning(f"Event stream read failed for job={log_safe(job_id)}: {log_safe(exc)}")
         entries = []
     finally:
         try:
@@ -244,8 +245,8 @@ async def cancel_job(
     try:
         await svc.cancel_job(job_id, user)
         logger.info(
-            f"Job cancelled: {job_id}",
-            extra={"job_id": str(job_id), "user_id": str(user.id)},
+            f"Job cancelled: {log_safe(job_id)}",
+            extra={"job_id": log_safe(job_id), "user_id": log_safe(user.id)},
         )
         await audit.record(
             "job.cancel",
@@ -258,7 +259,7 @@ async def cancel_job(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found") from None
     except RuntimeError as exc:
         logger.warning(
-            f"Job cancel rejected: {exc}",
-            extra={"job_id": str(job_id), "user_id": str(user.id)},
+            f"Job cancel rejected: {log_safe(exc)}",
+            extra={"job_id": log_safe(job_id), "user_id": log_safe(user.id)},
         )
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
