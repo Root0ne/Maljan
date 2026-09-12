@@ -1,0 +1,7 @@
+{
+  "iocs": [
+    {"kind": "domain", "value": "c2.evil.tld", "notes": "hard-coded"},
+    {"kind": "url", "value": "http://c2.evil.tld/gate.php", "notes": ""}
+  ],
+  "kinds": ["domain", "url"]
+}

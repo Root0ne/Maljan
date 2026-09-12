@@ -85,8 +85,11 @@ def stub(monkeypatch):
 @pytest.mark.asyncio
 async def test_a_job_detonates_and_the_dynamic_sections_are_filled(stub, tmp_path):
     from maljan.app import MaljanApp
-    from maljan.extractors.dynamic_extractor import build_dynamic_behavior
-    from maljan.extractors.network_extractor import build_network_iocs
+    from maljan.reporting.ledger_projection import (
+        dynamic_from_ledger,
+        network_from_sandbox_report,
+    )
+    from tests.unit._ledger_helpers import ledger_from_sandbox
 
     sample = tmp_path / "s.bin"
     sample.write_bytes(b"MZ" + b"\0" * 128)
@@ -101,20 +104,20 @@ async def test_a_job_detonates_and_the_dynamic_sections_are_filled(stub, tmp_pat
     assert [p["pid"] for p in report["behavior"]["processes"]] == [100, 101]
     # Routable, non-RFC-reserved values on purpose (as the Task 10 golden
     # fixture is) — a documentation-range IP or a *.example domain is
-    # filtered by the real network extractor's own suspicion rules, so this
+    # filtered by the emittable rules the projection applies, so this
     # is the only way to prove a mapped DNS row survives into the report a
     # job actually produces.
     assert report["network"]["dns"][0]["request"] == "telemetry-sync-71ad.net"
     assert report["network"]["tcp"][0]["dst"] == "185.220.101.42"
 
-    # The report a job actually produces reaching the two consumers that
-    # matter, not just the intermediate dict shape.
-    dynamic = build_dynamic_behavior(report)
+    # The report a job actually produces reaching the report's own blocks
+    # through the calls an analyst makes, not just the intermediate dict shape.
+    dynamic = dynamic_from_ledger(ledger_from_sandbox(report))
     assert dynamic is not None
     assert [p.pid for p in dynamic.process_tree] == [100]
     assert dynamic.sandbox_signatures[0].name == "persistence_run_key"
 
-    network = build_network_iocs(report)
+    network = network_from_sandbox_report(report)
     assert network is not None
     assert network.domains[0].fqdn == "telemetry-sync-71ad.net"
     assert network.ips[0].address == "185.220.101.42"

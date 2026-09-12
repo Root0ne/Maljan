@@ -5,6 +5,7 @@
       "NtWriteFile": 1
     }
   },
+  "channels": {},
   "cti": {},
   "dropped_files": [
     {
@@ -28,6 +29,7 @@
     "domains": [],
     "hosts": [],
     "http": [],
+    "icmp": [],
     "pcap_local_path": null,
     "tcp": [
       {
@@ -162,7 +164,6 @@
   "registry": [
     "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\svc"
   ],
-  "channels": {},
   "screenshots": [],
   "signatures": [
     {

@@ -41,15 +41,19 @@ _REAL_BLOCK = (
 
 
 class _FixedLLM:
-    """Minimal callable LLM stub returning a fixed-content message for any input.
+    """Minimal LLM stub returning a fixed-content message for any input.
 
-    langchain coerces a plain callable into a ``RunnableLambda`` inside the
-    ``prompt | llm`` chain, so this controls ``response.content`` deterministically
-    without a real chat model.
+    ``invoke`` is what the analyst calls: the revision prompt is built as
+    messages rather than through a ``ChatPromptTemplate``, because the resolved
+    system prompt carries a literal JSON example. ``__call__`` is kept so a
+    ``prompt | llm`` chain would still coerce it.
     """
 
     def __init__(self, content: str) -> None:
         self._content = content
+
+    def invoke(self, *_args: object, **_kwargs: object) -> MagicMock:
+        return MagicMock(content=self._content)
 
     def __call__(self, *_args: object, **_kwargs: object) -> MagicMock:
         return MagicMock(content=self._content)

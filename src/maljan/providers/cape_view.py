@@ -40,7 +40,7 @@ def to_cape_shaped_dict(report: SandboxReport) -> dict[str, Any]:
         "calls": [c for p in report.processes for c in p.calls],
         # "keys" is the registry-path passthrough; the other four are ruled in
         # during the pre-flight scan (beyond the brief's own field list) —
-        # persistence_extractor's Linux path rules read all four directly and
+        # an agent hunting Linux persistence reads all four directly and
         # a missing key reads exactly like a clean sample, so each is always
         # present even when empty.
         "summary": {
@@ -49,6 +49,10 @@ def to_cape_shaped_dict(report: SandboxReport) -> dict[str, Any]:
             "write_files": list(report.summary.get("write_files", [])),
             "modified_files": list(report.summary.get("modified_files", [])),
             "wrote_files": list(report.summary.get("wrote_files", [])),
+            "mutexes": list(report.summary.get("mutexes", [])),
+            "executed_commands": list(report.summary.get("executed_commands", [])),
+            "created_services": list(report.summary.get("created_services", [])),
+            "started_services": list(report.summary.get("started_services", [])),
         },
     }
     rendered: dict[str, Any] = {
@@ -77,6 +81,7 @@ def to_cape_shaped_dict(report: SandboxReport) -> dict[str, Any]:
             "hosts": list(report.network.hosts),
             "domains": list(report.network.domains),
             "tls": list(report.network.tls),
+            "icmp": list(report.network.icmp),
         },
         "dropped": list(report.dropped_files),
         "screenshots": list(report.screenshots),
@@ -86,8 +91,8 @@ def to_cape_shaped_dict(report: SandboxReport) -> dict[str, Any]:
         # it reads exactly like a clean sample; the report renderers say so.
         "unavailable": list(report.unavailable),
         # Top-level file-write arrays some sandboxes emit alongside (or instead
-        # of) behavior.summary — ruled in during the pre-flight scan, read by
-        # persistence_extractor's Linux path rules.
+        # of) behavior.summary — ruled in during the pre-flight scan, and one
+        # of the places an agent hunting Linux persistence looks.
         "file_writes": list(report.file_writes),
     }
     # The platform-namespaced channels ride through under one key rather than

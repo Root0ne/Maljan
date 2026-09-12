@@ -254,6 +254,10 @@ class TestSafeAnalyzeISRChunked:
             self.name = "static"
             self.logger = MagicMock()
             self._call_count = 0
+            # The gate drains the structured findings channel onto the merged
+            # ISR; a duck-typed stub needs the two buffers it drains.
+            self._findings_buffer: list = []
+            self._artifacts_buffer: list = []
 
         def analyze_isr(self, data: str) -> AgentISR:
             self._call_count += 1
@@ -274,6 +278,7 @@ class TestSafeAnalyzeISRChunked:
         # The wrapper now runs the §4 Item 4 consistency gate (off by default =
         # no-op); borrow it too so this duck-typed stub stays compatible.
         _apply_consistency_gate = BaseAnalyst._apply_consistency_gate
+        _drain_findings = BaseAnalyst._drain_findings
 
     @pytest.fixture
     def analyst(self) -> _ConcreteAnalyst:

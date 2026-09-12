@@ -319,3 +319,84 @@ class TestFallbackBundleFailsClosed:
             "an empty array serialised as present is one of the two conformance "
             "defects an external validator found in this emitter"
         )
+
+
+class TestJudgeToolCallsAreCitable:
+    """The judge calls tools too, and a verdict that leans on one must be checkable.
+
+    Threat intel on a disputed indicator and the knowledge lookups are exactly
+    the calls a reader would want to resolve, and they went through an executor
+    with no recorder attached, so they were neither citable nor counted.
+    """
+
+    @staticmethod
+    def _tool():
+        from langchain_core.tools import StructuredTool
+
+        def reputation(indicator: str) -> dict:
+            """Look up an indicator's reputation."""
+            return {"indicator": indicator, "malicious": 7}
+
+        return StructuredTool.from_function(func=reputation, name="reputation")
+
+    def _run(self, judge: JudgeAgent) -> str:
+        from langchain_core.messages import AIMessage
+
+        async def _ainvoke(payload, config=None):
+            # The executor is the seam the loop calls the tool through; the
+            # recorder wraps whichever tools it is handed.
+            for wrapped in captured[0]:
+                wrapped.invoke({"indicator": "c2.evil.tld"})
+            return {"messages": [AIMessage(content="Verdict: Malware.")]}
+
+        captured: list = []
+
+        def _create(llm, tools):
+            captured.append(tools)
+            executor = MagicMock()
+            executor.ainvoke = _ainvoke
+            return executor
+
+        with patch("langgraph.prebuilt.create_react_agent", _create):
+            return asyncio.run(
+                judge.execute_tool_loop([("system", "mediate"), ("human", "reports")])
+            )
+
+    def test_a_judge_tool_call_becomes_a_ledger_entry(self, mock_llm: MagicMock) -> None:
+        judge = JudgeAgent(llm=mock_llm)
+        judge.tools = [self._tool()]
+
+        assert self._run(judge) == "Verdict: Malware."
+
+        entries = judge.drain_evidence_entries()
+        assert [e.tool for e in entries] == ["reputation"]
+        assert entries[0].agent == "judge"
+        assert entries[0].structured == {"indicator": "c2.evil.tld", "malicious": 7}
+
+    def test_the_ids_continue_the_job_s_sequence(self, mock_llm: MagicMock) -> None:
+        from maljan.schemas.evidence import EvidenceCounter
+
+        counter = EvidenceCounter()
+        counter.next_id()
+        counter.next_id()
+
+        judge = JudgeAgent(llm=mock_llm)
+        judge.tools = [self._tool()]
+        judge.evidence_counter = counter
+        self._run(judge)
+
+        assert [e.id for e in judge.drain_evidence_entries()] == ["ev_0003"]
+
+    def test_two_mediation_rounds_both_reach_the_drain(self, mock_llm: MagicMock) -> None:
+        judge = JudgeAgent(llm=mock_llm)
+        judge.tools = [self._tool()]
+        self._run(judge)
+        self._run(judge)
+
+        entries = judge.drain_evidence_entries()
+        assert [e.id for e in entries] == ["ev_0001", "ev_0002"]
+        assert judge.drain_evidence_entries() == []
+
+    def test_a_judge_with_no_tools_records_nothing(self, mock_llm: MagicMock) -> None:
+        judge = JudgeAgent(llm=mock_llm)
+        assert judge.drain_evidence_entries() == []

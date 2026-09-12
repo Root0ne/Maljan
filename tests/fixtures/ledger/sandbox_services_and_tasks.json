@@ -1,0 +1,6 @@
+{
+  "services": ["EvilUpdater"],
+  "tasks": ["schtasks /create /tn EvilTask /tr C:\\evil.exe"],
+  "commands": ["schtasks /create /tn EvilTask /tr C:\\evil.exe", "vssadmin delete shadows /all"],
+  "total": 4
+}

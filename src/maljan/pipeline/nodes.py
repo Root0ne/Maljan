@@ -20,10 +20,7 @@ from maljan.core.config import BUILTIN_AGENTS
 from maljan.core.container import ServiceContainer
 from maljan.core.exceptions import AnalystError, LLMError
 from maljan.core.logger import logger
-from maljan.extractors.network_extractor import (
-    build_dga_isr,
-    build_network_iocs,
-)
+from maljan.extractors.network_extractor import build_dga_isr
 from maljan.memory.long_term_memory import build_stored_case
 from maljan.pipeline.events import (
     claims_to_payload,
@@ -33,12 +30,14 @@ from maljan.pipeline.events import (
 )
 from maljan.pipeline.state import AgentArgument, AnalysisState
 from maljan.pipeline.sycophancy_detector import build_revision_directive, detect_sycophancy
+from maljan.reporting.ledger_projection import network_from_sandbox_report
+from maljan.reporting.ledger_report import section_is_grounded
+from maljan.schemas.evidence import LedgerEntry
 from maljan.schemas.isr_models import AgentISR
 from maljan.schemas.stix_models import Bundle
 
 if TYPE_CHECKING:
     from maljan.memory.long_term_memory import MemoryStore
-    from maljan.reporting.models import StaticAnalysis
 
 
 # ---------------------------------------------------------------------------
@@ -68,11 +67,6 @@ def _empty_isr(agent_name: str, revision_round: int = 0) -> AgentISR:
 # ("No static data available for sample <sha>."). Local copy of the
 # placeholder pattern from static_analyst to avoid a nodes->agents import edge.
 _STATIC_PLACEHOLDER_RE = re.compile(r"^\s*no\s+\w+\s+data\s+available\b", re.IGNORECASE)
-
-# Hard ceiling for the synthesized head-chunk content. The augmented chunk
-# is spliced in via ``dataclasses.replace`` AFTER chunking, so it never
-# re-passes the token-budget check — the cap here is load-bearing.
-_MAX_SYNTH_CHUNK_CHARS = 40_000
 
 
 def _is_placeholder_only(chunks: list, role: str = "") -> bool:
@@ -121,40 +115,6 @@ def _is_placeholder_only(chunks: list, role: str = "") -> bool:
 # the value was once found silently disagreeing between layers. One
 # name, so a change cannot land in only half of them.
 DEGRADED_CONFIDENCE_CAP = 0.60
-
-
-def _compact_static_summary(static: StaticAnalysis) -> dict[str, Any]:
-    """Serialize a StaticAnalysis into a size-capped dict for the LLM prompt.
-
-    Caps keep the synthesized head chunk inside the prompt budget:
-    imports <= 60 rows (suspicious-first), strings <= 40, exports <= 40,
-    ``embedded_resources`` reduced to a count. Truncation markers record
-    how many rows were dropped so the model doesn't mistake a cap for
-    an empty artefact.
-    """
-    dump = static.model_dump(mode="json")
-    out: dict[str, Any] = {
-        "sections": dump.get("sections", []),
-        "packer_hint": dump.get("packer_hint"),
-        "obfuscation_indicators": dump.get("obfuscation_indicators", []),
-        "embedded_resources_count": len(dump.get("embedded_resources", [])),
-    }
-    imports = sorted(
-        dump.get("imports", []),
-        key=lambda r: not bool(r.get("is_suspicious")),
-    )
-    if len(imports) > 60:
-        out["imports_truncated"] = len(imports) - 60
-    out["imports"] = imports[:60]
-    strings = dump.get("interesting_strings", [])
-    if len(strings) > 40:
-        out["strings_truncated"] = len(strings) - 40
-    out["interesting_strings"] = strings[:40]
-    exports = dump.get("exports", [])
-    if len(exports) > 40:
-        out["exports_truncated"] = len(exports) - 40
-    out["exports"] = exports[:40]
-    return out
 
 
 def _absolute_host_sample_path(state: AnalysisState) -> str:
@@ -220,7 +180,6 @@ def _augment_static_chunks_with_path(
     chunks: list,
     state: AnalysisState,
     *,
-    static: StaticAnalysis | None = None,
     provider_id: str | None = None,
 ) -> list:
     """Inject the container-visible sample path into the static analyst's chunks.
@@ -285,27 +244,29 @@ def _augment_static_chunks_with_path(
         parsed = {
             "note": (
                 "Live analysis run: no pre-extracted static fixture exists "
-                "for this sample. The deterministic PE summary below was "
-                "parsed on the host; use your Ghidra tools for deeper "
-                "analysis."
+                "for this sample. Nothing about the binary is pasted here on "
+                "purpose — call your tools for the section table, the imports "
+                "and the strings, and cite the ids their results carry."
             ),
             "sha256": state.get("file_hash") or "",
-            "static_summary": (_compact_static_summary(static) if static is not None else None),
         }
 
     parsed["analysis_file_path"] = static_path
+    # What the routing layer already decided, so the analyst does not have to
+    # spend a call rediscovering it before it can choose a tool.
+    for key in ("file_type", "platform"):
+        value = state.get(key)
+        if isinstance(value, str) and value and value != "unknown":
+            parsed[key] = value
     # Also carry the HOST-readable path (when present) so the static-feature
     # family classifier can read the raw bytes — ember reads the file on the
     # host, unlike Ghidra which reads the container-visible ``analysis_file_path``.
     host_path = state.get("sample_path")
     if isinstance(host_path, str) and host_path:
         parsed["host_sample_path"] = host_path
-    # The toolchain, which the analyst could not previously see at all:
-    # ``language_or_compiler`` lives on SampleIdentity, this chunk carries
-    # StaticAnalysis, and ``AnalysisState`` has no channel joining them — so
-    # the two never met. Knowing a sample is AutoIt or PyInstaller rather than
-    # "a PE" changes which Ghidra tools are worth spending steps on, and it
-    # costs one line of prompt.
+    # The toolchain: knowing a sample is AutoIt or PyInstaller rather than
+    # "a PE" changes which tools are worth spending steps on, and it costs one
+    # line of prompt. It is the one fact here no tool answers directly.
     #
     # Detected here from a bounded prefix rather than threaded through state:
     # toolchain markers live in the runtime stub near the front of the file, and
@@ -324,12 +285,6 @@ def _augment_static_chunks_with_path(
         except Exception as _e:  # noqa: BLE001 — a prompt hint is never worth a failure
             logger.debug("static chunk: language fingerprint skipped (%s)", _e)
     new_content = json.dumps(parsed, indent=2, default=str)
-    if len(new_content) > _MAX_SYNTH_CHUNK_CHARS and "static_summary" in parsed:
-        # The spliced chunk bypasses the token-budget re-check; drop the
-        # summary rather than blow the prompt window.
-        parsed["static_summary"] = None
-        parsed["static_summary_omitted"] = "too large"
-        new_content = json.dumps(parsed, indent=2, default=str)
 
     import dataclasses as _dc
 
@@ -398,8 +353,33 @@ def make_analyst_node(
         # busy at once and is a poor proxy.
         emit(container.event_sink, "agent_progress", {"agent": agent_name, "phase": "analyzing"})
 
+        bound_agent: Any = None
+
+        def _evidence_update() -> dict[str, Any]:
+            """This agent's calls, drained, in the shape the state expects.
+
+            Called on the failure paths as well as the success one: an analyst
+            that made twenty calls and then died made twenty calls, and a run
+            that reaches consensus in round one never revises, so nothing else
+            would ever drain it.
+            """
+            if bound_agent is None:
+                return {}
+            try:
+                entries = bound_agent.drain_evidence_entries()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("evidence ledger read skipped for %s: %s", agent_name, exc)
+                return {}
+            if not entries:
+                return {}
+            return {
+                "evidence_ledger": [e.model_dump(mode="json") for e in entries],
+                "tool_evidence": {agent_name: [e.to_captured().model_dump() for e in entries]},
+            }
+
         try:
             agent = container.get_agent(agent_name)
+            bound_agent = agent
             role = container.agent_role(agent_name)
 
             sandbox_report = state.get("sandbox_report")
@@ -417,20 +397,6 @@ def make_analyst_node(
                 # same per-provider mirror path lookup the static branch
                 # uses below — because the sample itself always exists, then
                 # the sandbox slice on top of it when one exists.
-                _st_generic: StaticAnalysis | None = None
-                try:
-                    from maljan.extractors.pe_extractor import build_static_analysis
-
-                    _sp_generic = state.get("sample_path")
-                    if _sp_generic:
-                        _st_generic = build_static_analysis(sample_path=str(_sp_generic))
-                except Exception as _e:  # noqa: BLE001
-                    logger.debug(
-                        "generic agent '%s': static summary extraction skipped: %s",
-                        agent_name,
-                        _e,
-                    )
-
                 # BUG 11, second round: the chunk carries the path for the
                 # model to read; this carries it for the tool layer, which is
                 # what actually corrects a model that sends the bare filename.
@@ -441,7 +407,6 @@ def make_analyst_node(
                 static_context_chunks = _augment_static_chunks_with_path(
                     container.load_chunked(state["file_hash"], agent_name),
                     state,
-                    static=_st_generic,
                     provider_id=agent._resolved.static_provider_id,
                 )
                 sandbox_chunks: list = []
@@ -472,19 +437,6 @@ def make_analyst_node(
             # under ``analysis_file_path`` so the existing chunk-text flow
             # carries the path into the LLM prompt without a new state hop.
             if role == "static":
-                # Ghidra-path fix (2026-07-12): compute the deterministic PE
-                # summary ONCE and reuse it for both the synthesized head
-                # chunk and the dynamic-tool-selection categories below.
-                _st: StaticAnalysis | None = None
-                try:
-                    from maljan.extractors.pe_extractor import build_static_analysis
-
-                    _sp = state.get("sample_path")
-                    if _sp:
-                        _st = build_static_analysis(sample_path=str(_sp))
-                except Exception as _e:  # noqa: BLE001
-                    logger.debug("static summary extraction skipped: %s", _e)
-
                 # Pin the container-visible path on the agent so the
                 # load_program tool wrapper can override hallucinated paths.
                 # Assign unconditionally — agents are cached across samples;
@@ -506,7 +458,6 @@ def make_analyst_node(
                 chunks = _augment_static_chunks_with_path(
                     chunks,
                     state,
-                    static=_st,
                     provider_id=agent._resolved.static_provider_id,
                 )
 
@@ -635,12 +586,7 @@ def make_analyst_node(
             staged = dict(getattr(agent, "_path_by_server", {}) or {})
             if staged:
                 node_out["remote_sample_paths"] = staged
-            try:
-                _ev = agent.get_last_tool_evidence()
-                if _ev:
-                    node_out["tool_evidence"] = {agent_name: [o.model_dump() for o in _ev]}
-            except Exception as _ev_exc:  # noqa: BLE001
-                logger.debug("tool-evidence read skipped for %s: %s", agent_name, _ev_exc)
+            node_out.update(_evidence_update())
             return node_out
         except (AnalystError, LLMError) as e:
             # Structured error event so Loki/Promtail
@@ -669,6 +615,7 @@ def make_analyst_node(
             return {
                 "reports": {agent_name: failed_text},
                 "isr_reports": {agent_name: _empty_isr(agent_name)},
+                **_evidence_update(),
             }
         except (ValueError, RuntimeError) as e:
             logger.exception(
@@ -694,6 +641,7 @@ def make_analyst_node(
             return {
                 "reports": {agent_name: crashed_text},
                 "isr_reports": {agent_name: _empty_isr(agent_name)},
+                **_evidence_update(),
             }
 
     node_fn.__name__ = f"{agent_name}_analyst_node"
@@ -853,6 +801,22 @@ def make_negotiation_node(container: ServiceContainer) -> Any:
         # Sycophancy detector skips the first round internally.
         syco = detect_sycophancy(current_isrs, iteration=iteration) if current_isrs else False
 
+        def _judge_evidence() -> list[dict[str, Any]]:
+            """The judges' tool calls, drained from every cached role.
+
+            Drained here rather than named by role because the two roles are
+            two objects — the mediator runs on ``expert`` and the verdict on
+            ``judge`` — and only mediation reaches a tool loop. A node that
+            drained one by name drained the empty one.
+            """
+            try:
+                return [
+                    entry.model_dump(mode="json") for entry in container.drain_all_judge_evidence()
+                ]
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("evidence ledger read skipped for the judges: %s", exc)
+                return []
+
         try:
             judge = container.get_judge_agent(role="expert")
             # Mediation runs on the shared agent loop, not this one. The openai
@@ -916,6 +880,9 @@ def make_negotiation_node(container: ServiceContainer) -> Any:
                 "sycophancy_detected": syco,
                 "confidence_history": [mean_conf],
                 "discussion_history": [argument],
+                # Mediation is the only place a judge agent calls a tool, so
+                # this is where those calls have to leave the agent.
+                "evidence_ledger": _judge_evidence(),
             }
         except Exception as e:  # noqa: BLE001 — per-run fault-isolation boundary
             # The mediation step calls the LLM; on a constrained / local host that
@@ -953,6 +920,8 @@ def make_negotiation_node(container: ServiceContainer) -> Any:
                         status=status,
                     )
                 ],
+                # A mediation that timed out still made the calls it made.
+                "evidence_ledger": _judge_evidence(),
             }
 
     node_fn.__name__ = "negotiation_node"
@@ -1076,6 +1045,11 @@ def make_revision_node(container: ServiceContainer) -> Any:
 
         revised: dict[str, str] = {}
         revised_isrs: dict[str, AgentISR] = {}
+        # A revision round that used tools issued ids from the job counter, so
+        # leaving its entries behind puts holes in the persisted ledger and
+        # makes anything the revised answer cites unresolvable. Built-in
+        # analysts revise without tools; a composed agent does not.
+        revision_ledger: list[dict[str, Any]] = []
 
         # strict=True: agent_names and results MUST be equal length; mismatch
         # is a programming error and must surface, not be silently truncated.
@@ -1096,6 +1070,13 @@ def make_revision_node(container: ServiceContainer) -> Any:
                 revised_text, isr = result
                 revised[name] = revised_text
                 revised_isrs[name] = isr
+                try:
+                    revision_ledger.extend(
+                        entry.model_dump(mode="json")
+                        for entry in container.get_agent(name).drain_evidence_entries()
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("evidence ledger read skipped for %s: %s", name, exc)
                 emit_agent_message(
                     container.event_sink,
                     speaker=name,
@@ -1112,7 +1093,10 @@ def make_revision_node(container: ServiceContainer) -> Any:
                     report=revised_text,
                 )
 
-        return {"revised_reports": revised, "isr_reports": revised_isrs}
+        out: dict[str, Any] = {"revised_reports": revised, "isr_reports": revised_isrs}
+        if revision_ledger:
+            out["evidence_ledger"] = revision_ledger
+        return out
 
     node_fn.__name__ = "revision_node"
     return node_fn
@@ -1134,6 +1118,22 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 "stix_output": {},
                 "run_summary": None,
             }
+
+        def _judge_evidence() -> list[dict[str, Any]]:
+            """Whatever the judges still hold, drained once, whichever way this ends.
+
+            Mediation is where a judge agent calls a tool and the negotiation
+            node drains it there; this is the backstop for a run that reached
+            the verdict without one, and for a verdict path that grows tools
+            later. A drain leaves nothing behind, so draining twice is safe.
+            """
+            try:
+                return [
+                    entry.model_dump(mode="json") for entry in container.drain_all_judge_evidence()
+                ]
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("evidence ledger read skipped for the judges: %s", exc)
+                return []
 
         try:
             judge = container.get_judge_agent(role="judge")
@@ -1297,7 +1297,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
             _sandbox_report = state.get("sandbox_report")
             _sandbox_report = _sandbox_report if isinstance(_sandbox_report, dict) else None
             try:
-                dga_isr = build_dga_isr(build_network_iocs(_sandbox_report))
+                dga_isr = build_dga_isr(network_from_sandbox_report(_sandbox_report))
                 if dga_isr is not None:
                     isr_reports["network_dga"] = dga_isr
                     logger.info(
@@ -1405,7 +1405,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 )
             _net_empty = True
             try:
-                _net_iocs = build_network_iocs(_sandbox_report)
+                _net_iocs = network_from_sandbox_report(_sandbox_report)
                 _net_empty = not (
                     _net_iocs and (_net_iocs.domains or _net_iocs.ips or _net_iocs.urls)
                 )
@@ -1907,6 +1907,11 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 "judge_report": "Analyzed negotiation history and expert reports.",
                 "stix_output": stix_output,
                 "run_summary": run_summary_dict,
+                # The judge's own tool calls — threat intel on a disputed
+                # indicator, a knowledge lookup — on the same append-only
+                # channel the analysts use, so a verdict that leans on one can
+                # cite it and the citation resolves.
+                "evidence_ledger": _judge_evidence(),
                 # Persist YARA/Sigma layer ISRs so callers can inspect them.
                 "isr_reports": isr_reports,
                 # Surface the degraded-mode signal to the report
@@ -1959,6 +1964,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 "stix_output": {},
                 "degraded_mode": True,
                 "degradation_reasons": [f"judge failed ({type(e).__name__})"],
+                "evidence_ledger": _judge_evidence(),
             }
 
     node_fn.__name__ = "judge_node"
@@ -2084,11 +2090,11 @@ def make_report_node(container: ServiceContainer) -> Any:
         ]
 
         # Evidence-only static providers (capa_yara) have no ISR and no tool
-        # loop: the report is the only place their findings reach, so the
-        # bundle is collected once here and threaded through the builder
-        # (into ``report.static``) and into ``tool_evidence`` (into
-        # ``report.technical_evidence``) below. Best-effort — a provider
-        # failure here must never fail the report.
+        # loop, so nothing writes their passes to the evidence ledger as they
+        # run. The bundle is collected once here, turned into ledger entries
+        # below, and its rendered tables still reach the Composer through
+        # ``report.technical_evidence``. Best-effort — a provider failure here
+        # must never fail the report.
         _static_bundle = None
         try:
             _static_provider = container.get_static_provider()
@@ -2107,6 +2113,29 @@ def make_report_node(container: ServiceContainer) -> Any:
                 exc,
             )
             _static_bundle = None
+
+        # The run's evidence, in the order the ids were issued, plus the
+        # entries the evidence-only static provider could not write itself.
+        _ledger: list[LedgerEntry] = []
+        for _row in state.get("evidence_ledger") or []:
+            try:
+                _ledger.append(LedgerEntry.model_validate(_row))
+            except Exception as exc:  # noqa: BLE001 — one bad row is not a lost report
+                logger.debug("report_node: unreadable ledger row skipped (%s).", exc)
+        # The entries the evidence-only static provider could not write itself.
+        # They go back onto the state channel below, not only into this local
+        # list: the report cites their ids, and a citation the evidence
+        # endpoint cannot resolve is worse than no citation.
+        _capa_entries: list[LedgerEntry] = []
+        if _static_bundle is not None:
+            try:
+                from maljan.providers.static.capa_yara import ledger_entries
+
+                _capa_entries = ledger_entries(_static_bundle, container.get_evidence_counter())
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("report_node: capa/YARA evidence not recorded (%s).", exc)
+        _ledger.extend(_capa_entries)
+        _ledger.sort(key=lambda entry: entry.seq)
 
         try:
             builder = MalwareReportBuilder(
@@ -2127,10 +2156,11 @@ def make_report_node(container: ServiceContainer) -> Any:
                 # high verdict/severity on a low-data run is not read as authoritative.
                 degraded_mode=bool(state.get("degraded_mode")),
                 degradation_reasons=cast("list[str]", state.get("degradation_reasons") or []),
-                # Platform-gate persistence scanners (no Windows registry
-                # persistence on a Linux sample, and vice versa).
+                # The routing minimum, which stands in for the identity block
+                # when no agent called an identification tool.
                 sample_platform=state.get("platform"),
-                static_evidence=_static_bundle,
+                sample_file_type=state.get("file_type"),
+                evidence_ledger=_ledger,
             )
             # Deterministic and self-contained — every input is already in the
             # builder — so a thread changes when it runs, never what it
@@ -2193,6 +2223,32 @@ def make_report_node(container: ServiceContainer) -> Any:
         except Exception as exc:  # noqa: BLE001
             logger.error("report_node: deterministic build failed (%s).", exc, exc_info=True)
             return {"report_error": f"{type(exc).__name__}: {exc}"}
+
+        # What the report is standing on, counted. ``sections_without_evidence``
+        # is the number that matters: a section that can name neither a ledger
+        # entry nor the finding it came from is ungrounded, and a run where
+        # that number is not zero has a defect worth seeing rather than a
+        # report worth reading.
+        _by_tool: dict[str, int] = {}
+        for _entry in _ledger:
+            _by_tool[_entry.tool] = _by_tool.get(_entry.tool, 0) + 1
+        _summary = dict(report.run_summary or {})
+        _summary["evidence"] = {
+            "entries": len(_ledger),
+            "ok": sum(1 for e in _ledger if e.ok),
+            "failed": sum(1 for e in _ledger if not e.ok),
+            "trimmed": sum(1 for e in _ledger if e.truncated),
+            "by_tool": dict(sorted(_by_tool.items())),
+        }
+        _summary["sections_without_evidence"] = sum(
+            1 for section in report.sections if not section_is_grounded(section)
+        )
+        report.run_summary = _summary
+        if _summary["sections_without_evidence"]:
+            logger.warning(
+                "report_node: %d report section(s) carry no evidence id and no source.",
+                _summary["sections_without_evidence"],
+            )
 
         # Narrative LLM round. NarrativeAgent is None in mock mode;
         # also returns None when the structured-output and manual-parse
@@ -2384,11 +2440,23 @@ def make_report_node(container: ServiceContainer) -> Any:
             "malware_report_markdown": markdown,
             "stix_bundle_extended": extended_dump,
         }
+        if _capa_entries:
+            # ``evidence_ledger`` is append-only, so this adds the provider's
+            # entries to the run's rather than replacing it.
+            result["evidence_ledger"] = [e.model_dump(mode="json") for e in _capa_entries]
+        # ``run_summary`` on the state is what the API's own column carries, so
+        # anything a reader is meant to see outside the full report has to be
+        # added here too. Only written when there is something to add — an
+        # untouched value keeps the mock-mode contract, where the judge node
+        # skipped the RunSummaryBuilder and the column is legitimately null.
+        _state_summary: dict[str, Any] = {}
         if fp_warnings:
-            result["run_summary"] = {
-                **(state.get("run_summary") or {}),
-                "fp_warnings": fp_warnings,
-            }
+            _state_summary["fp_warnings"] = fp_warnings
+        if _ledger:
+            _state_summary["evidence"] = _summary["evidence"]
+            _state_summary["sections_without_evidence"] = _summary["sections_without_evidence"]
+        if _state_summary:
+            result["run_summary"] = {**(state.get("run_summary") or {}), **_state_summary}
         return result
 
     node_fn.__name__ = "report_node"

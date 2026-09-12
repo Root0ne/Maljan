@@ -1,0 +1,5 @@
+{
+  "summary": "12 conversations, 3 SNI values, beacon interval 60.0s +/- 1.2s",
+  "empty": false,
+  "packet_limit": 5000
+}

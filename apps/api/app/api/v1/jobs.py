@@ -14,6 +14,7 @@ from app.deps import get_current_user
 from app.logging_config import get_logger
 from app.logsafe import log_safe
 from app.models.user import User
+from app.schemas.evidence import EvidenceEntryResponse, EvidenceListResponse
 from app.schemas.job import JobCreateRequest, JobListResponse, JobResponse
 from app.services import audit
 from app.services.analysis_service import AnalysisService
@@ -233,6 +234,68 @@ async def get_job_events(
         payload["stream_id"] = stream_id
         events.append(payload)
     return {"job_id": str(job_id), "events": events, "count": len(events)}
+
+
+@router.get("/{job_id}/evidence", response_model=EvidenceListResponse)
+async def get_job_evidence(
+    job_id: uuid.UUID,
+    agent: str | None = Query(None, max_length=100),
+    tool: str | None = Query(None, max_length=200),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    user: User = Depends(get_current_user),
+    svc: AnalysisService = Depends(_get_service),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    """One page of the job's evidence ledger — the tool calls the report cites.
+
+    Ownership is the job's, checked exactly the way the job's report endpoint
+    checks it: a ledger is as sensitive as the report built from it. Ordered by
+    ``seq``, which is the order the ids were issued in across the whole run,
+    so paging walks the analysis rather than one agent at a time.
+    """
+    from sqlalchemy import func as sa_func
+    from sqlalchemy import select as sa_select
+
+    from app.models.evidence import EvidenceEntry
+
+    job = await svc.get_job(job_id, user)
+    if not job:
+        logger.warning(
+            f"Evidence requested for unknown job: {log_safe(job_id)}",
+            extra={"job_id": log_safe(job_id), "user_id": log_safe(user.id)},
+        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+
+    filters = [EvidenceEntry.job_id == job_id]
+    if agent:
+        filters.append(EvidenceEntry.agent == agent)
+    if tool:
+        filters.append(EvidenceEntry.tool == tool)
+
+    total = (
+        await db.execute(sa_select(sa_func.count()).select_from(EvidenceEntry).where(*filters))
+    ).scalar_one()
+    rows = (
+        (
+            await db.execute(
+                sa_select(EvidenceEntry)
+                .where(*filters)
+                .order_by(EvidenceEntry.seq)
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return EvidenceListResponse(
+        job_id=job_id,
+        entries=[EvidenceEntryResponse.model_validate(row) for row in rows],
+        total=int(total),
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT)

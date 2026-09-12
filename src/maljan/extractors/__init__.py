@@ -1,12 +1,12 @@
-"""Deterministic extractors that populate ``MalwareReport`` sections.
+"""What is left of the deterministic extractors.
 
-Each module owns one report section and is independently testable. They
-operate on the data the pipeline already collects (sandbox report dict,
-sample bytes / path, ISR reports, cascade summary) and never invoke an
-LLM. Graceful degradation is the rule: a missing input means a ``None``
-or empty list, never an exception.
+Each module here used to own one section of the report and fill it by
+re-reading the sample or the sandbox report. The report is assembled from the
+evidence ledger now, so the section-building halves are gone and what remains
+is the classification and scoring the rest of the pipeline still asks for:
+format and platform detection, the packer and language signatures, the import
+classifier, the DGA scorer, the capability matrix and the family attribution.
+
+Graceful degradation stays the rule: a missing input means a ``None`` or an
+empty list, never an exception.
 """
-
-from maljan.extractors.sample_identity import build_sample_identity
-
-__all__ = ["build_sample_identity"]

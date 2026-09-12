@@ -430,19 +430,29 @@ def _build_sigma(report: MalwareReport) -> DetectionRule | None:
 
 
 def _collect_registry_targets(report: MalwareReport) -> list[str]:
-    if report.dynamic is None:
-        return []
+    """Registry paths worth a Sigma selection, from wherever the run recorded them.
+
+    Registry writes reach the report two ways now: a sandbox view that lists
+    them, and a persistence entry an analyst wrote down after reading the call
+    itself. Both are the same fact, and a rule generated from only the first
+    would be silent on every run where the analyst is the one who saw it.
+    """
     out: list[str] = []
     seen: set[str] = set()
-    for reg in report.dynamic.registry_mods:
-        key = _registry_full_path(reg)
-        lower = key.lower()
-        if lower in seen:
-            continue
+
+    def _add(key: str) -> None:
+        lower = key.strip().lower()
+        if not lower or lower in seen or len(out) >= _MAX_SIGMA_VALUES:
+            return
         seen.add(lower)
-        out.append(key)
-        if len(out) >= _MAX_SIGMA_VALUES:
-            break
+        out.append(key.strip())
+
+    if report.dynamic is not None:
+        for reg in report.dynamic.registry_mods:
+            _add(_registry_full_path(reg))
+    for mech in report.persistence:
+        if mech.kind in {"registry_run", "image_hijack", "appinit_dll", "winlogon_helper"}:
+            _add(mech.target)
     return out
 
 

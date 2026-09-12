@@ -60,6 +60,58 @@ class ClaimEvidence(BaseModel):
     )
 
 
+class Artifact(BaseModel):
+    """One concrete thing an analyst established, in the shape it has.
+
+    A hash is a value; an import list is a table; a set of C2 endpoints is a
+    table with two columns. The model carries both shapes rather than forcing
+    one, because forcing one is how a table becomes a comma-joined string
+    nobody can sort.
+
+    ``kind`` groups artifacts across agents into a report section — ``hashes``,
+    ``imports``, ``permissions``, ``iocs``, ``processes``, ``persistence``,
+    ``endpoints``. It is a free string on purpose: an analyst that found
+    something the vocabulary has no word for should say the word, not the
+    nearest wrong one.
+    """
+
+    kind: str = Field(..., description="What this artifact is, e.g. 'imports' or 'iocs'.")
+    label: str = Field("", description="Human name for this artifact.")
+    value: str | None = Field(None, description="The value, when the artifact is a single fact.")
+    columns: list[str] | None = Field(None, description="Column headings, when it is a table.")
+    rows: list[list[str]] | None = Field(None, description="Rows, when it is a table.")
+    evidence_ids: list[str] = Field(
+        default_factory=list,
+        description="Ledger entry ids this artifact was read from, e.g. ['ev_0007'].",
+    )
+    source: str = Field("", description="Which agent or tool established it.")
+
+
+class Finding(BaseModel):
+    """A conclusion an analyst reached, with what it was drawn from.
+
+    Deliberately not a ``ClaimEvidence``: a claim is what the negotiation
+    argues about and carries one prose evidence reference, while a finding is
+    what the report prints and carries the ledger ids behind it plus the
+    artifacts it established. The two channels coexist; neither replaces the
+    other.
+    """
+
+    title: str = Field(..., description="One line naming the finding.")
+    detail: str = Field("", description="What was observed, in the analyst's own words.")
+    category: str = Field("", description="Free-form grouping, e.g. 'persistence'.")
+    technique_ids: list[str] = Field(
+        default_factory=list, description="MITRE ATT&CK technique ids, e.g. ['T1055']."
+    )
+    confidence: float = Field(0.0, ge=0.0, le=1.0, description="Analyst self-reported confidence.")
+    evidence_ids: list[str] = Field(
+        default_factory=list, description="Ledger entry ids supporting this finding."
+    )
+    artifacts: list[Artifact] = Field(
+        default_factory=list, description="Artifacts established alongside it."
+    )
+
+
 class AgentISR(BaseModel):
     """Full Intermediate Structural Representation from one analyst agent.
 
@@ -86,6 +138,17 @@ class AgentISR(BaseModel):
     )
     revision_round: int = Field(
         0, ge=0, description="Which negotiation round produced this ISR (0 = initial)."
+    )
+    # The optional structured channel (``agents.findings_block``). Empty for an
+    # agent that wrote only prose, which is every agent that ignores the
+    # channel — it adds to the ISR contract and replaces nothing in it.
+    findings: list[Finding] = Field(
+        default_factory=list,
+        description="Structured conclusions this agent emitted, with their evidence ids.",
+    )
+    artifacts: list[Artifact] = Field(
+        default_factory=list,
+        description="Concrete artifacts this agent established, for the report's sections.",
     )
 
     @property

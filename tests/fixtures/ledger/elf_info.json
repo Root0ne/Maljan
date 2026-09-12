@@ -1,0 +1,12 @@
+{
+  "bitness": 64,
+  "endianness": "little",
+  "size": 51200,
+  "interpreter": "/lib64/ld-linux-x86-64.so.2",
+  "sections": [
+    {"name": ".text", "virtual_address": 4096, "virtual_size": 8192,
+     "raw_size": 8192, "entropy": 6.1, "characteristics": "ELF"}
+  ],
+  "imports": [{"dll": "libc.so.6", "function": "execve", "category": "execution"}],
+  "exports": []
+}

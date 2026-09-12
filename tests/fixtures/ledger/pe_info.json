@@ -1,0 +1,21 @@
+{
+  "machine": 332,
+  "timestamp": 1614556800,
+  "subsystem": 2,
+  "entry_point": 4096,
+  "is_dll": false,
+  "size": 204800,
+  "sections": [
+    {"name": ".text", "virtual_address": 4096, "virtual_size": 12288,
+     "raw_size": 12800, "entropy": 6.4213, "raw_offset": 1024, "characteristics": "rx"},
+    {"name": ".rsrc", "virtual_address": 20480, "virtual_size": 4096,
+     "raw_size": 4096, "entropy": 7.9012, "raw_offset": 14336, "characteristics": "r"}
+  ],
+  "imports": [
+    {"dll": "KERNEL32.dll", "function": "VirtualAllocEx", "category": "process_injection"},
+    {"dll": "WS2_32.dll", "function": "connect", "category": "network"}
+  ],
+  "exports": ["StartService"],
+  "pdb_path": "C:\\build\\loader.pdb",
+  "packer_signatures": [{"name": "UPX", "sections": [".text"]}]
+}

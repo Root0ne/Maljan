@@ -175,8 +175,13 @@ class TestToolRoutingMechanism:
 
             result = agent.analyze("Analyze this binary for malware behavior.")
 
-            # Verify create_react_agent was called with the right LLM and tools
-            mock_create.assert_called_once_with(mock_llm, mock_tools)
+            # The loop hands the executor the same tools, each rebuilt by the
+            # evidence recorder so the call is written down and its answer
+            # carries the ledger id the model can cite.
+            mock_create.assert_called_once()
+            passed_llm, passed_tools = mock_create.call_args.args
+            assert passed_llm is mock_llm
+            assert [t.name for t in passed_tools] == [t.name for t in mock_tools]
             assert "process injection" in result
 
     def test_react_loop_extracts_final_message(self, mock_tools: list[StructuredTool]) -> None:

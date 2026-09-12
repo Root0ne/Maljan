@@ -32,13 +32,9 @@ from maljan.core.config import get_settings
 from maljan.core.exceptions import AgentLoopCancelled, AnalystError
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger, record_response_usage
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-from maljan.schemas.tool_evidence import (
-    MAX_OUTPUTS_PER_AGENT,
-    CapturedToolOutput,
-    _symbol_from_args,
-    trim_output,
-)
+from maljan.schemas.evidence import EvidenceCounter, LedgerEntry, apply_budget
+from maljan.schemas.isr_models import AgentISR, Artifact, ClaimEvidence, Finding
+from maljan.schemas.tool_evidence import CapturedToolOutput
 
 # Regex: matches MITRE ATT&CK technique IDs like T1055 or T1055.001.
 _TECHNIQUE_RE = re.compile(r"\b(T\d{4}(?:\.\d{3})?)\b")
@@ -1118,8 +1114,29 @@ class BaseAnalyst(ABC):
         # Durable capture of the ReAct tool loop's
         # ToolMessages (decompile/crypto/emulate/dataflow) so the report
         # Composer can ground deep sections instead of hallucinating. Populated
-        # by execute_tool_loop; read via get_last_tool_evidence().
-        self._last_tool_evidence: list[CapturedToolOutput] = []
+        # Every tool call this agent has made since the last drain, with the id
+        # the model was shown, the timing, the outcome and the parsed result.
+        # It accumulates across loops on purpose: a chunked analysis re-enters
+        # the loop once per chunk, and the node that writes the ledger reads it
+        # once at the end. The node drains it — reading without clearing is how
+        # a revision that made no calls re-emits the analysis round's.
+        self._evidence_entries: list[LedgerEntry] = []
+        # Bytes of tool output this agent has already kept. The budget is the
+        # agent's, not the loop's: a chunked analysis re-enters the loop once
+        # per chunk and would otherwise be handed the whole budget again on
+        # each of them.
+        self._evidence_bytes_spent = 0
+        # The per-job id source, attached by the container next to the token
+        # and truncation ledgers. None outside a job: the recorder then counts
+        # within its own loop.
+        self.evidence_counter: EvidenceCounter | None = None
+        # What the optional ``maljan-findings`` block carried, accumulated as
+        # the loop answers and drained onto the ISR the analyst returns. A
+        # buffer rather than a return value because the block arrives with the
+        # model's prose, several turns before the ISR is assembled, and on a
+        # chunked run it arrives once per chunk.
+        self._findings_buffer: list[Finding] = []
+        self._artifacts_buffer: list[Artifact] = []
         # Declared here rather than only in the subclasses that populate them,
         # because ``close_tools`` below has to be able to release them for any
         # analyst. ``toolkit`` is an MCP toolkit or a Ghidra HTTP client
@@ -1233,7 +1250,7 @@ class BaseAnalyst(ABC):
         # half-closed session — or its captured tool output — alive.
         self.toolkit = None
         self.tools = []
-        self._last_tool_evidence = []
+        self._evidence_entries = []
 
     def _try_initialize_mcp(self) -> bool:
         """Attach the MCP toolkit, returning False instead of raising.
@@ -1432,17 +1449,26 @@ class BaseAnalyst(ABC):
         no_tools_timeout = _timeout_overrides.get(self.name, cfg_for_timeout.react_agent_timeout)
 
         if not self.tools:
-            return self._invoke_llm_with_timeout(prebuilt, no_tools_timeout)
+            return self._capture_findings(self._invoke_llm_with_timeout(prebuilt, no_tools_timeout))
 
         from langgraph.prebuilt import create_react_agent
 
         self.logger.info("Starting ReAct agent loop with %d tools...", len(self.tools))
 
-        # Reset the per-run capture buffer before this
-        # loop populates it from the ReAct message stream (see below).
-        self._last_tool_evidence = []
+        # The recorder fills its own list as the loop runs, rather than the
+        # loop reconstructing one from the message stream afterwards — that is
+        # what gives each call its timing, its outcome and the id the model was
+        # shown. What it gathered is appended to the agent's buffer at the end;
+        # nothing is reset here, because this may be the second of ten chunks.
+        from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
 
-        agent_executor = create_react_agent(self.llm, self.pinned_tools())
+        # An agent built outside a container has no counter attached, and one
+        # per loop would issue ``ev_0001`` twice to the same buffer. It keeps
+        # its own from the first loop on.
+        if self.evidence_counter is None:
+            self.evidence_counter = EvidenceCounter()
+        recorder = EvidenceRecorder(self.name, counter=self.evidence_counter)
+        agent_executor = create_react_agent(self.llm, record_tools(self.pinned_tools(), recorder))
 
         messages = prebuilt
 
@@ -1527,34 +1553,33 @@ class BaseAnalyst(ABC):
         _t0 = _time.monotonic()
         hard_timeout = timeout + 30
         try:
-            thread_result: dict | None = _run_coro_blocking(
-                _invoke(), hard_timeout, label=f"react:{self.name}"
-            )
-        except TimeoutError:
-            self.logger.critical(
-                "%s ReAct agent exceeded the %ds hard cap; aborting this analyst.",
-                self.name,
-                hard_timeout,
-            )
-            raise
-        except AnalystError:
-            raise
-        except Exception as exc:
-            self.logger.error("ReAct agent failed: %s (%s)", type(exc).__name__, exc)
-            raise AnalystError(f"{self.name} ReAct agent failed: {exc}") from exc
+            try:
+                thread_result: dict | None = _run_coro_blocking(
+                    _invoke(), hard_timeout, label=f"react:{self.name}"
+                )
+            except TimeoutError:
+                self.logger.critical(
+                    "%s ReAct agent exceeded the %ds hard cap; aborting this analyst.",
+                    self.name,
+                    hard_timeout,
+                )
+                raise
+            except AnalystError:
+                raise
+            except Exception as exc:
+                self.logger.error("ReAct agent failed: %s (%s)", type(exc).__name__, exc)
+                raise AnalystError(f"{self.name} ReAct agent failed: {exc}") from exc
+        finally:
+            # In a ``finally`` because the run whose evidence is worth the most
+            # is the one that died: an analyst that hit the hard cap after
+            # thirty Ghidra calls made thirty calls, and losing all of them
+            # because the last one timed out is the opposite of a ledger.
+            self._finish_evidence(recorder)
 
         if thread_result is None:
             raise AnalystError(f"{self.name} ReAct agent returned no result")
 
         msgs = thread_result.get("messages", []) or []
-        # Capture the tool loop's ToolMessages as
-        # durable evidence for the report Composer. Best-effort — a capture
-        # failure must never sink the analysis.
-        try:
-            self._last_tool_evidence = self._capture_tool_evidence(msgs)
-        except Exception as _cap_exc:  # noqa: BLE001
-            self.logger.debug("tool-evidence capture skipped: %s", _cap_exc)
-            self._last_tool_evidence = []
         # Tool calls are AIMessage instances whose ``tool_calls`` attribute
         # is a non-empty list. Counting them is cheap and the most useful
         # single metric for "did this analyst overspend on Ghidra".
@@ -1634,8 +1659,8 @@ class BaseAnalyst(ABC):
             # 1,530 s cap, and zero techniques out the other side.
             synthesized = self._force_final_synthesis(msgs, timeout, elapsed)
             if synthesized.strip() and not _RECURSION_STOP_RE.search(synthesized):
-                return synthesized
-        return content
+                return self._capture_findings(synthesized)
+        return self._capture_findings(content)
 
     def _record_react_loop(self, *, hit_step_cap: bool) -> None:
         """Count one ReAct loop and whether it exhausted its step budget.
@@ -1652,53 +1677,94 @@ class BaseAnalyst(ABC):
         except Exception:  # noqa: BLE001
             return
 
-    def _capture_tool_evidence(self, msgs: list) -> list[CapturedToolOutput]:
-        """Pair each tool call with its result from the ReAct message stream.
+    def _finish_evidence(self, recorder: Any) -> None:
+        """Close this loop's ledger: apply the byte budget, then publish it.
 
-        AIMessages carry ``tool_calls`` (name + args +
-        id); ToolMessages carry the result keyed by ``tool_call_id``. We pair by
-        id — not positional order — so provider-specific interleaving cannot
-        mis-associate an output. Capped at ``MAX_OUTPUTS_PER_AGENT`` and each
-        output re-trimmed. Result feeds the report Composer's evidence bundles.
+        Best-effort in every branch. A ledger that cannot be closed is a
+        report with less to cite, never an analysis that failed.
         """
-        # tool_call_id -> (tool_name, args)
-        calls: dict[str, tuple[str, dict]] = {}
-        for m in msgs:
-            for tc in getattr(m, "tool_calls", None) or []:
-                tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
-                tc_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", None)
-                tc_args = tc.get("args") if isinstance(tc, dict) else getattr(tc, "args", None)
-                if isinstance(tc_id, str) and tc_name:
-                    calls[tc_id] = (str(tc_name), tc_args if isinstance(tc_args, dict) else {})
-
-        captured: list[CapturedToolOutput] = []
-        seq = 0
-        for m in msgs:
-            if getattr(m, "type", "") != "tool":
-                continue
-            msg_id = getattr(m, "tool_call_id", None)
-            tool_name = str(getattr(m, "name", "") or "unknown")
-            tool_args: dict = {}
-            if isinstance(msg_id, str) and msg_id in calls:
-                tool_name, tool_args = calls[msg_id]
-            captured.append(
-                CapturedToolOutput(
-                    agent_id=self.name,
-                    tool_name=tool_name,
-                    args=tool_args,
-                    symbol=_symbol_from_args(tool_args),
-                    output=trim_output(str(getattr(m, "content", "") or "")),
-                    seq=seq,
-                )
+        try:
+            entries = list(recorder.entries)
+            budget = int(getattr(get_settings().reporting, "evidence_budget_bytes", 0) or 0)
+            trimmed, self._evidence_bytes_spent = apply_budget(
+                entries, budget, already_spent=self._evidence_bytes_spent
             )
-            seq += 1
-            if len(captured) >= MAX_OUTPUTS_PER_AGENT:
-                break
-        return captured
+            if trimmed:
+                self.logger.warning(
+                    "%s: %d of %d evidence entries exceeded the %d-byte budget and "
+                    "kept only their call record.",
+                    self.name,
+                    trimmed,
+                    len(entries),
+                    budget,
+                )
+            ledger = getattr(self, "truncation_ledger", None)
+            if ledger is not None:
+                try:
+                    ledger.record_evidence_budget(entries=len(entries), trimmed=trimmed)
+                except Exception:  # noqa: BLE001 — telemetry never breaks a run
+                    pass
+            self._evidence_entries.extend(entries)
+        except Exception as exc:  # noqa: BLE001
+            self.logger.debug("evidence ledger not published: %s", exc)
+
+    def _capture_findings(self, content: str) -> str:
+        """Take the structured block out of an answer and keep what it carried.
+
+        The prose comes back without the block, so the ISR parser, the
+        transcript and the report all see what a person would read. Never
+        raises: an agent that emitted a malformed block still wrote an answer.
+        """
+        try:
+            from maljan.agents.findings_block import parse_findings_block
+
+            block = parse_findings_block(content)
+            if not block:
+                return content
+            self._findings_buffer.extend(block.findings)
+            self._artifacts_buffer.extend(block.artifacts)
+            self.logger.info(
+                "%s: findings block carried %d finding(s) and %d artifact(s).",
+                self.name,
+                len(block.findings),
+                len(block.artifacts),
+            )
+            return block.prose
+        except Exception as exc:  # noqa: BLE001
+            self.logger.debug("findings block not read: %s", exc)
+            return content
+
+    def _drain_findings(self, isr: AgentISR) -> AgentISR:
+        """Move the buffered structured channel onto ``isr`` and clear it."""
+        if self._findings_buffer:
+            isr.findings = list(self._findings_buffer)
+        if self._artifacts_buffer:
+            isr.artifacts = list(self._artifacts_buffer)
+        self._findings_buffer = []
+        self._artifacts_buffer = []
+        return isr
+
+    def drain_evidence_entries(self) -> list[LedgerEntry]:
+        """Every entry gathered since the last drain, handing over ownership.
+
+        Draining rather than reading is the contract, and it is the contract
+        because both halves of the alternative are wrong: a node that reads
+        without clearing re-emits the previous round's calls onto an
+        append-only channel, and a loop that clears on entry throws away the
+        chunks before the last one. Exactly one node drains each agent, after
+        the work that node is responsible for.
+        """
+        entries = self._evidence_entries
+        self._evidence_entries = []
+        return entries
 
     def get_last_tool_evidence(self) -> list[CapturedToolOutput]:
-        """Return the tool outputs captured by the most recent ReAct loop."""
-        return list(self._last_tool_evidence)
+        """The same calls in the previous capture shape, for readers not yet moved.
+
+        A peek, not a drain: this view is derived and nothing writes it to the
+        state on its own.
+        """
+        return [entry.to_captured() for entry in self._evidence_entries]
 
     def _force_final_synthesis(self, msgs: list, timeout: int, elapsed: float = 0.0) -> str:
         """Salvage a ReAct loop that hit its step budget without answering.
@@ -2180,6 +2246,7 @@ class BaseAnalyst(ABC):
         or no evidence is available. Never raises (a gate failure must not lose
         the run).
         """
+        self._drain_findings(isr)
         try:
             if not get_settings().preprocessing.use_claim_consistency_gate:
                 return isr
@@ -2214,9 +2281,10 @@ class BaseAnalyst(ABC):
         """Wrapper around revise_isr() with error handling."""
         try:
             truncated = self._truncate_input(original_data)
-            return self.revise_isr(
+            text, isr = self.revise_isr(
                 truncated, own_report, peer_reports, mediator_feedback, revision_round
             )
+            return text, self._drain_findings(isr)
         except AnalystError:
             raise
         except Exception as e:

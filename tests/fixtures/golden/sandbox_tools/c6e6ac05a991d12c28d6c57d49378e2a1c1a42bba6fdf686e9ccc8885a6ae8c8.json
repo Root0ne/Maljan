@@ -1,0 +1,4505 @@
+{
+  "sandbox_api_calls": {
+    "apis": [
+      {
+        "api": "ChangeWindowMessageFilter",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'message', 'value': '49238'}, {'name': 'dwFlag', 'value': '1'}]",
+        "suspicious": false
+      },
+      {
+        "api": "CoCreateInstance",
+        "category": "execution",
+        "count": 0,
+        "first_args": "[{'name': 'rclsid', 'value': '0000034B-0000-0000-C000-000000000046'}, {'name': 'ClsContext', 'value': '0x00000001', 'pretty_value': 'CLSCTX_INPROC_SERVER'}, {'name': 'riid', 'value': '0000015B-0000-0000-C000-000000000046'}, {'name': 'ProgID', 'value': ''}]",
+        "suspicious": true
+      },
+      {
+        "api": "CoCreateInstanceEx",
+        "category": "execution",
+        "count": 0,
+        "first_args": "[{'name': 'rclsid', 'value': '8BC3F05E-D86B-11D0-A075-00C04FB68820'}, {'name': 'ClsContext', 'value': '0x00000014', 'pretty_value': 'CLSCTX_LOCAL_SERVER|CLSCTX_REMOTE_SERVER'}, {'name': 'ServerName', 'value': ''}, {'name': 'ProgID', 'value': ''}]",
+        "suspicious": true
+      },
+      {
+        "api": "CoGetClassObject",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'rclsid', 'value': 'E7D35CFA-348B-485E-B524-252725D697CA'}, {'name': 'ClsContext', 'value': '0x80000001', 'pretty_value': 'CLSCTX_INPROC_SERVER|CLSCTX_PS_DLL'}, {'name': 'riid', 'value': 'D5F569D0-593B-101A-B569-08002B2DBF7A'}, {'name': 'ProgID', 'value': ''}]",
+        "suspicious": false
+      },
+      {
+        "api": "CommandLineToArgvW",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'CommandLine', 'value': '/enable-feature:NetFx3 /caller-name:mscoreei.dll'}, {'name': 'NumArgs', 'value': '2'}]",
+        "suspicious": false
+      },
+      {
+        "api": "CreateProcessInternalW",
+        "category": "execution",
+        "count": 0,
+        "first_args": "[{'name': 'ApplicationName', 'value': ''}, {'name': 'CommandLine', 'value': 'C:\\\\Windows\\\\System32\\\\svchost.exe -k LocalServiceNetworkRestricted -p'}, {'name': 'CreationFlags', 'value': '0x000c040c', 'pretty_value': 'CREATE_SUSPENDED|DETACHED_PROCESS|CREATE_UNICODE_ENVIRONMENT|CREATE_PROTECTED_PROCESS|EXTENDED_STARTUPINFO_PRESENT'}, {'name': 'ProcessId', 'value': '3764'}, {'name': 'ThreadId', 'val",
+        "suspicious": true
+      },
+      {
+        "api": "CreateProcessW",
+        "category": "execution",
+        "count": 0,
+        "first_args": "[{'name': 'ApplicationName', 'value': 'C:\\\\Windows\\\\system32\\\\fondue.exe'}, {'name': 'CommandLine', 'value': '\"C:\\\\Windows\\\\system32\\\\fondue.exe\" /enable-feature:NetFx3 /caller-name:mscoreei.dll'}, {'name': 'CreationFlags', 'value': '0x00000020'}, {'name': 'ProcessId', 'value': '2684'}, {'name': 'ThreadId', 'value': '2476'}, {'name': 'ProcessHandle', 'value': '0x00000264'}, {'name': 'ThreadHandle'",
+        "suspicious": true
+      },
+      {
+        "api": "CreateRemoteThreadEx",
+        "category": "process_injection",
+        "count": 0,
+        "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'StartRoutine', 'value': '0x7ffa01393ca0'}, {'name': 'Parameter', 'value': '0x1cadb378980'}, {'name': 'CreationFlags', 'value': '0x00000000'}, {'name': 'ThreadId', 'value': '4660'}, {'name': 'ProcessId', 'value': '5428'}]",
+        "suspicious": true
+      },
+      {
+        "api": "DeviceIoControl",
+        "category": "filesystem",
+        "count": 0,
+        "first_args": "[{'name': 'DeviceHandle', 'value': '0x00000260'}, {'name': 'IoControlCode', 'value': '0x00390008', 'pretty_value': 'IOCTL_KSEC_RANDOM_FILL_BUFFER'}, {'name': 'InBuffer', 'value': ''}, {'name': 'OutBuffer', 'value': '}2\\\\xc9>s\\\\x93h~\\\\x9b\\\\x1e\\\\x87\\\\x91\\\\x98\\\\x9c\\\\xfc{\\\\x8f-|j\\\\xb9#_\\\\xa5\\\\x94\\\\x97\\\\xf5\\\\x0fxSy\\\\xcd\\\\x18\\\\x0e.0=\\\\x88\\\\xc9\\\\x85\\\\xe4k\\\\x0b\\\\xa2\\\\x91\\\\x0c\\\\xe2\\\\x1b'}]",
+        "suspicious": false
+      },
+      {
+        "api": "DllLoadNotification",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'NotificationReason', 'value': 'load'}, {'name': 'DllName', 'value': 'C:\\\\Windows\\\\SYSTEM32\\\\kernel.appcore'}, {'name': 'DllBase', 'value': '0x7ffa067a0000'}]",
+        "suspicious": false
+      },
+      {
+        "api": "FindFirstFileExW",
+        "category": "filesystem",
+        "count": 0,
+        "first_args": "[{'name': 'FileName', 'value': 'C:\\\\Windows\\\\Microsoft.NET\\\\Framework\\\\v4.0.30319\\\\mscoreei.dll'}, {'name': 'FirstCreateTimeLow', 'value': '0x3683be6d'}, {'name': 'FirstCreateTimeHigh', 'value': '0x01d5acde'}]",
+        "suspicious": false
+      },
+      {
+        "api": "FindResourceExW",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'Module', 'value': '0x7ff9eb0d0000'}, {'name': 'Type', 'value': '#6'}, {'name': 'Name', 'value': '#188'}, {'name': 'Language', 'value': '0x00000000'}]",
+        "suspicious": false
+      },
+      {
+        "api": "GetFileVersionInfoSizeW",
+        "category": "discovery",
+        "count": 0,
+        "first_args": "[{'name': 'PathName', 'value': 'C:\\\\Windows\\\\Microsoft.NET\\\\Framework\\\\v2.0.50727\\\\mscorwks.dll'}]",
+        "suspicious": false
+      },
+      {
+        "api": "GetKeyboardLayout",
+        "category": "discovery",
+        "count": 0,
+        "first_args": "[{'name': 'KeyboardLayout', 'value': '0x00000409'}, {'name': 'LanguageName', 'value': 'English (United States)'}]",
+        "suspicious": false
+      },
+      {
+        "api": "GetSystemInfo",
+        "category": "discovery",
+        "count": 0,
+        "first_args": "",
+        "suspicious": false
+      },
+      {
+        "api": "GetSystemMetrics",
+        "category": "discovery",
+        "count": 0,
+        "first_args": "[{'name': 'SystemMetricIndex', 'value': '4096'}]",
+        "suspicious": false
+      },
+      {
+        "api": "GetSystemTime",
+        "category": null,
+        "count": 0,
+        "first_args": "",
+        "suspicious": false
+      },
+      {
+        "api": "GetSystemTimeAsFileTime",
+        "category": "anti_debug",
+        "count": 0,
+        "first_args": "",
+        "suspicious": true
+      },
+      {
+        "api": "GetUserDefaultLCID",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'SystemDefaultLangID', 'value': '0x00000409'}, {'name': 'LanguageName', 'value': 'English (United States)'}]",
+        "suspicious": false
+      },
+      {
+        "api": "GetVolumeNameForVolumeMountPointW",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'VolumeMountPoint', 'value': '\\\\\\\\?\\\\SCSI#CdRom&Ven_PNP0&Prod_HL-PQ-SV_WB8#4&35424867&0&010000#{53f5630d-b6bf-11d0-94f2-00a0c91efb8b}\\\\'}, {'name': 'VolumeName', 'value': '\\\\\\\\?\\\\Volume{705a300d-7a5e-11f1-89db-806e6f6e6963}\\\\'}]",
+        "suspicious": false
+      },
+      {
+        "api": "IsDebuggerPresent",
+        "category": "anti_debug",
+        "count": 0,
+        "first_args": "",
+        "suspicious": true
+      },
+      {
+        "api": "LdrGetDllHandle",
+        "category": "execution",
+        "count": 0,
+        "first_args": "[{'name': 'FileName', 'value': 'kernel32.dll'}, {'name': 'ModuleHandle', 'value': '0x757f0000'}]",
+        "suspicious": true
+      },
+      {
+        "api": "LdrGetProcedureAddress",
+        "category": "execution",
+        "count": 0,
+        "first_args": "[{'name': 'ModuleName', 'value': 'ntdll.dll'}, {'name': 'ModuleHandle', 'value': '0x7ffa0b270000'}, {'name': 'FunctionName', 'value': 'RtlWow64GetCurrentMachine'}, {'name': 'Ordinal', 'value': '0'}, {'name': 'FunctionAddress', 'value': '0x7ffa0b2c1e30'}]",
+        "suspicious": true
+      },
+      {
+        "api": "LdrGetProcedureAddressForCaller",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'ModuleName', 'value': 'ADVAPI32.dll'}, {'name': 'ModuleHandle', 'value': '0x76300000'}, {'name': 'FunctionName', 'value': 'RegOpenKeyExW'}, {'name': 'Ordinal', 'value': '0'}, {'name': 'FunctionAddress', 'value': '0x7631efd0'}]",
+        "suspicious": false
+      },
+      {
+        "api": "LdrLoadDll",
+        "category": "execution",
+        "count": 0,
+        "first_args": "[{'name': 'Flags', 'value': '0x00000000'}, {'name': 'FileName', 'value': 'kernel32.dll'}, {'name': 'BaseAddress', 'value': '0x7ffa0a8f0000'}]",
+        "suspicious": true
+      },
+      {
+        "api": "LdrpCallInitRoutine",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'MappedPath', 'value': '\\\\Device\\\\HarddiskVolume2\\\\Windows\\\\SysWOW64\\\\kernel.appcore'}, {'name': 'BaseAddress', 'value': '0x74c10000'}, {'name': 'InitRoutine', 'value': '0x74c147e0'}, {'name': 'Reason', 'value': '1'}]",
+        "suspicious": false
+      },
+      {
+        "api": "LoadLibraryExW",
+        "category": "execution",
+        "count": 0,
+        "first_args": "[{'name': 'lpLibFileName', 'value': 'C:\\\\Windows\\\\Microsoft.NET\\\\Framework\\\\v4.0.30319\\\\mscoreei.dll'}, {'name': 'dwFlags', 'value': '0x00000008'}]",
+        "suspicious": true
+      },
+      {
+        "api": "LoadResource",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'Module', 'value': '0x7ff9eb0d0000'}, {'name': 'ResourceInfo', 'value': '0x2f3cdf70c78'}]",
+        "suspicious": false
+      },
+      {
+        "api": "NtAddAtomEx",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'AtomName', 'value': 'ListBox'}, {'name': 'Atom', 'value': '0x0000c026'}]",
+        "suspicious": false
+      },
+      {
+        "api": "NtAllocateVirtualMemory",
+        "category": "process_injection",
+        "count": 0,
+        "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x1cadb36a000'}, {'name': 'RegionSize', 'value': '0x00001000'}, {'name': 'Protection', 'value': '0x00000004', 'pretty_value': 'PAGE_READWRITE'}, {'name': 'StackPivoted', 'value': 'no'}]",
+        "suspicious": true
+      },
+      {
+        "api": "NtClose",
+        "category": "anti_debug",
+        "count": 0,
+        "first_args": "[{'name': 'Handle', 'value': '0x00000260'}]",
+        "suspicious": true
+      },
+      {
+        "api": "NtCreateEvent",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'Handle', 'value': '0x00000268'}, {'name': 'EventName', 'value': 'CONFIRM_DOWNLOAD_EVENT'}, {'name': 'EventType', 'value': '0'}, {'name': 'InitialState', 'value': '0'}]",
+        "suspicious": false
+      },
+      {
+        "api": "NtCreateFile",
+        "category": "filesystem",
+        "count": 0,
+        "first_args": "[{'name': 'FileHandle', 'value': '0x00000200'}, {'name': 'DesiredAccess', 'value': '0x80100080', 'pretty_value': 'GENERIC_READ|FILE_READ_ATTRIBUTES|SYNCHRONIZE'}, {'name': 'FileName', 'value': 'C:\\\\Windows\\\\Globalization\\\\Sorting\\\\sortdefault.nls'}, {'name': 'CreateDisposition', 'value': '1', 'pretty_value': 'FILE_OPEN'}, {'name': 'ShareAccess', 'value': '1', 'pretty_value': 'FILE_SHARE_READ'}, {'",
+        "suspicious": false
+      },
+      {
+        "api": "NtCreateMutant",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'Handle', 'value': '0x000003e4'}, {'name': 'MutexName', 'value': ''}, {'name': 'InitialOwner', 'value': '0'}]",
+        "suspicious": false
+      },
+      {
+        "api": "NtCreateSection",
+        "category": "process_injection",
+        "count": 0,
+        "first_args": "[{'name': 'SectionHandle', 'value': '0x00000274'}, {'name': 'DesiredAccess', 'value': '0x000f0005', 'pretty_value': 'STANDARD_RIGHTS_REQUIRED|SECTION_QUERY|SECTION_MAP_READ'}, {'name': 'ObjectAttributes', 'value': ''}, {'name': 'FileHandle', 'value': '0x00000270'}, {'name': 'FileName', 'value': 'C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\c6e6ac05a991d12c28d6.exe'}]",
+        "suspicious": true
+      },
+      {
+        "api": "NtCreateThreadEx",
+        "category": "process_injection",
+        "count": 0,
+        "first_args": "[{'name': 'ThreadHandle', 'value': '0x00000388'}, {'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'StartAddress', 'value': '0x77123360'}, {'name': 'Parameter', 'value': '0x02d005f8'}, {'name': 'CreateFlags', 'value': '0x00000000'}, {'name': 'ThreadId', 'value': '1016'}, {'name': 'ProcessId', 'value': '2684'}, {'name': 'Module', 'value': 'combase.dll'}]",
+        "suspicious": true
+      },
+      {
+        "api": "NtCreateUserProcess",
+        "category": "execution",
+        "count": 0,
+        "first_args": "[{'name': 'ProcessHandle', 'value': '0x00000264'}, {'name': 'ThreadHandle', 'value': '0x0000026c'}, {'name': 'ProcessDesiredAccess', 'value': '0x02000000'}, {'name': 'ThreadDesiredAccess', 'value': '0x02000000'}, {'name': 'ProcessFileName', 'value': ''}, {'name': 'ThreadName', 'value': ''}, {'name': 'ImagePathName', 'value': 'C:\\\\Windows\\\\system32\\\\fondue.exe'}, {'name': 'CommandLine', 'value': '\"",
+        "suspicious": true
+      },
+      {
+        "api": "NtDelayExecution",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'Milliseconds', 'value': '0'}]",
+        "suspicious": false
+      },
+      {
+        "api": "NtDeviceIoControlFile",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'FileHandle', 'value': '0x00000388'}, {'name': 'HandleName', 'value': '\\\\Device\\\\MountPointManager'}, {'name': 'IoControlCode', 'value': '0x006d0034', 'pretty_value': 'IOCTL_MOUNTMGR_QUERY_DOS_VOLUME_PATHS'}, {'name': 'InputBuffer', 'value': '`\\\\x00\\\\\\\\x00?\\\\x00?\\\\x00\\\\\\\\x00V\\\\x00o\\\\x00l\\\\x00u\\\\x00m\\\\x00e\\\\x00{\\\\x007\\\\x000\\\\x005\\\\x00a\\\\x003\\\\x000\\\\x000\\\\x00d\\\\x00-\\\\x007\\\\x00a\\\\x005\\\\x00e",
+        "suspicious": false
+      },
+      {
+        "api": "NtDuplicateObject",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'SourceProcessHandle', 'value': '0xffffffff'}, {'name': 'SourceHandle', 'value': '0xfffffffe'}, {'name': 'TargetProcessHandle', 'value': '0xffffffff'}, {'name': 'TargetHandle', 'value': '0x000002d4'}, {'name': 'Options', 'value': '0x00000002'}]",
+        "suspicious": false
+      },
+      {
+        "api": "NtFindAtom",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'AtomName', 'value': 'UIASinkProvider'}, {'name': 'Atom', 'value': '0x00000000'}]",
+        "suspicious": false
+      },
+      {
+        "api": "NtFreeVirtualMemory",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x2f3ce033000'}, {'name': 'RegionSize', 'value': '0x0001e000'}, {'name': 'FreeType', 'value': '0x00004000'}]",
+        "suspicious": false
+      },
+      {
+        "api": "NtMapViewOfSection",
+        "category": "process_injection",
+        "count": 0,
+        "first_args": "[{'name': 'SectionHandle', 'value': '0x000001fc'}, {'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x1cadceb0000'}, {'name': 'SectionOffset', 'value': '0x63b00bf010'}, {'name': 'ViewSize', 'value': '0x00338000'}, {'name': 'Win32Protect', 'value': '0x00000002', 'pretty_value': 'PAGE_READONLY'}, {'name': 'StackPivoted', 'value': 'no'}]",
+        "suspicious": true
+      },
+      {
+        "api": "NtOpenEvent",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'Handle', 'value': '0xffda78dd40'}, {'name': 'EventName', 'value': 'Local\\\\1ImmersiveFocusTrackingActiveEvent'}]",
+        "suspicious": false
+      },
+      {
+        "api": "NtOpenFile",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'FileHandle', 'value': '0x00000000'}, {'name': 'DesiredAccess', 'value': '0x00100001', 'pretty_value': 'FILE_READ_ACCESS|SYNCHRONIZE'}, {'name': 'FileName', 'value': 'C:\\\\Windows\\\\SystemResources\\\\USER32.dll.mun'}, {'name': 'ShareAccess', 'value': '5', 'pretty_value': 'FILE_SHARE_READ|FILE_SHARE_DELETE'}]",
+        "suspicious": false
+      },
+      {
+        "api": "NtOpenKey",
+        "category": "registry",
+        "count": 0,
+        "first_args": "[{'name': 'KeyHandle', 'value': '0x00000104'}, {'name': 'DesiredAccess', 'value': '0x00020019', 'pretty_value': 'KEY_READ'}, {'name': 'ObjectAttributesHandle', 'value': '0x00000000'}, {'name': 'ObjectAttributesName', 'value': '\\\\Registry\\\\Machine\\\\Software\\\\Microsoft\\\\Windows NT\\\\CurrentVersion\\\\GRE_Initialize'}, {'name': 'ObjectAttributes', 'value': 'HKEY_LOCAL_MACHINE\\\\Software\\\\Microsoft\\\\Windo",
+        "suspicious": false
+      },
+      {
+        "api": "NtOpenKeyEx",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'KeyHandle', 'value': '0x0000026c'}, {'name': 'DesiredAccess', 'value': '0x00000001', 'pretty_value': 'KEY_QUERY_VALUE'}, {'name': 'ObjectAttributesHandle', 'value': '0x00000268'}, {'name': 'ObjectAttributesName', 'value': 'SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Themes\\\\Personalize'}, {'name': 'ObjectAttributes', 'value': 'HKEY_CURRENT_USER\\\\SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVe",
+        "suspicious": false
+      },
+      {
+        "api": "NtOpenMutant",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'Handle', 'value': '0x000002f4'}, {'name': 'MutexName', 'value': 'Local\\\\MSCTF.Asm.MutexDefault1'}]",
+        "suspicious": false
+      },
+      {
+        "api": "NtOpenProcess",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'ProcessHandle', 'value': '0x00000270'}, {'name': 'DesiredAccess', 'value': '0x00000400', 'pretty_value': 'PROCESS_QUERY_INFORMATION'}, {'name': 'ProcessIdentifier', 'value': '4280'}]",
+        "suspicious": false
+      },
+      {
+        "api": "NtOpenProcessToken",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'ProcessHandle', 'value': '0x00000270'}, {'name': 'DesiredAccess', 'value': '0x00000008'}, {'name': 'TokenHandle', 'value': '0x0000026c'}]",
+        "suspicious": false
+      },
+      {
+        "api": "NtOpenSection",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'SectionHandle', 'value': '0x00000000'}, {'name': 'DesiredAccess', 'value': '0x0000000d'}, {'name': 'ObjectAttributes', 'value': 'kernel.appcore.dll'}]",
+        "suspicious": false
+      },
+      {
+        "api": "NtProtectVirtualMemory",
+        "category": "process_injection",
+        "count": 0,
+        "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x7322c000'}, {'name': 'ModuleName', 'value': 'MSCOREE.DLL'}, {'name': 'NumberOfBytesProtected', 'value': '0x00001000'}, {'name': 'MemoryType', 'value': '0x00000000'}, {'name': 'NewAccessProtection', 'value': '0x00000004', 'pretty_value': 'PAGE_READWRITE'}, {'name': 'OldAccessProtection', 'value': '0x00000002', 'p",
+        "suspicious": true
+      },
+      {
+        "api": "NtQueryAttributesFile",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'FileName', 'value': 'C:\\\\Windows\\\\System32\\\\MSCOREE.DLL.local'}]",
+        "suspicious": false
+      },
+      {
+        "api": "NtQueryInformationFile",
+        "category": "filesystem",
+        "count": 0,
+        "first_args": "[{'name': 'FileHandle', 'value': '0x00000270'}, {'name': 'HandleName', 'value': 'C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\c6e6ac05a991d12c28d6.exe'}, {'name': 'FileInformationClass', 'value': '5', 'pretty_value': 'FileStandardInformation'}, {'name': 'FileInformation', 'value': '\\\\x00\\\\xf0\\r\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\xea\\r\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x01\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00'}]",
+        "suspicious": false
+      },
+      {
+        "api": "NtQueryInformationThread",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'ThreadHandle', 'value': '0xfffffffe'}, {'name': 'ThreadInformationClass', 'value': '42'}, {'name': 'ThreadInformation', 'value': '\\\\x00\\\\x00\\\\x00\\\\x00'}, {'name': 'ThreadId', 'value': '2476'}]",
+        "suspicious": false
+      },
+      {
+        "api": "NtQueryInformationToken",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'TokenInformationClass', 'value': '29'}, {'name': 'TokenInformation', 'value': '\\\\x00\\\\x00\\\\x00\\\\x00'}]",
+        "suspicious": false
+      },
+      {
+        "api": "NtQueryInstallUILanguage",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'InstallUILanguageId', 'value': '0xda78e740'}, {'name': 'LanguageName', 'value': 'English (United States)'}]",
+        "suspicious": false
+      },
+      {
+        "api": "NtQueryKey",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'KeyHandle', 'value': '0x00000272'}, {'name': 'KeyInformation', 'value': '\\\\REGISTRY\\\\USER\\\\S-1-5-21-1795187001-776152809-4276559823-1000_Classes'}, {'name': 'KeyInformationClass', 'value': '3'}]",
+        "suspicious": false
+      },
+      {
+        "api": "NtQueryLicenseValue",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'Name', 'value': 'TerminalServices-RemoteConnectionManager-AllowAppServerMode'}, {'name': 'Type', 'value': '0x00000004'}]",
+        "suspicious": false
+      },
+      {
+        "api": "NtQuerySystemInformation",
+        "category": "anti_debug",
+        "count": 0,
+        "first_args": "[{'name': 'SystemInformationClass', 'value': '0', 'pretty_value': 'FILE_SUPERSEDE'}]",
+        "suspicious": true
+      },
+      {
+        "api": "NtQuerySystemTime",
+        "category": null,
+        "count": 0,
+        "first_args": "",
+        "suspicious": false
+      },
+      {
+        "api": "NtQueryValueKey",
+        "category": "registry",
+        "count": 0,
+        "first_args": "[{'name': 'KeyHandle', 'value': '0x00000104'}, {'name': 'ValueName', 'value': 'DisableMetaFiles'}, {'name': 'FullName', 'value': 'HKEY_LOCAL_MACHINE\\\\SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion\\\\GRE_Initialize\\\\DisableMetaFiles'}]",
+        "suspicious": false
+      },
+      {
+        "api": "NtQueueApcThread",
+        "category": "process_injection",
+        "count": 0,
+        "first_args": "[{'name': 'ProcessId', 'value': '2684'}, {'name': 'ThreadId', 'value': '2476'}, {'name': 'ThreadHandle', 'value': '0x00000514'}, {'name': 'ApcRoutine', 'value': '0x76832c50'}, {'name': 'Module', 'value': 'sechost.dll'}]",
+        "suspicious": true
+      },
+      {
+        "api": "NtReadFile",
+        "category": "filesystem",
+        "count": 0,
+        "first_args": "[{'name': 'FileHandle', 'value': '0x000002b0'}, {'name': 'HandleName', 'value': 'C:\\\\Windows\\\\Fonts\\\\StaticCache.dat'}, {'name': 'Buffer', 'value': '\\\\x1a\\\\x83W\\\\xa5\\\\x02\\\\x00\\\\x01\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x01\\\\x00$\\\\x01\\\\x00\\\\x00$)\\\\x00\\\\x00\\\\x00\\\\x00\\\\x02\\\\x00\\\\xbe\\\\x02\\\\x00\\\\x00<\\\\x00\\\\x00\\\\x00$!\\\\x00\\\\x00L)\\\\x00\\\\x00\\\\x00\\\\x08\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x01\\\\x00\\\\x00\\\\",
+        "suspicious": false
+      },
+      {
+        "api": "NtReleaseMutant",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'Handle', 'value': '0x000000b0'}]",
+        "suspicious": false
+      },
+      {
+        "api": "NtResumeThread",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'ThreadHandle', 'value': '0x00000320'}, {'name': 'SuspendCount', 'value': '1'}, {'name': 'ThreadId', 'value': '3676'}, {'name': 'ProcessId', 'value': '3764'}]",
+        "suspicious": false
+      },
+      {
+        "api": "NtSetInformationFile",
+        "category": "filesystem",
+        "count": 0,
+        "first_args": "[{'name': 'FileHandle', 'value': '0x00000330'}, {'name': 'HandleName', 'value': 'C:\\\\Windows\\\\System32\\\\wbem\\\\Repository\\\\INDEX.BTR'}, {'name': 'FileInformationClass', 'value': '14', 'pretty_value': 'FilePositionInformation'}, {'name': 'FileInformation', 'value': '\\\\x00 \\\\x03\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00'}]",
+        "suspicious": false
+      },
+      {
+        "api": "NtSetInformationProcess",
+        "category": "evasion",
+        "count": 0,
+        "first_args": "[{'name': 'ProcessInformationClass', 'value': '93'}, {'name': 'ProcessInformation', 'value': '\\\\x7f7\\\\x9e}'}]",
+        "suspicious": true
+      },
+      {
+        "api": "NtTerminateProcess",
+        "category": "execution",
+        "count": 0,
+        "first_args": "[{'name': 'ProcessHandle', 'value': '0x00000000'}, {'name': 'ExitCode', 'value': '0x80131700'}]",
+        "suspicious": true
+      },
+      {
+        "api": "NtTerminateThread",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'ThreadHandle', 'value': '0x00000000'}, {'name': 'ExitStatus', 'value': '0x00000000'}, {'name': 'ThreadId', 'value': '0'}, {'name': 'ProcessId', 'value': '0'}]",
+        "suspicious": false
+      },
+      {
+        "api": "NtTestAlert",
+        "category": null,
+        "count": 0,
+        "first_args": "",
+        "suspicious": false
+      },
+      {
+        "api": "NtUnmapViewOfSection",
+        "category": "process_injection",
+        "count": 0,
+        "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x1cadd1f0000'}, {'name': 'RegionSize', 'value': '0x00144000'}]",
+        "suspicious": true
+      },
+      {
+        "api": "NtUnmapViewOfSectionEx",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x05450000'}, {'name': 'RegionSize', 'value': '0x000df000'}, {'name': 'Flags', 'value': '0'}]",
+        "suspicious": false
+      },
+      {
+        "api": "NtWaitForSingleObject",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'Handle', 'value': '0x000000b0'}, {'name': 'Milliseconds', 'value': '18446744073709551615'}, {'name': 'Status', 'value': 'Infinite'}]",
+        "suspicious": false
+      },
+      {
+        "api": "PostMessageW",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'WindowHandle', 'value': '0x00030076'}, {'name': 'Message', 'value': '0x00000470'}]",
+        "suspicious": false
+      },
+      {
+        "api": "PostThreadMessageA",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'ProcessId', 'value': '4508'}, {'name': 'ThreadId', 'value': '5180'}, {'name': 'Message', 'value': '18'}]",
+        "suspicious": false
+      },
+      {
+        "api": "RegCloseKey",
+        "category": "registry",
+        "count": 0,
+        "first_args": "[{'name': 'Handle', 'value': '0x00000264'}]",
+        "suspicious": false
+      },
+      {
+        "api": "RegEnumKeyExW",
+        "category": "registry",
+        "count": 0,
+        "first_args": "[{'name': 'Handle', 'value': '0x0000026c'}, {'name': 'Index', 'value': '3'}, {'name': 'Name', 'value': 'v4.0'}, {'name': 'Class', 'value': ''}, {'name': 'FullName', 'value': 'HKEY_LOCAL_MACHINE\\\\SOFTWARE\\\\WOW6432Node\\\\Microsoft\\\\.NETFramework\\\\policy\\\\v4.0'}]",
+        "suspicious": false
+      },
+      {
+        "api": "RegEnumValueW",
+        "category": "registry",
+        "count": 0,
+        "first_args": "[{'name': 'Handle', 'value': '0x00000264'}, {'name': 'Index', 'value': '0'}, {'name': 'ValueName', 'value': '30319'}, {'name': 'Data', 'value': '30319-30319'}, {'name': 'FullName', 'value': 'HKEY_LOCAL_MACHINE\\\\SOFTWARE\\\\WOW6432Node\\\\Microsoft\\\\.NETFramework\\\\policy\\\\v4.0\\\\30319'}]",
+        "suspicious": false
+      },
+      {
+        "api": "RegOpenKeyExW",
+        "category": "registry",
+        "count": 0,
+        "first_args": "[{'name': 'Registry', 'value': '0x80000002', 'pretty_value': 'HKEY_LOCAL_MACHINE'}, {'name': 'SubKey', 'value': 'Software\\\\Microsoft\\\\.NETFramework\\\\Policy\\\\'}, {'name': 'Handle', 'value': '0x0000026c'}, {'name': 'FullName', 'value': 'HKEY_LOCAL_MACHINE\\\\Software\\\\Microsoft\\\\.NETFramework\\\\Policy\\\\'}]",
+        "suspicious": false
+      },
+      {
+        "api": "RegQueryInfoKeyW",
+        "category": "registry",
+        "count": 0,
+        "first_args": "[{'name': 'KeyHandle', 'value': '0x0000026c'}, {'name': 'Class', 'value': ''}, {'name': 'SubKeyCount', 'value': '4'}, {'name': 'MaxSubKeyLength', 'value': '9'}, {'name': 'MaxClassLength', 'value': '0'}, {'name': 'ValueCount', 'value': '0'}, {'name': 'MaxValueNameLength', 'value': '0'}, {'name': 'MaxValueLength', 'value': '0'}]",
+        "suspicious": false
+      },
+      {
+        "api": "RegQueryValueExA",
+        "category": "registry",
+        "count": 0,
+        "first_args": "[{'name': 'Handle', 'value': '0x000002a8'}, {'name': 'ValueName', 'value': 'Plane1'}, {'name': 'FullName', 'value': 'HKEY_LOCAL_MACHINE\\\\SOFTWARE\\\\Microsoft\\\\Windows NT\\\\CurrentVersion\\\\LanguagePack\\\\SurrogateFallback\\\\Plane1'}]",
+        "suspicious": false
+      },
+      {
+        "api": "RegQueryValueExW",
+        "category": "registry",
+        "count": 0,
+        "first_args": "[{'name': 'Handle', 'value': '0x00000260'}, {'name': 'ValueName', 'value': 'InstallRoot'}, {'name': 'FullName', 'value': 'HKEY_LOCAL_MACHINE\\\\SOFTWARE\\\\WOW6432Node\\\\Microsoft\\\\.NETFramework\\\\InstallRoot'}]",
+        "suspicious": false
+      },
+      {
+        "api": "RtlSetCurrentTransaction",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'TransactionHandle', 'value': '0x00000000'}]",
+        "suspicious": false
+      },
+      {
+        "api": "RtlUserThreadStart",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'StartAddress', 'value': '0x00000000'}, {'name': 'Parameter', 'value': '0x00000000'}]",
+        "suspicious": false
+      },
+      {
+        "api": "SetUnhandledExceptionFilter",
+        "category": "evasion",
+        "count": 0,
+        "first_args": "[{'name': 'ExceptionFilter', 'value': '0x7ff7e9073e10'}]",
+        "suspicious": true
+      },
+      {
+        "api": "ShellExecuteExW",
+        "category": "execution",
+        "count": 0,
+        "first_args": "[{'name': 'FilePath', 'value': 'C:\\\\Windows\\\\sysnative\\\\Fondue.exe'}, {'name': 'Parameters', 'value': '/enable-feature:NetFx3 /caller-name:mscoreei.dll'}, {'name': 'Show', 'value': '1', 'pretty_value': 'SW_SHOWNORMAL'}]",
+        "suspicious": true
+      },
+      {
+        "api": "SizeofResource",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'ModuleHandle', 'value': '0x7ff9eb0d0000'}, {'name': 'ResourceInfo', 'value': '0x2f3cdf70c78'}]",
+        "suspicious": false
+      },
+      {
+        "api": "StartServiceW",
+        "category": "persistence",
+        "count": 0,
+        "first_args": "[{'name': 'ServiceHandle', 'value': '0x1fef7c2c840'}, {'name': 'ServiceName', 'value': 'WSearch'}, {'name': 'Arguments', 'value': []}]",
+        "suspicious": true
+      },
+      {
+        "api": "SystemParametersInfoA",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'Action', 'value': '0x00001042'}, {'name': 'uiParam', 'value': '0x00000000'}]",
+        "suspicious": false
+      },
+      {
+        "api": "SystemParametersInfoW",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'Action', 'value': '0x00000042'}, {'name': 'uiParam', 'value': '0x00000010'}]",
+        "suspicious": false
+      },
+      {
+        "api": "srand",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'seed', 'value': '0x6a7a4fff'}]",
+        "suspicious": false
+      },
+      {
+        "api": "sysenter",
+        "category": null,
+        "count": 0,
+        "first_args": "[{'name': 'ThreadIdentifier', 'value': '2476'}, {'name': 'Module', 'value': 'KERNEL32.DLL'}, {'name': 'Return Address', 'value': '0x7581274c'}]",
+        "suspicious": false
+      }
+    ],
+    "total": 93
+  },
+  "sandbox_dropped_files": {
+    "dropped": [],
+    "total": 0
+  },
+  "sandbox_mutexes": {
+    "mutexes": [
+      "Local\\SM0:4508:304:WilStaging_02",
+      "Local\\MSCTF.Asm.MutexDefault1",
+      "CicLoadWinStaWinSta0",
+      "Local\\SM0:4508:120:WilError_03"
+    ],
+    "total": 4
+  },
+  "sandbox_network": {
+    "dns": [
+      {
+        "answers": [],
+        "first_seen": 1786375440.629755,
+        "request": "global.wps.com",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786375452.589243,
+        "request": "params.wps.com",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786375452.989338,
+        "request": "ap-dw-collect.ksord.com",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786375454.779006,
+        "request": "entry.wpscdn.com",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786375458.73502,
+        "request": "www.ebay.com",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786375458.962951,
+        "request": "www.nytimes.com",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786375459.516278,
+        "request": "www.imdb.com",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "365.wpsdns.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "43.175.235.132",
+            "type": "A"
+          },
+          {
+            "data": "enterprise-hw-prod.2gcwjsz1js5u.eo.dnse1.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "43.175.234.132",
+            "type": "A"
+          }
+        ],
+        "first_seen": 1786375460.132164,
+        "request": "365.kdocs.cn",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "98.98.145.231",
+            "type": "A"
+          }
+        ],
+        "first_seen": 1786375460.133599,
+        "request": "account.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "98.98.145.226",
+            "type": "A"
+          },
+          {
+            "data": "163.53.19.88",
+            "type": "A"
+          },
+          {
+            "data": "192.169.115.101",
+            "type": "A"
+          },
+          {
+            "data": "156.59.78.66",
+            "type": "A"
+          },
+          {
+            "data": "45.79.118.173",
+            "type": "A"
+          },
+          {
+            "data": "36.150.56.217",
+            "type": "A"
+          },
+          {
+            "data": "172.96.115.146",
+            "type": "A"
+          },
+          {
+            "data": "156.59.141.242",
+            "type": "A"
+          },
+          {
+            "data": "119.96.49.216",
+            "type": "A"
+          },
+          {
+            "data": "199.182.237.66",
+            "type": "A"
+          },
+          {
+            "data": "156.59.88.28",
+            "type": "A"
+          },
+          {
+            "data": "23.90.180.162",
+            "type": "A"
+          },
+          {
+            "data": "120.240.103.13",
+            "type": "A"
+          },
+          {
+            "data": "183.36.41.234",
+            "type": "A"
+          },
+          {
+            "data": "156.59.42.130",
+            "type": "A"
+          },
+          {
+            "data": "156.59.94.5",
+            "type": "A"
+          }
+        ],
+        "first_seen": 1786375460.134146,
+        "request": "api.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "101.126.24.87",
+            "type": "A"
+          },
+          {
+            "data": "101.126.24.53",
+            "type": "A"
+          }
+        ],
+        "first_seen": 1786375460.134669,
+        "request": "avatar.qwps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "",
+            "type": "NXDOMAIN"
+          }
+        ],
+        "first_seen": 1786375460.135214,
+        "request": "dl.vas.wpscdn.cn",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786375460.135829,
+        "request": "docer-api.kdocs.cn",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786375460.138871,
+        "request": "docer.kdocs.cn",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "71.18.157.246",
+            "type": "A"
+          },
+          {
+            "data": "accelerator-cname-4krzo5bapdwvgzyuehna2u.c.vecdnlb.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "101.47.98.213",
+            "type": "A"
+          },
+          {
+            "data": "klbv2.wpsdns.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "veen-auto-global-0011766483193.s.vegalb.com",
+            "type": "CNAME"
+          }
+        ],
+        "first_seen": 1786375460.139737,
+        "request": "docer.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786375460.140748,
+        "request": "drive.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786375460.142251,
+        "request": "geo.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "home.vas.wpsdns.com",
+            "type": "CNAME"
+          }
+        ],
+        "first_seen": 1786375460.143269,
+        "request": "home.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "hwc-bj.ag.wpsdns.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "171.15.136.254",
+            "type": "A"
+          },
+          {
+            "data": "171.15.136.245",
+            "type": "A"
+          },
+          {
+            "data": "171.15.136.244",
+            "type": "A"
+          },
+          {
+            "data": "171.15.136.252",
+            "type": "A"
+          },
+          {
+            "data": "171.15.136.246",
+            "type": "A"
+          },
+          {
+            "data": "171.15.136.248",
+            "type": "A"
+          }
+        ],
+        "first_seen": 1786375460.144484,
+        "request": "hwc-bj.ag.kdocs.cn",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786375460.145081,
+        "request": "iaas.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "weboffice.wpsdns.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "64.6.174.20",
+            "type": "A"
+          },
+          {
+            "data": "218.12.74.180",
+            "type": "A"
+          },
+          {
+            "data": "124.236.107.134",
+            "type": "A"
+          },
+          {
+            "data": "192.169.115.102",
+            "type": "A"
+          },
+          {
+            "data": "23.90.180.166",
+            "type": "A"
+          },
+          {
+            "data": "156.59.141.246",
+            "type": "A"
+          },
+          {
+            "data": "199.182.237.70",
+            "type": "A"
+          },
+          {
+            "data": "71.18.160.105",
+            "type": "A"
+          },
+          {
+            "data": "veen-auto-117653-01769748579.s.vegalb.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "182.40.119.35",
+            "type": "A"
+          },
+          {
+            "data": "101.47.98.155",
+            "type": "A"
+          },
+          {
+            "data": "156.59.42.134",
+            "type": "A"
+          },
+          {
+            "data": "accelerator-cname-n9tte32bdbmezs5rwq9q4q.c.vecdnlb.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "111.62.159.200",
+            "type": "A"
+          },
+          {
+            "data": "172.96.115.150",
+            "type": "A"
+          },
+          {
+            "data": "120.220.199.169",
+            "type": "A"
+          },
+          {
+            "data": "39.91.170.229",
+            "type": "A"
+          },
+          {
+            "data": "98.98.145.230",
+            "type": "A"
+          }
+        ],
+        "first_seen": 1786375460.14556,
+        "request": "kdocs.cn",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "110.43.89.94",
+            "type": "A"
+          },
+          {
+            "data": "111.31.6.142",
+            "type": "A"
+          },
+          {
+            "data": "wpsfile-beijing.ksyunjiasu.cn",
+            "type": "CNAME"
+          },
+          {
+            "data": "60.28.214.185",
+            "type": "A"
+          },
+          {
+            "data": "ksc-bj.ag.wpsdns.com",
+            "type": "CNAME"
+          }
+        ],
+        "first_seen": 1786375460.146019,
+        "request": "ksc-bj.ag.kdocs.cn",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786375460.146454,
+        "request": "le.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786375460.14701,
+        "request": "lucky.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "pay-prod.2gcwjsz1js5u.eo.dnse1.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "43.175.252.84",
+            "type": "A"
+          },
+          {
+            "data": "43.175.253.84",
+            "type": "A"
+          },
+          {
+            "data": "pay.wpsdns.com",
+            "type": "CNAME"
+          }
+        ],
+        "first_seen": 1786375460.14755,
+        "request": "pay.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "drive.wpsdns.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "98.98.18.104",
+            "type": "A"
+          },
+          {
+            "data": "120.220.199.162",
+            "type": "A"
+          },
+          {
+            "data": "156.59.42.136",
+            "type": "A"
+          },
+          {
+            "data": "98.98.78.136",
+            "type": "A"
+          },
+          {
+            "data": "veen-auto-117650-01769748550.s.vegalb.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "39.91.170.231",
+            "type": "A"
+          },
+          {
+            "data": "64.6.174.18",
+            "type": "A"
+          },
+          {
+            "data": "156.59.141.248",
+            "type": "A"
+          },
+          {
+            "data": "accelerator-cname-qqgzkjqannhie6jgqwzhom.c.vecdnlb.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "182.40.119.36",
+            "type": "A"
+          },
+          {
+            "data": "172.96.115.152",
+            "type": "A"
+          },
+          {
+            "data": "101.47.98.83",
+            "type": "A"
+          },
+          {
+            "data": "98.98.145.232",
+            "type": "A"
+          },
+          {
+            "data": "199.182.237.72",
+            "type": "A"
+          },
+          {
+            "data": "23.90.180.168",
+            "type": "A"
+          },
+          {
+            "data": "192.169.115.104",
+            "type": "A"
+          },
+          {
+            "data": "71.18.160.37",
+            "type": "A"
+          }
+        ],
+        "first_seen": 1786375460.148442,
+        "request": "qing.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "accelerator-cname-frxv7q2rs5dvpxegc3i3xz.c.vecdnlb.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "71.18.160.102",
+            "type": "A"
+          },
+          {
+            "data": "101.47.98.223",
+            "type": "A"
+          },
+          {
+            "data": "veen-auto-117651-01769748568.s.vegalb.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "accountv2.wpsdns.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "71.18.160.60",
+            "type": "A"
+          }
+        ],
+        "first_seen": 1786375460.149025,
+        "request": "qr.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "qing.wpsdns.com",
+            "type": "CNAME"
+          }
+        ],
+        "first_seen": 1786375460.149583,
+        "request": "roaming.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786375460.150143,
+        "request": "sms.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "113.57.57.42",
+            "type": "A"
+          },
+          {
+            "data": "111.48.60.183",
+            "type": "A"
+          },
+          {
+            "data": "156.59.42.135",
+            "type": "A"
+          },
+          {
+            "data": "119.96.49.220",
+            "type": "A"
+          },
+          {
+            "data": "199.182.237.71",
+            "type": "A"
+          },
+          {
+            "data": "98.98.78.135",
+            "type": "A"
+          },
+          {
+            "data": "64.6.174.19",
+            "type": "A"
+          },
+          {
+            "data": "192.169.115.103",
+            "type": "A"
+          },
+          {
+            "data": "156.59.141.247",
+            "type": "A"
+          },
+          {
+            "data": "98.98.18.103",
+            "type": "A"
+          },
+          {
+            "data": "23.90.180.167",
+            "type": "A"
+          }
+        ],
+        "first_seen": 1786375460.150733,
+        "request": "vas.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786375460.151347,
+        "request": "vasapi.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786375460.151894,
+        "request": "vip.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786375460.1523,
+        "request": "vipapi.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "k1-ipv6.gslb.ksyuncdn.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "162.128.226.1",
+            "type": "A"
+          },
+          {
+            "data": "wdl1.cache.wps.cn.download.ks-cdn.com",
+            "type": "CNAME"
+          }
+        ],
+        "first_seen": 1786375460.152999,
+        "request": "wdl1.cache.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "183.214.164.143",
+            "type": "A"
+          },
+          {
+            "data": "111.47.131.112",
+            "type": "A"
+          },
+          {
+            "data": "36.158.204.131",
+            "type": "A"
+          },
+          {
+            "data": "111.48.64.100",
+            "type": "A"
+          },
+          {
+            "data": "111.47.229.244",
+            "type": "A"
+          },
+          {
+            "data": "wdl1.file.cache.docer.com.qiniudns.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "sz-qiniu-all.volcgtm.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "111.170.168.113",
+            "type": "A"
+          },
+          {
+            "data": "1.193.215.153",
+            "type": "A"
+          },
+          {
+            "data": "36.158.229.101",
+            "type": "A"
+          },
+          {
+            "data": "vod-all.ipv4v6.qiniu.com.volcgslb.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "119.36.124.159",
+            "type": "A"
+          },
+          {
+            "data": "wdl1.file.cache.wpscdn.cn",
+            "type": "CNAME"
+          },
+          {
+            "data": "58.49.191.104",
+            "type": "A"
+          }
+        ],
+        "first_seen": 1786375460.15341,
+        "request": "wdl1.file.cache.docer.com",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "wps-docer-property.ks3-cn-beijing.ksyuncs.com",
+            "type": "CNAME"
+          }
+        ],
+        "first_seen": 1786375460.153979,
+        "request": "wps-docer-property.file.docer.com",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "access-domain.ks3-cn-beijing-wan-wps.ksyun.com",
+            "type": "CNAME"
+          }
+        ],
+        "first_seen": 1786375460.154392,
+        "request": "wps-docer-property.ks3-cn-beijing.ksyun.com",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "access-domain.ks3-cn-beijing-wan-wps.ksyuncs.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "121.228.170.122",
+            "type": "A"
+          },
+          {
+            "data": "110.43.121.118",
+            "type": "A"
+          },
+          {
+            "data": "121.228.170.164",
+            "type": "A"
+          },
+          {
+            "data": "110.43.121.19",
+            "type": "A"
+          }
+        ],
+        "first_seen": 1786375460.154815,
+        "request": "wps-docer-property.ks3-cn-beijing.ksyuncs.com",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786375460.15535,
+        "request": "www.kdocs.cn",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "klbv3.wpsdns.com",
+            "type": "CNAME"
+          }
+        ],
+        "first_seen": 1786375460.155767,
+        "request": "zj-roaming.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786375460.156319,
+        "request": "zt.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786375460.156867,
+        "request": "zw-roaming.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786375460.161369,
+        "request": "ap-dw-parameters.ksord.com",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786375461.124378,
+        "request": "api.wps.com",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786375482.676818,
+        "request": "store.steampowered.com",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786375482.8005,
+        "request": "www.digitalocean.com",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786375483.412438,
+        "request": "www.quora.com",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786375487.843994,
+        "request": "www.msftconnecttest.com",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786375501.341072,
+        "request": "www.atlassian.com",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786375505.894803,
+        "request": "redis.io",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786375511.474676,
+        "request": "www.mysql.com",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786375518.008994,
+        "request": "www.deviantart.com",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786375530.074212,
+        "request": "wordpress.org",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786375577.463401,
+        "request": "disabled.invalid",
+        "type": "A"
+      }
+    ],
+    "domains": [
+      {
+        "domain": "global.wps.com",
+        "ip": "166.108.200.175"
+      },
+      {
+        "domain": "params.wps.com",
+        "ip": "110.238.109.205"
+      },
+      {
+        "domain": "ap-dw-collect.ksord.com",
+        "ip": "8.209.65.234"
+      },
+      {
+        "domain": "entry.wpscdn.com",
+        "ip": "101.45.16.242"
+      },
+      {
+        "domain": "www.ebay.com",
+        "ip": "195.175.177.177"
+      },
+      {
+        "domain": "www.nytimes.com",
+        "ip": "146.75.121.164"
+      },
+      {
+        "domain": "www.imdb.com",
+        "ip": "3.169.89.196"
+      },
+      {
+        "domain": "365.kdocs.cn",
+        "ip": "43.175.234.132"
+      },
+      {
+        "domain": "account.wps.cn",
+        "ip": "71.18.160.102"
+      },
+      {
+        "domain": "api.wps.cn",
+        "ip": "71.18.157.246"
+      },
+      {
+        "domain": "avatar.qwps.cn",
+        "ip": "101.126.24.53"
+      },
+      {
+        "domain": "dl.vas.wpscdn.cn",
+        "ip": ""
+      },
+      {
+        "domain": "docer-api.kdocs.cn",
+        "ip": "101.47.98.213"
+      },
+      {
+        "domain": "docer.kdocs.cn",
+        "ip": "71.18.157.246"
+      },
+      {
+        "domain": "docer.wps.cn",
+        "ip": "101.47.98.213"
+      },
+      {
+        "domain": "drive.wps.cn",
+        "ip": "101.47.98.83"
+      },
+      {
+        "domain": "geo.wps.cn",
+        "ip": "71.18.160.60"
+      },
+      {
+        "domain": "home.wps.cn",
+        "ip": "71.18.157.246"
+      },
+      {
+        "domain": "hwc-bj.ag.kdocs.cn",
+        "ip": "171.15.136.246"
+      },
+      {
+        "domain": "iaas.wps.cn",
+        "ip": "101.47.98.223"
+      },
+      {
+        "domain": "kdocs.cn",
+        "ip": "71.18.160.105"
+      },
+      {
+        "domain": "ksc-bj.ag.kdocs.cn",
+        "ip": "60.28.214.185"
+      },
+      {
+        "domain": "le.wps.cn",
+        "ip": "101.47.98.213"
+      },
+      {
+        "domain": "lucky.wps.cn",
+        "ip": "71.18.157.246"
+      },
+      {
+        "domain": "pay.wps.cn",
+        "ip": "43.175.252.84"
+      },
+      {
+        "domain": "qing.wps.cn",
+        "ip": "71.18.160.37"
+      },
+      {
+        "domain": "qr.wps.cn",
+        "ip": "71.18.160.102"
+      },
+      {
+        "domain": "roaming.wps.cn",
+        "ip": "101.47.98.83"
+      },
+      {
+        "domain": "sms.wps.cn",
+        "ip": "71.18.160.60"
+      },
+      {
+        "domain": "vas.wps.cn",
+        "ip": "101.47.98.223"
+      },
+      {
+        "domain": "vasapi.wps.cn",
+        "ip": "101.47.98.213"
+      },
+      {
+        "domain": "vip.wps.cn",
+        "ip": "71.18.157.246"
+      },
+      {
+        "domain": "vipapi.wps.cn",
+        "ip": "43.175.253.84"
+      },
+      {
+        "domain": "wdl1.cache.wps.cn",
+        "ip": "162.128.226.1"
+      },
+      {
+        "domain": "wdl1.file.cache.docer.com",
+        "ip": "111.6.201.217"
+      },
+      {
+        "domain": "wps-docer-property.file.docer.com",
+        "ip": "121.228.170.164"
+      },
+      {
+        "domain": "wps-docer-property.ks3-cn-beijing.ksyun.com",
+        "ip": "121.228.170.122"
+      },
+      {
+        "domain": "wps-docer-property.ks3-cn-beijing.ksyuncs.com",
+        "ip": "110.43.121.19"
+      },
+      {
+        "domain": "www.kdocs.cn",
+        "ip": "101.47.98.155"
+      },
+      {
+        "domain": "zj-roaming.wps.cn",
+        "ip": "101.47.98.213"
+      },
+      {
+        "domain": "zt.wps.cn",
+        "ip": "71.18.157.246"
+      },
+      {
+        "domain": "zw-roaming.wps.cn",
+        "ip": "71.18.160.37"
+      },
+      {
+        "domain": "ap-dw-parameters.ksord.com",
+        "ip": "163.181.138.162"
+      },
+      {
+        "domain": "api.wps.com",
+        "ip": "110.238.109.205"
+      },
+      {
+        "domain": "store.steampowered.com",
+        "ip": "23.52.181.109"
+      },
+      {
+        "domain": "www.digitalocean.com",
+        "ip": "104.19.174.68"
+      },
+      {
+        "domain": "www.quora.com",
+        "ip": "162.159.152.17"
+      },
+      {
+        "domain": "www.msftconnecttest.com",
+        "ip": "23.207.210.72"
+      },
+      {
+        "domain": "www.atlassian.com",
+        "ip": "13.227.180.4"
+      },
+      {
+        "domain": "redis.io",
+        "ip": "104.18.25.196"
+      },
+      {
+        "domain": "www.mysql.com",
+        "ip": "23.56.206.95"
+      },
+      {
+        "domain": "www.deviantart.com",
+        "ip": "3.169.85.86"
+      },
+      {
+        "domain": "wordpress.org",
+        "ip": "66.6.42.252"
+      },
+      {
+        "domain": "disabled.invalid",
+        "ip": ""
+      }
+    ],
+    "hosts": [
+      {
+        "asn": "AS37963",
+        "asn_name": "Hangzhou Alibaba Advertising Co.,Ltd.",
+        "country_name": "China",
+        "hostname": "",
+        "inaddrarpa": "",
+        "ip": "223.6.6.6",
+        "ports": [
+          53
+        ]
+      },
+      {
+        "asn": "AS37963",
+        "asn_name": "Hangzhou Alibaba Advertising Co.,Ltd.",
+        "country_name": "China",
+        "hostname": "",
+        "inaddrarpa": "",
+        "ip": "223.5.5.5",
+        "ports": [
+          53
+        ]
+      },
+      {
+        "asn": "AS132203",
+        "asn_name": "Shenzhen Tencent Computer Systems Company Limited",
+        "country_name": "United States",
+        "hostname": "",
+        "inaddrarpa": "",
+        "ip": "119.29.29.29",
+        "ports": [
+          53
+        ]
+      },
+      {
+        "asn": "AS8075",
+        "asn_name": "Microsoft Corporation",
+        "country_name": "France",
+        "hostname": "",
+        "inaddrarpa": "",
+        "ip": "98.66.133.185",
+        "ports": [
+          443
+        ]
+      },
+      {
+        "asn": "AS45102",
+        "asn_name": "Alibaba (US) Technology Co., Ltd.",
+        "country_name": "Germany",
+        "hostname": "",
+        "inaddrarpa": "",
+        "ip": "8.211.55.206",
+        "ports": [
+          443
+        ]
+      },
+      {
+        "asn": "AS15169",
+        "asn_name": "Google LLC",
+        "country_name": "Italy",
+        "hostname": "",
+        "inaddrarpa": "",
+        "ip": "172.217.16.142",
+        "ports": [
+          443
+        ]
+      },
+      {
+        "asn": "AS20940",
+        "asn_name": "Akamai International B.V.",
+        "country_name": "Turkey",
+        "hostname": "",
+        "inaddrarpa": "",
+        "ip": "23.58.222.96",
+        "ports": [
+          80
+        ]
+      }
+    ],
+    "http": [],
+    "icmp": [],
+    "tcp": [
+      {
+        "dport": 443,
+        "dst": "172.217.16.142",
+        "offset": 802,
+        "sport": 49681,
+        "src": "192.168.122.89",
+        "time": 4.029554128646851
+      },
+      {
+        "dport": 443,
+        "dst": "8.211.55.206",
+        "offset": 1215,
+        "sport": 49682,
+        "src": "192.168.122.89",
+        "time": 4.053872108459473
+      },
+      {
+        "dport": 443,
+        "dst": "98.66.133.185",
+        "offset": 22956,
+        "sport": 49673,
+        "src": "192.168.122.89",
+        "time": 10.469536066055298
+      },
+      {
+        "dport": 443,
+        "dst": "172.217.16.142",
+        "offset": 24727,
+        "sport": 49684,
+        "src": "192.168.122.89",
+        "time": 15.49313497543335
+      },
+      {
+        "dport": 443,
+        "dst": "8.211.55.206",
+        "offset": 25140,
+        "sport": 49683,
+        "src": "192.168.122.89",
+        "time": 15.518271923065186
+      },
+      {
+        "dport": 443,
+        "dst": "172.217.16.142",
+        "offset": 39120,
+        "sport": 49686,
+        "src": "192.168.122.89",
+        "time": 15.864208936691284
+      },
+      {
+        "dport": 443,
+        "dst": "8.211.55.206",
+        "offset": 39533,
+        "sport": 49685,
+        "src": "192.168.122.89",
+        "time": 15.889020919799805
+      },
+      {
+        "dport": 443,
+        "dst": "98.66.133.185",
+        "offset": 56770,
+        "sport": 49675,
+        "src": "192.168.122.89",
+        "time": 20.217082023620605
+      },
+      {
+        "dport": 443,
+        "dst": "172.217.16.142",
+        "offset": 73688,
+        "sport": 49688,
+        "src": "192.168.122.89",
+        "time": 25.09352993965149
+      },
+      {
+        "dport": 443,
+        "dst": "8.211.55.206",
+        "offset": 74101,
+        "sport": 49689,
+        "src": "192.168.122.89",
+        "time": 25.119621992111206
+      },
+      {
+        "dport": 443,
+        "dst": "172.217.16.142",
+        "offset": 102907,
+        "sport": 49690,
+        "src": "192.168.122.89",
+        "time": 25.548957109451294
+      },
+      {
+        "dport": 443,
+        "dst": "172.217.16.142",
+        "offset": 104497,
+        "sport": 49691,
+        "src": "192.168.122.89",
+        "time": 25.55511498451233
+      },
+      {
+        "dport": 443,
+        "dst": "98.66.133.185",
+        "offset": 114241,
+        "sport": 49692,
+        "src": "192.168.122.89",
+        "time": 26.29192304611206
+      },
+      {
+        "dport": 443,
+        "dst": "172.217.16.142",
+        "offset": 125314,
+        "sport": 49694,
+        "src": "192.168.122.89",
+        "time": 27.214877128601074
+      },
+      {
+        "dport": 443,
+        "dst": "172.217.16.142",
+        "offset": 125727,
+        "sport": 49696,
+        "src": "192.168.122.89",
+        "time": 27.218941926956177
+      },
+      {
+        "dport": 443,
+        "dst": "8.211.55.206",
+        "offset": 126140,
+        "sport": 49693,
+        "src": "192.168.122.89",
+        "time": 27.236371994018555
+      },
+      {
+        "dport": 443,
+        "dst": "8.211.55.206",
+        "offset": 126552,
+        "sport": 49695,
+        "src": "192.168.122.89",
+        "time": 27.24240207672119
+      },
+      {
+        "dport": 443,
+        "dst": "8.211.55.206",
+        "offset": 182747,
+        "sport": 49680,
+        "src": "192.168.122.89",
+        "time": 30.46902108192444
+      },
+      {
+        "dport": 443,
+        "dst": "172.217.16.142",
+        "offset": 184705,
+        "sport": 49679,
+        "src": "192.168.122.89",
+        "time": 30.469605922698975
+      },
+      {
+        "dport": 443,
+        "dst": "172.217.16.142",
+        "offset": 196213,
+        "sport": 49698,
+        "src": "192.168.122.89",
+        "time": 32.111061096191406
+      },
+      {
+        "dport": 443,
+        "dst": "8.211.55.206",
+        "offset": 197015,
+        "sport": 49699,
+        "src": "192.168.122.89",
+        "time": 32.136852979660034
+      },
+      {
+        "dport": 443,
+        "dst": "98.66.133.185",
+        "offset": 258187,
+        "sport": 49700,
+        "src": "192.168.122.89",
+        "time": 53.73205208778381
+      },
+      {
+        "dport": 443,
+        "dst": "172.217.16.142",
+        "offset": 275918,
+        "sport": 49701,
+        "src": "192.168.122.89",
+        "time": 70.95042514801025
+      },
+      {
+        "dport": 443,
+        "dst": "172.217.16.142",
+        "offset": 308212,
+        "sport": 56013,
+        "src": "192.168.122.89",
+        "time": 124.41211104393005
+      },
+      {
+        "dport": 443,
+        "dst": "8.211.55.206",
+        "offset": 308854,
+        "sport": 56012,
+        "src": "192.168.122.89",
+        "time": 124.4374189376831
+      }
+    ],
+    "udp": [
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 304,
+        "sport": 58075,
+        "src": "192.168.122.89",
+        "time": 3.439892053604126
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 394,
+        "sport": 64125,
+        "src": "192.168.122.89",
+        "time": 3.97468900680542
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 24321,
+        "sport": 50424,
+        "src": "192.168.122.89",
+        "time": 15.399379968643188
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 38705,
+        "sport": 63812,
+        "src": "192.168.122.89",
+        "time": 15.799474954605103
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 53820,
+        "sport": 51465,
+        "src": "192.168.122.89",
+        "time": 16.064154148101807
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 55618,
+        "sport": 51979,
+        "src": "192.168.122.89",
+        "time": 17.58914303779602
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 57617,
+        "sport": 61899,
+        "src": "192.168.122.89",
+        "time": 21.545156955718994
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 57797,
+        "sport": 53535,
+        "src": "192.168.122.89",
+        "time": 21.773087978363037
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 57888,
+        "sport": 52474,
+        "src": "192.168.122.89",
+        "time": 22.326415061950684
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 58623,
+        "sport": 61865,
+        "src": "192.168.122.89",
+        "time": 22.942301034927368
+      },
+      {
+        "dport": 53,
+        "dst": "223.5.5.5",
+        "offset": 58711,
+        "sport": 54663,
+        "src": "192.168.122.89",
+        "time": 22.94373607635498
+      },
+      {
+        "dport": 53,
+        "dst": "223.5.5.5",
+        "offset": 58801,
+        "sport": 56591,
+        "src": "192.168.122.89",
+        "time": 22.94428300857544
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 58887,
+        "sport": 60991,
+        "src": "192.168.122.89",
+        "time": 22.94480609893799
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 58977,
+        "sport": 54373,
+        "src": "192.168.122.89",
+        "time": 22.945351123809814
+      },
+      {
+        "dport": 53,
+        "dst": "223.6.6.6",
+        "offset": 59069,
+        "sport": 52346,
+        "src": "192.168.122.89",
+        "time": 22.945966005325317
+      },
+      {
+        "dport": 53,
+        "dst": "223.5.5.5",
+        "offset": 59163,
+        "sport": 55827,
+        "src": "192.168.122.89",
+        "time": 22.949007987976074
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 59253,
+        "sport": 63764,
+        "src": "192.168.122.89",
+        "time": 22.94987392425537
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 59341,
+        "sport": 54084,
+        "src": "192.168.122.89",
+        "time": 22.95088505744934
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 59429,
+        "sport": 61421,
+        "src": "192.168.122.89",
+        "time": 22.952388048171997
+      },
+      {
+        "dport": 53,
+        "dst": "223.5.5.5",
+        "offset": 59515,
+        "sport": 65177,
+        "src": "192.168.122.89",
+        "time": 22.95340609550476
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 59602,
+        "sport": 53705,
+        "src": "192.168.122.89",
+        "time": 22.954621076583862
+      },
+      {
+        "dport": 53,
+        "dst": "223.6.6.6",
+        "offset": 59696,
+        "sport": 51311,
+        "src": "192.168.122.89",
+        "time": 22.955218076705933
+      },
+      {
+        "dport": 53,
+        "dst": "223.6.6.6",
+        "offset": 59783,
+        "sport": 54809,
+        "src": "192.168.122.89",
+        "time": 22.955697059631348
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 59867,
+        "sport": 62859,
+        "src": "192.168.122.89",
+        "time": 22.956156015396118
+      },
+      {
+        "dport": 53,
+        "dst": "223.5.5.5",
+        "offset": 59961,
+        "sport": 63466,
+        "src": "192.168.122.89",
+        "time": 22.95659112930298
+      },
+      {
+        "dport": 53,
+        "dst": "223.6.6.6",
+        "offset": 60046,
+        "sport": 61128,
+        "src": "192.168.122.89",
+        "time": 22.957147121429443
+      },
+      {
+        "dport": 53,
+        "dst": "223.6.6.6",
+        "offset": 60134,
+        "sport": 50816,
+        "src": "192.168.122.89",
+        "time": 22.95768713951111
+      },
+      {
+        "dport": 53,
+        "dst": "223.6.6.6",
+        "offset": 60220,
+        "sport": 58611,
+        "src": "192.168.122.89",
+        "time": 22.958579063415527
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 60307,
+        "sport": 64949,
+        "src": "192.168.122.89",
+        "time": 22.95916199684143
+      },
+      {
+        "dport": 53,
+        "dst": "223.5.5.5",
+        "offset": 60392,
+        "sport": 51301,
+        "src": "192.168.122.89",
+        "time": 22.959720134735107
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 60482,
+        "sport": 59702,
+        "src": "192.168.122.89",
+        "time": 22.960279941558838
+      },
+      {
+        "dport": 53,
+        "dst": "223.6.6.6",
+        "offset": 60568,
+        "sport": 59455,
+        "src": "192.168.122.89",
+        "time": 22.960870027542114
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 60654,
+        "sport": 62694,
+        "src": "192.168.122.89",
+        "time": 22.9614839553833
+      },
+      {
+        "dport": 53,
+        "dst": "223.5.5.5",
+        "offset": 60743,
+        "sport": 64851,
+        "src": "192.168.122.89",
+        "time": 22.96203112602234
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 60829,
+        "sport": 53103,
+        "src": "192.168.122.89",
+        "time": 22.96243691444397
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 60918,
+        "sport": 57875,
+        "src": "192.168.122.89",
+        "time": 22.963135957717896
+      },
+      {
+        "dport": 53,
+        "dst": "223.6.6.6",
+        "offset": 61011,
+        "sport": 58103,
+        "src": "192.168.122.89",
+        "time": 22.963546991348267
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 61112,
+        "sport": 51956,
+        "src": "192.168.122.89",
+        "time": 22.964116096496582
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 61221,
+        "sport": 61532,
+        "src": "192.168.122.89",
+        "time": 22.964529037475586
+      },
+      {
+        "dport": 53,
+        "dst": "223.5.5.5",
+        "offset": 61340,
+        "sport": 49787,
+        "src": "192.168.122.89",
+        "time": 22.964951992034912
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 61461,
+        "sport": 57155,
+        "src": "192.168.122.89",
+        "time": 22.965487003326416
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 61549,
+        "sport": 56684,
+        "src": "192.168.122.89",
+        "time": 22.965903997421265
+      },
+      {
+        "dport": 53,
+        "dst": "223.5.5.5",
+        "offset": 61642,
+        "sport": 62750,
+        "src": "192.168.122.89",
+        "time": 22.966455936431885
+      },
+      {
+        "dport": 53,
+        "dst": "223.5.5.5",
+        "offset": 61727,
+        "sport": 52828,
+        "src": "192.168.122.89",
+        "time": 22.96700406074524
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 61820,
+        "sport": 55741,
+        "src": "192.168.122.89",
+        "time": 22.971506118774414
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 70277,
+        "sport": 62959,
+        "src": "192.168.122.89",
+        "time": 23.20180892944336
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 72555,
+        "sport": 52050,
+        "src": "192.168.122.89",
+        "time": 23.93451499938965
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 175902,
+        "sport": 55986,
+        "src": "192.168.122.89",
+        "time": 27.8711040019989
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 177971,
+        "sport": 61305,
+        "src": "192.168.122.89",
+        "time": 28.131722927093506
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 197483,
+        "sport": 59781,
+        "src": "192.168.122.89",
+        "time": 32.13751792907715
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 251632,
+        "sport": 50088,
+        "src": "192.168.122.89",
+        "time": 39.067214012145996
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 255066,
+        "sport": 63410,
+        "src": "192.168.122.89",
+        "time": 43.12669396400452
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 255246,
+        "sport": 53097,
+        "src": "192.168.122.89",
+        "time": 44.19406795501709
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 255520,
+        "sport": 56178,
+        "src": "192.168.122.89",
+        "time": 45.48695492744446
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 255618,
+        "sport": 51067,
+        "src": "192.168.122.89",
+        "time": 45.610636949539185
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 255806,
+        "sport": 64122,
+        "src": "192.168.122.89",
+        "time": 46.222574949264526
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 256926,
+        "sport": 53925,
+        "src": "192.168.122.89",
+        "time": 50.654130935668945
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 257354,
+        "sport": 59263,
+        "src": "192.168.122.89",
+        "time": 52.15474009513855
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 268842,
+        "sport": 58560,
+        "src": "192.168.122.89",
+        "time": 56.252264976501465
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 274510,
+        "sport": 56458,
+        "src": "192.168.122.89",
+        "time": 62.699645042419434
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 274694,
+        "sport": 59605,
+        "src": "192.168.122.89",
+        "time": 64.15120911598206
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 275340,
+        "sport": 62241,
+        "src": "192.168.122.89",
+        "time": 68.7049400806427
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 282259,
+        "sport": 50814,
+        "src": "192.168.122.89",
+        "time": 73.91659712791443
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 282350,
+        "sport": 59907,
+        "src": "192.168.122.89",
+        "time": 73.92357993125916
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 282440,
+        "sport": 59695,
+        "src": "192.168.122.89",
+        "time": 74.2848129272461
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 282611,
+        "sport": 56028,
+        "src": "192.168.122.89",
+        "time": 74.75179505348206
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 282710,
+        "sport": 61350,
+        "src": "192.168.122.89",
+        "time": 74.75289011001587
+      },
+      {
+        "dport": 138,
+        "dst": "192.168.122.255",
+        "offset": 284433,
+        "sport": 138,
+        "src": "192.168.122.89",
+        "time": 78.81979298591614
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 284692,
+        "sport": 58564,
+        "src": "192.168.122.89",
+        "time": 80.81913113594055
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 289408,
+        "sport": 54263,
+        "src": "192.168.122.89",
+        "time": 92.02359414100647
+      },
+      {
+        "dport": 53,
+        "dst": "223.5.5.5",
+        "offset": 289498,
+        "sport": 50568,
+        "src": "192.168.122.89",
+        "time": 92.61652994155884
+      },
+      {
+        "dport": 53,
+        "dst": "223.5.5.5",
+        "offset": 289586,
+        "sport": 52278,
+        "src": "192.168.122.89",
+        "time": 92.62536692619324
+      },
+      {
+        "dport": 53,
+        "dst": "223.6.6.6",
+        "offset": 289676,
+        "sport": 56339,
+        "src": "192.168.122.89",
+        "time": 92.62592697143555
+      },
+      {
+        "dport": 53,
+        "dst": "223.5.5.5",
+        "offset": 289762,
+        "sport": 55382,
+        "src": "192.168.122.89",
+        "time": 92.62676906585693
+      },
+      {
+        "dport": 53,
+        "dst": "223.5.5.5",
+        "offset": 289854,
+        "sport": 62603,
+        "src": "192.168.122.89",
+        "time": 92.62730097770691
+      },
+      {
+        "dport": 53,
+        "dst": "223.6.6.6",
+        "offset": 289948,
+        "sport": 55932,
+        "src": "192.168.122.89",
+        "time": 92.6279649734497
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 290038,
+        "sport": 50054,
+        "src": "192.168.122.89",
+        "time": 92.62858510017395
+      },
+      {
+        "dport": 53,
+        "dst": "223.6.6.6",
+        "offset": 290126,
+        "sport": 55805,
+        "src": "192.168.122.89",
+        "time": 92.62956309318542
+      },
+      {
+        "dport": 53,
+        "dst": "223.6.6.6",
+        "offset": 290214,
+        "sport": 50716,
+        "src": "192.168.122.89",
+        "time": 92.63015413284302
+      },
+      {
+        "dport": 53,
+        "dst": "223.6.6.6",
+        "offset": 290300,
+        "sport": 50464,
+        "src": "192.168.122.89",
+        "time": 92.6309130191803
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 290387,
+        "sport": 62626,
+        "src": "192.168.122.89",
+        "time": 92.63176202774048
+      },
+      {
+        "dport": 53,
+        "dst": "223.5.5.5",
+        "offset": 290474,
+        "sport": 57555,
+        "src": "192.168.122.89",
+        "time": 92.63289308547974
+      },
+      {
+        "dport": 53,
+        "dst": "223.5.5.5",
+        "offset": 290558,
+        "sport": 56815,
+        "src": "192.168.122.89",
+        "time": 92.63349103927612
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 290652,
+        "sport": 50648,
+        "src": "192.168.122.89",
+        "time": 92.63414692878723
+      },
+      {
+        "dport": 53,
+        "dst": "223.5.5.5",
+        "offset": 290737,
+        "sport": 49841,
+        "src": "192.168.122.89",
+        "time": 92.63480806350708
+      },
+      {
+        "dport": 53,
+        "dst": "223.5.5.5",
+        "offset": 290825,
+        "sport": 60284,
+        "src": "192.168.122.89",
+        "time": 92.63546800613403
+      },
+      {
+        "dport": 53,
+        "dst": "223.5.5.5",
+        "offset": 290911,
+        "sport": 55402,
+        "src": "192.168.122.89",
+        "time": 92.63652014732361
+      },
+      {
+        "dport": 53,
+        "dst": "223.6.6.6",
+        "offset": 290998,
+        "sport": 56046,
+        "src": "192.168.122.89",
+        "time": 92.63720893859863
+      },
+      {
+        "dport": 53,
+        "dst": "223.5.5.5",
+        "offset": 291083,
+        "sport": 51534,
+        "src": "192.168.122.89",
+        "time": 92.63773894309998
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 291173,
+        "sport": 59548,
+        "src": "192.168.122.89",
+        "time": 92.63824605941772
+      },
+      {
+        "dport": 53,
+        "dst": "223.5.5.5",
+        "offset": 291259,
+        "sport": 60569,
+        "src": "192.168.122.89",
+        "time": 92.63907504081726
+      },
+      {
+        "dport": 53,
+        "dst": "223.6.6.6",
+        "offset": 291345,
+        "sport": 54966,
+        "src": "192.168.122.89",
+        "time": 92.63956093788147
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 291434,
+        "sport": 62586,
+        "src": "192.168.122.89",
+        "time": 92.64031410217285
+      },
+      {
+        "dport": 53,
+        "dst": "223.5.5.5",
+        "offset": 291520,
+        "sport": 51317,
+        "src": "192.168.122.89",
+        "time": 92.64083504676819
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 291609,
+        "sport": 49990,
+        "src": "192.168.122.89",
+        "time": 92.6413459777832
+      },
+      {
+        "dport": 53,
+        "dst": "223.5.5.5",
+        "offset": 291702,
+        "sport": 51398,
+        "src": "192.168.122.89",
+        "time": 92.64203000068665
+      },
+      {
+        "dport": 53,
+        "dst": "223.5.5.5",
+        "offset": 291803,
+        "sport": 64746,
+        "src": "192.168.122.89",
+        "time": 92.64259004592896
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 291912,
+        "sport": 63118,
+        "src": "192.168.122.89",
+        "time": 92.64329695701599
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 292031,
+        "sport": 56519,
+        "src": "192.168.122.89",
+        "time": 92.64383697509766
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 292152,
+        "sport": 60456,
+        "src": "192.168.122.89",
+        "time": 92.64484810829163
+      },
+      {
+        "dport": 53,
+        "dst": "223.5.5.5",
+        "offset": 292240,
+        "sport": 51596,
+        "src": "192.168.122.89",
+        "time": 92.64537501335144
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 292333,
+        "sport": 61251,
+        "src": "192.168.122.89",
+        "time": 92.64600110054016
+      },
+      {
+        "dport": 53,
+        "dst": "223.5.5.5",
+        "offset": 292418,
+        "sport": 61585,
+        "src": "192.168.122.89",
+        "time": 92.64657402038574
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 299987,
+        "sport": 49595,
+        "src": "192.168.122.89",
+        "time": 92.84892296791077
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 302527,
+        "sport": 51707,
+        "src": "192.168.122.89",
+        "time": 92.88434910774231
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 305891,
+        "sport": 53249,
+        "src": "192.168.122.89",
+        "time": 104.0795829296112
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 306188,
+        "sport": 57505,
+        "src": "192.168.122.89",
+        "time": 106.31117510795593
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 307046,
+        "sport": 57582,
+        "src": "192.168.122.89",
+        "time": 116.12374997138977
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 307414,
+        "sport": 51283,
+        "src": "192.168.122.89",
+        "time": 122.80032110214233
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 316503,
+        "sport": 63667,
+        "src": "192.168.122.89",
+        "time": 133.51712608337402
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 316717,
+        "sport": 62775,
+        "src": "192.168.122.89",
+        "time": 134.92833304405212
+      },
+      {
+        "dport": 1900,
+        "dst": "239.255.255.250",
+        "offset": 317086,
+        "sport": 62776,
+        "src": "192.168.122.89",
+        "time": 135.94607710838318
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 318285,
+        "sport": 62208,
+        "src": "192.168.122.89",
+        "time": 140.27353811264038
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 318377,
+        "sport": 49495,
+        "src": "192.168.122.89",
+        "time": 140.31426906585693
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 318469,
+        "sport": 64424,
+        "src": "192.168.122.89",
+        "time": 141.33391213417053
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 318561,
+        "sport": 54076,
+        "src": "192.168.122.89",
+        "time": 141.33419394493103
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 318932,
+        "sport": 62971,
+        "src": "192.168.122.89",
+        "time": 143.36387610435486
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 319208,
+        "sport": 61019,
+        "src": "192.168.122.89",
+        "time": 146.99667811393738
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 319788,
+        "sport": 51704,
+        "src": "192.168.122.89",
+        "time": 151.9020960330963
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 319880,
+        "sport": 59723,
+        "src": "192.168.122.89",
+        "time": 151.9023380279541
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 319972,
+        "sport": 60300,
+        "src": "192.168.122.89",
+        "time": 152.91206812858582
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 320064,
+        "sport": 52891,
+        "src": "192.168.122.89",
+        "time": 152.91240692138672
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 320156,
+        "sport": 54183,
+        "src": "192.168.122.89",
+        "time": 153.12545013427734
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 320683,
+        "sport": 63797,
+        "src": "192.168.122.89",
+        "time": 158.67053413391113
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 320787,
+        "sport": 57125,
+        "src": "192.168.122.89",
+        "time": 159.02720713615417
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 321574,
+        "sport": 50906,
+        "src": "192.168.122.89",
+        "time": 163.62846302986145
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 321666,
+        "sport": 60061,
+        "src": "192.168.122.89",
+        "time": 163.6289370059967
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 321758,
+        "sport": 53598,
+        "src": "192.168.122.89",
+        "time": 165.047523021698
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 321850,
+        "sport": 58032,
+        "src": "192.168.122.89",
+        "time": 165.0478241443634
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 322138,
+        "sport": 57766,
+        "src": "192.168.122.89",
+        "time": 173.47432494163513
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 322486,
+        "sport": 53408,
+        "src": "192.168.122.89",
+        "time": 175.07894611358643
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 323678,
+        "sport": 52663,
+        "src": "192.168.122.89",
+        "time": 209.6543140411377
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 324038,
+        "sport": 49171,
+        "src": "192.168.122.89",
+        "time": 215.11888599395752
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 324516,
+        "sport": 53317,
+        "src": "192.168.122.89",
+        "time": 219.38686394691467
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 324608,
+        "sport": 53894,
+        "src": "192.168.122.89",
+        "time": 219.38729095458984
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 324700,
+        "sport": 57922,
+        "src": "192.168.122.89",
+        "time": 220.7879500389099
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 324792,
+        "sport": 65411,
+        "src": "192.168.122.89",
+        "time": 220.78880214691162
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 324884,
+        "sport": 59125,
+        "src": "192.168.122.89",
+        "time": 222.80977296829224
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 325349,
+        "sport": 58498,
+        "src": "192.168.122.89",
+        "time": 229.05266404151917
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 325936,
+        "sport": 49372,
+        "src": "192.168.122.89",
+        "time": 241.10537099838257
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 326120,
+        "sport": 58205,
+        "src": "192.168.122.89",
+        "time": 242.137836933136
+      },
+      {
+        "dport": 1900,
+        "dst": "239.255.255.250",
+        "offset": 326664,
+        "sport": 58206,
+        "src": "192.168.122.89",
+        "time": 246.30654191970825
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 327840,
+        "sport": 57252,
+        "src": "192.168.122.89",
+        "time": 253.16722202301025
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 328280,
+        "sport": 52321,
+        "src": "192.168.122.89",
+        "time": 256.22764706611633
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 329078,
+        "sport": 51669,
+        "src": "192.168.122.89",
+        "time": 272.33169412612915
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 329573,
+        "sport": 53972,
+        "src": "192.168.122.89",
+        "time": 284.3660831451416
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 329665,
+        "sport": 64358,
+        "src": "192.168.122.89",
+        "time": 285.2382130622864
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 329765,
+        "sport": 56902,
+        "src": "192.168.122.89",
+        "time": 285.24335408210754
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 331274,
+        "sport": 63208,
+        "src": "192.168.122.89",
+        "time": 302.75757002830505
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 331374,
+        "sport": 57682,
+        "src": "192.168.122.89",
+        "time": 303.0385420322418
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 331854,
+        "sport": 54414,
+        "src": "192.168.122.89",
+        "time": 304.878525018692
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 331946,
+        "sport": 51236,
+        "src": "192.168.122.89",
+        "time": 304.8789429664612
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 332137,
+        "sport": 59539,
+        "src": "192.168.122.89",
+        "time": 305.8879280090332
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 332229,
+        "sport": 64360,
+        "src": "192.168.122.89",
+        "time": 305.88868498802185
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 332520,
+        "sport": 58121,
+        "src": "192.168.122.89",
+        "time": 307.8088049888611
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 332612,
+        "sport": 54253,
+        "src": "192.168.122.89",
+        "time": 307.91824412345886
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 332888,
+        "sport": 57558,
+        "src": "192.168.122.89",
+        "time": 309.25570702552795
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 333897,
+        "sport": 49353,
+        "src": "192.168.122.89",
+        "time": 314.8671190738678
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 334571,
+        "sport": 61800,
+        "src": "192.168.122.89",
+        "time": 319.87093710899353
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 335626,
+        "sport": 61392,
+        "src": "192.168.122.89",
+        "time": 327.5886719226837
+      }
+    ]
+  },
+  "sandbox_processes": {
+    "processes": [
+      {
+        "call_count": 213,
+        "command_line": "",
+        "first_seen": "2026-07-25 17:55:12,492",
+        "name": "WmiPrvSE.exe",
+        "pid": null,
+        "ppid": 816
+      },
+      {
+        "call_count": 109,
+        "command_line": "",
+        "first_seen": "2026-07-25 17:55:13,743",
+        "name": "svchost.exe",
+        "pid": null,
+        "ppid": 628
+      },
+      {
+        "call_count": 302,
+        "command_line": "",
+        "first_seen": "2026-08-10 22:25:54,610",
+        "name": "c6e6ac05a991d12c28d6.exe",
+        "pid": null,
+        "ppid": 2508
+      },
+      {
+        "call_count": 1099,
+        "command_line": "",
+        "first_seen": "2026-08-10 22:25:56,267",
+        "name": "Fondue.exe",
+        "pid": null,
+        "ppid": 4280
+      },
+      {
+        "call_count": 33,
+        "command_line": "",
+        "first_seen": "2026-08-10 22:26:01,979",
+        "name": "svchost.exe",
+        "pid": null,
+        "ppid": 628
+      },
+      {
+        "call_count": 1486,
+        "command_line": "",
+        "first_seen": "2026-08-10 22:26:05,743",
+        "name": "Fondue.exe",
+        "pid": null,
+        "ppid": 2684
+      },
+      {
+        "call_count": 25,
+        "command_line": "",
+        "first_seen": "2026-08-10 22:26:45,768",
+        "name": "services.exe",
+        "pid": null,
+        "ppid": 488
+      }
+    ],
+    "total": 7
+  },
+  "sandbox_registry_ops": {
+    "registry": [
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\.NETFramework\\Policy\\",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\.NETFramework\\policy\\v4.0",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\.NETFramework",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\.NETFramework\\InstallRoot",
+        "operation": "query",
+        "value": "C:\\Windows\\Microsoft.NET\\Framework\\"
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\.NETFramework",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\.NETFramework\\UseLegacyV2RuntimeActivationPolicyDefaultValue",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\.NETFramework\\OnlyUseLatestCLR",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "Policy\\Standards",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\.NETFramework\\Policy\\Standards",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\.NETFramework\\policy\\standards\\v2.0.50727",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\.NETFramework\\ErrorDialog",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\.NETFramework\\Fod",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\.NETFramework\\Advertised",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\.NETFramework\\Advertised\\Policy\\Standards",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\.NETFramework\\Advertised\\Policy\\Standards\\v2.0.50727",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Fusion",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Fusion\\NoClientChecks",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\.NETFramework\\FodPath",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\.NETFramework\\FodLaunchAsync",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows NT\\CurrentVersion\\GRE_Initialize",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\GRE_Initialize\\DisableMetaFiles",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\GRE_Initialize\\DisableUmpdBufferSizeCheck",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Session Manager",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Session Manager\\ResourcePolicies",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Control\\Lsa\\FipsAlgorithmPolicy",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Lsa\\FipsAlgorithmPolicy\\STE",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Lsa\\FipsAlgorithmPolicy\\Enabled",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Control\\Lsa",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Lsa\\FipsAlgorithmPolicy",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Lsa\\FipsAlgorithmPolicy\\MDMEnabled",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Policies\\Microsoft\\Cryptography\\Configuration",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize\\AppsUseLightTheme",
+        "operation": "query",
+        "value": "0"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Appx",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Appx\\AllowDevelopmentWithoutDevLicense",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\AppModelUnlock",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\AppModelUnlock\\AllowDevelopmentWithoutDevLicense",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\OLE\\AppCompat",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Ole\\AppCompat\\RaiseActivationAuthenticationLevel",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Classes",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Classes\\AppID\\fondue.exe",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Classes\\AppID\\fondue.exe",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\AppModel\\Lookaside\\user\\software\\Classes\\AppID\\fondue.exe",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\MountPoints2\\CPC\\Volume",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\MountPoints2\\CPC\\Volume\\{705a300d-7a5e-11f1-89db-806e6f6e6963}\\",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\MountPoints2\\CPC\\Volume\\{705a300d-7a5e-11f1-89db-806e6f6e6963}\\Data",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\MountPoints2\\CPC\\Volume\\{705a300d-7a5e-11f1-89db-806e6f6e6963}\\Generation",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\MountPoints2\\CPC\\Volume\\{f5be1900-0000-0000-0000-100000000000}\\",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\MountPoints2\\CPC\\Volume\\{f5be1900-0000-0000-0000-100000000000}\\Data",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\MountPoints2\\CPC\\Volume\\{f5be1900-0000-0000-0000-100000000000}\\Generation",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\MountPoints2\\CPC\\Volume\\{f5be1900-0000-0000-0000-300300000000}\\",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\MountPoints2\\CPC\\Volume\\{f5be1900-0000-0000-0000-300300000000}\\Data",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\MountPoints2\\CPC\\Volume\\{f5be1900-0000-0000-0000-300300000000}\\Generation",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\WindowsRuntime",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\ActivatableClassId",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\ActivatableClassId\\Windows.Internal.StateRepository.FileTypeAssociation",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\ActivatableClassId\\Windows.Internal.StateRepository.FileTypeAssociation\\ActivationType",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\ActivatableClassId\\Windows.Internal.StateRepository.FileTypeAssociation\\Server",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\ActivatableClassId\\Windows.Internal.StateRepository.FileTypeAssociation\\DllPath",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\ActivatableClassId\\Windows.Internal.StateRepository.FileTypeAssociation\\Threading",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\ActivatableClassId\\Windows.Internal.StateRepository.FileTypeAssociation\\TrustLevel",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\ActivatableClassId\\Windows.Internal.StateRepository.FileTypeAssociation\\CustomAttributes",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\AppModel\\Lookaside\\machine\\SOFTWARE\\Microsoft\\WindowsRuntime\\ActivatableClassId\\Windows.Internal.StateRepository.FileTypeAssociation\\CustomAttributes",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\ActivatableClassId\\Windows.Internal.StateRepository.FileTypeAssociation\\RemoteServer",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\ActivatableClassId\\Windows.Internal.StateRepository.FileTypeAssociation\\ActivateAsUser",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\ActivatableClassId\\Windows.Internal.StateRepository.FileTypeAssociation\\ActivateInSharedBroker",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\ActivatableClassId\\Windows.Internal.StateRepository.FileTypeAssociation\\ActivateInBrokerForMediumILContainer",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\ActivatableClassId\\Windows.Internal.StateRepository.FileTypeAssociation\\Permissions",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\ActivatableClassId\\Windows.Internal.StateRepository.FileTypeAssociation\\ActivateOnHostFlags",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\OLE\\Diagnosis",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\AppModel\\Lookaside\\machine\\SOFTWARE\\Microsoft\\OLE\\Diagnosis",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\Server",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\Server\\StateRepository",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\Server\\StateRepository\\ExePath",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\Server\\StateRepository\\CommandLine",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\Server\\StateRepository\\IdentityType",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\Server\\StateRepository\\Permissions",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\Server\\StateRepository\\ActivatableClasses",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\Server\\StateRepository\\ServerType",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\Server\\StateRepository\\AppId",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\Server\\StateRepository\\Identity",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\Server\\StateRepository\\ServiceName",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\Server\\StateRepository\\ExplicitPsmActivationType",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\Server\\StateRepository\\CustomAttributes",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\AppModel\\Lookaside\\machine\\SOFTWARE\\Microsoft\\WindowsRuntime\\Server\\StateRepository\\CustomAttributes",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Classes\\Interface\\{8645456F-D9A2-4B82-AFEC-58F0E8DF0ACF}",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Classes\\Interface\\{8645456F-D9A2-4B82-AFEC-58F0E8DF0ACF}",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Classes\\WOW6432Node\\Interface\\{8645456f-d9a2-4b82-afec-58f0e8df0acf}\\ProxyStubClsid32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\WOW6432Node\\Interface\\{8645456f-d9a2-4b82-afec-58f0e8df0acf}\\ProxyStubClsid32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\WOW6432Node\\Interface\\{8645456f-d9a2-4b82-afec-58f0e8df0acf}\\ProxyStubClsid32\\(Default)",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Classes\\CLSID\\{C53E07EC-25F3-4093-AA39-FC67EA22E99D}",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Classes\\CLSID\\{C53E07EC-25F3-4093-AA39-FC67EA22E99D}",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Classes\\WOW6432Node\\CLSID\\{c53e07ec-25f3-4093-aa39-fc67ea22e99d}\\TreatAs",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{c53e07ec-25f3-4093-aa39-fc67ea22e99d}\\TreatAs",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\AppModel\\Lookaside\\machine\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{c53e07ec-25f3-4093-aa39-fc67ea22e99d}\\TreatAs",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Classes\\WOW6432Node\\CLSID\\{c53e07ec-25f3-4093-aa39-fc67ea22e99d}",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{c53e07ec-25f3-4093-aa39-fc67ea22e99d}\\ActivateOnHostFlags",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{c53e07ec-25f3-4093-aa39-fc67ea22e99d}\\(Default)",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Classes\\WOW6432Node\\CLSID\\{c53e07ec-25f3-4093-aa39-fc67ea22e99d}\\InprocServer32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{c53e07ec-25f3-4093-aa39-fc67ea22e99d}\\InprocServer32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Classes\\WOW6432Node\\CLSID\\{c53e07ec-25f3-4093-aa39-fc67ea22e99d}\\InProcServer32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{c53e07ec-25f3-4093-aa39-fc67ea22e99d}\\InProcServer32\\InprocServer32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{c53e07ec-25f3-4093-aa39-fc67ea22e99d}\\InProcServer32\\(Default)",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{c53e07ec-25f3-4093-aa39-fc67ea22e99d}\\InProcServer32\\ThreadingModel",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Classes\\WOW6432Node\\CLSID\\{c53e07ec-25f3-4093-aa39-fc67ea22e99d}\\InprocHandler32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{c53e07ec-25f3-4093-aa39-fc67ea22e99d}\\InprocHandler32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\AppModel\\Lookaside\\machine\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{c53e07ec-25f3-4093-aa39-fc67ea22e99d}\\InprocHandler32",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Classes\\WOW6432Node\\CLSID\\{c53e07ec-25f3-4093-aa39-fc67ea22e99d}\\InprocHandler",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{c53e07ec-25f3-4093-aa39-fc67ea22e99d}\\InprocHandler",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\AppModel\\Lookaside\\machine\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{c53e07ec-25f3-4093-aa39-fc67ea22e99d}\\InprocHandler",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Classes\\WOW6432Node\\CLSID\\{c53e07ec-25f3-4093-aa39-fc67ea22e99d}\\LocalServer32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{c53e07ec-25f3-4093-aa39-fc67ea22e99d}\\LocalServer32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\AppModel\\Lookaside\\machine\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{c53e07ec-25f3-4093-aa39-fc67ea22e99d}\\LocalServer32",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{c53e07ec-25f3-4093-aa39-fc67ea22e99d}\\AppID",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Classes\\WOW6432Node\\CLSID\\{c53e07ec-25f3-4093-aa39-fc67ea22e99d}\\LocalServer",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{c53e07ec-25f3-4093-aa39-fc67ea22e99d}\\LocalServer",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\AppModel\\Lookaside\\machine\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{c53e07ec-25f3-4093-aa39-fc67ea22e99d}\\LocalServer",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Classes\\WOW6432Node\\CLSID\\{c53e07ec-25f3-4093-aa39-fc67ea22e99d}\\Elevation",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{c53e07ec-25f3-4093-aa39-fc67ea22e99d}\\Elevation",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\AppModel\\Lookaside\\machine\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{c53e07ec-25f3-4093-aa39-fc67ea22e99d}\\Elevation",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Classes\\Interface\\{AF86E2E0-B12D-4C6A-9C5A-D7AA65101E90}",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Classes\\Interface\\{AF86E2E0-B12D-4C6A-9C5A-D7AA65101E90}",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Classes\\WOW6432Node\\Interface\\{AF86E2E0-B12D-4c6a-9C5A-D7AA65101E90}\\ProxyStubClsid32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\WOW6432Node\\Interface\\{AF86E2E0-B12D-4c6a-9C5A-D7AA65101E90}\\ProxyStubClsid32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\WOW6432Node\\Interface\\{AF86E2E0-B12D-4c6a-9C5A-D7AA65101E90}\\ProxyStubClsid32\\(Default)",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Classes\\Interface\\{89BC3F49-F8D9-5103-BA13-DE497E609167}",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Classes\\Interface\\{89BC3F49-F8D9-5103-BA13-DE497E609167}",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Classes\\WOW6432Node\\Interface\\{89bc3f49-f8d9-5103-ba13-de497e609167}\\ProxyStubClsid32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\WOW6432Node\\Interface\\{89bc3f49-f8d9-5103-ba13-de497e609167}\\ProxyStubClsid32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\WOW6432Node\\Interface\\{89bc3f49-f8d9-5103-ba13-de497e609167}\\ProxyStubClsid32\\(Default)",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Classes\\Interface\\{657A8842-0B5E-40E1-B8CB-9AAFACC33AAB}",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Classes\\Interface\\{657A8842-0B5E-40E1-B8CB-9AAFACC33AAB}",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Classes\\WOW6432Node\\Interface\\{657A8842-0B5E-40E1-B8CB-9AAFACC33AAB}\\ProxyStubClsid32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\WOW6432Node\\Interface\\{657A8842-0B5E-40E1-B8CB-9AAFACC33AAB}\\ProxyStubClsid32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\WOW6432Node\\Interface\\{657A8842-0B5E-40E1-B8CB-9AAFACC33AAB}\\ProxyStubClsid32\\(Default)",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Classes\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Classes\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Classes\\WOW6432Node\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}\\TreatAs",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}\\TreatAs",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\AppModel\\Lookaside\\machine\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}\\TreatAs",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Classes\\WOW6432Node\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}\\ActivateOnHostFlags",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}\\(Default)",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Classes\\WOW6432Node\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}\\InprocServer32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}\\InprocServer32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Classes\\WOW6432Node\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}\\InProcServer32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}\\InProcServer32\\InprocServer32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}\\InProcServer32\\(Default)",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}\\InProcServer32\\ThreadingModel",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Classes\\WOW6432Node\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}\\InprocHandler32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}\\InprocHandler32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\AppModel\\Lookaside\\machine\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}\\InprocHandler32",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Classes\\WOW6432Node\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}\\InprocHandler",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}\\InprocHandler",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\AppModel\\Lookaside\\machine\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}\\InprocHandler",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Classes\\WOW6432Node\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}\\LocalServer32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}\\LocalServer32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\AppModel\\Lookaside\\machine\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}\\LocalServer32",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}\\AppID",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Classes\\WOW6432Node\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}\\LocalServer",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}\\LocalServer",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\AppModel\\Lookaside\\machine\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}\\LocalServer",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Classes\\WOW6432Node\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}\\Elevation",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}\\Elevation",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\AppModel\\Lookaside\\machine\\SOFTWARE\\Classes\\WOW6432Node\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}\\Elevation",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\ActivatableClassId\\Windows.Storage.Streams.DataWriter",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\ActivatableClassId\\Windows.Storage.Streams.DataWriter\\ActivationType",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\ActivatableClassId\\Windows.Storage.Streams.DataWriter\\Server",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\ActivatableClassId\\Windows.Storage.Streams.DataWriter\\DllPath",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\ActivatableClassId\\Windows.Storage.Streams.DataWriter\\Threading",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\ActivatableClassId\\Windows.Storage.Streams.DataWriter\\TrustLevel",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\ActivatableClassId\\Windows.Storage.Streams.DataWriter\\CustomAttributes",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\AppModel\\Lookaside\\machine\\SOFTWARE\\Microsoft\\WindowsRuntime\\ActivatableClassId\\Windows.Storage.Streams.DataWriter\\CustomAttributes",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\ActivatableClassId\\Windows.Storage.Streams.DataWriter\\RemoteServer",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\ActivatableClassId\\Windows.Storage.Streams.DataWriter\\ActivateAsUser",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\ActivatableClassId\\Windows.Storage.Streams.DataWriter\\ActivateInSharedBroker",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\ActivatableClassId\\Windows.Storage.Streams.DataWriter\\ActivateInBrokerForMediumILContainer",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\ActivatableClassId\\Windows.Storage.Streams.DataWriter\\Permissions",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsRuntime\\ActivatableClassId\\Windows.Storage.Streams.DataWriter\\ActivateOnHostFlags",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Classes\\AppID\\FonDUE.EXE",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\DirectUI\\DynamicScaling",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\AppModel\\Lookaside\\machine\\Software\\Microsoft\\DirectUI\\DynamicScaling",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\DirectUI",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Control\\Nls\\CustomLocale",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CustomLocale\\en-US",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Control\\Nls\\ExtendedLocale",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\ExtendedLocale\\en-US",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\Sorting\\Versions\\000603xx",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Control\\Nls\\Sorting\\Ids",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\Sorting\\Ids\\en-US",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\Sorting\\Ids\\en",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\FontLink\\SystemLink",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\DataStore_V1.0",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\DataStore_V1.0\\Disable",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\DataStore_V1.0\\DataFilePath",
+        "operation": "query",
+        "value": "C:\\Windows\\Fonts\\staticcache.dat"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\Plane1",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\Plane2",
+        "operation": "query",
+        "value": "SimSun-ExtB"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\Plane3",
+        "operation": "query",
+        "value": "SimSun-ExtG"
+      }
+    ],
+    "total": 285
+  },
+  "sandbox_services_and_tasks": {
+    "commands": [
+      "\"C:\\Windows\\system32\\fondue.exe\" /enable-feature:NetFx3 /caller-name:mscoreei.dll",
+      "\"C:\\Windows\\sysnative\\FonDUE.EXE\" /enable-feature:NetFx3 /caller-name:mscoreei.dll",
+      "C:\\Windows\\sysnative\\Fondue.exe /enable-feature:NetFx3 /caller-name:mscoreei.dll",
+      "C:\\Windows\\system32\\wbem\\wmiprvse.exe -secured -Embedding",
+      "C:\\Windows\\System32\\svchost.exe -k LocalServiceNetworkRestricted -p",
+      "C:\\Windows\\system32\\sppsvc.exe"
+    ],
+    "services": [
+      "WSearch"
+    ],
+    "tasks": [],
+    "total": 7
+  },
+  "sandbox_signatures": {
+    "signatures": [
+      {
+        "confidence": 100,
+        "description": "Network activity detected but not expressed in monitor API logs",
+        "name": "stealth_network",
+        "references": [],
+        "severity": 1
+      },
+      {
+        "confidence": 100,
+        "description": "Queries the keyboard layout",
+        "name": "queries_keyboard_layout",
+        "references": [],
+        "severity": 1
+      },
+      {
+        "confidence": 100,
+        "description": "Queries the computer locale (possible geofencing)",
+        "name": "queries_locale_api",
+        "references": [],
+        "severity": 1
+      },
+      {
+        "confidence": 30,
+        "description": "Communicates with IPs located across a large number of unique countries",
+        "name": "network_country_distribution",
+        "references": [],
+        "severity": 1
+      },
+      {
+        "confidence": 40,
+        "description": "SetUnhandledExceptionFilter detected (possible anti-debug)",
+        "name": "antidebug_setunhandledexceptionfilter",
+        "references": [],
+        "severity": 1
+      },
+      {
+        "confidence": 100,
+        "description": "A file with an unusual extension was attempted to be loaded as a DLL.",
+        "name": "dll_load_uncommon_file_types",
+        "references": [],
+        "severity": 1
+      },
+      {
+        "confidence": 40,
+        "description": "Possible date expiration check, exits too soon after checking local time",
+        "name": "stealth_timeout",
+        "references": [],
+        "severity": 1
+      },
+      {
+        "confidence": 100,
+        "description": "Checks system language via registry key (possible geofencing)",
+        "name": "language_check_registry",
+        "references": [],
+        "severity": 1
+      },
+      {
+        "confidence": 50,
+        "description": "Queries or modifies system parameters associated with user presence detection or sandbox evasion",
+        "name": "antisandbox_system_parameters_info",
+        "references": [],
+        "severity": 2
+      },
+      {
+        "confidence": 80,
+        "description": "Queries process token information to check for Administrator privileges or UAC elevation status",
+        "name": "privilege_elevation_check",
+        "references": [],
+        "severity": 2
+      },
+      {
+        "confidence": 50,
+        "description": "Queried the FIPS cryptography policy, can be used to adapt C2 network encryption or by legitimate encryption software",
+        "name": "query_fips_reconnaissance",
+        "references": [],
+        "severity": 2
+      },
+      {
+        "confidence": 20,
+        "description": "Queries the mount points and then resolves volume paths to enumerate storage devices",
+        "name": "mountpoints_volume_discovery",
+        "references": [],
+        "severity": 2
+      },
+      {
+        "confidence": 50,
+        "description": "Creates a process in a suspended state, likely for injection",
+        "name": "creates_suspended_process",
+        "references": [],
+        "severity": 2
+      },
+      {
+        "confidence": 100,
+        "description": "Resumed a thread in another process",
+        "name": "resumethread_remote_process",
+        "references": [],
+        "severity": 2
+      },
+      {
+        "confidence": 20,
+        "description": "Queries registry mount points to identify historical or connected removable/network drives",
+        "name": "discover_registry_mount_points",
+        "references": [],
+        "severity": 2
+      },
+      {
+        "confidence": 60,
+        "description": "Repeatedly opens the MountPointManager device to enumerate drive letters and resolve volume paths to discover all attached drives and network shares",
+        "name": "mountpoint_manager_access",
+        "references": [],
+        "severity": 3
+      }
+    ],
+    "total": 16
+  }
+}
