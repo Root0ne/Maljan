@@ -112,6 +112,42 @@ Both are editable from Settings → Agents and pipeline. A custom agent runs as 
 list an analyst twice, may not include the judge, and may not name a disabled
 analyst while it is the active profile.
 
+A second profile ships built in: `measurement`. It runs the same three analysts
+with every tool server withheld and the static provider forced to `none` — the
+baseline for what the ensemble contributes on its own. It is a profile rather
+than three tool-free clones of the definitions, so the agents it measures
+cannot drift from the ones `default` runs.
+
+## Built-in tool servers
+
+Every analysis capability the pipeline used to run in-process is also a tool an
+agent may call. Four stdio sidecars ship built in, each a single-file `FastMCP`
+server under `services/`, launched with the same interpreter the worker runs on
+and registered in `_builtin_servers()`:
+
+| Server | Bound to | Offers |
+| :-- | :-- | :-- |
+| `analysis` | `static` | Identity and hashes, strings and typed IOCs, PE/ELF/Mach-O/APK structure, archive and document inspection, payload carving, YARA, Sigma and capa. |
+| `knowledge` | every analyst and the judge | ATT&CK lookup, validation and ranking, the API-behaviour catalog, the LOLBin table, family and prior-case retrieval. |
+| `network` | `network` | DNS, HTTP and packet views of a capture, plus the whole-capture summary. |
+| `threatintel` | `judge` | VirusTotal and AbuseIPDB reputation lookups. |
+
+The implementations live in `src/maljan/tools/` as plain functions — explicit
+arguments, JSON-serialisable returns, no `Settings` access — so the sidecar is
+a `@mcp.tool()` wrapper and nothing more, and the same code backs an in-process
+caller. Two rules hold across all of them: they report facts rather than
+verdicts (a packer section name is a match, not "packed"), and an optional
+dependency that is missing costs one tool's answer, never the server.
+
+The `dynamic` analyst's tools are the exception: its sandbox report is already
+in the worker's memory, so `ToolRef(kind="sandbox")` resolves to in-process
+tools over that report (`src/maljan/providers/sandbox_tools.py`) with no
+transport to open.
+
+A tool server that does not share the worker's filesystem is handed the sample
+rather than a path to it; see the remote-delivery section of
+[configuration.md](configuration.md).
+
 ## Providers
 
 The provider layer (`src/maljan/providers/`) puts one interface in front of

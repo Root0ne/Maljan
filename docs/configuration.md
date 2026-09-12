@@ -198,6 +198,78 @@ console (`editable=false`, reason "set in the deployment environment; restart
 required"), and DSNs are redacted before they are shown. Change them by
 redeploying with a different environment.
 
+## Tools, and the measurement baseline
+
+Four tool servers are enabled out of the box and bound to the agents that read
+them: `analysis` and `knowledge` to the static analyst, `knowledge` also to the
+dynamic and network analysts and to the judge, `network` to the network
+analyst, `threatintel` to the judge. What each offers is in
+[architecture.md](architecture.md); what an operator changes here is the
+binding (`agents`), the exposure (`tools`) and whether the server runs at all
+(`enabled`).
+
+The per-format tools of `analysis` rest on optional libraries. Install them
+with `uv sync --extra tools` (the backend image already does); without them
+`apk_info` falls back to the zip-level facts and `macho_info`, the OLE2 half of
+`document_info` and the 7z half of `archive_list` answer
+`{"error": "<module> is not installed"}`. Nothing else changes, and the server
+starts either way.
+
+Two profiles ship built in. `default` is the three analysts with their tools.
+`measurement` is the same three analysts with `exclude_servers` covering every
+tool server, `exclude_sandbox_tools` on and `static_provider` forced to `none`
+— the baseline for measuring what the ensemble contributes without any tool.
+Select it from Settings → Agents and pipeline like any other profile; a run
+under it resolves each analyst to a prompt, a model and no tools at all.
+
+A profile's three fields are honoured in `agents/composition.resolve_agent`, so
+they apply to a custom profile too: `exclude_servers` withholds servers by key,
+`exclude_sandbox_tools` withholds the in-process sandbox tool set, and
+`static_provider` overrides every member's provider at once.
+
+## Tool servers on another host
+
+Every path-taking tool assumes the server can open the path the worker hands
+it. That holds for a local stdio sidecar and for nothing else. There are two
+ways to make it hold elsewhere.
+
+**A shared volume.** Mount the same directory into both, and point the
+provider's mirror at it — `static.r2.mirror_dir` is the worked example: the
+worker copies the sample there (0o700 directory, 0o600 file, removed when the
+job ends) and the server reads it from its own mount. Nothing is uploaded, and
+the path both sides use has to agree.
+
+**The `put_sample` convention.** A server that cannot share a filesystem
+advertises `put_sample` on its manifest, and Maljan uploads the sample to it
+before the agent's first tool call:
+
+| tool | arguments | returns |
+| :-- | :-- | :-- |
+| `put_sample` | `filename`, `content_b64`, `sha256` | `{"path": ...}` |
+| `put_sample_begin` | `filename`, `sha256`, `size` | `{"upload_id": ...}` |
+| `put_sample_chunk` | `upload_id`, `seq`, `content_b64` | `{"seq": ...}` |
+| `put_sample_finish` | `upload_id` | `{"path": ...}` |
+
+Samples over 8 MiB go through the three chunked calls when the manifest carries
+all of them, and through the single call otherwise. Chunks are keyed by `seq`
+rather than streamed, so a transport that retries one cannot corrupt the file.
+The returned path is what that server's tools are then called with —
+`agents.tool_pinning.pin_paths` substitutes per server, so one agent can hold a
+local sidecar's tools and a remote server's at the same time and each gets the
+path it can open. Uploads are cached per `(server, sha256)` for half an hour.
+
+Staging is triggered for any bound server whose transport is not stdio, and for
+any server — stdio included — whose manifest advertises `put_sample`. It never
+fails a run: an upload that goes wrong is recorded as
+`sample staging failed for '<server>': <reason>` on the run's degradation
+reasons, and the server is called with the local path exactly as before. The
+paths that were used are recorded on the run under `remote_sample_paths`.
+
+The built-in `analysis` sidecar implements the convention itself, so it is
+exercised end to end by a default install. Its uploads land under
+`$MALJAN_STAGING_DIR` — a private temp directory when that is unset — with the
+directory 0o700 and each file 0o600.
+
 ## Export and import
 
 `GET /api/v1/settings/export` (admin) returns the configuration as JSON and

@@ -33,14 +33,43 @@ DEFAULT_CASE_CORPUS = "data/attck_case_corpus_v1.json"
 _INDEX_LOCK = threading.Lock()
 _HYBRID_INDEX: Any = None
 _HYBRID_FAILED: str = ""
+_CATALOG: dict[str, Any] | None = None
 
 
 def reset_indices() -> None:
-    """Drop the warm hybrid index. For tests and for a catalog refresh."""
-    global _HYBRID_INDEX, _HYBRID_FAILED
+    """Drop the warm index and catalog. For tests and for a refresh."""
+    global _HYBRID_INDEX, _HYBRID_FAILED, _CATALOG
     with _INDEX_LOCK:
         _HYBRID_INDEX = None
         _HYBRID_FAILED = ""
+        _CATALOG = None
+
+
+def _catalog() -> dict[str, Any]:
+    """``{technique_id: ATTCKTechnique}`` across every domain, or ``{}``.
+
+    Deliberately *not* the vector index. Looking up a technique by its id needs
+    the catalogue and nothing else, and routing that through the hybrid index
+    would load an embedding model — seconds and hundreds of megabytes — to
+    answer a dictionary lookup. ``resolve_technique`` is the one function here
+    that genuinely ranks, and it is the only one that pays for the index.
+    """
+    global _CATALOG
+    with _INDEX_LOCK:
+        if _CATALOG is not None:
+            return _CATALOG
+    catalog: dict[str, Any] = {}
+    try:
+        from maljan.memory.attck_loader import load_all_domains
+
+        for data in load_all_domains().values():
+            for technique in data.techniques:
+                catalog.setdefault(technique.technique_id, technique)
+    except Exception as exc:  # noqa: BLE001 — a knowledge lookup degrades, never raises
+        logger.warning("knowledge: the ATT&CK catalogue is unavailable (%s).", exc)
+    with _INDEX_LOCK:
+        _CATALOG = catalog
+    return catalog
 
 
 def _hybrid_index() -> tuple[Any, str]:
@@ -120,25 +149,19 @@ def attck_lookup(technique_id: str) -> dict[str, Any]:
     tid = (technique_id or "").strip().upper()
     if not tid:
         return {"valid": False, "technique_id": "", "reason": "no technique id given"}
-    known = tid in valid_ids()
+    technique = _catalog().get(tid)
     out: dict[str, Any] = {
-        "valid": known,
+        "valid": tid in valid_ids(),
         "technique_id": tid,
+        "name": technique.name if technique else "",
         "domain": domain_of(tid),
         "platforms": list(platforms_for(tid)),
-        "url": f"https://attack.mitre.org/techniques/{tid.replace('.', '/')}/",
+        "tactics": list(technique.tactic_phases) if technique else [],
+        "url": (technique.url if technique and technique.url else None)
+        or f"https://attack.mitre.org/techniques/{tid.replace('.', '/')}/",
     }
-    index, reason = _hybrid_index()
-    if index is None:
-        out["reason"] = reason
-        out["name"] = ""
-        out["tactics"] = []
-        return out
-    technique = index.get_by_id(tid)
-    out["name"] = technique.name if technique else ""
-    out["tactics"] = list(technique.tactic_phases) if technique else []
-    if technique and technique.url:
-        out["url"] = technique.url
+    if technique is None:
+        out["reason"] = "the ATT&CK catalogue has no entry for this id"
     return out
 
 
@@ -151,27 +174,30 @@ def attck_validate(ids: list[str]) -> dict[str, Any]:
     from maljan.memory.attck_loader import valid_ids
 
     known = valid_ids()
-    index, reason = _hybrid_index()
+    catalog = _catalog()
     invalid: list[dict[str, Any]] = []
     for raw in ids or []:
         tid = str(raw).strip().upper()
         if not tid or tid in known:
             continue
         row: dict[str, Any] = {"id": tid, "suggestions": []}
-        if index is not None:
-            # The parent of a bogus sub-technique is the single most likely
-            # intent, so it leads when it is real.
-            parent = tid.split(".")[0]
-            if parent != tid and parent in known:
-                row["suggestions"].append(parent)
-            technique = index.get_by_id(parent)
-            if technique is not None:
-                for result in index.search(technique.name, top_k=3):
-                    candidate = result.technique.technique_id
-                    if candidate not in row["suggestions"]:
-                        row["suggestions"].append(candidate)
-        elif reason:
-            row["reason"] = reason
+        # The parent of a bogus sub-technique is the single most likely intent,
+        # and it is a string operation rather than a search — a suggestion that
+        # cost an embedding model would be worse than no suggestion.
+        parent = tid.split(".")[0]
+        if parent != tid and parent in known:
+            row["suggestions"].append(parent)
+        # Then the parent's real sub-techniques, which is where an id like
+        # ``T1055.999`` was reaching for.
+        row["suggestions"].extend(
+            sorted(
+                other
+                for other in catalog
+                if other.startswith(f"{parent}.") and other not in row["suggestions"]
+            )[:3]
+        )
+        if not catalog:
+            row["reason"] = "the ATT&CK catalogue is unavailable"
         invalid.append(row)
     return {"invalid": invalid, "checked": len(ids or [])}
 

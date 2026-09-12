@@ -8,6 +8,46 @@ change landed on `main`.
 
 ### Added
 
+- **Every analysis capability is a tool.** `src/maljan/tools/` holds the
+  implementations as plain functions — identity and hashes, strings and typed
+  IOCs, PE/ELF/Mach-O/APK structure, archives, documents, payload carving,
+  YARA, Sigma, capa, PCAP summaries and the ATT&CK / API-behaviour / LOLBin /
+  retrieval lookups — and two new built-in stdio sidecars expose them:
+  `analysis` (bound to the static analyst) and `knowledge` (bound to every
+  analyst and the judge). `network-mcp` gains `pcap_summary`. They report facts
+  rather than verdicts, and a missing optional library costs one tool's answer
+  rather than the server. Install the per-format parsers with
+  `uv sync --extra tools`.
+- **The sandbox report as tools.** `ToolRef(kind="sandbox")` resolves to
+  in-process tools over the job's report — processes, network, signatures,
+  dropped files, platform channels and a raw section reader — so the dynamic
+  analyst can ask for what it needs instead of being handed the whole report as
+  chunked text.
+- **A measurement baseline profile.** `measurement` runs the same three
+  analysts as `default` with every tool server withheld, the in-process sandbox
+  tools withheld and the static provider forced to `none`.
+  `ProfileDefinition.exclude_servers`, `exclude_sandbox_tools` and
+  `static_provider` make that a profile rather than three cloned definitions
+  that could drift from the ones being measured.
+- **Remote sample delivery.** A tool server that cannot see the worker's
+  filesystem advertises `put_sample` (with `put_sample_begin` /
+  `put_sample_chunk` / `put_sample_finish` above 8 MiB) and is handed the bytes
+  before the first tool call; the path it returns is what its own tools are
+  then called with, per server. Staging never fails a run — a failure is a
+  degradation reason and the local path is used — and the paths used are
+  recorded on the run as `remote_sample_paths`. The `analysis` sidecar
+  implements the convention, so a default install exercises it.
+
+### Changed
+
+- **Tool-argument path pinning is shared.** The bare-filename guard moved from
+  `ConfigurableAnalyst` to `agents/tool_pinning.pin_paths`, called by every
+  analyst through `BaseAnalyst`, and now substitutes a different path per
+  server. `ServerRegistry.merge_tools` stamps each tool with the server it came
+  from so it can.
+- **The string and IOC scan moved** from `extractors/pe_extractor` to
+  `maljan.tools.strings`; the extractor imports it and its output is unchanged.
+
 - **Per-format sandbox submission options.** `sandbox.cape2.package_by_format`
   maps a detected file type to a CAPE analysis package (`*` is the fallback)
   and `sandbox.cape2.submit_options` is sent verbatim as further form fields;
