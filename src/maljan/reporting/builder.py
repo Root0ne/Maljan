@@ -267,18 +267,23 @@ class MalwareReportBuilder:
         # (none of which were patches). Re-derive the category deterministically
         # from the action/rationale text so the label matches the advice.
         valid_tids = {m.technique_id for m in report.ttp_mappings if m.technique_id}
-        for rec in recs:
-            rec.category = _derive_recommendation_category(  # type: ignore[assignment]
-                rec.action, rec.rationale
+        # A fresh row per recommendation rather than an edit in place. The
+        # technique id is read out of the model's own sentence — it wrote
+        # "block T1547 autorun" and left the structured field empty — so this
+        # moves a value the LLM supplied into the field it belongs in rather
+        # than choosing one on its behalf.
+        report.defensive_recommendations = [
+            rec.model_copy(
+                update={
+                    "category": _derive_recommendation_category(rec.action, rec.rationale),
+                    "technique_id": rec.technique_id
+                    or _first_report_technique(
+                        f"{rec.action} {rec.rationale} {rec.detection or ''}", valid_tids
+                    ),
+                }
             )
-            # When the LLM omits technique_id, recover it from a
-            # T#### cited in the action/rationale/detection text, preferring one
-            # that is actually mapped in this report.
-            if not rec.technique_id:
-                rec.technique_id = _first_report_technique(
-                    f"{rec.action} {rec.rationale} {rec.detection or ''}", valid_tids
-                )
-        report.defensive_recommendations = recs
+            for rec in recs
+        ]
         return report
 
     @staticmethod
