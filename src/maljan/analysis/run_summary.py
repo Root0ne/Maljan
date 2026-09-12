@@ -209,18 +209,16 @@ class RunSummary:
 
         degraded_mode:      Set True when the verdict came from a partial /
                             failed pipeline (zero corroboration, analyst
-                            errors). Audit 2026-05-19 OPS-DEGRADED-VERDICT-01.
+                            errors).
         degradation_reasons: Human-readable bullets explaining why this run
                             is flagged as degraded.
         failed_analysts:    Names of analysts whose ``reports[name]`` started
-                            with ``[ERROR]``. (Audit 2026-05-19
-                            OBS-ANALYST-ERRORS-METRIC-01.)
+                            with ``[ERROR]``.
         techniques_by_layer: Per-layer (yara / sigma / static / dynamic /
                             network) technique counts so the report can show
                             "1 yara + 9 sigma + 1 network + 0 static +
                             0 dynamic = 11 total" attribution instead of the
-                            opaque "11 techniques". Audit 2026-05-19
-                            OBS-TTP-ATTRIBUTION-01.
+                            opaque "11 techniques".
         profile:            which profile ran, the analysts it named, and
                             which of them are not built in.
     """
@@ -263,7 +261,7 @@ class RunSummary:
             "",
         ]
 
-        # OPS-DEGRADED-VERDICT-01 (audit 2026-05-19): banner the degraded
+        # Banner the degraded
         # run prominently so a reader can't miss it when scrolling.
         if self.degraded_mode:
             lines += [
@@ -341,7 +339,7 @@ class RunSummary:
                         f"| {t['technique_id']} | {t['label']} | {t['confidence']:.3f} | {layers} |"
                     )
                 lines.append("")
-            # OBS-TTP-ATTRIBUTION-01 (audit 2026-05-19): per-layer breakdown.
+            # Per-layer breakdown.
             if self.techniques_by_layer:
                 lines.append("**Per-layer attribution:**")
                 lines.append("")
@@ -358,7 +356,7 @@ class RunSummary:
         else:
             lines += ["## Three-Layer TTP Cascade", "", "*No TTP claims found.*", ""]
 
-        # OBS-ANALYST-ERRORS-METRIC-01 (audit 2026-05-19): always render the
+        # Always render the
         # failed-analyst section so operators see "0 failures" rather than
         # ambiguity.
         lines += ["## Analyst Errors", ""]
@@ -564,10 +562,7 @@ class RunSummaryBuilder:
     def set_degraded_mode(
         self, degraded: bool, reasons: list[str] | None = None
     ) -> RunSummaryBuilder:
-        """Mark the run as degraded with optional human-readable reasons.
-
-        Audit 2026-05-19 OPS-DEGRADED-VERDICT-01.
-        """
+        """Mark the run as degraded with optional human-readable reasons."""
         self._degraded_mode = bool(degraded)
         self._degradation_reasons = list(reasons or [])
         return self
@@ -626,10 +621,7 @@ class RunSummaryBuilder:
         return self
 
     def set_failed_analysts(self, names: list[str]) -> RunSummaryBuilder:
-        """Record analysts whose reports failed with an [ERROR] prefix.
-
-        Audit 2026-05-19 OBS-ANALYST-ERRORS-METRIC-01.
-        """
+        """Record analysts whose reports failed with an [ERROR] prefix."""
         self._failed_analysts = list(names)
         return self
 
@@ -785,7 +777,7 @@ class RunSummaryBuilder:
                 top_techniques=top_techniques,
                 dropped_by_platform=dropped,
             )
-            # OBS-TTP-ATTRIBUTION-01 (audit 2026-05-19): bucket every
+            # Bucket every
             # cascade result by *every* contributing layer (a technique can
             # contribute to multiple layers if more than one analyst hit it).
             # Use ``results`` not ``top_techniques(n=k)`` so the breakdown

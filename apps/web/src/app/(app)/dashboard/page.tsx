@@ -41,7 +41,7 @@ const STATUS_STYLES: Record<string, string> = {
   cancelled: "text-text-muted",
 };
 
-/* audit 2026-07-26 (T4): every recent-analysis row rendered the same
+/* Every recent-analysis row rendered the same
    `sample_id` UUID prefix, so the ten rows were indistinguishable. Prefer the
    readable identity the API already returns — same precedence as the analysis
    header (analysis/[id]/layout.tsx). */
@@ -86,7 +86,7 @@ function mapApiStats(s: DashboardStatsDTO): DisplayStats {
   const byStatus = s.jobs_by_status || {};
   const byVerdict = s.verdict_distribution || {};
 
-  // audit 2026-07-26 (T2): the API returns the MalwareReport verdict casing
+  // The API returns the MalwareReport verdict casing
   // ("Malware", "Suspicious", "Benign") plus legacy "malicious" from older
   // rows. Funnel every key through the shared `verdictBucket` instead of a
   // hand-rolled lowercase map so the dashboard agrees with every other
@@ -191,7 +191,7 @@ export default function DashboardPage() {
 
   return (
     <div>
-      {/* Mock-mode banner (audit 2026-05-17, W-01 follow-up): operators
+      {/* Mock-mode banner: operators
           frequently miss the worker log line announcing mock mode. Red
           banner makes the configuration impossible to overlook. */}
       {systemStatus?.mock_mode_allowed && (

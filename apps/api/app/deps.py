@@ -19,7 +19,7 @@ from app.models.user import User
 # active and the client sends no Authorization header.
 security_scheme = HTTPBearer(auto_error=False)
 
-# Audit 2026-07-26 (K2): API keys used to be write-only — ``/audit/api-keys``
+# API keys used to be write-only — ``/audit/api-keys``
 # minted them and the UI told the operator to copy the secret, but NOTHING ever
 # read ``APIKey.key_hash`` back, so a key authenticated exactly zero requests.
 # auto_error=False mirrors the bearer scheme so the two can coexist.

@@ -47,14 +47,14 @@ def _static_prompt(provider: Any | None = None) -> str:
 _ISR_SYSTEM = _static_prompt()
 
 
-# BUG-07 (2026-06-23 live-UI audit): the deterministic raw-data slot.
+# The deterministic raw-data slot.
 _STATIC_RAW_PLACEHOLDER_RE = re.compile(r"^\s*no\s+\w+\s+data\s+available\b", re.IGNORECASE)
 
 
 def _reframe_static_raw_data(data: str, has_tools: bool) -> str:
     """Rephrase the 'No static data available' file-loader placeholder.
 
-    BUG-07: for a freshly uploaded sample there is no pre-extracted
+    For a freshly uploaded sample there is no pre-extracted
     ``data/samples/static/<sha>.json`` fixture, so
     ``FileBasedLoader.load(sha, "static")`` returns the literal placeholder
     "No static data available for sample <sha>." When that text lands in the
@@ -557,7 +557,7 @@ class StaticAnalyst(BaseAnalyst):
                 "own_report": own_report,
                 "peer_section": peer_section,
                 "mediator_feedback": mediator_feedback,
-                # BUG-07: don't let the "No static data available" placeholder
+                # Don't let the "No static data available" placeholder
                 # talk the model out of its live-Ghidra ORIGINAL REPORT.
                 "data": _reframe_static_raw_data(original_data, bool(self.tools)),
             }
@@ -574,11 +574,11 @@ class StaticAnalyst(BaseAnalyst):
 
         self._try_initialize_mcp()
 
-        # PIPE-ANA-01 (audit 2026-05-19): when the supplied target *looks*
+        # When the supplied target *looks*
         # like a filename but doesn't exist on disk (e.g. a sandbox sent
         # the task_id instead of the artefact path), short-circuit
         # to a zero-claim ISR rather than paying for an LLM round that
-        # ends with ``load_program: File not found``. ANA-MARK-01 already
+        # ends with ``load_program: File not found``. The meta-claim guard already
         # neutralises the placeholder text path; this is the equivalent
         # cheap guard at the *structured* entry point.
         stripped = data.strip()
@@ -592,8 +592,8 @@ class StaticAnalyst(BaseAnalyst):
         if looks_like_filename and not os.path.exists(stripped):
             self.logger.error(
                 "Static analyst received a non-existent path '%s'. Skipping LLM "
-                "round and emitting an empty ISR — downstream CONF-INFL-01 cap "
-                "will mark this run as degraded.",
+                "round and emitting an empty ISR — the downstream confidence "
+                "cap will mark this run as degraded.",
                 stripped,
             )
             return AgentISR(
@@ -668,7 +668,7 @@ class StaticAnalyst(BaseAnalyst):
 
         content = self.execute_tool_loop(prompt_messages)
         parsed = _parse_claim_blocks(content)
-        # BUG-07: a defeatist "could not be performed / missing binary data"
+        # A defeatist "could not be performed / missing binary data"
         # claim parses as a well-formed block but is not a real finding — drop it
         # so static collapses to a zero-claim (degraded) ISR rather than a fake
         # high-confidence one.
@@ -747,7 +747,7 @@ class StaticAnalyst(BaseAnalyst):
                 "own_report": own_report,
                 "peer_section": peer_isr_summaries,
                 "mediator_feedback": mediator_feedback,
-                # BUG-07: don't let the "No static data available" placeholder
+                # Don't let the "No static data available" placeholder
                 # talk the model out of its live-Ghidra ORIGINAL REPORT.
                 "data": _reframe_static_raw_data(original_data, bool(self.tools)),
             }
@@ -755,7 +755,7 @@ class StaticAnalyst(BaseAnalyst):
         content = str(response.content)
 
         parsed = _parse_claim_blocks(content)
-        # BUG-07: drop defeatist meta-claims ("could not be performed / missing
+        # Drop defeatist meta-claims ("could not be performed / missing
         # binary data") that parse as well-formed blocks; a no-real-finding
         # revision must collapse to a zero-claim ISR so the run is honestly
         # marked degraded instead of crediting a fake high-confidence claim.

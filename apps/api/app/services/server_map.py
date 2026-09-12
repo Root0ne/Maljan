@@ -169,7 +169,7 @@ def split_server_secrets(
 def _keep_masked_env(value: Any, stored: dict[str, Any] | None) -> Any:
     """An ``env`` value that arrives as the mask keeps whatever is stored.
 
-    The JSON export masks every ``env`` value (SEC-1: that map is where a
+    The JSON export masks every ``env`` value (that map is where a
     server's own credential lives), so importing the document back must not
     write ten asterisks into the variable. A mask with nothing stored behind
     it is dropped rather than stored -- it names a value this deployment never

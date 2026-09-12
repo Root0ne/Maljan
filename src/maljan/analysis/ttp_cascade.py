@@ -292,7 +292,7 @@ class TTPCascadeEngine:
             sample_platform: When set, the cascade
                 drops claims whose source rule explicitly declared an
                 incompatible platform. ``None`` preserves legacy behaviour.
-            empty_domains: 2026-07 audit — domains that had NO real input data
+            empty_domains: Domains that had NO real input data
                 this run (e.g. ``{"dynamic", "network"}`` when the sandbox never
                 ran). Claims tagged with an empty domain are dropped so an
                 absent layer can't be counted as independent corroboration. This
@@ -310,7 +310,7 @@ class TTPCascadeEngine:
         dropped: list[DroppedTechnique] = []
 
         # Pre-filter invalid technique IDs so cascade only works with real TTPs.
-        # Audit 2026-05-19 SIG-T0000-01: ``T0000`` matches ``T\d{4}`` and was
+        # ``T0000`` matches ``T\d{4}`` and was
         # leaking past this guard. Reject the curated placeholder set
         # explicitly as belt-and-braces.
         _VALID_TID_RE = re.compile(r"^T\d{4}(?:\.\d{3})?$")
@@ -353,7 +353,7 @@ class TTPCascadeEngine:
                 dom: str = isr.domain  # type: ignore[assignment]
                 agent = isr.agent_id
 
-                # 2026-07 audit: an absent layer cannot corroborate. A claim
+                # An absent layer cannot corroborate. A claim
                 # tagged to a domain that produced no real data this run (e.g. a
                 # "dynamic" sandbox-evasion claim when no sandbox ever ran) is
                 # dropped so it neither becomes an independent contributing layer

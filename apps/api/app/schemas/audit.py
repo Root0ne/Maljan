@@ -24,7 +24,7 @@ class AuditLogResponse(BaseModel):
     # or an invalid/replayed refresh token all write ``user_id=NULL``
     # (``AuditLog.user_id`` is nullable in the model). Declaring this required
     # made the endpoint raise ResponseValidationError -> 500 as soon as such a
-    # row appeared. Audit 2026-07-26 (K1).
+    # row appeared.
     user_id: uuid.UUID | None
     action: str
     resource_type: str | None

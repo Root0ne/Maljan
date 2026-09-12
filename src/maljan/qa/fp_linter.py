@@ -46,8 +46,8 @@ class FPWarning:
     """One linter finding. Serialised under ``run_summary.fp_warnings``.
 
     ``explanation`` is a structured root-cause sentence that names the
-    upstream guardrail responsible for the warning. The audit gate G-FP-7
-    asserts every warning carries a non-empty ``explanation`` so the UI
+    upstream guardrail responsible for the warning. A test gate asserts
+    every warning carries a non-empty ``explanation`` so the UI
     surfaces actionable text instead of raw rule-engine output.
     """
 
@@ -176,7 +176,8 @@ def lint_report(report: Any, sample_platform: str | None) -> list[FPWarning]:
                 severity="warn",
                 message=(
                     f"{file_name_count} file:name indicators present "
-                    f"(threshold {MAX_FILE_NAME_INDICATORS}). The J-02 cap may not be running."
+                    f"(threshold {MAX_FILE_NAME_INDICATORS}). The judge "
+                    "post-processor's cap may not be running."
                 ),
                 field="stix_bundle_extended.objects[indicator]",
                 explanation=(

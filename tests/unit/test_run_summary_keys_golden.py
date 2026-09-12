@@ -1,6 +1,6 @@
 """The run summary's key set is a contract, so it is pinned.
 
-CORE-3 (dev audit 2026-09-06): ``RunSummary.to_dict()`` is what the API
+``RunSummary.to_dict()`` is what the API
 stores, what the report renders and what every evaluation script reads back
 out of a stored run, and nothing pinned its shape. A key renamed or dropped in
 passing would keep every existing test green and quietly break a consumer that

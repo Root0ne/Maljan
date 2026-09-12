@@ -271,7 +271,7 @@ class LLMConfig(BaseModel):
     # split when ``view_decomposition_views > 0`` (0 = provider/server default,
     # i.e. UNBOUNDED on llama-server).
     #
-    # 2026-07-26 audit (Ö3) — raised 0 -> 8192. The analyst path was the only
+    # Raised 0 -> 8192. The analyst path was the only
     # unbounded LLM call in the system (judge 8192, narrative 1500, composer 900
     # are all capped). MEASURED on a 36 KB sample: after the depth restore the
     # static analyst gathered 19 tool observations, and the forced-synthesis
@@ -1443,7 +1443,7 @@ class Settings(BaseSettings):
     # ReAct agent execution limits
     react_agent_timeout: Annotated[int, Field(ge=1)] = 180  # seconds before agent loop times out
     react_agent_max_steps: Annotated[int, Field(ge=1)] = 10  # max LangGraph recursion steps
-    # PERF-STATIC-ANALYST-LATENCY-01 (audit 2026-05-19) — tool-call budget.
+    # Tool-call budget.
     # When an analyst's ReAct loop exceeds this many cumulative tool calls
     # we log a WARNING. Not a hard limit (LangGraph's recursion_limit is
     # the structural cap); this is the early signal that an analyst is

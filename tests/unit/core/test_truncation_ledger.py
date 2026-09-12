@@ -272,11 +272,12 @@ class TestTheCapIsDetectedWhenTheServerWillNotSaySo:
     The response carries no ``stopped_limit``, no ``length``, nothing at all to
     say it was cut — only ``usage.completion_tokens`` equal to the cap.
 
-    So the judge-ceiling counter was blind twice over. Before OUTPUT-CAP-01 the
-    cap never reached the server (§3.35) and the counter measured an event that
-    could not occur; after the fix the event occurs and ``finish_reason`` still
-    does not report it. Comparing the produced count against the requested cap is
-    the only evidence the server leaves.
+    So the judge-ceiling counter was blind twice over. Before the cap was sent
+    under the key the server reads it never reached the server (§3.35) and the
+    counter measured an event that could not occur; after the fix the event
+    occurs and ``finish_reason`` still does not report it. Comparing the
+    produced count against the requested cap is the only evidence the server
+    leaves.
     """
 
     def _response(self, *, tokens: int, reason: str = "stop") -> object:

@@ -101,7 +101,7 @@ async def _audit(
 ) -> None:
     """Persist an auth audit row on an INDEPENDENT transaction.
 
-    Audit 2026-07-26 (K1): this used to ``db.add()`` on the request-scoped
+    This used to ``db.add()`` on the request-scoped
     session, which only commits when the endpoint returns successfully
     (``database.get_db``). Every audit row written on a failure path was
     therefore rolled back with the ``HTTPException`` — verified live: after a
@@ -111,11 +111,10 @@ async def _audit(
     ``login.locked``, ``login.blocked_inactive``, ``refresh.invalid`` and
     ``refresh.reuse_detected`` (a token-theft indicator).
 
-    Dev audit 2026-09-06 (A2): the independent-session write itself moved to
-    ``services.audit.record``, which the sample, job and sandbox-report
-    endpoints now share. What stays here is this endpoint's own shape of a
-    row. ``db`` is kept in the signature for call-site compatibility and is
-    deliberately unused.
+    The independent-session write itself lives in ``services.audit.record``,
+    which the sample, job and sandbox-report endpoints share. What stays here
+    is this endpoint's own shape of a row. ``db`` is kept in the signature for
+    call-site compatibility and is deliberately unused.
     """
     del db  # audit rows must not share the request transaction (see docstring)
     await audit.record(

@@ -181,7 +181,7 @@ async def test_mock_pipeline_completes(
     async def _fake_execute(*args: Any, **kwargs: Any) -> MagicMock:
         nonlocal call_count
         # The worker fires extra ``UPDATE`` statements for ``started_at``/
-        # ``completed_at`` after the audit 2026-05-17 TIME-01 fix. Those
+        # ``completed_at`` after the job-timestamp fix. Those
         # don't need a row payload — return an empty MagicMock so the
         # commit/refresh path doesn't blow up.
         if call_count >= len(exec_results):
@@ -192,7 +192,7 @@ async def test_mock_pipeline_completes(
 
     mock_db_session.execute = _fake_execute
 
-    # Audit 2026-05-17 (W-01 permanent fix): mock mode requires BOTH the
+    # Mock mode requires BOTH the
     # env/job flag AND ``api.mock_mode_allowed=True``. Without the second
     # toggle the worker stays on the real LLM path -- exactly the opposite of
     # what this test wants. The second toggle comes from the module's
@@ -382,7 +382,7 @@ async def test_pipeline_failure_sets_failed_status(
     async def _fake_execute(*args: Any, **kwargs: Any) -> MagicMock:
         nonlocal call_count
         # The worker fires extra ``UPDATE`` statements for ``started_at``/
-        # ``completed_at`` after the audit 2026-05-17 TIME-01 fix. Those
+        # ``completed_at`` after the job-timestamp fix. Those
         # don't need a row payload — return an empty MagicMock so the
         # commit/refresh path doesn't blow up.
         if call_count >= len(exec_results):

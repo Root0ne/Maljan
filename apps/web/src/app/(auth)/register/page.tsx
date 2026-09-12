@@ -17,8 +17,8 @@ export default function RegisterPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // audit 2026-07-26 (T6): /login already bounced to the dashboard when auth
-  // is disabled, but /register rendered a full — and pointless — signup form.
+  // /login already bounced to the dashboard when auth is disabled, but
+  // /register rendered a full — and pointless — signup form.
   useEffect(() => {
     if (AUTH_DISABLED) router.replace("/dashboard");
   }, [router]);

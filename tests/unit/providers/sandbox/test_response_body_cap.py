@@ -1,6 +1,6 @@
 """A sandbox does not get to decide how much memory Maljan spends.
 
-CORE-1 (dev audit 2026-09-06): ``rest.py`` and ``triage.py`` read a report
+``rest.py`` and ``triage.py`` read a report
 body with ``response.json()`` and streamed a pcap to disk with no ceiling on
 either. A sandbox is a remote service under someone else's control -- often a
 public one -- and a report is the one body that is legitimately large, so a

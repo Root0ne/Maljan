@@ -66,7 +66,7 @@ class JobResponse(BaseModel):
 
     id: uuid.UUID
     sample_id: uuid.UUID
-    # BUG-02: surface the linked sample's hash + filename so the live view shows
+    # Surface the linked sample's hash + filename so the live view shows
     # a readable identity instead of the opaque sample_id UUID before the report
     # exists. Populated from the eager-loaded ``sample`` relationship; ``None``
     # when the sample row is unavailable.

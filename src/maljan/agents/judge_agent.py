@@ -352,7 +352,7 @@ class JudgeAgent:
             if isr_block:
                 reports_text = f"{reports_text}\n\n=== STRUCTURED CLAIMS (ISR) ===\n{isr_block}"
 
-        # Audit 2026-05-17 (MED-01): the mediator is NOT allowed to state a
+        # The mediator is NOT allowed to state a
         # verdict or describe the sample as "clean". Its only job is to
         # surface explicit contradictions between agents and quantify how
         # aligned they are. The downstream judge LLM owns the verdict
@@ -619,15 +619,14 @@ class JudgeAgent:
         try:
             # Filter out hallucinated / invalid technique IDs
             data = self._filter_invalid_technique_ids(data)
-            # Audit 2026-05-17: rewrite placeholder/non-UUID STIX IDs
-            # (J-01), drop indicators whose pattern value isn't in the
-            # deterministic evidence (J-02), and back-fill
-            # ``attack-pattern.external_references`` (REP-01).
+            # Rewrite placeholder/non-UUID STIX IDs, drop indicators whose
+            # pattern value isn't in the deterministic evidence, and
+            # back-fill ``attack-pattern.external_references``.
             from maljan.agents.judge_postprocess import postprocess_judge_bundle
 
             # When a cascade summary is available,
             # derive the set of TIDs that survived the cascade and pass it
-            # to REP-02 so orphan attack-patterns (TTPs the LLM emitted
+            # to the post-processor so orphan attack-patterns (TTPs the LLM emitted
             # but the deterministic pipeline rejected) are dropped from
             # the bundle before validation.
             valid_tids: frozenset[str] | None = None
@@ -662,7 +661,7 @@ class JudgeAgent:
         support the structured-output path — we build the wrapper inside the
         loop so a provider-level failure also routes through the fallback.
 
-        PORTABLE-RESPONSE-FORMAT-01 (audit 2026-05-19): check the provider
+        Check the provider
         capability table before attempting ``with_structured_output``.
         Ollama (and any future provider that lacks tool-calling) is routed
         directly to the text fallback so we don't pay 3 retry rounds for a
@@ -746,7 +745,7 @@ class JudgeAgent:
         (e.g. T1055, T1055.001). Anything else (T0000, T123, T12345, etc.) is
         treated as hallucinated and the object is removed.
 
-        Audit 2026-05-19 FILT-COVERAGE-01: the previous implementation only
+        The previous implementation only
         inspected the Maljan-custom ``x_maljan_technique_id`` field. STIX-
         standard technique IDs surface in ``external_references[*].external_id``
         and (for LLM-emitted SDOs) the ``name`` field, so we now check those
@@ -779,7 +778,7 @@ class JudgeAgent:
                     if isinstance(ext_id, str) and src in {"mitre-attack", "mitre attack"}:
                         candidates.append(ext_id)
             # AttackPattern SDOs whose ``name`` is itself a T#### string
-            # (the SIG-T0000-01 leak path) — only check ``name`` for
+            # (a known leak path) — only check ``name`` for
             # attack-pattern objects.
             if obj.get("type") == "attack-pattern":
                 name = obj.get("name")
@@ -1204,7 +1203,7 @@ class JudgeAgent:
             return ""
 
         try:
-            # Audit 2026-05-17 LTM-01: never retrieve the current
+            # Never retrieve the current
             # sample's own past run as a "weighted prior". Newer
             # QdrantStore.retrieve accepts ``exclude_sample_id``; older
             # MemoryStore implementations (InMemoryStore in tests) may

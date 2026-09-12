@@ -13,8 +13,8 @@ Directory Enumeration") — while ``ttp_mappings`` in the very same report liste
 downstream consumer: the technique ID *is* the ATT&CK mapping.
 
 Both existing guards missed it because both key off a technique ID the LLM
-never supplied. REP-02 drops orphans via ``if tid and tid not in valid_ids`` —
-a ``None`` tid keeps the object. REP-01 back-fills references only once a tid
+never supplied. The orphan drop runs ``if tid and tid not in valid_ids`` —
+a ``None`` tid keeps the object. The reference back-fill runs only once a tid
 resolves. When the model writes prose names with no IDs anywhere, both are
 no-ops, and nothing in the pipeline ever *adds* the techniques the model left
 out: the bundle was only ever a filtered view of the LLM's output.

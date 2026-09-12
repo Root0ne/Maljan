@@ -250,8 +250,7 @@ async def _publish_event(
     PubSub channel ``analysis:{job_id}`` is used by the live WebSocket
     fan-out. A parallel Redis Stream ``analysis:{job_id}:events`` keeps
     the last 1000 events so a client opening the Live tab mid-run can
-    back-fill its event log via ``GET /api/v1/jobs/{job_id}/events``
-    (audit 2026-05-17, LIVE-01).
+    back-fill its event log via ``GET /api/v1/jobs/{job_id}/events``.
 
     Message format on both channels:
     ``{"type": ..., "data": ..., "ts": ...}``.
@@ -537,7 +536,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     extra={"job_id": job_id},
                 )
 
-            # Mock-mode resolution (audit 2026-05-17: W-01 permanent fix).
+            # Mock-mode resolution.
             # Two independent toggles must agree before the pipeline runs
             # in mock mode:
             #   1. ``api.mock_mode_allowed`` — operator-level gate
@@ -779,7 +778,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             cancelled_by_user = False
 
             async def _heartbeat() -> None:
-                # Audit 2026-07-26 (Ö5): the heartbeat is also the cancellation
+                # The heartbeat is also the cancellation
                 # poller. `cancel_job` sets `analysis:{job_id}:cancel`; the
                 # pipeline is a single long `await`, so cancelling that task is
                 # the only way to stop the run. Previously the worker checked the
@@ -822,7 +821,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             await _publish_event(redis_conn, job_id, "phase_change", {"phase": "analyzing"})
             try:
                 # Run the pipeline as a task so the heartbeat poller can cancel
-                # it when the user cancels the job (audit 2026-07-26, Ö5).
+                # it when the user cancels the job.
                 pipeline_task = asyncio.create_task(
                     app.arun(
                         file_hash=sample.sha256,
@@ -1320,7 +1319,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
 def _extract_confidence(result: dict) -> float:
     """Extract overall confidence from the pipeline result.
 
-    CONF-INFL-01 (audit 2026-07-26): the degraded-run confidence cap
+    The degraded-run confidence cap
     (``nodes.py`` ``_DEGRADED_CONFIDENCE_CAP``) is applied while building the
     ``MalwareReport``; ``run_summary`` and ``confidence_history`` still carry the
     RAW judge value. Persisting the raw value here made the API, the reports

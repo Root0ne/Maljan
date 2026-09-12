@@ -239,7 +239,7 @@ class TestDegradationReasonsAreNotSharedAcrossInstances:
 
 
 class TestPerAgentMaxStepsOverride:
-    """2026-06-23 live-UI audit: the static analyst's Ghidra ReAct loop needs
+    """The static analyst's Ghidra ReAct loop needs
     more than the default 10 recursion steps. ``react_agent_max_steps_overrides``
     must raise the LangGraph ``recursion_limit`` for ``static`` while leaving
     other analysts on the default. Without it the loop was cut off after ~4 tool
@@ -296,7 +296,7 @@ class TestPerAgentMaxStepsOverride:
 
 
 class TestForcedFinalSynthesis:
-    """2026-06-23 live-UI audit: a tool-using ReAct loop that exhausts its step
+    """A tool-using ReAct loop that exhausts its step
     budget returns LangGraph's "Sorry, need more steps to process this request."
     stop message, silently discarding every tool result it gathered.
     ``execute_tool_loop`` must salvage that by re-invoking the model once on the

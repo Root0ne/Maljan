@@ -352,8 +352,8 @@ def _resolve_tactic(index: Any | None, tactic_slug: str) -> tuple[str, str]:
 
     Prefers the live ATT&CK bundle's tactic catalogue (via the index) for
     resolution, then pins the *display name* to the canonical Enterprise label
-    for known TA-ids. 2026-07 audit (Bulgu #5): a v19+ bundle returns the
-    renamed label "Stealth" for TA0005, which leaked into the markdown export /
+    for known TA-ids. A v19+ bundle returns the renamed label "Stealth" for
+    TA0005, which leaked into the markdown export /
     ``ttp_mappings`` and contradicted the frontend's "Defense Evasion". Pinning
     keeps every surface consistent. Falls back to the inlined ``_TACTIC_BY_SLUG``
     table when the catalogue is unavailable (offline first run, fixtures, tests).

@@ -44,7 +44,7 @@ export default function AttributionTab() {
     setEnrichBusy(true);
     setEnrichMsg(null);
     try {
-      // audit 2026-07-26 (§4): report the actual endpoint status rather than
+      // Report the actual endpoint status rather than
       // promising a refresh for every outcome.
       const res = await api.enrichReport(reportId);
       setEnrichMsg(ENRICH_STATUS_MESSAGE[res.status] ?? ENRICH_STATUS_MESSAGE.queued);

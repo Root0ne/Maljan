@@ -10,7 +10,7 @@ import { countLabel, formatDuration, timeAgo } from "@/lib/report-utils";
 interface DisplayJob {
   id: string;
   sample_id: string;
-  // audit 2026-07-26 (T4): carry the readable sample identity so rows are
+  // Carry the readable sample identity so rows are
   // distinguishable instead of all showing the same sample_id UUID prefix.
   sample_filename: string | null;
   sample_sha256: string | null;
@@ -94,7 +94,7 @@ export default function JobsPage() {
       setJobs(res.items.map(mapJob));
       setRefreshError(null);
     } catch (err) {
-      // audit 2026-07-26 (§4 "sessizce yutulan hatalar"): the list stays
+      // The list stays
       // stale on failure, so say so rather than silently showing old rows.
       setRefreshError(
         `${getErrorMessage(err) || "Failed to refresh jobs."} The list below may be out of date.`,
@@ -125,7 +125,7 @@ export default function JobsPage() {
     setCancelError(null);
   };
 
-  /* audit 2026-07-26 (§4 accessibility): Escape must dismiss the dialog —
+  /* Escape must dismiss the dialog —
    * same keydown pattern the search palette uses. */
   useEffect(() => {
     if (!confirmJob) return;

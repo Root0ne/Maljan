@@ -1,4 +1,4 @@
-"""BUG-06 regression: the shared, never-closing agent event loop.
+"""Regression: the shared, never-closing agent event loop.
 
 The old model spun up a fresh ``asyncio.new_event_loop()`` per agent call and
 ``close()``d it afterwards. The openai SDK's httpx ASYNC connection pool, bound
@@ -39,7 +39,7 @@ def test_run_coro_blocking_runs_many_times_on_same_loop() -> None:
 
 
 def test_timeout_does_not_poison_subsequent_calls() -> None:
-    """The core BUG-06 invariant: a timed-out call must not break the loop."""
+    """The core invariant: a timed-out call must not break the loop."""
 
     async def _hang() -> None:
         await asyncio.sleep(60)
@@ -67,7 +67,7 @@ def test_exception_in_coro_propagates_and_loop_survives() -> None:
 
 
 class TestGraphNodesReachTheSameLoop:
-    """The other half of BUG-06, found live on 2026-07-26.
+    """The other half of the shared-loop fix, found live on 2026-07-26.
 
     Moving the *analysts* onto the shared loop was only half a fix. The graph's
     own coroutine nodes still awaited their agent calls on the worker's loop,

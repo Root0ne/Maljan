@@ -1,6 +1,6 @@
 """Model tool-call syntax is scaffolding, not a finding.
 
-C1 (dev audit 2026-09-06): a live job's ``static_r2`` analyst -- the static
+A live job's ``static_r2`` analyst -- the static
 analyst under r2 tools, on the local model -- produced ISR claims whose text
 was raw tool-call syntax, and the Pipeline tab showed them to the operator as
 findings. A local model that emits its tool calls into the assistant channel

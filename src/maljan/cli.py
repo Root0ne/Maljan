@@ -407,11 +407,11 @@ def memory_purge_low_quality(
         False, "--dry-run", help="Show how many cases would be removed without deleting."
     ),
 ) -> None:
-    """Retroactively purge low-quality LTM entries per the LTM-01 gate.
+    """Retroactively purge low-quality LTM entries per the write-time gate.
 
-    Helpful after the audit 2026-05-17 fixes: older Qdrant points stored
-    before the quality gate landed are still in the collection and would
-    otherwise keep biasing new analyses via the few-shot retrieval prior.
+    Older Qdrant points stored before the quality gate landed are still in
+    the collection and would otherwise keep biasing new analyses via the
+    few-shot retrieval prior.
     """
     store = _build_memory_store_cli()
     backend = type(store).__name__

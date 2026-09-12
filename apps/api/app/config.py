@@ -64,8 +64,8 @@ class APISettings(BaseSettings):
     app_name: str = "Maljan"
     app_version: str = "0.1.0"
     debug: bool = False
-    # Echo every SQL statement to the log. Deliberately independent of ``debug``
-    # (audit 2026-07-26, Ö6): with DEBUG=true this drowned the worker/API logs in
+    # Echo every SQL statement to the log. Deliberately independent of ``debug``:
+    # with DEBUG=true this drowned the worker/API logs in
     # duplicated SQL and made pipeline stages impossible to follow. Enable only
     # when actively debugging queries: ``SQL_ECHO=true``.
     sql_echo: bool = False
@@ -74,7 +74,7 @@ class APISettings(BaseSettings):
     cors_allow_methods: list[str] = Field(
         default=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
     )
-    # "X-API-Key" is required for the API-key auth path (audit 2026-07-26, K2);
+    # "X-API-Key" is required for the API-key auth path;
     # without it the browser preflight strips the header and keys silently fail.
     cors_allow_headers: list[str] = Field(
         default=["Authorization", "Content-Type", "X-Correlation-Id", "X-API-Key"]

@@ -5,7 +5,7 @@ Sigma and YARA are complementary layers:
   - Sigma: looks at structured telemetry events (process creation, registry
     writes) built from the sandbox report (Sysmon/Windows-Event-Log shaped).
 
-2026-07 audit: the pipeline feeds Sigma structured events built from real
+The pipeline feeds Sigma structured events built from real
 sandbox telemetry via ``build_events_from_sandbox`` + ``scan_events`` (strict
 field matching). The legacy ``scan_report_text``/``scan_log_lines`` prose path
 is retained only for tests/back-compat — it must NOT be used on analyst prose,
@@ -77,7 +77,7 @@ class SigmaMatch:
     ``technique_id`` is ``None`` when the matched Sigma rule carries no
     ``attack.t####`` tag — previously this surfaced as the literal string
     ``"T0000"``, which polluted the STIX bundle with an invalid MITRE
-    AttackPattern SDO. (2026-05-19 audit SIG-T0000-01.)
+    AttackPattern SDO.
 
     ``rule_platforms``: the canonical platform bucket(s) the rule
     declared via ``logsource.product``. Empty when the rule is generic.
@@ -394,8 +394,8 @@ class SigmaLayer:
 
         Previously returned the hardcoded ``"T0000"`` sentinel when a rule
         had no ``attack.t####`` tag — that placeholder leaked through the
-        cascade into the STIX bundle as an invalid AttackPattern SDO
-        (audit 2026-05-19 SIG-T0000-01). Now we return ``None`` so
+        cascade into the STIX bundle as an invalid AttackPattern SDO.
+        Now we return ``None`` so
         downstream consumers that already accept ``Optional[str]`` (the
         ISR ClaimEvidence model, the cascade engine's regex filter) treat
         the rule as "untagged" rather than "T0000".
@@ -567,7 +567,7 @@ def build_events_from_sandbox(sandbox_report: dict[str, Any] | None) -> list[dic
     """Translate real sandbox telemetry into Sysmon-shaped events for strict
     Sigma evaluation.
 
-    2026-07 audit: Sigma previously scanned concatenated analyst prose with
+    Sigma previously scanned concatenated analyst prose with
     ``strict=False``, which matched a rule's *values* against any text — e.g.
     the Ghidra tool name ``list_imports`` appearing in an analyst report
     satisfied a ``CommandLine|contains: list_imports`` rule and surfaced as a

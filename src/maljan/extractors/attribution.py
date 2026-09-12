@@ -137,7 +137,7 @@ def build_family_attribution(
     verdict confidence. ``similar_samples`` / ``function_hash_matches`` are left
     at their defaults here and filled later by the enrichment / report nodes.
 
-    2026-07 audit (Bulgu #6/#7): the family is drawn ONLY from a real family
+    The family is drawn ONLY from a real family
     source (sandbox CTI ``family[]``). The behavioural *category*
     (``malware_category`` — "dropper", "loader", …) is a class, NOT a family, so
     it is no longer echoed into ``family``; that echo produced the contradictory

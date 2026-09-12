@@ -67,7 +67,7 @@ def test_flatten_leaves_reads_only_requested_keys():
 
 
 def test_public_snapshot_keeps_server_env_names_and_hides_their_values():
-    """SEC-1 (dev audit 2026-09-06): defence in depth for an open-ended dict.
+    """Defence in depth for an open-ended dict.
 
     ``mcp.servers.<key>.env`` is a plain mapping an admin fills in, and it is
     where a server's own credential naturally goes -- an API token a sidecar

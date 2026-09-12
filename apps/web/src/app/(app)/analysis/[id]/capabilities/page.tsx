@@ -110,7 +110,7 @@ function parseTechniques(raw: unknown[]): Tactic[] {
     // Canonical Enterprise display name wins for any KNOWN tactic id. This
     // covers two cases: (a) the mapping only carried the TA-id (TTPMapping has
     // no tactic_name, so columns would read "TA0005" instead of "Defense
-    // Evasion"), and (b) audit M2 — a persisted/bundle tactic_name that is
+    // Evasion"), and (b) a persisted/bundle tactic_name that is
     // non-canonical (e.g. "Stealth" for TA0005) would otherwise mislabel the
     // column. Unknown/new tactic ids keep whatever name the mapping supplied.
     const canonicalName = ENTERPRISE_NAME_BY_ID[tacticId];
@@ -147,7 +147,7 @@ export default function AttackTab() {
   const { report, job, loading } = useReport();
   const [search, setSearch] = useState("");
   const [mitreData, setMitreData] = useState<unknown[] | null>(null);
-  // audit 2026-07-26 (§4 "sessizce yutulan hatalar"): a failed /mitre fallback
+  // A failed /mitre fallback
   // rendered as "no techniques mapped", which is a different claim entirely.
   const [fetchError, setFetchError] = useState<string | null>(null);
 

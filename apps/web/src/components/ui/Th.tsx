@@ -1,6 +1,6 @@
 /* Shared table-header cell.
  *
- * audit 2026-07-26 (§5 "yinelenen yardımcılar"): three byte-identical `Th`
+ * Three byte-identical `Th`
  * components lived in the STATIC, DYNAMIC and NETWORK tabs. One definition
  * keeps the table chrome consistent as the styling evolves.
  */

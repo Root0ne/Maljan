@@ -292,7 +292,7 @@ class NarrativeAgent:
     ) -> None:
         self.llm = llm
         self.max_input_tokens = max_input_tokens
-        # 2026-07 audit (Bulgu #10, G1): the narrative round is a real LLM call
+        # The narrative round is a real LLM call
         # and must count toward run_summary token metrics. Recorded on the raw
         # path below (the structured path hides usage behind the parser).
         self.token_ledger = token_ledger

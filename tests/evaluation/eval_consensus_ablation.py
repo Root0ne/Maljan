@@ -472,7 +472,7 @@ def bind_eval_llm(agent: Any, *, timeout_s: int = _CALL_TIMEOUT_S) -> None:
     2026-08-15.** ``bind(extra_body=...)`` overrides the value the provider set at
     construction rather than adding to it. The provider puts everything a local
     llama.cpp server needs in there: the output cap under the key that server
-    actually reads (``OUTPUT-CAP-01``), and the repetition penalty when one is
+    actually reads, and the repetition penalty when one is
     configured. Passing a fresh dict here silently dropped all of it, so **every
     harness that calls this function was measuring a differently-configured
     system than production runs** — with the judge's 8,192-token ceiling removed,

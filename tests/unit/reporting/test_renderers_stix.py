@@ -163,7 +163,7 @@ class TestBaseBundlePreserved:
         assert "malware--b2c3d4e5-f6a7-8901-bcde-f12345678901" in malware_ids
 
     def test_judge_is_family_normalized_to_false(self) -> None:
-        # Audit Bulgu #8: the LLM copies ``is_family: true`` from STIX docs, but
+        # The LLM copies ``is_family: true`` from STIX docs, but
         # Maljan analyses a single specimen — the renderer must force it to False
         # so the SDO doesn't claim to represent a whole malware family.
         judge_malware = Malware(
