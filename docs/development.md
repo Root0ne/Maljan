@@ -14,11 +14,10 @@ Maljan/
 │                      providers, memory, reporting, core (config, container)
 ├── services/          stdio MCP sidecars, one server.py each
 ├── scripts/
-│   ├── dev/           local running helpers (LLM server, Ghidra manager, external/)
+│   ├── dev/           fetch_external.sh and the Ghidra image manager
 │   ├── goldens/       one-off capture scripts that write tests/fixtures/golden/
 │   ├── knowledge/     builders for the data/ assets and the evaluation fixtures
-│   ├── paper/         the paper conformance check and the cohort completer
-│   └── settings/      the settings-annotation seeder
+│   └── paper/         the paper conformance check and the cohort completer
 ├── tests/             unit/ api/ integration/ fixtures/ evaluation/
 ├── data/              tracked knowledge assets, loaded lazily, each with a fallback
 ├── docker/            Dockerfiles, the compose stack and its dev overlay
@@ -35,6 +34,13 @@ backend image and in CI alike.
 Route-local React components stay in their route folder; a component two routes
 use moves to `apps/web/src/components/`. `tests/unit/` mirrors `src/maljan`,
 one subdirectory per subpackage, and is where a new test starts.
+
+Host-specific helpers (a launcher for a local llama-server, a memory guard, a
+restart wrapper for long evaluations) live outside the repository. For the
+record, the local model server the measurements in this repository were taken
+with ran `ik_llama.cpp` as
+`llama-server -m Qwen3.6-35B-A3B-IQ3_K_R4.gguf -c 131072 -t 16 -fa on -ctk q8_0 -ctv q8_0 -ngl 999 -ot 'blk\.([1-3][0-9])\.ffn_(up|gate|down)_exps=CPU' --context-shift on --jinja`
+on loopback port 8080.
 
 ## Make targets
 

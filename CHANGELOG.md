@@ -81,6 +81,9 @@ change landed on `main`.
 - Dead code found by vulture, ruff and knip, and a duplicated structural
   `deepEqual` in the settings console, now one implementation
   ([#36](https://github.com/Root0ne/Maljan/pull/36)).
+- Machine-local operator scripts (`llm_server.sh`, `night_guard.sh`,
+  `run_with_restarts.sh`) and the retired annotation seeder left `scripts/`;
+  what remains is what the Makefile, CI and the tests call.
 - Process tags in source comments — dated audit identifiers, ticket numbers and
   phase labels. The reasoning stays, the bookkeeping goes
   ([#38](https://github.com/Root0ne/Maljan/pull/38)).

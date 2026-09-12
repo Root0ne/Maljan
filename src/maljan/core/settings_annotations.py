@@ -1,10 +1,9 @@
 """What each setting means, in words a person can act on.
 
-Titles and descriptions were seeded from the comments in the root ``.env.example``
-(deleted 2026-09-11, when application settings moved into the settings store) by
-``scripts/settings/seed_settings_annotations.py`` and then edited; that script is now
-retired, and a new leaf's title and description are written by hand here. Groups come from
-the key prefix (``group_for``); an entry may override its group. ``applies``
+Titles and descriptions were first drafted from the comments of the former
+root ``.env.example`` and then edited; a new leaf's title and description are
+written by hand here. Groups come from the key prefix (``group_for``); an entry
+may override its group. ``applies``
 defaults to ``next_job`` for every core setting. ``probe`` names the
 connection test in apps/api/app/services/settings_probes.py that exercises
 the field.
