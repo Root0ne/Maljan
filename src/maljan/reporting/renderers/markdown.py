@@ -122,6 +122,21 @@ class MarkdownRenderer:
                 "verdict, confidence and severity below should be treated as tentative "
                 f"and corroborated manually.  \n> Reasons: {reasons}"
             )
+        # What the report is standing on, said in the header rather than left
+        # in a JSON field: a reader who is told nothing was trimmed reads the
+        # evidence sections as complete, and a reader who is told twelve
+        # entries were trimmed knows to open the evidence endpoint.
+        evidence = (report.run_summary or {}).get("evidence") or {}
+        entries = evidence.get("entries")
+        if entries:
+            line = f"\n\n**Evidence**: {entries} tool call(s) recorded"
+            failed = int(evidence.get("failed") or 0)
+            if failed:
+                line += f", {failed} failed"
+            trimmed = int(evidence.get("trimmed") or 0)
+            if trimmed:
+                line += f", {trimmed} evidence entries trimmed to the budget"
+            header += line + "."
         profile = (report.run_summary or {}).get("profile") or {}
         # Live-verification L2: a reduced profile (fewer/different analysts than
         # the default ensemble) changes what evidence backs the verdict, but
@@ -896,6 +911,16 @@ class MarkdownRenderer:
                     lines.append(f"- Final confidence: {float(final_conf):.3f}")
                 except (TypeError, ValueError):
                     pass
+        evidence = run_summary.get("evidence") or {}
+        if evidence:
+            lines.append(
+                f"- Evidence entries: {evidence.get('entries', 0)} "
+                f"({evidence.get('ok', 0)} ok, {evidence.get('failed', 0)} failed, "
+                f"{evidence.get('trimmed', 0)} trimmed to the budget)"
+            )
+        ungrounded = run_summary.get("sections_without_evidence")
+        if ungrounded:
+            lines.append(f"- Report sections with no evidence: {ungrounded}")
         cascade = run_summary.get("cascade") or {}
         if cascade:
             total = cascade.get("total_techniques")

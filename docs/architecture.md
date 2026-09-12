@@ -199,9 +199,11 @@ model with the entry's id stamped on the front:
 {"machine": 332, "sections": [...], "imports": [...]}
 ```
 
-Ids (`ev_0007`) are monotonic across the whole job. That stamp is what makes a
-report checkable: the model can cite the call it read a fact from, a report
-section lists the entries it was built from, and `GET
+Ids (`ev_0007`) are monotonic across the whole job, and the judge's own calls —
+threat intel on a disputed indicator, a knowledge lookup — go through the same
+recorder under `agent="judge"`, so a verdict that leans on one can cite it.
+That stamp is what makes a report checkable: the model can cite the call it read
+a fact from, a report section lists the entries it was built from, and `GET
 /api/v1/jobs/{id}/evidence` serves those entries back.
 
 Two bounds keep the ledger from becoming the thing it records. Each output is

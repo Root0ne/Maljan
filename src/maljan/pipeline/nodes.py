@@ -1846,11 +1846,24 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 status="complete",
             )
 
+            _judge_ledger: list[dict[str, Any]] = []
+            try:
+                _judge_ledger = [
+                    entry.model_dump(mode="json") for entry in judge.get_last_evidence_entries()
+                ]
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("evidence ledger read skipped for the judge: %s", exc)
+
             return {
                 "final_decision": decision,
                 "judge_report": "Analyzed negotiation history and expert reports.",
                 "stix_output": stix_output,
                 "run_summary": run_summary_dict,
+                # The judge's own tool calls — threat intel on a disputed
+                # indicator, a knowledge lookup — on the same append-only
+                # channel the analysts use, so a verdict that leans on one can
+                # cite it and the citation resolves.
+                "evidence_ledger": _judge_ledger,
                 # Persist YARA/Sigma layer ISRs so callers can inspect them.
                 "isr_reports": isr_reports,
                 # Surface the degraded-mode signal to the report
@@ -2382,11 +2395,19 @@ def make_report_node(container: ServiceContainer) -> Any:
             # ``evidence_ledger`` is append-only, so this adds the provider's
             # entries to the run's rather than replacing it.
             result["evidence_ledger"] = [e.model_dump(mode="json") for e in _capa_entries]
+        # ``run_summary`` on the state is what the API's own column carries, so
+        # anything a reader is meant to see outside the full report has to be
+        # added here too. Only written when there is something to add — an
+        # untouched value keeps the mock-mode contract, where the judge node
+        # skipped the RunSummaryBuilder and the column is legitimately null.
+        _state_summary: dict[str, Any] = {}
         if fp_warnings:
-            result["run_summary"] = {
-                **(state.get("run_summary") or {}),
-                "fp_warnings": fp_warnings,
-            }
+            _state_summary["fp_warnings"] = fp_warnings
+        if _ledger:
+            _state_summary["evidence"] = _summary["evidence"]
+            _state_summary["sections_without_evidence"] = _summary["sections_without_evidence"]
+        if _state_summary:
+            result["run_summary"] = {**(state.get("run_summary") or {}), **_state_summary}
         return result
 
     node_fn.__name__ = "report_node"

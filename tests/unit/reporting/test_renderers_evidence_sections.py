@@ -119,3 +119,43 @@ class TestHtml:
         assert ">Evidence</h2>" in html
         assert "<td>VirtualAllocEx</td>" in html
         assert "ev_0002" in html
+
+
+class TestTheReaderIsToldWhatWasTrimmed:
+    """A count the report keeps to itself is a count nobody acts on."""
+
+    def _report_with(self, evidence: dict) -> MalwareReport:
+        report = _report()
+        report.run_summary = {"evidence": evidence}
+        return report
+
+    def test_the_header_names_the_trimmed_entries(self) -> None:
+        markdown = MarkdownRenderer().render(
+            self._report_with({"entries": 40, "ok": 39, "failed": 1, "trimmed": 12})
+        )
+        assert "40 tool call(s) recorded" in markdown
+        assert "1 failed" in markdown
+        assert "12 evidence entries trimmed to the budget" in markdown
+
+    def test_a_run_that_trimmed_nothing_says_nothing_about_trimming(self) -> None:
+        markdown = MarkdownRenderer().render(
+            self._report_with({"entries": 4, "ok": 4, "failed": 0, "trimmed": 0})
+        )
+        assert "4 tool call(s) recorded" in markdown
+        assert "trimmed to the budget" not in markdown.split("## Run Summary")[0]
+
+    def test_a_run_with_no_evidence_adds_no_line(self) -> None:
+        assert "tool call(s) recorded" not in MarkdownRenderer().render(_report())
+
+    def test_the_run_summary_section_carries_the_counts(self) -> None:
+        report = self._report_with({"entries": 40, "ok": 39, "failed": 1, "trimmed": 12})
+        report.run_summary["sections_without_evidence"] = 2
+        markdown = MarkdownRenderer().render(report)
+        assert "- Evidence entries: 40 (39 ok, 1 failed, 12 trimmed to the budget)" in markdown
+        assert "- Report sections with no evidence: 2" in markdown
+
+    def test_the_html_export_carries_it_too(self) -> None:
+        html = HtmlRenderer().render(
+            self._report_with({"entries": 40, "ok": 39, "failed": 1, "trimmed": 12})
+        )
+        assert "12 evidence entries trimmed to the budget" in html

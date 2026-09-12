@@ -18,7 +18,9 @@ change landed on `main`.
   /api/v1/jobs/{job_id}/evidence` (filters `agent` and `tool`, paged, the job's
   own ownership rules). `reporting.evidence_budget_bytes` caps what one agent
   may keep: past it an entry keeps its call record and drops its output, and the
-  count reaches the truncation ledger and the run summary.
+  count reaches the truncation ledger, the job's stored run summary and the
+  report's own header, so a reader is told what they are not being shown. The
+  judge's tool calls go through the same recorder under `agent="judge"`.
 - **A structured findings channel.** An analyst may end its answer with a fenced
   `maljan-findings` block holding JSON — `artifacts` (a kind, a label, a value
   or columns and rows) and `findings` (a title, techniques, a confidence), each

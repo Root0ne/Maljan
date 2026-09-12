@@ -67,6 +67,7 @@ from maljan.core.token_ledger import TokenLedger, record_response_usage
 from maljan.core.truncation_ledger import TruncationLedger, record_judge_response
 from maljan.pipeline.mediation_models import MediatorVerdict
 from maljan.pipeline.state import AgentArgument
+from maljan.schemas.evidence import EvidenceCounter, LedgerEntry
 from maljan.schemas.isr_models import AgentISR
 from maljan.schemas.stix_models import Bundle
 
@@ -161,6 +162,12 @@ class JudgeAgent:
         # never ran.
         self.tools: list[Any] = []
         self.degradation_reasons: list[Any] = []
+        # The judge calls tools too — threat intel on a disputed indicator, an
+        # ATT&CK or family lookup — and a verdict that cites one has to be
+        # checkable the same way an analyst's claim is. Same counter as the
+        # analysts, so the ids are one sequence across the whole job.
+        self.evidence_counter: EvidenceCounter | None = None
+        self._last_evidence_entries: list[LedgerEntry] = []
 
     def _server_registry(self) -> Any | None:
         """The job's tool-server registry, or None when this judge runs bare."""
@@ -295,7 +302,11 @@ class JudgeAgent:
 
         self.logger.info("JudgeAgent starting ReAct agent loop with %d tools...", len(self.tools))
 
-        agent_executor = create_react_agent(self.llm, self.tools)
+        from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
+
+        recorder = EvidenceRecorder("judge", counter=self.evidence_counter)
+        self._last_evidence_entries = []
+        agent_executor = create_react_agent(self.llm, record_tools(self.tools, recorder))
 
         messages = messages_pre
 
@@ -327,6 +338,14 @@ class JudgeAgent:
         except TimeoutError:
             self.logger.error("JudgeAgent ReAct timed out after %ds.", timeout)
             raise
+        finally:
+            # In a ``finally`` for the reason the analysts' loop uses one: a
+            # mediation that timed out still made the calls it made.
+            self._last_evidence_entries = list(recorder.entries)
+
+    def get_last_evidence_entries(self) -> list[LedgerEntry]:
+        """The ledger entries the judge's most recent tool loop wrote."""
+        return list(self._last_evidence_entries)
 
     @staticmethod
     def _has_explicit_dissent(isr_reports: dict[str, AgentISR] | None) -> bool:
