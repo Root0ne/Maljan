@@ -1,12 +1,16 @@
-"""Extract the NetworkIOCs section from the sandbox report.
+"""Score a domain, and turn the algorithmic ones into a claim.
 
-The CAPEv2 sandbox report exposes ``network`` with sub-lists for ``dns``,
-``http``, ``tcp``, ``udp``, ``hosts``, ``domains``. Each accessor below
-tolerates minor shape variation across CAPE versions (some report TCP/UDP
-flows under ``flows`` rather than dedicated keys).
+This module used to pull the whole network section out of a sandbox report
+inside the report builder. It does not any more — the report is assembled from
+what the agents' tools returned — and what is left is the part that was never
+extraction: the DGA scorer, the IDN homograph check and the emittable-address
+rules that decide whether an observed indicator is worth reporting at all.
 
-Suspicion heuristics are deliberately simple and additive — the narrative
-agent and the threat-intel enrichment worker layer richer signal on top.
+``reporting.ledger_projection`` applies the scorer to the domains a run
+actually observed, and ``build_dga_isr`` turns the algorithmic ones into a
+Layer-0 claim. Both go in the next phase, when the judgement layers are
+reworked; the scorer lives here until then so there is one definition of what
+"looks generated" means.
 """
 
 from __future__ import annotations
@@ -15,10 +19,9 @@ import ipaddress
 import math
 import unicodedata
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from maljan.core.logger import logger
-from maljan.reporting.models import NetworkDomain, NetworkIOCs, NetworkIP, NetworkURL
+from maljan.reporting.models import NetworkIOCs
 
 if TYPE_CHECKING:
     from maljan.schemas.isr_models import AgentISR
@@ -285,106 +288,9 @@ _HOMOGRAPH_BRANDS: frozenset[str] = frozenset(
 )
 
 
-def build_network_iocs(
-    sandbox_report: dict[str, Any] | None,
-) -> NetworkIOCs | None:
-    """Return NetworkIOCs aggregated from the sandbox report, or None if empty."""
-    if not sandbox_report:
-        return None
-    raw = sandbox_report.get("network") or {}
-    if not isinstance(raw, dict):
-        return None
-
-    domains = _extract_domains(raw)
-    ips = _extract_ips(raw)
-    urls = _extract_urls(raw)
-    user_agents = _extract_user_agents(raw)
-    ja3 = _extract_ja3(raw)
-    ja3s = _extract_ja3s(raw)
-
-    if not (domains or ips or urls or user_agents or ja3 or ja3s):
-        return None
-
-    logger.info(
-        "network_extractor: domains=%d ips=%d urls=%d ja3=%d ja3s=%d",
-        len(domains),
-        len(ips),
-        len(urls),
-        len(ja3),
-        len(ja3s),
-    )
-    return NetworkIOCs(
-        domains=domains,
-        ips=ips,
-        urls=urls,
-        user_agents=user_agents,
-        ja3_fingerprints=ja3,
-        ja3s_fingerprints=ja3s,
-    )
-
-
 # ---------------------------------------------------------------------------
 # Domains
 # ---------------------------------------------------------------------------
-
-
-def _extract_domains(raw: dict[str, Any]) -> list[NetworkDomain]:
-    by_fqdn: dict[str, NetworkDomain] = {}
-
-    # 1. DNS queries
-    for entry in raw.get("dns") or []:
-        if not isinstance(entry, dict):
-            continue
-        fqdn = (entry.get("request") or entry.get("hostname") or entry.get("name") or "").strip()
-        if not fqdn:
-            continue
-        node = _get_or_create_domain(by_fqdn, fqdn)
-        if isinstance(entry.get("answers"), list):
-            for ans in entry["answers"]:
-                if isinstance(ans, dict):
-                    ip = ans.get("data") or ans.get("ip")
-                    if ip and ip not in node.resolved_ips:
-                        node.resolved_ips.append(str(ip))
-        pid = entry.get("pid")
-        if isinstance(pid, int) and pid not in node.queried_pids:
-            node.queried_pids.append(pid)
-
-    # 2. HTTP host headers
-    for entry in raw.get("http") or []:
-        if not isinstance(entry, dict):
-            continue
-        host = (entry.get("host") or entry.get("hostname") or "").strip()
-        if host:
-            _get_or_create_domain(by_fqdn, host)
-
-    # 3. ``domains`` aggregate (some sandboxes pre-compute)
-    for d in raw.get("domains") or []:
-        if isinstance(d, str):
-            _get_or_create_domain(by_fqdn, d.strip())
-        elif isinstance(d, dict) and d.get("domain"):
-            _get_or_create_domain(by_fqdn, str(d["domain"]).strip())
-
-    # Drop reserved / local / single-label names, then score suspicion.
-    emittable = [n for n in by_fqdn.values() if _is_emittable_domain(n.fqdn)]
-    for node in emittable:
-        verdict = _assess_domain(node.fqdn)
-        node.is_suspicious = verdict.suspicious
-        node.reason = verdict.reason
-        node.dga_score = verdict.dga_score
-        node.is_punycode = verdict.is_punycode
-        node.homograph_target = verdict.homograph_target
-        # Deterministic VirusTotal permalink (no API/quota); async enrichment
-        # may later merge real VT scores on top (enrichment/orchestrator.py).
-        node.reputation = {"virustotal_url": _vt_url_domain(node.fqdn), "source": "cape"}
-
-    return sorted(emittable, key=lambda d: (not d.is_suspicious, d.fqdn))
-
-
-def _get_or_create_domain(table: dict[str, NetworkDomain], fqdn: str) -> NetworkDomain:
-    key = fqdn.lower().rstrip(".")
-    if key not in table:
-        table[key] = NetworkDomain(fqdn=key, queried_pids=[], resolved_ips=[])
-    return table[key]
 
 
 @dataclass(frozen=True)
@@ -638,145 +544,12 @@ def build_dga_isr(network_iocs: NetworkIOCs | None) -> AgentISR | None:
 # ---------------------------------------------------------------------------
 
 
-# ---------------------------------------------------------------------------
-# VirusTotal permalinks + CAPE host metadata (2026-07-11)
-#
-# CAPE gives more than bare addresses: ``network.hosts`` carries per-IP ASN /
-# country / hostname / ports, and every IP/domain has a deterministic
-# VirusTotal GUI permalink (no API call or quota needed). Both are folded onto
-# the emitted IOCs so the network analyst and the report see the *contacted
-# host* (geo/ASN + a click-through VT link), not just the address.
-# ---------------------------------------------------------------------------
-
-_VT_GUI = "https://www.virustotal.com/gui"
-
-
-def _vt_url_ip(ip: str) -> str:
-    """Deterministic VirusTotal GUI permalink for an IP address."""
-    return f"{_VT_GUI}/ip-address/{ip}"
-
-
-def _vt_url_domain(fqdn: str) -> str:
-    """Deterministic VirusTotal GUI permalink for a domain."""
-    return f"{_VT_GUI}/domain/{fqdn}"
-
-
-def _build_host_meta(raw: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """Map ``IP -> {asn, geo, hostname, ports}`` from the CAPE ``hosts`` list.
-
-    The tcp/udp flow lists only expose ``dst``/``dport``; the aggregate
-    ``hosts`` entries carry the enrichment (``asn`` / ``asn_name`` /
-    ``country_name`` / ``hostname`` / ``ports``). CAPE writes the literal
-    string ``"unknown"`` for un-geolocated hosts, which we treat as absent.
-    """
-    meta: dict[str, dict[str, Any]] = {}
-    for entry in raw.get("hosts") or []:
-        if not isinstance(entry, dict):
-            continue
-        ip = str(entry.get("ip") or entry.get("address") or "").strip()
-        if not ip:
-            continue
-        m: dict[str, Any] = {}
-        asn = str(entry.get("asn") or "").strip()
-        asn_name = str(entry.get("asn_name") or "").strip()
-        asn_label = " ".join(p for p in (asn, asn_name) if p).strip()
-        if asn_label and asn_label.lower() != "unknown":
-            m["asn"] = asn_label
-        country = str(entry.get("country_name") or "").strip()
-        if country and country.lower() != "unknown":
-            m["geo"] = country
-        hostname = str(entry.get("hostname") or "").strip()
-        if hostname:
-            m["hostname"] = hostname
-        ports = entry.get("ports")
-        if isinstance(ports, list) and ports:
-            m["ports"] = ports
-        meta[ip] = m
-    return meta
-
-
-def _extract_ips(raw: dict[str, Any]) -> list[NetworkIP]:
-    seen: dict[tuple[str, int | None, str | None], NetworkIP] = {}
-    host_meta = _build_host_meta(raw)
-
-    def _add(address: str, port: int | None, transport: str | None) -> None:
-        if not _is_valid_ip(address) or not _is_emittable_ip(address):
-            return
-        key = (address, port, transport)
-        if key in seen:
-            return
-        suspicious, reason = _ip_suspicious(address)
-        meta = host_meta.get(address, {})
-        ip_obj = NetworkIP(
-            address=address,
-            port=port,
-            transport=transport,  # type: ignore[arg-type]
-            asn=meta.get("asn"),
-            geo=meta.get("geo"),
-            is_suspicious=suspicious,
-        )
-        # Every emitted IP is public/routable (see ``_is_emittable_ip``), so the
-        # VirusTotal permalink is always meaningful. Async enrichment may later
-        # merge real VT scores on top (see enrichment/orchestrator.py).
-        rep: dict[str, Any] = {"virustotal_url": _vt_url_ip(address), "source": "cape"}
-        if reason:
-            rep["_heuristic_reason"] = reason
-        if meta.get("hostname"):
-            rep["hostname"] = meta["hostname"]
-        if meta.get("ports"):
-            rep["contacted_ports"] = meta["ports"]
-        ip_obj.reputation = rep
-        seen[key] = ip_obj
-
-    for entry in raw.get("tcp") or []:
-        _read_flow(entry, "tcp", _add)
-    for entry in raw.get("udp") or []:
-        _read_flow(entry, "udp", _add)
-    for entry in raw.get("hosts") or []:
-        if isinstance(entry, str):
-            _add(entry, None, None)
-        elif isinstance(entry, dict):
-            _add(str(entry.get("ip") or entry.get("address") or ""), None, None)
-
-    return list(seen.values())
-
-
-def _read_flow(entry: Any, transport: str, add: Any) -> None:
-    if isinstance(entry, str):
-        add(entry, None, transport)
-        return
-    if not isinstance(entry, dict):
-        return
-    dst = entry.get("dst") or entry.get("dst_ip") or entry.get("ip") or entry.get("address")
-    port = entry.get("dport") or entry.get("dst_port") or entry.get("port")
-    if dst:
-        try:
-            port_int = int(port) if port is not None else None
-        except (TypeError, ValueError):
-            port_int = None
-        if port_int is not None and not (1 <= port_int <= 65535):
-            port_int = None
-        add(str(dst), port_int, transport)
-
-
 def _is_valid_ip(ip: str) -> bool:
     try:
         ipaddress.ip_address(ip)
         return True
     except ValueError:
         return False
-
-
-def _ip_suspicious(ip: str) -> tuple[bool, str | None]:
-    try:
-        addr = ipaddress.ip_address(ip)
-    except ValueError:
-        return False, None
-    if addr.is_private or addr.is_loopback or addr.is_multicast:
-        return False, None
-    # Naive RBL-style heuristic: just flag every public routable IP as
-    # "to be enriched" — the threat-intel worker fills in actual reputation.
-    return False, "public_address"
 
 
 def _is_emittable_ip(ip: str) -> bool:
@@ -815,87 +588,3 @@ def _is_emittable_domain(fqdn: str) -> bool:
     if lower in _RESERVED_DOMAIN_NAMES:
         return False
     return not any(lower.endswith(suffix) for suffix in _RESERVED_DOMAIN_SUFFIXES)
-
-
-# ---------------------------------------------------------------------------
-# URLs / UAs / JA3
-# ---------------------------------------------------------------------------
-
-
-def _extract_urls(raw: dict[str, Any]) -> list[NetworkURL]:
-    out: list[NetworkURL] = []
-    seen: set[str] = set()
-    for entry in raw.get("http") or []:
-        if not isinstance(entry, dict):
-            continue
-        # Host is case-insensitive (RFC 3986) — lowercase so casing variants
-        # dedupe to one URL.
-        host = (entry.get("host") or "").strip().lower()
-        path = (entry.get("uri") or entry.get("path") or "/").strip()
-        if not host:
-            continue
-        is_https = (
-            entry.get("port") in (443, "443", 8443, "8443")
-            or bool(entry.get("encrypted"))
-            or bool(entry.get("ssl"))
-        )
-        scheme = "https" if is_https else "http"
-        url = f"{scheme}://{host}{path if path.startswith('/') else '/' + path}"
-        if url in seen:
-            continue
-        seen.add(url)
-        raw_status = entry.get("status")
-        try:
-            status = int(raw_status) if raw_status is not None else None
-        except (TypeError, ValueError):
-            status = None
-        if status is not None and not (100 <= status <= 599):
-            status = None
-        out.append(
-            NetworkURL(
-                url=url,
-                method=str(entry.get("method") or "GET").upper(),
-                status=status,
-                user_agent=entry.get("user_agent") or entry.get("ua"),
-            )
-        )
-    return out
-
-
-def _extract_user_agents(raw: dict[str, Any]) -> list[str]:
-    out: list[str] = []
-    seen: set[str] = set()
-    for entry in raw.get("http") or []:
-        if not isinstance(entry, dict):
-            continue
-        ua = str(entry.get("user_agent") or entry.get("ua") or "").strip()
-        if ua and ua not in seen:
-            seen.add(ua)
-            out.append(ua)
-    return out
-
-
-def _extract_ja3(raw: dict[str, Any]) -> list[str]:
-    out: list[str] = []
-    seen: set[str] = set()
-    for entry in raw.get("tls") or []:
-        if not isinstance(entry, dict):
-            continue
-        ja3 = entry.get("ja3") or entry.get("ja3_hash")
-        if ja3 and ja3 not in seen:
-            seen.add(str(ja3))
-            out.append(str(ja3))
-    return out
-
-
-def _extract_ja3s(raw: dict[str, Any]) -> list[str]:
-    out: list[str] = []
-    seen: set[str] = set()
-    for entry in raw.get("tls") or []:
-        if not isinstance(entry, dict):
-            continue
-        ja3s = entry.get("ja3s") or entry.get("ja3s_hash")
-        if ja3s and ja3s not in seen:
-            seen.add(str(ja3s))
-            out.append(str(ja3s))
-    return out

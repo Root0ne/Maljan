@@ -145,7 +145,7 @@ def test_registry_keeps_the_real_string_shape_not_just_dict_rows():
 
 def test_summary_and_file_writes_carry_the_linux_persistence_evidence():
     # Ruled in during the pre-flight scan, beyond the brief's own field list:
-    # persistence_extractor's Linux path rules read behavior.summary.{files,
+    # an agent hunting Linux persistence reads behavior.summary.{files,
     # write_files,modified_files,wrote_files} and the top-level file_writes /
     # files_written arrays directly — and keep only the *string* entries of
     # each (its own `isinstance(p, str)` guard), which is also the shape the

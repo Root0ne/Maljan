@@ -1,0 +1,70 @@
+{
+  "sandbox_dropped_files": {
+    "dropped": [
+      {
+        "name": "svc.exe",
+        "path": "",
+        "sha256": "0f",
+        "size": 2048,
+        "type": null
+      }
+    ],
+    "total": 1
+  },
+  "sandbox_network": {
+    "dns": [
+      {
+        "answers": [
+          "185.220.101.42"
+        ],
+        "request": "telemetry-sync-71ad.net",
+        "type": "A"
+      }
+    ],
+    "domains": [],
+    "hosts": [],
+    "http": [],
+    "icmp": [],
+    "tcp": [
+      {
+        "dport": 443,
+        "dst": "185.220.101.42"
+      }
+    ],
+    "tls": [],
+    "udp": []
+  },
+  "sandbox_processes": {
+    "processes": [
+      {
+        "call_count": 2,
+        "command_line": "loader.exe /q",
+        "first_seen": "",
+        "name": "loader.exe",
+        "pid": 100,
+        "ppid": 4
+      },
+      {
+        "call_count": 0,
+        "command_line": "svc.exe",
+        "first_seen": "",
+        "name": "svc.exe",
+        "pid": 101,
+        "ppid": 100
+      }
+    ],
+    "total": 2
+  },
+  "sandbox_signatures": {
+    "signatures": [
+      {
+        "confidence": null,
+        "description": "Writes a Run key",
+        "name": "persistence_run_key",
+        "references": [],
+        "severity": 3
+      }
+    ],
+    "total": 1
+  }
+}

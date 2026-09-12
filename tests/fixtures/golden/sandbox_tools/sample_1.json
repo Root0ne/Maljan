@@ -1,0 +1,21 @@
+{
+  "sandbox_dropped_files": {
+    "dropped": [],
+    "total": 0
+  },
+  "sandbox_network": {
+    "dns": [],
+    "hosts": [],
+    "http": [],
+    "tcp": [],
+    "udp": []
+  },
+  "sandbox_processes": {
+    "processes": [],
+    "total": 0
+  },
+  "sandbox_signatures": {
+    "signatures": [],
+    "total": 0
+  }
+}

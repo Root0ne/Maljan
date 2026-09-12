@@ -351,9 +351,9 @@ def test_every_consumer_channel_is_populated_or_named_unavailable():
 def test_the_mapped_network_survives_the_real_parsers_not_as_na():
     """The mapping is only proven correct once real consumers, not the
     mapper's own assertions, read real domains and IPs out of it."""
-    from maljan.extractors.network_extractor import build_network_iocs
     from maljan.parsers.network_parser import NetworkParser
     from maljan.providers.cape_view import to_cape_shaped_dict
+    from maljan.reporting.ledger_projection import network_from_sandbox_report
     from maljan.schemas.sandbox_report import triage_overview_to_sandbox_report
 
     overview = json.loads((FIX / "triage_overview.json").read_text(encoding="utf-8"))
@@ -368,7 +368,7 @@ def test_the_mapped_network_survives_the_real_parsers_not_as_na():
     assert "45.33.32.23" in parsed
     assert "N/A / N/A" not in parsed
 
-    iocs = build_network_iocs(rendered)
+    iocs = network_from_sandbox_report(rendered)
     assert iocs is not None
     assert any(d.fqdn == "update-relay-c9f2.net" for d in iocs.domains)
     assert any(ip.address == "45.33.32.23" for ip in iocs.ips)

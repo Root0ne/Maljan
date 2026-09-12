@@ -2,10 +2,34 @@
 
 from __future__ import annotations
 
-from maljan.extractors.dynamic_extractor import build_dynamic_behavior
+from typing import Any
+
+from maljan.providers.sandbox_tools import sandbox_processes, sandbox_report_section
+from maljan.reporting.ledger_projection import dynamic_from_ledger
 from maljan.reporting.models import DynamicBehavior, FileHashes, MalwareReport, SampleIdentity
 from maljan.reporting.renderers.html import HtmlRenderer
 from maljan.reporting.renderers.markdown import MarkdownRenderer
+from maljan.schemas.evidence import EvidenceCounter
+from tests.unit._ledger_helpers import entry
+
+
+def _behavior(report: dict[str, Any]) -> DynamicBehavior | None:
+    """What the report's dynamic block holds after an analyst reads it.
+
+    Two calls, the ones a dynamic analyst makes: the process list, and the
+    report's own declaration of what this sandbox could not provide.
+    """
+    counter = EvidenceCounter()
+    ledger = [
+        entry("sandbox_processes", sandbox_processes(report), counter, agent="dynamic"),
+        entry(
+            "sandbox_report_section",
+            sandbox_report_section(report, "unavailable"),
+            counter,
+            agent="dynamic",
+        ),
+    ]
+    return dynamic_from_ledger(ledger)
 
 
 def test_a_cape_report_declares_nothing_unavailable():
@@ -14,7 +38,7 @@ def test_a_cape_report_declares_nothing_unavailable():
         "signatures": [],
         "network": {},
     }
-    behavior = build_dynamic_behavior(report)
+    behavior = _behavior(report)
     assert behavior is not None and behavior.unavailable == []
 
 
@@ -25,14 +49,17 @@ def test_the_unavailable_list_travels_from_the_report_into_the_model():
         "network": {},
         "unavailable": ["apistats", "calls", "registry", "generic_events"],
     }
-    behavior = build_dynamic_behavior(report)
+    behavior = _behavior(report)
     assert behavior is not None
     assert behavior.unavailable == ["apistats", "calls", "registry", "generic_events"]
 
 
-def test_a_report_with_only_unavailable_sections_is_still_none():
-    """Nothing observed and nothing available is still no dynamic behaviour."""
-    assert build_dynamic_behavior({"unavailable": ["apistats"]}) is None
+def test_a_report_with_only_unavailable_sections_still_has_no_behaviour():
+    """Nothing observed is nothing observed, whatever the sandbox could not watch."""
+    behavior = _behavior({"unavailable": ["apistats"]})
+    assert behavior is not None
+    assert behavior.process_tree == []
+    assert behavior.unavailable == ["apistats"]
 
 
 def _minimal_report_with_gaps() -> MalwareReport:
@@ -65,12 +92,13 @@ def test_the_html_report_names_the_gaps():
 
 def test_a_cape_shaped_report_names_no_gaps_in_markdown():
     """CAPE fills every section: no ``unavailable`` key, nothing to disclaim."""
-    cape_report = {
-        "behavior": {"processes": [{"pid": 4, "process_name": "x.exe"}], "apistats": {}},
-        "signatures": [],
-        "network": {},
-    }
-    behavior = build_dynamic_behavior(cape_report)
+    behavior = _behavior(
+        {
+            "behavior": {"processes": [{"pid": 4, "process_name": "x.exe"}], "apistats": {}},
+            "signatures": [],
+            "network": {},
+        }
+    )
     assert behavior is not None
     report = MalwareReport(
         identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),

@@ -20,10 +20,7 @@ from maljan.core.config import BUILTIN_AGENTS
 from maljan.core.container import ServiceContainer
 from maljan.core.exceptions import AnalystError, LLMError
 from maljan.core.logger import logger
-from maljan.extractors.network_extractor import (
-    build_dga_isr,
-    build_network_iocs,
-)
+from maljan.extractors.network_extractor import build_dga_isr
 from maljan.memory.long_term_memory import build_stored_case
 from maljan.pipeline.events import (
     claims_to_payload,
@@ -33,13 +30,13 @@ from maljan.pipeline.events import (
 )
 from maljan.pipeline.state import AgentArgument, AnalysisState
 from maljan.pipeline.sycophancy_detector import build_revision_directive, detect_sycophancy
+from maljan.reporting.ledger_projection import network_from_sandbox_report
 from maljan.schemas.evidence import LedgerEntry
 from maljan.schemas.isr_models import AgentISR
 from maljan.schemas.stix_models import Bundle
 
 if TYPE_CHECKING:
     from maljan.memory.long_term_memory import MemoryStore
-    from maljan.reporting.models import StaticAnalysis
 
 
 # ---------------------------------------------------------------------------
@@ -69,11 +66,6 @@ def _empty_isr(agent_name: str, revision_round: int = 0) -> AgentISR:
 # ("No static data available for sample <sha>."). Local copy of the
 # placeholder pattern from static_analyst to avoid a nodes->agents import edge.
 _STATIC_PLACEHOLDER_RE = re.compile(r"^\s*no\s+\w+\s+data\s+available\b", re.IGNORECASE)
-
-# Hard ceiling for the synthesized head-chunk content. The augmented chunk
-# is spliced in via ``dataclasses.replace`` AFTER chunking, so it never
-# re-passes the token-budget check — the cap here is load-bearing.
-_MAX_SYNTH_CHUNK_CHARS = 40_000
 
 
 def _is_placeholder_only(chunks: list, role: str = "") -> bool:
@@ -122,40 +114,6 @@ def _is_placeholder_only(chunks: list, role: str = "") -> bool:
 # the value was once found silently disagreeing between layers. One
 # name, so a change cannot land in only half of them.
 DEGRADED_CONFIDENCE_CAP = 0.60
-
-
-def _compact_static_summary(static: StaticAnalysis) -> dict[str, Any]:
-    """Serialize a StaticAnalysis into a size-capped dict for the LLM prompt.
-
-    Caps keep the synthesized head chunk inside the prompt budget:
-    imports <= 60 rows (suspicious-first), strings <= 40, exports <= 40,
-    ``embedded_resources`` reduced to a count. Truncation markers record
-    how many rows were dropped so the model doesn't mistake a cap for
-    an empty artefact.
-    """
-    dump = static.model_dump(mode="json")
-    out: dict[str, Any] = {
-        "sections": dump.get("sections", []),
-        "packer_hint": dump.get("packer_hint"),
-        "obfuscation_indicators": dump.get("obfuscation_indicators", []),
-        "embedded_resources_count": len(dump.get("embedded_resources", [])),
-    }
-    imports = sorted(
-        dump.get("imports", []),
-        key=lambda r: not bool(r.get("is_suspicious")),
-    )
-    if len(imports) > 60:
-        out["imports_truncated"] = len(imports) - 60
-    out["imports"] = imports[:60]
-    strings = dump.get("interesting_strings", [])
-    if len(strings) > 40:
-        out["strings_truncated"] = len(strings) - 40
-    out["interesting_strings"] = strings[:40]
-    exports = dump.get("exports", [])
-    if len(exports) > 40:
-        out["exports_truncated"] = len(exports) - 40
-    out["exports"] = exports[:40]
-    return out
 
 
 def _absolute_host_sample_path(state: AnalysisState) -> str:
@@ -221,7 +179,6 @@ def _augment_static_chunks_with_path(
     chunks: list,
     state: AnalysisState,
     *,
-    static: StaticAnalysis | None = None,
     provider_id: str | None = None,
 ) -> list:
     """Inject the container-visible sample path into the static analyst's chunks.
@@ -286,27 +243,29 @@ def _augment_static_chunks_with_path(
         parsed = {
             "note": (
                 "Live analysis run: no pre-extracted static fixture exists "
-                "for this sample. The deterministic PE summary below was "
-                "parsed on the host; use your Ghidra tools for deeper "
-                "analysis."
+                "for this sample. Nothing about the binary is pasted here on "
+                "purpose — call your tools for the section table, the imports "
+                "and the strings, and cite the ids their results carry."
             ),
             "sha256": state.get("file_hash") or "",
-            "static_summary": (_compact_static_summary(static) if static is not None else None),
         }
 
     parsed["analysis_file_path"] = static_path
+    # What the routing layer already decided, so the analyst does not have to
+    # spend a call rediscovering it before it can choose a tool.
+    for key in ("file_type", "platform"):
+        value = state.get(key)
+        if isinstance(value, str) and value and value != "unknown":
+            parsed[key] = value
     # Also carry the HOST-readable path (when present) so the static-feature
     # family classifier can read the raw bytes — ember reads the file on the
     # host, unlike Ghidra which reads the container-visible ``analysis_file_path``.
     host_path = state.get("sample_path")
     if isinstance(host_path, str) and host_path:
         parsed["host_sample_path"] = host_path
-    # The toolchain, which the analyst could not previously see at all:
-    # ``language_or_compiler`` lives on SampleIdentity, this chunk carries
-    # StaticAnalysis, and ``AnalysisState`` has no channel joining them — so
-    # the two never met. Knowing a sample is AutoIt or PyInstaller rather than
-    # "a PE" changes which Ghidra tools are worth spending steps on, and it
-    # costs one line of prompt.
+    # The toolchain: knowing a sample is AutoIt or PyInstaller rather than
+    # "a PE" changes which tools are worth spending steps on, and it costs one
+    # line of prompt. It is the one fact here no tool answers directly.
     #
     # Detected here from a bounded prefix rather than threaded through state:
     # toolchain markers live in the runtime stub near the front of the file, and
@@ -325,12 +284,6 @@ def _augment_static_chunks_with_path(
         except Exception as _e:  # noqa: BLE001 — a prompt hint is never worth a failure
             logger.debug("static chunk: language fingerprint skipped (%s)", _e)
     new_content = json.dumps(parsed, indent=2, default=str)
-    if len(new_content) > _MAX_SYNTH_CHUNK_CHARS and "static_summary" in parsed:
-        # The spliced chunk bypasses the token-budget re-check; drop the
-        # summary rather than blow the prompt window.
-        parsed["static_summary"] = None
-        parsed["static_summary_omitted"] = "too large"
-        new_content = json.dumps(parsed, indent=2, default=str)
 
     import dataclasses as _dc
 
@@ -418,20 +371,6 @@ def make_analyst_node(
                 # same per-provider mirror path lookup the static branch
                 # uses below — because the sample itself always exists, then
                 # the sandbox slice on top of it when one exists.
-                _st_generic: StaticAnalysis | None = None
-                try:
-                    from maljan.extractors.pe_extractor import build_static_analysis
-
-                    _sp_generic = state.get("sample_path")
-                    if _sp_generic:
-                        _st_generic = build_static_analysis(sample_path=str(_sp_generic))
-                except Exception as _e:  # noqa: BLE001
-                    logger.debug(
-                        "generic agent '%s': static summary extraction skipped: %s",
-                        agent_name,
-                        _e,
-                    )
-
                 # BUG 11, second round: the chunk carries the path for the
                 # model to read; this carries it for the tool layer, which is
                 # what actually corrects a model that sends the bare filename.
@@ -442,7 +381,6 @@ def make_analyst_node(
                 static_context_chunks = _augment_static_chunks_with_path(
                     container.load_chunked(state["file_hash"], agent_name),
                     state,
-                    static=_st_generic,
                     provider_id=agent._resolved.static_provider_id,
                 )
                 sandbox_chunks: list = []
@@ -473,19 +411,6 @@ def make_analyst_node(
             # under ``analysis_file_path`` so the existing chunk-text flow
             # carries the path into the LLM prompt without a new state hop.
             if role == "static":
-                # Ghidra-path fix (2026-07-12): compute the deterministic PE
-                # summary ONCE and reuse it for both the synthesized head
-                # chunk and the dynamic-tool-selection categories below.
-                _st: StaticAnalysis | None = None
-                try:
-                    from maljan.extractors.pe_extractor import build_static_analysis
-
-                    _sp = state.get("sample_path")
-                    if _sp:
-                        _st = build_static_analysis(sample_path=str(_sp))
-                except Exception as _e:  # noqa: BLE001
-                    logger.debug("static summary extraction skipped: %s", _e)
-
                 # Pin the container-visible path on the agent so the
                 # load_program tool wrapper can override hallucinated paths.
                 # Assign unconditionally — agents are cached across samples;
@@ -507,7 +432,6 @@ def make_analyst_node(
                 chunks = _augment_static_chunks_with_path(
                     chunks,
                     state,
-                    static=_st,
                     provider_id=agent._resolved.static_provider_id,
                 )
 
@@ -1301,7 +1225,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
             _sandbox_report = state.get("sandbox_report")
             _sandbox_report = _sandbox_report if isinstance(_sandbox_report, dict) else None
             try:
-                dga_isr = build_dga_isr(build_network_iocs(_sandbox_report))
+                dga_isr = build_dga_isr(network_from_sandbox_report(_sandbox_report))
                 if dga_isr is not None:
                     isr_reports["network_dga"] = dga_isr
                     logger.info(
@@ -1409,7 +1333,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 )
             _net_empty = True
             try:
-                _net_iocs = build_network_iocs(_sandbox_report)
+                _net_iocs = network_from_sandbox_report(_sandbox_report)
                 _net_empty = not (
                     _net_iocs and (_net_iocs.domains or _net_iocs.ips or _net_iocs.urls)
                 )

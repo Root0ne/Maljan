@@ -14,7 +14,7 @@ from maljan.reporting.builder import MalwareReportBuilder
 from maljan.reporting.models import MalwareReport
 from maljan.schemas.evidence import EvidenceCounter
 from maljan.schemas.isr_models import AgentISR, Artifact
-from tests.unit.reporting._ledger_helpers import entry, ledger_from_sandbox
+from tests.unit._ledger_helpers import entry, ledger_from_sandbox
 
 _SHA = "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f"
 

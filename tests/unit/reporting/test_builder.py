@@ -13,7 +13,7 @@ import pytest
 
 from maljan.reporting.builder import MalwareReportBuilder
 from maljan.reporting.models import MalwareReport
-from tests.unit.reporting._ledger_helpers import ledger_from_sandbox
+from tests.unit._ledger_helpers import ledger_from_sandbox
 
 
 def _build(
@@ -118,7 +118,7 @@ class TestRansomwareFixture:
         # Nothing re-scans the sandbox report for Run keys any more: the
         # analyst that read the call writes it down as an artifact, and that
         # artifact is what the report carries.
-        from tests.unit.reporting._ledger_helpers import persistence_isr
+        from tests.unit._ledger_helpers import persistence_isr
 
         report = _build(
             sandbox=sandbox,

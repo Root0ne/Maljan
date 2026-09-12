@@ -26,7 +26,7 @@ from maljan.schemas.stix_models import (
     ObservedData,
     Report,
 )
-from tests.unit.reporting._ledger_helpers import ledger_from_sandbox
+from tests.unit._ledger_helpers import ledger_from_sandbox
 
 
 def _build(**kwargs: Any) -> MalwareReport:

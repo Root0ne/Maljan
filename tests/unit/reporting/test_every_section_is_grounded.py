@@ -19,7 +19,7 @@ from maljan.reporting.ledger_report import build_sections
 from maljan.reporting.renderers.markdown import MarkdownRenderer
 from maljan.schemas.evidence import EvidenceCounter
 from maljan.schemas.isr_models import AgentISR, Artifact, Finding
-from tests.unit.reporting._ledger_helpers import entry
+from tests.unit._ledger_helpers import entry
 
 _FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "ledger"
 

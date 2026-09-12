@@ -8,8 +8,6 @@ from pathlib import Path
 import pytest
 
 from maljan.core.config import RestMappingConfig
-from maljan.extractors.dynamic_extractor import build_dynamic_behavior
-from maljan.extractors.network_extractor import build_network_iocs
 from maljan.providers.cape_view import to_cape_shaped_dict
 from maljan.providers.errors import ProviderConfigurationError
 from maljan.providers.sandbox.rest_mapping import (
@@ -18,6 +16,8 @@ from maljan.providers.sandbox.rest_mapping import (
     apply_mapping,
     compile_mapping,
 )
+from maljan.reporting.ledger_projection import network_from_sandbox_report
+from tests.unit._ledger_helpers import sandbox_view
 
 GOLDEN = Path(__file__).resolve().parents[3] / "fixtures" / "golden" / "rest_mapping"
 
@@ -233,28 +233,21 @@ def test_the_xyz_golden_maps_exactly_as_recorded():
     assert result.report.model_dump(mode="json") == expected
 
 
-def _dump(model):
-    return None if model is None else model.model_dump(mode="json")
-
-
-def test_the_xyz_golden_renders_through_the_existing_consumers():
-    """The mapped report is not just a shape; the downstream extractors read it."""
+def test_the_xyz_golden_renders_through_the_tools_an_agent_calls():
+    """The mapped report is not just a shape; the sandbox tools read it."""
     payload = json.loads((GOLDEN / "xyz_report.json").read_text(encoding="utf-8"))
     compiled = compile_mapping(XYZ_MAPPING)
     result = apply_mapping(compiled, payload, provider="rest", task_id="xyz-1")
     cape_shaped = to_cape_shaped_dict(result.report)
 
-    expected_dynamic = json.loads(
-        (GOLDEN / "xyz_dynamic_behavior.json").read_text(encoding="utf-8")
-    )
-    expected_network = json.loads((GOLDEN / "xyz_network_iocs.json").read_text(encoding="utf-8"))
-    assert _dump(build_dynamic_behavior(cape_shaped)) == expected_dynamic
-    assert _dump(build_network_iocs(cape_shaped)) == expected_network
+    expected = json.loads((GOLDEN / "xyz_sandbox_view.json").read_text(encoding="utf-8"))
+    assert sandbox_view(cape_shaped) == expected
+
     # The fixture's DNS/TCP rows use routable, non-RFC-reserved values on
     # purpose: a documentation-range IP or a *.example domain is filtered by
-    # the real extractor's own suspicion/emittable rules, and a golden built
-    # from one would pin `null` and prove nothing about the mapped rows
-    # actually surviving into a real IOC table.
-    assert expected_network is not None
-    assert expected_network["domains"], "the golden must carry at least one real DNS row"
-    assert expected_network["ips"], "the golden must carry at least one real TCP/IP row"
+    # the emittable rules, and a golden built from one would pin an empty
+    # table and prove nothing about the mapped rows reaching a real IOC list.
+    network = network_from_sandbox_report(cape_shaped)
+    assert network is not None
+    assert network.domains, "the golden must carry at least one real DNS row"
+    assert network.ips, "the golden must carry at least one real TCP/IP row"

@@ -15,7 +15,7 @@ from maljan.reporting.detection_signatures import (
     build_detection_rules,
 )
 from maljan.reporting.models import MalwareReport
-from tests.unit.reporting._ledger_helpers import ledger_from_sandbox, persistence_isr
+from tests.unit._ledger_helpers import ledger_from_sandbox, persistence_isr
 
 
 def _build(**kwargs: Any) -> MalwareReport:

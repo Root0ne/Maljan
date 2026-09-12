@@ -15,7 +15,7 @@ import pytest
 from maljan.reporting.builder import MalwareReportBuilder
 from maljan.reporting.models import MalwareReport
 from maljan.reporting.renderers.markdown import MarkdownRenderer
-from tests.unit.reporting._ledger_helpers import ledger_from_sandbox, persistence_isr
+from tests.unit._ledger_helpers import ledger_from_sandbox, persistence_isr
 
 # The headings every report carries, whatever the run gathered.
 REQUIRED_HEADINGS = [

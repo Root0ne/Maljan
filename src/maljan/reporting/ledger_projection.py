@@ -22,6 +22,7 @@ ask for them.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -43,6 +44,7 @@ from maljan.reporting.models import (
     StaticAnalysis,
     StringIOC,
 )
+from maljan.schemas.evidence import build_entry, format_entry_id
 
 if TYPE_CHECKING:
     from maljan.schemas.evidence import LedgerEntry
@@ -405,6 +407,17 @@ def dynamic_from_ledger(
                 seen = True
                 dynamic.file_operations.append({"operation": "write", **row})
 
+    # A sandbox that cannot fill a section says so in the report's own
+    # ``unavailable`` list, and that disclaimer is the difference between "the
+    # sample did nothing" and "this sandbox does not watch for it".
+    for _entry, data in _payloads(ledger, "sandbox_report_section"):
+        if str(data.get("section") or "") != "unavailable":
+            continue
+        rows = data.get("rows")
+        if isinstance(rows, list) and rows:
+            seen = True
+            dynamic.unavailable = [str(row) for row in rows]
+
     for artifact in _artifacts(isrs, "processes"):
         for row in _rows_of(artifact):
             if row:
@@ -431,7 +444,11 @@ def network_from_ledger(
     the homograph verdict mean here exactly what they meant when a sandbox
     extractor filled this block.
     """
-    from maljan.extractors.network_extractor import _assess_domain, _is_emittable_ip
+    from maljan.extractors.network_extractor import (
+        _assess_domain,
+        _is_emittable_domain,
+        _is_emittable_ip,
+    )
 
     network = NetworkIOCs()
     domains: set[str] = set()
@@ -443,6 +460,11 @@ def network_from_ledger(
         if not value:
             return
         if kind == "domain" and value not in domains:
+            if not _is_emittable_domain(value):
+                return
+            value = value.lower().strip().rstrip(".")
+            if value in domains:
+                return
             domains.add(value)
             verdict = _assess_domain(value)
             network.domains.append(
@@ -460,7 +482,12 @@ def network_from_ledger(
                 return
             ips.add(value)
             network.ips.append(NetworkIP(address=value))
-        elif kind == "url" and value not in urls:
+        elif kind == "url":
+            # Case-fold the host so one endpoint reached twice under two
+            # spellings is one URL, not two.
+            value = _fold_url_host(value)
+            if value in urls:
+                return
             urls.add(value)
             network.urls.append(NetworkURL(url=value))
 
@@ -489,6 +516,40 @@ def network_from_ledger(
                 _add(row[0].strip().lower(), row[1])
 
     return network if (network.domains or network.ips or network.urls) else None
+
+
+def network_from_sandbox_report(report: dict[str, Any] | None) -> NetworkIOCs | None:
+    """The network block a sandbox report yields when read through its own tool.
+
+    For the Layer-0 scanners, which run before any analyst and therefore before
+    there is a ledger to read. They ask the same tool an analyst would and get
+    the same block back, so the DGA claim a layer makes and the domains the
+    report prints cannot disagree.
+    """
+    from maljan.providers.sandbox_tools import sandbox_network
+
+    if not report:
+        return None
+    answer = sandbox_network(report)
+    entry = build_entry(
+        entry_id=format_entry_id(1),
+        seq=1,
+        agent="layer0",
+        tool="sandbox_network",
+        args={},
+        server=None,
+        output=json.dumps(answer),
+    )
+    return network_from_ledger([entry])
+
+
+def _fold_url_host(url: str) -> str:
+    """A URL with its host lowercased and its path left exactly as it is."""
+    if "://" not in url:
+        return url
+    scheme, _, rest = url.partition("://")
+    host, slash, path = rest.partition("/")
+    return f"{scheme.lower()}://{host.lower()}{slash}{path}"
 
 
 def _http_url(row: Any, host: str) -> str:

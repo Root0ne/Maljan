@@ -1,0 +1,2662 @@
+{
+  "sandbox_dropped_files": {
+    "dropped": [],
+    "total": 0
+  },
+  "sandbox_network": {
+    "dns": [
+      {
+        "answers": [],
+        "first_seen": 1786376490.539929,
+        "request": "global.wps.com",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786376499.253202,
+        "request": "params.wps.com",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786376502.87037,
+        "request": "ap-dw-collect.ksord.com",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786376508.386467,
+        "request": "entry.wpscdn.com",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786376509.083287,
+        "request": "code.visualstudio.com",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786376510.280307,
+        "request": "kubernetes.io",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786376511.760537,
+        "request": "www.quora.com",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786376513.037133,
+        "request": "ap-dw-parameters.ksord.com",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786376513.203202,
+        "request": "trello.com",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786376514.000876,
+        "request": "api.wps.com",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786376514.00676,
+        "request": "dl.acm.org",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "365.wpsdns.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "43.175.235.132",
+            "type": "A"
+          },
+          {
+            "data": "enterprise-hw-prod.2gcwjsz1js5u.eo.dnse1.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "43.175.234.132",
+            "type": "A"
+          }
+        ],
+        "first_seen": 1786376521.401108,
+        "request": "365.kdocs.cn",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "accelerator-cname-frxv7q2rs5dvpxegc3i3xz.c.vecdnlb.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "71.18.160.102",
+            "type": "A"
+          },
+          {
+            "data": "101.47.98.223",
+            "type": "A"
+          },
+          {
+            "data": "veen-auto-117651-01769748568.s.vegalb.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "accountv2.wpsdns.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "71.18.160.60",
+            "type": "A"
+          }
+        ],
+        "first_seen": 1786376521.402151,
+        "request": "account.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "klbv3.wpsdns.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "71.18.157.246",
+            "type": "A"
+          },
+          {
+            "data": "accelerator-cname-4krzo5bapdwvgzyuehna2u.c.vecdnlb.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "101.47.98.213",
+            "type": "A"
+          },
+          {
+            "data": "veen-auto-global-0011766483193.s.vegalb.com",
+            "type": "CNAME"
+          }
+        ],
+        "first_seen": 1786376521.402812,
+        "request": "api.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "101.126.24.87",
+            "type": "A"
+          },
+          {
+            "data": "101.126.24.53",
+            "type": "A"
+          }
+        ],
+        "first_seen": 1786376521.407221,
+        "request": "avatar.qwps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "",
+            "type": "NXDOMAIN"
+          }
+        ],
+        "first_seen": 1786376521.408356,
+        "request": "dl.vas.wpscdn.cn",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786376521.409171,
+        "request": "docer-api.kdocs.cn",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786376521.409969,
+        "request": "docer.kdocs.cn",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "98.98.145.226",
+            "type": "A"
+          },
+          {
+            "data": "163.53.19.88",
+            "type": "A"
+          },
+          {
+            "data": "klbv2.wpsdns.com",
+            "type": "CNAME"
+          }
+        ],
+        "first_seen": 1786376521.410559,
+        "request": "docer.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "drive.wpsdns.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "veen-auto-117650-01769748550.s.vegalb.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "98.98.145.232",
+            "type": "A"
+          },
+          {
+            "data": "accelerator-cname-qqgzkjqannhie6jgqwzhom.c.vecdnlb.com",
+            "type": "CNAME"
+          }
+        ],
+        "first_seen": 1786376521.411351,
+        "request": "drive.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "113.57.57.42",
+            "type": "A"
+          },
+          {
+            "data": "111.48.60.183",
+            "type": "A"
+          },
+          {
+            "data": "98.98.145.231",
+            "type": "A"
+          },
+          {
+            "data": "119.96.49.220",
+            "type": "A"
+          },
+          {
+            "data": "172.96.115.151",
+            "type": "A"
+          },
+          {
+            "data": "199.182.237.71",
+            "type": "A"
+          },
+          {
+            "data": "98.98.78.135",
+            "type": "A"
+          },
+          {
+            "data": "64.6.174.19",
+            "type": "A"
+          },
+          {
+            "data": "192.169.115.103",
+            "type": "A"
+          },
+          {
+            "data": "156.59.141.247",
+            "type": "A"
+          },
+          {
+            "data": "98.98.18.103",
+            "type": "A"
+          },
+          {
+            "data": "23.90.180.167",
+            "type": "A"
+          }
+        ],
+        "first_seen": 1786376521.412104,
+        "request": "geo.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "home.vas.wpsdns.com",
+            "type": "CNAME"
+          }
+        ],
+        "first_seen": 1786376521.412738,
+        "request": "home.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "hwc-bj.ag.wpsdns.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "171.15.136.254",
+            "type": "A"
+          },
+          {
+            "data": "171.15.136.245",
+            "type": "A"
+          },
+          {
+            "data": "171.15.136.244",
+            "type": "A"
+          },
+          {
+            "data": "171.15.136.252",
+            "type": "A"
+          },
+          {
+            "data": "171.15.136.246",
+            "type": "A"
+          },
+          {
+            "data": "171.15.136.248",
+            "type": "A"
+          }
+        ],
+        "first_seen": 1786376521.413259,
+        "request": "hwc-bj.ag.kdocs.cn",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786376521.413936,
+        "request": "iaas.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "weboffice.wpsdns.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "accelerator-cname-n9tte32bdbmezs5rwq9q4q.c.vecdnlb.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "veen-auto-117653-01769748579.s.vegalb.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "98.98.145.230",
+            "type": "A"
+          }
+        ],
+        "first_seen": 1786376521.414452,
+        "request": "kdocs.cn",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "110.43.89.94",
+            "type": "A"
+          },
+          {
+            "data": "111.31.6.142",
+            "type": "A"
+          },
+          {
+            "data": "wpsfile-beijing.ksyunjiasu.cn",
+            "type": "CNAME"
+          },
+          {
+            "data": "60.28.214.185",
+            "type": "A"
+          },
+          {
+            "data": "ksc-bj.ag.wpsdns.com",
+            "type": "CNAME"
+          }
+        ],
+        "first_seen": 1786376521.415092,
+        "request": "ksc-bj.ag.kdocs.cn",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786376521.415776,
+        "request": "le.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786376521.416279,
+        "request": "lucky.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "pay-prod.2gcwjsz1js5u.eo.dnse1.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "43.175.252.84",
+            "type": "A"
+          },
+          {
+            "data": "43.175.253.84",
+            "type": "A"
+          },
+          {
+            "data": "pay.wpsdns.com",
+            "type": "CNAME"
+          }
+        ],
+        "first_seen": 1786376521.417033,
+        "request": "pay.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786376521.417907,
+        "request": "qing.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786376521.418575,
+        "request": "qr.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "101.47.98.83",
+            "type": "A"
+          },
+          {
+            "data": "71.18.160.37",
+            "type": "A"
+          },
+          {
+            "data": "qing.wpsdns.com",
+            "type": "CNAME"
+          }
+        ],
+        "first_seen": 1786376521.419248,
+        "request": "roaming.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786376521.419879,
+        "request": "sms.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786376521.420537,
+        "request": "vas.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786376521.421017,
+        "request": "vasapi.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786376521.421587,
+        "request": "vip.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786376521.422141,
+        "request": "vipapi.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "k1-ipv6.gslb.ksyuncdn.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "162.128.226.1",
+            "type": "A"
+          },
+          {
+            "data": "wdl1.cache.wps.cn.download.ks-cdn.com",
+            "type": "CNAME"
+          }
+        ],
+        "first_seen": 1786376521.422791,
+        "request": "wdl1.cache.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "111.172.211.147",
+            "type": "A"
+          },
+          {
+            "data": "111.6.201.217",
+            "type": "A"
+          },
+          {
+            "data": "111.48.138.69",
+            "type": "A"
+          },
+          {
+            "data": "171.15.110.242",
+            "type": "A"
+          },
+          {
+            "data": "122.191.142.70",
+            "type": "A"
+          },
+          {
+            "data": "111.6.202.217",
+            "type": "A"
+          },
+          {
+            "data": "wdl1.file.cache.docer.com.wps.volcfake.com.volcgslb.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "123.6.179.122",
+            "type": "A"
+          },
+          {
+            "data": "111.174.12.68",
+            "type": "A"
+          },
+          {
+            "data": "ct-common-all.volcgtm.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "118.252.196.73",
+            "type": "A"
+          },
+          {
+            "data": "111.7.66.219",
+            "type": "A"
+          },
+          {
+            "data": "wdl1.file.cache.wpscdn.cn",
+            "type": "CNAME"
+          }
+        ],
+        "first_seen": 1786376521.423429,
+        "request": "wdl1.file.cache.docer.com",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "wps-docer-property.ks3-cn-beijing.ksyuncs.com",
+            "type": "CNAME"
+          }
+        ],
+        "first_seen": 1786376521.42408,
+        "request": "wps-docer-property.file.docer.com",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "access-domain.ks3-cn-beijing-wan-wps.ksyun.com",
+            "type": "CNAME"
+          }
+        ],
+        "first_seen": 1786376521.424507,
+        "request": "wps-docer-property.ks3-cn-beijing.ksyun.com",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "access-domain.ks3-cn-beijing-wan-wps.ksyuncs.com",
+            "type": "CNAME"
+          },
+          {
+            "data": "121.228.170.122",
+            "type": "A"
+          },
+          {
+            "data": "110.43.121.118",
+            "type": "A"
+          },
+          {
+            "data": "121.228.170.164",
+            "type": "A"
+          },
+          {
+            "data": "110.43.121.19",
+            "type": "A"
+          }
+        ],
+        "first_seen": 1786376521.425086,
+        "request": "wps-docer-property.ks3-cn-beijing.ksyuncs.com",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786376521.425566,
+        "request": "www.kdocs.cn",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786376521.426327,
+        "request": "zj-roaming.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786376521.426893,
+        "request": "zt.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786376521.427523,
+        "request": "zw-roaming.wps.cn",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786376532.294785,
+        "request": "www.ebay.com",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786376533.759083,
+        "request": "www.dropbox.com",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786376534.143105,
+        "request": "discord.com",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786376534.490044,
+        "request": "ieeexplore.ieee.org",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786376534.848171,
+        "request": "www.docker.com",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786376554.770531,
+        "request": "www.sciencedirect.com",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786376576.826462,
+        "request": "www.msftconnecttest.com",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786376628.295194,
+        "request": "disabled.invalid",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786376635.371112,
+        "request": "client-update.steamstatic.com",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 1786376662.582535,
+        "request": "api-ad-adapter.wps.com",
+        "type": "A"
+      }
+    ],
+    "domains": [
+      {
+        "domain": "global.wps.com",
+        "ip": "166.108.200.175"
+      },
+      {
+        "domain": "params.wps.com",
+        "ip": "110.238.109.205"
+      },
+      {
+        "domain": "ap-dw-collect.ksord.com",
+        "ip": "8.209.65.234"
+      },
+      {
+        "domain": "entry.wpscdn.com",
+        "ip": "38.60.239.82"
+      },
+      {
+        "domain": "code.visualstudio.com",
+        "ip": "150.171.109.103"
+      },
+      {
+        "domain": "kubernetes.io",
+        "ip": "15.197.167.90"
+      },
+      {
+        "domain": "www.quora.com",
+        "ip": "162.159.153.247"
+      },
+      {
+        "domain": "ap-dw-parameters.ksord.com",
+        "ip": "155.102.149.42"
+      },
+      {
+        "domain": "trello.com",
+        "ip": "3.160.57.120"
+      },
+      {
+        "domain": "api.wps.com",
+        "ip": "110.238.109.205"
+      },
+      {
+        "domain": "dl.acm.org",
+        "ip": "104.18.42.89"
+      },
+      {
+        "domain": "365.kdocs.cn",
+        "ip": "43.175.234.132"
+      },
+      {
+        "domain": "account.wps.cn",
+        "ip": "101.47.98.223"
+      },
+      {
+        "domain": "api.wps.cn",
+        "ip": "101.47.98.213"
+      },
+      {
+        "domain": "avatar.qwps.cn",
+        "ip": "101.126.24.53"
+      },
+      {
+        "domain": "dl.vas.wpscdn.cn",
+        "ip": ""
+      },
+      {
+        "domain": "docer-api.kdocs.cn",
+        "ip": "71.18.157.246"
+      },
+      {
+        "domain": "docer.kdocs.cn",
+        "ip": "101.47.98.213"
+      },
+      {
+        "domain": "docer.wps.cn",
+        "ip": "71.18.157.246"
+      },
+      {
+        "domain": "drive.wps.cn",
+        "ip": "101.47.98.83"
+      },
+      {
+        "domain": "geo.wps.cn",
+        "ip": "71.18.160.102"
+      },
+      {
+        "domain": "home.wps.cn",
+        "ip": "101.47.98.213"
+      },
+      {
+        "domain": "hwc-bj.ag.kdocs.cn",
+        "ip": "171.15.136.244"
+      },
+      {
+        "domain": "iaas.wps.cn",
+        "ip": "71.18.160.60"
+      },
+      {
+        "domain": "kdocs.cn",
+        "ip": "101.47.98.155"
+      },
+      {
+        "domain": "ksc-bj.ag.kdocs.cn",
+        "ip": "60.28.214.185"
+      },
+      {
+        "domain": "le.wps.cn",
+        "ip": "71.18.157.246"
+      },
+      {
+        "domain": "lucky.wps.cn",
+        "ip": "101.47.98.213"
+      },
+      {
+        "domain": "pay.wps.cn",
+        "ip": "43.175.253.84"
+      },
+      {
+        "domain": "qing.wps.cn",
+        "ip": "71.18.160.37"
+      },
+      {
+        "domain": "qr.wps.cn",
+        "ip": "101.47.98.223"
+      },
+      {
+        "domain": "roaming.wps.cn",
+        "ip": "101.47.98.83"
+      },
+      {
+        "domain": "sms.wps.cn",
+        "ip": "71.18.160.102"
+      },
+      {
+        "domain": "vas.wps.cn",
+        "ip": "71.18.160.60"
+      },
+      {
+        "domain": "vasapi.wps.cn",
+        "ip": "71.18.157.246"
+      },
+      {
+        "domain": "vip.wps.cn",
+        "ip": "101.47.98.213"
+      },
+      {
+        "domain": "vipapi.wps.cn",
+        "ip": "43.175.252.84"
+      },
+      {
+        "domain": "wdl1.cache.wps.cn",
+        "ip": "162.128.226.1"
+      },
+      {
+        "domain": "wdl1.file.cache.docer.com",
+        "ip": "111.48.64.100"
+      },
+      {
+        "domain": "wps-docer-property.file.docer.com",
+        "ip": "110.43.121.118"
+      },
+      {
+        "domain": "wps-docer-property.ks3-cn-beijing.ksyun.com",
+        "ip": "110.43.121.118"
+      },
+      {
+        "domain": "wps-docer-property.ks3-cn-beijing.ksyuncs.com",
+        "ip": "110.43.121.19"
+      },
+      {
+        "domain": "www.kdocs.cn",
+        "ip": "71.18.160.105"
+      },
+      {
+        "domain": "zj-roaming.wps.cn",
+        "ip": "71.18.157.246"
+      },
+      {
+        "domain": "zt.wps.cn",
+        "ip": "101.47.98.213"
+      },
+      {
+        "domain": "zw-roaming.wps.cn",
+        "ip": "71.18.160.37"
+      },
+      {
+        "domain": "www.ebay.com",
+        "ip": "195.175.177.171"
+      },
+      {
+        "domain": "www.dropbox.com",
+        "ip": "162.125.66.18"
+      },
+      {
+        "domain": "discord.com",
+        "ip": "195.175.254.2"
+      },
+      {
+        "domain": "ieeexplore.ieee.org",
+        "ip": "108.157.60.119"
+      },
+      {
+        "domain": "www.docker.com",
+        "ip": "23.185.0.4"
+      },
+      {
+        "domain": "www.sciencedirect.com",
+        "ip": "203.22.241.9"
+      },
+      {
+        "domain": "www.msftconnecttest.com",
+        "ip": "2.20.245.181"
+      },
+      {
+        "domain": "disabled.invalid",
+        "ip": ""
+      },
+      {
+        "domain": "client-update.steamstatic.com",
+        "ip": "146.75.123.82"
+      },
+      {
+        "domain": "api-ad-adapter.wps.com",
+        "ip": "110.238.107.232"
+      }
+    ],
+    "hosts": [
+      {
+        "asn": "AS11426",
+        "asn_name": "Charter Communications Inc",
+        "country_name": "United States",
+        "hostname": "",
+        "inaddrarpa": "",
+        "ip": "45.36.99.184",
+        "ports": [
+          443
+        ]
+      },
+      {
+        "asn": "AS20115",
+        "asn_name": "Charter Communications",
+        "country_name": "United States",
+        "hostname": "",
+        "inaddrarpa": "",
+        "ip": "97.83.40.67",
+        "ports": [
+          443
+        ]
+      },
+      {
+        "asn": "AS209",
+        "asn_name": "CenturyLink Communications, LLC",
+        "country_name": "United States",
+        "hostname": "",
+        "inaddrarpa": "",
+        "ip": "65.152.201.203",
+        "ports": [
+          443
+        ]
+      },
+      {
+        "asn": "AS136885",
+        "asn_name": "PT BINTANG MATARAM TEKNOLOGI",
+        "country_name": "Indonesia",
+        "hostname": "",
+        "inaddrarpa": "",
+        "ip": "103.105.254.17",
+        "ports": [
+          443
+        ]
+      },
+      {
+        "asn": "AS4788",
+        "asn_name": "TM TECHNOLOGY SERVICES SDN BHD",
+        "country_name": "Malaysia",
+        "hostname": "",
+        "inaddrarpa": "",
+        "ip": "60.51.47.65",
+        "ports": [
+          443
+        ]
+      },
+      {
+        "asn": "AS21632",
+        "asn_name": "Cybernet1",
+        "country_name": "United States",
+        "hostname": "",
+        "inaddrarpa": "",
+        "ip": "216.166.148.187",
+        "ports": [
+          443
+        ]
+      },
+      {
+        "asn": "AS21246",
+        "asn_name": "IPKO Telecommunications LLC",
+        "country_name": "Kosovo",
+        "hostname": "",
+        "inaddrarpa": "",
+        "ip": "46.99.175.149",
+        "ports": [
+          443
+        ]
+      },
+      {
+        "asn": "AS37963",
+        "asn_name": "Hangzhou Alibaba Advertising Co.,Ltd.",
+        "country_name": "China",
+        "hostname": "",
+        "inaddrarpa": "",
+        "ip": "223.5.5.5",
+        "ports": [
+          53
+        ]
+      },
+      {
+        "asn": "AS37963",
+        "asn_name": "Hangzhou Alibaba Advertising Co.,Ltd.",
+        "country_name": "China",
+        "hostname": "",
+        "inaddrarpa": "",
+        "ip": "223.6.6.6",
+        "ports": [
+          53
+        ]
+      },
+      {
+        "asn": "AS132203",
+        "asn_name": "Shenzhen Tencent Computer Systems Company Limited",
+        "country_name": "United States",
+        "hostname": "",
+        "inaddrarpa": "",
+        "ip": "119.29.29.29",
+        "ports": [
+          53
+        ]
+      },
+      {
+        "asn": "AS8075",
+        "asn_name": "Microsoft Corporation",
+        "country_name": "France",
+        "hostname": "",
+        "inaddrarpa": "",
+        "ip": "98.66.133.185",
+        "ports": [
+          443
+        ]
+      },
+      {
+        "asn": "AS20940",
+        "asn_name": "Akamai International B.V.",
+        "country_name": "Turkey",
+        "hostname": "",
+        "inaddrarpa": "",
+        "ip": "23.58.222.96",
+        "ports": [
+          80
+        ]
+      },
+      {
+        "asn": "AS15169",
+        "asn_name": "Google LLC",
+        "country_name": "Italy",
+        "hostname": "",
+        "inaddrarpa": "",
+        "ip": "172.217.16.142",
+        "ports": [
+          443
+        ]
+      },
+      {
+        "asn": "AS45102",
+        "asn_name": "Alibaba (US) Technology Co., Ltd.",
+        "country_name": "Germany",
+        "hostname": "",
+        "inaddrarpa": "",
+        "ip": "8.211.55.206",
+        "ports": [
+          443
+        ]
+      }
+    ],
+    "http": [],
+    "icmp": [],
+    "tcp": [
+      {
+        "dport": 443,
+        "dst": "172.217.16.142",
+        "offset": 340,
+        "sport": 49682,
+        "src": "192.168.122.89",
+        "time": 0.038893938064575195
+      },
+      {
+        "dport": 443,
+        "dst": "8.211.55.206",
+        "offset": 753,
+        "sport": 49681,
+        "src": "192.168.122.89",
+        "time": 0.06283402442932129
+      },
+      {
+        "dport": 443,
+        "dst": "172.217.16.142",
+        "offset": 23542,
+        "sport": 49684,
+        "src": "192.168.122.89",
+        "time": 9.250144958496094
+      },
+      {
+        "dport": 443,
+        "dst": "8.211.55.206",
+        "offset": 23955,
+        "sport": 49683,
+        "src": "192.168.122.89",
+        "time": 9.276643991470337
+      },
+      {
+        "dport": 443,
+        "dst": "98.66.133.185",
+        "offset": 38627,
+        "sport": 49673,
+        "src": "192.168.122.89",
+        "time": 10.697815895080566
+      },
+      {
+        "dport": 443,
+        "dst": "172.217.16.142",
+        "offset": 40346,
+        "sport": 49685,
+        "src": "192.168.122.89",
+        "time": 14.177295923233032
+      },
+      {
+        "dport": 443,
+        "dst": "8.211.55.206",
+        "offset": 40759,
+        "sport": 49686,
+        "src": "192.168.122.89",
+        "time": 14.2044038772583
+      },
+      {
+        "dport": 443,
+        "dst": "98.66.133.185",
+        "offset": 56233,
+        "sport": 49675,
+        "src": "192.168.122.89",
+        "time": 16.968398094177246
+      },
+      {
+        "dport": 443,
+        "dst": "172.217.16.142",
+        "offset": 62023,
+        "sport": 49688,
+        "src": "192.168.122.89",
+        "time": 19.145639896392822
+      },
+      {
+        "dport": 443,
+        "dst": "8.211.55.206",
+        "offset": 63613,
+        "sport": 49689,
+        "src": "192.168.122.89",
+        "time": 19.17276906967163
+      },
+      {
+        "dport": 443,
+        "dst": "172.217.16.142",
+        "offset": 74773,
+        "sport": 49692,
+        "src": "192.168.122.89",
+        "time": 20.796000957489014
+      },
+      {
+        "dport": 443,
+        "dst": "8.211.55.206",
+        "offset": 75736,
+        "sport": 49691,
+        "src": "192.168.122.89",
+        "time": 20.82215690612793
+      },
+      {
+        "dport": 443,
+        "dst": "172.217.16.142",
+        "offset": 87198,
+        "sport": 49694,
+        "src": "192.168.122.89",
+        "time": 24.38594698905945
+      },
+      {
+        "dport": 443,
+        "dst": "8.211.55.206",
+        "offset": 87459,
+        "sport": 49693,
+        "src": "192.168.122.89",
+        "time": 24.38609504699707
+      },
+      {
+        "dport": 443,
+        "dst": "172.217.16.142",
+        "offset": 88175,
+        "sport": 49696,
+        "src": "192.168.122.89",
+        "time": 24.44767189025879
+      },
+      {
+        "dport": 443,
+        "dst": "8.211.55.206",
+        "offset": 97062,
+        "sport": 49695,
+        "src": "192.168.122.89",
+        "time": 24.472238063812256
+      },
+      {
+        "dport": 443,
+        "dst": "172.217.16.142",
+        "offset": 117457,
+        "sport": 49697,
+        "src": "192.168.122.89",
+        "time": 27.282949924468994
+      },
+      {
+        "dport": 443,
+        "dst": "172.217.16.142",
+        "offset": 117718,
+        "sport": 49698,
+        "src": "192.168.122.89",
+        "time": 27.28304696083069
+      },
+      {
+        "dport": 443,
+        "dst": "8.211.55.206",
+        "offset": 118131,
+        "sport": 49700,
+        "src": "192.168.122.89",
+        "time": 27.307910919189453
+      },
+      {
+        "dport": 443,
+        "dst": "8.211.55.206",
+        "offset": 118543,
+        "sport": 49699,
+        "src": "192.168.122.89",
+        "time": 27.30888605117798
+      },
+      {
+        "dport": 443,
+        "dst": "172.217.16.142",
+        "offset": 174029,
+        "sport": 49679,
+        "src": "192.168.122.89",
+        "time": 30.410767078399658
+      },
+      {
+        "dport": 443,
+        "dst": "8.211.55.206",
+        "offset": 175764,
+        "sport": 49680,
+        "src": "192.168.122.89",
+        "time": 30.411261081695557
+      },
+      {
+        "dport": 443,
+        "dst": "172.217.16.142",
+        "offset": 208727,
+        "sport": 49703,
+        "src": "192.168.122.89",
+        "time": 31.673449993133545
+      },
+      {
+        "dport": 443,
+        "dst": "8.211.55.206",
+        "offset": 209439,
+        "sport": 49704,
+        "src": "192.168.122.89",
+        "time": 31.697619915008545
+      },
+      {
+        "dport": 443,
+        "dst": "172.217.16.142",
+        "offset": 269006,
+        "sport": 49707,
+        "src": "192.168.122.89",
+        "time": 64.40256309509277
+      },
+      {
+        "dport": 443,
+        "dst": "172.217.16.142",
+        "offset": 286288,
+        "sport": 51749,
+        "src": "192.168.122.89",
+        "time": 122.17020893096924
+      },
+      {
+        "dport": 443,
+        "dst": "8.211.55.206",
+        "offset": 286930,
+        "sport": 51748,
+        "src": "192.168.122.89",
+        "time": 122.20350503921509
+      },
+      {
+        "dport": 443,
+        "dst": "172.217.16.142",
+        "offset": 302546,
+        "sport": 63907,
+        "src": "192.168.122.89",
+        "time": 154.86932706832886
+      },
+      {
+        "dport": 443,
+        "dst": "172.217.16.142",
+        "offset": 307026,
+        "sport": 63908,
+        "src": "192.168.122.89",
+        "time": 156.95137405395508
+      },
+      {
+        "dport": 443,
+        "dst": "172.217.16.142",
+        "offset": 307287,
+        "sport": 63909,
+        "src": "192.168.122.89",
+        "time": 156.95159006118774
+      }
+    ],
+    "udp": [
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 14673,
+        "sport": 61709,
+        "src": "192.168.122.89",
+        "time": 0.4298388957977295
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 14763,
+        "sport": 49316,
+        "src": "192.168.122.89",
+        "time": 0.42993688583374023
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 23136,
+        "sport": 61446,
+        "src": "192.168.122.89",
+        "time": 9.143111944198608
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 39393,
+        "sport": 52406,
+        "src": "192.168.122.89",
+        "time": 12.760279893875122
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 39492,
+        "sport": 62473,
+        "src": "192.168.122.89",
+        "time": 13.057554006576538
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 57559,
+        "sport": 51219,
+        "src": "192.168.122.89",
+        "time": 18.276376962661743
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 57651,
+        "sport": 54348,
+        "src": "192.168.122.89",
+        "time": 18.973196983337402
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 70369,
+        "sport": 58477,
+        "src": "192.168.122.89",
+        "time": 20.170217037200928
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 83247,
+        "sport": 54756,
+        "src": "192.168.122.89",
+        "time": 21.650446891784668
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 84074,
+        "sport": 65066,
+        "src": "192.168.122.89",
+        "time": 22.927042961120605
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 84273,
+        "sport": 62953,
+        "src": "192.168.122.89",
+        "time": 23.093111991882324
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 86280,
+        "sport": 60830,
+        "src": "192.168.122.89",
+        "time": 23.890785932540894
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 86367,
+        "sport": 64845,
+        "src": "192.168.122.89",
+        "time": 23.89666986465454
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 115110,
+        "sport": 58076,
+        "src": "192.168.122.89",
+        "time": 24.783232927322388
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 115563,
+        "sport": 60655,
+        "src": "192.168.122.89",
+        "time": 25.116339921951294
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 189092,
+        "sport": 56362,
+        "src": "192.168.122.89",
+        "time": 31.29101800918579
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 189180,
+        "sport": 61930,
+        "src": "192.168.122.89",
+        "time": 31.29206109046936
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 189270,
+        "sport": 51128,
+        "src": "192.168.122.89",
+        "time": 31.29272198677063
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 189356,
+        "sport": 58394,
+        "src": "192.168.122.89",
+        "time": 31.297131061553955
+      },
+      {
+        "dport": 53,
+        "dst": "223.6.6.6",
+        "offset": 189446,
+        "sport": 65091,
+        "src": "192.168.122.89",
+        "time": 31.29826593399048
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 189538,
+        "sport": 50088,
+        "src": "192.168.122.89",
+        "time": 31.299081087112427
+      },
+      {
+        "dport": 53,
+        "dst": "223.5.5.5",
+        "offset": 189632,
+        "sport": 58810,
+        "src": "192.168.122.89",
+        "time": 31.29987907409668
+      },
+      {
+        "dport": 53,
+        "dst": "223.5.5.5",
+        "offset": 189722,
+        "sport": 63095,
+        "src": "192.168.122.89",
+        "time": 31.300468921661377
+      },
+      {
+        "dport": 53,
+        "dst": "223.6.6.6",
+        "offset": 189810,
+        "sport": 58410,
+        "src": "192.168.122.89",
+        "time": 31.301260948181152
+      },
+      {
+        "dport": 53,
+        "dst": "223.6.6.6",
+        "offset": 189898,
+        "sport": 52591,
+        "src": "192.168.122.89",
+        "time": 31.302013874053955
+      },
+      {
+        "dport": 53,
+        "dst": "223.5.5.5",
+        "offset": 189984,
+        "sport": 60600,
+        "src": "192.168.122.89",
+        "time": 31.302648067474365
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 190071,
+        "sport": 51953,
+        "src": "192.168.122.89",
+        "time": 31.303169012069702
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 190165,
+        "sport": 55683,
+        "src": "192.168.122.89",
+        "time": 31.30384588241577
+      },
+      {
+        "dport": 53,
+        "dst": "223.6.6.6",
+        "offset": 190252,
+        "sport": 65009,
+        "src": "192.168.122.89",
+        "time": 31.304362058639526
+      },
+      {
+        "dport": 53,
+        "dst": "223.6.6.6",
+        "offset": 190336,
+        "sport": 56510,
+        "src": "192.168.122.89",
+        "time": 31.305001974105835
+      },
+      {
+        "dport": 53,
+        "dst": "223.6.6.6",
+        "offset": 190430,
+        "sport": 61112,
+        "src": "192.168.122.89",
+        "time": 31.305685997009277
+      },
+      {
+        "dport": 53,
+        "dst": "223.6.6.6",
+        "offset": 190515,
+        "sport": 64644,
+        "src": "192.168.122.89",
+        "time": 31.30618906021118
+      },
+      {
+        "dport": 53,
+        "dst": "223.5.5.5",
+        "offset": 190603,
+        "sport": 49946,
+        "src": "192.168.122.89",
+        "time": 31.3069429397583
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 190689,
+        "sport": 63709,
+        "src": "192.168.122.89",
+        "time": 31.307816982269287
+      },
+      {
+        "dport": 53,
+        "dst": "223.6.6.6",
+        "offset": 190776,
+        "sport": 50471,
+        "src": "192.168.122.89",
+        "time": 31.30848503112793
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 190861,
+        "sport": 60520,
+        "src": "192.168.122.89",
+        "time": 31.309158086776733
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 190951,
+        "sport": 63420,
+        "src": "192.168.122.89",
+        "time": 31.309788942337036
+      },
+      {
+        "dport": 53,
+        "dst": "223.6.6.6",
+        "offset": 191037,
+        "sport": 64505,
+        "src": "192.168.122.89",
+        "time": 31.310446977615356
+      },
+      {
+        "dport": 53,
+        "dst": "223.5.5.5",
+        "offset": 191123,
+        "sport": 55671,
+        "src": "192.168.122.89",
+        "time": 31.310926914215088
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 191212,
+        "sport": 52419,
+        "src": "192.168.122.89",
+        "time": 31.31149697303772
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 191298,
+        "sport": 56288,
+        "src": "192.168.122.89",
+        "time": 31.31205105781555
+      },
+      {
+        "dport": 53,
+        "dst": "223.6.6.6",
+        "offset": 191387,
+        "sport": 64456,
+        "src": "192.168.122.89",
+        "time": 31.312700986862183
+      },
+      {
+        "dport": 53,
+        "dst": "223.6.6.6",
+        "offset": 191480,
+        "sport": 52555,
+        "src": "192.168.122.89",
+        "time": 31.31333899497986
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 191581,
+        "sport": 59569,
+        "src": "192.168.122.89",
+        "time": 31.313989877700806
+      },
+      {
+        "dport": 53,
+        "dst": "223.6.6.6",
+        "offset": 191690,
+        "sport": 58463,
+        "src": "192.168.122.89",
+        "time": 31.314416885375977
+      },
+      {
+        "dport": 53,
+        "dst": "223.6.6.6",
+        "offset": 191809,
+        "sport": 61723,
+        "src": "192.168.122.89",
+        "time": 31.314996004104614
+      },
+      {
+        "dport": 53,
+        "dst": "223.6.6.6",
+        "offset": 191930,
+        "sport": 59093,
+        "src": "192.168.122.89",
+        "time": 31.315475940704346
+      },
+      {
+        "dport": 53,
+        "dst": "223.5.5.5",
+        "offset": 192018,
+        "sport": 52368,
+        "src": "192.168.122.89",
+        "time": 31.316236972808838
+      },
+      {
+        "dport": 53,
+        "dst": "223.5.5.5",
+        "offset": 192111,
+        "sport": 54016,
+        "src": "192.168.122.89",
+        "time": 31.316802978515625
+      },
+      {
+        "dport": 53,
+        "dst": "223.5.5.5",
+        "offset": 192196,
+        "sport": 52987,
+        "src": "192.168.122.89",
+        "time": 31.31743288040161
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 197598,
+        "sport": 57571,
+        "src": "192.168.122.89",
+        "time": 31.5208740234375
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 226008,
+        "sport": 58705,
+        "src": "192.168.122.89",
+        "time": 32.362228870391846
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 255524,
+        "sport": 61034,
+        "src": "192.168.122.89",
+        "time": 37.864490032196045
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 256332,
+        "sport": 61536,
+        "src": "192.168.122.89",
+        "time": 42.18469500541687
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 259684,
+        "sport": 53199,
+        "src": "192.168.122.89",
+        "time": 43.64899301528931
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 259775,
+        "sport": 60172,
+        "src": "192.168.122.89",
+        "time": 44.03301501274109
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 259950,
+        "sport": 57831,
+        "src": "192.168.122.89",
+        "time": 44.37995409965515
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 260045,
+        "sport": 60987,
+        "src": "192.168.122.89",
+        "time": 44.40885806083679
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 260228,
+        "sport": 60488,
+        "src": "192.168.122.89",
+        "time": 44.738080978393555
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 261322,
+        "sport": 57433,
+        "src": "192.168.122.89",
+        "time": 47.31882309913635
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 262798,
+        "sport": 59560,
+        "src": "192.168.122.89",
+        "time": 52.60560703277588
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 275170,
+        "sport": 52100,
+        "src": "192.168.122.89",
+        "time": 64.66044092178345
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 275558,
+        "sport": 60469,
+        "src": "192.168.122.89",
+        "time": 70.60021686553955
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 276015,
+        "sport": 64588,
+        "src": "192.168.122.89",
+        "time": 75.35839104652405
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 276879,
+        "sport": 62410,
+        "src": "192.168.122.89",
+        "time": 76.36592197418213
+      },
+      {
+        "dport": 138,
+        "dst": "192.168.122.255",
+        "offset": 279054,
+        "sport": 138,
+        "src": "192.168.122.89",
+        "time": 79.03589200973511
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 279499,
+        "sport": 60569,
+        "src": "192.168.122.89",
+        "time": 82.647381067276
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 280045,
+        "sport": 56734,
+        "src": "192.168.122.89",
+        "time": 86.71637201309204
+      },
+      {
+        "dport": 53,
+        "dst": "119.29.29.29",
+        "offset": 280243,
+        "sport": 53421,
+        "src": "192.168.122.89",
+        "time": 88.29980087280273
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 280503,
+        "sport": 60936,
+        "src": "192.168.122.89",
+        "time": 88.37891888618469
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 281159,
+        "sport": 54916,
+        "src": "192.168.122.89",
+        "time": 93.62195992469788
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 281671,
+        "sport": 64666,
+        "src": "192.168.122.89",
+        "time": 96.70517086982727
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 282048,
+        "sport": 56526,
+        "src": "192.168.122.89",
+        "time": 98.754065990448
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 283391,
+        "sport": 56269,
+        "src": "192.168.122.89",
+        "time": 108.80529808998108
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 283953,
+        "sport": 50631,
+        "src": "192.168.122.89",
+        "time": 110.81595396995544
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 284052,
+        "sport": 59128,
+        "src": "192.168.122.89",
+        "time": 110.81880187988281
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 285143,
+        "sport": 58583,
+        "src": "192.168.122.89",
+        "time": 118.04777097702026
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 293913,
+        "sport": 62077,
+        "src": "192.168.122.89",
+        "time": 122.88862609863281
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 294143,
+        "sport": 63054,
+        "src": "192.168.122.89",
+        "time": 122.90612292289734
+      },
+      {
+        "dport": 1900,
+        "dst": "239.255.255.250",
+        "offset": 295958,
+        "sport": 63055,
+        "src": "192.168.122.89",
+        "time": 128.9747428894043
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 297469,
+        "sport": 60300,
+        "src": "192.168.122.89",
+        "time": 134.9416298866272
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 297561,
+        "sport": 62097,
+        "src": "192.168.122.89",
+        "time": 135.02778100967407
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 298425,
+        "sport": 57710,
+        "src": "192.168.122.89",
+        "time": 138.18510389328003
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 298517,
+        "sport": 60821,
+        "src": "192.168.122.89",
+        "time": 138.2759928703308
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 298791,
+        "sport": 63797,
+        "src": "192.168.122.89",
+        "time": 139.29707098007202
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 298883,
+        "sport": 51305,
+        "src": "192.168.122.89",
+        "time": 139.29733991622925
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 298975,
+        "sport": 50208,
+        "src": "192.168.122.89",
+        "time": 140.85319995880127
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 299072,
+        "sport": 55926,
+        "src": "192.168.122.89",
+        "time": 141.32350897789001
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 299821,
+        "sport": 52165,
+        "src": "192.168.122.89",
+        "time": 145.26102209091187
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 300123,
+        "sport": 60352,
+        "src": "192.168.122.89",
+        "time": 146.46091198921204
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 301089,
+        "sport": 53586,
+        "src": "192.168.122.89",
+        "time": 150.35908794403076
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 301181,
+        "sport": 64810,
+        "src": "192.168.122.89",
+        "time": 150.3595108985901
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 301380,
+        "sport": 57173,
+        "src": "192.168.122.89",
+        "time": 151.37399101257324
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 301472,
+        "sport": 63969,
+        "src": "192.168.122.89",
+        "time": 151.37428092956543
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 301564,
+        "sport": 62030,
+        "src": "192.168.122.89",
+        "time": 152.69550800323486
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 301759,
+        "sport": 51122,
+        "src": "192.168.122.89",
+        "time": 153.4059419631958
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 322861,
+        "sport": 60893,
+        "src": "192.168.122.89",
+        "time": 162.02824091911316
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 322953,
+        "sport": 59040,
+        "src": "192.168.122.89",
+        "time": 162.0286328792572
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 323127,
+        "sport": 62383,
+        "src": "192.168.122.89",
+        "time": 163.03752493858337
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 323219,
+        "sport": 65002,
+        "src": "192.168.122.89",
+        "time": 163.037770986557
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 323311,
+        "sport": 61533,
+        "src": "192.168.122.89",
+        "time": 164.29543209075928
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 323410,
+        "sport": 59330,
+        "src": "192.168.122.89",
+        "time": 164.82510495185852
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 323608,
+        "sport": 58056,
+        "src": "192.168.122.89",
+        "time": 165.69866490364075
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 326778,
+        "sport": 59175,
+        "src": "192.168.122.89",
+        "time": 171.41152000427246
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 327057,
+        "sport": 62898,
+        "src": "192.168.122.89",
+        "time": 172.47244501113892
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 328042,
+        "sport": 63659,
+        "src": "192.168.122.89",
+        "time": 176.90612196922302
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 328134,
+        "sport": 64065,
+        "src": "192.168.122.89",
+        "time": 177.76833605766296
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 332452,
+        "sport": 54503,
+        "src": "192.168.122.89",
+        "time": 189.41966009140015
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 332544,
+        "sport": 56782,
+        "src": "192.168.122.89",
+        "time": 189.42000889778137
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 332636,
+        "sport": 54707,
+        "src": "192.168.122.89",
+        "time": 189.62613701820374
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 332726,
+        "sport": 51728,
+        "src": "192.168.122.89",
+        "time": 189.64775204658508
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 332906,
+        "sport": 62025,
+        "src": "192.168.122.89",
+        "time": 190.43194794654846
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 332998,
+        "sport": 56129,
+        "src": "192.168.122.89",
+        "time": 190.43236207962036
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 333548,
+        "sport": 62450,
+        "src": "192.168.122.89",
+        "time": 192.468523979187
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 334456,
+        "sport": 61811,
+        "src": "192.168.122.89",
+        "time": 198.98224902153015
+      },
+      {
+        "dport": 53,
+        "dst": "223.5.5.5",
+        "offset": 335067,
+        "sport": 63963,
+        "src": "192.168.122.89",
+        "time": 202.69226908683777
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 335327,
+        "sport": 58388,
+        "src": "192.168.122.89",
+        "time": 202.91037893295288
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 335600,
+        "sport": 50869,
+        "src": "192.168.122.89",
+        "time": 203.68039393424988
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 336061,
+        "sport": 51000,
+        "src": "192.168.122.89",
+        "time": 206.40355587005615
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 339529,
+        "sport": 50073,
+        "src": "192.168.122.89",
+        "time": 215.71497702598572
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 342393,
+        "sport": 57224,
+        "src": "192.168.122.89",
+        "time": 216.85291695594788
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 342575,
+        "sport": 49499,
+        "src": "192.168.122.89",
+        "time": 217.50916290283203
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 343229,
+        "sport": 64901,
+        "src": "192.168.122.89",
+        "time": 220.02722597122192
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 344688,
+        "sport": 54464,
+        "src": "192.168.122.89",
+        "time": 231.5676610469818
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 344787,
+        "sport": 54204,
+        "src": "192.168.122.89",
+        "time": 231.5693120956421
+      },
+      {
+        "dport": 1900,
+        "dst": "239.255.255.250",
+        "offset": 346381,
+        "sport": 54205,
+        "src": "192.168.122.89",
+        "time": 244.4837429523468
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 348113,
+        "sport": 64854,
+        "src": "192.168.122.89",
+        "time": 247.52016186714172
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 349247,
+        "sport": 57298,
+        "src": "192.168.122.89",
+        "time": 254.95026993751526
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 350288,
+        "sport": 60436,
+        "src": "192.168.122.89",
+        "time": 264.75877809524536
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 350380,
+        "sport": 61133,
+        "src": "192.168.122.89",
+        "time": 264.75905990600586
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 350472,
+        "sport": 63590,
+        "src": "192.168.122.89",
+        "time": 265.77673602104187
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 350564,
+        "sport": 61728,
+        "src": "192.168.122.89",
+        "time": 265.77850890159607
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 350656,
+        "sport": 57553,
+        "src": "192.168.122.89",
+        "time": 267.7989149093628
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 351188,
+        "sport": 53425,
+        "src": "192.168.122.89",
+        "time": 273.07220697402954
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 351894,
+        "sport": 57409,
+        "src": "192.168.122.89",
+        "time": 285.1229269504547
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 352372,
+        "sport": 55385,
+        "src": "192.168.122.89",
+        "time": 291.6102249622345
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 353077,
+        "sport": 58271,
+        "src": "192.168.122.89",
+        "time": 297.17445492744446
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 353353,
+        "sport": 49856,
+        "src": "192.168.122.89",
+        "time": 299.4108600616455
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 353815,
+        "sport": 64121,
+        "src": "192.168.122.89",
+        "time": 301.32407689094543
+      },
+      {
+        "dport": 5353,
+        "dst": "224.0.0.251",
+        "offset": 354112,
+        "sport": 5353,
+        "src": "192.168.122.89",
+        "time": 302.8315351009369
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 354697,
+        "sport": 53714,
+        "src": "192.168.122.89",
+        "time": 305.6688439846039
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 355328,
+        "sport": 60004,
+        "src": "192.168.122.89",
+        "time": 309.22477102279663
+      },
+      {
+        "dport": 53,
+        "dst": "192.168.122.1",
+        "offset": 356477,
+        "sport": 64291,
+        "src": "192.168.122.89",
+        "time": 317.7253849506378
+      }
+    ]
+  },
+  "sandbox_processes": {
+    "processes": [
+      {
+        "call_count": 505,
+        "command_line": "",
+        "first_seen": "2026-08-10 22:43:28,028",
+        "name": "3a311fa2632d70ba58f4.exe",
+        "pid": null,
+        "ppid": 2508
+      },
+      {
+        "call_count": 10696,
+        "command_line": "",
+        "first_seen": "2026-08-10 22:43:36,103",
+        "name": "wermgr.exe",
+        "pid": null,
+        "ppid": 1980
+      }
+    ],
+    "total": 2
+  },
+  "sandbox_signatures": {
+    "signatures": [
+      {
+        "confidence": 100,
+        "description": "Queries computer hostname",
+        "name": "queries_computer_name",
+        "references": [],
+        "severity": 1
+      },
+      {
+        "confidence": 100,
+        "description": "Queries the computer locale (possible geofencing)",
+        "name": "queries_locale_api",
+        "references": [],
+        "severity": 1
+      },
+      {
+        "confidence": 30,
+        "description": "Communicates with IPs located across a large number of unique countries",
+        "name": "network_country_distribution",
+        "references": [],
+        "severity": 1
+      },
+      {
+        "confidence": 80,
+        "description": "The PE file contains a PDB path",
+        "name": "static_pe_pdbpath",
+        "references": [
+          "https://www.fireeye.com/blog/threat-research/2019/08/definitive-dossier-of-devilish-debug-details-part-one-pdb-paths-malware.html"
+        ],
+        "severity": 1
+      },
+      {
+        "confidence": 40,
+        "description": "SetUnhandledExceptionFilter detected (possible anti-debug)",
+        "name": "antidebug_setunhandledexceptionfilter",
+        "references": [],
+        "severity": 1
+      },
+      {
+        "confidence": 100,
+        "description": "A file with an unusual extension was attempted to be loaded as a DLL.",
+        "name": "dll_load_uncommon_file_types",
+        "references": [],
+        "severity": 1
+      },
+      {
+        "confidence": 100,
+        "description": "Checks system language via registry key (possible geofencing)",
+        "name": "language_check_registry",
+        "references": [],
+        "severity": 1
+      },
+      {
+        "confidence": 80,
+        "description": "Queries process token information to check for Administrator privileges or UAC elevation status",
+        "name": "privilege_elevation_check",
+        "references": [],
+        "severity": 2
+      },
+      {
+        "confidence": 100,
+        "description": "At least one IP Address, Domain, or File Name was found in a crypto call",
+        "name": "encrypted_ioc",
+        "references": [],
+        "severity": 2
+      },
+      {
+        "confidence": 80,
+        "description": "Registers a vectored exception handler (VEH), possibly to hijack execution flow",
+        "name": "registers_vectored_exception_handler",
+        "references": [],
+        "severity": 2
+      },
+      {
+        "confidence": 50,
+        "description": "Creates a process in a suspended state, likely for injection",
+        "name": "creates_suspended_process",
+        "references": [],
+        "severity": 2
+      },
+      {
+        "confidence": 100,
+        "description": "Terminates another process",
+        "name": "terminates_remote_process",
+        "references": [],
+        "severity": 2
+      },
+      {
+        "confidence": 100,
+        "description": "The PE file contains an overlay",
+        "name": "contains_pe_overlay",
+        "references": [],
+        "severity": 2
+      },
+      {
+        "confidence": 50,
+        "description": "Creates RWX memory",
+        "name": "injection_rwx",
+        "references": [],
+        "severity": 2
+      },
+      {
+        "confidence": 80,
+        "description": "Uses Windows utilities for basic functionality",
+        "name": "uses_windows_utilities",
+        "references": [],
+        "severity": 2
+      },
+      {
+        "confidence": 80,
+        "description": "Queries the Volume Serial Number or Physical Hardware ID, possibly for anti-sandbox, victim profiling or environmental keying",
+        "name": "hardware_id_profiling",
+        "references": [],
+        "severity": 3
+      },
+      {
+        "confidence": 80,
+        "description": "Creates a thread executing from dynamically allocated (unbacked) memory rather than a file on disk, likely to execute shellcode",
+        "name": "thread_unbacked_memory",
+        "references": [],
+        "severity": 3
+      },
+      {
+        "confidence": 100,
+        "description": "Manually resolves API addresses from dynamically allocated (unbacked) memory, indicative of shellcode or an unpacker",
+        "name": "unbacked_api_resolution",
+        "references": [],
+        "severity": 3
+      },
+      {
+        "confidence": 100,
+        "description": "Loads a new DLL where the caller address originates from dynamically allocated (unbacked) memory",
+        "name": "unbacked_library_load",
+        "references": [],
+        "severity": 3
+      },
+      {
+        "confidence": 20,
+        "description": "Altered memory protections from dynamically allocated (unbacked) memory, indicative of self-modifying shellcode or memory patching",
+        "name": "unbacked_memory_protection_alteration",
+        "references": [],
+        "severity": 3
+      },
+      {
+        "confidence": 100,
+        "description": "Attempted to spawn a new child process from dynamically allocated (unbacked) memory",
+        "name": "unbacked_process_creation",
+        "references": [],
+        "severity": 3
+      },
+      {
+        "confidence": 100,
+        "description": "Paused execution (sleep/delay) in a thread executing in dynamically allocated (unbacked) memory, indicative of sandbox evasion or C2 sleeping between callbacks",
+        "name": "unbacked_delay_execution",
+        "references": [],
+        "severity": 3
+      },
+      {
+        "confidence": 100,
+        "description": "Yara detections observed in process dumps, payloads or dropped files",
+        "name": "procmem_yara",
+        "references": [],
+        "severity": 3
+      }
+    ],
+    "total": 23
+  }
+}
