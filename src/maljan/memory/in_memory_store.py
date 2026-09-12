@@ -67,7 +67,7 @@ class InMemoryStore:
             top_k:  Maximum cases to return. May return fewer when the store
                     contains fewer than top_k entries.
             exclude_sample_id: When provided, drop hits whose ``sample_id``
-                equals this value (audit 2026-05-17, LTM-01). Stops a
+                equals this value. Stops a
                 fresh analysis from feeding its own past run back to the
                 judge as a "weighted prior".
 
@@ -102,7 +102,7 @@ class InMemoryStore:
         require_uncorroborated: bool = True,
         include_analyst_errors: bool = True,
     ) -> int:
-        """Drop low-quality cases per the LTM-01 audit gate.
+        """Drop low-quality cases per the write-time quality gate.
 
         See ``MemoryStore.purge_low_quality`` for the contract. The
         in-memory implementation walks the case list and rebuilds it,

@@ -47,14 +47,14 @@ def _static_prompt(provider: Any | None = None) -> str:
 _ISR_SYSTEM = _static_prompt()
 
 
-# BUG-07 (2026-06-23 live-UI audit): the deterministic raw-data slot.
+# The deterministic raw-data slot.
 _STATIC_RAW_PLACEHOLDER_RE = re.compile(r"^\s*no\s+\w+\s+data\s+available\b", re.IGNORECASE)
 
 
 def _reframe_static_raw_data(data: str, has_tools: bool) -> str:
     """Rephrase the 'No static data available' file-loader placeholder.
 
-    BUG-07: for a freshly uploaded sample there is no pre-extracted
+    For a freshly uploaded sample there is no pre-extracted
     ``data/samples/static/<sha>.json`` fixture, so
     ``FileBasedLoader.load(sha, "static")`` returns the literal placeholder
     "No static data available for sample <sha>." When that text lands in the
@@ -89,31 +89,10 @@ class StaticAnalyst(BaseAnalyst):
     # ------------------------------------------------------------------
 
     # Container-visible path of the current sample, assigned per-run by the
-    # pipeline (nodes.py) alongside ``_sample_categories``. Read at CALL time
-    # by the load_program wrapper (late binding — the agent is cached across
-    # samples and tools may be selected before the pipeline sets the path).
+    # pipeline (nodes.py). Read at CALL time by the load_program wrapper (late
+    # binding — the agent is cached across samples and tools may be attached
+    # before the pipeline sets the path).
     _analysis_file_path: str | None = None
-
-    def _refine_tools_for_sample(self, host_path: str | None) -> None:
-        """Narrow ``self.tools`` to this sample's relevant tools.
-
-        Cheaply derives capability categories from the PE import classification
-        (no Ghidra call) and lets the provider re-select from the full pool it
-        already selected once at attach time. No-op unless the full pool was
-        captured. Fail-safe.
-        """
-        pool = getattr(self, "_all_ghidra_tools", None)
-        if not pool or not host_path:
-            return
-        try:
-            from maljan.analysis.import_capability_layer import _imports_by_category
-            from maljan.extractors.pe_extractor import build_static_analysis
-
-            static = build_static_analysis(sample_path=host_path)
-            categories = set(_imports_by_category(static).keys()) if static else set()
-            self.tools = self._provider().select_tools(pool, categories)
-        except Exception as e:  # noqa: BLE001
-            self.logger.warning("Dynamic tool selection failed (%s); keeping current set.", e)
 
     def _provider(self) -> Any:
         """The static provider for *this agent*: its own, the container's, or an ad hoc one.
@@ -141,7 +120,7 @@ class StaticAnalyst(BaseAnalyst):
 
         Everything this used to do — transports, clients, guardrails, the shared
         agent loop — moved into ``GhidraStaticProvider.open``. What is left is
-        the analyst's half of the contract: ask, and narrow.
+        the analyst's half of the contract: ask.
         """
         provider = self._provider()
         if not provider.capabilities.provides_tools:
@@ -150,20 +129,17 @@ class StaticAnalyst(BaseAnalyst):
             return
         provider.open(self._job_context())
         pool = provider.get_tools()
-        self._all_ghidra_tools = pool  # kept: the report and tests read this name
         # No ``self.toolkit`` assignment here: the provider holds its own client
         # privately and closes it itself (``ServiceContainer.aclose`` calls
         # ``get_static_provider().close()``), so there is nothing for this
         # analyst's ``close_tools()`` to release on the static path.
         self.tools = [
-            *provider.select_tools(pool, getattr(self, "_sample_categories", None)),
+            *pool,
             *self._attach_registry_tools(
                 "static", exclude=str(getattr(provider, "server_name", ""))
             ),
         ]
-        self.logger.info(
-            "Static provider '%s': %d/%d tools attached.", provider.id, len(self.tools), len(pool)
-        )
+        self.logger.info("Static provider '%s': %d tools attached.", provider.id, len(self.tools))
 
     def _job_context(self) -> StaticJobContext:
         from maljan.core.config import get_settings
@@ -183,7 +159,6 @@ class StaticAnalyst(BaseAnalyst):
         return StaticJobContext(
             host_sample_path=getattr(self, "_host_sample_path", None),
             mirror_sample_path=getattr(self, "_analysis_file_path", None),
-            capability_categories=frozenset(getattr(self, "_sample_categories", None) or ()),
             output_guardrail=guardrail,
             max_output_chars=cfg.preprocessing.max_tool_output_chars,
             truncation_ledger=getattr(self, "truncation_ledger", None),
@@ -525,10 +500,6 @@ class StaticAnalyst(BaseAnalyst):
         else:
             target_info = f"Static output:\n{data}"
 
-        # Dynamic-mode tool narrowing when data is a file path.
-        if len(data.strip()) < 512 and os.path.exists(data.strip()):
-            self._refine_tools_for_sample(data.strip())
-
         prompt_messages = [
             ("system", _static_prompt(self._provider())),
             (
@@ -586,7 +557,7 @@ class StaticAnalyst(BaseAnalyst):
                 "own_report": own_report,
                 "peer_section": peer_section,
                 "mediator_feedback": mediator_feedback,
-                # BUG-07: don't let the "No static data available" placeholder
+                # Don't let the "No static data available" placeholder
                 # talk the model out of its live-Ghidra ORIGINAL REPORT.
                 "data": _reframe_static_raw_data(original_data, bool(self.tools)),
             }
@@ -603,11 +574,11 @@ class StaticAnalyst(BaseAnalyst):
 
         self._try_initialize_mcp()
 
-        # PIPE-ANA-01 (audit 2026-05-19): when the supplied target *looks*
+        # When the supplied target *looks*
         # like a filename but doesn't exist on disk (e.g. a sandbox sent
         # the task_id instead of the artefact path), short-circuit
         # to a zero-claim ISR rather than paying for an LLM round that
-        # ends with ``load_program: File not found``. ANA-MARK-01 already
+        # ends with ``load_program: File not found``. The meta-claim guard already
         # neutralises the placeholder text path; this is the equivalent
         # cheap guard at the *structured* entry point.
         stripped = data.strip()
@@ -621,8 +592,8 @@ class StaticAnalyst(BaseAnalyst):
         if looks_like_filename and not os.path.exists(stripped):
             self.logger.error(
                 "Static analyst received a non-existent path '%s'. Skipping LLM "
-                "round and emitting an empty ISR — downstream CONF-INFL-01 cap "
-                "will mark this run as degraded.",
+                "round and emitting an empty ISR — the downstream confidence "
+                "cap will mark this run as degraded.",
                 stripped,
             )
             return AgentISR(
@@ -676,11 +647,6 @@ class StaticAnalyst(BaseAnalyst):
             # own long-term memory. Same host profile as the family RAG, different KB
             # (prior cases -> recurring techniques). Fail-safe and gated OFF by default.
             attck_hint = self._compute_attck_case_hint(host_path)
-        # In dynamic mode, narrow the Ghidra tool manifest to the
-        # tools relevant to THIS sample's capability categories before the ReAct
-        # loop (all tools stay reachable; only the relevant subset is shown).
-        self._refine_tools_for_sample(host_path)
-
         prompt_messages = [
             ("system", _static_prompt(self._provider())),
             (
@@ -702,7 +668,7 @@ class StaticAnalyst(BaseAnalyst):
 
         content = self.execute_tool_loop(prompt_messages)
         parsed = _parse_claim_blocks(content)
-        # BUG-07: a defeatist "could not be performed / missing binary data"
+        # A defeatist "could not be performed / missing binary data"
         # claim parses as a well-formed block but is not a real finding — drop it
         # so static collapses to a zero-claim (degraded) ISR rather than a fake
         # high-confidence one.
@@ -781,7 +747,7 @@ class StaticAnalyst(BaseAnalyst):
                 "own_report": own_report,
                 "peer_section": peer_isr_summaries,
                 "mediator_feedback": mediator_feedback,
-                # BUG-07: don't let the "No static data available" placeholder
+                # Don't let the "No static data available" placeholder
                 # talk the model out of its live-Ghidra ORIGINAL REPORT.
                 "data": _reframe_static_raw_data(original_data, bool(self.tools)),
             }
@@ -789,7 +755,7 @@ class StaticAnalyst(BaseAnalyst):
         content = str(response.content)
 
         parsed = _parse_claim_blocks(content)
-        # BUG-07: drop defeatist meta-claims ("could not be performed / missing
+        # Drop defeatist meta-claims ("could not be performed / missing
         # binary data") that parse as well-formed blocks; a no-real-finding
         # revision must collapse to a zero-claim ISR so the run is honestly
         # marked degraded instead of crediting a fake high-confidence claim.

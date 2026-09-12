@@ -181,7 +181,7 @@ def test_export_lists_one_path_per_arm_whose_key_is_stored(client):
 
 
 def test_export_masks_every_server_env_value(client):
-    """SEC-1: a server's ``env`` map is where its own credential lives, so the
+    """A server's ``env`` map is where its own credential lives, so the
     export carries the variable names and the mask, never the values; each one
     is named under ``secrets_omitted`` so an operator can see what is missing."""
     fake = {

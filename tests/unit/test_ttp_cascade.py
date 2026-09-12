@@ -456,7 +456,7 @@ class TestPlatformAwareCascade:
 
 
 class TestEmptyDomainGate:
-    """2026-07 audit (Bulgu #3): a domain with no real input data this run must
+    """A domain with no real input data this run must
     not be counted as an independent corroborating layer — that is what inflated
     T1497 to 1.00 "corroborated across dynamic,network,static,yara" when the
     sandbox never ran."""

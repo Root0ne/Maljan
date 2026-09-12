@@ -39,7 +39,7 @@ class TestBuildFamilyAttribution:
         assert attr.family_confidence == 0.9
 
     def test_category_is_not_surfaced_as_family(self) -> None:
-        # 2026-07 audit (Bulgu #6/#7): a behavioural category ("rat", "dropper")
+        # A behavioural category ("rat", "dropper")
         # is a class, NOT a family — it must never become the family attribution.
         # With no CTI family source, family is left unset.
         attr = build_family_attribution(

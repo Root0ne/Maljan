@@ -131,7 +131,7 @@ class TestConsensusRouter:
         state = _make_state(iteration=0, consensus=False, sycophancy=False)
         assert router.should_continue(state) == "revision"
 
-    # --- BUG-05: mediation-error short-circuit (avoid wasteful revision round) ---
+    # --- mediation-error short-circuit (avoid a wasteful revision round) ---
 
     def test_mediation_error_routes_to_judge(self) -> None:
         router = _make_router(max_iterations=5)

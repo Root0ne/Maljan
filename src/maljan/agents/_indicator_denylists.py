@@ -3,7 +3,7 @@
 A 2026-05-28 noise audit surfaced ~50 hallucinated indicator SDOs whose
 pattern values were toolchain/build paths, bundled bytecode class refs,
 or random extracted short strings (``/I FyD``, ``/urLU4b``, etc.) — all
-substrings of the analyst report so J-02's corpus-presence check passed
+substrings of the analyst report so the corpus-presence check passed
 them through.
 
 The constants here drive the acceptance-based tightening implemented in
@@ -104,7 +104,7 @@ IOC_OS_RESOURCE_PREFIXES: tuple[str, ...] = (
 # Compile-artefact regex — matches NDK / LLVM / toolchain paths embedded
 # in shipped binaries. These leak into the static extractor's
 # interesting_strings list when scanning bundled native libraries and
-# would otherwise pass J-02's corpus check (they ARE in the corpus, but
+# would otherwise pass the corpus check (they ARE in the corpus, but
 # they aren't IOCs).
 COMPILE_ARTIFACT_RE: re.Pattern[str] = re.compile(
     r"(?:"
@@ -161,7 +161,7 @@ MAX_FILE_NAME_INDICATORS: int = 10
 
 # Hard cap on the total number of indicator SDOs in the STIX bundle.
 # A Linux ELF audit hit 19 indicators (4
-# hashes + 5 network + 10 file:name) and broke G-FP-4's downstream-
+# hashes + 5 network + 10 file:name) and broke the downstream-
 # tractability assertion. Applied by the STIX renderer with priority
 # order: hashes (sha256 always) -> network IOCs -> file:name.
 MAX_TOTAL_INDICATORS: int = 15

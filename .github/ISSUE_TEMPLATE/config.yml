@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/Root0ne/Maljan/security/advisories/new
+    about: Use private vulnerability reporting; never open a public issue for an unfixed vulnerability.
+  - name: Documentation
+    url: https://github.com/Root0ne/Maljan/tree/main/docs
+    about: Getting started, configuration, deployment, operations and the API.

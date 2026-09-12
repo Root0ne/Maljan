@@ -170,7 +170,7 @@ def _provider_tools(container: Any, definition: AgentDefinition, provider_id: st
         logger.info("Static provider '%s' exposes no tools.", provider.id)
         return []
     provider.open(StaticJobContext())
-    return list(provider.select_tools(provider.get_tools(), None))
+    return list(provider.get_tools())
 
 
 def _claim_provider_tools(

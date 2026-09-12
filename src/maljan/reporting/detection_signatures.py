@@ -74,8 +74,8 @@ def build_detection_rules(report: MalwareReport) -> list[DetectionRule]:
     * **YARA** is hash-anchored (sha256 condition) so it's platform-neutral
       and always safe to ship. The rule name still gets de-familied when
       the family is ungrounded.
-    * **Sigma** is platform-shaped (logsource.product, event fields). The
-      2026-05-23 audit found ``Maljan_AutoGen_Sigma_rat`` — a Windows
+    * **Sigma** is platform-shaped (logsource.product, event fields). One
+      run produced ``Maljan_AutoGen_Sigma_rat`` — a Windows
       event-log schema attached to a sample whose family was an LLM
       hallucination. We refuse Sigma generation when EITHER the family is
       ungrounded OR the sample platform is unknown.
@@ -122,8 +122,8 @@ def build_detection_rules(report: MalwareReport) -> list[DetectionRule]:
 
 
 # Names that assert an attribution the report does not actually have. A rule
-# titled after any of these is the ``Maljan_AutoGen_unknown`` stub the D11
-# guardrail exists to stop (audit 2026-07-26).
+# titled after any of these is the ``Maljan_AutoGen_unknown`` stub this
+# guardrail exists to stop.
 _PLACEHOLDER_NAMES: frozenset[str] = frozenset({"unknown", "unclassified", "none", "n/a", ""})
 
 
@@ -174,7 +174,7 @@ def _family_grounded_reason(report: MalwareReport) -> str | None:
     if family and grounded is False:
         return f"ungrounded family '{family}' (D11 guardrail)"
 
-    # Audit 2026-07-26: the guardrail was still being defeated from the other
+    # The guardrail was still being defeated from the other
     # side. With NO family attributed, ``family_grounded`` is vacuously True, so
     # the check above passes — but rule naming falls back to
     # ``family or malware_category or sha256[:12]``, and when the category is

@@ -255,7 +255,7 @@ class TestContainerGetAgentLLM:
         expected_llm = MagicMock()
         container._llm_registry.build_model_for_agent.return_value = expected_llm
         result = container.get_agent_llm("static")
-        # Analyst models carry the expert output cap (audit 2026-07-26, Ö3):
+        # Analyst models carry the expert output cap:
         # the analyst path was the only unbounded LLM call in the system and a
         # single forced-synthesis call was measured running 19+ minutes.
         container._llm_registry.build_model_for_agent.assert_called_once_with(

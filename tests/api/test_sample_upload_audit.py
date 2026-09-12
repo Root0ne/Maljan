@@ -1,6 +1,6 @@
 """Every successful upload leaves a row, including the ones that store nothing.
 
-A2 re-verification (dev audit 2026-09-06): the audit call sat at the end of
+The audit call sat at the end of
 ``upload_sample``, and two of the route's three successful exits return before
 it. Re-uploading your own sample (the per-user dedup path) and uploading bytes
 another user had already pushed to MinIO both answered 201 and wrote nothing to

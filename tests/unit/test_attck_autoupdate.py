@@ -207,7 +207,7 @@ class TestResolveTactic:
         # A NEW v19 tactic not in the canonical table resolves straight from the
         # bundle (tid + live name both come from the catalogue).
         assert _resolve_tactic(idx, "defense-impairment") == ("TA0112", "Defense Impairment")
-        # 2026-07 audit (Bulgu #5): for a KNOWN Enterprise tactic the canonical
+        # For a KNOWN Enterprise tactic the canonical
         # display name is pinned, so a v19+ bundle relabelling TA0005 to
         # "Stealth" no longer leaks into exports — it stays "Defense Evasion".
         assert _resolve_tactic(idx, "stealth") == ("TA0005", "Defense Evasion")

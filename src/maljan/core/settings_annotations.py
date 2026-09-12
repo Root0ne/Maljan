@@ -1,10 +1,9 @@
 """What each setting means, in words a person can act on.
 
-Titles and descriptions were seeded from the comments in the root ``.env.example``
-(deleted 2026-09-11, when application settings moved into the settings store) by
-``scripts/settings/seed_settings_annotations.py`` and then edited; that script is now
-retired, and a new leaf's title and description are written by hand here. Groups come from
-the key prefix (``group_for``); an entry may override its group. ``applies``
+Titles and descriptions were first drafted from the comments of the former
+root ``.env.example`` and then edited; a new leaf's title and description are
+written by hand here. Groups come from the key prefix (``group_for``); an entry
+may override its group. ``applies``
 defaults to ``next_job`` for every core setting. ``probe`` names the
 connection test in apps/api/app/services/settings_probes.py that exercises
 the field.
@@ -1212,20 +1211,6 @@ def mcp_server_annotations(
             "empty when the server does not enforce one.",
             with_probe=True,
             subgroup="Connection",
-        ),
-        f"{prefix}.tool_selection": ann(
-            f"{label} tool selection",
-            "How many of the server's tools the analyst sees per run: curated is "
-            "a fixed allow-list (fastest, narrowest); dynamic shows a core triage "
-            "set plus the tools relevant to the sample's inferred capabilities; "
-            "all exposes every tool, which is measurably slower and noisier.",
-            subgroup="Tool selection",
-        ),
-        f"{prefix}.use_all_tools": ann(
-            f"{label} force all tools",
-            "Back-compat flag: when true, forces tool selection to all regardless "
-            "of its own value.",
-            subgroup="Tool selection",
         ),
         f"{prefix}.cwd": ann(
             f"{label} working directory",

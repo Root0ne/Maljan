@@ -1,4 +1,4 @@
-"""BUG-07 regression tests (2026-06-23 live-UI audit).
+"""Regression tests for the defeatist static-analysis placeholder.
 
 On a freshly-uploaded sample there is no pre-extracted
 ``data/samples/static/<sha>.json`` fixture, so the deterministic raw-data slot
@@ -174,7 +174,7 @@ class TestReviseIsrBug07:
             mediator_feedback="static disputed",
             revision_round=1,
         )
-        # BUG-07: the defeatist claim is dropped -> zero-claim, run marked degraded.
+        # The defeatist claim is dropped -> zero-claim, run marked degraded.
         assert isr.claims == []
 
     def test_real_revision_keeps_claims(self) -> None:

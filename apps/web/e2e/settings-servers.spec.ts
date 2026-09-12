@@ -115,42 +115,6 @@ test.describe("tool servers and the REST sandbox", () => {
     await expect(detail.getByText("Run Test to load the tool list")).toHaveCount(0);
   });
 
-  /* WEB-2 (dev audit 2026-09-06): every server carries `tool_selection` and
-   * `use_all_tools`, the providers read both, and neither had a control on
-   * this screen — so a server added here kept whatever default it was given
-   * with no way to change it. */
-  test("a server's tool selection is editable and is sent", async ({
-    authenticatedPage: page,
-  }) => {
-    await page.goto(MCP_PATH);
-
-    await page.locator('[data-server="network"]').click();
-    const detail = page.locator('[data-server-detail="network"]');
-    await expect(detail.getByLabel("network tool selection")).toHaveValue("dynamic");
-    await detail.getByLabel("network tool selection").selectOption("curated");
-    await detail.getByLabel("network force all tools").check();
-    // The back-compat flag overrides the selection, so the select says so.
-    await expect(detail.getByLabel("network tool selection")).toBeDisabled();
-
-    const patches: unknown[] = [];
-    await page.route("**/api/v1/settings", (r) => {
-      if (r.request().method() === "PATCH") {
-        patches.push(r.request().postDataJSON());
-        return r.fulfill({ json: { applied: ["core.mcp.servers"], applies: { next_job: 1 } } });
-      }
-      return r.fallback();
-    });
-    await page.getByRole("button", { name: "Review" }).click();
-    await page.getByRole("button", { name: "Confirm and apply" }).click();
-
-    const body = patches[0] as {
-      changes: Record<string, Record<string, { tool_selection: string; use_all_tools: boolean }>>;
-    };
-    const sent = body.changes["core.mcp.servers"].network;
-    expect(sent.tool_selection).toBe("curated");
-    expect(sent.use_all_tools).toBe(true);
-  });
-
   /* BUG 2 (live e2e 2026-09-07): `MCPServerConfig.env` had no control at all,
    * so a stdio server needing a fixed variable (Qu1cksc0pe wants
    * `SC0PE_MCP_TRANSPORT=stdio`) had to be wrapped in a shell script. */

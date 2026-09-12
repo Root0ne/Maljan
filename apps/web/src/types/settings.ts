@@ -88,8 +88,6 @@ export interface McpServerEntry {
   /** Where the effective token comes from, reported the way every other
    *  row's `source` is: a UI-saved secret row, or the built-in default. */
   auth_token_source: "ui" | "default";
-  tool_selection: string;
-  use_all_tools: boolean;
   tools: string[] | null;
   agents: string[];
   label: string;

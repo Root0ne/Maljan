@@ -8,6 +8,12 @@ change landed on `main`.
 
 ### Added
 
+- **Repository security posture.** CodeQL (Python, TypeScript, Actions;
+  `security-extended`), dependency review on pull requests, OpenSSF Scorecard,
+  Dependabot updates for every dependency surface, actions pinned by commit,
+  `SECURITY.md` with private vulnerability reporting, `CONTRIBUTING.md`,
+  code owners, issue and pull request templates. Secret scanning with push
+  protection and Dependabot security updates are enabled on the repository.
 - **Environment-free configuration.** Every application setting — LLM
   provider, sandbox, static analyst, tool servers, agents, rate limits,
   enrichment, memory — now lives in the settings store and is edited from
@@ -37,6 +43,13 @@ change landed on `main`.
 
 ### Changed
 
+- **Dependencies brought current.** The uv workspace is relocked to today's
+  releases (cryptography 50, starlette 1.6, langchain-core 1.6, mcp 1.30 with
+  2.x held back as a separate migration, pillow 12.3, pyjwt 2.14, urllib3 2.7,
+  weasyprint 70 and the rest), and the console moves to Next.js 16.3.5 and
+  vitest 4 with a regenerated lockfile. This clears every Dependabot alert
+  that has a fix; the two without one (`ecdsa`, `diskcache`) are recorded in
+  the alert list with the reason.
 - The process refuses to start without a valid `SETTINGS_ENCRYPTION_KEY`, so
   there is no mode in which stored secrets sit unencrypted
   ([#31](https://github.com/Root0ne/Maljan/pull/31)).
@@ -56,6 +69,14 @@ change landed on `main`.
 
 ### Removed
 
+- **Tool-count limits on MCP servers.** The Ghidra tool-selection modes
+  (`curated`, a fixed 20-tool allow-list; `dynamic`, a per-sample relevance cut
+  capped at 40) and the `use_all_tools` override are gone, as are the radare2
+  read-only allow-list and the 13-tool "essential" list for the CAPE MCP
+  server. Every tool a server offers now reaches the model, minus whatever the
+  operator unticks in that server's own tool list. Tool descriptions are no
+  longer cut at 100 characters. A migration removes the two retired settings
+  from stored server entries. Expect larger per-step prompts on a local model.
 - **Legacy settings-name aliases.** The compatibility layer that translated old
   setting names into current ones is gone; the Alembic revision that renames
   operator data carries its own frozen table, as a migration should
@@ -73,9 +94,19 @@ change landed on `main`.
 - Dead code found by vulture, ruff and knip, and a duplicated structural
   `deepEqual` in the settings console, now one implementation
   ([#36](https://github.com/Root0ne/Maljan/pull/36)).
+- Machine-local operator scripts (`llm_server.sh`, `night_guard.sh`,
+  `run_with_restarts.sh`) and the retired annotation seeder left `scripts/`;
+  what remains is what the Makefile, CI and the tests call.
 - Process tags in source comments — dated audit identifiers, ticket numbers and
   phase labels. The reasoning stays, the bookkeeping goes
   ([#38](https://github.com/Root0ne/Maljan/pull/38)).
+
+### Fixed
+
+- **The Ghidra connection test proves the token.** The probe read the
+  unauthenticated health endpoint, so a wrong bearer token passed the test and
+  every job then failed with 401 on the tool schema. It now fetches the schema
+  itself and lists the tools it found.
 
 ### Upgrading
 
@@ -86,3 +117,9 @@ Configuration — or import a JSON export from another instance. Keep
 `SETTINGS_ENCRYPTION_KEY` stable: there is no re-encryption step, and a changed
 key makes every stored secret unreadable. See
 [docs/configuration.md](docs/configuration.md).
+
+A JSON export taken before the tool-selection modes were removed may carry
+`core.static.ghidra.tool_selection`, `core.static.r2.tool_selection` or the
+`use_all_tools` counterparts; the import refuses keys the catalog no longer
+knows, so delete those entries from the file first. Stored overrides are
+cleaned up by the migration.

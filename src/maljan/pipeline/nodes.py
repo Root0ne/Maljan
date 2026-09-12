@@ -66,7 +66,7 @@ def _empty_isr(agent_name: str, revision_round: int = 0) -> AgentISR:
 
 # The file-loader placeholder for a missing per-sample fixture
 # ("No static data available for sample <sha>."). Local copy of the
-# BUG-07 pattern from static_analyst to avoid a nodes->agents import edge.
+# placeholder pattern from static_analyst to avoid a nodes->agents import edge.
 _STATIC_PLACEHOLDER_RE = re.compile(r"^\s*no\s+\w+\s+data\s+available\b", re.IGNORECASE)
 
 # Hard ceiling for the synthesized head-chunk content. The augmented chunk
@@ -114,11 +114,11 @@ def _is_placeholder_only(chunks: list, role: str = "") -> bool:
     return bool(_STATIC_PLACEHOLDER_RE.match(content.strip()))
 
 
-# CONF-INFL-01: the confidence ceiling for a degraded run. Public, and
+# The confidence ceiling for a degraded run. Public, and
 # module-level, because it is a cross-layer contract rather than an
 # implementation detail of the report node: the worker persists whatever ends
 # up under it, the dashboard styles "low confidence" at the same threshold, and
-# the 2026-07-26 audit found the value silently disagreeing between layers. One
+# the value was once found silently disagreeing between layers. One
 # name, so a change cannot land in only half of them.
 DEGRADED_CONFIDENCE_CAP = 0.60
 
@@ -506,19 +506,6 @@ def make_analyst_node(
                     provider_id=agent._resolved.static_provider_id,
                 )
 
-                # Hand the static analyst the sample's capability
-                # categories (from the PE import classification) so dynamic Ghidra
-                # tool selection works regardless of whether the chunk carried a
-                # readable path. state["sample_path"] is reliably host-readable.
-                try:
-                    from maljan.analysis.import_capability_layer import _imports_by_category
-
-                    agent._sample_categories = (  # type: ignore[attr-defined]
-                        set(_imports_by_category(_st).keys()) if _st else set()
-                    )
-                except Exception as _e:  # noqa: BLE001
-                    logger.debug("static category hint skipped: %s", _e)
-
             if not chunks or _is_placeholder_only(chunks, role):
                 # A Linux ELF audit found that an ELF sample with no PCAP / sandbox network
                 # trace caused the network analyst to fail-hard with an
@@ -646,8 +633,7 @@ def make_analyst_node(
                 logger.debug("tool-evidence read skipped for %s: %s", agent_name, _ev_exc)
             return node_out
         except (AnalystError, LLMError) as e:
-            # OPS-ANALYST-ERROR-TRACKING-01 + OBS-STRUCTURED-LOGS-MISSING-FIELDS-01
-            # (audit 2026-05-19): structured error event so Loki/Promtail
+            # Structured error event so Loki/Promtail
             # can aggregate ``event_type=analyst_error`` instead of regex-
             # scanning free-text. ``sample_hash`` is short-fingerprinted so
             # the log line stays human-skim-friendly.
@@ -1167,7 +1153,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
             # Linux sample).
             sample_platform = state.get("platform") or "unknown"
 
-            # 2026-07 audit: YARA scans the sample BYTES (not analyst prose) so
+            # YARA scans the sample BYTES (not analyst prose) so
             # an API-name pattern only fires when the string is really in the
             # binary. Read from the worker-visible host path (same one the PE
             # extractor / family RAG use), not the container Ghidra path.
@@ -1242,7 +1228,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
                     logger.warning("YARA Layer 0 scan failed: %s. Skipping.", e)
                 return None
 
-            # 2026-07 audit: Sigma scans structured events built from real
+            # Sigma scans structured events built from real
             # sandbox telemetry (strict field matching) instead of analyst
             # prose. No telemetry -> no events -> no matches (correct for
             # static-only runs).
@@ -1397,7 +1383,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("ATT&CK autocorrect skipped: %s", exc, exc_info=True)
 
-            # 2026-07 audit: mark domains that had no real input data this run so
+            # Mark domains that had no real input data this run so
             # the cascade can't count an absent layer as corroboration (the
             # T1497 "1.00 across dynamic,network,static,yara" inflation).
             _dyn_empty = True
@@ -1430,9 +1416,8 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 logger.warning("TTP cascade failed: %s. Skipping.", e)
 
             # Capture pre-cascade platform-filter
-            # counters from both Layer 0 evaluators so the audit gate
-            # G-FP-8 can prove the filter ran even when the cascade has
-            # nothing to drop.
+            # counters from both Layer 0 evaluators so a test can prove the
+            # filter ran even when the cascade has nothing to drop.
             _sigma_dropped_total = 0
             _yara_dropped_total = 0
             try:
@@ -1457,7 +1442,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
             except Exception as e:
                 logger.warning("Memory store unavailable: %s. Skipping LTM context.", e)
 
-            # Audit 2026-05-17 J-02: build evidence corpus so the judge
+            # Build the evidence corpus so the judge
             # post-processor can drop hallucinated indicators whose
             # pattern values never appeared in deterministic findings.
             evidence_corpus: set[str] = set()
@@ -1500,9 +1485,9 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 except Exception as exc:
                     logger.debug("validate_isr_reports failed: %s", exc, exc_info=True)
 
-            # CONF-INFL-01 (2026-05-19 audit): compute corroboration /
-            # failure signals up front so we can feed the LTM quality
-            # gate (LTM-01, below) AND the run_summary builder. Without
+            # Compute corroboration / failure signals up front so we can
+            # feed the LTM quality gate (below) AND the run_summary
+            # builder. Without
             # this, a run where every LLM analyst silently fails (zero
             # claims, only YARA+Sigma layer matches) yields a 0.95+
             # confidence verdict that visually matches a fully
@@ -1583,7 +1568,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
                     if _hit_name and _hit_name not in _anti_emu_hits:
                         _anti_emu_hits.append(_hit_name)
             _degradation_reasons: list[str] = []
-            # CONF-INFL-01 fix (2026-07-05): the previous guard required
+            # The previous guard required
             # ``_technique_count > 0`` and so silently *missed* the most
             # degraded outcome of all — a run with zero corroboration AND
             # zero techniques (every LLM analyst failed and no YARA/Sigma
@@ -1599,7 +1584,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
                     if _technique_count > 0
                     else "no techniques mapped (no corroborating evidence)"
                 )
-            # Audit 2026-07-26 (Ö2): a missing sandbox report is itself a
+            # A missing sandbox report is itself a
             # degradation, and it was the one cause NOT represented here. With
             # CAPE unreachable ``_submit_to_sandbox`` swallows the error and
             # returns None, so the run silently becomes static-only; the
@@ -1696,7 +1681,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 logger.warning("RunSummary build failed (%s). Skipping.", exc)
 
             if memory_store is not None and isr_reports:
-                # Audit 2026-05-17 LTM-01: quality gate. Skip the upsert
+                # Quality gate: skip the upsert
                 # when the run is clearly degraded (no corroboration, no
                 # techniques, failed analysts, etc.). A polluted entry
                 # poisons future analyses via the few-shot prior block.
@@ -1914,7 +1899,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 "run_summary": run_summary_dict,
                 # Persist YARA/Sigma layer ISRs so callers can inspect them.
                 "isr_reports": isr_reports,
-                # CONF-INFL-01: surface degraded-mode signal to the report
+                # Surface the degraded-mode signal to the report
                 # node and downstream consumers (API/dashboard).
                 "degraded_mode": _degraded_mode,
                 "degradation_reasons": _degradation_reasons,
@@ -1953,9 +1938,9 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 round_index=state.get("iteration_count", 0),
                 status="failed",
             )
-            # F16 (2026-07-05): a judge-body failure must ALSO flag the run as
-            # degraded so the report node caps ``overall_confidence`` (CONF-INFL-01)
-            # and the UI shows the DEGRADED banner. Without these keys the report
+            # A judge-body failure must ALSO flag the run as degraded so the
+            # report node caps ``overall_confidence`` and the UI shows the
+            # DEGRADED banner. Without these keys the report
             # node saw ``degraded_mode`` unset and could ship an uncapped
             # confidence for a verdict the judge never actually produced.
             return {
@@ -2034,7 +2019,7 @@ def make_report_node(container: ServiceContainer) -> Any:
             except (TypeError, ValueError):
                 overall_confidence = 0.0
 
-        # CONF-INFL-01 (2026-05-19 audit): cap confidence when the judge
+        # Cap confidence when the judge
         # node flagged the run as degraded. Without this, a verdict drawn
         # entirely from YARA/Sigma deterministic layers (with all three
         # LLM analysts silently producing zero claims) lands at 0.98+ and
@@ -2050,7 +2035,7 @@ def make_report_node(container: ServiceContainer) -> Any:
 
         # Best-effort malware category — cheap and fully deterministic.
         #
-        # CAT-PERSIST-01 (2026-05-19 audit): the previous implementation
+        # The previous implementation
         # swallowed every exception at DEBUG level, so a silently-failing
         # ``.value`` access (e.g. when the inference returned a string
         # instead of an enum, or when the schema_pruner module raised on a

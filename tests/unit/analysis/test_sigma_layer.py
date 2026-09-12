@@ -343,7 +343,7 @@ class TestScanWithPlatformFilter:
 
 
 class TestBuildEventsFromSandbox:
-    """2026-07 audit (Bulgu #2): Sigma scans structured events built from real
+    """Sigma scans structured events built from real
     sandbox telemetry (strict field matching), never analyst prose."""
 
     def test_no_sandbox_yields_no_events(self) -> None:

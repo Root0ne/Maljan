@@ -36,7 +36,7 @@ export function useReport() {
 }
 
 /* ── Verdict badge config ──────────────────────────────
- * audit 2026-07-26 (T2): keyed by the shared `VerdictBucket` rather than a
+ * Keyed by the shared `VerdictBucket` rather than a
  * hand-rolled lower-cased raw verdict, so the backend's "Malware" spelling
  * can never miss the map and fall through to the muted "unknown" styling.
  * The human label comes from `verdictLabel` for the same reason. */
@@ -135,7 +135,7 @@ export default function AnalysisLayout({
         setReport(r);
         setReportError(null);
       } catch (err) {
-        // audit 2026-07-26 (§4 "sessizce yutulan hatalar"): while the job is
+        // While the job is
         // still running a missing report is expected, so stay quiet. Once the
         // job is terminal the report should exist — surface the failure.
         if (!cancelled && terminal) {
@@ -165,7 +165,7 @@ export default function AnalysisLayout({
         if (!cancelled) setLoading(false);
         setTimeout(() => { if (!cancelled) fetchAll(); }, POLL_INTERVAL);
       } catch (err) {
-        // audit 2026-07-26: report *why* the API call failed instead of only
+        // Report *why* the API call failed instead of only
         // the generic "could not connect" banner.
         if (!cancelled) {
           if (isApiStatus(err, 404)) setNotFound(true);
@@ -206,7 +206,7 @@ export default function AnalysisLayout({
   const verdict = verdictBucket(report?.verdict);
   const confidence = Math.round((report?.overall_confidence ?? 0) * 100);
   const category = report?.malware_category ?? "";
-  // BUG-02: prefer a readable sample identity (filename, then hash prefix) over
+  // Prefer a readable sample identity (filename, then hash prefix) over
   // the opaque sample_id UUID — available from the job even during the live run,
   // before the rich report's identity payload lands.
   const sampleId = job?.sample_id ?? "";
@@ -214,7 +214,7 @@ export default function AnalysisLayout({
     job?.sample_filename ||
     (job?.sample_sha256 ? `${job.sample_sha256.slice(0, 16)}…` : "");
   const duration = formatDuration(job?.duration_seconds);
-  // audit 2026-07-26 (T3): use the one canonical timestamp format instead of
+  // Use the one canonical timestamp format instead of
   // the locale default, which rendered as "26.07.2026 11:04:51" here while the
   // sample/report lists showed "Jul 5, 2026, 07:34 PM".
   const analyzedAtIso = report?.created_at ?? job?.created_at;

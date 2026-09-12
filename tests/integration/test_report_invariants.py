@@ -1,6 +1,6 @@
-"""Cross-layer report invariants — the guard the 2026-07-26 audit was missing.
+"""Cross-layer report invariants — the guard that was missing.
 
-Every bug that audit found had the same shape: a value was **correct in the
+Every bug this file pins had the same shape: a value was **correct in the
 layer that computed it and wrong in the layer the user actually reads**. The
 1710 unit tests all passed, because each one checked a single layer.
 

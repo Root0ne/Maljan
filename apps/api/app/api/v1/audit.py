@@ -106,7 +106,7 @@ def _generate_api_key() -> tuple[str, str, str]:
     """
     raw = "mk_" + secrets.token_urlsafe(32)
     # Hashing lives in ``app.deps`` so minting and verification can never drift
-    # apart (audit 2026-07-26, K2 — keys previously verified nothing at all).
+    # apart (keys previously verified nothing at all).
     key_hash = hash_api_key(raw)
     prefix = raw[:8]
     return raw, key_hash, prefix

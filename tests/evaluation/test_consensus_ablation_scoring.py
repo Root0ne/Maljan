@@ -196,7 +196,7 @@ class TestTheEvalTimeoutActuallyBinds:
         """The 2026-08-15 regression: ``bind(extra_body=...)`` *replaces*.
 
         The provider puts the local server's output cap in ``extra_body``
-        (OUTPUT-CAP-01) and its repetition penalty beside it. Passing a fresh
+        and its repetition penalty beside it. Passing a fresh
         dict here dropped both, so every harness calling this function ran a
         differently-configured model than production — with the judge's
         8,192-token ceiling removed, which is how one C3 call reached 30,155

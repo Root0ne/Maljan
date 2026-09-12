@@ -84,11 +84,11 @@ class AnalysisService:
         self.db.add(job)
         await self.db.flush()
         await self.db.refresh(job)
-        # F11 (2026-07-05): attach the already-verified sample so the
+        # Attach the already-verified sample so the
         # ``JobResponse.sample_sha256`` / ``sample_filename`` read-only props
         # resolve on the create path too. Without this the POST /jobs
-        # response returned those fields as null (the BUG-02 selectinload
-        # fix only covered get_job / list_jobs), diverging from GET /jobs.
+        # response returned those fields as null (the sample eager-load
+        # only covered get_job / list_jobs), diverging from GET /jobs.
         job.sample = sample
 
         # Enqueue to ARQ worker. Failure here is **propagated** as a 503 by the
@@ -117,7 +117,7 @@ class AnalysisService:
                 AnalysisJob.id == job_id,
                 AnalysisJob.created_by == user.id,
             )
-            # BUG-02: eager-load the sample so JobResponse.sample_sha256 /
+            # Eager-load the sample so JobResponse.sample_sha256 /
             # sample_filename populate without an async lazy-load.
             .options(selectinload(AnalysisJob.sample))
         )
@@ -142,7 +142,7 @@ class AnalysisService:
 
         query = query.order_by(AnalysisJob.created_at.desc())
         query = query.offset((page - 1) * page_size).limit(page_size)
-        # BUG-02: eager-load sample for sample_sha256 / sample_filename.
+        # Eager-load the sample for sample_sha256 / sample_filename.
         query = query.options(selectinload(AnalysisJob.sample))
 
         result = await self.db.execute(query)
@@ -180,7 +180,7 @@ class AnalysisService:
         job.completed_at = datetime.now(UTC)
         await self.db.flush()
 
-        # Audit 2026-07-26 (Ö5). This used to ONLY publish to PubSub, which had
+        # This used to ONLY publish to PubSub, which had
         # two consequences:
         #   1. The running worker never learned about the cancellation — it
         #      checks the job status exactly once, before starting — so the

@@ -130,8 +130,8 @@ class QdrantStore:
             "stix_bundle_json": case.stix_bundle_json,
             "created_at": case.created_at.astimezone(UTC).isoformat(),
             # Quality signals persisted so retroactive purges and dashboards
-            # can identify low-signal runs even after the write-time LTM-01
-            # gate (audit 2026-05-17, follow-up 2026-05-19).
+            # can identify low-signal runs even after the write-time
+            # quality gate.
             "corroborated_count": case.corroborated_count,
             "total_techniques": case.total_techniques or len(case.technique_ids),
             "has_analyst_errors": case.has_analyst_errors,
@@ -162,7 +162,7 @@ class QdrantStore:
             exclude_sample_id: Optional sha256 of the current sample. Hits
                 with the same ``sample_id`` are filtered out so a fresh
                 analysis cannot feed its own previous run back into itself
-                as a "weighted prior" (audit 2026-05-17, LTM-01).
+                as a "weighted prior".
 
         Returns:
             List of StoredCase objects ordered by descending cosine similarity.
@@ -263,7 +263,7 @@ class QdrantStore:
         """Delete low-quality stored cases from Qdrant.
 
         Scrolls the collection with a small page size, evaluates each point
-        against the LTM-01 quality gate, and issues a single ``delete``
+        against the write-time quality gate, and issues a single ``delete``
         for the offending IDs. Older points that pre-date the quality-signal
         payload (no ``total_techniques`` field) are treated as 0 — they are
         purged by default. Operators can disable that branch by passing

@@ -124,7 +124,7 @@ function parseNegotiationLog(negotiationLog: Record<string, unknown> | null | un
 export default function TimelinePanel() {
   const { report, job, loading } = useReport();
   const [timelineData, setTimelineData] = useState<Record<string, unknown> | null>(null);
-  // audit 2026-07-26 (§4 "sessizce yutulan hatalar"): a failed timeline fetch
+  // A failed timeline fetch
   // silently fell back to the embedded negotiation log with no explanation.
   const [fetchError, setFetchError] = useState<string | null>(null);
 

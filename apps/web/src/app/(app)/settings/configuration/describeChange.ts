@@ -142,8 +142,6 @@ const SERVER_FIELDS = [
   "env",
   "env_allow",
   "label",
-  "tool_selection",
-  "use_all_tools",
   "agents",
 ] as const;
 

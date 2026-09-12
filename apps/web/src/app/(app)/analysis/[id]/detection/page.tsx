@@ -5,7 +5,7 @@ import GeneratedRulesPanel from "@/components/analysis/GeneratedRulesPanel";
 import StixPanel from "@/components/analysis/StixPanel";
 
 /**
- * Unified "Detection" tab (2026-07 audit, Bulgu #1 UI).
+ * Unified "Detection" tab.
  *
  * The two features that used to live in separate SIGNATURES and RULES tabs are
  * genuinely different things, and their old names implied the opposite of what

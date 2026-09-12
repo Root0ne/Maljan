@@ -482,7 +482,7 @@ class MarkdownRenderer:
     def _section_attack_matrix(self, report: MalwareReport) -> str:
         """Single ATT&CK section: the summary table + per-technique evidence.
 
-        2026-07 audit (Bulgu #15): the report previously carried two H2 sections
+        The report previously carried two H2 sections
         ("MITRE ATT&CK Matrix" and "Capability Matrix (evidence)") that listed
         the same techniques twice. They are merged here — one table, with the
         evidence quotes rendered underneath as an ``### Evidence`` subsection —
@@ -525,7 +525,7 @@ class MarkdownRenderer:
     def _section_attribution(self, report: MalwareReport) -> str:
         attr = report.attribution
         lines = ["## Family Attribution", ""]
-        # 2026-07 audit (Bulgu #6/#7): the behavioural *category* is a distinct
+        # The behavioural *category* is a distinct
         # classification, never a family — do NOT fall back to it as the family
         # name (that produced the contradictory "Family: dropper (0.00)" line).
         family = attr.family

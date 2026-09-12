@@ -48,8 +48,8 @@ _TECHNIQUE_RE = re.compile(r"\b(T\d{4}(?:\.\d{3})?)\b")
 # The static analyst's Ghidra loop hits this after spending its whole step
 # budget gathering evidence; matching it lets ``execute_tool_loop`` salvage that
 # gathered tool output with a forced-synthesis call instead of discarding it and
-# returning a useless "need more steps" non-answer. (Phrase observed across the
-# 2026-06-23 live-UI audit runs; it is not a maljan/langchain in-tree literal.)
+# returning a useless "need more steps" non-answer. (Phrase observed across
+# live runs; it is not a maljan/langchain in-tree literal.)
 _RECURSION_STOP_RE = re.compile(r"need more steps to process", re.IGNORECASE)
 
 # Bounds for the forced-synthesis salvage (see ``_force_final_synthesis``).
@@ -185,7 +185,7 @@ async def retry_on_connection_error(
 def describe_exception(exc: BaseException) -> str:
     """Return a non-empty, diagnosable description of ``exc``.
 
-    Audit 2026-07-26: analyst failures were logged as
+    Analyst failures were logged as
     ``"dynamic ISR analysis failed: "`` — an empty tail — because several
     exceptions raised on the MCP path carry no message (bare ``Exception``,
     ``ExceptionGroup``, ``anyio`` cancellation wrappers). The operator was left
@@ -279,7 +279,7 @@ def strip_tool_call_scaffolding(text: str) -> str:
 def parse_structured_claims(text: str) -> list[ClaimEvidence]:
     """Parse ``CLAIM:``-delimited blocks, tolerating missing optional fields.
 
-    Audit 2026-07-26: the view/tier decomposition prompts (``_VIEW_SYSTEM``)
+    The view/tier decomposition prompts (``_VIEW_SYSTEM``)
     require this exact format, but the parsed output was handed to
     ``_text_to_isr``'s free-text sentence splitter, which has no notion of a
     ``TECHNIQUE:`` line. Every technique ID produced through those paths was
@@ -647,7 +647,7 @@ def _claim_grounded_in_evidence(
 
 
 # ---------------------------------------------------------------------------
-# BUG-06 fix (2026-06-23 live-UI audit): single process-wide agent event loop.
+# A single process-wide agent event loop.
 #
 # Every agent ReAct / no-tools LLM call used to spin up a throwaway
 # ``asyncio.new_event_loop()`` in its own thread and ``close()`` it afterwards.
@@ -960,7 +960,7 @@ async def run_on_agent_loop(coro: Any, hard_timeout: float, label: str = "") -> 
     """Await ``coro`` on the shared agent loop from a *different* running loop.
 
     The async sibling of ``_run_coro_blocking``, and the other half of the
-    BUG-06 fix above. That fix moved every *analyst* call onto one long-lived
+    shared-loop fix above. That fix moved every *analyst* call onto one long-lived
     loop, but the graph's own coroutine nodes still awaited their agent calls
     on the worker's loop — and the openai SDK's httpx pool is bound to the loop
     that first awaited it, which by then is always the agent loop. Building a
@@ -1127,7 +1127,6 @@ class BaseAnalyst(ABC):
         # created this agent, so the static analyst can reuse it instead of
         # building a new one per chunk.
         self.toolkit: Any = None
-        self._all_ghidra_tools: list[Any] = []
         self._container: Any = None
         # The ``ResolvedAgent`` the container built this agent from — its own
         # prompt, tools and static provider id, so a clone never has to
@@ -1205,7 +1204,6 @@ class BaseAnalyst(ABC):
         # half-closed session — or its captured tool output — alive.
         self.toolkit = None
         self.tools = []
-        self._all_ghidra_tools = []
         self._last_tool_evidence = []
 
     def _try_initialize_mcp(self) -> bool:
@@ -1335,19 +1333,19 @@ class BaseAnalyst(ABC):
         messages = prebuilt
 
         cfg = get_settings()
-        # Per-agent timeout override (audit 2026-05-17, A-01). The static
+        # Per-agent timeout override. The static
         # analyst with 31 Ghidra tools never finishes inside 180 s on
         # commodity hardware; give it the operator-configured headroom.
         overrides = getattr(cfg, "react_agent_timeout_overrides", {}) or {}
         timeout = overrides.get(self.name, cfg.react_agent_timeout)
-        # Per-agent recursion-step override (2026-06-23 live-UI audit): the
+        # Per-agent recursion-step override: the
         # static analyst's Ghidra ReAct loop needs far more than the default
         # ~4-tool-call budget. Without this it hit the step cap and LangGraph
         # returned the "need more steps" stop message instead of real claims.
         step_overrides = getattr(cfg, "react_agent_max_steps_overrides", {}) or {}
         max_steps = step_overrides.get(self.name, cfg.react_agent_max_steps)
 
-        # BUG-06 fix: run the ReAct coroutine on the shared, never-closing agent
+        # Run the ReAct coroutine on the shared, never-closing agent
         # loop (see ``_get_agent_loop``) instead of a throwaway per-call loop.
         async def _invoke() -> dict:
             self.logger.info(
@@ -1355,7 +1353,7 @@ class BaseAnalyst(ABC):
                 timeout,
                 len(self.tools),
             )
-            # BUG-04 fix (2026-06-22 live-UI audit): the provider sets
+            # The provider sets
             # ``max_retries=0`` on purpose to stop the openai SDK from
             # retry-storming a *stalled* request (3 x request_timeout).
             # But a transient ``APIConnectionError`` — the local
@@ -1405,7 +1403,7 @@ class BaseAnalyst(ABC):
                 "ReAct retry loop exited without result"
             )
 
-        # PERF-STATIC-ANALYST-LATENCY-01 (audit 2026-05-19): instrument the
+        # Instrument the
         # outer execute_tool_loop window so operators can correlate slow
         # analysts with token / tool-call counts without sprinkling timers
         # across the codebase. Minimal-viable implementation: wall-clock,
@@ -1496,7 +1494,7 @@ class BaseAnalyst(ABC):
 
         final_message = msgs[-1]
         content = str(final_message.content)
-        # Forced synthesis (2026-06-23 live-UI audit): a tool-using ReAct loop
+        # Forced synthesis: a tool-using ReAct loop
         # that spends its whole step budget gathering evidence ends with
         # LangGraph's "need more steps" stop message (or an empty final turn),
         # silently discarding every tool result it collected. The static
@@ -1671,7 +1669,7 @@ class BaseAnalyst(ABC):
 
         from maljan.core.exceptions import AnalystError
 
-        # BUG-06 fix: run on the shared agent loop (see ``_get_agent_loop``)
+        # Run on the shared agent loop (see ``_get_agent_loop``)
         # rather than a throwaway per-call loop, so no openai async client is
         # ever orphaned on a closed loop.
         async def _invoke() -> str:
@@ -2126,12 +2124,12 @@ class BaseAnalyst(ABC):
         flags=re.UNICODE,
     )
 
-    # ANA-MARK-01 (2026-05-19 audit): recognise meta-claim text so the
+    # Recognise meta-claim text so the
     # judge / cascade / LTM gate can treat it as "no real claims" instead
     # of inflating verdict confidence with a 1.0 sentence. The fallback
     # strings come from ``file_loader.py:107`` ("No * data available for
     # sample ...") and from analyst LLM fallbacks that copy that wording.
-    # BUG-07 (2026-06-23 live-UI audit): widened beyond the bare file_loader
+    # Widened beyond the bare file_loader
     # placeholder to also catch the DEFEATIST re-wordings a small model emits
     # when it parrots a "No <x> data available" raw-data slot — e.g. "Static
     # analysis could not be performed due to missing binary data" (confidence
@@ -2168,7 +2166,7 @@ class BaseAnalyst(ABC):
     def _drop_meta_claims(self, claims: list[ClaimEvidence]) -> list[ClaimEvidence]:
         """Strip parsed claims that are really "I could not analyse" meta-claims.
 
-        ANA-MARK-01 / BUG-07: ``_text_to_isr`` neutralises the placeholder on the
+        ``_text_to_isr`` neutralises the placeholder on the
         text-fallback path, but a defeatist claim that parses as a well-formed
         ``CLAIM/EVIDENCE/CONFIDENCE`` block bypasses it. Filtering the parsed list
         here makes a no-real-finding analyst collapse to a zero-claim ISR so the
@@ -2191,7 +2189,7 @@ class BaseAnalyst(ABC):
         # placeholder case.
         text = strip_tool_call_scaffolding(text)
 
-        # ANA-MARK-01: when the agent returned only the placeholder
+        # When the agent returned only the placeholder
         # ("No static data available for sample ..."), emit a *zero-claim*
         # ISR rather than one with a meta-sentence. Downstream cascade +
         # judge already drop empty-claim ISRs from the confidence math, so
@@ -2209,7 +2207,7 @@ class BaseAnalyst(ABC):
                 revision_round=revision_round,
             )
 
-        # Structured output first (audit 2026-07-26). Several prompts —
+        # Structured output first. Several prompts —
         # notably the view/tier decomposition ones — mandate the
         # CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE block format. Running the
         # free-text sentence splitter over that shape kept the literal

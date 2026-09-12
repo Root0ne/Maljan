@@ -157,7 +157,6 @@ class CapaYaraStaticProvider(StaticProvider):
             provides_tools=False,
             provides_evidence=self._capa_available is not False,
             needs_sample_mirror=False,
-            supports_tool_curation=False,
             degrade_on_failure=True,
         )
 

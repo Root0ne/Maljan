@@ -1,4 +1,4 @@
-"""OUTPUT-CAP-01 — the judge's output ceiling did not reach the server.
+"""The judge's output ceiling did not reach the server.
 
 ``ServiceContainer.get_judge_llm`` builds the verdict model with
 ``max_tokens=judge_max_tokens`` and says why in a comment: *"Bound the verdict

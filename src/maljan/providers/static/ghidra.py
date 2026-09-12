@@ -1,10 +1,9 @@
 """Ghidra MCP static analysis — moved out of the static analyst.
 
-The tool allow-list, the tool-selection modes, the load_program path pin and
-the http/stdio attach path are all the static analyst's own code
-(``StaticAnalyst``, pre-2026-09), transplanted here unchanged. The analyst's
-``_initialize_mcp_client`` now calls this provider instead of driving its own
-copy.
+The load_program path pin and the http/stdio attach path are the static
+analyst's own code (``StaticAnalyst``, pre-2026-09), transplanted here
+unchanged. The analyst's ``_initialize_mcp_client`` now calls this provider
+instead of driving its own copy.
 """
 
 from __future__ import annotations
@@ -23,7 +22,6 @@ from maljan.providers.base import (
     StaticProvider,
 )
 from maljan.providers.registry import register_static_provider
-from maljan.providers.static.ghidra_tool_selector import select_relevant_ghidra_tools
 
 if TYPE_CHECKING:
     from maljan.core.config import MCPServerConfig, MemoryConfig, PreprocessingConfig, Settings
@@ -101,67 +99,14 @@ GHIDRA_PROMPT_FRAGMENT: str = (
 )
 
 
-# Allowlist of Ghidra MCP tools exposed to the ReAct agent.
-#
-# Rationale: Ghidra MCP advertises ~225 tools, of which ~165 reach our
-# client. Past runs loaded 123 tools after a denylist filter, but each
-# ReAct step then carries that entire catalogue in the prompt — for a
-# 9B-parameter local model with a 32k context window this is the single
-# largest contributor to per-step latency (3–5 minutes per round). The
-# allowlist below covers everything a static malware analyst actually
-# needs (load + enumerate + decompile + xrefs + malware-specific
-# detectors) and nothing else, cutting the catalog ~5x.
-GHIDRA_ALLOWED_TOOLS: frozenset[str] = frozenset(
-    {
-        # Program lifecycle (load_program MUST run first).
-        "load_program",
-        "get_current_program_info",
-        # Pre-digested high-value analyzers — give the LLM curated
-        # triage signals in one tool call instead of forcing it to
-        # walk the function graph by hand.
-        "detect_malware_behaviors",
-        "analyze_api_call_chains",
-        "find_anti_analysis_techniques",
-        "extract_iocs_with_context",
-        # Compact enumeration tools the model uses to corroborate
-        # behavior calls without exploding the prompt.
-        "list_imports",
-        "list_strings",
-        "list_segments",
-        "get_entry_points",
-        # Targeted deep-dive when the analyzers point at a function.
-        "decompile_function",
-        "get_xrefs_to",
-        # 2026-05-31: high-value malware analyzers surfaced by the
-        # ghidra-mcp v5.6.0 audit (we were using 12/165 tools). These
-        # close the evasion / crypto / dynamic-emulation gaps.
-        "emulate_hash_batch",  # resolve API-hash obfuscation (ROR13/CRC32/djb2/FNV)
-        "emulate_function",  # run a hash/crypto/deobfuscation routine in isolation
-        "detect_crypto_constants",  # AES/RC4/etc. constants (ransomware/packing)
-        "analyze_dataflow",  # PCode taint: trace keys / C2 config / decode chains
-        "get_function_hash",  # normalized opcode hash for family attribution
-        "search_byte_patterns",  # masked in-binary signature hunt
-        "find_code_gaps",  # surface missed functions in packed/obfuscated code
-        "analyze_function_complete",  # one-call comprehensive function analysis
-    }
-)
-# 31 → 12 (audit 2026-05-17, A-01). The dropped tools were redundant
-# call-graph traversals and function-listing variants that bloated
-# the prompt and pushed each ReAct round into the 180-600 s range.
-# 2026-05-31: 12 → 20 — added 8 high-value malware analyzers (emulate /
-# crypto / dataflow / code-gap). The sink-reachability pre-pass focuses
-# the loop, offsetting the larger tool manifest.
-
-
 @register_static_provider("ghidra")
 class GhidraStaticProvider(StaticProvider):
     """Ghidra MCP, as the static analyst has always driven it.
 
     Every line of the attach path — the http/stdio branch, the shared-loop
-    ``_run_async``, the load_program pin, the three tool-selection modes — is
-    this file's, moved out of ``StaticAnalyst`` unchanged. What is new is only
-    the seam: the analyst now asks a provider for tools instead of knowing how
-    to build them.
+    ``_run_async``, the load_program pin — is this file's, moved out of
+    ``StaticAnalyst`` unchanged. What is new is only the seam: the analyst now
+    asks a provider for tools instead of knowing how to build them.
 
     ``degrade_on_failure`` is False on purpose. Ghidra IS the static evidence;
     a toolless static run produces a confident-looking report grounded in
@@ -200,7 +145,6 @@ class GhidraStaticProvider(StaticProvider):
             provides_evidence=False,
             provides_function_hashes=http,
             needs_sample_mirror=True,
-            supports_tool_curation=True,
             degrade_on_failure=False,
         )
 
@@ -260,15 +204,9 @@ class GhidraStaticProvider(StaticProvider):
 
             self._run_async(client.initialize())
             self._toolkit = client
-            all_tools = list(client.get_tools())
-            self._all_tools = all_tools  # full pool; kept reachable
-            self.tools = self.select_tools(all_tools)
-            logger.info(
-                "Initialized Ghidra HTTP tools: %d/%d (mode=%s).",
-                len(self.tools),
-                len(all_tools),
-                self._tool_mode(),
-            )
+            self._all_tools = self._pin_load_program_path(list(client.get_tools()))
+            self.tools = list(self._all_tools)
+            logger.info("Initialized Ghidra HTTP tools: %d.", len(self.tools))
             return
 
         # ------------------------------------------------------------------
@@ -298,15 +236,9 @@ class GhidraStaticProvider(StaticProvider):
 
         self._run_async(toolkit.initialize())
         self._toolkit = toolkit  # type: ignore[assignment]
-        all_tools = list(toolkit.get_tools())
-        self._all_tools = all_tools  # full pool; kept reachable
-        self.tools = self.select_tools(all_tools)
-        logger.info(
-            "Initialized Ghidra MCP tools: %d/%d (mode=%s).",
-            len(self.tools),
-            len(all_tools),
-            self._tool_mode(),
-        )
+        self._all_tools = self._pin_load_program_path(list(toolkit.get_tools()))
+        self.tools = list(self._all_tools)
+        logger.info("Initialized Ghidra MCP tools: %d.", len(self.tools))
 
     def _run_async(self, coro: Any) -> None:
         """Run an MCP-client init coroutine on the *shared agent loop*.
@@ -335,53 +267,6 @@ class GhidraStaticProvider(StaticProvider):
     def get_tools(self) -> list[BaseTool]:
         return self._all_tools
 
-    def select_tools(self, tools: list[Any], categories: set[str] | None = None) -> list[Any]:
-        """Pick the tool manifest to expose to the model per the configured mode.
-
-        - ``curated`` — the fixed ~20-tool allowlist (fastest, narrowest).
-        - ``dynamic`` — CORE triage set + tools relevant to the sample's
-          capability ``categories`` (~30-40). All tools stay reachable; only the
-          relevant subset is shown (tool-RAG). Without
-          categories (init time) it falls back to the curated allowlist.
-        - ``all`` — every tool the server offers (measured 5-6x slower + noisier).
-        """
-        mode = self._tool_mode()
-        if mode == "all":
-            logger.info("Ghidra MCP [all]: exposing all %d tools.", len(tools))
-            return self._pin_load_program_path(list(tools))
-
-        # Fall back to categories set by the pipeline (nodes.py) when the caller
-        # didn't pass any — this is the reliable path (state["sample_path"]).
-        if categories is None:
-            job_categories = self._job.capability_categories
-            categories = None if job_categories is None else set(job_categories)
-
-        if mode == "dynamic" and categories is not None:
-            selected = select_relevant_ghidra_tools(tools, categories)
-            logger.info(
-                "Ghidra MCP [dynamic]: selected %d/%d tools for categories %s.",
-                len(selected),
-                len(tools),
-                sorted(categories) or "{}",
-            )
-            return self._pin_load_program_path(selected)
-
-        # curated (or dynamic before a sample is known)
-        kept = [t for t in tools if getattr(t, "name", "").lower() in GHIDRA_ALLOWED_TOOLS]
-        logger.info(
-            "Ghidra MCP [%s]: kept %d/%d tools via curated allowlist.",
-            mode,
-            len(kept),
-            len(tools),
-        )
-        return self._pin_load_program_path(kept)
-
-    def _tool_mode(self) -> str:
-        """Resolve the effective tool-selection mode from config (back-compat)."""
-        if getattr(self._cfg, "use_all_tools", False):
-            return "all"
-        return str(getattr(self._cfg, "tool_selection", "dynamic"))
-
     def _pin_load_program_path(self, tools: list[Any]) -> list[Any]:
         """Wrap ``load_program`` so a hallucinated ``file`` arg is overridden.
 
@@ -408,9 +293,8 @@ class GhidraStaticProvider(StaticProvider):
         """Rebuild the load_program StructuredTool with a path-pinning coroutine.
 
         A fresh tool is built rather than mutating ``tool.coroutine`` in
-        place — the original lives in the shared ``_all_tools`` pool
-        and the HTTP client's tool list; in-place mutation would leak the
-        wrapper across selections.
+        place — the original lives in the client's own tool list, and
+        in-place mutation would leak the wrapper across samples.
         """
         from langchain_core.tools import StructuredTool
 
@@ -456,7 +340,12 @@ class GhidraStaticProvider(StaticProvider):
         )
 
     async def probe(self) -> ProviderProbe:
-        """The headless server's own health endpoint, with the configured token."""
+        """The tool schema, with the configured token.
+
+        ``/check_connection`` answers without a token, so it proved the address
+        and nothing else; ``/mcp/schema`` is the first authenticated call a job
+        makes, so a token the server rejects fails here as it would there.
+        """
         import time
 
         import httpx
@@ -464,7 +353,7 @@ class GhidraStaticProvider(StaticProvider):
         t0 = time.perf_counter()
         token = self._cfg.auth_token.get_secret_value()
         headers = {"Authorization": f"Bearer {token}"} if token else {}
-        url = f"{self._cfg.url.rstrip('/')}/check_connection"
+        url = f"{self._cfg.url.rstrip('/')}/mcp/schema"
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.get(url, headers=headers)

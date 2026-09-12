@@ -4,7 +4,7 @@ This module implements the Layer 0 (pre-LLM) grounding step of the Maljan
 TTP cascade pipeline. It scans the **sample's raw bytes** against a
 YAML-configured rule set and produces a synthetic AgentISR with domain="yara".
 
-2026-07 audit: the scan target was changed from concatenated analyst prose to
+The scan target was changed from concatenated analyst prose to
 the actual sample bytes. Scanning prose let a rule fire whenever an analyst
 merely *mentioned* an API name (e.g. "no evidence of WriteProcessMemory"),
 manufacturing high-confidence false T1055/T1497 evidence. Matching against the
@@ -444,7 +444,7 @@ class YaraLayer:
         Uses the compiled yara-python engine when available; falls back to
         regex-based string matching otherwise.
 
-        2026-07 audit (deep re-architecture): the scan target is now the
+        The scan target is now the
         **sample bytes**, not analyst prose. An API-name pattern such as
         ``WriteProcessMemory`` therefore only fires when the string is
         actually present in the binary (import table / embedded strings),

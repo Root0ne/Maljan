@@ -175,7 +175,7 @@ class ReportService:
     ) -> bool:
         """Delete a report owned by ``user``. Returns False when not found.
 
-        Audit 2026-07-26 (Ö4). Scoped through the owning job exactly like
+        Scoped through the owning job exactly like
         ``get_report`` so one user can never delete another's report.
         ``AnalysisReport.agent_findings`` and ``.transcript`` are both
         declared with ``cascade="all, delete-orphan"``, so the findings and

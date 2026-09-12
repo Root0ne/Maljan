@@ -1,0 +1,8 @@
+# Every change is reviewed by the maintainers listed for its path. The last
+# matching pattern wins.
+*                       @Root0ne
+/apps/api/alembic/      @Root0ne
+/src/maljan/core/       @Root0ne
+/docker/                @Root0ne
+/.github/               @Root0ne
+/SECURITY.md            @Root0ne

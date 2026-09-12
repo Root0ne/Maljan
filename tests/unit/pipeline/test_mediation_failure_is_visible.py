@@ -47,7 +47,7 @@ class TestTheStatusFieldCarriesIt:
 
 class TestTheRouterNoLongerParsesProse:
     def test_an_errored_round_still_short_circuits_to_the_judge(self) -> None:
-        """The BUG-05 behaviour, now driven by the field rather than the text."""
+        """The short-circuit, now driven by the field rather than the text."""
         router = ConsensusRouter(Settings())
         state = _state(
             discussion_history=[

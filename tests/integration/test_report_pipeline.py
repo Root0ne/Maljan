@@ -196,9 +196,9 @@ class TestDetectionSignaturesInReport:
     def test_no_family_attribution_never_ships_a_family_named_rule(
         self, mock_settings: Settings
     ) -> None:
-        """Wave 9 D11 (2026-05-29), contract corrected by the 2026-07-26 audit.
+        """A report with no family attribution never names a rule after one.
 
-        The D11 guardrail exists to stop an **unverified family name** being
+        The guardrail exists to stop an **unverified family name** being
         embedded in a generated rule title (the ``Maljan_AutoGen_unknown`` stub
         from the 2026-05-29 Linux ELF audit). It fires on
         ``family set AND family_grounded is False``

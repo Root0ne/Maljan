@@ -55,7 +55,6 @@ def test_capability_defaults_are_conservative():
             s.provides_evidence,
             s.provides_function_hashes,
             s.needs_sample_mirror,
-            s.supports_tool_curation,
             s.degrade_on_failure,
         )
     )

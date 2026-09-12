@@ -1,0 +1,31 @@
+name: Dependency review
+
+on:
+  pull_request:
+    branches: ["main", "dev"]
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    name: Dependency review
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Review dependency changes
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: on-failure
+          # Strong copyleft would bind the distribution of a private
+          # deployment; a maintainer may allow one deliberately in a review.
+          # LGPL is not listed: it permits use as a library, and two
+          # dependencies carry it (sharp's libvips binaries behind Next.js
+          # image optimisation, and cairosvg in the dev group).
+          deny-licenses: "GPL-2.0, GPL-3.0, AGPL-3.0, SSPL-1.0"

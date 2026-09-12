@@ -52,7 +52,7 @@ def _minio_client() -> Any:
     """Build a MinIO client from settings.
 
     Single construction point so the upload and delete paths cannot drift apart
-    (audit 2026-07-26 — the client used to be hand-built inline at every site).
+    (the client used to be hand-built inline at every site).
     """
     from minio import Minio
 
@@ -87,7 +87,7 @@ def _streaming_hashes(file: UploadFile, dest: Path, max_bytes: int) -> tuple[str
             total += len(chunk)
             if total > max_bytes:
                 raise HTTPException(
-                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                     detail=(f"File too large. Maximum: {max_bytes // (1024 * 1024)} MB"),
                 )
             sha256.update(chunk)
@@ -483,7 +483,7 @@ async def delete_sample(
 ) -> None:
     """Delete a sample, its stored object and every analysis derived from it.
 
-    Audit 2026-07-26 (Ö4): there was no way to remove an uploaded sample through
+    There was no way to remove an uploaded sample through
     the API or the UI, so malware binaries accumulated forever with no retention
     or cleanup path.
 

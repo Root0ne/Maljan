@@ -190,7 +190,7 @@ async def get_job_events(
     """Return historical pipeline events for this job.
 
     The Live tab uses this on mount to back-fill its event log before
-    attaching the WebSocket (audit 2026-05-17, LIVE-01). Events live in
+    attaching the WebSocket. Events live in
     Redis Stream ``analysis:{job_id}:events`` with a 24 h TTL and a
     1 000-entry cap. ``stream_id`` is the canonical ordering key —
     clients dedupe against it when WS events arrive concurrently.

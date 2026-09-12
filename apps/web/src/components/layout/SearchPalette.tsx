@@ -35,7 +35,7 @@ interface SearchPaletteProps {
 
 /* ── Helpers ───────────────────────────────────────────── */
 
-/* audit 2026-07-26 (T2): keyed by the shared bucket, not the raw string. The
+/* Keyed by the shared bucket, not the raw string. The
  * backend emits "Malware", which was not a key here — every malicious report's
  * badge silently fell through to the muted "unknown" grey. */
 const VERDICT_CLASS: Record<VerdictBucket, string> = {
@@ -123,7 +123,7 @@ export default function SearchPalette({
     setLoading(true);
     setError(null);
 
-    // audit 2026-07-26 (§4 "sessizce yutulan hatalar"): each source used to be
+    // Each source used to be
     // swallowed into an empty list, so an unreachable API rendered as a
     // confident "No matches". Track which sources failed and say so.
     Promise.all([
@@ -190,7 +190,7 @@ export default function SearchPalette({
         (j) =>
           ci(j.id, q) ||
           ci(j.sample_id, q) ||
-          // audit 2026-07-26 (T4): jobs were only findable by UUID even though
+          // Jobs were only findable by UUID even though
           // the API returns the sample's filename and hash.
           ci(j.sample_filename, q) ||
           ci(j.sample_sha256, q)
@@ -219,7 +219,7 @@ export default function SearchPalette({
     const reportMatches: ResultItem[] = reports
       .filter((r) => {
         if (ci(r.verdict, q)) return true;
-        // audit 2026-07-26 (T2): the UI shows "Malicious" but the stored
+        // The UI shows "Malicious" but the stored
         // verdict is "Malware" — typing what you see found nothing.
         if (ci(verdictLabel(r.verdict), q)) return true;
         if (ci(r.malware_category, q)) return true;

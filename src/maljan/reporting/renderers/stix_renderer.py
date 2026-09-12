@@ -109,7 +109,7 @@ class ExtendedSTIXRenderer:
         # Collect indicators per-kind, then apply
         # MAX_TOTAL_INDICATORS as a hard cap with priority order
         # (hashes > network > file:name strings). The 2026-05-29 Linux
-        # ELF audit found 19 indicators leaking past G-FP-4's ≤15 ceiling
+        # ELF audit found 19 indicators leaking past the ≤15 ceiling
         # because the per-kind cap (MAX_FILE_NAME_INDICATORS=10) ignored
         # hashes and network IOCs.
         # ``hash_inds`` always pairs an Indicator with its "indicates"
@@ -137,7 +137,7 @@ class ExtendedSTIXRenderer:
         # 5) StringIOC → Indicator.
         #
         # Apply the same acceptance-based filter
-        # used by the judge bundle postprocess (J-02) so deterministic
+        # used by the judge bundle postprocess so deterministic
         # interesting_strings can't smuggle noise (NDK build paths, bundled
         # bytecode class refs, random short strings) into the public STIX
         # bundle. Without this, the 2026-05-23 noise audit's 49-noisy-paths
@@ -266,10 +266,10 @@ class ExtendedSTIXRenderer:
         examples verbatim. Two fields are never authoritative and are fixed here:
 
         * ``created``/``modified`` — land on the placeholder
-          ``2023-01-01T00:00:00Z`` epoch (audit L7) instead of the analysis
+          ``2023-01-01T00:00:00Z`` epoch instead of the analysis
           time; a downstream CTI consumer would trust that bogus date. Overwrite
           with the render time (matching every renderer-produced SDO).
-        * ``is_family`` on Malware SDOs (2026-07 audit, Bulgu #8) — the LLM often
+        * ``is_family`` on Malware SDOs — the LLM often
           copies ``is_family: true`` from the docs, but Maljan analyses a single
           specimen, so this must be ``false``. STIX ``is_family=true`` asserts
           the object represents a malware *family*, not one sample.
@@ -335,7 +335,7 @@ def _accept_string_ioc(ioc: StringIOC, pattern: str, file_name_kept: int) -> boo
     """Gate StringIOC → Indicator emission.
 
     Mirrors :func:`maljan.agents.judge_postprocess._admit_indicator` so the
-    extended renderer can't bypass the J-02 noise floor. Mocking out the
+    extended renderer can't bypass the indicator noise floor. Mocking out the
     LLM (or any judge bundle path) no longer means the bundle ships with
     NDK build paths / bundled bytecode class refs / random short strings.
     """
