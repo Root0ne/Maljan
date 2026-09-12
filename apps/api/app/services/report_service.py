@@ -13,6 +13,7 @@ from sqlalchemy.orm import selectinload
 
 from app.config import settings
 from app.logging_config import get_logger
+from app.logsafe import log_safe
 from app.models.job import AnalysisJob
 from app.models.report import AnalysisReport
 from app.models.user import User
@@ -188,8 +189,8 @@ class ReportService:
         await self.db.flush()
         logger.info(
             "Report deleted: id=%s",
-            report_id,
-            extra={"user_id": str(user.id)},
+            log_safe(report_id),
+            extra={"user_id": log_safe(user.id)},
         )
         return True
 

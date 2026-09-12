@@ -25,6 +25,7 @@ from app.auth.jwt import decode_token
 from app.config import settings
 from app.database import async_session_factory
 from app.logging_config import get_logger
+from app.logsafe import log_safe
 from app.models.job import AnalysisJob
 
 logger = get_logger("ws")
@@ -75,7 +76,7 @@ class ConnectionManager:
             await websocket.accept(subprotocol="maljan.v1")
         else:
             await websocket.accept()
-        logger.info("WebSocket connected: job=%s", job_id)
+        logger.info("WebSocket connected: job=%s", log_safe(job_id))
         async with self._lock:
             self._active.setdefault(job_id, []).append(websocket)
             if job_id not in self._tasks or self._tasks[job_id].done():
@@ -83,7 +84,7 @@ class ConnectionManager:
 
     async def disconnect(self, websocket: WebSocket, job_id: str) -> None:
         """Remove a WebSocket connection from tracking."""
-        logger.info("WebSocket disconnected: job=%s", job_id)
+        logger.info("WebSocket disconnected: job=%s", log_safe(job_id))
         async with self._lock:
             if job_id not in self._active:
                 return
@@ -93,7 +94,7 @@ class ConnectionManager:
                 task = self._tasks.pop(job_id, None)
                 if task and not task.done():
                     task.cancel()
-                    logger.debug("Redis PubSub listener cancelled: job=%s", job_id)
+                    logger.debug("Redis PubSub listener cancelled: job=%s", log_safe(job_id))
 
     async def broadcast(self, job_id: str, message: str) -> None:
         """Send a message to all connected clients watching a job."""
@@ -183,7 +184,9 @@ async def ws_analysis(websocket: WebSocket, job_id: str) -> None:
                 break
 
         if not token:
-            logger.warning("WebSocket rejected: missing credential (job=%s)", job_id)  # nosemgrep
+            logger.warning(
+                "WebSocket rejected: missing credential (job=%s)", log_safe(job_id)
+            )  # nosemgrep
             await _reject(
                 websocket,
                 4401,
@@ -193,20 +196,24 @@ async def ws_analysis(websocket: WebSocket, job_id: str) -> None:
 
         decoded = decode_token(token)
         if decoded is None:
-            logger.warning("WebSocket rejected: invalid token (job=%s)", job_id)  # nosemgrep
+            logger.warning(
+                "WebSocket rejected: invalid token (job=%s)", log_safe(job_id)
+            )  # nosemgrep
             await _reject(websocket, 1008, "Unauthorized: invalid token")
             return
         payload = decoded
 
         if payload.get("type") != "access":
-            logger.warning("WebSocket rejected: wrong token type (job=%s)", job_id)  # nosemgrep
+            logger.warning(
+                "WebSocket rejected: wrong token type (job=%s)", log_safe(job_id)
+            )  # nosemgrep
             await _reject(websocket, 1008, "Unauthorized: access token required")
             return
 
         sub = payload.get("sub")
         if not sub or not isinstance(sub, str):
             logger.warning(  # nosemgrep
-                "WebSocket rejected: token missing subject (job=%s)", job_id
+                "WebSocket rejected: token missing subject (job=%s)", log_safe(job_id)
             )
             await _reject(websocket, 1008, "Unauthorized: token missing subject")
             return
@@ -216,7 +223,7 @@ async def ws_analysis(websocket: WebSocket, job_id: str) -> None:
     try:
         job_uuid = uuid.UUID(job_id)
     except ValueError:
-        logger.warning("WebSocket rejected: invalid job_id format (%s)", job_id)
+        logger.warning("WebSocket rejected: invalid job_id format (%s)", log_safe(job_id))
         await _reject(websocket, 1008, "Bad request: invalid job ID")
         return
 
@@ -225,21 +232,21 @@ async def ws_analysis(websocket: WebSocket, job_id: str) -> None:
         job = result.scalar_one_or_none()
 
         if job is None:
-            logger.warning("WebSocket rejected: job not found (%s)", job_id)
+            logger.warning("WebSocket rejected: job not found (%s)", log_safe(job_id))
             await _reject(websocket, 1008, "Not found: job does not exist")
             return
 
         if str(job.created_by) != user_id:
             logger.warning(
                 "WebSocket rejected: user %s does not own job %s",
-                user_id,
-                job_id,
+                log_safe(user_id),
+                log_safe(job_id),
             )
             await _reject(websocket, 1008, "Forbidden: not your job")
             return
 
     # ── Connection accepted ──────────────────────────────────────────
-    logger.info("WebSocket authenticated: user=%s job=%s", user_id, job_id)
+    logger.info("WebSocket authenticated: user=%s job=%s", log_safe(user_id), log_safe(job_id))
     await manager.connect(websocket, job_id)
 
     # The handshake checked
@@ -270,8 +277,8 @@ async def ws_analysis(websocket: WebSocket, job_id: str) -> None:
                 if _token_exp_ts is not None and _time.time() >= _token_exp_ts:
                     logger.warning(  # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure — user_id/job_id are opaque identifiers, not the token  # noqa: E501
                         "WebSocket closed: token expired mid-stream (user=%s job=%s).",
-                        user_id,
-                        job_id,
+                        log_safe(user_id),
+                        log_safe(job_id),
                     )
                     try:
                         await websocket.close(code=1008, reason="Unauthorized: token expired")

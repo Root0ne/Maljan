@@ -16,6 +16,7 @@ from sqlalchemy.orm import selectinload
 
 from app.config import settings
 from app.logging_config import get_logger
+from app.logsafe import log_safe
 from app.models.job import AnalysisJob
 from app.models.sample import Sample
 from app.models.user import User
@@ -303,6 +304,6 @@ async def _abort_queued_analysis(redis_conn: Any, job_id: uuid.UUID) -> None:
         logger.warning(
             "cancel_job: could not abort queued arq job %s (%s); "
             "the cooperative cancel flag still applies.",
-            job_id,
-            exc,
+            log_safe(job_id),
+            log_safe(exc),
         )

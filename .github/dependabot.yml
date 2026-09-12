@@ -26,6 +26,11 @@ updates:
     groups:
       web-minor-and-patch:
         update-types: ["minor", "patch"]
+    ignore:
+      # The type stubs follow whichever Node line the images and CI run; a
+      # major here is part of that migration, not an update of its own.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     open-pull-requests-limit: 5
 
   - package-ecosystem: "github-actions"
@@ -43,3 +48,10 @@ updates:
       day: "monday"
     target-branch: "dev"
     labels: ["dependencies", "docker"]
+    ignore:
+      # A runtime major is a deliberate migration with its own testing, not a
+      # weekly bump: the interpreter and the Node line move by hand.
+      - dependency-name: "python"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]

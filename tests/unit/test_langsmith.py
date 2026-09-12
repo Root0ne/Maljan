@@ -192,8 +192,8 @@ class TestConfigureLangSmithMethod:
             assert os.environ.get("LANGCHAIN_TRACING_V2") == "true"
             assert os.environ.get("LANGCHAIN_PROJECT") == "maljan-idem"
 
-    def test_logs_masked_api_key(self, caplog: pytest.LogCaptureFixture) -> None:
-        """The log message should include the last 4 chars, not the full key."""
+    def test_logs_no_part_of_the_api_key(self, caplog: pytest.LogCaptureFixture) -> None:
+        """The log message names the project and nothing from the key."""
         import logging
 
         from maljan.core.container import ServiceContainer
@@ -208,10 +208,14 @@ class TestConfigureLangSmithMethod:
             with patch.dict(os.environ, {}, clear=False):
                 container._configure_langsmith()  # type: ignore[union-attr]
 
-        full_key_logged = any("ls_secretkey9999" in r.message for r in caplog.records)
-        last4_logged = any("9999" in r.message for r in caplog.records)
-        assert not full_key_logged, "Full API key must never appear in logs"
-        assert last4_logged, "Last 4 chars of API key should appear in log"
+        messages = [r.message for r in caplog.records]
+        assert not any("ls_secretkey9999" in m for m in messages), (
+            "the full API key must never appear in logs"
+        )
+        assert not any("9999" in m for m in messages), (
+            "a fragment of the key narrows a brute force and confirms a key found elsewhere"
+        )
+        assert any("maljan" in m for m in messages), "the project name is what the line is for"
 
 
 # ---------------------------------------------------------------------------

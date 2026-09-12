@@ -29,6 +29,7 @@ from app.config import settings
 from app.database import get_db
 from app.deps import get_current_user, require_active_user
 from app.logging_config import get_logger
+from app.logsafe import log_safe
 from app.models.job import AnalysisJob
 from app.models.sample import Sample
 from app.models.sandbox_report import SandboxReportRow
@@ -545,7 +546,7 @@ async def delete_sample(
             except Exception as exc:  # noqa: BLE001 — object cleanup must not fail the delete
                 logger.warning(
                     "Sample %s row deleted but sandbox-report object %s could not be removed: %s",
-                    sample_id,
+                    log_safe(sample_id),
                     report_path,
                     exc,
                     extra={"user_id": str(user.id), "component": "minio"},
@@ -561,7 +562,7 @@ async def delete_sample(
         except Exception as exc:  # noqa: BLE001 — object cleanup must not fail the delete
             logger.warning(
                 "Sample %s row deleted but MinIO object %s could not be removed: %s",
-                sample_id,
+                log_safe(sample_id),
                 storage_path,
                 exc,
                 extra={"user_id": str(user.id), "component": "minio"},
@@ -575,13 +576,15 @@ async def delete_sample(
         except Exception as exc:  # noqa: BLE001 - cleanup must not fail the delete
             logger.warning("Could not read the mirror directory setting: %s", exc)
         for removed in sample_files.remove_for_sha(sha256, mirror_dir=mirror_dir):
-            logger.info("Removed local copy %s", removed, extra={"sample_id": str(sample_id)})
+            logger.info(
+                "Removed local copy %s", log_safe(removed), extra={"sample_id": log_safe(sample_id)}
+            )
 
     logger.info(
         "Sample deleted: id=%s sha256=%s",
-        sample_id,
+        log_safe(sample_id),
         sha256[:16],
-        extra={"user_id": str(user.id), "sample_id": str(sample_id)},
+        extra={"user_id": log_safe(user.id), "sample_id": log_safe(sample_id)},
     )
     await audit.record(
         "sample.delete",
