@@ -8,6 +8,12 @@ change landed on `main`.
 
 ### Added
 
+- **Repository security posture.** CodeQL (Python, TypeScript, Actions;
+  `security-extended`), dependency review on pull requests, OpenSSF Scorecard,
+  Dependabot updates for every dependency surface, actions pinned by commit,
+  `SECURITY.md` with private vulnerability reporting, `CONTRIBUTING.md`,
+  code owners, issue and pull request templates. Secret scanning with push
+  protection and Dependabot security updates are enabled on the repository.
 - **Environment-free configuration.** Every application setting — LLM
   provider, sandbox, static analyst, tool servers, agents, rate limits,
   enrichment, memory — now lives in the settings store and is edited from
