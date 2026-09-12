@@ -796,10 +796,11 @@ class ServiceContainer:
                 api_key.get_secret_value() if hasattr(api_key, "get_secret_value") else str(api_key)
             )
             os.environ["LANGCHAIN_API_KEY"] = secret_value
-            logger.info(  # nosemgrep
-                "LangSmith tracing enabled (project=%s, api_key=***%s).",
+            # No part of the key reaches the log: a fragment narrows a brute
+            # force and is enough to confirm a key found elsewhere.
+            logger.info(
+                "LangSmith tracing enabled (project=%s).",
                 self.config.langchain_project,
-                secret_value[-4:] if len(secret_value) >= 4 else "****",
             )
         else:
             logger.warning(

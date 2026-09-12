@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.deps import get_current_user, hash_api_key, require_admin
 from app.logging_config import get_logger
+from app.logsafe import log_safe
 from app.models.audit import APIKey, AuditLog
 from app.models.user import User
 from app.schemas.audit import (
@@ -64,8 +65,9 @@ async def list_audit_logs(
     logs = result.scalars().all()
 
     logger.debug(
-        f"Admin {admin.id} listed audit logs: page={page} count={len(logs)} total={total}",
-        extra={"user_id": str(admin.id)},
+        f"Admin {log_safe(admin.id)} listed audit logs: "
+        f"page={log_safe(page)} count={len(logs)} total={log_safe(total)}",
+        extra={"user_id": log_safe(admin.id)},
     )
 
     return {
@@ -200,6 +202,6 @@ async def revoke_api_key(
     await db.flush()
 
     logger.info(
-        f"API key revoked: id={key_id}",
-        extra={"user_id": str(user.id), "api_key_id": str(key_id)},
+        f"API key revoked: id={log_safe(key_id)}",
+        extra={"user_id": log_safe(user.id), "api_key_id": log_safe(key_id)},
     )

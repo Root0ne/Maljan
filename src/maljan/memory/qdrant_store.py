@@ -40,6 +40,7 @@ from typing import Any
 
 from maljan.core.exceptions import MemoryStoreError
 from maljan.core.logger import logger
+from maljan.core.settings_overrides import redact_url
 from maljan.memory.embeddings import EMBED_DIM, encode
 from maljan.memory.long_term_memory import StoredCase
 
@@ -100,7 +101,7 @@ class QdrantStore:
 
         logger.info(
             "QdrantStore initialized (url=%s, collection=%s, embed_dim=%d).",
-            url,
+            redact_url(url),
             collection,
             EMBED_DIM,
         )

@@ -1,0 +1,9 @@
+# Test code is excluded from the scan. The first security-extended run reported
+# 19 py/incomplete-url-substring-sanitization findings, and every one of them
+# was an assertion in a test asserting on a URL, not a sanitiser guarding a
+# request.
+name: Maljan CodeQL configuration
+paths-ignore:
+  - tests
+  - apps/web/e2e
+  - "**/*.spec.ts"

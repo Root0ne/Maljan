@@ -8,6 +8,12 @@ change landed on `main`.
 
 ### Added
 
+- **A per-agent LLM base URL.** `llm.agents.<agent>.base_url` points one agent
+  at its own OpenAI-compatible or Ollama server while the rest keep the global
+  endpoint, with the provider's API key still shared.
+- **Dependency submission for `uv.lock`.** A workflow posts the resolved Python
+  packages to GitHub's dependency graph on every push to `main`, so Dependabot
+  alerts close when the lockfile moves instead of lingering on the first parse.
 - **Repository security posture.** CodeQL (Python, TypeScript, Actions;
   `security-extended`), dependency review on pull requests, OpenSSF Scorecard,
   Dependabot updates for every dependency surface, actions pinned by commit,
@@ -43,6 +49,12 @@ change landed on `main`.
 
 ### Changed
 
+- **Request-derived values are sanitised before they are logged.** Every job,
+  sample, report and audit identifier that reaches a log line from a path, a
+  query string or a request body now passes through `log_safe`, which escapes
+  newlines and other control characters and bounds the length, so a caller
+  cannot forge a second log record. The container images pin their bases by
+  digest and the console's Node line moves to 22 across the images and CI.
 - **Dependencies brought current.** The uv workspace is relocked to today's
   releases (cryptography 50, starlette 1.6, langchain-core 1.6, mcp 1.30 with
   2.x held back as a separate migration, pillow 12.3, pyjwt 2.14, urllib3 2.7,
@@ -103,6 +115,9 @@ change landed on `main`.
 
 ### Fixed
 
+- **No fragment of the LangSmith API key is logged.** Enabling tracing logged
+  the key's last four characters; it now records only that tracing is on and
+  which project it writes to.
 - **The Ghidra connection test proves the token.** The probe read the
   unauthenticated health endpoint, so a wrong bearer token passed the test and
   every job then failed with 401 on the tool schema. It now fetches the schema

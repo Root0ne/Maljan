@@ -359,7 +359,8 @@ function describeProfilesMap(before: unknown, after: unknown): {
 // ---------------------------------------------------------------------------
 
 function formatOverride(o: AgentLLMOverride): string {
-  const base = `${o.provider}/${o.model}`;
+  let base = `${o.provider}/${o.model}`;
+  if (o.base_url) base = `${base} @ ${o.base_url}`;
   return o.temperature === null || o.temperature === undefined
     ? base
     : `${base} (temp ${o.temperature})`;

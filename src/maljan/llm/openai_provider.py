@@ -33,13 +33,18 @@ class OpenAIProvider:
         from pydantic import SecretStr
 
         api_key = secret if isinstance(secret, SecretStr) else SecretStr(str(secret))
+        # A per-agent endpoint (``llm.agents.<key>.base_url``) wins over the
+        # global one, so two agents can sit on two different local servers.
+        # The credential stays global: the key belongs to the provider, not to
+        # the endpoint. Every local-server branch below keys off this resolved
+        # value, so a per-agent server gets the same llama.cpp treatment.
+        base_url = kwargs.pop("base_url", None) or self._config.llm.openai.base_url
         build_kwargs: dict[str, Any] = {
             "model": model,
             "api_key": api_key,
             "temperature": temperature,
             **kwargs,
         }
-        base_url = self._config.llm.openai.base_url
         if base_url:
             build_kwargs["base_url"] = base_url
 

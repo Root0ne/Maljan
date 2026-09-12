@@ -174,17 +174,24 @@ class LLMProviderRegistry:
             return self.build_model(role=fallback_role, **kwargs)
 
         temp = agent_cfg.temperature if agent_cfg.temperature is not None else 0.1
+        agent_base_url = getattr(agent_cfg, "base_url", None)
         logger.info(
-            "Building dedicated LLM for agent '%s': %s/%s (temp=%.2f)",
+            "Building dedicated LLM for agent '%s': %s/%s (temp=%.2f, base_url=%s)",
             agent_name,
             agent_cfg.provider,
             agent_cfg.model,
             temp,
+            agent_base_url or "(global)",
         )
 
         # Build a temporary Settings-like config targeting the agent's provider
         # by patching _config at the provider level — clean duck-typing approach
         provider = provider_cls(config=self._config)
+        # Only forwarded when the agent actually overrides the endpoint: the
+        # providers resolve a missing kwarg to the global value themselves, and
+        # a None passed through would land in the model's own kwargs.
+        if agent_base_url:
+            kwargs["base_url"] = agent_base_url
         return provider.build_model(  # type: ignore[no-any-return]
             model=agent_cfg.model,
             temperature=temp,
@@ -216,6 +223,17 @@ def structured_output_supported(config: Any | None = None, llm: Any | None = Non
     endpoint is not a reason to gamble half an hour of a job on it.
     """
     try:
+        # A per-agent endpoint is as local as a global one, and the model
+        # object is the only place it survives: ChatOpenAI keeps it as
+        # ``openai_api_base`` (``base_url`` is the constructor alias). It is
+        # checked before the global provider name because the agent that owns
+        # this model may run on ``openai`` while the global provider is not.
+        # Only a real non-empty string counts — anything else is an object
+        # that answers every attribute, not a configured endpoint.
+        if llm is not None:
+            candidate = getattr(llm, "openai_api_base", None)
+            if isinstance(candidate, str) and candidate.strip():
+                return False
         if config is not None:
             provider_name = str(config.llm.provider)
             base_url = getattr(config.llm.openai, "base_url", None)

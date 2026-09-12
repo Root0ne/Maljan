@@ -676,6 +676,42 @@ async def test_llm_probe_accepts_per_agent_models_the_server_has(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_llm_probe_asks_a_per_agent_endpoint_for_its_own_catalogue(monkeypatch):
+    """An agent on its own Ollama host is checked there, not against the global one."""
+    catalogues = {
+        "ollama": ["qwen3:8b"],
+        "gpu-box": ["qwen3:4b"],
+    }
+
+    def handler(req: httpx.Request):
+        assert req.url.path.endswith("/api/tags")
+        return httpx.Response(200, json={"models": [{"name": n} for n in catalogues[req.url.host]]})
+
+    monkeypatch.setattr(
+        probes, "_client", lambda: httpx.AsyncClient(transport=transport(handler), timeout=10)
+    )
+    values = {
+        "provider": "ollama",
+        "ollama_base_url": "http://ollama:11434",
+        "ollama_expert_model": "qwen3:8b",
+        "ollama_judge_model": "qwen3:8b",
+        "agents": {
+            "judge": {
+                "provider": "ollama",
+                "model": "qwen3:4b",
+                "base_url": "http://gpu-box:11434",
+            }
+        },
+    }
+    assert (await probes.probe_llm(values)).ok is True
+
+    values["agents"]["judge"]["model"] = "qwen3:8b"
+    missing = await probes.probe_llm(values)
+    assert missing.ok is False
+    assert "judge=qwen3:8b @ http://gpu-box:11434" in missing.detail
+
+
+@pytest.mark.asyncio
 async def test_llm_probe_ignores_a_per_agent_entry_on_another_provider(monkeypatch):
     _tags_transport(monkeypatch, ["qwen3:8b"])
     r = await probes.probe_llm(
