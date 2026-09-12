@@ -12,7 +12,7 @@ dependencies = [
     "asyncpg>=0.30.0",
     "alembic>=1.15.0",
     # Auth
-    "python-jose[cryptography]>=3.4.0",
+    "pyjwt[crypto]>=2.10.0",
     "argon2-cffi>=25.1.0",
     # Redis / Task queue
     "redis>=5.2.0",
