@@ -176,11 +176,10 @@ class CAPEv2Client:
                 # POST is not idempotent, a request that timed out client-side
                 # may still have been accepted, and a blind retry would burn a
                 # second detonation slot on a one-VM instance.
-                files: dict[str, Any] = {"file": (path.name, f, "application/octet-stream")}
-                files.update({name: (None, value) for name, value in form.items()})
                 response = self._http.post(
                     "/apiv2/tasks/create/file/",
-                    files=files,
+                    data=form,
+                    files={"file": (path.name, f, "application/octet-stream")},
                     timeout=self._upload_timeout,
                 )
             except Exception as exc:

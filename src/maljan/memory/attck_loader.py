@@ -474,8 +474,9 @@ _platform_cache: dict[str, tuple[str, ...]] | None = None
 def _platform_catalog() -> dict[str, tuple[str, ...]]:
     """``{technique_id: (MITRE platforms,)}`` across every loadable domain.
 
-    Built once. An unreachable catalog yields an empty map, and every caller
-    reads that as "no platform information", never as "no platforms".
+    Built once, cached whatever the outcome. An unreachable catalog yields an
+    empty map, and every caller reads that as "no platform information", never
+    as "no platforms".
     """
     global _platform_cache
     if _platform_cache is not None:
@@ -486,8 +487,11 @@ def _platform_catalog() -> dict[str, tuple[str, ...]]:
             for technique in data.techniques:
                 catalog.setdefault(technique.technique_id, tuple(technique.platforms or ()))
     except Exception as exc:  # noqa: BLE001 — platform filtering degrades, the run does not
+        # The empty result is cached too. A box that cannot reach MITRE would
+        # otherwise re-attempt the download on every technique the cascade
+        # checks, which is thousands of failed fetches in one job.
+        # ``reset_caches`` is the way back once the network returns.
         logger.debug("Could not load the ATT&CK platform catalog: %s", exc)
-        return {}
     _platform_cache = catalog
     return catalog
 

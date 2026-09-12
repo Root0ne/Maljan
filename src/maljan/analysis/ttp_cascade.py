@@ -538,6 +538,12 @@ def _mitre_platforms_for(technique_id: str) -> tuple[str, ...] | None:
 
     The catalog itself lives in ``memory.attck_loader``, which spans all three
     ATT&CK domains; this is the thin call site the cascade filters on.
+
+    An empty platform list is deliberately ``None`` rather than ``()``. The
+    loader returns ``()`` both for a technique it has never heard of and for
+    one that declares no platforms at all, and neither is grounds for dropping
+    a claim: the first is a gap in the catalog and the second is a technique
+    MITRE itself did not bind to an OS. Both fall open.
     """
     from maljan.memory.attck_loader import platforms_for
 

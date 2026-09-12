@@ -5,7 +5,7 @@ import { useState } from "react";
 import { useReport } from "../layout";
 import { copyToClipboard, formatBytes } from "@/lib/report-utils";
 import Field from "@/components/ui/Field";
-import { platformLabel } from "@/types/malware-report";
+import { fileTypeLabel, platformLabel } from "@/types/malware-report";
 import type { SampleIdentity } from "@/types/malware-report";
 
 export default function IdentityTab() {
@@ -46,7 +46,7 @@ export default function IdentityTab() {
         </div>
         <div className="p-4 grid grid-cols-2 gap-4">
           <Field label="File Name" value={identity.file_name || "(unknown)"} />
-          <Field label="File Type" value={identity.file_type} />
+          <Field label="File Type" value={fileTypeLabel(identity.file_type)} />
           <Field
             label="Platform"
             value={

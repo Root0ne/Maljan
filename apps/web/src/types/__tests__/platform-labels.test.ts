@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { PLATFORM_LABELS, platformLabel } from "../malware-report";
+import { FILE_TYPE_LABELS, PLATFORM_LABELS, fileTypeLabel, platformLabel } from "../malware-report";
 
 describe("platformLabel", () => {
   it("names every platform the backend emits", () => {
@@ -27,5 +27,24 @@ describe("platformLabel", () => {
     expect(platformLabel(null)).toBe("Unknown");
     expect(platformLabel(undefined)).toBe("Unknown");
     expect(platformLabel("")).toBe("Unknown");
+  });
+});
+
+describe("fileTypeLabel", () => {
+  it("names the lowercase routing labels the backend emits", () => {
+    expect(fileTypeLabel("pe")).toBe("PE");
+    expect(fileTypeLabel("elf")).toBe("ELF");
+    expect(fileTypeLabel("mach-o")).toBe("Mach-O");
+    expect(fileTypeLabel("ooxml")).toBe("OOXML");
+    expect(FILE_TYPE_LABELS["7z"]).toBe("7-Zip");
+  });
+
+  it("renders a type it has no label for as itself", () => {
+    expect(fileTypeLabel("nonsense")).toBe("nonsense");
+  });
+
+  it("falls back to Unknown for an absent type", () => {
+    expect(fileTypeLabel(null)).toBe("Unknown");
+    expect(fileTypeLabel("")).toBe("Unknown");
   });
 });

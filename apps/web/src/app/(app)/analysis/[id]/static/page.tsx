@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { useReport } from "../layout";
 import { entropyClass, formatBytes } from "@/lib/report-utils";
 import Th from "@/components/ui/Th";
+import { fileTypeLabel } from "@/types/malware-report";
 import type { StringIOC, StringIOCKind } from "@/types/malware-report";
 
 /* Ordered by what an analyst reaches for first, not alphabetically. `secret`
@@ -32,7 +33,7 @@ export default function StaticTab() {
 
   const staticData = report?.malware_report?.static;
   const fileType = report?.malware_report?.identity?.file_type;
-  const sectionsLabel = fileType ? `${fileType} Sections` : "Sections";
+  const sectionsLabel = fileType ? `${fileTypeLabel(fileType)} Sections` : "Sections";
 
   const filteredImports = useMemo(() => {
     if (!staticData) return [];
@@ -73,7 +74,8 @@ export default function StaticTab() {
   if (!staticData) {
     return (
       <div className="p-8 text-center text-sm text-text-secondary">
-        No static analysis data for this {fileType ? <code>{fileType}</code> : "sample"} —
+        No static analysis data for this{" "}
+        {fileType ? <code>{fileTypeLabel(fileType)}</code> : "sample"} —
         no format-aware extractor produced anything for it, or the loader was
         unable to parse the file.
       </div>
