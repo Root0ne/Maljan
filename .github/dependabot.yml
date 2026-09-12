@@ -36,6 +36,10 @@ updates:
       # major here is part of that migration, not an update of its own.
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
+      # typescript-eslint (pulled in by eslint-config-next) does not support
+      # TypeScript 7; the ESLint step fails until it does.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
     open-pull-requests-limit: 5
 
   - package-ecosystem: "github-actions"
