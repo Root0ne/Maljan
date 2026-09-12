@@ -1,4 +1,9 @@
-"""Neither sidecar is launched from a constant inside an agent any more."""
+"""Neither sidecar is launched from a constant inside an agent any more.
+
+Both the role binding and the definition's ``ToolRef``s go through the
+registry, so the assertions below cover both: an agent must acquire tools from
+nowhere else, and must acquire the referenced ones at all.
+"""
 
 from __future__ import annotations
 
@@ -30,35 +35,34 @@ def _wired(container, name: str):
     return agent
 
 
-def _only_role_bound(cfg) -> None:
-    """Drop the definitions' tool references from these settings.
+class _T:
+    def __init__(self, name: str) -> None:
+        self.name = name
 
-    These tests are about the *role-bound* half of an agent's tools — what
-    ``MCPServerConfig.agents`` contributes and in what order. The built-in
-    definitions also name servers by reference, and leaving those in would
-    attach the real analysis and knowledge sidecars to every assertion here.
-    The reference half has its own coverage in ``test_composition``.
+
+def test_the_network_analyst_takes_both_halves_from_the_registry(monkeypatch):
+    """Its role binding and its definition's references, and nothing else.
+
+    The analyst used to call ``registry.tools_for`` itself; it goes through the
+    shared attach path now, so both halves have to arrive and neither may come
+    from anywhere but the registry.
     """
-    for key, definition in cfg.agents.definitions.items():
-        cfg.agents.definitions[key] = definition.model_copy(update={"tools": []})
-
-
-def test_the_network_analyst_takes_its_tools_from_the_registry(monkeypatch):
     from maljan.core.config import Settings
     from maljan.core.container import ServiceContainer
 
     cfg = Settings(_env_file=None)
-    _only_role_bound(cfg)
     container = ServiceContainer(config=cfg, mock=True)
     registry = container.get_server_registry()
 
-    class _T:
-        name = "extract_dns"
-
-    monkeypatch.setattr(registry, "tools_for", lambda role, job_id, **kw: ([_T()], []))
+    monkeypatch.setattr(registry, "tools_for", lambda role, job_id, **kw: ([_T("extract_dns")], []))
+    monkeypatch.setattr(
+        registry,
+        "tools_for_ref",
+        lambda ref, job_id, **kw: ([_T(f"{ref.server}_tool")], []),
+    )
     agent = _wired(container, "network")
     agent._initialize_mcp_client()
-    assert [t.name for t in agent.tools] == ["extract_dns"]
+    assert [t.name for t in agent.tools] == ["extract_dns", "network_tool", "knowledge_tool"]
 
 
 @pytest.mark.asyncio
@@ -70,21 +74,21 @@ async def test_the_judge_takes_its_tools_from_the_registry(monkeypatch):
     from maljan.core.container import ServiceContainer
 
     cfg = Settings(_env_file=None)
-    _only_role_bound(cfg)
     container = ServiceContainer(config=cfg, mock=True)
     registry = container.get_server_registry()
 
-    class _T:
-        name = "check_ip_reputation"
-
     async def fake(role, job_id, **kw):
         assert role == "judge"
-        return [_T()], []
+        return [_T("check_ip_reputation")], []
+
+    async def fake_ref(ref, job_id, **kw):
+        return [_T(f"{ref.server}_tool")], []
 
     monkeypatch.setattr(registry, "atools_for", fake)
+    monkeypatch.setattr(registry, "atools_for_ref", fake_ref)
     judge = JudgeAgent(llm=MagicMock(), config=cfg)
     judge._container = container
     await judge._initialize_mcp_client()
-    assert [t.name for t in judge.tools] == ["check_ip_reputation"]
+    assert [t.name for t in judge.tools] == ["check_ip_reputation", "knowledge_tool"]
     await judge.aclose()
     assert judge.tools == []
