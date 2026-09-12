@@ -45,6 +45,30 @@ async def test_ghidra_probe_reports_http_error(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_ghidra_probe_reads_the_authenticated_schema_and_lists_tools(monkeypatch):
+    """A token the server rejects must fail the probe, so the probe reads the
+    endpoint that enforces it, and returns the names a job will expose."""
+    seen: dict[str, str] = {}
+
+    def handler(r: httpx.Request) -> httpx.Response:
+        seen["path"] = r.url.path
+        seen["auth"] = r.headers.get("Authorization", "")
+        return httpx.Response(
+            200,
+            json={"tools": [{"path": "/load_program"}, {"path": "/analyze/function"}]},
+        )
+
+    monkeypatch.setattr(
+        probes,
+        "_client",
+        lambda: httpx.AsyncClient(transport=transport(handler), timeout=10),
+    )
+    r = await probes.probe_ghidra({"url": "http://ghidra:8089/", "auth_token": "t"})
+    assert seen == {"path": "/mcp/schema", "auth": "Bearer t"}
+    assert r.ok and r.tools == ["load_program", "analyze_function"] and r.detail == "2 tools"
+
+
+@pytest.mark.asyncio
 async def test_timeout_is_reported_not_raised(monkeypatch):
     def handler(_r):
         raise httpx.ReadTimeout("slow")
