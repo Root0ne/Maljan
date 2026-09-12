@@ -322,6 +322,9 @@ class MaljanApp:
         # container as well: it is what their prompts' format fragment is
         # assembled from.
         self.container.sample_format = (file_type, platform)
+        # Same reason, same place: ``ToolRef(kind="sandbox")`` resolves to
+        # tools over this report, and resolution happens off the graph state.
+        self.container.sandbox_report = sandbox_report
 
         initial_state: AnalysisState = {
             "file_hash": file_hash,

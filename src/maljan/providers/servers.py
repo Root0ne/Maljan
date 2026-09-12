@@ -942,15 +942,22 @@ class ServerRegistry:
         name a tool ``extract_dns`` is the one that gets renamed, and the
         pinned built-in tool names never move.
 
-        ``exclude`` drops one handle by name — the server a provider already
-        opened itself, so the registry does not hand the same tools out twice.
+        ``exclude`` drops handles by name — the server a provider already
+        opened itself, so the registry does not hand the same tools out twice,
+        and the set a profile withholds (``ProfileDefinition.exclude_servers``,
+        which is how the ``measurement`` baseline runs the same analysts with
+        no tools). One name or several comma-separated; the single-name form is
+        the older caller and stays exactly what it was.
         """
         from maljan.core.config import BUILTIN_SERVER_KEYS
 
+        excluded = {name.strip() for name in exclude.split(",") if name.strip()}
         bound = [
             handle
             for handle in self._handles.values()
-            if handle.config.enabled and role in handle.config.agents and handle.name != exclude
+            if handle.config.enabled
+            and role in handle.config.agents
+            and handle.name not in excluded
         ]
         return sorted(bound, key=lambda h: (h.name not in BUILTIN_SERVER_KEYS, h.name))
 

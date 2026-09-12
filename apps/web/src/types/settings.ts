@@ -98,10 +98,11 @@ export interface McpServerEntry {
  * `maljan.core.config.ToolRef`. `kind: "mcp"` names a server and, optionally,
  * one of its tools — `name: null` means the server's whole allow-listed set.
  * `kind: "provider"` means "this agent's static provider's tools" and carries
- * nothing else.
+ * nothing else. `kind: "sandbox"` means the job's sandbox report, read through
+ * the in-process sandbox tool set, and likewise carries nothing else.
  */
 export interface ToolRefEntry {
-  kind: "mcp" | "provider";
+  kind: "mcp" | "provider" | "sandbox";
   server: string | null;
   name: string | null;
 }

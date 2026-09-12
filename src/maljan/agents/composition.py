@@ -20,6 +20,10 @@ Two halves of an agent's tools live in two places on purpose:
 A ``generic`` agent has no class of its own to open a provider, so an explicit
 ``ToolRef(kind="provider")`` is the one way it gets provider tools, and that
 path *is* resolved here.
+
+``ToolRef(kind="sandbox")`` is the third half and the simplest: the job's
+sandbox report is already on the container, so the tools over it are closures
+built here with nothing to open and nothing that can hang.
 """
 
 from __future__ import annotations
@@ -82,7 +86,15 @@ def current_analyst_keys() -> list[str]:
 
 
 def static_provider_id_for(settings: Settings, key: str) -> str:
-    """The static provider id agent ``key`` reads, falling back to the global one."""
+    """The static provider id agent ``key`` reads, falling back to the global one.
+
+    The active profile wins over both. ``measurement`` forces ``none`` across
+    every member, which is what makes it a baseline rather than a profile that
+    merely happens to have no tool servers today.
+    """
+    forced = active_profile(settings).static_provider
+    if forced:
+        return str(forced)
     definition = settings.agents.definitions.get(key)
     if definition is not None and definition.static_provider:
         return str(definition.static_provider)
@@ -197,25 +209,60 @@ def _provider_tools(container: Any, definition: AgentDefinition, provider_id: st
     return list(provider.get_tools())
 
 
-def _claim_provider_tools(
-    incoming: list[Any], provider_id: str, tools: list[Any], seen: dict[str, str]
-) -> None:
-    """Put the provider half into ``tools`` and record what it claimed.
+def _sandbox_tools(container: Any, definition: AgentDefinition) -> list[Any]:
+    """The job's sandbox-report tools, for a definition that asked for them.
 
-    The provider half is first, so it never renames anything; recording its
-    names under the provider's id is what makes a later server's identically
+    In-process, so unlike the provider half there is nothing to open and
+    nothing that can hang: the report is already on the container and the tools
+    are closures over it. Any role may ask — ``dynamic`` is the obvious one,
+    but a judge cross-checking an analyst's claim about a dropped file wants
+    the same lookup, and there is no reason to make it read the whole report to
+    get it.
+    """
+    if not any(ref.kind == "sandbox" for ref in definition.tools):
+        return []
+    if active_profile(container.config).exclude_sandbox_tools:
+        return []
+    from maljan.providers.sandbox_tools import sandbox_tools
+
+    return list(sandbox_tools(container))
+
+
+def _claim_in_process_tools(
+    incoming: list[Any], source: str, tools: list[Any], seen: dict[str, str]
+) -> None:
+    """Put an in-process half into ``tools`` and record what it claimed.
+
+    Two halves come through here: the static provider's tools and the sandbox
+    report's. Both are first, so neither renames anything; recording their
+    names under the source's own id is what makes a later server's identically
     named tool take the prefix rather than vanish into ``_dedupe``.
     """
     for tool in incoming:
         name = str(getattr(tool, "name", ""))
         if name in seen:
             continue
-        seen[name] = f"provider:{provider_id}"
+        seen[name] = source
         tools.append(tool)
 
 
-def _mcp_refs(definition: AgentDefinition) -> list[ToolRef]:
-    return [ref for ref in definition.tools if ref.kind == "mcp"]
+def _mcp_refs(settings: Settings, definition: AgentDefinition) -> list[ToolRef]:
+    """The definition's server references, minus the ones the profile excludes."""
+    excluded = set(active_profile(settings).exclude_servers)
+    return [
+        ref for ref in definition.tools if ref.kind == "mcp" and str(ref.server) not in excluded
+    ]
+
+
+def _excluded_servers(settings: Settings) -> str:
+    """``ServerRegistry``'s ``exclude`` argument for the active profile.
+
+    The registry takes one name, not a list — it grew for the one case of an
+    analyst that must not see its own provider's server. A profile excluding
+    several is expressed as a comma-joined value that ``handles_for`` splits;
+    see ``ServerRegistry.handles_for``.
+    """
+    return ",".join(active_profile(settings).exclude_servers)
 
 
 def _agent_llm(container: Any, key: str) -> Any:
@@ -246,14 +293,20 @@ def resolve_agent(key: str, container: Any, job_key: str = "job") -> ResolvedAge
     # dropped as a duplicate of a tool it has nothing to do with.
     seen: dict[str, str] = {}
     tools: list[Any] = []
-    _claim_provider_tools(
-        _provider_tools(container, definition, provider_id), provider_id, tools, seen
+    _claim_in_process_tools(
+        _provider_tools(container, definition, provider_id),
+        f"provider:{provider_id}",
+        tools,
+        seen,
     )
+    _claim_in_process_tools(_sandbox_tools(container, definition), "sandbox", tools, seen)
     registry = container.get_server_registry()
-    bound, bound_reasons = registry.tools_for(key, job_key, seen=seen)
+    bound, bound_reasons = registry.tools_for(
+        key, job_key, exclude=_excluded_servers(settings), seen=seen
+    )
     tools.extend(bound)
     reasons.extend(bound_reasons)
-    for ref in _mcp_refs(definition):
+    for ref in _mcp_refs(settings, definition):
         referenced, ref_reasons = registry.tools_for_ref(ref, job_key, seen=seen)
         tools.extend(referenced)
         reasons.extend(ref_reasons)
@@ -291,17 +344,20 @@ async def aresolve_agent(key: str, container: Any, job_key: str = "job") -> Reso
     # loop. Awaited callers (the judge's node, the settings probe) keep serving
     # everything else, and the probe's ``asyncio.wait`` budget can actually
     # preempt a wedged provider.
-    _claim_provider_tools(
+    _claim_in_process_tools(
         await asyncio.to_thread(_provider_tools, container, definition, provider_id),
-        provider_id,
+        f"provider:{provider_id}",
         tools,
         seen,
     )
+    _claim_in_process_tools(_sandbox_tools(container, definition), "sandbox", tools, seen)
     registry = container.get_server_registry()
-    bound, bound_reasons = await registry.atools_for(key, job_key, seen=seen)
+    bound, bound_reasons = await registry.atools_for(
+        key, job_key, exclude=_excluded_servers(settings), seen=seen
+    )
     tools.extend(bound)
     reasons.extend(bound_reasons)
-    for ref in _mcp_refs(definition):
+    for ref in _mcp_refs(settings, definition):
         referenced, ref_reasons = await registry.atools_for_ref(ref, job_key, seen=seen)
         tools.extend(referenced)
         reasons.extend(ref_reasons)

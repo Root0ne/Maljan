@@ -138,6 +138,85 @@ def _capa_worker(
         queue.put(("error", f"{type(exc).__name__}: {exc}"))
 
 
+def run_capa_document(
+    *,
+    sample_path: str,
+    rules_dir: str,
+    signatures_dir: str,
+    backend_name: str,
+    timeout_seconds: float,
+    target: _CapaWorker | None = None,
+) -> dict[str, Any] | None:
+    """Run the capa pipeline in a subprocess, killed if it overruns its budget.
+
+    capa's vivisect backend has no cooperative cancellation point inside a
+    disassembly loop, so it cannot be interrupted from inside the calling
+    process — a thread-based timeout (this function's first cut, as a provider
+    method) could only report a timeout to the caller while the actual vivisect
+    thread kept running for however long the analysis really took, and
+    ``ThreadPoolExecutor`` registers an ``atexit`` hook that joins every
+    outstanding worker thread, which would have hung an arq worker's shutdown
+    on a slow sample. A ``multiprocessing`` child process can actually be
+    killed: on expiry this calls ``terminate()``, escalates to ``kill()`` if
+    the process is still alive after a short grace period, and returns ``None``
+    either way — the existing warn-and-degrade contract, just backed by
+    something that can really stop the work.
+
+    A free function rather than a provider method because the ``capa`` tool
+    runs the same pass with no provider and no ``Settings`` around it, and two
+    copies of a spawn-and-kill loop is one too many.
+    """
+    worker = target or _capa_worker
+    ctx = mp.get_context("spawn")
+    queue: Any = ctx.Queue()
+    process = ctx.Process(
+        target=worker,
+        args=(sample_path, rules_dir, signatures_dir, backend_name, queue),
+        daemon=True,
+    )
+    process.start()
+    try:
+        # Read before joining: the child's result is routinely well over the OS
+        # pipe buffer (a full capa ResultDocument), and a child that has put a
+        # large item blocks in its feeder thread until the parent drains the
+        # queue. Joining first therefore deadlocks the parent's wait on a child
+        # that has *already* produced its result — the join times out, the
+        # child is killed as a false "exceeded its budget", and a real result
+        # is thrown away. Draining the queue first lets that feeder thread
+        # unblock and the child exit on its own well within the same budget.
+        kind, payload = queue.get(timeout=timeout_seconds)
+    except Exception:  # noqa: BLE001 - stdlib queue.Empty, or a crashed child
+        logger.warning(
+            "capa on %s exceeded its %ss budget; terminating the worker process.",
+            sample_path,
+            timeout_seconds,
+        )
+        process.terminate()
+        process.join(5.0)
+        if process.is_alive():
+            process.kill()
+            process.join(5.0)
+        queue.close()
+        return None
+    # The result is already in hand; give the child a short grace period to
+    # exit on its own now that the queue is drained, then reap it.
+    process.join(5.0)
+    if process.is_alive():
+        process.terminate()
+        process.join(5.0)
+        if process.is_alive():
+            process.kill()
+            process.join(5.0)
+    queue.close()
+    if kind != "ok":
+        logger.warning(
+            "capa failed on %s (%s); continuing without capa evidence.", sample_path, payload
+        )
+        return None
+    result: dict[str, Any] = payload
+    return result
+
+
 @register_static_provider("capa_yara")
 class CapaYaraStaticProvider(StaticProvider):
     """capa and YARA: evidence for the analyst, not tools for the model."""
@@ -252,78 +331,21 @@ class CapaYaraStaticProvider(StaticProvider):
         rules_dir: Path,
         target: _CapaWorker | None = None,
     ) -> dict[str, Any] | None:
-        """Run the capa pipeline in a subprocess, killed if it overruns its budget.
-
-        capa's vivisect backend has no cooperative cancellation point inside a
-        disassembly loop, so it cannot be interrupted from inside the calling
-        process — a thread-based timeout (this method's first cut) could only
-        report a timeout to the caller while the actual vivisect thread kept
-        running for however long the analysis really took, and
-        ``ThreadPoolExecutor`` registers an ``atexit`` hook that joins every
-        outstanding worker thread, which would have hung an arq worker's
-        shutdown on a slow sample. A ``multiprocessing`` child process can
-        actually be killed: on expiry this calls ``terminate()``, escalates to
-        ``kill()`` if the process is still alive after a short grace period,
-        and returns ``None`` either way — the existing warn-and-degrade
-        contract, just backed by something that can really stop the work.
+        """This provider's budget and backend, applied to ``run_capa_document``.
 
         ``target`` defaults to the module-level ``_capa_worker`` and exists so
         a test can inject a fake (module-level, picklable) target — e.g. one
         that only sleeps — to exercise the timeout/kill path without needing
         capa installed or a real multi-minute analysis.
         """
-        worker = target or _capa_worker
-        ctx = mp.get_context("spawn")
-        queue: Any = ctx.Queue()
-        backend_name = _BACKEND_NAMES.get(self._capa.backend, "BACKEND_VIV")
-        signatures_dir = str(Path(resolve_data(self._capa.signatures_dir)))
-        process = ctx.Process(
-            target=worker,
-            args=(sample_path, str(rules_dir), signatures_dir, backend_name, queue),
-            daemon=True,
+        return run_capa_document(
+            sample_path=sample_path,
+            rules_dir=str(rules_dir),
+            signatures_dir=str(Path(resolve_data(self._capa.signatures_dir))),
+            backend_name=_BACKEND_NAMES.get(self._capa.backend, "BACKEND_VIV"),
+            timeout_seconds=self._capa.timeout_seconds,
+            target=target,
         )
-        process.start()
-        try:
-            # Read before joining: the child's result is routinely well over
-            # the OS pipe buffer (a full capa ResultDocument), and a child
-            # that has put a large item blocks in its feeder thread until the
-            # parent drains the queue. Joining first therefore deadlocks the
-            # parent's wait on a child that has *already* produced its
-            # result — the join times out, the child is killed as a false
-            # "exceeded its budget", and a real result is thrown away.
-            # Draining the queue first lets that feeder thread unblock and
-            # the child exit on its own well within the same budget.
-            kind, payload = queue.get(timeout=self._capa.timeout_seconds)
-        except Exception:  # noqa: BLE001 - stdlib queue.Empty, or a crashed child
-            logger.warning(
-                "capa on %s exceeded its %ss budget; terminating the worker process.",
-                sample_path,
-                self._capa.timeout_seconds,
-            )
-            process.terminate()
-            process.join(5.0)
-            if process.is_alive():
-                process.kill()
-                process.join(5.0)
-            queue.close()
-            return None
-        # The result is already in hand; give the child a short grace period
-        # to exit on its own now that the queue is drained, then reap it.
-        process.join(5.0)
-        if process.is_alive():
-            process.terminate()
-            process.join(5.0)
-            if process.is_alive():
-                process.kill()
-                process.join(5.0)
-        queue.close()
-        if kind != "ok":
-            logger.warning(
-                "capa failed on %s (%s); continuing without capa evidence.", sample_path, payload
-            )
-            return None
-        result: dict[str, Any] = payload
-        return result
 
     # ------------------------------------------------------------------
     # YARA

@@ -722,8 +722,15 @@ AgentRole = str
 # It is a path segment in the probe URL and a prefix in a renamed tool name,
 # so it is validated in the model rather than only in the API.
 SERVER_KEY_PATTERN = r"^[a-z][a-z0-9_-]{0,31}$"
-BUILTIN_SERVER_KEYS: tuple[str, ...] = ("network", "threatintel")
-RESERVED_SERVER_KEYS: tuple[str, ...] = ("network", "threatintel", "ghidra", "cape")
+BUILTIN_SERVER_KEYS: tuple[str, ...] = ("analysis", "knowledge", "network", "threatintel")
+RESERVED_SERVER_KEYS: tuple[str, ...] = (
+    "analysis",
+    "knowledge",
+    "network",
+    "threatintel",
+    "ghidra",
+    "cape",
+)
 
 
 class MCPServerConfig(BaseModel):
@@ -762,7 +769,15 @@ class MCPServerConfig(BaseModel):
 
 
 def _builtin_servers() -> dict[str, MCPServerConfig]:
-    """The two sidecars every run depends on, as settings rather than constants.
+    """The four sidecars every run depends on, as settings rather than constants.
+
+    ``analysis`` and ``knowledge`` are the tool sidecars: every static-analysis
+    capability the pipeline used to run in-process, and every reference lookup
+    it used to consult from one stage, offered to an agent as a tool. They are
+    bound by ``agents`` the same way the older two are, so an operator turns
+    one off by flipping ``enabled`` rather than by editing code. ``analysis``
+    is the one built-in that sees an environment variable of its own —
+    ``MALJAN_STAGING_DIR``, which is where its ``put_sample`` uploads land.
 
     Byte-for-byte the launch parameters ``NetworkAnalyst._initialize_mcp_client``
     and ``JudgeAgent._initialize_mcp_client`` used before the sidecars became
@@ -773,6 +788,25 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
     ``tests/fixtures/golden/mcp_tools/*.json`` pins.
     """
     return {
+        "analysis": MCPServerConfig(
+            enabled=True,
+            transport="stdio",
+            command=sys.executable,
+            args=["services/analysis-mcp/server.py"],
+            cwd="services/analysis-mcp",
+            env_allow=["MALJAN_STAGING_DIR"],
+            agents=["static"],
+            label="Analysis MCP",
+        ),
+        "knowledge": MCPServerConfig(
+            enabled=True,
+            transport="stdio",
+            command=sys.executable,
+            args=["services/knowledge-mcp/server.py"],
+            cwd="services/knowledge-mcp",
+            agents=["static", "dynamic", "network", "judge"],
+            label="Knowledge MCP",
+        ),
         "network": MCPServerConfig(
             enabled=True,
             transport="stdio",
@@ -834,7 +868,7 @@ class MCPConfig(BaseModel):
 # maps' rules from drifting apart.
 AGENT_KEY_PATTERN = SERVER_KEY_PATTERN
 BUILTIN_AGENTS: tuple[str, ...] = ("static", "dynamic", "network", "judge")
-BUILTIN_PROFILES: tuple[str, ...] = ("default",)
+BUILTIN_PROFILES: tuple[str, ...] = ("default", "measurement")
 
 _AGENT_KEY_RE = re.compile(AGENT_KEY_PATTERN)
 _KEY_RULE = (
@@ -852,12 +886,13 @@ class ToolRef(BaseModel):
     carries nothing else — the provider is already chosen by
     ``AgentDefinition.static_provider``, so naming it twice could disagree.
 
-    ``builtin`` is deliberately not a kind: no in-process tool exists in this
-    project, every tool comes from an MCP server or a provider, and the literal
-    grows on the day one does.
+    ``kind="sandbox"`` is the one in-process tool source: the job's sandbox
+    report, read through ``providers.sandbox_tools``. It carries nothing else
+    for the same reason a provider reference does not — there is exactly one
+    report per job and naming it twice could disagree.
     """
 
-    kind: Literal["mcp", "provider"]
+    kind: Literal["mcp", "provider", "sandbox"]
     server: str | None = None
     name: str | None = None
 
@@ -867,8 +902,30 @@ class ToolRef(BaseModel):
             if not self.server:
                 raise ValueError("an mcp tool reference needs a server")
         elif self.server is not None or self.name is not None:
-            raise ValueError("a provider tool reference names no server and no tool")
+            raise ValueError(f"a {self.kind} tool reference names no server and no tool")
         return self
+
+
+def _without_the_empty_builtin_tool_list(entry: dict[str, Any]) -> dict[str, Any]:
+    """Drop a stored built-in's ``tools: []`` so the seed's tool list applies.
+
+    Every built-in definition used to seed an empty tool list, so that is what
+    an operator database written before the tool sidecars existed holds — for
+    a built-in the operator never edited as much as once. Left alone, the
+    stored ``[]`` would win the merge below, the identity check would then see
+    a definition that does not match its seed, and loading those settings would
+    raise "built in; clone it to change it" over an edit nobody made. Worse, if
+    the check were relaxed instead, the run would quietly go on with the four
+    analysts holding no tools at all.
+
+    This is ``MCPConfig._reseed_builtins`` for the definition map: an empty
+    list is indistinguishable from "not set", so it is treated as not set. An
+    operator who genuinely wants a tool-free run has the ``measurement``
+    profile, which withholds the servers without touching the definitions.
+    """
+    if entry.get("tools") == []:
+        return {k: v for k, v in entry.items() if k != "tools"}
+    return entry
 
 
 class AgentDefinition(BaseModel):
@@ -892,32 +949,94 @@ class AgentDefinition(BaseModel):
 
 
 class ProfileDefinition(BaseModel):
-    """An ordered set of analyst keys. The order is the sequential run order."""
+    """An ordered set of analyst keys. The order is the sequential run order.
+
+    The three ``exclude``/override fields are what make a tool-free baseline
+    possible without cloning every definition: a profile says which servers its
+    members may not reach, whether the in-process sandbox tools are withheld,
+    and which static provider to force. ``resolve_agent`` applies them, so the
+    same definition runs with tools under one profile and without them under
+    another — and the two can never drift apart, because there is only one
+    definition.
+
+    ``static_provider=None`` means "leave each definition's own choice alone";
+    a value overrides it for every member of the profile.
+    """
 
     label: str = ""
     analysts: list[str]
+    exclude_servers: list[str] = Field(default_factory=list)
+    exclude_sandbox_tools: bool = False
+    static_provider: str | None = None
 
 
 def _builtin_definitions() -> dict[str, AgentDefinition]:
     """The four agents the pipeline has always had, as settings.
 
-    Every field is the neutral value, because "the built-in behaviour" is what
-    a null prompt, an empty tool list and a null static provider *mean*. The
-    judge is here so that its LLM and its tool servers have the same editing
-    surface as the analysts; it can never appear in a profile.
+    The prompt and the static provider stay neutral — a null prompt and a null
+    provider are what "the built-in behaviour" *means*. The tool lists are not
+    neutral any more: every analysis capability the pipeline used to run
+    in-process is now a tool, and an agent that is not given the tools cannot
+    reach any of it. Each definition therefore names the sidecars its role
+    actually reads, and ``measurement`` below is the profile that takes them
+    all away again.
+
+    ``dynamic`` gets ``ToolRef(kind="sandbox")`` rather than a server: the
+    job's sandbox report is already in this process, so the tools over it are
+    closures, not a transport.
+
+    The judge is here so that its LLM and its tool servers have the same
+    editing surface as the analysts; it can never appear in a profile.
     """
     return {
-        "static": AgentDefinition(role="static", label="Static analyst"),
-        "dynamic": AgentDefinition(role="dynamic", label="Dynamic analyst"),
-        "network": AgentDefinition(role="network", label="Network analyst"),
-        "judge": AgentDefinition(role="judge", label="Judge"),
+        "static": AgentDefinition(
+            role="static",
+            label="Static analyst",
+            tools=[
+                ToolRef(kind="mcp", server="analysis"),
+                ToolRef(kind="mcp", server="knowledge"),
+            ],
+        ),
+        "dynamic": AgentDefinition(
+            role="dynamic",
+            label="Dynamic analyst",
+            tools=[ToolRef(kind="sandbox"), ToolRef(kind="mcp", server="knowledge")],
+        ),
+        "network": AgentDefinition(
+            role="network",
+            label="Network analyst",
+            tools=[
+                ToolRef(kind="mcp", server="network"),
+                ToolRef(kind="mcp", server="knowledge"),
+            ],
+        ),
+        "judge": AgentDefinition(
+            role="judge",
+            label="Judge",
+            tools=[ToolRef(kind="mcp", server="knowledge")],
+        ),
     }
 
 
 def _builtin_profiles() -> dict[str, ProfileDefinition]:
-    """The paper's architecture, named. The order is the order the graph ran in."""
+    """The paper's architecture, named. The order is the order the graph ran in.
+
+    ``measurement`` is the same three analysts with every tool server taken
+    away and every static provider forced to ``none``: the honest baseline for
+    "what does the ensemble contribute on its own". It is a profile rather than
+    three cloned definitions because a clone would have to be kept in step with
+    its original by hand, and the first time someone edited one and not the
+    other the baseline would silently stop being the same agents.
+    """
     return {
         "default": ProfileDefinition(label="Default", analysts=["static", "dynamic", "network"]),
+        "measurement": ProfileDefinition(
+            label="Measurement baseline",
+            analysts=["static", "dynamic", "network"],
+            exclude_servers=["analysis", "knowledge", "network", "threatintel"],
+            exclude_sandbox_tools=True,
+            static_provider="none",
+        ),
     }
 
 
@@ -953,6 +1072,7 @@ class AgentsConfig(BaseModel):
         for key, entry in definitions.items():
             seed = seeds.get(key)
             if seed is not None and isinstance(entry, dict):
+                entry = _without_the_empty_builtin_tool_list(entry)
                 merged[key] = {**seed.model_dump(), **entry}
             else:
                 merged[key] = entry

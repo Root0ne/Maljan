@@ -176,6 +176,13 @@ class ServiceContainer:
         # from nodes that do not all carry the state.
         self.sample_format: tuple[str, str] = ("unknown", "unknown")
 
+        # The job's sandbox report, set by ``app.arun`` for the same reason
+        # ``sample_format`` is: the sandbox tool set
+        # (``providers.sandbox_tools``) is built during agent resolution, which
+        # happens in nodes that do not all carry the graph state. ``None``
+        # outside a job, and the tools then say so rather than answering empty.
+        self.sandbox_report: dict[str, Any] | None = None
+
         # Per-run LLM token/cost ledger (findings-log §4 Item 1). Agents and the
         # judge add each call's usage; the judge node snapshots it into RunSummary.
         self._token_ledger = TokenLedger()
