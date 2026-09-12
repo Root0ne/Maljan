@@ -562,7 +562,7 @@ def make_analyst_node(
             if staged:
                 node_out["remote_sample_paths"] = staged
             try:
-                _entries = agent.get_last_evidence_entries()
+                _entries = agent.drain_evidence_entries()
                 if _entries:
                     node_out["evidence_ledger"] = [e.model_dump(mode="json") for e in _entries]
                     node_out["tool_evidence"] = {
@@ -1033,7 +1033,7 @@ def make_revision_node(container: ServiceContainer) -> Any:
                 try:
                     revision_ledger.extend(
                         entry.model_dump(mode="json")
-                        for entry in container.get_agent(name).get_last_evidence_entries()
+                        for entry in container.get_agent(name).drain_evidence_entries()
                     )
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("evidence ledger read skipped for %s: %s", name, exc)
@@ -1078,6 +1078,23 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 "stix_output": {},
                 "run_summary": None,
             }
+
+        judge: Any = None
+
+        def _judge_evidence() -> list[dict[str, Any]]:
+            """The judge's own tool calls, drained once, whichever way this ends.
+
+            A mediation that ran threat intel and then lost the verdict still
+            ran it: the entries consumed ids and the report may not be able to
+            cite them, but the endpoint has to resolve them.
+            """
+            if judge is None:
+                return []
+            try:
+                return [entry.model_dump(mode="json") for entry in judge.drain_evidence_entries()]
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("evidence ledger read skipped for the judge: %s", exc)
+                return []
 
         try:
             judge = container.get_judge_agent(role="judge")
@@ -1846,14 +1863,6 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 status="complete",
             )
 
-            _judge_ledger: list[dict[str, Any]] = []
-            try:
-                _judge_ledger = [
-                    entry.model_dump(mode="json") for entry in judge.get_last_evidence_entries()
-                ]
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("evidence ledger read skipped for the judge: %s", exc)
-
             return {
                 "final_decision": decision,
                 "judge_report": "Analyzed negotiation history and expert reports.",
@@ -1863,7 +1872,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 # indicator, a knowledge lookup — on the same append-only
                 # channel the analysts use, so a verdict that leans on one can
                 # cite it and the citation resolves.
-                "evidence_ledger": _judge_ledger,
+                "evidence_ledger": _judge_evidence(),
                 # Persist YARA/Sigma layer ISRs so callers can inspect them.
                 "isr_reports": isr_reports,
                 # Surface the degraded-mode signal to the report
@@ -1916,6 +1925,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 "stix_output": {},
                 "degraded_mode": True,
                 "degradation_reasons": [f"judge failed ({type(e).__name__})"],
+                "evidence_ledger": _judge_evidence(),
             }
 
     node_fn.__name__ = "judge_node"

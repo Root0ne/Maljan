@@ -368,7 +368,7 @@ class TestJudgeToolCallsAreCitable:
 
         assert self._run(judge) == "Verdict: Malware."
 
-        entries = judge.get_last_evidence_entries()
+        entries = judge.drain_evidence_entries()
         assert [e.tool for e in entries] == ["reputation"]
         assert entries[0].agent == "judge"
         assert entries[0].structured == {"indicator": "c2.evil.tld", "malicious": 7}
@@ -385,8 +385,18 @@ class TestJudgeToolCallsAreCitable:
         judge.evidence_counter = counter
         self._run(judge)
 
-        assert [e.id for e in judge.get_last_evidence_entries()] == ["ev_0003"]
+        assert [e.id for e in judge.drain_evidence_entries()] == ["ev_0003"]
+
+    def test_two_mediation_rounds_both_reach_the_drain(self, mock_llm: MagicMock) -> None:
+        judge = JudgeAgent(llm=mock_llm)
+        judge.tools = [self._tool()]
+        self._run(judge)
+        self._run(judge)
+
+        entries = judge.drain_evidence_entries()
+        assert [e.id for e in entries] == ["ev_0001", "ev_0002"]
+        assert judge.drain_evidence_entries() == []
 
     def test_a_judge_with_no_tools_records_nothing(self, mock_llm: MagicMock) -> None:
         judge = JudgeAgent(llm=mock_llm)
-        assert judge.get_last_evidence_entries() == []
+        assert judge.drain_evidence_entries() == []

@@ -153,10 +153,13 @@ class TestPublishing:
 
         agent = _agent()
         agent._finish_evidence(recorder)
-        assert [e.id for e in agent.get_last_evidence_entries()] == ["ev_0001"]
         captured = agent.get_last_tool_evidence()
         assert captured[0].tool_name == "probe"
         assert captured[0].agent_id == "static"
+        # Draining hands over ownership: the second read is empty.
+        assert [e.id for e in agent.drain_evidence_entries()] == ["ev_0001"]
+        assert agent.drain_evidence_entries() == []
+        assert agent.get_last_tool_evidence() == []
 
     def test_the_budget_trim_is_counted_in_the_truncation_ledger(self) -> None:
         from maljan.core.truncation_ledger import TruncationLedger
@@ -191,7 +194,7 @@ class TestPublishing:
         snapshot = agent.truncation_ledger.snapshot()
         assert snapshot["evidence_entries"] == 4
         assert snapshot["evidence_trimmed"] == 3
-        assert agent.get_last_evidence_entries()[3].truncated is True
+        assert agent.drain_evidence_entries()[3].truncated is True
 
     def test_a_loop_that_raises_still_publishes_what_it_gathered(self) -> None:
         # The run whose evidence is worth the most is the one that died.
@@ -226,10 +229,28 @@ class TestPublishing:
         ):
             agent.execute_tool_loop([("system", "s"), ("human", "h")])
 
-        assert [e.tool for e in agent.get_last_evidence_entries()] == ["probe"]
+        assert [e.tool for e in agent.drain_evidence_entries()] == ["probe"]
+
+    def test_two_loops_accumulate_until_the_node_drains(self) -> None:
+        # A chunked analysis re-enters the loop once per chunk and the node
+        # reads once at the end; a buffer reset per loop would keep only the
+        # last chunk while the earlier ones had already consumed ids.
+        def probe() -> str:
+            """Probe."""
+            return "ok"
+
+        counter = EvidenceCounter()
+        agent = _agent()
+        for _ in range(2):
+            recorder = EvidenceRecorder("static", counter=counter)
+            record_tools([_tool(probe, "probe")], recorder)[0].invoke({})
+            agent._finish_evidence(recorder)
+
+        assert [e.id for e in agent.drain_evidence_entries()] == ["ev_0001", "ev_0002"]
+        assert agent.drain_evidence_entries() == []
 
     def test_no_calls_publishes_nothing(self) -> None:
         agent = _agent()
         agent._finish_evidence(EvidenceRecorder("static"))
-        assert agent.get_last_evidence_entries() == []
+        assert agent.drain_evidence_entries() == []
         assert agent.get_last_tool_evidence() == []

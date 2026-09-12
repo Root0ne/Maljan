@@ -1114,13 +1114,13 @@ class BaseAnalyst(ABC):
         # Durable capture of the ReAct tool loop's
         # ToolMessages (decompile/crypto/emulate/dataflow) so the report
         # Composer can ground deep sections instead of hallucinating. Populated
-        # by execute_tool_loop; read via get_last_tool_evidence().
-        self._last_tool_evidence: list[CapturedToolOutput] = []
-        # The same calls as ``_last_tool_evidence``, with the id the model was
-        # shown, the timing, the outcome and the parsed result. The analyst
-        # node writes these to ``evidence_ledger``; the captured view above is
-        # derived from them and goes when its last reader does.
-        self._last_evidence_entries: list[LedgerEntry] = []
+        # Every tool call this agent has made since the last drain, with the id
+        # the model was shown, the timing, the outcome and the parsed result.
+        # It accumulates across loops on purpose: a chunked analysis re-enters
+        # the loop once per chunk, and the node that writes the ledger reads it
+        # once at the end. The node drains it — reading without clearing is how
+        # a revision that made no calls re-emits the analysis round's.
+        self._evidence_entries: list[LedgerEntry] = []
         # Bytes of tool output this agent has already kept. The budget is the
         # agent's, not the loop's: a chunked analysis re-enters the loop once
         # per chunk and would otherwise be handed the whole budget again on
@@ -1250,8 +1250,7 @@ class BaseAnalyst(ABC):
         # half-closed session — or its captured tool output — alive.
         self.toolkit = None
         self.tools = []
-        self._last_tool_evidence = []
-        self._last_evidence_entries = []
+        self._evidence_entries = []
 
     def _try_initialize_mcp(self) -> bool:
         """Attach the MCP toolkit, returning False instead of raising.
@@ -1456,15 +1455,18 @@ class BaseAnalyst(ABC):
 
         self.logger.info("Starting ReAct agent loop with %d tools...", len(self.tools))
 
-        # Reset the per-run capture buffers; the recorder below fills them as
-        # the loop runs rather than reconstructing them from the message
-        # stream afterwards, which is what gives each call its timing, its
-        # outcome and the id the model was shown.
-        self._last_tool_evidence = []
-        self._last_evidence_entries = []
-
+        # The recorder fills its own list as the loop runs, rather than the
+        # loop reconstructing one from the message stream afterwards — that is
+        # what gives each call its timing, its outcome and the id the model was
+        # shown. What it gathered is appended to the agent's buffer at the end;
+        # nothing is reset here, because this may be the second of ten chunks.
         from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
 
+        # An agent built outside a container has no counter attached, and one
+        # per loop would issue ``ev_0001`` twice to the same buffer. It keeps
+        # its own from the first loop on.
+        if self.evidence_counter is None:
+            self.evidence_counter = EvidenceCounter()
         recorder = EvidenceRecorder(self.name, counter=self.evidence_counter)
         agent_executor = create_react_agent(self.llm, record_tools(self.pinned_tools(), recorder))
 
@@ -1702,12 +1704,9 @@ class BaseAnalyst(ABC):
                     ledger.record_evidence_budget(entries=len(entries), trimmed=trimmed)
                 except Exception:  # noqa: BLE001 — telemetry never breaks a run
                     pass
-            self._last_evidence_entries = entries
-            self._last_tool_evidence = [entry.to_captured() for entry in entries]
+            self._evidence_entries.extend(entries)
         except Exception as exc:  # noqa: BLE001
             self.logger.debug("evidence ledger not published: %s", exc)
-            self._last_evidence_entries = []
-            self._last_tool_evidence = []
 
     def _capture_findings(self, content: str) -> str:
         """Take the structured block out of an answer and keep what it carried.
@@ -1745,13 +1744,27 @@ class BaseAnalyst(ABC):
         self._artifacts_buffer = []
         return isr
 
-    def get_last_evidence_entries(self) -> list[LedgerEntry]:
-        """The ledger entries the most recent ReAct loop wrote."""
-        return list(self._last_evidence_entries)
+    def drain_evidence_entries(self) -> list[LedgerEntry]:
+        """Every entry gathered since the last drain, handing over ownership.
+
+        Draining rather than reading is the contract, and it is the contract
+        because both halves of the alternative are wrong: a node that reads
+        without clearing re-emits the previous round's calls onto an
+        append-only channel, and a loop that clears on entry throws away the
+        chunks before the last one. Exactly one node drains each agent, after
+        the work that node is responsible for.
+        """
+        entries = self._evidence_entries
+        self._evidence_entries = []
+        return entries
 
     def get_last_tool_evidence(self) -> list[CapturedToolOutput]:
-        """The same calls in the previous capture shape, for readers not yet moved."""
-        return list(self._last_tool_evidence)
+        """The same calls in the previous capture shape, for readers not yet moved.
+
+        A peek, not a drain: this view is derived and nothing writes it to the
+        state on its own.
+        """
+        return [entry.to_captured() for entry in self._evidence_entries]
 
     def _force_final_synthesis(self, msgs: list, timeout: int, elapsed: float = 0.0) -> str:
         """Salvage a ReAct loop that hit its step budget without answering.

@@ -167,7 +167,11 @@ class JudgeAgent:
         # checkable the same way an analyst's claim is. Same counter as the
         # analysts, so the ids are one sequence across the whole job.
         self.evidence_counter: EvidenceCounter | None = None
-        self._last_evidence_entries: list[LedgerEntry] = []
+        # Accumulated across mediation rounds and drained by the judge node,
+        # for the reason the analysts' buffer is: ``mediate`` runs the loop
+        # once per round, and a buffer replaced on each of them would persist
+        # only the last round's calls while the earlier ones consumed ids.
+        self._evidence_entries: list[LedgerEntry] = []
 
     def _server_registry(self) -> Any | None:
         """The job's tool-server registry, or None when this judge runs bare."""
@@ -304,8 +308,11 @@ class JudgeAgent:
 
         from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
 
+        # As in ``BaseAnalyst.execute_tool_loop``: without a container there is
+        # no counter, and one per mediation round would reissue ``ev_0001``.
+        if self.evidence_counter is None:
+            self.evidence_counter = EvidenceCounter()
         recorder = EvidenceRecorder("judge", counter=self.evidence_counter)
-        self._last_evidence_entries = []
         agent_executor = create_react_agent(self.llm, record_tools(self.tools, recorder))
 
         messages = messages_pre
@@ -341,11 +348,13 @@ class JudgeAgent:
         finally:
             # In a ``finally`` for the reason the analysts' loop uses one: a
             # mediation that timed out still made the calls it made.
-            self._last_evidence_entries = list(recorder.entries)
+            self._evidence_entries.extend(recorder.entries)
 
-    def get_last_evidence_entries(self) -> list[LedgerEntry]:
-        """The ledger entries the judge's most recent tool loop wrote."""
-        return list(self._last_evidence_entries)
+    def drain_evidence_entries(self) -> list[LedgerEntry]:
+        """Every entry the judge's tool loops gathered, handing over ownership."""
+        entries = self._evidence_entries
+        self._evidence_entries = []
+        return entries
 
     @staticmethod
     def _has_explicit_dissent(isr_reports: dict[str, AgentISR] | None) -> bool:

@@ -94,7 +94,7 @@ class AnalysisState(TypedDict):
     isr_reports: Annotated[dict[str, AgentISR], _merge_dicts]
 
     # Every tool call the run made, in the order the ids were issued. Written
-    # by the analyst nodes from ``agent.get_last_evidence_entries()`` and read
+    # by the analyst nodes from ``agent.drain_evidence_entries()`` and read
     # by ``report_node``, which builds the report's sections out of it and
     # attaches the index a reader cites. Append-only: two analysts running in
     # parallel each contribute their own calls and neither overwrites the
