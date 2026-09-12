@@ -1,4 +1,5 @@
 import type { TranscriptRow } from "@/lib/transcript";
+import type { EvidenceListResponse, EvidenceQuery } from "@/types/evidence";
 import type {
   EnrichTriggerResponse,
   MalwareReport,
@@ -686,6 +687,23 @@ class ApiClient {
       }>;
       count: number;
     }>(`/api/v1/jobs/${jobId}/events?limit=${limit}`);
+  }
+
+  /**
+   * One page of a job's evidence ledger — the tool calls its report cites.
+   * Filters narrow to one agent or one tool; the order is always the order
+   * the calls were made in.
+   */
+  getJobEvidence(jobId: string, query: EvidenceQuery = {}) {
+    const params = new URLSearchParams({
+      page: String(query.page ?? 1),
+      page_size: String(query.pageSize ?? 50),
+    });
+    if (query.agent) params.set("agent", query.agent);
+    if (query.tool) params.set("tool", query.tool);
+    return this.request<EvidenceListResponse>(
+      `/api/v1/jobs/${jobId}/evidence?${params}`
+    );
   }
 
   /* ── Reports ───────────────────────────────────────────

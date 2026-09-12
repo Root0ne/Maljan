@@ -28,7 +28,7 @@ from maljan.core.config import Settings as _CoreSettings
 from maljan.core.settings_catalog import core_catalog
 from maljan.core.settings_overrides import build_settings, public_snapshot
 from pydantic import ValidationError
-from sqlalchemy import Select, func, select, update
+from sqlalchemy import Select, delete, func, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.config import get_settings, settings
@@ -1094,6 +1094,39 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 extra={"job_id": job_id},
             )
 
+            # ── 4a. Save the evidence ledger ─────────────────────
+            # Every tool call the run made, in the order the ids were issued.
+            # The report's sections cite these ids, so the two are written in
+            # one transaction: a report whose citations resolve to nothing is
+            # worse than one that was never saved.
+            from app.models.evidence import EvidenceEntry
+
+            _ledger = pipeline_result.get("evidence_ledger") or []
+            for _entry in _ledger:
+                if not isinstance(_entry, dict):
+                    continue
+                db.add(
+                    EvidenceEntry(
+                        job_id=job.id,
+                        entry_id=str(_entry.get("id", ""))[:32],
+                        stage=str(_entry.get("stage", "analysis"))[:32],
+                        agent=str(_entry.get("agent", ""))[:100],
+                        server=(str(_entry["server"])[:100] if _entry.get("server") else None),
+                        tool=str(_entry.get("tool", ""))[:200],
+                        ok=bool(_entry.get("ok", True)),
+                        duration_ms=int(_entry.get("duration_ms", 0) or 0),
+                        seq=int(_entry.get("seq", 0) or 0),
+                        args=_entry.get("args") or {},
+                        output=str(_entry.get("output", "") or ""),
+                        structured=_entry.get("structured"),
+                    )
+                )
+
+            logger.info(
+                f"Saved {len(_ledger)} evidence entries for job={job.id}",
+                extra={"job_id": job_id},
+            )
+
             # ── 4b. Save the transcript ──────────────────────────
             # The conversation itself, written down exactly as it was
             # broadcast. ``agent_findings`` above records where each agent
@@ -1697,7 +1730,10 @@ async def _supersede_previous_report(db: Any, job_id: Any) -> None:
     result, not a history — so a second run replaces rather than accumulates.
     ``agent_findings`` and ``agent_messages`` are ``ondelete="CASCADE"``, which
     is what we want here: their contents describe the superseded analysis and
-    would otherwise stay attached to a report that no longer exists.
+    would otherwise stay attached to a report that no longer exists. The
+    evidence ledger hangs off the job instead of the report, so no cascade
+    reaches it and it is deleted here by hand — otherwise a re-run's ledger
+    would be the two runs' calls interleaved under one job.
 
     The delete is flushed before the caller adds the new row; leaving both in
     one flush puts two rows with the same ``job_id`` in the same statement
@@ -1708,7 +1744,10 @@ async def _supersede_previous_report(db: Any, job_id: Any) -> None:
     below will surface any real problem on its own.
     """
     try:
+        from app.models.evidence import EvidenceEntry
         from app.models.report import AnalysisReport
+
+        await db.execute(delete(EvidenceEntry).where(EvidenceEntry.job_id == job_id))
 
         existing = (
             await db.execute(select(AnalysisReport).where(AnalysisReport.job_id == job_id))

@@ -32,13 +32,9 @@ from maljan.core.config import get_settings
 from maljan.core.exceptions import AgentLoopCancelled, AnalystError
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger, record_response_usage
+from maljan.schemas.evidence import EvidenceCounter, LedgerEntry, apply_budget
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-from maljan.schemas.tool_evidence import (
-    MAX_OUTPUTS_PER_AGENT,
-    CapturedToolOutput,
-    _symbol_from_args,
-    trim_output,
-)
+from maljan.schemas.tool_evidence import CapturedToolOutput
 
 # Regex: matches MITRE ATT&CK technique IDs like T1055 or T1055.001.
 _TECHNIQUE_RE = re.compile(r"\b(T\d{4}(?:\.\d{3})?)\b")
@@ -1120,6 +1116,15 @@ class BaseAnalyst(ABC):
         # Composer can ground deep sections instead of hallucinating. Populated
         # by execute_tool_loop; read via get_last_tool_evidence().
         self._last_tool_evidence: list[CapturedToolOutput] = []
+        # The same calls as ``_last_tool_evidence``, with the id the model was
+        # shown, the timing, the outcome and the parsed result. The analyst
+        # node writes these to ``evidence_ledger``; the captured view above is
+        # derived from them and goes when its last reader does.
+        self._last_evidence_entries: list[LedgerEntry] = []
+        # The per-job id source, attached by the container next to the token
+        # and truncation ledgers. None outside a job: the recorder then counts
+        # within its own loop.
+        self.evidence_counter: EvidenceCounter | None = None
         # Declared here rather than only in the subclasses that populate them,
         # because ``close_tools`` below has to be able to release them for any
         # analyst. ``toolkit`` is an MCP toolkit or a Ghidra HTTP client
@@ -1234,6 +1239,7 @@ class BaseAnalyst(ABC):
         self.toolkit = None
         self.tools = []
         self._last_tool_evidence = []
+        self._last_evidence_entries = []
 
     def _try_initialize_mcp(self) -> bool:
         """Attach the MCP toolkit, returning False instead of raising.
@@ -1438,11 +1444,17 @@ class BaseAnalyst(ABC):
 
         self.logger.info("Starting ReAct agent loop with %d tools...", len(self.tools))
 
-        # Reset the per-run capture buffer before this
-        # loop populates it from the ReAct message stream (see below).
+        # Reset the per-run capture buffers; the recorder below fills them as
+        # the loop runs rather than reconstructing them from the message
+        # stream afterwards, which is what gives each call its timing, its
+        # outcome and the id the model was shown.
         self._last_tool_evidence = []
+        self._last_evidence_entries = []
 
-        agent_executor = create_react_agent(self.llm, self.pinned_tools())
+        from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
+
+        recorder = EvidenceRecorder(self.name, counter=self.evidence_counter)
+        agent_executor = create_react_agent(self.llm, record_tools(self.pinned_tools(), recorder))
 
         messages = prebuilt
 
@@ -1547,14 +1559,7 @@ class BaseAnalyst(ABC):
             raise AnalystError(f"{self.name} ReAct agent returned no result")
 
         msgs = thread_result.get("messages", []) or []
-        # Capture the tool loop's ToolMessages as
-        # durable evidence for the report Composer. Best-effort — a capture
-        # failure must never sink the analysis.
-        try:
-            self._last_tool_evidence = self._capture_tool_evidence(msgs)
-        except Exception as _cap_exc:  # noqa: BLE001
-            self.logger.debug("tool-evidence capture skipped: %s", _cap_exc)
-            self._last_tool_evidence = []
+        self._finish_evidence(recorder)
         # Tool calls are AIMessage instances whose ``tool_calls`` attribute
         # is a non-empty list. Counting them is cheap and the most useful
         # single metric for "did this analyst overspend on Ghidra".
@@ -1652,52 +1657,44 @@ class BaseAnalyst(ABC):
         except Exception:  # noqa: BLE001
             return
 
-    def _capture_tool_evidence(self, msgs: list) -> list[CapturedToolOutput]:
-        """Pair each tool call with its result from the ReAct message stream.
+    def _finish_evidence(self, recorder: Any) -> None:
+        """Close this loop's ledger: apply the byte budget, then publish it.
 
-        AIMessages carry ``tool_calls`` (name + args +
-        id); ToolMessages carry the result keyed by ``tool_call_id``. We pair by
-        id — not positional order — so provider-specific interleaving cannot
-        mis-associate an output. Capped at ``MAX_OUTPUTS_PER_AGENT`` and each
-        output re-trimmed. Result feeds the report Composer's evidence bundles.
+        Best-effort in every branch. A ledger that cannot be closed is a
+        report with less to cite, never an analysis that failed.
         """
-        # tool_call_id -> (tool_name, args)
-        calls: dict[str, tuple[str, dict]] = {}
-        for m in msgs:
-            for tc in getattr(m, "tool_calls", None) or []:
-                tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
-                tc_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", None)
-                tc_args = tc.get("args") if isinstance(tc, dict) else getattr(tc, "args", None)
-                if isinstance(tc_id, str) and tc_name:
-                    calls[tc_id] = (str(tc_name), tc_args if isinstance(tc_args, dict) else {})
-
-        captured: list[CapturedToolOutput] = []
-        seq = 0
-        for m in msgs:
-            if getattr(m, "type", "") != "tool":
-                continue
-            msg_id = getattr(m, "tool_call_id", None)
-            tool_name = str(getattr(m, "name", "") or "unknown")
-            tool_args: dict = {}
-            if isinstance(msg_id, str) and msg_id in calls:
-                tool_name, tool_args = calls[msg_id]
-            captured.append(
-                CapturedToolOutput(
-                    agent_id=self.name,
-                    tool_name=tool_name,
-                    args=tool_args,
-                    symbol=_symbol_from_args(tool_args),
-                    output=trim_output(str(getattr(m, "content", "") or "")),
-                    seq=seq,
+        try:
+            entries = list(recorder.entries)
+            budget = int(getattr(get_settings().reporting, "evidence_budget_bytes", 0) or 0)
+            trimmed = apply_budget(entries, budget)
+            if trimmed:
+                self.logger.warning(
+                    "%s: %d of %d evidence entries exceeded the %d-byte budget and "
+                    "kept only their call record.",
+                    self.name,
+                    trimmed,
+                    len(entries),
+                    budget,
                 )
-            )
-            seq += 1
-            if len(captured) >= MAX_OUTPUTS_PER_AGENT:
-                break
-        return captured
+            ledger = getattr(self, "truncation_ledger", None)
+            if ledger is not None:
+                try:
+                    ledger.record_evidence_budget(entries=len(entries), trimmed=trimmed)
+                except Exception:  # noqa: BLE001 — telemetry never breaks a run
+                    pass
+            self._last_evidence_entries = entries
+            self._last_tool_evidence = [entry.to_captured() for entry in entries]
+        except Exception as exc:  # noqa: BLE001
+            self.logger.debug("evidence ledger not published: %s", exc)
+            self._last_evidence_entries = []
+            self._last_tool_evidence = []
+
+    def get_last_evidence_entries(self) -> list[LedgerEntry]:
+        """The ledger entries the most recent ReAct loop wrote."""
+        return list(self._last_evidence_entries)
 
     def get_last_tool_evidence(self) -> list[CapturedToolOutput]:
-        """Return the tool outputs captured by the most recent ReAct loop."""
+        """The same calls in the previous capture shape, for readers not yet moved."""
         return list(self._last_tool_evidence)
 
     def _force_final_synthesis(self, msgs: list, timeout: int, elapsed: float = 0.0) -> str:

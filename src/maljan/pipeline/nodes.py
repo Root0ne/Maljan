@@ -636,11 +636,14 @@ def make_analyst_node(
             if staged:
                 node_out["remote_sample_paths"] = staged
             try:
-                _ev = agent.get_last_tool_evidence()
-                if _ev:
-                    node_out["tool_evidence"] = {agent_name: [o.model_dump() for o in _ev]}
+                _entries = agent.get_last_evidence_entries()
+                if _entries:
+                    node_out["evidence_ledger"] = [e.model_dump(mode="json") for e in _entries]
+                    node_out["tool_evidence"] = {
+                        agent_name: [e.to_captured().model_dump() for e in _entries]
+                    }
             except Exception as _ev_exc:  # noqa: BLE001
-                logger.debug("tool-evidence read skipped for %s: %s", agent_name, _ev_exc)
+                logger.debug("evidence ledger read skipped for %s: %s", agent_name, _ev_exc)
             return node_out
         except (AnalystError, LLMError) as e:
             # Structured error event so Loki/Promtail

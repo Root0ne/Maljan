@@ -1071,6 +1071,17 @@ ANNOTATIONS: dict[str, Annotation] = {
         ),
         "subgroup": "Report content",
     },
+    "reporting.evidence_budget_bytes": {
+        "title": "Evidence budget per agent (bytes)",
+        "description": (
+            "How many bytes of tool output one agent may keep in the evidence ledger. "
+            "Entries past the budget still record the call and its outcome but carry no "
+            "output, and the report states how many were trimmed. Zero disables the "
+            "budget and keeps every output."
+        ),
+        "subgroup": "Report content",
+        "advanced": True,
+    },
     "reporting.html_export_enabled": {
         "title": "HTML export enabled",
         "description": ("Enables server-side HTML-to-PDF export of the generated report."),

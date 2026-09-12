@@ -44,6 +44,7 @@ from maljan.core.truncation_ledger import TruncationLedger
 from maljan.llm.registry import LLMProviderRegistry
 from maljan.loaders.file_loader import FileDataLoader
 from maljan.parsers.registry import ParserRegistry
+from maljan.schemas.evidence import EvidenceCounter
 
 if TYPE_CHECKING:
     from maljan.agents.base_agent import BaseAnalyst
@@ -198,6 +199,10 @@ class ServiceContainer:
         # ledger: written to at every bound, snapshotted by the judge node.
         # Truncation is designed into this pipeline and has never been counted.
         self._truncation_ledger = TruncationLedger()
+
+        # Per-job source of evidence-ledger ids. One counter for the whole job
+        # so ``ev_0007`` names one tool call rather than one per agent.
+        self._evidence_counter = EvidenceCounter()
 
         _LIVE_CONTAINERS.add(self)
         _register_retirement_hook()
@@ -403,6 +408,10 @@ class ServiceContainer:
         """Return the per-run truncation ledger (pitfall P6)."""
         return self._truncation_ledger
 
+    def get_evidence_counter(self) -> EvidenceCounter:
+        """Return the per-job counter that issues evidence-ledger ids."""
+        return self._evidence_counter
+
     # ------------------------------------------------------------------
     # Composition accessors
     # ------------------------------------------------------------------
@@ -477,6 +486,7 @@ class ServiceContainer:
                     agent.logger = agent.logger.getChild(name.lower())
             agent.token_ledger = getattr(self, "_token_ledger", None)
             agent.truncation_ledger = getattr(self, "_truncation_ledger", None)
+            agent.evidence_counter = getattr(self, "_evidence_counter", None)
             # Hand the agent a way back to this container. The static analyst
             # used to construct a *whole new* ServiceContainer on every failed
             # MCP init — per chunk, so up to ten of them per run.
