@@ -158,7 +158,8 @@ async def list_jobs(
         status_filter=status_filter,
     )
     logger.debug(
-        f"Listed jobs: page={page} filter={log_safe(status_filter)} total={result.get('total', 0)}",
+        f"Listed jobs: page={log_safe(page)} filter={log_safe(status_filter)} "
+        f"total={log_safe(result.get('total', 0))}",
         extra={"user_id": log_safe(user.id)},
     )
     return result
