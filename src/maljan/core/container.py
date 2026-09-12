@@ -169,6 +169,13 @@ class ServiceContainer:
         self._report_composer_cache: Any | None = None
         self._samples_dir = str(resolve_data(samples_dir))
 
+        # The job sample's ``(file_type, platform)``, set by ``app.arun`` once
+        # routing has answered and read by ``composition.builtin_prompt`` when
+        # it assembles an agent's format fragment. It lives here rather than in
+        # the graph state because agents are built lazily, by this container,
+        # from nodes that do not all carry the state.
+        self.sample_format: tuple[str, str] = ("unknown", "unknown")
+
         # Per-run LLM token/cost ledger (findings-log §4 Item 1). Agents and the
         # judge add each call's usage; the judge node snapshots it into RunSummary.
         self._token_ledger = TokenLedger()

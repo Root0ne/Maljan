@@ -26,19 +26,30 @@ import re
 from langchain_core.prompts import ChatPromptTemplate
 
 from maljan.agents.base_agent import BaseAnalyst, prompt_to_messages, revision_messages
+from maljan.agents.prompt_fragments import format_fragment
 from maljan.agents.registry import register_agent
 from maljan.agents.static_analyst import _parse_claim_blocks, _parse_disputes
 from maljan.schemas.isr_models import AgentISR
 
-_ISR_SYSTEM = (
+# The platform-independent head of the network system prompt. Traffic looks the
+# same from every guest, but what reached the wire does not, so the sample's
+# format fragment is appended by ``composition.builtin_prompt``.
+_NET_HEAD = (
     "You are an expert Network Security Analyst with deep knowledge of malware C2 communication. "
     "Analyze DNS queries, HTTP/HTTPS flows, SSL certificates, and PCAP captures for "
     "beaconing patterns, DGA domains, tunneling, and exfiltration channels. "
     "For EVERY claim, cite a concrete artifact: 'DNS query: abc.evil.com', "
     "'PCAP frame 42: src=10.0.0.5 dst=185.220.x.x:443', 'TLS SNI: suspicious.tld'. "
     "Focus on MITRE ATT&CK: T1071 (Application Layer Protocol), T1571 (Non-Standard Port), "
-    "T1048 (Exfiltration), T1568 (Dynamic Resolution)."
+    "T1048 (Exfiltration), T1568 (Dynamic Resolution).\n\n"
 )
+
+# Empty today, declared for the same reason the other analysts declare theirs:
+# the assembly order is a contract, and an implicit empty tail is a trap.
+_NET_TAIL = ""
+
+# Back-compat: the assembly for a sample whose format is undetermined.
+_ISR_SYSTEM = _NET_HEAD + format_fragment("unknown", "unknown") + _NET_TAIL
 
 # The text revision path's own system prompt. It is not ``_ISR_SYSTEM`` plus a
 # suffix — it is a different prompt, and it was inline in ``revise`` until the

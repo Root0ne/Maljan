@@ -89,32 +89,56 @@ def static_provider_id_for(settings: Settings, key: str) -> str:
     return str(settings.static.provider)
 
 
-def builtin_prompt(role: str, container: Any, static_provider_id: str) -> str:
-    """The prompt a built-in role has always sent.
+def sample_format(container: Any) -> tuple[str, str]:
+    """The ``(file_type, platform)`` of the job's sample, as the container knows it.
 
-    ``static`` is assembled — HEAD + the *agent's own* static provider's
-    fragment + TAIL — which is what makes a clone on radare2 meaningful: the
-    same assembly, a different middle.
-
-    ``dynamic`` is the frozen CAPE2 assembly, not the configured sandbox's.
-    This analyst has never read the configured provider for its prompt (the
-    default is ``mock``, whose fragment is empty), there is no per-agent
-    sandbox provider to vary, and assembling from the configured one here
-    would change the default profile's dynamic prompt on the day this landed.
+    ``app.arun`` puts the routing answer on the container before the graph
+    runs, which is the one place both the pipeline and every lazily built
+    agent can read it from. A container that was never told — the settings
+    probe, a test — answers ``("unknown", "unknown")`` and gets the neutral
+    fragment.
     """
+    fmt = getattr(container, "sample_format", None)
+    if not isinstance(fmt, tuple) or len(fmt) != 2:
+        return "unknown", "unknown"
+    return str(fmt[0] or "unknown"), str(fmt[1] or "unknown")
+
+
+def builtin_prompt(role: str, container: Any, static_provider_id: str) -> str:
+    """The prompt a built-in role sends for this job's sample.
+
+    Every analyst assembles the same way: HEAD, then the sample's format
+    fragment, then the provider fragment where the role has one, then TAIL.
+    The head says what the role does, the format fragment says what artefacts
+    exist on this sample, and the provider fragment says what tools are on the
+    other end — so handing the same agent an APK, or attaching radare2, each
+    changes one part and nothing else.
+
+    ``static`` reads the *agent's own* static provider, which is what makes a
+    clone on radare2 meaningful.
+
+    ``dynamic`` uses the CAPE2 fragment, not the configured sandbox's. This
+    analyst has never read the configured provider for its prompt (the default
+    is ``mock``, whose fragment is empty) and there is no per-agent sandbox
+    provider to vary.
+    """
+    from maljan.agents.prompt_fragments import format_fragment
+
+    fragment = format_fragment(*sample_format(container))
     if role == "static":
         from maljan.agents.static_analyst import _ISR_HEAD, _ISR_TAIL
 
         provider = container.get_static_provider(static_provider_id)
-        return _ISR_HEAD + str(provider.prompt_fragment()) + _ISR_TAIL
+        return _ISR_HEAD + fragment + "\n\n" + str(provider.prompt_fragment()) + _ISR_TAIL
     if role == "dynamic":
-        from maljan.agents.dynamic_analyst import _ISR_SYSTEM as DYNAMIC_SYSTEM
+        from maljan.agents.dynamic_analyst import _DYN_HEAD, _DYN_TAIL
+        from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
 
-        return DYNAMIC_SYSTEM
+        return _DYN_HEAD + fragment + "\n\n" + CAPE2SandboxProvider.CAPE_PROMPT_FRAGMENT + _DYN_TAIL
     if role == "network":
-        from maljan.agents.network_analyst import _ISR_SYSTEM as NETWORK_SYSTEM
+        from maljan.agents.network_analyst import _NET_HEAD, _NET_TAIL
 
-        return NETWORK_SYSTEM
+        return _NET_HEAD + fragment + _NET_TAIL
     if role == "judge":
         from maljan.agents.judge_agent import JUDGE_VERDICT_SYSTEM
 

@@ -317,6 +317,11 @@ class MaljanApp:
         # fall-open).
         file_type, platform = self._infer_sample_platform(sample_path, sandbox_report)
         logger.info("Sample platform inferred: file_type=%s platform=%s", file_type, platform)
+        # The analysts are built lazily by the container, from nodes that do
+        # not all carry the graph state, so the routing answer is handed to the
+        # container as well: it is what their prompts' format fragment is
+        # assembled from.
+        self.container.sample_format = (file_type, platform)
 
         initial_state: AnalysisState = {
             "file_hash": file_hash,

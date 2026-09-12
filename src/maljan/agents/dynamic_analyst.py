@@ -12,24 +12,25 @@ from typing import Any
 from langchain_core.prompts import ChatPromptTemplate
 
 from maljan.agents.base_agent import BaseAnalyst
+from maljan.agents.prompt_fragments import format_fragment
 from maljan.agents.registry import register_agent
 from maljan.agents.static_analyst import _parse_claim_blocks, _parse_disputes
 from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
 from maljan.schemas.isr_models import AgentISR
 
-# The provider-independent head of the dynamic system prompt: it names the
-# sandbox report shape (CAPEv2/Cuckoo JSON) this analyst was measured on, but
-# no tool — the tool-usage workflow is the sandbox provider's fragment,
-# appended below. A golden test pins the assembled result byte for byte
-# against the prompt this project measured its evaluation on.
+# The provider- and platform-independent head of the dynamic system prompt: it
+# names the sandbox report shape (CAPEv2/Cuckoo JSON) this analyst reads, but
+# no tool and no operating system. The tool-usage workflow is the sandbox
+# provider's fragment and the artefacts to look for are the sample's format
+# fragment; ``composition.builtin_prompt`` assembles all three.
 _DYN_HEAD = (
     "You are an expert Dynamic Malware Analyst with deep knowledge of sandbox behavior. "
-    "Analyze API call sequences, registry operations, process injection chains, "
-    "and persistence mechanisms from CAPEv2/Cuckoo JSON reports. "
-    "For EVERY claim, cite a concrete artifact: 'API call: X at address Y', "
-    "'Registry key: HKLM\\...\\Run', 'Process spawned: cmd.exe PID 1234'. "
+    "Analyze the call sequences, process trees, file and configuration changes, "
+    "and persistence mechanisms in the sandbox JSON report. "
+    "For EVERY claim, cite a concrete artifact from the report: the call and where it "
+    "was made, the process and its pid, the exact path or key that was written. "
     "Focus on MITRE ATT&CK: T1547 (Autostart), T1055 (Process Injection), "
-    "T1059 (Command Execution), T1112 (Registry Modification).\n\n"
+    "T1059 (Command Execution).\n\n"
 )
 
 # Empty today. Declared because the assembly order is the contract the tool
@@ -37,14 +38,19 @@ _DYN_HEAD = (
 # implicit empty tail is a trap.
 _DYN_TAIL = ""
 
-# Back-compat: several modules and tests import this name. It is the default
-# evaluation profile's assembled prompt — CAPEv2, the sandbox this project has
-# always measured the dynamic analyst against — not whatever ``sandbox.provider``
-# happens to be configured on a given box (that one field defaults to "mock").
-# Every run's actual tool attachment goes through the *configured* provider
-# instead (see ``_sandbox_provider`` below); only this frozen constant is
-# pinned to CAPE2, exactly as the literal it replaces always was.
-_ISR_SYSTEM = _DYN_HEAD + CAPE2SandboxProvider.CAPE_PROMPT_FRAGMENT + _DYN_TAIL
+# Back-compat: several modules and tests import this name. It is the assembly
+# for a sample whose format is undetermined, against CAPEv2 — the sandbox this
+# project has always measured the dynamic analyst on — rather than whatever
+# ``sandbox.provider`` happens to be configured on a given box (that one field
+# defaults to "mock"). A real job assembles the same three parts with its own
+# sample's format fragment; see ``composition.builtin_prompt``.
+_ISR_SYSTEM = (
+    _DYN_HEAD
+    + format_fragment("unknown", "unknown")
+    + "\n\n"
+    + CAPE2SandboxProvider.CAPE_PROMPT_FRAGMENT
+    + _DYN_TAIL
+)
 
 
 @register_agent("dynamic")

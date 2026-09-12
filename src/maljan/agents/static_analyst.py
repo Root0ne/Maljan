@@ -18,10 +18,10 @@ from maljan.agents.registry import register_agent
 from maljan.providers.base import StaticJobContext
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
-# The provider-independent head of the static system prompt. Everything that
-# names a tool lives in the provider's fragment, so attaching radare2 or capa
-# changes the middle and nothing else. A golden test pins the assembled result
-# byte for byte against the prompt this project measured its evaluation on.
+# The provider- and platform-independent head of the static system prompt.
+# Everything that names a tool lives in the provider's fragment and everything
+# that names an operating system lives in the sample's format fragment, so
+# attaching radare2 or handing it an APK changes the middle and nothing else.
 _ISR_HEAD = (
     "You are an expert Static Malware Analyst with 15 years of reverse engineering experience. "
 )
@@ -32,18 +32,31 @@ _ISR_HEAD = (
 _ISR_TAIL = ""
 
 
-def _static_prompt(provider: Any | None = None) -> str:
+def _static_prompt(
+    provider: Any | None = None,
+    file_type: str = "unknown",
+    platform: str = "unknown",
+) -> str:
     """Assemble the static system prompt for ``provider`` (the configured one by default)."""
     if provider is None:
         from maljan.core.config import get_settings
         from maljan.providers.registry import get_static_provider
 
         provider = get_static_provider(get_settings())
-    return _ISR_HEAD + provider.prompt_fragment() + _ISR_TAIL
+    from maljan.agents.prompt_fragments import format_fragment
+
+    return (
+        _ISR_HEAD
+        + format_fragment(file_type, platform)
+        + "\n\n"
+        + provider.prompt_fragment()
+        + _ISR_TAIL
+    )
 
 
 # Back-compat: several modules and tests import this name. It is the default
-# profile's assembled prompt, which is what it always was.
+# profile's assembly for a sample whose format is undetermined; a real job
+# supplies its own (``composition.builtin_prompt``).
 _ISR_SYSTEM = _static_prompt()
 
 
