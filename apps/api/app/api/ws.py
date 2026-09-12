@@ -184,9 +184,9 @@ async def ws_analysis(websocket: WebSocket, job_id: str) -> None:
                 break
 
         if not token:
-            logger.warning(
+            logger.warning(  # nosemgrep
                 "WebSocket rejected: missing credential (job=%s)", log_safe(job_id)
-            )  # nosemgrep
+            )
             await _reject(
                 websocket,
                 4401,
@@ -196,17 +196,17 @@ async def ws_analysis(websocket: WebSocket, job_id: str) -> None:
 
         decoded = decode_token(token)
         if decoded is None:
-            logger.warning(
+            logger.warning(  # nosemgrep
                 "WebSocket rejected: invalid token (job=%s)", log_safe(job_id)
-            )  # nosemgrep
+            )
             await _reject(websocket, 1008, "Unauthorized: invalid token")
             return
         payload = decoded
 
         if payload.get("type") != "access":
-            logger.warning(
+            logger.warning(  # nosemgrep
                 "WebSocket rejected: wrong token type (job=%s)", log_safe(job_id)
-            )  # nosemgrep
+            )
             await _reject(websocket, 1008, "Unauthorized: access token required")
             return
 
