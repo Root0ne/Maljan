@@ -57,6 +57,10 @@ export interface AgentLLMOverride {
   provider: string;
   model: string;
   temperature?: number | null;
+  /** A per-agent endpoint, so two agents can sit on two different local
+   *  servers. Only the `openai` and `ollama` providers accept one; the
+   *  provider's API key stays global. */
+  base_url?: string | null;
 }
 
 /** What the detail's LLM section needs to know about the two *global* leaves
@@ -310,7 +314,8 @@ export function AgentDetail({
    *  `AgentLLMConfig` rejects: the effective global `llm.provider` (staged
    *  over saved) fills in instead, and if even that is unavailable nothing
    *  is staged — an inline message asks for a provider rather than sending
-   *  a request the API would only reject. */
+   *  a request the API would only reject. The base URL is dropped when
+   *  blank for the same reason temperature is. */
   const putLlm = (key: string, next: Partial<AgentLLMOverride>) => {
     const base: AgentLLMOverride = llmAgents[key] ?? { provider: "", model: "" };
     const merged: AgentLLMOverride = { ...base, ...next };
@@ -334,6 +339,12 @@ export function AgentDetail({
     const stored: AgentLLMOverride = { provider, model: merged.model };
     if (merged.temperature !== null && merged.temperature !== undefined) {
       stored.temperature = merged.temperature;
+    }
+    // Dropped rather than carried when the provider has no endpoint to
+    // override: switching an entry to Anthropic would otherwise stage a
+    // base_url the API rejects, from a field that is no longer on screen.
+    if (merged.base_url && (provider === "openai" || provider === "ollama")) {
+      stored.base_url = merged.base_url;
     }
     onChangeLlmAgents({ ...llmAgents, [key]: stored });
   };
@@ -658,6 +669,28 @@ export function AgentDetail({
                 }}
               />
             </label>
+            {/* Only the two providers that speak to a server the operator
+                runs: Anthropic and Gemini are vendor APIs with no per-agent
+                endpoint, and `AgentLLMConfig` rejects one set against them. */}
+            {(() => {
+              const effectiveProvider =
+                llmAgents[agentKey]?.provider || llmGlobal.providerValue || "";
+              if (effectiveProvider !== "openai" && effectiveProvider !== "ollama") {
+                return null;
+              }
+              return (
+                <label className="block">
+                  <span className="text-text-muted">Base URL</span>
+                  <input
+                    className={input}
+                    aria-label={`${agentKey} llm base url`}
+                    placeholder="http://127.0.0.1:8080/v1"
+                    value={llmAgents[agentKey]?.base_url ?? ""}
+                    onChange={(e) => putLlm(agentKey, { base_url: e.target.value })}
+                  />
+                </label>
+              );
+            })()}
           </div>
           {llmError && (
             <p className="text-[11px] text-status-red mt-1" role="alert">

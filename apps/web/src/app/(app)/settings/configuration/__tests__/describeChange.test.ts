@@ -370,6 +370,29 @@ describe("describeChange: core.llm.agents", () => {
     expect(line.detail).toEqual(["network: openai/gpt-4"]);
   });
 
+  it("names a per-agent endpoint", () => {
+    const before = {};
+    const after = {
+      network: { provider: "openai", model: "qwen", base_url: "http://127.0.0.1:8081/v1" },
+    };
+    const line = describeChange(llmAgentsEntry, before, after);
+    expect(line.detail).toEqual(["network: openai/qwen @ http://127.0.0.1:8081/v1"]);
+  });
+
+  it("keeps the temp suffix last when both are set", () => {
+    const before = {};
+    const after = {
+      network: {
+        provider: "ollama",
+        model: "qwen3:8b",
+        base_url: "http://gpu-box:11434",
+        temperature: 0.2,
+      },
+    };
+    const line = describeChange(llmAgentsEntry, before, after);
+    expect(line.detail).toEqual(["network: ollama/qwen3:8b @ http://gpu-box:11434 (temp 0.2)"]);
+  });
+
   it("reports a removed override", () => {
     const before = { network: { provider: "openai", model: "gpt-4" } };
     const after = {};
