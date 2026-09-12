@@ -17,6 +17,7 @@ routers under `apps/api/app/api/v1/` and the compose stack in `docker/`.
 | [security.md](security.md) | Authentication, roles, API keys, secret encryption, what an export leaves out, CORS and cookie flags, vulnerability reporting. |
 | [development.md](development.md) | Repository layout, `make` targets, the test suites, CI jobs and the branch workflow. |
 | [api.md](api.md) | Router groups, OpenAPI, authentication headers and pagination conventions. |
+| [paper.md](paper.md) | Where the published evaluation, its harness and its fixtures live. |
 
 Images used by these documents and by the top-level [README.md](../README.md)
 live in [assets/](assets).

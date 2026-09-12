@@ -1,9 +1,9 @@
 """Every scripts/... path the Makefile names must exist.
 
 Task 4 regroups twenty scripts into five directories. A target that still names
-the old path fails only when somebody runs that target, which for ``paper-check``
-and ``cohort-complete`` can be weeks later. Reading the Makefile and stat-ing
-what it names turns that into a test failure in the same commit as the move.
+the old path fails only when somebody runs that target, which for a rarely used
+generator can be weeks later. Reading the Makefile and stat-ing what it names
+turns that into a test failure in the same commit as the move.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ def makefile_script_tokens() -> set[str]:
 
 
 def test_the_makefile_names_scripts_at_all() -> None:
-    assert len(makefile_script_tokens()) >= 7
+    assert len(makefile_script_tokens()) >= 4
 
 
 def test_every_script_the_makefile_names_exists() -> None:

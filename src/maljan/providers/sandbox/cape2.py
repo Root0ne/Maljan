@@ -127,7 +127,7 @@ class CAPE2SandboxProvider(SandboxProvider):
             url = self._cfg.mcp.url
             if not url:
                 logger.warning(
-                    "CAPE MCP transport=%s but mcp.cape.url is empty; skipping MCP init.",
+                    "CAPE MCP transport=%s but sandbox.cape2.mcp.url is empty; skipping MCP init.",
                     transport,
                 )
                 return []

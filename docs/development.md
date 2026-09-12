@@ -17,9 +17,8 @@ Maljan/
 │   ├── ci/            the uv.lock dependency-graph submission the workflow runs
 │   ├── dev/           fetch_external.sh and the Ghidra image manager
 │   ├── goldens/       one-off capture scripts that write tests/fixtures/golden/
-│   ├── knowledge/     builders for the data/ assets and the evaluation fixtures
-│   └── paper/         the paper conformance check and the cohort completer
-├── tests/             unit/ api/ integration/ fixtures/ evaluation/
+│   └── knowledge/     builders for the data/ assets
+├── tests/             unit/ api/ integration/ fixtures/
 ├── data/              tracked knowledge assets, loaded lazily, each with a fallback
 ├── docker/            Dockerfiles, the compose stack and its dev overlay
 ├── docs/              this documentation set and assets/
@@ -77,11 +76,9 @@ on loopback port 8080.
   --project=chromium`) rather than the whole suite, and stop any dev server you
   started yourself first — the browsers are memory-hungry, which is why the
   local worker count and the timeouts are raised deliberately.
-- **`tests/evaluation/`** — the measured corpus behind the paper. Feature work
-  treats it as read-only; CI enforces that with
-  `scripts/paper/check_evaluation_diff.py`, which compares syntax trees with
-  every string blanked and admits only string-literal and docstring edits
-  inside existing `.py` files.
+
+The evaluation harness behind the published measurements is no longer part of
+this tree; see [paper.md](paper.md).
 
 ## Continuous integration
 
@@ -90,7 +87,7 @@ on loopback port 8080.
 
 | Job | Contents |
 | :-- | :-- |
-| `quality` | The evaluation-artefact gate (off `main`), ruff lint, ruff format check, mypy. Every other job needs it. |
+| `quality` | Ruff lint, ruff format check, mypy. Every other job needs it. |
 | `semgrep` | `p/python` and `p/security-audit` at the pinned version, over `src/ apps/api/ services/ scripts/`. |
 | `test` | `pytest tests/ -q --tb=short` on Python 3.13. |
 | `test-qdrant` | `tests/unit/test_qdrant_store.py` against a live Qdrant service container. |

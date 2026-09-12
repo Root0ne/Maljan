@@ -81,6 +81,13 @@ change landed on `main`.
 
 ### Removed
 
+- **The paper evaluation tree and its reproducibility gates.**
+  `tests/evaluation/`, `scripts/paper/`, the CI evaluation-diff gate, the
+  prompt byte-identity pins under `tests/fixtures/prompts/`, the revision
+  prompt golden, the benchmark and `make paper` targets and the deprecated
+  `mcp.ghidra` / `mcp.cape` compatibility view are gone from the working line.
+  The published evaluation is preserved at the git tag `paper-2026-09`; see
+  [docs/paper.md](docs/paper.md).
 - **Tool-count limits on MCP servers.** The Ghidra tool-selection modes
   (`curated`, a fixed 20-tool allow-list; `dynamic`, a per-sample relevance cut
   capped at 40) and the `use_all_tools` override are gone, as are the radare2

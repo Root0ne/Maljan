@@ -1,4 +1,4 @@
-.PHONY: test lint typecheck format setup migrate check ci-check pre-commit-run benchmark prepare-tram benchmark-tram prepare-attck benchmark-attck prepare-api-db docker-build docker-up docker-down docker-logs dev-up dev-down dev-logs fe-rebuild worker-restart rebuild-ghidra external semgrep
+.PHONY: test lint typecheck format setup migrate check ci-check pre-commit-run prepare-attck prepare-api-db docker-build docker-up docker-down docker-logs dev-up dev-down dev-logs fe-rebuild worker-restart rebuild-ghidra external semgrep
 
 test:
 	uv run pytest tests/ -q
@@ -73,15 +73,6 @@ external:
 pre-commit-run:
 	uv run pre-commit run --all-files
 
-benchmark:
-	uv run python -m tests.evaluation.benchmark_suite
-
-prepare-tram:
-	uv run python scripts/knowledge/prepare_tram_dataset.py
-
-benchmark-tram:
-	uv run python -m tests.evaluation.benchmark_suite --fixtures-dir tests/evaluation/ground_truth/tram
-
 prepare-attck:
 	uv run python scripts/knowledge/prepare_attck_malware_fixtures.py
 
@@ -91,9 +82,6 @@ prepare-attck:
 # any mismatch, so a typo fails loudly here rather than silently never firing.
 prepare-api-db:
 	uv run python scripts/knowledge/build_api_capability_db.py
-
-benchmark-attck:
-	uv run python -m tests.evaluation.benchmark_suite --fixtures-dir tests/evaluation/ground_truth/attck_malware
 
 # ── Docker Orchestration ───────────────────────────────────────────
 
@@ -158,29 +146,3 @@ ghidra-watch:
 
 # Legacy alias
 rebuild-ghidra: ghidra-build
-
-# The paper. Facts first, always: build_paper.py refuses to run against a
-# paper_facts.json older than any result it summarises, so this ordering is not
-# a convenience — the reverse order fails loudly, which is the point.
-.PHONY: paper facts reanalyse paper-check cohort-complete
-# Every interval in the paper, recomputed at the cluster its observations are
-# independent at. Reads committed per-sample artifacts only: no LLM, no network.
-reanalyse:
-	uv run python tests/evaluation/reanalyse.py
-
-facts: reanalyse
-	uv run python tests/evaluation/paper_facts.py
-
-# Recover the three samples the sandbox lost and take the cohort to 100.
-# Needs the sandbox's network; refuses clearly without it.
-cohort-complete:
-	./scripts/paper/complete_cohort.sh
-
-# Every rubric item a machine can check, checked by one. Run after `make paper`.
-paper-check:
-	./scripts/paper/check_paper.sh
-
-paper: facts
-	uv run python tests/evaluation/make_paper_figures.py
-	uv run python other/docs/academic-article/paper/make_architecture_figure.py
-	uv run python other/docs/academic-article/paper/build_paper.py

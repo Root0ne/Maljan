@@ -36,27 +36,6 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen --all-packages
 
-      - name: Evaluation artefacts are untouched
-        if: github.ref != 'refs/heads/main'
-        run: |
-          set -euo pipefail
-          # The measured numbers in the paper come from tests/evaluation/, and
-          # no branch may change what that tree computes. The gate admits one
-          # kind of edit that cannot move a number: the text of a string
-          # literal or a docstring inside an existing .py file (a skip message
-          # naming a script path, for example). scripts/paper/check_evaluation_diff.py
-          # compares the syntax trees with every string blanked and rejects
-          # anything else, including JSON, CSV and Markdown artefacts.
-          # actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0 defaults to a depth-1 clone of this ref, which
-          # shares no history with a depth-50 fetch of dev's tip, so unshallow
-          # this ref first to give origin/dev a usable merge base. A plain
-          # `git fetch origin dev` would land under the checkout's own
-          # single-branch refspec instead of creating origin/dev, so fetch it
-          # with an explicit refspec.
-          git fetch --no-tags --unshallow origin || git fetch --no-tags --depth=200 origin "$(git rev-parse HEAD)"
-          git fetch --no-tags --depth=50 origin +refs/heads/dev:refs/remotes/origin/dev
-          uv run python scripts/paper/check_evaluation_diff.py origin/dev
-
       # The same set the Makefile's PY_SOURCES names: the FastAPI app, the arq
       # worker, the two MCP sidecars and scripts/ were outside this gate.
       - name: Ruff lint

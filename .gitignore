@@ -52,9 +52,7 @@ external/
 data/sigma_rules/
 data/capa-rules/
 data/external/
-# CAPE analysis reports for the n=100 dynamic cohort: ~7 MB each, reproducible
-# from the committed task ledger (tests/evaluation/cape_task_ledger_n100.json)
-# plus the instance. The ledger is the artefact worth versioning.
+# CAPE analysis reports: ~7 MB each and reproducible from the instance.
 data/cape_reports/
 
 # ── Local model weights ────────────────────────────────────────────────
@@ -67,11 +65,6 @@ data/cape_reports/
 # the overnight watch directory.
 *.log
 logs/
-# A/B eval transient checkpoints, regenerated per run.
-tests/evaluation/ab_off.jsonl
-tests/evaluation/ab_on.jsonl
-tests/evaluation/ab_off.partial.jsonl
-
 # ── Not part of this repository ────────────────────────────────────────
 # Third-party threat reports, the journal's guide and class files, reference
 # PDFs, drafts. One directory rather than a scatter of root-level entries, so
