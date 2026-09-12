@@ -14,13 +14,20 @@ the ids the run issued, each once, in order, with no holes.
 from __future__ import annotations
 
 import asyncio
+import threading
 from dataclasses import dataclass
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from maljan.agents.base_agent import BaseAnalyst
 from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
-from maljan.pipeline.nodes import make_analyst_node, make_judge_node, make_revision_node
+from maljan.core.container import ServiceContainer
+from maljan.pipeline.nodes import (
+    make_analyst_node,
+    make_judge_node,
+    make_negotiation_node,
+    make_revision_node,
+)
 from maljan.schemas.evidence import EvidenceCounter
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
@@ -160,6 +167,46 @@ class TestTheAnalystNode:
         assert agents["static"].calls_made == 3
         assert _ids(update) == ["ev_0001", "ev_0002", "ev_0003"]
 
+    def test_a_failed_analyst_still_hands_over_the_calls_it_made(self) -> None:
+        # Twenty Ghidra calls and then a timeout is twenty calls made. Nothing
+        # else would ever drain them either: a run that reaches consensus in
+        # round one never revises.
+        from maljan.core.exceptions import AnalystError
+
+        counter = EvidenceCounter()
+        agent = _Analyst("static", counter)
+        agents = {"static": agent}
+        container = _container(agents, {"static": [_Chunk("PE32 executable.")]})
+
+        def _die(_data: str) -> AgentISR:
+            agent._run_one_loop()
+            raise AnalystError("ghidra died")
+
+        agent.safe_analyze_isr = _die  # type: ignore[method-assign]
+
+        update = make_analyst_node("static", container)(_analysis_state())
+
+        assert update["reports"]["static"].startswith("[ERROR]")
+        assert _ids(update) == ["ev_0001"]
+        assert agent.drain_evidence_entries() == []
+
+    def test_a_crashed_analyst_hands_them_over_too(self) -> None:
+        counter = EvidenceCounter()
+        agent = _Analyst("static", counter)
+        agents = {"static": agent}
+        container = _container(agents, {"static": [_Chunk("PE32 executable.")]})
+
+        def _crash(_data: str) -> AgentISR:
+            agent._run_one_loop()
+            raise RuntimeError("segfault in the loader")
+
+        agent.safe_analyze_isr = _crash  # type: ignore[method-assign]
+
+        update = make_analyst_node("static", container)(_analysis_state())
+
+        assert "crashed" in update["reports"]["static"]
+        assert _ids(update) == ["ev_0001"]
+
     def test_the_node_leaves_the_agent_empty(self) -> None:
         counter = EvidenceCounter()
         agents = {"static": _Analyst("static", counter)}
@@ -203,55 +250,165 @@ class TestTheRevisionNode:
         assert _ids(revision) == ["ev_0002"]
 
 
-class TestTheJudgeNode:
-    def _judge_with_two_rounds(self, counter: EvidenceCounter) -> Any:
+class _JudgeContainer:
+    """A container that caches a distinct judge per role, as the real one does.
+
+    The two roles are the whole point: the negotiation node mediates on
+    ``expert`` and the verdict runs on ``judge``, and only mediation reaches a
+    tool loop. A test whose container hands the same object to both cannot see
+    a node draining the wrong one, which is how the defect survived a round.
+    """
+
+    is_mock = False
+    event_sink = None
+
+    def __init__(self, counter: EvidenceCounter) -> None:
+        self._lock = threading.Lock()
+        self._judge_agent_cache: dict[str, Any] = {}
+        self._counter = counter
+        self.config = MagicMock()
+
+    def analyst_keys(self) -> list[str]:
+        return ["static"]
+
+    def get_judge_agent(self, role: str = "judge") -> Any:
         from maljan.agents.judge_agent import JudgeAgent
 
-        judge = JudgeAgent(llm=MagicMock())
-        judge.evidence_counter = counter
+        cached = self._judge_agent_cache.get(role)
+        if cached is None:
+            cached = JudgeAgent(llm=MagicMock())
+            cached.evidence_counter = self._counter
+            self._judge_agent_cache[role] = cached
+        return cached
+
+    # The real drain, borrowed rather than reimplemented, so this test fails
+    # if it stops looking at every cached role.
+    drain_all_judge_evidence = ServiceContainer.drain_all_judge_evidence
+
+
+def _mediates_with_a_tool_call(judge: Any) -> None:
+    """Make this judge's ``mediate`` record one call through the real loop.
+
+    The recording path is ``execute_tool_loop`` itself — the same code the
+    mediator runs in production — with only the executor faked, so what lands
+    in the buffer is what a real mediation would leave there.
+    """
+    from langchain_core.messages import AIMessage
+
+    async def _mediate(**_kwargs: Any) -> tuple[Any, bool]:
+        async def _ainvoke(payload, config=None):
+            for wrapped in captured[0]:
+                wrapped.invoke({})
+            return {"messages": [AIMessage(content="Agents agree.")]}
+
+        captured: list = []
+
+        def _create(llm, tools):
+            captured.append(tools)
+            executor = MagicMock()
+            executor.ainvoke = _ainvoke
+            return executor
+
+        judge.tools = [_tool("reputation")]
+        with patch("langgraph.prebuilt.create_react_agent", _create):
+            await judge.execute_tool_loop([("system", "mediate"), ("human", "reports")])
+        return MagicMock(agent_name="Mediator", finding="Agents agree.", confidence_score=0.8), True
+
+    judge.mediate = _mediate
+
+
+class TestTheNegotiationNode:
+    def test_the_mediator_s_calls_reach_the_channel(self) -> None:
+        counter = EvidenceCounter()
+        container = _JudgeContainer(counter)
+        mediator = container.get_judge_agent(role="expert")
+        _mediates_with_a_tool_call(mediator)
+
+        update = asyncio.run(
+            make_negotiation_node(container)(
+                {"iteration_count": 0, "reports": {"static": "f"}, "isr_reports": {}}
+            )
+        )
+
+        assert _ids(update) == ["ev_0001"]
+        # The verdict instance is a different object and has nothing to give.
+        assert container.get_judge_agent(role="judge") is not mediator
+        assert container.get_judge_agent(role="judge").drain_evidence_entries() == []
+
+    def test_two_rounds_each_return_their_own_round(self) -> None:
+        counter = EvidenceCounter()
+        container = _JudgeContainer(counter)
+        _mediates_with_a_tool_call(container.get_judge_agent(role="expert"))
+        node = make_negotiation_node(container)
+        state = {"iteration_count": 0, "reports": {"static": "f"}, "isr_reports": {}}
+
+        first = asyncio.run(node(state))
+        second = asyncio.run(node({**state, "iteration_count": 1}))
+
+        assert _ids(first) == ["ev_0001"]
+        assert _ids(second) == ["ev_0002"]
+
+    def test_a_mediation_that_failed_still_hands_over_what_it_spent(self) -> None:
+        counter = EvidenceCounter()
+        container = _JudgeContainer(counter)
+        mediator = container.get_judge_agent(role="expert")
+        _mediates_with_a_tool_call(mediator)
+        recorded = mediator.mediate
+
+        async def _fail(**kwargs: Any) -> tuple[Any, bool]:
+            await recorded(**kwargs)
+            raise TimeoutError("mediation timed out")
+
+        mediator.mediate = _fail
+
+        update = asyncio.run(
+            make_negotiation_node(container)(
+                {"iteration_count": 0, "reports": {"static": "f"}, "isr_reports": {}}
+            )
+        )
+
+        assert update["is_consensus"] is False
+        assert _ids(update) == ["ev_0001"]
+
+
+class TestTheJudgeNode:
+    def _run(self, container: _JudgeContainer) -> dict[str, Any]:
+        judge = container.get_judge_agent(role="judge")
+        # The verdict itself is not under test. Losing it takes the node's own
+        # error path, which must still hand over anything still buffered.
+        judge.give_verdict = AsyncMock(side_effect=RuntimeError("verdict lost"))
+        return asyncio.run(make_judge_node(container)({"iteration_count": 1}))
+
+    def test_it_picks_up_a_mediation_nothing_else_drained(self) -> None:
+        # Mediation is where the calls happen; if no negotiation node ran (or a
+        # future verdict path grows tools), the judge node is the backstop.
+        counter = EvidenceCounter()
+        container = _JudgeContainer(counter)
+        mediator = container.get_judge_agent(role="expert")
         for _ in range(2):
             recorder = EvidenceRecorder("judge", counter=counter)
             record_tools([_tool("reputation")], recorder)[0].invoke({})
-            judge._evidence_entries.extend(recorder.entries)
-        return judge
+            mediator._evidence_entries.extend(recorder.entries)
 
-    def test_both_mediation_rounds_reach_the_channel(self) -> None:
-        # ``mediate`` runs the loop once per negotiation round; a buffer the
-        # node replaced each time would persist only the last round's calls
-        # while the earlier ones had already consumed ids.
-        counter = EvidenceCounter()
-        judge = self._judge_with_two_rounds(counter)
-        # The verdict itself is not under test. Losing it takes the node's own
-        # error path, which must still hand over what the judge already spent.
-        judge.give_verdict = AsyncMock(side_effect=RuntimeError("verdict lost"))
-
-        container = MagicMock()
-        container.is_mock = False
-        container.event_sink = None
-        container.analyst_keys.return_value = ["static"]
-        container.get_judge_agent.return_value = judge
-
-        update = asyncio.run(make_judge_node(container)({"iteration_count": 1}))
+        update = self._run(container)
 
         assert update["degraded_mode"] is True
         assert _ids(update) == ["ev_0001", "ev_0002"]
-        assert judge.drain_evidence_entries() == []
 
-    def test_a_judge_that_called_nothing_returns_an_empty_list(self) -> None:
-        from maljan.agents.judge_agent import JudgeAgent
+    def test_it_re_emits_nothing_the_negotiation_node_already_returned(self) -> None:
+        counter = EvidenceCounter()
+        container = _JudgeContainer(counter)
+        _mediates_with_a_tool_call(container.get_judge_agent(role="expert"))
 
-        judge = JudgeAgent(llm=MagicMock())
-        judge.give_verdict = AsyncMock(side_effect=RuntimeError("verdict lost"))
+        negotiation = asyncio.run(
+            make_negotiation_node(container)(
+                {"iteration_count": 0, "reports": {"static": "f"}, "isr_reports": {}}
+            )
+        )
+        judged = self._run(container)
 
-        container = MagicMock()
-        container.is_mock = False
-        container.event_sink = None
-        container.analyst_keys.return_value = ["static"]
-        container.get_judge_agent.return_value = judge
-
-        update = asyncio.run(make_judge_node(container)({"iteration_count": 1}))
-
-        assert update["evidence_ledger"] == []
+        assert _ids(negotiation) == ["ev_0001"]
+        assert judged["evidence_ledger"] == []
 
 
 class TestOneSequenceAcrossTheRun:

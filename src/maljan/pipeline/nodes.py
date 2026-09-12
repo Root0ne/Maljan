@@ -353,8 +353,33 @@ def make_analyst_node(
         # busy at once and is a poor proxy.
         emit(container.event_sink, "agent_progress", {"agent": agent_name, "phase": "analyzing"})
 
+        bound_agent: Any = None
+
+        def _evidence_update() -> dict[str, Any]:
+            """This agent's calls, drained, in the shape the state expects.
+
+            Called on the failure paths as well as the success one: an analyst
+            that made twenty calls and then died made twenty calls, and a run
+            that reaches consensus in round one never revises, so nothing else
+            would ever drain it.
+            """
+            if bound_agent is None:
+                return {}
+            try:
+                entries = bound_agent.drain_evidence_entries()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("evidence ledger read skipped for %s: %s", agent_name, exc)
+                return {}
+            if not entries:
+                return {}
+            return {
+                "evidence_ledger": [e.model_dump(mode="json") for e in entries],
+                "tool_evidence": {agent_name: [e.to_captured().model_dump() for e in entries]},
+            }
+
         try:
             agent = container.get_agent(agent_name)
+            bound_agent = agent
             role = container.agent_role(agent_name)
 
             sandbox_report = state.get("sandbox_report")
@@ -561,15 +586,7 @@ def make_analyst_node(
             staged = dict(getattr(agent, "_path_by_server", {}) or {})
             if staged:
                 node_out["remote_sample_paths"] = staged
-            try:
-                _entries = agent.drain_evidence_entries()
-                if _entries:
-                    node_out["evidence_ledger"] = [e.model_dump(mode="json") for e in _entries]
-                    node_out["tool_evidence"] = {
-                        agent_name: [e.to_captured().model_dump() for e in _entries]
-                    }
-            except Exception as _ev_exc:  # noqa: BLE001
-                logger.debug("evidence ledger read skipped for %s: %s", agent_name, _ev_exc)
+            node_out.update(_evidence_update())
             return node_out
         except (AnalystError, LLMError) as e:
             # Structured error event so Loki/Promtail
@@ -598,6 +615,7 @@ def make_analyst_node(
             return {
                 "reports": {agent_name: failed_text},
                 "isr_reports": {agent_name: _empty_isr(agent_name)},
+                **_evidence_update(),
             }
         except (ValueError, RuntimeError) as e:
             logger.exception(
@@ -623,6 +641,7 @@ def make_analyst_node(
             return {
                 "reports": {agent_name: crashed_text},
                 "isr_reports": {agent_name: _empty_isr(agent_name)},
+                **_evidence_update(),
             }
 
     node_fn.__name__ = f"{agent_name}_analyst_node"
@@ -782,6 +801,22 @@ def make_negotiation_node(container: ServiceContainer) -> Any:
         # Sycophancy detector skips the first round internally.
         syco = detect_sycophancy(current_isrs, iteration=iteration) if current_isrs else False
 
+        def _judge_evidence() -> list[dict[str, Any]]:
+            """The judges' tool calls, drained from every cached role.
+
+            Drained here rather than named by role because the two roles are
+            two objects — the mediator runs on ``expert`` and the verdict on
+            ``judge`` — and only mediation reaches a tool loop. A node that
+            drained one by name drained the empty one.
+            """
+            try:
+                return [
+                    entry.model_dump(mode="json") for entry in container.drain_all_judge_evidence()
+                ]
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("evidence ledger read skipped for the judges: %s", exc)
+                return []
+
         try:
             judge = container.get_judge_agent(role="expert")
             # Mediation runs on the shared agent loop, not this one. The openai
@@ -845,6 +880,9 @@ def make_negotiation_node(container: ServiceContainer) -> Any:
                 "sycophancy_detected": syco,
                 "confidence_history": [mean_conf],
                 "discussion_history": [argument],
+                # Mediation is the only place a judge agent calls a tool, so
+                # this is where those calls have to leave the agent.
+                "evidence_ledger": _judge_evidence(),
             }
         except Exception as e:  # noqa: BLE001 — per-run fault-isolation boundary
             # The mediation step calls the LLM; on a constrained / local host that
@@ -882,6 +920,8 @@ def make_negotiation_node(container: ServiceContainer) -> Any:
                         status=status,
                     )
                 ],
+                # A mediation that timed out still made the calls it made.
+                "evidence_ledger": _judge_evidence(),
             }
 
     node_fn.__name__ = "negotiation_node"
@@ -1079,21 +1119,20 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 "run_summary": None,
             }
 
-        judge: Any = None
-
         def _judge_evidence() -> list[dict[str, Any]]:
-            """The judge's own tool calls, drained once, whichever way this ends.
+            """Whatever the judges still hold, drained once, whichever way this ends.
 
-            A mediation that ran threat intel and then lost the verdict still
-            ran it: the entries consumed ids and the report may not be able to
-            cite them, but the endpoint has to resolve them.
+            Mediation is where a judge agent calls a tool and the negotiation
+            node drains it there; this is the backstop for a run that reached
+            the verdict without one, and for a verdict path that grows tools
+            later. A drain leaves nothing behind, so draining twice is safe.
             """
-            if judge is None:
-                return []
             try:
-                return [entry.model_dump(mode="json") for entry in judge.drain_evidence_entries()]
+                return [
+                    entry.model_dump(mode="json") for entry in container.drain_all_judge_evidence()
+                ]
             except Exception as exc:  # noqa: BLE001
-                logger.debug("evidence ledger read skipped for the judge: %s", exc)
+                logger.debug("evidence ledger read skipped for the judges: %s", exc)
                 return []
 
         try:

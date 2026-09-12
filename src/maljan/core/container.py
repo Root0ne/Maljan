@@ -412,6 +412,31 @@ class ServiceContainer:
         """Return the per-job counter that issues evidence-ledger ids."""
         return self._evidence_counter
 
+    def drain_all_judge_evidence(self) -> list[Any]:
+        """Every entry the judge agents gathered, drained from each cached role.
+
+        The judge is cached per role and the roles are different objects: the
+        negotiation node mediates on ``expert`` and the verdict runs on
+        ``judge``. Only ``mediate`` reaches a tool loop, so a node that drained
+        one instance by name drained the wrong one and the mediation's calls
+        were never written down. Draining every cached role removes the
+        question of which instance recorded what, and it is safe to call twice
+        because a drain leaves nothing behind.
+        """
+        with self._lock:
+            judges = list(self._judge_agent_cache.values())
+        entries: list[Any] = []
+        for judge in judges:
+            drain = getattr(judge, "drain_evidence_entries", None)
+            if drain is None:
+                continue
+            try:
+                entries.extend(drain())
+            except Exception as exc:  # noqa: BLE001 — a ledger read never fails a run
+                logger.debug("evidence drain skipped for a judge agent: %s", exc)
+        entries.sort(key=lambda entry: getattr(entry, "seq", 0))
+        return entries
+
     # ------------------------------------------------------------------
     # Composition accessors
     # ------------------------------------------------------------------
