@@ -98,6 +98,13 @@ export default function DynamicTab() {
 
   const analystFindings = dynamicClaims(report?.agent_findings);
   const dyn = report?.malware_report?.dynamic;
+  // The registry exists on Windows and nowhere else. On a Linux, macOS or
+  // Android sample an empty "Registry Modifications" panel reads as a sandbox
+  // that found nothing rather than a concept the platform does not have, so
+  // the panel is drawn only where it can be populated.
+  const platform = report?.malware_report?.identity?.platform;
+  const showsRegistry =
+    platform === "windows" || (!!dyn?.registry_mods.length && platform !== undefined);
   if (!dyn) {
     return (
       <div className="space-y-4">
@@ -232,6 +239,7 @@ export default function DynamicTab() {
         )}
       </div>
 
+      {showsRegistry && (
       <div className="bg-bg-surface border border-border rounded">
         <div className="px-4 py-3 border-b border-border">
           <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
@@ -278,6 +286,7 @@ export default function DynamicTab() {
           </div>
         )}
       </div>
+      )}
 
       {dyn.notable_apis.length > 0 && (
         <div className="bg-bg-surface border border-border rounded">

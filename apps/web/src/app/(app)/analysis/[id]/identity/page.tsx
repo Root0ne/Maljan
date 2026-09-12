@@ -5,6 +5,7 @@ import { useState } from "react";
 import { useReport } from "../layout";
 import { copyToClipboard, formatBytes } from "@/lib/report-utils";
 import Field from "@/components/ui/Field";
+import { platformLabel } from "@/types/malware-report";
 import type { SampleIdentity } from "@/types/malware-report";
 
 export default function IdentityTab() {
@@ -50,7 +51,7 @@ export default function IdentityTab() {
             label="Platform"
             value={
               identity.platform && identity.platform !== "unknown"
-                ? identity.platform.toUpperCase()
+                ? platformLabel(identity.platform)
                 : "(unknown)"
             }
           />
@@ -82,7 +83,12 @@ export default function IdentityTab() {
           <HashRow label="SHA-1" value={identity.hashes.sha1} />
           <HashRow label="SHA-256" value={identity.hashes.sha256} />
           <HashRow label="SHA-512" value={identity.hashes.sha512} />
-          <HashRow label="Imphash" value={identity.hashes.imphash} />
+          {/* Imphash is a PE import-table hash; a Mach-O, an APK or a script
+            * has no import table and an always-drawn empty row reads as a
+            * missing value rather than an inapplicable one. */}
+          {identity.hashes.imphash && (
+            <HashRow label="Imphash" value={identity.hashes.imphash} />
+          )}
           <HashRow label="SSDeep" value={identity.hashes.ssdeep} />
           <HashRow label="TLSH" value={identity.hashes.tlsh} />
         </div>

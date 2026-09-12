@@ -296,7 +296,7 @@ function SamplesPageContent() {
             : "Drop a file here or click to upload"}
         </p>
         <p className="text-xs text-text-muted mt-1">
-          PE, ELF, Mach-O, scripts, documents
+          Executables, mobile apps, scripts, documents, archives
         </p>
         <input
           ref={fileRef}
