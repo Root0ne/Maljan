@@ -28,7 +28,6 @@ from typing import Annotated, Any, Literal
 from pydantic import (
     BaseModel,
     Field,
-    PrivateAttr,
     SecretStr,
     field_validator,
     model_validator,
@@ -613,9 +612,8 @@ class PreprocessingConfig(BaseModel):
     # the fastembed BGE-384 embedder already loaded for LTM — zero new deps. Build the
     # corpus with scripts/knowledge/build_attck_case_kb.py.
     #
-    # STAYS OFF — measured, not merely undeployed (tests/evaluation/eval_attck_case_rag.py,
-    # attck_case_rag_retrieval.json, 2026-08-08). The index itself works; the *query*
-    # does not reach it:
+    # STAYS OFF — measured, not merely undeployed. The index itself works; the
+    # *query* does not reach it:
     #
     #   corpus-native query (leave-one-out, near-duplicates suppressed)
     #       retrieval F1 0.620   vs frequency-prior 0.424   vs random 0.078
@@ -668,8 +666,8 @@ class PreprocessingConfig(BaseModel):
     #   "tfidf"    keyword bag-of-words (clean alignment gate, weaker ranking)
     #   "semantic" dense BGE-384 embeddings (better ranking, poor gate)
     #   "hybrid"   semantic ranking + TF-IDF gate — best of both (DEFAULT, §1.5.1)
-    # The TRAM2 comparison (tests/evaluation/eval_technique_mapping.py) showed the
-    # hybrid dominates both pure backends: it matches semantic's ranking (+6pp
+    # The TRAM2 comparison showed the hybrid dominates both pure backends: it
+    # matches semantic's ranking (+6pp
     # top-3 over TF-IDF) AND gives the cleanest alignment gate (correct-vs-wrong
     # separation +0.108 vs TF-IDF +0.068 vs semantic +0.020). Its gate is TF-IDF,
     # so the existing 0.08 threshold applies. fastembed is already loaded in
@@ -688,8 +686,8 @@ class PreprocessingConfig(BaseModel):
     # it *abstains* (UNKNOWN -> no hint) rather than guessing, which is the safe
     # failure mode for an advisory hint.
     #
-    # The category-inference eval (tests/evaluation/eval_category_inference.py,
-    # 101 ATT&CK families labelled by self-declared type) measured:
+    # The category-inference eval (101 ATT&CK families labelled by
+    # self-declared type) measured:
     #   * keyword:               full 0.792 acc / behavioral 0.327 (abstains 38%)
     #   * semantic (zero-shot):  full 0.376 / behavioral 0.168  (NOT recommended —
     #                            averaged technique prototypes are too blurry)
@@ -798,29 +796,14 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
 
 
 class MCPConfig(BaseModel):
-    """The operator-visible registry of tool servers, and a compatibility view.
+    """The operator-visible registry of tool servers.
 
     ``ghidra`` and ``cape`` used to live here as a transitional mirror of
     ``static.ghidra`` / ``sandbox.cape2.mcp`` for readers that had not yet
-    moved onto the provider layer; the last of those readers has since moved,
-    and ``servers`` now holds a real ``dict[str, MCPServerConfig]`` for
+    moved onto the provider layer; every reader has since moved, and
+    ``servers`` now holds a real ``dict[str, MCPServerConfig]`` for
     operator-configured MCP tools that are not one of the built-in providers.
-
-    ``ghidra`` and ``cape`` below are a **deprecated read-only compatibility
-    view**, for ``tests/evaluation/``'s reproduction scripts alone — that
-    harness predates the provider layer and reads
-    ``cfg.mcp.ghidra`` / ``cfg.mcp.cape`` directly, and the plan-wide
-    constraint forbids editing it. ``Settings.model_validator(mode="after")``
-    populates the two private attributes with the *same objects* as
-    ``settings.static.ghidra`` / ``settings.sandbox.cape2.mcp`` (not copies),
-    so a mutation through either name is visible through the other. Nothing
-    in ``src/`` or ``apps/`` reads these properties, and they are not
-    ``Settings`` fields — the catalog and every new caller belong on the
-    provider-layer paths instead.
     """
-
-    _ghidra_view: MCPServerConfig | None = PrivateAttr(default=None)
-    _cape_view: MCPServerConfig | None = PrivateAttr(default=None)
 
     # The operator-visible registry of tool servers, keyed by slug. Built-in
     # entries are re-seeded on load, so "delete" in the UI means enabled=False
@@ -839,23 +822,6 @@ class MCPConfig(BaseModel):
         for key, default in _builtin_servers().items():
             self.servers.setdefault(key, default)
         return self
-
-    @property
-    def ghidra(self) -> MCPServerConfig:
-        """Deprecated: the same object as ``settings.static.ghidra``."""
-        if self._ghidra_view is None:
-            # Only reachable for an ``MCPConfig`` built outside a validated
-            # ``Settings`` (e.g. constructed bare in a test); a real
-            # ``Settings`` always populates this in its after-validator.
-            self._ghidra_view = MCPServerConfig()
-        return self._ghidra_view
-
-    @property
-    def cape(self) -> MCPServerConfig:
-        """Deprecated: the same object as ``settings.sandbox.cape2.mcp``."""
-        if self._cape_view is None:
-            self._cape_view = MCPServerConfig()
-        return self._cape_view
 
 
 # ---------------------------------------------------------------------------
@@ -1180,8 +1146,7 @@ class StaticConfig(BaseModel):
 
     ``provider`` is the single switch; every block below is the configuration of
     one provider and is inert unless that provider is selected. ``ghidra`` is
-    the default and is byte-for-byte the configuration that used to live at
-    ``mcp.ghidra``.
+    the default.
     """
 
     provider: Literal["ghidra", "r2", "capa_yara", "generic_mcp", "none"] = "ghidra"
@@ -1374,9 +1339,8 @@ class ReportingConfig(BaseModel):
 # Flipped around ``Settings(**overrides)`` by ``build_settings`` (see
 # ``maljan.core.settings_overrides``) to mean "init kwargs and field defaults
 # only -- no environment, no .env, no secrets directory". Bare ``Settings()``
-# never touches this flag, so it stays environment- and dotenv-capable: that
-# is the documented library behaviour the frozen ``tests/evaluation/**``
-# scripts depend on. A ContextVar rather than an init kwarg because
+# never touches this flag, so it stays environment- and dotenv-capable, which
+# is the documented library behaviour. A ContextVar rather than an init kwarg because
 # pydantic-settings validates unknown keyword arguments against the model's
 # fields and rejects one that is not a declared field.
 STORE_ONLY: contextvars.ContextVar[bool] = contextvars.ContextVar(
@@ -1592,22 +1556,6 @@ class Settings(BaseSettings):
             self.llm.anthropic.api_key = self.anthropic_api_key
         if self.google_api_key and not self.llm.gemini.api_key:
             self.llm.gemini.api_key = self.google_api_key
-
-    @model_validator(mode="after")
-    def _populate_deprecated_mcp_view(self) -> "Settings":
-        """Wire ``mcp.ghidra`` / ``mcp.cape`` to the real provider-layer objects.
-
-        See ``MCPConfig``'s docstring: this is a read-only
-        compatibility view for ``tests/evaluation/``'s scripts, which predate
-        the provider layer and cannot be edited under the plan-wide
-        constraint. The views share the *same* ``MCPServerConfig`` instances
-        as ``static.ghidra`` and ``sandbox.cape2.mcp`` — never copies — so
-        this must run after those sub-configs exist, which an "after"
-        validator guarantees.
-        """
-        self.mcp._ghidra_view = self.static.ghidra
-        self.mcp._cape_view = self.sandbox.cape2.mcp
-        return self
 
     @model_validator(mode="after")
     def _validate_agent_composition(self) -> "Settings":

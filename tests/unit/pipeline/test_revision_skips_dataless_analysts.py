@@ -278,13 +278,10 @@ class TestTheDataLessDistinctionIsCarriedAsDataNotAsANewReasonString:
     """(c), reworked after the wave-4 review.
 
     The first cut split the degradation reason into "analysts had no data to
-    analyse" and "analysts produced no claims". That silently broke the paper's
-    evaluation harness: `tests/evaluation/eval_dynamic_vs_static.py`
-    partitions on the literal "analysts produced no claims:" to strip the
-    starved analysts out of the static-only arm's treatment, and the evaluation
-    tree is read-only. Every static-only arm would have recorded an unexplained
-    incidental degradation, and the E.1 numbers would have moved without
-    anything saying so.
+    analyse" and "analysts produced no claims". Downstream readers partition on
+    the literal "analysts produced no claims:" to strip the starved analysts
+    out of a static-only run, so splitting the string would have recorded an
+    unexplained incidental degradation without anything saying so.
 
     So the reason string stays exactly as it was for every claimless analyst,
     and the distinction is carried as data: a per-agent `no_data` flag on
@@ -292,7 +289,7 @@ class TestTheDataLessDistinctionIsCarriedAsDataNotAsANewReasonString:
     """
 
     def test_the_legacy_reason_string_is_the_only_one_emitted(self) -> None:
-        """The harness's partition key, and the absence of a rival string."""
+        """The partition key, and the absence of a rival string."""
         import inspect
 
         from maljan.pipeline import nodes
@@ -300,13 +297,12 @@ class TestTheDataLessDistinctionIsCarriedAsDataNotAsANewReasonString:
         source = inspect.getsource(nodes.make_judge_node)
         assert "analysts produced no claims" in source
         assert "analysts had no data to analyse" not in source, (
-            "a second degradation reason bypasses the evaluation harness's "
-            "treatment carve-out (eval_dynamic_vs_static.incidental_reasons)"
+            "a second degradation reason bypasses the treatment carve-out "
+            "that partitions on the first one"
         )
 
-    def test_the_harness_still_recognises_the_reason_it_partitions_on(self) -> None:
-        """Read the harness rather than trust the string: it is read-only, so
-        this side has to keep matching it."""
+    def test_the_reason_string_stays_partitionable(self) -> None:
+        """The degradation reason keeps the shape a reader partitions on."""
         from maljan.analysis.run_summary import RunSummaryBuilder
 
         summary = (

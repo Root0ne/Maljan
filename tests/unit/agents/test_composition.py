@@ -1,7 +1,6 @@
 """What ``resolve_agent`` hands one agent, and where each piece came from.
 
-The four built-in resolutions are pinned in ``test_prompt_byte_identity.py``
-because they are byte-identity statements. These are the composition rules:
+These are the composition rules:
 a clone follows its own provider, a generic agent starts tool-less, an
 explicit provider reference is the only way a generic agent gets provider
 tools, duplicates collapse by name, and a tool a server does not have is a
