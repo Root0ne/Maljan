@@ -51,8 +51,8 @@ operator can reconfigure.
 The platform never refuses a sample for its format. The first thing a job does
 is read the sample's magic bytes into a file type and a platform
 (`src/maljan/extractors/sample_identity.py`), and everything downstream routes
-on that answer: which sandbox package or VM profile is asked for, which
-platform-specific extractors run, which rules the Sigma and YARA layers keep,
+on that answer: which sandbox package or VM profile is asked for, which tools
+an analyst is given, which rules the Sigma and YARA layers keep,
 which ATT&CK domain a technique id belongs to, and which artefacts the analyst
 prompts are told to look for. A format nothing recognises routes to the neutral
 path — a raw-byte sweep and a report that says so — rather than to a rejection.
@@ -184,10 +184,65 @@ its embeddings are cached on disk; on the compose stack that cache is a named
 volume, because rebuilding it costs the judge node about a gigabyte of resident
 memory and a minute and a half on the first analysis.
 
+## The evidence ledger
+
+Every tool call an analysis makes is written down as it happens. The tool loop
+wraps each tool, times the call, records the arguments, the outcome and the
+result — parsed when the tool answered JSON — and hands the answer back to the
+model with the entry's id stamped on the front:
+
+```
+[ev_0007]
+{"machine": 332, "sections": [...], "imports": [...]}
+```
+
+Ids (`ev_0007`) are monotonic across the whole job. That stamp is what makes a
+report checkable: the model can cite the call it read a fact from, a report
+section lists the entries it was built from, and `GET
+/api/v1/jobs/{id}/evidence` serves those entries back.
+
+Two bounds keep the ledger from becoming the thing it records. Each output is
+trimmed on the way in, and each agent gets a byte budget
+(`report.evidence_budget_bytes`); past the budget an entry keeps its arguments,
+its outcome and its timing and drops its output, and the count of what was
+dropped reaches the run summary. The ledger lands in the pipeline state as an
+append-only list and is persisted with the report, in the same transaction.
+
+## The findings block
+
+An analyst may end its answer with a fenced `maljan-findings` block holding
+JSON: `artifacts` (a kind, a label, and either a value or columns and rows) and
+`findings` (a title, techniques, a confidence), each naming the ledger ids it
+came from. It is optional in both directions — an analyst that emits nothing
+loses no claim, and the CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE contract the
+negotiation runs on is untouched. What the block adds is the *table* a claim
+cannot carry: the import list, the permission set, the endpoints.
+
+Anything that fails validation is dropped and counted rather than repaired, and
+the block is stripped before the prose reaches the transcript or the report.
+
 ## Reporting
 
-Every run emits a structured `MalwareReport` (`src/maljan/reporting/`). The API
-renders it as Markdown, HTML and PDF, and exposes the STIX 2.1 bundle, a MITRE
-view, the extracted indicators, the detection signatures that fired and a
-timeline. Post-hoc enrichment fills VirusTotal, AbuseIPDB, WHOIS and GeoIP
-reputation into the indicator set after the verdict has shipped.
+Every run emits a structured `MalwareReport` (`src/maljan/reporting/`), and it
+is assembled from what the run gathered rather than recomputed beside it:
+
+* `reporting/ledger_report.py` turns the ledger into `report.sections` — a
+  builder per known tool, generic fallbacks (a JSON object becomes a key/value
+  block, an array of objects a table, anything else a capped text block) for a
+  tool nobody has written yet, the agents' artifacts grouped by kind, and their
+  findings as one table. Every section carries the entry ids behind it.
+* `reporting/ledger_projection.py` fills the typed blocks — `static`,
+  `dynamic`, `network`, `persistence` — from the same ledger, because several
+  layers still read them. A tool that was never called leaves its block empty
+  and every layer downstream of it degrades to silence.
+* Identity comes from `identify_file` and `hashes` when they ran, and from the
+  routing minimum (format, platform, and hashes the builder computes) when they
+  did not.
+* `run_summary.evidence` counts the calls and `run_summary.sections_without_
+  evidence` counts the sections that can name neither an entry nor a finding —
+  the number that says whether the report is standing on anything.
+
+The API renders the report as Markdown, HTML and PDF, and exposes the STIX 2.1
+bundle, a MITRE view, the extracted indicators, the detection signatures that
+fired and a timeline. Post-hoc enrichment fills VirusTotal, AbuseIPDB, WHOIS and
+GeoIP reputation into the indicator set after the verdict has shipped.
