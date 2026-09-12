@@ -133,3 +133,37 @@ def format_fragment(file_type: str, platform: str) -> str:
     if category == "archive":
         return _ARCHIVE_FRAGMENT
     return _BY_PLATFORM.get(plat, _NEUTRAL)
+
+
+# The optional machine channel. Every tool result an analyst reads arrives
+# prefixed with its ledger id, and this is what turns those ids into something
+# the report can print: the analyst repeats the key artefacts it established
+# and names the calls it read them from.
+#
+# Optional in both directions. An analyst that emits nothing here loses no
+# claim and fails no check — the ISR contract above is unchanged and remains
+# the only thing the negotiation runs on. What it loses is the table: the
+# report can only print an import list, a permission set or an endpoint list
+# if some analyst says it saw one.
+FINDINGS_BLOCK_FRAGMENT = (
+    "\n\nAfter your findings, you may append one fenced block labelled "
+    "maljan-findings containing JSON with two optional keys.\n"
+    '"artifacts" is a list of the concrete things you established — hashes, '
+    "imports, permissions, IOCs, processes, persistence entries, network "
+    "endpoints. Each has a kind, a label, either a value or columns plus rows, "
+    "and evidence_ids naming the tool results you read them from.\n"
+    '"findings" is a list of your conclusions: a title, a detail, optional '
+    "technique_ids, a confidence between 0 and 1, and evidence_ids.\n"
+    "Every tool result you were shown starts with its id in brackets, for "
+    "example [ev_0007]; cite those ids and no others. Emit the block only for "
+    "what you actually observed, and omit it entirely when you have nothing "
+    "structured to add.\n"
+    "```maljan-findings\n"
+    '{"artifacts": [{"kind": "imports", "label": "Suspicious imports", '
+    '"columns": ["Library", "Function"], "rows": [["KERNEL32.dll", '
+    '"VirtualAllocEx"]], "evidence_ids": ["ev_0002"]}], '
+    '"findings": [{"title": "Allocates memory in a remote process", '
+    '"technique_ids": ["T1055"], "confidence": 0.8, '
+    '"evidence_ids": ["ev_0002"]}]}\n'
+    "```"
+)

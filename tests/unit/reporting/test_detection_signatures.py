@@ -15,16 +15,20 @@ from maljan.reporting.detection_signatures import (
     build_detection_rules,
 )
 from maljan.reporting.models import MalwareReport
+from tests.unit._ledger_helpers import ledger_from_sandbox, persistence_isr
 
 
 def _build(**kwargs: Any) -> MalwareReport:
+    # A sandbox fixture reaches the report through the tools a dynamic analyst
+    # would have called on it, which is the only route there is now.
+    _sandbox = kwargs.pop("sandbox_report", {})
     return MalwareReportBuilder(
         file_hash=kwargs.pop("file_hash", "a" * 64),
         file_name=kwargs.pop("file_name", "fixture.exe"),
         sample_path=kwargs.pop("sample_path", None),
-        sandbox_report=kwargs.pop("sandbox_report", {}),
+        sandbox_report=_sandbox,
         reports={},
-        isr_reports={},
+        isr_reports=kwargs.pop("isr_reports", {}),
         stix_output={"objects": []},
         run_summary={},
         discussion_history=[],
@@ -32,6 +36,7 @@ def _build(**kwargs: Any) -> MalwareReport:
         overall_confidence=kwargs.pop("overall_confidence", 0.9),
         cascade_summary=None,
         malware_category=kwargs.pop("malware_category", "ransomware"),
+        evidence_ledger=ledger_from_sandbox(_sandbox) if _sandbox else [],
     ).build_deterministic()
 
 
@@ -148,6 +153,17 @@ def ransomware_report() -> MalwareReport:
         sandbox_report=sandbox,
         malware_category="ransomware",
         overall_confidence=0.92,
+        isr_reports={
+            "dynamic": persistence_isr(
+                [
+                    [
+                        "registry_run",
+                        "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                        "C:\\Users\\Public\\lockbit.exe",
+                    ]
+                ]
+            )
+        },
     )
 
 

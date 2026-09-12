@@ -26,14 +26,18 @@ from maljan.schemas.stix_models import (
     ObservedData,
     Report,
 )
+from tests.unit._ledger_helpers import ledger_from_sandbox
 
 
 def _build(**kwargs: Any) -> MalwareReport:
+    # A sandbox fixture reaches the report through the tools a dynamic analyst
+    # would have called on it, which is the only route there is now.
+    _sandbox = kwargs.pop("sandbox_report", {})
     return MalwareReportBuilder(
         file_hash=kwargs.pop("file_hash", "c" * 64),
         file_name=kwargs.pop("file_name", "rat.exe"),
         sample_path=kwargs.pop("sample_path", None),
-        sandbox_report=kwargs.pop("sandbox_report", {}),
+        sandbox_report=_sandbox,
         reports={},
         isr_reports={},
         stix_output={"objects": []},
@@ -43,6 +47,7 @@ def _build(**kwargs: Any) -> MalwareReport:
         overall_confidence=kwargs.pop("overall_confidence", 0.8),
         cascade_summary=None,
         malware_category=kwargs.pop("malware_category", "rat"),
+        evidence_ledger=ledger_from_sandbox(_sandbox) if _sandbox else [],
     ).build_deterministic()
 
 

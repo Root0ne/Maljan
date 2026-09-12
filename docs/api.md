@@ -31,7 +31,7 @@ HttpOnly cookie scoped to `/api/v1/auth` and is never sent by hand. See
 | `/auth` | Register, log in, refresh, log out, and read or update the current user. |
 | `/samples` | Upload a sample, list and read sample metadata, delete a sample. |
 | `/samples/{sample_id}/sandbox-reports` | Attach, list and delete sandbox reports produced elsewhere, for the `upload` sandbox provider. |
-| `/jobs` | Create an analysis job, list and read jobs, read a job's event history, cancel a job. |
+| `/jobs` | Create an analysis job, list and read jobs, read a job's event history and its evidence ledger, cancel a job. |
 | `/reports` | Everything a finished analysis produces: the report itself, its renderings, its indicators, its signatures, its timeline, and post-hoc enrichment. |
 | `/dashboard` | Aggregate counts for the console's landing page. |
 | `/audit` | The audit trail and API-key management. Admin only. |
@@ -42,6 +42,18 @@ Outside the prefix: `GET /health` and `GET /healthz` (see
 [deployment.md](deployment.md)), and the WebSocket at
 `/ws/analysis/{job_id}`, which streams one analysis run's events and
 negotiates the `maljan.v1` subprotocol when the client asks for it.
+
+### Jobs
+
+`GET /jobs/{job_id}/evidence` is the analysis's evidence ledger: one entry per
+tool call, in the order the calls were made. An entry carries the citation id
+the report quotes (`entry_id`, e.g. `ev_0007`), the agent, the tool server (null
+for an in-process tool), the tool, the arguments, whether the call succeeded,
+its duration, the result text and the parsed result when the tool answered
+JSON. `agent` and `tool` narrow it; `page` and `page_size` (up to 200) page it.
+Ownership is the job's own — the same rule the job's report endpoint applies —
+and an entry whose output was dropped to the per-agent byte budget comes back
+with an empty `output` and the rest of its record intact.
 
 ### Reports
 

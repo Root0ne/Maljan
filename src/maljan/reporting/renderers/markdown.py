@@ -83,6 +83,7 @@ class MarkdownRenderer:
             ),
             self._safe_section("c2_channels", lambda: self._section_c2_channels(report)),
             self._safe_section("conclusion", lambda: self._section_conclusion(report)),
+            self._safe_section("evidence_sections", lambda: self._section_evidence(report)),
             self._safe_section("references", lambda: self._section_references(report)),
             self._safe_section(
                 "run_summary", lambda: self._section_run_summary(report.run_summary)
@@ -121,6 +122,21 @@ class MarkdownRenderer:
                 "verdict, confidence and severity below should be treated as tentative "
                 f"and corroborated manually.  \n> Reasons: {reasons}"
             )
+        # What the report is standing on, said in the header rather than left
+        # in a JSON field: a reader who is told nothing was trimmed reads the
+        # evidence sections as complete, and a reader who is told twelve
+        # entries were trimmed knows to open the evidence endpoint.
+        evidence = (report.run_summary or {}).get("evidence") or {}
+        entries = evidence.get("entries")
+        if entries:
+            line = f"\n\n**Evidence**: {entries} tool call(s) recorded"
+            failed = int(evidence.get("failed") or 0)
+            if failed:
+                line += f", {failed} failed"
+            trimmed = int(evidence.get("trimmed") or 0)
+            if trimmed:
+                line += f", {trimmed} evidence entries trimmed to the budget"
+            header += line + "."
         profile = (report.run_summary or {}).get("profile") or {}
         # Live-verification L2: a reduced profile (fewer/different analysts than
         # the default ensemble) changes what evidence backs the verdict, but
@@ -203,9 +219,11 @@ class MarkdownRenderer:
     def _section_static_analysis(self, report: MalwareReport) -> str:
         static = report.static
         lines = ["## Static Analysis", ""]
+        # A block nobody filled is left out rather than printed as an apology:
+        # the evidence sections below say what the run did gather, and an empty
+        # heading in between reads as a gap in the sample, not in the run.
         if static is None:
-            lines.append("_No static analysis available (sample bytes unreachable)._")
-            return "\n".join(lines)
+            return ""
 
         if static.packer_matches:
             lines.append("**Packer / protector**:")
@@ -343,8 +361,7 @@ class MarkdownRenderer:
         dyn = report.dynamic
         lines = ["## Dynamic Behavior", ""]
         if dyn is None:
-            lines.append("_No sandbox dynamic data available._")
-            return "\n".join(lines)
+            return ""
 
         if dyn.unavailable:
             names = ", ".join(f"`{name}`" for name in dyn.unavailable)
@@ -412,8 +429,7 @@ class MarkdownRenderer:
         net = report.network
         lines = ["## Network IOCs", ""]
         if net is None:
-            lines.append("_No network observations available._")
-            return "\n".join(lines)
+            return ""
 
         if net.domains:
             lines.append("### Domains")
@@ -468,8 +484,7 @@ class MarkdownRenderer:
     def _section_persistence(self, mechanisms: list[PersistenceMechanism]) -> str:
         lines = ["## Persistence Mechanisms", ""]
         if not mechanisms:
-            lines.append("_No persistence mechanisms detected._")
-            return "\n".join(lines)
+            return ""
         lines.append("| Kind | Target | Payload | ATT&CK |")
         lines.append("|---|---|---|---|")
         for mech in mechanisms[:40]:
@@ -835,6 +850,28 @@ class MarkdownRenderer:
         lines.append(concl.text.strip())
         return "\n".join(lines)
 
+    def _section_evidence(self, report: MalwareReport) -> str:
+        """Everything the tools and the agents produced, each citing its calls.
+
+        Generic on purpose: a section knows whether it is a table, a key/value
+        block, a list or a paragraph, and this renders that, so a tool server
+        added tomorrow prints without a renderer change. The footnote is the
+        part that matters — the ledger ids under each section are what let a
+        reader ask the evidence endpoint what the tool actually said.
+        """
+        if not report.sections:
+            return ""
+        lines = ["## Evidence", ""]
+        for section in report.sections:
+            lines.append(f"### {section.title}")
+            lines.append("")
+            lines.extend(_evidence_body(section))
+            if section.evidence_ids:
+                lines.append("")
+                lines.append(f"_Evidence: {', '.join(section.evidence_ids)}_")
+            lines.append("")
+        return "\n".join(lines).rstrip()
+
     def _section_references(self, report: MalwareReport) -> str:
         lines = ["## References", ""]
         if not report.references:
@@ -874,6 +911,16 @@ class MarkdownRenderer:
                     lines.append(f"- Final confidence: {float(final_conf):.3f}")
                 except (TypeError, ValueError):
                     pass
+        evidence = run_summary.get("evidence") or {}
+        if evidence:
+            lines.append(
+                f"- Evidence entries: {evidence.get('entries', 0)} "
+                f"({evidence.get('ok', 0)} ok, {evidence.get('failed', 0)} failed, "
+                f"{evidence.get('trimmed', 0)} trimmed to the budget)"
+            )
+        ungrounded = run_summary.get("sections_without_evidence")
+        if ungrounded:
+            lines.append(f"- Report sections with no evidence: {ungrounded}")
         cascade = run_summary.get("cascade") or {}
         if cascade:
             total = cascade.get("total_techniques")
@@ -897,6 +944,26 @@ class MarkdownRenderer:
 # ---------------------------------------------------------------------------
 # Module-level helpers (kept private to keep MarkdownRenderer focused)
 # ---------------------------------------------------------------------------
+
+
+def _evidence_body(section: Any) -> list[str]:
+    """One evidence section's rows, in whichever shape it carries."""
+    if section.kind in {"table", "kv"} and section.rows:
+        columns = section.columns or [f"Column {i + 1}" for i in range(len(section.rows[0]))]
+        out = [
+            "| " + " | ".join(columns) + " |",
+            "|" + "---|" * len(columns),
+        ]
+        for row in section.rows:
+            cells = [_truncate(str(cell), 160) for cell in row]
+            cells += [""] * (len(columns) - len(cells))
+            out.append("| " + " | ".join(cells[: len(columns)]) + " |")
+        return out
+    if section.kind == "list" and section.items:
+        return [f"- {_truncate(item, 200)}" for item in section.items]
+    if section.text:
+        return ["```", section.text, "```"]
+    return []
 
 
 def _truncate(value: str, length: int) -> str:

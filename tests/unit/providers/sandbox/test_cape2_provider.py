@@ -90,18 +90,17 @@ def test_the_configured_timeout_and_interval_reach_the_client(raw_report):
     assert client.waited == [("42", 1200, 15)]
 
 
-def test_notable_apis_survives_the_identity_short_circuit_for_persistence_extractor():
-    """Carried finding: ``persistence_extractor`` reads ``behavior.notable_apis``
-    straight off the raw sandbox dict for Linux LD_PRELOAD detection. Neither
-    ``SandboxReport`` nor ``to_cape_shaped_dict``'s full render names that key —
-    but this provider never takes the full-render path with a real report:
-    ``fetch()`` always sets ``raw`` to the client's untouched dict and
-    ``source_format="cape2"``, so ``to_cape_shaped_dict`` always short-circuits
-    to ``raw`` by identity, carrying whatever ``behavior.notable_apis`` the
-    sandbox emitted through byte-for-byte. Proved end to end against
-    ``persistence_extractor`` rather than merely asserted in prose.
+def test_notable_apis_survives_the_identity_short_circuit():
+    """Carried finding: ``behavior.notable_apis`` is where a Linux LD_PRELOAD
+    shows up, and neither ``SandboxReport`` nor ``to_cape_shaped_dict``'s full
+    render names that key — but this provider never takes the full-render path
+    with a real report: ``fetch()`` always sets ``raw`` to the client's
+    untouched dict and ``source_format="cape2"``, so ``to_cape_shaped_dict``
+    short-circuits to ``raw`` by identity and carries the key through
+    byte-for-byte. Proved through the call an agent makes to read it rather
+    than asserted in prose.
     """
-    from maljan.extractors.persistence_extractor import build_persistence_list
+    from maljan.providers.sandbox_tools import sandbox_report_section
 
     raw = {
         "target": {"sha256": "e" * 64, "name": "mirai"},
@@ -116,8 +115,8 @@ def test_notable_apis_survives_the_identity_short_circuit_for_persistence_extrac
     rendered = to_cape_shaped_dict(run.report)
     assert rendered is raw
 
-    mechanisms = build_persistence_list(rendered, sample_platform="linux")
-    assert any(m.kind == "ld_preload" for m in mechanisms)
+    behavior = sandbox_report_section(rendered, "behavior")["value"]
+    assert behavior["notable_apis"] == [{"api": "setenv", "arguments": "LD_PRELOAD=/tmp/x.so"}]
 
 
 def test_dynamic_tools_are_every_tool_the_toolkit_offers():

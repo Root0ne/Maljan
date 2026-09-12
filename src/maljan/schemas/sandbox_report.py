@@ -113,6 +113,10 @@ class SandboxNetwork(BaseModel):
     hosts: list[dict[str, Any]] = Field(default_factory=list)
     domains: list[str | dict[str, Any]] = Field(default_factory=list)
     tls: list[dict[str, Any]] = Field(default_factory=list)
+    # ICMP is rarer than the rest and is exactly why it is modelled: a sample
+    # whose only outbound traffic is an ICMP probe used to render as a sample
+    # with no network activity at all.
+    icmp: list[dict[str, Any]] = Field(default_factory=list)
     pcap_local_path: str | None = None
 
 
@@ -154,7 +158,7 @@ class SandboxReport(BaseModel):
     raw: dict[str, Any] = Field(default_factory=dict)
     _validate_raw = field_validator("raw", mode="wrap")(_dict_identity_or_validate)
     # Ruled in during the pre-flight scan, beyond the brief's own field list:
-    # persistence_extractor's Linux path rules read both of these directly
+    # an agent hunting Linux persistence reads both of these directly
     # (``behavior.summary.{files,write_files,modified_files,wrote_files}`` and
     # the top-level ``file_writes``/``files_written`` arrays) and keep only
     # the string entries of each (its own ``isinstance(p, str)`` guard) — a
@@ -192,7 +196,21 @@ class SandboxRun(BaseModel):
     error: str = ""
 
 
-_SUMMARY_KEYS: tuple[str, ...] = ("files", "write_files", "modified_files", "wrote_files")
+_SUMMARY_KEYS: tuple[str, ...] = (
+    "files",
+    "write_files",
+    "modified_files",
+    "wrote_files",
+    # The three channels an agent asks about when it is hunting persistence
+    # and host artefacts. They were passed over while the report's dynamic
+    # section was recomputed from ``behavior`` inside the report builder; now
+    # that an agent has to ask, a channel the render drops is a question the
+    # agent cannot get an answer to.
+    "mutexes",
+    "executed_commands",
+    "created_services",
+    "started_services",
+)
 
 # Blocks a CAPE guest other than Windows publishes, and the namespaced channel
 # each one lands in. ``behavior.processes`` is shared across every guest and
@@ -337,6 +355,7 @@ def cape_report_to_sandbox_report(
             hosts=_rows(net.get("hosts")),
             domains=list(net.get("domains") or []),
             tls=_rows(net.get("tls")),
+            icmp=_rows(net.get("icmp")),
             pcap_local_path=net.get("pcap_local_path") or None,
         ),
         dropped_files=_rows(raw.get("dropped")),

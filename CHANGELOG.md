@@ -8,6 +8,37 @@ change landed on `main`.
 
 ### Added
 
+- **An evidence ledger.** Every tool call an analysis makes is written down as
+  it happens — the agent, the tool server, the arguments, the timing, whether
+  it worked, the result text and the parsed result when the tool answered JSON
+  — and the result the model reads is stamped with the entry's id (`[ev_0007]`)
+  so it can cite what it read. Ids are monotonic across the job. The ledger
+  reaches the pipeline state as an append-only `evidence_ledger`, is persisted
+  beside the report in one transaction, and is served by `GET
+  /api/v1/jobs/{job_id}/evidence` (filters `agent` and `tool`, paged, the job's
+  own ownership rules). `reporting.evidence_budget_bytes` caps what one agent
+  may keep: past it an entry keeps its call record and drops its output, and the
+  count reaches the truncation ledger, the job's stored run summary and the
+  report's own header, so a reader is told what they are not being shown. The
+  judge's tool calls go through the same recorder under `agent="judge"`.
+- **A structured findings channel.** An analyst may end its answer with a fenced
+  `maljan-findings` block holding JSON — `artifacts` (a kind, a label, a value
+  or columns and rows) and `findings` (a title, techniques, a confidence), each
+  naming the ledger ids it came from. Optional in both directions, validated
+  item by item with the failures dropped and counted, and stripped from the
+  prose before it goes anywhere. The three built-in prompts ask for it; the
+  CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE contract is unchanged.
+- **The report is assembled from that evidence.** `MalwareReport.sections` is
+  built by `reporting/ledger_report.py` — one builder per known tool, generic
+  fallbacks for a tool nobody has written yet, the agents' artifacts grouped by
+  kind and their findings as one table — and every section carries the entry
+  ids it was built from. `MalwareReport.evidence_index` lists the calls behind
+  them without repeating their output, the renderers print the sections
+  generically after the typed ones, and `run_summary.sections_without_evidence`
+  counts anything that can name neither an entry nor a finding.
+- **`network.icmp` is modelled.** A sample whose only outbound traffic was an
+  ICMP probe rendered as a sample with no network activity at all; the CAPE
+  render was dropping the list.
 - **Every analysis capability is a tool.** `src/maljan/tools/` holds the
   implementations as plain functions — identity and hashes, strings and typed
   IOCs, PE/ELF/Mach-O/APK structure, archives, documents, payload carving,
@@ -22,9 +53,13 @@ change landed on `main`.
   `uv sync --extra tools`.
 - **The sandbox report as tools.** `ToolRef(kind="sandbox")` resolves to
   in-process tools over the job's report — processes, network, signatures,
-  dropped files, platform channels and a raw section reader — so the dynamic
-  analyst can ask for what it needs instead of being handed the whole report as
-  chunked text.
+  dropped files, registry operations, the categorised API-call histogram,
+  mutexes, services and scheduled tasks, platform channels and a raw section
+  reader — so the dynamic analyst can ask for what it needs instead of being
+  handed the whole report as chunked text. The registry, API, mutex and
+  service answers project into `report.dynamic.registry_mods`,
+  `notable_apis` and the persistence list, which is what feeds the persistence
+  tab and the generated Sigma rule's registry selection.
 - **A measurement baseline profile.** `measurement` runs the same three
   analysts as `default` with every tool server withheld, the in-process sandbox
   tools withheld and the static provider forced to `none`.
@@ -60,6 +95,26 @@ change landed on `main`.
 
 ### Changed
 
+- **The report is built from the ledger, not recomputed beside it.**
+  `MalwareReportBuilder` no longer calls an extractor per section. Identity
+  comes from the `identify_file` and `hashes` calls when they ran and from the
+  routing minimum when they did not; `static`, `dynamic`, `network` and
+  `persistence` are projections of the same ledger
+  (`reporting/ledger_projection.py`) and stay empty when the matching tool was
+  never called. A typed section nobody filled is left out of the rendered
+  report rather than printed as an apology.
+- **capa and YARA reach the report as tool calls.** The evidence-only static
+  provider writes its own ledger entries (`agent="capa_yara"`), so its rule hits
+  print as sections like any other tool's and its capability counters still
+  reach the layers that read `report.static`.
+- **The static analyst's head chunk carries context, not a paste.** It keeps the
+  analysis path, the host path, the toolchain and the routing verdict, and drops
+  the pre-parsed section table, imports and strings — the analyst calls
+  `pe_info` and `strings` for those, and the ids their results carry are what
+  the report cites.
+- **The provider goldens freeze the sandbox tools' answers** over the same
+  98-report CAPE corpus, rather than the extractors' output, because that is the
+  normalisation contract now: what an agent sees when it asks.
 - **Tool-argument path pinning is shared.** The bare-filename guard moved from
   `ConfigurableAnalyst` to `agents/tool_pinning.pin_paths`, called by every
   analyst through `BaseAnalyst`, and now substitutes a different path per
@@ -186,6 +241,21 @@ change landed on `main`.
 
 ### Removed
 
+- **The report-only extractors.** `extractors/dynamic_extractor` and
+  `extractors/persistence_extractor` are deleted, and so are
+  `network_extractor.build_network_iocs` with its extraction helpers,
+  `sample_identity.build_sample_identity`,
+  `capa_yara.merge_static_evidence` and `pipeline/nodes._compact_static_summary`.
+  Each re-read the sample or the sandbox report inside the report builder and
+  reached its own conclusions, which is how a report could describe an import
+  table no analyst had looked at. What they classified and scored is kept —
+  format and platform detection, the packer and language signatures, the DGA
+  scorer and the homograph check, the emittable-address rules — and is applied
+  to what a run actually observed.
+- **`MAX_OUTPUTS_PER_AGENT`.** The per-agent cap of 40 captured tool outputs is
+  replaced by the byte budget above. `schemas/tool_evidence.CapturedToolOutput`
+  remains for one release as a converter (`LedgerEntry.to_captured` /
+  `from_captured`).
 - **The format reject gate.** `app.arun` no longer refuses a sample whose magic
   bytes name a non-Windows, non-Linux executable, and
   `sample_identity.unsupported_os_reason`, its foreign-format tables and

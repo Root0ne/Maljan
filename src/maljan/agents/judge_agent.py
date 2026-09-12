@@ -67,6 +67,7 @@ from maljan.core.token_ledger import TokenLedger, record_response_usage
 from maljan.core.truncation_ledger import TruncationLedger, record_judge_response
 from maljan.pipeline.mediation_models import MediatorVerdict
 from maljan.pipeline.state import AgentArgument
+from maljan.schemas.evidence import EvidenceCounter, LedgerEntry
 from maljan.schemas.isr_models import AgentISR
 from maljan.schemas.stix_models import Bundle
 
@@ -161,6 +162,16 @@ class JudgeAgent:
         # never ran.
         self.tools: list[Any] = []
         self.degradation_reasons: list[Any] = []
+        # The judge calls tools too — threat intel on a disputed indicator, an
+        # ATT&CK or family lookup — and a verdict that cites one has to be
+        # checkable the same way an analyst's claim is. Same counter as the
+        # analysts, so the ids are one sequence across the whole job.
+        self.evidence_counter: EvidenceCounter | None = None
+        # Accumulated across mediation rounds and drained by the judge node,
+        # for the reason the analysts' buffer is: ``mediate`` runs the loop
+        # once per round, and a buffer replaced on each of them would persist
+        # only the last round's calls while the earlier ones consumed ids.
+        self._evidence_entries: list[LedgerEntry] = []
 
     def _server_registry(self) -> Any | None:
         """The job's tool-server registry, or None when this judge runs bare."""
@@ -295,7 +306,14 @@ class JudgeAgent:
 
         self.logger.info("JudgeAgent starting ReAct agent loop with %d tools...", len(self.tools))
 
-        agent_executor = create_react_agent(self.llm, self.tools)
+        from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
+
+        # As in ``BaseAnalyst.execute_tool_loop``: without a container there is
+        # no counter, and one per mediation round would reissue ``ev_0001``.
+        if self.evidence_counter is None:
+            self.evidence_counter = EvidenceCounter()
+        recorder = EvidenceRecorder("judge", counter=self.evidence_counter)
+        agent_executor = create_react_agent(self.llm, record_tools(self.tools, recorder))
 
         messages = messages_pre
 
@@ -327,6 +345,16 @@ class JudgeAgent:
         except TimeoutError:
             self.logger.error("JudgeAgent ReAct timed out after %ds.", timeout)
             raise
+        finally:
+            # In a ``finally`` for the reason the analysts' loop uses one: a
+            # mediation that timed out still made the calls it made.
+            self._evidence_entries.extend(recorder.entries)
+
+    def drain_evidence_entries(self) -> list[LedgerEntry]:
+        """Every entry the judge's tool loops gathered, handing over ownership."""
+        entries = self._evidence_entries
+        self._evidence_entries = []
+        return entries
 
     @staticmethod
     def _has_explicit_dissent(isr_reports: dict[str, AgentISR] | None) -> bool:

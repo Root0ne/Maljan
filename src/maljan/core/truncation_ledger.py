@@ -184,6 +184,10 @@ class TruncationLedger:
         self.judge_invocations = 0
         self.judge_token_cap_hits = 0
 
+        # Evidence ledger byte budget (schemas.evidence.apply_budget).
+        self.evidence_entries = 0
+        self.evidence_trimmed = 0
+
         # STIX integrity pass (agents/judge_postprocess.enforce_bundle_integrity).
         self.integrity_invocations = 0
         self.integrity_objects_in = 0
@@ -230,6 +234,18 @@ class TruncationLedger:
             self.judge_invocations += 1
             if hit_token_cap:
                 self.judge_token_cap_hits += 1
+
+    # -- evidence ledger ----------------------------------------------------
+
+    def record_evidence_budget(self, *, entries: int, trimmed: int) -> None:
+        """Record one agent's ledger against its byte budget.
+
+        Both numbers, not just the loss: "12 entries trimmed" says nothing
+        without the total it was trimmed from.
+        """
+        with self._lock:
+            self.evidence_entries += max(0, int(entries))
+            self.evidence_trimmed += max(0, int(trimmed))
 
     # -- STIX integrity pass ------------------------------------------------
 
@@ -281,6 +297,9 @@ class TruncationLedger:
                 "judge_token_cap_rate": truncation_rate(
                     self.judge_token_cap_hits, self.judge_invocations
                 ),
+                "evidence_entries": self.evidence_entries,
+                "evidence_trimmed": self.evidence_trimmed,
+                "evidence_trim_rate": truncation_rate(self.evidence_trimmed, self.evidence_entries),
                 "integrity_invocations": self.integrity_invocations,
                 "integrity_objects_in": self.integrity_objects_in,
                 "integrity_objects_out": self.integrity_objects_out,
@@ -295,5 +314,8 @@ class TruncationLedger:
         """True when this run hit at least one bound — the P6 headline per run."""
         with self._lock:
             return bool(
-                self.tool_output_over_limit or self.react_step_cap_hits or self.judge_token_cap_hits
+                self.tool_output_over_limit
+                or self.react_step_cap_hits
+                or self.judge_token_cap_hits
+                or self.evidence_trimmed
             )

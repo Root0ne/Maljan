@@ -1,0 +1,8 @@
+{
+  "capabilities": [
+    {"namespace": "host-interaction/process/inject", "rule": "inject code",
+     "attck": ["Defense Evasion::Process Injection [T1055]"], "mbc": [], "match_count": 2}
+  ],
+  "meta": {"capa_version": "7.0", "format": "pe", "arch": "i386", "os": "windows",
+           "rule_count": 900, "sha256": ""}
+}

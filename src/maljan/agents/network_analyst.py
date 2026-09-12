@@ -23,10 +23,8 @@ from __future__ import annotations
 import os
 import re
 
-from langchain_core.prompts import ChatPromptTemplate
-
 from maljan.agents.base_agent import BaseAnalyst, prompt_to_messages, revision_messages
-from maljan.agents.prompt_fragments import format_fragment
+from maljan.agents.prompt_fragments import FINDINGS_BLOCK_FRAGMENT, format_fragment
 from maljan.agents.registry import register_agent
 from maljan.agents.static_analyst import _parse_claim_blocks, _parse_disputes
 from maljan.schemas.isr_models import AgentISR
@@ -44,9 +42,10 @@ _NET_HEAD = (
     "T1048 (Exfiltration), T1568 (Dynamic Resolution).\n\n"
 )
 
-# Empty today, declared for the same reason the other analysts declare theirs:
-# the assembly order is a contract, and an implicit empty tail is a trap.
-_NET_TAIL = ""
+# The optional structured channel, appended last for the same reason the other
+# analysts append theirs: the assembly order is a contract, and this is the
+# last thing the analyst reads before it answers.
+_NET_TAIL = FINDINGS_BLOCK_FRAGMENT
 
 # Back-compat, and the fallback for an analyst built outside a container: the
 # neutral assembly. A running job sends the container's resolved prompt
@@ -175,11 +174,11 @@ class NetworkAnalyst(BaseAnalyst):
         if mcp_ready:
             content = self.execute_tool_loop(prompt_messages)
         else:
-            from langchain_core.prompts import ChatPromptTemplate as CPT
-
-            prompt = CPT.from_messages(prompt_messages)
-            response = (prompt | self.llm).invoke({})
-            content = str(response.content)
+            # Messages, not a template: the resolved system prompt carries a
+            # literal JSON example and a template would read its braces as
+            # variables.
+            response = self.llm.invoke(prompt_to_messages(prompt_messages))
+            content = self._capture_findings(str(response.content))
 
         return str(content)
 
@@ -304,9 +303,11 @@ class NetworkAnalyst(BaseAnalyst):
         if mcp_ready:
             content = self.execute_tool_loop(prompt_messages)
         else:
-            prompt = ChatPromptTemplate.from_messages(prompt_messages)
-            response = (prompt | self.llm).invoke({})
-            content = str(response.content)
+            # Messages, not a template: the resolved system prompt carries a
+            # literal JSON example and a template would read its braces as
+            # variables.
+            response = self.llm.invoke(prompt_to_messages(prompt_messages))
+            content = self._capture_findings(str(response.content))
 
         claims = _parse_claim_blocks(content)
 
@@ -341,8 +342,13 @@ class NetworkAnalyst(BaseAnalyst):
             isr=True,
             revision_round=revision_round,
         )
+        # Through the findings capture like every other answer: the resolved
+        # system prompt ends with the findings-block instruction, so a model
+        # that obeys it puts a JSON fence into the revised report, and nothing
+        # downstream of here — the claim parser, the transcript, the Composer —
+        # should ever see it.
         response = self.llm.invoke(prompt_to_messages(messages))
-        content = str(response.content)
+        content = self._capture_findings(str(response.content))
 
         claims = _parse_claim_blocks(content)
         dissent = _parse_disputes(content)

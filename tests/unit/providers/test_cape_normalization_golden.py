@@ -3,7 +3,7 @@
 Three properties, one file:
   (a) a CAPE-sourced report renders to *the same object* it came from, so no
       consumer can observe the provider layer at all;
-  (b) the extractors agree on the rendered dict and on the raw one;
+  (b) the sandbox tools answer the same on the rendered dict and on the raw one;
   (c) with ``raw`` emptied — the path a non-CAPE provider takes — the render
       still carries every key the nine consumers read.
 """
@@ -12,12 +12,10 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.extractors.dynamic_extractor import build_dynamic_behavior
-from maljan.extractors.network_extractor import build_network_iocs
-from maljan.extractors.persistence_extractor import build_persistence_list
 from maljan.providers.cape_view import to_cape_shaped_dict
 from maljan.schemas.sandbox_report import cape_report_to_sandbox_report
-from tests.unit.providers.test_extractor_golden import cape_reports, dump
+from tests.unit._ledger_helpers import sandbox_view
+from tests.unit.providers.test_sandbox_tools_golden import cape_reports
 
 _REPORTS = cape_reports()
 _IDS = [n for n, _ in _REPORTS]
@@ -31,8 +29,8 @@ _IDS = [n for n, _ in _REPORTS]
 #   gap rather than leave it silently untested.
 # - The four ``behavior.summary.*`` keys and the top-level ``file_writes``
 #   array are the two model additions ruled in during the pre-flight scan —
-#   the brief's own consumer-key table names them (persistence_extractor's
-#   Linux path rules read all six), but its own render code only reproduced
+#   the brief's own consumer-key table names them (an agent hunting Linux
+#   persistence reads all six), but its own render code only reproduced
 #   ``behavior.summary`` as a bare ``{"keys": [...]}`` shell, so they are
 #   listed here individually rather than folded into one dict-shaped entry.
 #
@@ -88,10 +86,9 @@ def test_cape_render_is_the_same_object(name, raw):
 
 
 @pytest.mark.parametrize("name,raw", _REPORTS, ids=_IDS)
-def test_extractors_agree_on_rendered_and_raw(name, raw):
+def test_the_tools_answer_the_same_on_rendered_and_raw(name, raw):
     rendered = to_cape_shaped_dict(cape_report_to_sandbox_report(raw, provider="cape2"))
-    assert dump(build_dynamic_behavior(rendered)) == dump(build_dynamic_behavior(raw))
-    assert dump(build_network_iocs(rendered)) == dump(build_network_iocs(raw))
+    assert sandbox_view(rendered) == sandbox_view(raw)
 
 
 @pytest.mark.parametrize("name,raw", _REPORTS[:5], ids=_IDS[:5])
@@ -107,26 +104,26 @@ def test_the_render_reproduces_every_consumer_key_without_the_short_circuit(name
 
 
 @pytest.mark.parametrize("name,raw", _REPORTS[:5], ids=_IDS[:5])
-def test_the_rendered_extractors_still_find_what_the_raw_ones_found(name, raw):
+def test_the_rendered_report_still_answers_what_the_raw_one_answered(name, raw):
     """The rendered dict is not merely shaped right; it carries the same evidence."""
     report = cape_report_to_sandbox_report(raw, provider="cape2").model_copy(update={"raw": {}})
     rendered = to_cape_shaped_dict(report)
-    raw_dyn, new_dyn = build_dynamic_behavior(raw), build_dynamic_behavior(rendered)
-    if raw_dyn is None:
-        assert new_dyn is None
-    else:
-        assert new_dyn is not None
-        assert len(new_dyn.process_tree) == len(raw_dyn.process_tree)
-        assert [s.name for s in new_dyn.sandbox_signatures] == [
-            s.name for s in raw_dyn.sandbox_signatures
-        ]
-    raw_net, new_net = build_network_iocs(raw), build_network_iocs(rendered)
-    if raw_net is None:
-        assert new_net is None
-    else:
-        assert new_net is not None
-        assert {d.fqdn for d in new_net.domains} == {d.fqdn for d in raw_net.domains}
-        assert {i.address for i in new_net.ips} == {i.address for i in raw_net.ips}
+    raw_view, new_view = sandbox_view(raw), sandbox_view(rendered)
+    assert len(new_view["sandbox_processes"]["processes"]) == len(
+        raw_view["sandbox_processes"]["processes"]
+    )
+    assert [s["name"] for s in new_view["sandbox_signatures"]["signatures"]] == [
+        s["name"] for s in raw_view["sandbox_signatures"]["signatures"]
+    ]
+    # Empty kinds are dropped before the comparison: the render carries a
+    # ``tls`` placeholder the raw report does not and omits an ``icmp`` one it
+    # does, and neither absence is evidence about the sample.
+    assert _nonempty(new_view["sandbox_network"]) == _nonempty(raw_view["sandbox_network"])
+
+
+def _nonempty(view: dict) -> dict:
+    """One tool answer with the kinds it found nothing for left out."""
+    return {key: value for key, value in view.items() if value}
 
 
 def test_pcap_path_and_unavailable_survive_the_render():
@@ -140,15 +137,12 @@ def test_pcap_path_and_unavailable_survive_the_render():
     assert rendered["unavailable"] == ["apistats", "calls"]
 
 
-def test_file_writes_reaches_persistence_extractor_the_same_from_raw_and_rendered():
-    """Review finding: ``file_writes``/``registry`` were filtered with ``_rows``
-    (dict entries only), but the real shape — and the only shape
-    ``persistence_extractor`` reads (its own ``isinstance(p, str)`` guard) —
-    is a flat list of path strings. The dict-only filter silently dropped
-    every real entry on the non-short-circuit render path. Asserted through
-    the real consumer rather than a shape check, per the review: the set of
-    persistence mechanisms ``build_persistence_list`` finds must be identical
-    whether it is fed the raw dict or the rendered one.
+def test_file_writes_survives_the_render_as_the_flat_list_it_is():
+    """Carried finding: ``file_writes``/``registry`` were filtered with ``_rows``
+    (dict entries only), but the real shape is a flat list of path strings, so
+    the dict-only filter silently dropped every real entry on the
+    non-short-circuit render path. The agent that reads this section asks for
+    it by name, so the assertion is on what that call returns.
     """
     raw = {
         "target": {"sha256": "a" * 64},
@@ -159,9 +153,9 @@ def test_file_writes_reaches_persistence_extractor_the_same_from_raw_and_rendere
     assert rendered is not raw
     assert rendered["file_writes"] == ["/etc/rc.local", "/etc/ld.so.preload"]
 
-    raw_mechanisms = build_persistence_list(raw, sample_platform="linux")
-    rendered_mechanisms = build_persistence_list(rendered, sample_platform="linux")
-    assert len(raw_mechanisms) == 2
-    assert {(m.kind, m.target) for m in rendered_mechanisms} == {
-        (m.kind, m.target) for m in raw_mechanisms
-    }
+    from maljan.providers.sandbox_tools import sandbox_report_section
+
+    raw_section = sandbox_report_section(raw, "file_writes")
+    rendered_section = sandbox_report_section(rendered, "file_writes")
+    assert raw_section["rows"] == ["/etc/rc.local", "/etc/ld.so.preload"]
+    assert rendered_section == raw_section

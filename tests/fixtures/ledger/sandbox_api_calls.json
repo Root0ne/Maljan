@@ -1,0 +1,14 @@
+{
+  "apis": [
+    {
+      "api": "VirtualAllocEx",
+      "count": 4,
+      "category": "process_injection",
+      "suspicious": true,
+      "first_args": "{'ProcessHandle': '0x1a4', 'Size': 4096}"
+    },
+    {"api": "RegSetValueExA", "count": 3, "category": "registry", "suspicious": true,
+     "first_args": ""}
+  ],
+  "total": 2
+}

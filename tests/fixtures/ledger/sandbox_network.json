@@ -1,0 +1,5 @@
+{
+  "dns": [{"request": "c2.evil.tld", "type": "A"}],
+  "http": [{"uri": "http://c2.evil.tld/gate.php", "method": "POST"}],
+  "tcp": [{"dst": "185.220.101.5", "dport": 443}]
+}

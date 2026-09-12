@@ -1,9 +1,17 @@
 """Assemble the deterministic part of a ``MalwareReport``.
 
-The builder is intentionally simple: it owns the pipeline inputs as
-attributes and calls each extractor in turn. Each extractor is robust to
-missing inputs, so the builder degrades gracefully — a sample-only run
-(no sandbox) still produces a useful identity + static section.
+The builder used to call an extractor per section: one re-parsed the PE, one
+re-read the sandbox report for behaviour, one for network, one for
+persistence. Every one of them worked from the same inputs the agents had and
+reached its own conclusions, so a report could describe an import table no
+analyst had looked at and a Run key no analyst had mentioned.
+
+It builds from the evidence ledger now. ``sections`` come from what the tools
+returned and what the agents established; the typed blocks (``static``,
+``dynamic``, ``network``, ``persistence``) are projections of the same ledger,
+kept because several layers still read them and empty whenever the matching
+tool was never called. The only file the builder still opens is the sample
+itself, for the hashes and size a report cannot be without.
 
 ``build_deterministic()`` is the entry point used by ``report_node``. The
 narrative LLM pass and detection-rule auto-generator are applied by
@@ -19,24 +27,27 @@ from typing import TYPE_CHECKING, Any
 from maljan.core.logger import logger
 from maljan.extractors.attribution import build_family_attribution
 from maljan.extractors.capability_matrix import build_capability_matrix
-from maljan.extractors.dynamic_extractor import build_dynamic_behavior
-from maljan.extractors.network_extractor import build_network_iocs
-from maljan.extractors.pe_extractor import build_static_analysis
-from maljan.extractors.persistence_extractor import build_persistence_list
-from maljan.extractors.sample_identity import build_sample_identity
+from maljan.reporting.ledger_projection import (
+    dynamic_from_ledger,
+    identity_from_ledger,
+    network_from_ledger,
+    persistence_from_ledger,
+    static_from_ledger,
+)
+from maljan.reporting.ledger_report import build_sections
 from maljan.reporting.models import (
     ConsolidatedIOC,
     DefensiveRecommendation,
+    EvidenceIndexRow,
     ExternalReference,
     MalwareReport,
     ReportFrontMatter,
     SeverityAssessment,
-    StaticAnalysis,
     VersionHistoryEntry,
 )
 
 if TYPE_CHECKING:
-    from maljan.providers.base import StaticEvidenceBundle
+    from maljan.schemas.evidence import LedgerEntry
 
 
 class MalwareReportBuilder:
@@ -71,7 +82,8 @@ class MalwareReportBuilder:
         degraded_mode: bool = False,
         degradation_reasons: list[str] | None = None,
         sample_platform: str | None = None,
-        static_evidence: StaticEvidenceBundle | None = None,
+        sample_file_type: str | None = None,
+        evidence_ledger: list[LedgerEntry] | None = None,
     ) -> None:
         self.file_hash = file_hash
         self.file_name = file_name
@@ -89,38 +101,35 @@ class MalwareReportBuilder:
         self.degraded_mode = degraded_mode
         self.degradation_reasons = degradation_reasons or []
         self.sample_platform = sample_platform
-        # Evidence-only static providers (capa_yara) have no ISR and no tool
-        # loop to thread findings through; report_node collects this once,
-        # before the builder is constructed, and it is folded into
-        # ``static`` right after the PE extractor runs, below.
-        self.static_evidence = static_evidence
+        self.sample_file_type = sample_file_type
+        # Every tool call the run made, in the order the ids were issued. The
+        # report's sections and its typed blocks are both built from this and
+        # from the agents' own artifacts; an empty ledger means an empty
+        # report body, which is the honest outcome for a run that gathered
+        # nothing.
+        self.evidence_ledger = list(evidence_ledger or [])
 
     # ------------------------------------------------------------------
     # Deterministic build
     # ------------------------------------------------------------------
 
     def build_deterministic(self) -> MalwareReport:
-        """Run every extractor and return a deterministic ``MalwareReport``."""
-        identity = build_sample_identity(
+        """Build a deterministic ``MalwareReport`` out of the evidence ledger."""
+        identity = identity_from_ledger(
+            self.evidence_ledger,
             sample_path=self.sample_path,
-            sandbox_report=self.sandbox_report,
-            file_hash=self.file_hash,
             file_name=self.file_name,
+            file_hash=self.file_hash,
+            file_type=self.sample_file_type or "unknown",
+            platform=self.sample_platform or "unknown",
         )
-        static = build_static_analysis(sample_path=self.sample_path)
-        if self.static_evidence is not None:
-            from maljan.providers.static.capa_yara import merge_static_evidence
-
-            # M5 (final review): a non-PE sample, or one pefile could not
-            # parse, made ``build_static_analysis`` return None — and this
-            # used to drop the capa/YARA bundle on the floor right there,
-            # precisely when capa is the *only* static evidence there is.
-            # An empty ``StaticAnalysis`` (every field defaults) is the same
-            # shell the merge would otherwise start folding evidence into.
-            static = merge_static_evidence(static or StaticAnalysis(), self.static_evidence)
-        dynamic = build_dynamic_behavior(self.sandbox_report)
-        network = build_network_iocs(self.sandbox_report)
-        persistence = build_persistence_list(self.sandbox_report, self.sample_platform)
+        # The typed blocks are projections, not a second analysis: each is
+        # filled from the tools that were actually called and the artifacts the
+        # analysts actually established, and each stays empty otherwise.
+        static = static_from_ledger(self.evidence_ledger, self.isr_reports)
+        dynamic = dynamic_from_ledger(self.evidence_ledger, self.isr_reports)
+        network = network_from_ledger(self.evidence_ledger, self.isr_reports)
+        persistence = persistence_from_ledger(self.evidence_ledger, self.isr_reports)
         cells, mappings = build_capability_matrix(
             cascade_summary=self.cascade_summary,
             isr_reports=self.isr_reports,
@@ -179,6 +188,28 @@ class MalwareReportBuilder:
             stix_bundle_extended=self.stix_output,
             references=references,
         )
+        # The sections the report is actually made of, and the index of the
+        # calls behind them. Built last so a section builder can never affect
+        # the verdict, the severity or the STIX bundle above it.
+        report.sections = build_sections(
+            self.evidence_ledger,
+            self.isr_reports,
+            identity.file_type,
+            str(identity.platform),
+        )
+        report.evidence_index = [
+            EvidenceIndexRow(
+                id=entry.id,
+                agent=entry.agent,
+                server=entry.server,
+                tool=entry.tool,
+                ok=entry.ok,
+                duration_ms=entry.duration_ms,
+                truncated=entry.truncated,
+            )
+            for entry in self.evidence_ledger
+        ]
+
         # Deterministic front-matter, version history,
         # and consolidated IOC table (the professional-report scaffolding the
         # Composer's prose sits inside). All derived from already-built fields.
@@ -188,12 +219,15 @@ class MalwareReportBuilder:
         report.consolidated_iocs = build_consolidated_iocs(report)
         logger.info(
             "MalwareReportBuilder: deterministic build complete "
-            "(verdict=%s, severity=%s, TTPs=%d, persistence=%d, IOCs=%d)",
+            "(verdict=%s, severity=%s, TTPs=%d, persistence=%d, IOCs=%d, "
+            "sections=%d, evidence=%d)",
             report.verdict,
             report.severity.rating,
             len(report.ttp_mappings),
             len(report.persistence),
             _ioc_count(report),
+            len(report.sections),
+            len(report.evidence_index),
         )
         return report
 

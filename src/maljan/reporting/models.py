@@ -705,6 +705,63 @@ class Conclusion(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Evidence-built sections
+# ---------------------------------------------------------------------------
+
+
+class EvidenceSection(BaseModel):
+    """One report section built from what the tools and the agents produced.
+
+    The typed blocks above model the shapes this project knew in advance: a PE
+    section table, a process tree, a persistence mechanism. A tool server
+    nobody has written yet produces shapes nothing here models, and a report
+    that could only print what it modelled would silently drop them.
+
+    So a section carries its own shape — a table, a key/value block, a list or
+    a paragraph — and, more importantly, the ledger entry ids it was built
+    from. ``evidence_ids`` is what makes the section checkable: a reader can
+    ask the evidence endpoint for ``ev_0007`` and see the call the row came
+    out of. A section with neither an evidence id nor a ``source`` naming the
+    finding it came from is counted in the run summary and is a defect.
+    """
+
+    model_config = _STRICT_CONFIG
+
+    key: str
+    title: str
+    kind: Literal["table", "kv", "text", "list"] = "text"
+    columns: list[str] = Field(default_factory=list)
+    rows: list[list[str]] = Field(default_factory=list)
+    text: str = ""
+    items: list[str] = Field(default_factory=list)
+    evidence_ids: list[str] = Field(default_factory=list)
+    # Where the section came from: ``tool``, ``routing``, ``agent`` or
+    # ``agent:<name>``. Read by the grounding check, which accepts a finding
+    # source in place of an evidence id.
+    source: str = ""
+
+
+class EvidenceIndexRow(BaseModel):
+    """One line of the report's index of the calls behind it.
+
+    Deliberately without the output: the report says which call happened, how
+    long it took and whether it worked, and the evidence endpoint serves what
+    it returned. Embedding every output would put the whole ledger inside the
+    report's JSONB column twice.
+    """
+
+    model_config = _STRICT_CONFIG
+
+    id: str
+    agent: str = ""
+    server: str | None = None
+    tool: str = ""
+    ok: bool = True
+    duration_ms: int = 0
+    truncated: bool = False
+
+
+# ---------------------------------------------------------------------------
 # Top-level report
 # ---------------------------------------------------------------------------
 
@@ -779,6 +836,14 @@ class MalwareReport(BaseModel):
     # upstream (see ``schemas.tool_evidence``); kept out of the STIX / FP-linter
     # paths. Empty on legacy rows and mock runs.
     technical_evidence: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
+
+    # --- Sections built from the evidence ledger ---
+    # Everything the tools and the agents produced that the typed blocks above
+    # have no field for, each carrying the ledger ids it was built from. The
+    # renderers print these after the typed sections; ``evidence_index`` is the
+    # list of calls behind them, without their outputs.
+    sections: list[EvidenceSection] = Field(default_factory=list)
+    evidence_index: list[EvidenceIndexRow] = Field(default_factory=list)
 
     # --- Professional-report front-matter & spine ---
     # All additive/optional. Deterministic extractors fill front_matter /

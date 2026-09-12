@@ -69,6 +69,12 @@ class StaticEvidenceBundle:
     technique_hits: list[dict[str, Any]] = field(default_factory=list)
     strings: list[dict[str, Any]] = field(default_factory=list)
     technical_evidence: dict[str, str] = field(default_factory=dict)
+    # The rule hits themselves, in the shape the ``capa`` and ``yara_scan``
+    # tools return them. A provider with no tool loop still has to reach the
+    # report the way every other tool does — as ledger entries — and a
+    # rendered Markdown table is not something the section builders can read.
+    capa_rules: list[dict[str, Any]] = field(default_factory=list)
+    yara_matches: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

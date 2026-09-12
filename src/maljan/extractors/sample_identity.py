@@ -1,95 +1,25 @@
-"""Extract the SampleIdentity block of the MalwareReport.
+"""What a sample is: its format, its platform, and how it was built.
 
-Inputs that may be available:
+This module used to assemble the report's identity block as well. It does not
+any more — that block comes from the ``identify_file`` and ``hashes`` tools, or
+from the routing minimum when neither was called
+(``reporting.ledger_projection``). What is left is the classification the
+routing layer, the prompt fragments and ``tools/identify`` all read: the magic
+and extension tables behind ``detect_file_type``, the platform inference,
+the language/compiler signatures and the container-format reasons.
 
-- Sample bytes on disk (``sample_path``) — exact hashes, magic bytes, size.
-- Sandbox report (CAPEv2 ``target`` block) — file_name, hashes pre-
-  computed by the sandbox.
-
-The extractor merges both, preferring locally computed hashes when the
-bytes are reachable (cheap & deterministic) and falling back to the
-sandbox-reported values otherwise. Optional fuzzy hashes (``ssdeep``,
-``tlsh``) are computed when the corresponding library is installed; the
-fields are ``None`` otherwise — never crash.
+Graceful degradation is the rule: an unreadable sample yields ``unknown``,
+never an exception.
 """
 
 from __future__ import annotations
 
-import hashlib
 import io
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from maljan.core.logger import logger
-from maljan.reporting.models import FileHashes, Platform, SampleIdentity, SignatureInfo
-
-
-def build_sample_identity(
-    *,
-    sample_path: str | None,
-    sandbox_report: dict[str, Any] | None,
-    file_hash: str | None,
-    file_name: str | None,
-) -> SampleIdentity:
-    """Assemble a ``SampleIdentity`` from whatever inputs are available.
-
-    ``file_hash`` is the canonical sha256 the pipeline runs under; we treat
-    it as authoritative when present and skip recomputing it from disk.
-    """
-    target = (sandbox_report or {}).get("target", {})
-    sandbox_file = target.get("file") if isinstance(target, dict) else {}
-    if not isinstance(sandbox_file, dict):
-        sandbox_file = {}
-
-    name = (
-        file_name or sandbox_file.get("name") or (Path(sample_path).name if sample_path else None)
-    )
-
-    bytes_blob: bytes | None = None
-    file_size = int(sandbox_file.get("size") or 0)
-    magic_bytes = ""
-    file_type = "unknown"
-    mime_type: str | None = (
-        sandbox_file.get("type") if isinstance(sandbox_file.get("type"), str) else None
-    )
-
-    if sample_path:
-        try:
-            path = Path(sample_path)
-            if path.exists() and path.is_file():
-                bytes_blob = path.read_bytes()
-                if not file_size:
-                    file_size = len(bytes_blob)
-                magic_bytes = bytes_blob[:16].hex()
-                file_type = _detect_file_type(path, bytes_blob)
-                mime_type = mime_type or _guess_mime(path)
-        except OSError as exc:
-            logger.warning("sample_identity: could not read %s (%s)", sample_path, exc)
-
-    hashes = _compute_hashes(
-        bytes_blob=bytes_blob,
-        sha256_override=file_hash or sandbox_file.get("sha256"),
-        sandbox_file=sandbox_file,
-    )
-
-    compile_ts = _extract_compile_timestamp(bytes_blob)
-    language = _detect_language_or_compiler(bytes_blob)
-    signing = _extract_signing(bytes_blob)
-    platform = _infer_platform(file_type, mime_type, sandbox_report, language)
-
-    return SampleIdentity(
-        hashes=hashes,
-        file_name=name,
-        file_size_bytes=file_size,
-        file_type=file_type,
-        platform=platform,
-        mime_type=mime_type,
-        magic_bytes=magic_bytes,
-        compile_timestamp=compile_ts,
-        language_or_compiler=language,
-        signing=signing,
-    )
+from maljan.reporting.models import Platform, SignatureInfo
 
 
 def _infer_platform(
@@ -153,43 +83,6 @@ def _infer_platform(
         return "windows"
 
     return "unknown"
-
-
-def _compute_hashes(
-    *,
-    bytes_blob: bytes | None,
-    sha256_override: str | None,
-    sandbox_file: dict[str, Any],
-) -> FileHashes:
-    """Compute hashes from bytes when available, otherwise trust the sandbox."""
-    if bytes_blob is not None:
-        # MD5 and SHA1 below are sample fingerprints (VirusTotal, MalwareBazaar,
-        # MISP all index by them); they are NOT used as cryptographic
-        # signatures. ``usedforsecurity=False`` is the canonical Python opt-out
-        # but Semgrep's default rule doesn't recognise it — we suppress here
-        # rather than weaken the fingerprint set.
-        return FileHashes(
-            md5=hashlib.md5(
-                bytes_blob, usedforsecurity=False
-            ).hexdigest(),  # nosemgrep: insecure-hash-algorithm-md5
-            # nosemgrep: python.lang.security.insecure-hash-algorithms.insecure-hash-algorithm-sha1
-            sha1=hashlib.sha1(bytes_blob, usedforsecurity=False).hexdigest(),
-            sha256=(sha256_override or hashlib.sha256(bytes_blob).hexdigest()),
-            sha512=hashlib.sha512(bytes_blob).hexdigest(),
-            imphash=_safe_imphash(bytes_blob),
-            ssdeep=_safe_ssdeep(bytes_blob),
-            tlsh=_safe_tlsh(bytes_blob),
-        )
-
-    return FileHashes(
-        md5=sandbox_file.get("md5"),
-        sha1=sandbox_file.get("sha1"),
-        sha256=sha256_override or sandbox_file.get("sha256") or "unknown",
-        sha512=sandbox_file.get("sha512"),
-        imphash=sandbox_file.get("imphash"),
-        ssdeep=sandbox_file.get("ssdeep"),
-        tlsh=sandbox_file.get("tlsh"),
-    )
 
 
 # Magic-byte prefixes that identify a format on their own, longest first so a

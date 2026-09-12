@@ -1,0 +1,8 @@
+{
+  "strings": [
+    {"offset": 4160, "enc": "ascii", "text": "http://c2.evil.tld/gate.php"},
+    {"offset": 4224, "enc": "utf16le", "text": "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run"}
+  ],
+  "total": 2,
+  "truncated": false
+}

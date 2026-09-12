@@ -341,6 +341,7 @@ class MaljanApp:
             "reports": {},
             "revised_reports": {},
             "isr_reports": {},
+            "evidence_ledger": [],
             "tool_evidence": {},
             "discussion_history": [],
             "sycophancy_detected": False,

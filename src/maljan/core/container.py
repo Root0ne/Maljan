@@ -44,6 +44,7 @@ from maljan.core.truncation_ledger import TruncationLedger
 from maljan.llm.registry import LLMProviderRegistry
 from maljan.loaders.file_loader import FileDataLoader
 from maljan.parsers.registry import ParserRegistry
+from maljan.schemas.evidence import EvidenceCounter
 
 if TYPE_CHECKING:
     from maljan.agents.base_agent import BaseAnalyst
@@ -198,6 +199,10 @@ class ServiceContainer:
         # ledger: written to at every bound, snapshotted by the judge node.
         # Truncation is designed into this pipeline and has never been counted.
         self._truncation_ledger = TruncationLedger()
+
+        # Per-job source of evidence-ledger ids. One counter for the whole job
+        # so ``ev_0007`` names one tool call rather than one per agent.
+        self._evidence_counter = EvidenceCounter()
 
         _LIVE_CONTAINERS.add(self)
         _register_retirement_hook()
@@ -403,6 +408,35 @@ class ServiceContainer:
         """Return the per-run truncation ledger (pitfall P6)."""
         return self._truncation_ledger
 
+    def get_evidence_counter(self) -> EvidenceCounter:
+        """Return the per-job counter that issues evidence-ledger ids."""
+        return self._evidence_counter
+
+    def drain_all_judge_evidence(self) -> list[Any]:
+        """Every entry the judge agents gathered, drained from each cached role.
+
+        The judge is cached per role and the roles are different objects: the
+        negotiation node mediates on ``expert`` and the verdict runs on
+        ``judge``. Only ``mediate`` reaches a tool loop, so a node that drained
+        one instance by name drained the wrong one and the mediation's calls
+        were never written down. Draining every cached role removes the
+        question of which instance recorded what, and it is safe to call twice
+        because a drain leaves nothing behind.
+        """
+        with self._lock:
+            judges = list(self._judge_agent_cache.values())
+        entries: list[Any] = []
+        for judge in judges:
+            drain = getattr(judge, "drain_evidence_entries", None)
+            if drain is None:
+                continue
+            try:
+                entries.extend(drain())
+            except Exception as exc:  # noqa: BLE001 — a ledger read never fails a run
+                logger.debug("evidence drain skipped for a judge agent: %s", exc)
+        entries.sort(key=lambda entry: getattr(entry, "seq", 0))
+        return entries
+
     # ------------------------------------------------------------------
     # Composition accessors
     # ------------------------------------------------------------------
@@ -477,6 +511,7 @@ class ServiceContainer:
                     agent.logger = agent.logger.getChild(name.lower())
             agent.token_ledger = getattr(self, "_token_ledger", None)
             agent.truncation_ledger = getattr(self, "_truncation_ledger", None)
+            agent.evidence_counter = getattr(self, "_evidence_counter", None)
             # Hand the agent a way back to this container. The static analyst
             # used to construct a *whole new* ServiceContainer on every failed
             # MCP init — per chunk, so up to ten of them per run.
@@ -502,6 +537,7 @@ class ServiceContainer:
                 )
                 cached.token_ledger = getattr(self, "_token_ledger", None)
                 cached.truncation_ledger = getattr(self, "_truncation_ledger", None)
+                cached.evidence_counter = getattr(self, "_evidence_counter", None)
                 # Hand the judge a way back to this container, the same way
                 # ``get_agent`` does above. Without this, ``_server_registry()``
                 # always read ``None`` and the judge ran with zero threat-intel

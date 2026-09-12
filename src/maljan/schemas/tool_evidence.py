@@ -1,27 +1,27 @@
-"""Captured MCP/Ghidra tool outputs — durable raw material for deep reporting.
+"""The previous capture shape, kept while its readers migrate.
 
-The ReAct tool loop (``base_agent.execute_tool_loop``) previously discarded every
-``ToolMessage`` (``decompile_function``, ``detect_crypto_constants``,
-``emulate_function``, ``analyze_dataflow``, …), returning only the model's final
-prose. That made a professional technical spine (encryption-scheme reversing,
-CLI-flag tables, ransom-note extraction, per-function walkthroughs) impossible —
-the only durable analyst signal was the ≤200-char ``ClaimEvidence.evidence_ref``.
+Superseded by ``schemas.evidence.LedgerEntry``, which records the same call
+with an id to cite it by, its timing, its outcome and its parsed result.
+``LedgerEntry.to_captured`` and ``LedgerEntry.from_captured`` convert between
+the two, so a consumer written against this model keeps working for a release.
 
-This module defines the structured, size-capped container the loop now emits so
-the report Composer (and an optional appendix) can ground deep sections in real
-tool output instead of hallucinating. Capture is best-effort: it must never break
-an analysis, and it is trimmed hard so it cannot blow the token / JSONB budget.
+What it holds is one ReAct tool call paired with its result — the loop used to
+return only the model's final prose, so the only durable analyst signal was the
+200-character ``ClaimEvidence.evidence_ref`` and no report section could be
+grounded in what a tool actually said. Capture is best-effort and hard-trimmed:
+it must never break an analysis, and it must never blow the JSONB budget.
 """
 
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# Hard caps so captured evidence can never blow the token / JSONB budget. The
+# A hard cap so captured evidence can never blow the token / JSONB budget. The
 # tool outputs are already guardrail-capped inside ``ghidra_http_client`` /
-# ``max_tool_output_chars``; these are a second, report-facing ceiling.
+# ``max_tool_output_chars``; this is a second, report-facing ceiling. How much
+# an agent may keep is a byte budget now rather than a call count —
+# ``report.evidence_budget_bytes``, applied in ``schemas.evidence``.
 MAX_OUTPUT_CHARS: int = 6000
-MAX_OUTPUTS_PER_AGENT: int = 40
 
 
 class CapturedToolOutput(BaseModel):

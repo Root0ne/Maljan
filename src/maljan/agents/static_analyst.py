@@ -13,7 +13,12 @@ from typing import Any
 
 from langchain_core.prompts import ChatPromptTemplate
 
-from maljan.agents.base_agent import BaseAnalyst, strip_tool_call_scaffolding
+from maljan.agents.base_agent import (
+    BaseAnalyst,
+    prompt_to_messages,
+    strip_tool_call_scaffolding,
+)
+from maljan.agents.prompt_fragments import FINDINGS_BLOCK_FRAGMENT
 from maljan.agents.registry import register_agent
 from maljan.providers.base import StaticJobContext
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
@@ -26,10 +31,10 @@ _ISR_HEAD = (
     "You are an expert Static Malware Analyst with 15 years of reverse engineering experience. "
 )
 
-# Empty today. Declared because the assembly order is the contract the tool
-# server and agent-composition layers build agent prompts from, and an
-# implicit empty tail is a trap.
-_ISR_TAIL = ""
+# The optional structured channel, appended after the provider fragment so it
+# is the last thing the analyst reads before it answers. The assembly order is
+# the contract the tool-server and agent-composition layers build prompts from.
+_ISR_TAIL = FINDINGS_BLOCK_FRAGMENT
 
 
 def _static_prompt(provider: Any | None = None) -> str:
@@ -734,7 +739,10 @@ class StaticAnalyst(BaseAnalyst):
             or "No peer reports available."
         )
 
-        prompt = ChatPromptTemplate.from_messages(
+        # Built as messages rather than through a template: the resolved system
+        # prompt carries a literal JSON example (the findings block), and a
+        # ``ChatPromptTemplate`` reads every ``{...}`` in it as a variable.
+        messages = prompt_to_messages(
             [
                 (
                     "system",
@@ -746,11 +754,15 @@ class StaticAnalyst(BaseAnalyst):
                 ),
                 (
                     "human",
-                    "YOUR ORIGINAL REPORT:\n{own_report}\n\n"
-                    "PEER REPORTS:\n{peer_section}\n\n"
-                    "MEDIATOR FEEDBACK:\n{mediator_feedback}\n\n"
-                    "RAW DATA:\n{data}\n\n"
-                    "Format your response as structured claims (CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE)\n"
+                    f"YOUR ORIGINAL REPORT:\n{own_report}\n\n"
+                    f"PEER REPORTS:\n{peer_isr_summaries}\n\n"
+                    f"MEDIATOR FEEDBACK:\n{mediator_feedback}\n\n"
+                    # Don't let the "No static data available" placeholder
+                    # talk the model out of its live-Ghidra ORIGINAL REPORT.
+                    "RAW DATA:\n"
+                    f"{_reframe_static_raw_data(original_data, bool(self.tools))}\n\n"
+                    "Format your response as structured claims "
+                    "(CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE)\n"
                     "followed by a DISPUTES section listing peer claims you reject.\n"
                     "Example:\n"
                     "CLAIM: ...\nEVIDENCE: ...\nCONFIDENCE: 0.8\nTECHNIQUE: T1055\n---\n"
@@ -759,17 +771,13 @@ class StaticAnalyst(BaseAnalyst):
             ]
         )
 
-        response = (prompt | self.llm).invoke(
-            {
-                "own_report": own_report,
-                "peer_section": peer_isr_summaries,
-                "mediator_feedback": mediator_feedback,
-                # Don't let the "No static data available" placeholder
-                # talk the model out of its live-Ghidra ORIGINAL REPORT.
-                "data": _reframe_static_raw_data(original_data, bool(self.tools)),
-            }
-        )
-        content = str(response.content)
+        # Through the findings capture like every other answer: the resolved
+        # system prompt ends with the findings-block instruction, so a model
+        # that obeys it puts a JSON fence into the revised report, and nothing
+        # downstream of here — the claim parser, the transcript, the Composer —
+        # should ever see it.
+        response = self.llm.invoke(messages)
+        content = self._capture_findings(str(response.content))
 
         parsed = _parse_claim_blocks(content)
         # Drop defeatist meta-claims ("could not be performed / missing

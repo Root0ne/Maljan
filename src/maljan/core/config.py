@@ -1501,6 +1501,13 @@ class ReportingConfig(BaseModel):
     # Server-side HTML→PDF export.
     html_export_enabled: bool = True
 
+    # How many bytes of tool output one agent may keep in the evidence ledger.
+    # Past it an entry still records the call — tool, arguments, outcome,
+    # timing — and drops the output, and the report says how many entries it
+    # is not showing. Half a megabyte holds a full Ghidra loop's decompilation
+    # and stays well inside what a JSONB column and a context window tolerate.
+    evidence_budget_bytes: Annotated[int, Field(ge=0)] = 524288
+
 
 # ---------------------------------------------------------------------------
 # Root Settings

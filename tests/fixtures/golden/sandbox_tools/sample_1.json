@@ -1,0 +1,96 @@
+{
+  "sandbox_api_calls": {
+    "apis": [
+      {
+        "api": "HttpSendRequestW",
+        "category": "network",
+        "count": 12,
+        "first_args": "",
+        "suspicious": true
+      },
+      {
+        "api": "RegSetValueExW",
+        "category": "registry",
+        "count": 3,
+        "first_args": "",
+        "suspicious": false
+      },
+      {
+        "api": "CreateProcessInternalW",
+        "category": "execution",
+        "count": 2,
+        "first_args": "",
+        "suspicious": true
+      },
+      {
+        "api": "CryptAcquireContextW",
+        "category": "crypto",
+        "count": 2,
+        "first_args": "",
+        "suspicious": true
+      },
+      {
+        "api": "CreateRemoteThread",
+        "category": "process_injection",
+        "count": 1,
+        "first_args": "",
+        "suspicious": true
+      },
+      {
+        "api": "ShellExecuteExW",
+        "category": "execution",
+        "count": 1,
+        "first_args": "",
+        "suspicious": true
+      },
+      {
+        "api": "VirtualAllocEx",
+        "category": "process_injection",
+        "count": 1,
+        "first_args": "",
+        "suspicious": true
+      },
+      {
+        "api": "WriteProcessMemory",
+        "category": "process_injection",
+        "count": 1,
+        "first_args": "",
+        "suspicious": true
+      }
+    ],
+    "total": 8
+  },
+  "sandbox_dropped_files": {
+    "dropped": [],
+    "total": 0
+  },
+  "sandbox_mutexes": {
+    "mutexes": [],
+    "total": 0
+  },
+  "sandbox_network": {
+    "dns": [],
+    "hosts": [],
+    "http": [],
+    "tcp": [],
+    "udp": []
+  },
+  "sandbox_processes": {
+    "processes": [],
+    "total": 0
+  },
+  "sandbox_registry_ops": {
+    "registry": [],
+    "total": 0
+  },
+  "sandbox_services_and_tasks": {
+    "commands": [],
+    "services": [],
+    "tasks": [],
+    "total": 0
+  },
+  "sandbox_signatures": {
+    "signatures": [],
+    "total": 0
+  }
+}

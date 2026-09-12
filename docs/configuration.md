@@ -189,6 +189,16 @@ required; Mobile and ICS are additive, and a box that can reach neither keeps
 working with a narrower catalog. Regenerate the id lists with
 `uv run python scripts/knowledge/prepare_attck_malware_fixtures.py`.
 
+### The evidence budget
+
+`reporting.evidence_budget_bytes` (512 KiB by default) is how many bytes of
+tool output one agent may keep in the evidence ledger. Entries past it still
+record the call — the tool, the arguments, the outcome and the timing — and
+carry no output, and the report states how many were trimmed. Raise it for a
+deep reversing loop whose decompilation is the evidence; set it to `0` to keep
+every output, which is a supportable choice on a machine with room for it and
+a way to fill a JSONB column and a context window on one that has not.
+
 ### Read-only deployment group
 
 The Deployment group shows the bootstrap values the process is running with —

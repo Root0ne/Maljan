@@ -13,6 +13,7 @@ import pytest
 
 from maljan.reporting.builder import MalwareReportBuilder
 from maljan.reporting.models import MalwareReport
+from tests.unit._ledger_helpers import ledger_from_sandbox
 
 
 def _build(
@@ -23,7 +24,13 @@ def _build(
     confidence: float = 0.85,
     category: str | None = None,
     isr_reports: dict[str, Any] | None = None,
+    ledger: list[Any] | None = None,
 ) -> MalwareReport:
+    # The report is built from the calls the run made, so a sandbox fixture
+    # reaches it the way it does in production: through the sandbox tools a
+    # dynamic analyst would have called on it.
+    if ledger is None:
+        ledger = ledger_from_sandbox(sandbox) if sandbox else []
     return MalwareReportBuilder(
         file_hash="a" * 64,
         file_name="fixture.bin",
@@ -44,6 +51,7 @@ def _build(
         overall_confidence=confidence,
         cascade_summary=None,
         malware_category=category,
+        evidence_ledger=ledger,
     ).build_deterministic()
 
 
@@ -106,12 +114,41 @@ class TestRansomwareFixture:
             "ttp_tags": ["T1486"],
         }
 
-    def test_persistence_detected(self, sandbox: dict[str, Any]) -> None:
-        report = _build(sandbox=sandbox, category="ransomware")
+    def test_persistence_comes_from_the_analyst_that_saw_it(self, sandbox: dict[str, Any]) -> None:
+        # An analyst that read the call and wrote it down as an artifact is
+        # one of the two routes; the other is the registry tool below.
+        from tests.unit._ledger_helpers import persistence_isr
+
+        report = _build(
+            sandbox=sandbox,
+            category="ransomware",
+            isr_reports={
+                "dynamic": persistence_isr(
+                    [
+                        [
+                            "registry_run",
+                            "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                            "C:\\Users\\Public\\lockbit.exe",
+                        ]
+                    ]
+                )
+            },
+        )
         assert len(report.persistence) >= 1
-        # at least one mechanism is the autorun registry entry
         kinds = {p.kind for p in report.persistence}
         assert "registry_run" in kinds
+
+    def test_the_registry_call_alone_is_enough_to_find_the_autorun(
+        self, sandbox: dict[str, Any]
+    ) -> None:
+        # No analyst artifact this time: the Run key comes from the registry
+        # call the sandbox recorded, read through ``sandbox_registry_ops``.
+        report = _build(sandbox=sandbox, category="ransomware")
+        assert [p.kind for p in report.persistence] == ["registry_run"]
+        assert report.persistence[0].payload == "C:\\Users\\Public\\lockbit.exe"
+
+    def test_persistence_is_empty_when_the_run_recorded_none(self) -> None:
+        assert _build(sandbox={"behavior": {"processes": []}}).persistence == []
 
     def test_network_ioc_extracted(self, sandbox: dict[str, Any]) -> None:
         report = _build(sandbox=sandbox, category="ransomware")
