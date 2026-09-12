@@ -832,7 +832,7 @@ def _parse_elf_imports(blob: bytes) -> list[ImportRow]:
             if isinstance(section, DynamicSection):
                 for tag in section.iter_tags():
                     if tag.entry.d_tag == "DT_NEEDED":
-                        libraries.append(tag.needed)
+                        libraries.append(str(getattr(tag, "needed", "")))
 
         # Imported (undefined) symbols
         dynsym = elf.get_section_by_name(".dynsym")
