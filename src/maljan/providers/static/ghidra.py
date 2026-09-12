@@ -2,9 +2,8 @@
 
 The load_program path pin and the http/stdio attach path are the static
 analyst's own code (``StaticAnalyst``, pre-2026-09), transplanted here
-unchanged. The analyst's
-``_initialize_mcp_client`` now calls this provider instead of driving its own
-copy.
+unchanged. The analyst's ``_initialize_mcp_client`` now calls this provider
+instead of driving its own copy.
 """
 
 from __future__ import annotations
@@ -105,10 +104,9 @@ class GhidraStaticProvider(StaticProvider):
     """Ghidra MCP, as the static analyst has always driven it.
 
     Every line of the attach path — the http/stdio branch, the shared-loop
-    ``_run_async``, the load_program pin — is
-    this file's, moved out of ``StaticAnalyst`` unchanged. What is new is only
-    the seam: the analyst now asks a provider for tools instead of knowing how
-    to build them.
+    ``_run_async``, the load_program pin — is this file's, moved out of
+    ``StaticAnalyst`` unchanged. What is new is only the seam: the analyst now
+    asks a provider for tools instead of knowing how to build them.
 
     ``degrade_on_failure`` is False on purpose. Ghidra IS the static evidence;
     a toolless static run produces a confident-looking report grounded in
@@ -207,7 +205,7 @@ class GhidraStaticProvider(StaticProvider):
             self._run_async(client.initialize())
             self._toolkit = client
             self._all_tools = self._pin_load_program_path(list(client.get_tools()))
-            self.tools = self._all_tools
+            self.tools = list(self._all_tools)
             logger.info("Initialized Ghidra HTTP tools: %d.", len(self.tools))
             return
 
@@ -239,7 +237,7 @@ class GhidraStaticProvider(StaticProvider):
         self._run_async(toolkit.initialize())
         self._toolkit = toolkit  # type: ignore[assignment]
         self._all_tools = self._pin_load_program_path(list(toolkit.get_tools()))
-        self.tools = self._all_tools
+        self.tools = list(self._all_tools)
         logger.info("Initialized Ghidra MCP tools: %d.", len(self.tools))
 
     def _run_async(self, coro: Any) -> None:

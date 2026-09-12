@@ -115,7 +115,6 @@ test.describe("tool servers and the REST sandbox", () => {
     await expect(detail.getByText("Run Test to load the tool list")).toHaveCount(0);
   });
 
-
   /* BUG 2 (live e2e 2026-09-07): `MCPServerConfig.env` had no control at all,
    * so a stdio server needing a fixed variable (Qu1cksc0pe wants
    * `SC0PE_MCP_TRANSPORT=stdio`) had to be wrapped in a shell script. */

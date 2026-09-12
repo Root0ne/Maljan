@@ -97,7 +97,7 @@ class GhidraHTTPClient:
 
         # A category tag in front of the full description lets the model scan
         # tool families quickly.
-        description = self._compress_description(path, description)
+        description = self._tag_description(path, description)
 
         # Build Pydantic args schema
         properties: dict[str, tuple[Any, Any]] = {}
@@ -234,7 +234,7 @@ class GhidraHTTPClient:
         except Exception as exc:  # noqa: BLE001 — never fail an analysis over this
             logger.warning("Ghidra switch_program failed for '%s' (non-fatal): %s", name, exc)
 
-    def _compress_description(self, path: str, description: str) -> str:
+    def _tag_description(self, path: str, description: str) -> str:
         """Prefix the description with a category tag; the text itself is kept whole."""
         name = path.lstrip("/").replace("/", "_")
         prefix = name.split("_")[0]

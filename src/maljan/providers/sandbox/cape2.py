@@ -92,7 +92,10 @@ class CAPE2SandboxProvider(SandboxProvider):
         return self.CAPE_PROMPT_FRAGMENT
 
     def dynamic_tools(self) -> list[BaseTool]:
-        """Every tool the CAPE MCP server offers, or none while MCP is disabled.
+        """The CAPE MCP server's tools, narrowed only by ``mcp.tools``; none while disabled.
+
+        ``mcp.tools`` follows the ``ServerHandle.tools()`` contract: ``None``
+        exposes every tool the server advertises, a list keeps those names.
 
         Moved from ``DynamicAnalyst._initialize_mcp_client``, reading
         ``self._cfg.mcp`` (this provider's own config slice) instead of a
@@ -105,7 +108,7 @@ class CAPE2SandboxProvider(SandboxProvider):
         the first one instead of replacing it.
         """
         if self._toolkit is not None:
-            return list(self._toolkit.get_tools())
+            return self._allowed(self._toolkit.get_tools())
 
         if not self._cfg.mcp.enabled:
             logger.info("CAPEv2 MCP is disabled in config.")
@@ -165,13 +168,20 @@ class CAPE2SandboxProvider(SandboxProvider):
         run_coro_blocking(toolkit.initialize(), hard_timeout=120.0, label="cape-mcp-init")
 
         self._toolkit = toolkit
-        tools = list(toolkit.get_tools())
+        tools = self._allowed(toolkit.get_tools())
         logger.info(
             "Initialized CAPEv2 MCP tools: %d: %s",
             len(tools),
             [t.name for t in tools],
         )
         return tools
+
+    def _allowed(self, tools: list[BaseTool]) -> list[BaseTool]:
+        allowed = self._cfg.mcp.tools
+        if allowed is None:
+            return list(tools)
+        keep = set(allowed)
+        return [t for t in tools if t.name in keep]
 
     def _get_client(self) -> Any:
         if self._client is None:

@@ -237,7 +237,7 @@ class MCPLangChainToolkit:
 
         # Compress description to reduce ReAct context bloat
         raw_desc = mcp_tool.description or f"Executes {mcp_tool.name} on the MCP server."
-        description = self._compress_description(mcp_tool.name, raw_desc)
+        description = self._tag_description(mcp_tool.name, raw_desc)
 
         return StructuredTool.from_function(
             func=None,  # Not supporting sync execution since MCP client is async
@@ -247,7 +247,7 @@ class MCPLangChainToolkit:
             args_schema=args_schema,
         )
 
-    def _compress_description(self, name: str, description: str) -> str:
+    def _tag_description(self, name: str, description: str) -> str:
         """Add a category tag and truncate to keep ReAct context lean."""
         prefix = name.split("_")[0]
 

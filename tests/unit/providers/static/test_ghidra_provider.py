@@ -2,16 +2,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import httpx
 import pytest
 
 from maljan.core.config import Settings
 from maljan.providers.base import StaticJobContext
 from maljan.providers.static.ghidra import GhidraStaticProvider
-
-ROOT = Path(__file__).resolve().parents[4]
 
 
 class _Tool:
@@ -39,9 +35,26 @@ def test_capabilities_track_the_transport():
 
 
 def test_every_tool_the_server_offers_is_exposed():
-    provider = _provider()
-    tools = [_Tool(f"t{i}") for i in range(200)]
-    assert [t.name for t in provider._pin_load_program_path(tools)] == [t.name for t in tools]
+    """No allow-list, no cap: the pool comes back whole, in order, with only
+    ``load_program`` swapped for its path-pinning wrapper."""
+    from langchain_core.tools import StructuredTool
+    from pydantic import create_model
+
+    async def inner(**kwargs):
+        return "loaded"
+
+    load = StructuredTool.from_function(
+        func=None,
+        coroutine=inner,
+        name="load_program",
+        description="load",
+        args_schema=create_model("Args", file=(str, ...)),
+    )
+    pool = [_Tool(f"t{i}") for i in range(100)] + [load] + [_Tool(f"u{i}") for i in range(100)]
+    exposed = _provider()._pin_load_program_path(pool)
+    assert [t.name for t in exposed] == [t.name for t in pool]
+    assert exposed[100] is not load and exposed[100].name == "load_program"
+    assert all(a is b for a, b in zip(exposed[:100], pool[:100], strict=True))
 
 
 def test_a_failed_attach_raises_instead_of_degrading():

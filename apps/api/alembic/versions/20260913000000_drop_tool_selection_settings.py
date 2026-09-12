@@ -5,8 +5,8 @@ the model saw: a curated allow-list, a per-sample relevance cut, or all of
 them. The modes are gone — every tool a server offers reaches the model, minus
 whatever the operator unticks in the server's own ``tools`` list — so this
 revision removes the two leaves from every entry of the ``core.mcp.servers``
-document and deletes the flat rows the ``static.ghidra`` and ``static.r2``
-leaves stored. A stored override that names a setting the catalog no longer
+document and deletes the flat rows the ``static.ghidra``, ``static.r2`` and
+``sandbox.cape2.mcp`` leaves stored. A stored override that names a setting the catalog no longer
 knows would otherwise be refused by the settings service.
 
 Downgrade restores nothing: the old values selected a narrowing that no
@@ -30,7 +30,8 @@ depends_on = None
 
 MAP_KEY = "core.mcp.servers"
 LEAVES = ("tool_selection", "use_all_tools")
-FLAT_KEYS = tuple(f"core.static.{leaf}.{name}" for leaf in ("ghidra", "r2") for name in LEAVES)
+_PREFIXES = ("static.ghidra", "static.r2", "sandbox.cape2.mcp")
+FLAT_KEYS = tuple(f"core.{prefix}.{name}" for prefix in _PREFIXES for name in LEAVES)
 
 _UPSERT_JSON_PG = sa.text(
     "INSERT INTO runtime_settings (key, value, is_secret) "

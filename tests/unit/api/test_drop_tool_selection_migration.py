@@ -60,13 +60,15 @@ def _upgrade(mod, conn):
         mod.upgrade()
 
 
-def test_the_flat_rows_name_both_static_leaves():
+def test_the_flat_rows_name_every_server_leaf():
     mod = _module()
     assert set(mod.FLAT_KEYS) == {
         "core.static.ghidra.tool_selection",
         "core.static.ghidra.use_all_tools",
         "core.static.r2.tool_selection",
         "core.static.r2.use_all_tools",
+        "core.sandbox.cape2.mcp.tool_selection",
+        "core.sandbox.cape2.mcp.use_all_tools",
     }
 
 
@@ -76,6 +78,7 @@ def test_the_upgrade_strips_the_leaves_and_is_idempotent():
     _insert(conn, "core.static.ghidra.tool_selection", "curated")
     _insert(conn, "core.static.ghidra.use_all_tools", True)
     _insert(conn, "core.static.r2.tool_selection", "all")
+    _insert(conn, "core.sandbox.cape2.mcp.use_all_tools", True)
     _insert(conn, "core.static.r2.binary_path", "/opt/r2mcp")
     _insert(
         conn,

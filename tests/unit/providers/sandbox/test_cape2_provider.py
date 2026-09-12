@@ -2,16 +2,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from maljan.core.config import Settings
 from maljan.providers.cape_view import to_cape_shaped_dict
 from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
 from tests.unit.providers._cape_fixture import first_cape_report
-
-ROOT = Path(__file__).resolve().parents[4]
 
 
 class _FakeClient:
@@ -142,6 +138,23 @@ def test_dynamic_tools_are_every_tool_the_toolkit_offers():
         "get_task_report",
         "extra_tool",
     }
+
+
+def test_dynamic_tools_honour_the_operator_tick_list():
+    class _T:
+        def __init__(self, name):
+            self.name = name
+
+    class _Toolkit:
+        def get_tools(self):
+            return [_T("submit_file"), _T("get_task_report"), _T("extra_tool")]
+
+    cfg = Settings(_env_file=None)
+    cfg.sandbox.cape2.mcp.enabled = True
+    cfg.sandbox.cape2.mcp.tools = ["submit_file", "not_offered"]
+    provider = CAPE2SandboxProvider.from_settings(cfg)
+    provider._toolkit = _Toolkit()
+    assert [t.name for t in provider.dynamic_tools()] == ["submit_file"]
 
 
 def test_a_disabled_cape_mcp_yields_no_tools_and_no_workflow():

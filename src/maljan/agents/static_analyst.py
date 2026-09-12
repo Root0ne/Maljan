@@ -129,7 +129,6 @@ class StaticAnalyst(BaseAnalyst):
             return
         provider.open(self._job_context())
         pool = provider.get_tools()
-        self._all_ghidra_tools = pool  # kept: the report and tests read this name
         # No ``self.toolkit`` assignment here: the provider holds its own client
         # privately and closes it itself (``ServiceContainer.aclose`` calls
         # ``get_static_provider().close()``), so there is nothing for this

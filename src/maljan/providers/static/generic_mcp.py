@@ -170,7 +170,7 @@ class GenericMCPStaticProvider(StaticProvider):
         Same shape as ``GhidraStaticProvider.open``, for the same reason: a
         multi-chunk static run calls this once per chunk on one memoized
         provider instance, re-deriving a *fresh but equal* ``StaticJobContext``
-        each time (same sample, same categories) rather than the literal same
+        each time (same sample) rather than the literal same
         object. A repeat call whose job compares equal to the one already
         attached is a no-op; a call for a genuinely different job closes the
         previous toolkit before reattaching, so there is never a point where

@@ -69,7 +69,7 @@ class TestCreateLangChainToolDictSchema:
         assert lc_tool.name == "submit_file"
         # The MCP toolkit prefixes descriptions with a category tag (e.g.
         # "[TOOL]") and keeps the text whole — see
-        # ``MCPLangChainToolkit._compress_description``.
+        # ``MCPLangChainToolkit._tag_description``.
         assert lc_tool.description.endswith("Submit a file for analysis")
         assert lc_tool.description.startswith("[")
 

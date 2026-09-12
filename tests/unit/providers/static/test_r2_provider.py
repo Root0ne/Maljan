@@ -9,11 +9,6 @@ from maljan.providers.static.generic_mcp import GenericMCPStaticProvider
 from maljan.providers.static.r2 import R2StaticProvider
 
 
-class _T:
-    def __init__(self, name):
-        self.name = name
-
-
 def _cfg():
     cfg = Settings(_env_file=None)
     cfg.static.provider = "r2"
