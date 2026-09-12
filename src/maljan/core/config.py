@@ -1272,6 +1272,10 @@ class RestMappingConfig(BaseModel):
     # "<channel>.<consumer field>" -> the field name this sandbox uses,
     # e.g. {"processes.command_line": "cmdline"}.
     field_names: dict[str, str] = Field(default_factory=dict)
+    # Channels this schema has no field for: "<name>" -> JSONPath, landing in
+    # SandboxReport.channels under that name. Namespace the name by platform,
+    # e.g. {"android.permissions": "$.apk.permissions[*]"}.
+    channels: dict[str, str] = Field(default_factory=dict)
 
 
 class SandboxRestConfig(BaseModel):

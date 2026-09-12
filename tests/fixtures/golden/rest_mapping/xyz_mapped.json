@@ -162,6 +162,7 @@
   "registry": [
     "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\svc"
   ],
+  "channels": {},
   "screenshots": [],
   "signatures": [
     {

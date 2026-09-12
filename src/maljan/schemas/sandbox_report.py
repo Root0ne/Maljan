@@ -139,6 +139,15 @@ class SandboxReport(BaseModel):
     # dicts). A dict-only filter here would silently drop all of it, the same
     # mistake ``file_writes`` had below.
     registry: list[str] = Field(default_factory=list)
+    # Everything a sandbox reports that this schema has no field for, kept
+    # rather than dropped. ``registry`` above is the Windows-only channel this
+    # project grew first; a Linux guest publishes systemd units and syscalls,
+    # an Android one permissions and receivers, a macOS one launchd jobs, and
+    # none of those had anywhere to land. Keys are namespaced by platform
+    # ("android.permissions", "linux.systemd", "macos.launchd") so two
+    # sandboxes cannot collide on a bare word, and rows stay close to the
+    # shape the sandbox published them in.
+    channels: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
     screenshots: list[dict[str, Any]] = Field(default_factory=list)
     cti: dict[str, Any] = Field(default_factory=dict)
     unavailable: list[str] = Field(default_factory=list)
@@ -184,6 +193,66 @@ class SandboxRun(BaseModel):
 
 
 _SUMMARY_KEYS: tuple[str, ...] = ("files", "write_files", "modified_files", "wrote_files")
+
+# Blocks a CAPE guest other than Windows publishes, and the namespaced channel
+# each one lands in. ``behavior.processes`` is shared across every guest and
+# already has a field of its own, so it is not repeated here. A block CAPE did
+# not emit produces no channel at all — an absent channel and an empty one say
+# different things, and only one of them means the sandbox looked.
+_CAPE_CHANNEL_SOURCES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("linux.strace", ("strace",)),
+    ("linux.syscalls", ("syscalls",)),
+    ("linux.systemd", ("systemd",)),
+    ("android.permissions", ("permissions",)),
+    ("android.receivers", ("receivers",)),
+    ("android.services", ("services",)),
+    ("android.activities", ("activities",)),
+    ("macos.launchd", ("launchd",)),
+)
+
+
+def _channel_rows(value: Any) -> list[dict[str, Any]]:
+    """One channel's rows, with a bare string wrapped so every row is a mapping."""
+    if isinstance(value, dict):
+        return [{"name": str(k), "value": v} for k, v in value.items()]
+    if not isinstance(value, list):
+        return []
+    rows: list[dict[str, Any]] = []
+    for entry in value:
+        if isinstance(entry, dict):
+            rows.append(entry)
+        elif entry not in (None, ""):
+            rows.append({"value": entry})
+    return rows
+
+
+def _cape_channels(
+    raw: dict[str, Any], behavior: dict[str, Any]
+) -> dict[str, list[dict[str, Any]]]:
+    """The non-Windows blocks a CAPE report carries, namespaced by platform.
+
+    CAPE's Linux and Android packages publish beside the shared
+    ``behavior.processes`` rather than instead of it, and nothing downstream
+    could see any of it. Each block is looked for at the top level and under
+    ``behavior``, since CAPE places them in both depending on the package.
+    """
+    channels: dict[str, list[dict[str, Any]]] = {}
+    for channel, keys in _CAPE_CHANNEL_SOURCES:
+        for key in keys:
+            rows = _channel_rows(raw.get(key))
+            if not rows:
+                rows = _channel_rows(behavior.get(key))
+            if rows:
+                channels[channel] = rows
+                break
+    # Anything the operator's own sandbox already namespaced is taken as-is.
+    declared = raw.get("channels")
+    if isinstance(declared, dict):
+        for name, value in declared.items():
+            rows = _channel_rows(value)
+            if rows:
+                channels[str(name)] = rows
+    return channels
 
 
 def cape_report_to_sandbox_report(
@@ -272,6 +341,7 @@ def cape_report_to_sandbox_report(
         ),
         dropped_files=_rows(raw.get("dropped")),
         registry=_as_str_list((behavior.get("summary") or {}).get("keys")),
+        channels=_cape_channels(raw, behavior),
         screenshots=_rows(raw.get("screenshots")),
         cti=cti_field if isinstance(cti_field, dict) else {},
         unavailable=[],

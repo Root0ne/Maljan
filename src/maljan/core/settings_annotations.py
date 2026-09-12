@@ -1741,6 +1741,12 @@ ANNOTATIONS.update(
             "JSONPath to the touched registry paths, one string per match.",
             generic_only=True,
         ),
+        "sandbox.rest.mapping.channels": _rest(
+            "Mapping: open channels",
+            "Extra channels this schema has no field for, as name/JSONPath pairs; "
+            "namespace the name by platform, e.g. android.permissions.",
+            generic_only=True,
+        ),
         "sandbox.rest.mapping.field_names": _rest(
             "Mapping: field renames",
             "Per-row field renames, keyed 'channel.field', e.g. processes.command_line -> cmdline.",
