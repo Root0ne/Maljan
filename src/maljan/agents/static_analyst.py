@@ -32,12 +32,15 @@ _ISR_HEAD = (
 _ISR_TAIL = ""
 
 
-def _static_prompt(
-    provider: Any | None = None,
-    file_type: str = "unknown",
-    platform: str = "unknown",
-) -> str:
-    """Assemble the static system prompt for ``provider`` (the configured one by default)."""
+def _static_prompt(provider: Any | None = None) -> str:
+    """The neutral static system prompt for ``provider`` (the configured one by default).
+
+    Neutral because it carries the format fragment for a sample nothing has
+    identified. A running job does not use this: the container resolves the
+    agent's prompt with the job's own format (``composition.builtin_prompt``)
+    and ``BaseAnalyst._system_prompt`` reads it. This is the fallback for an
+    analyst built outside a container.
+    """
     if provider is None:
         from maljan.core.config import get_settings
         from maljan.providers.registry import get_static_provider
@@ -47,7 +50,7 @@ def _static_prompt(
 
     return (
         _ISR_HEAD
-        + format_fragment(file_type, platform)
+        + format_fragment("unknown", "unknown")
         + "\n\n"
         + provider.prompt_fragment()
         + _ISR_TAIL
@@ -55,8 +58,9 @@ def _static_prompt(
 
 
 # Back-compat: several modules and tests import this name. It is the default
-# profile's assembly for a sample whose format is undetermined; a real job
-# supplies its own (``composition.builtin_prompt``).
+# profile's neutral assembly; a running job sends the container's resolved
+# prompt instead (``composition.builtin_prompt`` and
+# ``BaseAnalyst._system_prompt``).
 _ISR_SYSTEM = _static_prompt()
 
 
@@ -514,7 +518,7 @@ class StaticAnalyst(BaseAnalyst):
             target_info = f"Static output:\n{data}"
 
         prompt_messages = [
-            ("system", _static_prompt(self._provider())),
+            ("system", self._system_prompt(lambda: _static_prompt(self._provider()))),
             (
                 "human",
                 "Analyze the following target for obfuscation, "
@@ -661,7 +665,7 @@ class StaticAnalyst(BaseAnalyst):
             # (prior cases -> recurring techniques). Fail-safe and gated OFF by default.
             attck_hint = self._compute_attck_case_hint(host_path)
         prompt_messages = [
-            ("system", _static_prompt(self._provider())),
+            ("system", self._system_prompt(lambda: _static_prompt(self._provider()))),
             (
                 "human",
                 "Analyze the target binary and return a structured list of findings.\n"
@@ -734,7 +738,7 @@ class StaticAnalyst(BaseAnalyst):
             [
                 (
                     "system",
-                    _ISR_SYSTEM + "\n\n"
+                    self._system_prompt(lambda: _static_prompt(self._provider())) + "\n\n"
                     "You are in a negotiation round. You MUST:\n"
                     "1. List any peer claims you still DISPUTE in a DISPUTES section.\n"
                     "2. Revise your own claims based on new evidence.\n"

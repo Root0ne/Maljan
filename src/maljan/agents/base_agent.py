@@ -1140,6 +1140,27 @@ class BaseAnalyst(ABC):
         # only for an agent inspected directly (tests, scripts).
         self.degradation_reasons: list[str] = []
 
+    def _system_prompt(self, fallback: str | Callable[[], str]) -> str:
+        """This analyst's system turn for the job it is actually running.
+
+        The container resolves an agent once per job — its prompt already
+        carries the sample's format fragment, the agent's own static provider
+        fragment and any prompt the operator set on the definition — and hands
+        it over as ``_resolved``. Reading it here is what makes that resolution
+        the prompt a built-in analyst sends, rather than a value only the
+        settings probe ever saw.
+
+        ``fallback`` is the module constant (or a callable that assembles it),
+        used by an analyst constructed outside a container: a test, a script,
+        the CLI. It is the neutral assembly, which is the honest answer when
+        nothing has said what the sample is.
+        """
+        resolved = getattr(self, "_resolved", None)
+        prompt = getattr(resolved, "prompt", "") if resolved is not None else ""
+        if prompt:
+            return str(prompt)
+        return fallback() if callable(fallback) else fallback
+
     def _initialize_mcp_client(self) -> None:
         """Attach this analyst's MCP toolkit. Subclasses that have one override."""
         return None

@@ -48,7 +48,9 @@ _NET_HEAD = (
 # the assembly order is a contract, and an implicit empty tail is a trap.
 _NET_TAIL = ""
 
-# Back-compat: the assembly for a sample whose format is undetermined.
+# Back-compat, and the fallback for an analyst built outside a container: the
+# neutral assembly. A running job sends the container's resolved prompt
+# (``composition.builtin_prompt`` and ``BaseAnalyst._system_prompt``).
 _ISR_SYSTEM = _NET_HEAD + format_fragment("unknown", "unknown") + _NET_TAIL
 
 # The text revision path's own system prompt. It is not ``_ISR_SYSTEM`` plus a
@@ -133,7 +135,7 @@ class NetworkAnalyst(BaseAnalyst):
 
             if mcp_ready:
                 prompt_messages = [
-                    ("system", _ISR_SYSTEM),
+                    ("system", self._system_prompt(_ISR_SYSTEM)),
                     (
                         "human",
                         "A PCAP capture file is available for analysis.\n\n"
@@ -157,7 +159,7 @@ class NetworkAnalyst(BaseAnalyst):
         )
 
         prompt_messages = [
-            ("system", _ISR_SYSTEM),
+            ("system", self._system_prompt(_ISR_SYSTEM)),
             (
                 "human",
                 "Analyze DNS queries, HTTPS SSL flows, and potential C2 beacons "
@@ -233,7 +235,7 @@ class NetworkAnalyst(BaseAnalyst):
                 # aborted, so we hand the analyst the structured evidence up front
                 # and cap the PCAP peek (react_agent_max_steps_overrides.network).
                 prompt_messages = [
-                    ("system", _ISR_SYSTEM),
+                    ("system", self._system_prompt(_ISR_SYSTEM)),
                     (
                         "human",
                         "Analyze the network activity below and return a structured "
@@ -279,7 +281,7 @@ class NetworkAnalyst(BaseAnalyst):
         )
 
         prompt_messages = [
-            ("system", _ISR_SYSTEM),
+            ("system", self._system_prompt(_ISR_SYSTEM)),
             (
                 "human",
                 "Analyze the network data and return a structured list of findings.\n"
@@ -330,7 +332,7 @@ class NetworkAnalyst(BaseAnalyst):
         self.logger.info("Executing network ISR revision (round %d)...", revision_round)
 
         messages = revision_messages(
-            _ISR_SYSTEM,
+            self._system_prompt(_ISR_SYSTEM),
             original_data,
             own_report,
             peer_reports,

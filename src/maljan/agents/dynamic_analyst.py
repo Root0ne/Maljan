@@ -38,12 +38,13 @@ _DYN_HEAD = (
 # implicit empty tail is a trap.
 _DYN_TAIL = ""
 
-# Back-compat: several modules and tests import this name. It is the assembly
-# for a sample whose format is undetermined, against CAPEv2 — the sandbox this
-# project has always measured the dynamic analyst on — rather than whatever
-# ``sandbox.provider`` happens to be configured on a given box (that one field
-# defaults to "mock"). A real job assembles the same three parts with its own
-# sample's format fragment; see ``composition.builtin_prompt``.
+# Back-compat, and the fallback for an analyst built outside a container: the
+# neutral assembly, against CAPEv2 — the sandbox this project has always
+# measured the dynamic analyst on — rather than whatever ``sandbox.provider``
+# happens to be configured on a given box (that one field defaults to "mock").
+# A running job sends the container's resolved prompt, which is the same three
+# parts with its own sample's format fragment; see
+# ``composition.builtin_prompt`` and ``BaseAnalyst._system_prompt``.
 _ISR_SYSTEM = (
     _DYN_HEAD
     + format_fragment("unknown", "unknown")
@@ -106,7 +107,7 @@ class DynamicAnalyst(BaseAnalyst):
         task_info = f"Task ID: {data}" if data.strip().isdigit() else f"Sandbox data:\n{data}"
 
         prompt_messages = [
-            ("system", _ISR_SYSTEM),
+            ("system", self._system_prompt(_ISR_SYSTEM)),
             (
                 "human",
                 "Analyze registry persistence, process injection, and file/folder drops "
@@ -184,7 +185,7 @@ class DynamicAnalyst(BaseAnalyst):
         task_info = f"Task ID: {data}" if data.strip().isdigit() else f"Sandbox data:\n{data}"
 
         prompt_messages = [
-            ("system", _ISR_SYSTEM),
+            ("system", self._system_prompt(_ISR_SYSTEM)),
             (
                 "human",
                 "Analyze the sandbox behavioral data and return a structured list of findings.\n"
@@ -238,7 +239,7 @@ class DynamicAnalyst(BaseAnalyst):
             [
                 (
                     "system",
-                    _ISR_SYSTEM + "\n\n"
+                    self._system_prompt(_ISR_SYSTEM) + "\n\n"
                     "You are in a negotiation round. You MUST:\n"
                     "1. List any peer claims you still DISPUTE in a DISPUTES section.\n"
                     "2. Revise your own claims based on new evidence.\n"
