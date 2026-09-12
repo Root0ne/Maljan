@@ -46,6 +46,19 @@ operator can reconfigure.
 6. Threat-intelligence enrichment runs afterwards as its own job, so it never
    delays the verdict.
 
+## Format routing
+
+The platform never refuses a sample for its format. The first thing a job does
+is read the sample's magic bytes into a file type and a platform
+(`src/maljan/extractors/sample_identity.py`), and everything downstream routes
+on that answer: which sandbox package or VM profile is asked for, which
+platform-specific extractors run, which rules the Sigma and YARA layers keep,
+which ATT&CK domain a technique id belongs to, and which artefacts the analyst
+prompts are told to look for. A format nothing recognises routes to the neutral
+path — a raw-byte sweep and a report that says so — rather than to a rejection.
+Deterministic code decides the routing; the analysis itself is the agents'
+work over whichever tools the operator connected for that format.
+
 ## The pipeline
 
 A LangGraph `StateGraph` over one shared state (`src/maljan/pipeline/`). The
