@@ -1744,9 +1744,13 @@ def _validate() -> list[str]:
     # Every ATT&CK id must exist in the vendored catalog.
     try:
         valid_raw = json.loads(_VALID_IDS.read_text(encoding="utf-8"))
-        valid_ids = set(
-            valid_raw if isinstance(valid_raw, list) else valid_raw.get("technique_ids", [])
-        )
+        if isinstance(valid_raw, list):
+            valid_ids = set(valid_raw)
+        elif "technique_ids" in valid_raw:
+            valid_ids = set(valid_raw["technique_ids"])
+        else:
+            # One id list per ATT&CK domain.
+            valid_ids = {tid for ids in valid_raw.values() for tid in ids}
     except (OSError, ValueError) as exc:
         problems.append(f"cannot read {_VALID_IDS}: {exc}")
         valid_ids = set()

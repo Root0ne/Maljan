@@ -191,7 +191,32 @@ class CAPE2SandboxProvider(SandboxProvider):
         return self._client
 
     def submit(self, sample_path: str | Path) -> str:
-        return str(self._get_client().submit(sample_path))
+        """Submit, asking for the analysis package and guest this format needs.
+
+        An APK handed to CAPE's default ``exe`` package detonates nothing, and
+        a report of nothing is indistinguishable from a benign sample. The
+        package comes from ``package_by_format`` (the sample's detected file
+        type, then the ``"*"`` fallback) and the platform from the inferred
+        one, only when CAPE has a name for it. Neither is guessed: an
+        unconfigured format leaves both unset, which is CAPE deciding for
+        itself exactly as it did before.
+        """
+        from maljan.providers.sandbox.formats import (
+            cape_platform,
+            detect_sample_format,
+            option_for_format,
+        )
+
+        file_type, platform = detect_sample_format(sample_path)
+        package = option_for_format(self._cfg.package_by_format, file_type)
+        return str(
+            self._get_client().submit(
+                sample_path,
+                package=package or None,
+                platform=cape_platform(platform) or None,
+                extra_fields=dict(self._cfg.submit_options),
+            )
+        )
 
     def wait_for_completion(
         self,

@@ -258,8 +258,7 @@ _NETWORK_LOG_PRODUCTS = frozenset(
 )
 
 # Direct one-to-one match with our canonical SampleIdentity.platform values.
-# OS-support scope (2026-06-02): Windows + Linux only.
-_OS_PRODUCTS = frozenset({"windows", "linux"})
+_OS_PRODUCTS = frozenset({"windows", "linux", "macos", "android", "ios"})
 
 
 def _normalise_product(product: str | None) -> str:
@@ -288,8 +287,8 @@ def _is_rule_compatible(rule_product: str | None, sample_platform: str | None) -
       2. rule_product in network-log set → drop (no network-log layer
          today).
       3. rule_product in OS set → keep only when sample matches.
-      4. anything else (unmapped product — incl. cloud/SaaS/macOS rules) →
-         drop conservatively. OS-support scope is Windows + Linux only.
+      4. anything else (an unmapped product — cloud/SaaS rules and the like) →
+         drop conservatively.
     """
     product = _normalise_product(rule_product)
     if sample_platform is None:

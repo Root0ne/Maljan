@@ -8,6 +8,25 @@ change landed on `main`.
 
 ### Added
 
+- **Per-format sandbox submission options.** `sandbox.cape2.package_by_format`
+  maps a detected file type to a CAPE analysis package (`*` is the fallback)
+  and `sandbox.cape2.submit_options` is sent verbatim as further form fields;
+  `sandbox.triage.profile_by_format` picks a Triage VM profile per format with
+  `sandbox.triage.profile` behind it; `sandbox.rest.submit.submit_fields`
+  passes extra multipart fields through the REST DSL. The CAPE guest platform
+  is sent when CAPE has a name for it and left unset otherwise.
+- **ATT&CK Mobile and ICS.** `data/attck_valid_ids.json` carries one technique
+  id list per domain and the loader downloads and caches the Mobile and ICS
+  STIX bundles beside Enterprise, exposing `valid_ids`, `domain_of` and
+  `platforms_for`. A Mobile technique id now validates instead of being
+  reported as a hallucination. Enterprise is required; the other two are
+  additive and their absence costs coverage, not a run.
+- **Open sandbox report channels.** `SandboxReport.channels` keeps what the
+  schema has no field for, namespaced by platform (`android.permissions`,
+  `linux.systemd`, `macos.launchd`). CAPE's non-Windows blocks are lifted into
+  it, and the REST DSL gains `mapping.channels`, an operator-named
+  name-to-JSONPath map.
+
 - **A per-agent LLM base URL.** `llm.agents.<agent>.base_url` points one agent
   at its own OpenAI-compatible or Ollama server while the rest keep the global
   endpoint, with the provider's API key still shared.
@@ -49,6 +68,25 @@ change landed on `main`.
 
 ### Changed
 
+- **Built-in analysts honour a definition's own prompt.** The static, dynamic and
+  network analysts now take their system prompt from the resolved agent
+  definition on every run, so an operator's explicit `prompt` on a built-in
+  role applies, and the format fragment for the sample's platform reaches the
+  model. The module constants remain only as the neutral fallback.
+- **The platform vocabulary is open.** `reporting.models.Platform` is a plain
+  string with `KNOWN_PLATFORMS` beside it — `windows`, `linux`, `macos`,
+  `android`, `ios`, `multi`, `unknown` — rather than a three-value literal.
+  File-type detection recognises Mach-O, APK, DEX, JAR, IPA, OLE2, OOXML, PDF,
+  LNK, the script formats and the archive formats, and returns lowercase
+  routing labels. The persistence extractor selects its platform scanners
+  positively, so the Windows registry sweep no longer runs for an Android or
+  macOS sample.
+- **Analyst prompts are platform-neutral plus a format fragment.** The built-in
+  heads no longer name Windows artefacts; `agents/prompt_fragments` supplies
+  the paragraph naming what to look for on the sample actually in hand, and
+  `composition.builtin_prompt` assembles head, format fragment, provider
+  fragment and tail for every built-in role.
+
 - **PyJWT signs and verifies the API's tokens.** `python-jose` is gone from both
   projects; it was the only route by which `ecdsa` (an unfixed timing-attack
   advisory) reached the lockfile. Token format, claims and the dual-secret
@@ -84,6 +122,12 @@ change landed on `main`.
   ([#38](https://github.com/Root0ne/Maljan/pull/38)).
 
 ### Removed
+
+- **The format reject gate.** `app.arun` no longer refuses a sample whose magic
+  bytes name a non-Windows, non-Linux executable, and
+  `sample_identity.unsupported_os_reason`, its foreign-format tables and
+  `core.exceptions.UnsupportedSampleError` are gone with it. Routing decides
+  where a sample goes, never whether it goes anywhere.
 
 - **The paper evaluation tree and its reproducibility gates.**
   `tests/evaluation/`, `scripts/paper/`, the CI evaluation-diff gate, the

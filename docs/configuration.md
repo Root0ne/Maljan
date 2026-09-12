@@ -146,6 +146,49 @@ Thirteen probes back the "Test" buttons
 that fails answers 200 with the failure as data — a connection test that fails
 is an answer, not an error.
 
+### Format routing and the sandbox
+
+No sample is refused for its format. Routing detects the file type from magic
+bytes (`pe`, `elf`, `mach-o`, `apk`, `dex`, `ipa`, `jar`, `ole2`, `ooxml`,
+`pdf`, `lnk`, the script types, the archive types) and maps it to a platform.
+
+The platform vocabulary is `windows`, `linux`, `macos`, `android`, `ios`,
+`multi` and `unknown`. It is a plain string rather than a closed set: an
+unlisted value degrades the rule filtering that reads it and nothing else.
+`multi` is a sample that does not bind to one OS — a JAR, a macro document, a
+PDF — and `unknown` is the honest answer when the bytes did not say.
+
+Each sandbox is asked for the options its format needs:
+
+- **CAPEv2.** `sandbox.cape2.package_by_format` maps a file type to a CAPE
+  analysis package, e.g. `{"apk": "apk", "elf": "generic", "pdf": "pdf",
+  "ooxml": "doc"}`. `*` is the fallback key; a format with no entry is
+  submitted without a package, so CAPE picks one. The guest platform is sent
+  when CAPE has a name for it (`windows`, `linux`, `android`) and left unset
+  otherwise. `sandbox.cape2.submit_options` is sent verbatim as further form
+  fields (`machine`, `tags`, `options`, `timeout`, anything else
+  `tasks/create/file` accepts).
+- **Hatching Triage.** `sandbox.triage.profile_by_format` maps a file type to a
+  VM profile, with `*` as its fallback and `sandbox.triage.profile` behind
+  that, so an operator who never touches the map keeps the profile they had.
+- **The REST DSL.** `sandbox.rest.submit.submit_fields` is passed through
+  verbatim as extra multipart fields, beside the existing `extra_fields`.
+  `sandbox.rest.mapping.channels` maps an operator-chosen channel name to a
+  JSONPath for anything the report schema has no field for; namespace the name
+  by platform, e.g. `{"android.permissions": "$.apk.permissions[*]"}`. Those
+  rows land in `SandboxReport.channels` and are capped and counted like every
+  other channel.
+
+### ATT&CK domains
+
+The technique universe spans all three ATT&CK domains. `data/attck_valid_ids.json`
+carries one sorted id list per domain (`enterprise`, `mobile`, `ics`), and
+`src/maljan/memory/attck_loader.py` downloads and caches each domain's STIX
+bundle under `~/.cache/maljan/attck/` (or `MALJAN_ATTCK_CACHE`). Enterprise is
+required; Mobile and ICS are additive, and a box that can reach neither keeps
+working with a narrower catalog. Regenerate the id lists with
+`uv run python scripts/knowledge/prepare_attck_malware_fixtures.py`.
+
 ### Read-only deployment group
 
 The Deployment group shows the bootstrap values the process is running with —

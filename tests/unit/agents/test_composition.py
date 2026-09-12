@@ -114,8 +114,12 @@ def test_a_clone_on_r2_gets_the_r2_fragment_in_the_built_in_assembly():
             "profile": "two",
         },
     )
+    from maljan.agents.prompt_fragments import format_fragment
+
     resolved = resolve_agent("static_r2", _Container(cfg))
-    assert resolved.prompt == _ISR_HEAD + "R2-FRAGMENT " + _ISR_TAIL
+    assert resolved.prompt == (
+        _ISR_HEAD + format_fragment("unknown", "unknown") + "\n\n" + "R2-FRAGMENT " + _ISR_TAIL
+    )
     assert resolved.static_provider_id == "r2"
     assert resolved.role == "static"
 

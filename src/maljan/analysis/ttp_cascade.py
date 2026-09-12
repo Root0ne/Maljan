@@ -500,7 +500,7 @@ def _is_claim_platform_compatible(
          keep iff ``"any" in claim_platforms`` or the sample's platform
          is in the list.
       4. No ``claim_platforms`` (analyst LLM claim or legacy rule):
-         consult the MITRE catalog (Windows / Linux).
+         consult the MITRE catalog across every ATT&CK domain.
     """
     if sample_platform is None:
         return True
@@ -521,7 +521,9 @@ def _is_claim_platform_compatible(
         # Technique not in our catalog — fall open (don't lose unknown signal).
         return True
 
-    mitre_sp = _MITRE_PLATFORM_MAP.get(sp, ())
+    from maljan.memory.attck_loader import mitre_platforms
+
+    mitre_sp = mitre_platforms(sp)
     if not mitre_sp:
         return True  # Unknown sample type vs. MITRE — fall open.
 
@@ -531,47 +533,23 @@ def _is_claim_platform_compatible(
     return False
 
 
-# Map our canonical Platform taxonomy to MITRE's x_mitre_platforms strings.
-# OS-support scope (2026-06-02): Windows + Linux only.
-_MITRE_PLATFORM_MAP: dict[str, tuple[str, ...]] = {
-    "windows": ("Windows",),
-    "linux": ("Linux",),
-}
-
-
 def _mitre_platforms_for(technique_id: str) -> tuple[str, ...] | None:
-    """Lazy-load and cache the MITRE catalog; return platforms list or None."""
+    """The technique's MITRE platforms, or None when the catalog cannot say.
+
+    The catalog itself lives in ``memory.attck_loader``, which spans all three
+    ATT&CK domains; this is the thin call site the cascade filters on.
+
+    An empty platform list is deliberately ``None`` rather than ``()``. The
+    loader returns ``()`` both for a technique it has never heard of and for
+    one that declares no platforms at all, and neither is grounds for dropping
+    a claim: the first is a gap in the catalog and the second is a technique
+    MITRE itself did not bind to an OS. Both fall open.
+    """
+    from maljan.memory.attck_loader import platforms_for
+
     try:
-        catalog = _get_attck_catalog()
+        platforms = platforms_for(technique_id)
     except Exception as exc:  # noqa: BLE001
         logger.debug("ATTCK catalog unavailable (%s); skipping MITRE platform check.", exc)
         return None
-    if catalog is None:
-        return None
-    entry = catalog.get(technique_id)
-    if entry is None:
-        return None
-    return tuple(entry)
-
-
-_attck_cache: dict[str, tuple[str, ...]] | None = None
-
-
-def _get_attck_catalog() -> dict[str, tuple[str, ...]] | None:
-    """Build ``{technique_id: tuple(platforms)}`` from the loader once."""
-    global _attck_cache
-    if _attck_cache is not None:
-        return _attck_cache
-    try:
-        from maljan.memory.attck_loader import load_attck_bundle
-
-        techs = load_attck_bundle()
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("Could not load ATT&CK catalog: %s", exc)
-        return None
-    catalog: dict[str, tuple[str, ...]] = {}
-    for t in techs:
-        platforms = getattr(t, "platforms", None) or ()
-        catalog[t.technique_id] = tuple(platforms)
-    _attck_cache = catalog
-    return catalog
+    return platforms or None

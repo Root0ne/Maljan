@@ -1,9 +1,9 @@
 """A macro document produced a confident report over a payload nobody read.
 
 `.docm`, `.ps1`, `.vbs`, `.js` and `.jar` are accepted by the upload allow-list
-and are not rejected by ``unsupported_os_reason``. That is the right call — a
-macro document is among the commonest Windows malware carriers, and refusing it
-would be worse than analysing it thinly.
+and no format is refused. That is the right call — a macro document is among
+the commonest malware carriers, and refusing it would be worse than analysing
+it thinly.
 
 What was wrong is that nothing said it *was* thin. ``build_static_analysis``
 returns empty sections, imports and exports for a `.docm`; only the raw-byte
@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from maljan.extractors.sample_identity import unparsed_container_reason, unsupported_os_reason
+from maljan.extractors.sample_identity import unparsed_container_reason
 
 
 def _write(tmp_path: Path, name: str, magic: bytes = b"\x00\x01\x02\x03") -> Path:
@@ -54,11 +54,13 @@ class TestContainersAreDeclaredNotRejected:
         assert fragment in reason
         assert "raw-byte string sweep" in reason
 
-    def test_they_are_still_accepted_for_analysis(self, tmp_path: Path) -> None:
-        """Refusing a macro document would be the wrong fix — they are exactly
-        what a Windows analyst needs to look at."""
-        assert unsupported_os_reason(_write(tmp_path, "invoice.docm")) is None
-        assert unsupported_os_reason(_write(tmp_path, "dropper.ps1")) is None
+    def test_declaring_a_container_is_not_refusing_it(self, tmp_path: Path) -> None:
+        """A degradation reason describes the analysis, it does not stop it: the
+        reason names the sweep that ran, never a refusal."""
+        for name in ("invoice.docm", "dropper.ps1"):
+            reason = unparsed_container_reason(_write(tmp_path, name)) or ""
+            assert "raw-byte string sweep" in reason
+            assert "unsupported" not in reason.lower()
 
     def test_a_pdf_by_magic_is_declared(self, tmp_path: Path) -> None:
         p = _write(tmp_path, "doc.bin", b"%PDF-1.7")

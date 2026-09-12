@@ -90,6 +90,11 @@ def to_cape_shaped_dict(report: SandboxReport) -> dict[str, Any]:
         # persistence_extractor's Linux path rules.
         "file_writes": list(report.file_writes),
     }
+    # The platform-namespaced channels ride through under one key rather than
+    # being flattened into the CAPE shape: a consumer that knows about
+    # ``android.permissions`` reads it, and one that does not is unaffected.
+    if report.channels:
+        rendered["channels"] = {name: list(rows) for name, rows in report.channels.items()}
     if report.network.pcap_local_path:
         rendered["network"]["pcap_local_path"] = report.network.pcap_local_path
     return rendered

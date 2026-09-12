@@ -98,6 +98,12 @@ export default function DynamicTab() {
 
   const analystFindings = dynamicClaims(report?.agent_findings);
   const dyn = report?.malware_report?.dynamic;
+  // The registry exists on Windows and nowhere else. On a Linux, macOS or
+  // Android sample an empty "Registry Modifications" panel reads as a sandbox
+  // that found nothing rather than a concept the platform does not have, so
+  // the panel is drawn only where it can be populated.
+  const platform = report?.malware_report?.identity?.platform;
+  const showsRegistry = platform === "windows" || !!dyn?.registry_mods.length;
   if (!dyn) {
     return (
       <div className="space-y-4">
@@ -232,52 +238,54 @@ export default function DynamicTab() {
         )}
       </div>
 
-      <div className="bg-bg-surface border border-border rounded">
-        <div className="px-4 py-3 border-b border-border">
-          <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-            Registry Modifications ({dyn.registry_mods.length})
-          </h2>
-        </div>
-        {dyn.registry_mods.length === 0 ? (
-          <div className="p-8 text-center text-sm text-text-muted">
-            No registry activity recorded.
+      {showsRegistry && (
+        <div className="bg-bg-surface border border-border rounded">
+          <div className="px-4 py-3 border-b border-border">
+            <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+              Registry Modifications ({dyn.registry_mods.length})
+            </h2>
           </div>
-        ) : (
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-border">
-                <Th>Op</Th>
-                <Th>Hive</Th>
-                <Th>Key</Th>
-                <Th>Value Name</Th>
-                <Th>New Value</Th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border-light">
-              {dyn.registry_mods.slice(0, 200).map((r, i) => (
-                <tr key={i} className="hover:bg-bg-hover transition-colors">
-                  <td className="px-4 py-2 text-[11px] uppercase tracking-wider text-text-muted">
-                    {r.operation}
-                  </td>
-                  <td className="px-4 py-2 text-xs font-mono text-text-secondary">{r.hive}</td>
-                  <td className="px-4 py-2 text-xs font-mono text-status-blue break-all">{r.key}</td>
-                  <td className="px-4 py-2 text-xs font-mono text-text-secondary">
-                    {r.value_name || "-"}
-                  </td>
-                  <td className="px-4 py-2 text-xs text-text-secondary break-all">
-                    {r.new_value || "-"}
-                  </td>
+          {dyn.registry_mods.length === 0 ? (
+            <div className="p-8 text-center text-sm text-text-muted">
+              No registry activity recorded.
+            </div>
+          ) : (
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-border">
+                  <Th>Op</Th>
+                  <Th>Hive</Th>
+                  <Th>Key</Th>
+                  <Th>Value Name</Th>
+                  <Th>New Value</Th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-        {dyn.registry_mods.length > 200 && (
-          <div className="px-4 py-2 text-[11px] text-text-muted border-t border-border">
-            Showing first 200 of {dyn.registry_mods.length}.
-          </div>
-        )}
-      </div>
+              </thead>
+              <tbody className="divide-y divide-border-light">
+                {dyn.registry_mods.slice(0, 200).map((r, i) => (
+                  <tr key={i} className="hover:bg-bg-hover transition-colors">
+                    <td className="px-4 py-2 text-[11px] uppercase tracking-wider text-text-muted">
+                      {r.operation}
+                    </td>
+                    <td className="px-4 py-2 text-xs font-mono text-text-secondary">{r.hive}</td>
+                    <td className="px-4 py-2 text-xs font-mono text-status-blue break-all">{r.key}</td>
+                    <td className="px-4 py-2 text-xs font-mono text-text-secondary">
+                      {r.value_name || "-"}
+                    </td>
+                    <td className="px-4 py-2 text-xs text-text-secondary break-all">
+                      {r.new_value || "-"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {dyn.registry_mods.length > 200 && (
+            <div className="px-4 py-2 text-[11px] text-text-muted border-t border-border">
+              Showing first 200 of {dyn.registry_mods.length}.
+            </div>
+          )}
+        </div>
+      )}
 
       {dyn.notable_apis.length > 0 && (
         <div className="bg-bg-surface border border-border rounded">

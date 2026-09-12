@@ -16,6 +16,7 @@ fields are ``None`` otherwise — never crash.
 from __future__ import annotations
 
 import hashlib
+import io
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -97,43 +98,53 @@ def _infer_platform(
     sandbox_report: dict[str, Any] | None,
     language_or_compiler: str | None = None,
 ) -> Platform:
-    """Map file_type / sandbox hints to the canonical Platform taxonomy.
+    """Map file_type / sandbox hints to the canonical platform vocabulary.
 
     Strategy: file_type FIRST (magic-byte-derived, deterministic), then a
     best-effort sandbox-hint fallback when file_type didn't disambiguate.
     A misrouted sandbox therefore can't poison the inference — magic bytes win.
 
-    OS-support scope (2026-06-02): only ``windows`` and ``linux`` are recognized;
-    every other executable format resolves to ``unknown`` — the pipeline does
-    not support those platforms.
+    No format resolves to a rejection: a type this table does not name simply
+    stays ``unknown``, which the rule layers treat as fall-open.
     """
     ft = (file_type or "").lower()
-    if ft == "pe":
-        return "windows"
-    if ft == "elf":
-        return "linux"
+    mapped = PLATFORM_BY_FILE_TYPE.get(ft)
+    # A format that binds to one OS is the end of the question. ``multi`` is
+    # not: a macro document or a JAR runs anywhere, and the guest it was
+    # detonated on is real information about which one it ran on here. So a
+    # ``multi`` mapping falls through to the hints below and is only the answer
+    # when nothing else says otherwise.
+    if mapped and mapped != "multi":
+        return mapped
 
-    # Sandbox fallback when file_type is "unknown" or generic "zip".
+    # Sandbox fallback when file_type is "unknown", cross-platform, or a
+    # generic container.
     target = (sandbox_report or {}).get("target", {})
     if isinstance(target, dict):
         sandbox_os = str(target.get("os") or target.get("platform") or "").lower()
-        if "windows" in sandbox_os or sandbox_os.startswith("win"):
+        for needle, platform in _SANDBOX_OS_HINTS:
+            if needle in sandbox_os:
+                return platform
+        if sandbox_os.startswith("win"):
             return "windows"
-        if "linux" in sandbox_os or "ubuntu" in sandbox_os or "debian" in sandbox_os:
-            return "linux"
 
     # MIME hint as last resort.
     mime = (mime_type or "").lower()
-    if "msdownload" in mime or "x-msdos-program" in mime:
-        return "windows"
+    for needle, platform in _MIME_HINTS:
+        if needle in mime:
+            return platform
 
-    # Toolchain hint, last of all. This matters more than its position suggests:
-    # ``unknown`` is not a neutral answer downstream — ``_yara_rule_compatible``
-    # drops *every* platform-specific rule for an unknown platform, and Sigma
-    # does the same, so an unidentified blob is scanned by a fraction of the
-    # corpus. A confident Windows-only toolchain fingerprint is enough to
-    # restore that coverage, and only Windows-exclusive runtimes are listed —
-    # Go and Rust are cross-platform and say nothing about the target.
+    if mapped:
+        return mapped
+
+    # Toolchain hint, last of all, and only over an ``unknown`` platform. This
+    # matters more than its position suggests: ``unknown`` is not a neutral
+    # answer downstream — ``_yara_rule_compatible`` drops *every*
+    # platform-specific rule for an unknown platform, and Sigma does the same,
+    # so an unidentified blob is scanned by a fraction of the corpus. A
+    # confident Windows-only toolchain fingerprint is enough to restore that
+    # coverage, and only Windows-exclusive runtimes are listed — Go and Rust
+    # are cross-platform and say nothing about the target.
     lang = (language_or_compiler or "").lower()
     if any(
         marker in lang
@@ -181,81 +192,262 @@ def _compute_hashes(
     )
 
 
-def _detect_file_type(path: Path, blob: bytes) -> str:
-    """Return a short label such as ``PE32``, ``ELF``, ``Mach-O``, ``ZIP``."""
-    if len(blob) >= 2 and blob[:2] == b"MZ":
-        return "PE"
-    if len(blob) >= 4 and blob[:4] == b"\x7fELF":
-        return "ELF"
-    if len(blob) >= 4 and blob[:4] in (
-        b"\xca\xfe\xba\xbe",
-        b"\xfe\xed\xfa\xce",
-        b"\xcf\xfa\xed\xfe",
-    ):
-        return "Mach-O"
-    if len(blob) >= 4 and blob[:4] == b"PK\x03\x04":
-        suffix = path.suffix.lower()
-        if suffix in {".apk", ".jar", ".ipa", ".zip"}:
-            return f"ZIP/{suffix.lstrip('.').upper()}"
-        return "ZIP"
-    if len(blob) >= 4 and blob[:4] == b"%PDF":
-        return "PDF"
+# Magic-byte prefixes that identify a format on their own, longest first so a
+# prefix never shadows a longer one that starts with the same bytes.
+_MAGIC_PREFIXES: tuple[tuple[bytes, str], ...] = (
+    (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1", "ole2"),
+    (b"\xfd7zXZ\x00", "xz"),
+    (b"7z\xbc\xaf\x27\x1c", "7z"),
+    (b"Rar!\x1a\x07", "rar"),
+    (b"\x7fELF", "elf"),
+    (b"%PDF", "pdf"),
+    (b"dex\n", "dex"),
+    (b"BZh", "bz2"),
+    (b"MZ", "pe"),
+    (b"\x1f\x8b", "gz"),
+)
+
+# Mach-O thin headers: 32/64-bit, big- and little-endian.
+_MACHO_THIN_MAGICS: frozenset[bytes] = frozenset(
+    {b"\xfe\xed\xfa\xce", b"\xfe\xed\xfa\xcf", b"\xce\xfa\xed\xfe", b"\xcf\xfa\xed\xfe"}
+)
+
+# A Mach-O fat binary and a Java class file share the 0xCAFEBABE magic. The
+# next four bytes tell them apart: a fat header counts its architectures (a
+# handful), a class file carries its minor/major version, which as a 32-bit
+# big-endian integer is at least 45.
+_MACHO_FAT_MAGIC = b"\xca\xfe\xba\xbe"
+_MACHO_FAT_MAX_ARCHS = 16
+
+# A Windows shortcut: the 76-byte header length followed by the LNK class id.
+_LNK_MAGIC = b"\x4c\x00\x00\x00\x01\x14\x02\x00"
+
+# ZIP local file header, plus the empty and spanned central-directory variants.
+_ZIP_MAGICS: frozenset[bytes] = frozenset({b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"})
+
+# ISO 9660 writes its volume descriptor identifier at this fixed offset.
+_ISO_MAGIC_OFFSET = 32769
+_ISO_MAGIC = b"CD001"
+
+# Interpreters named on a shebang line, and the type each one gives the file.
+_SHEBANG_TYPES: tuple[tuple[str, str], ...] = (
+    ("python", "py"),
+    ("perl", "pl"),
+    ("pwsh", "ps1"),
+    ("powershell", "ps1"),
+    ("bash", "sh"),
+    ("zsh", "sh"),
+    ("dash", "sh"),
+    ("ksh", "sh"),
+    ("/sh", "sh"),
+    ("env sh", "sh"),
+)
+
+# Formats with no distinctive header, recognised by their extension alone.
+_EXTENSION_TYPES: dict[str, str] = {
+    ".ps1": "ps1",
+    ".psm1": "ps1",
+    ".bat": "bat",
+    ".cmd": "cmd",
+    ".vbs": "vbs",
+    ".vbe": "vbs",
+    ".js": "js",
+    ".jse": "js",
+    ".hta": "hta",
+    ".wsf": "wsf",
+    ".sh": "sh",
+    ".py": "py",
+    ".pl": "pl",
+    ".iso": "iso",
+}
+
+# Entries that identify what a ZIP container really is, in the order they are
+# looked for: an APK also carries META-INF/MANIFEST.MF, so ``jar`` must lose to
+# ``apk`` rather than win by arriving first.
+_ZIP_SIGNATURE_ENTRIES: tuple[tuple[str, str], ...] = (
+    ("AndroidManifest.xml", "apk"),
+    ("classes.dex", "apk"),
+    ("[Content_Types].xml", "ooxml"),
+    ("META-INF/MANIFEST.MF", "jar"),
+)
+
+# Every container format, grouped under the one word an operator routes on.
+ARCHIVE_FILE_TYPES: frozenset[str] = frozenset({"zip", "7z", "rar", "gz", "bz2", "xz", "iso"})
+DOCUMENT_FILE_TYPES: frozenset[str] = frozenset({"ole2", "ooxml", "pdf"})
+SCRIPT_FILE_TYPES: frozenset[str] = frozenset(
+    {"ps1", "bat", "cmd", "vbs", "js", "hta", "wsf", "sh", "py", "pl"}
+)
+
+# The platform each recognised file type binds the sample to. A format that
+# runs anywhere (a JAR, a macro document, a PDF) is "multi"; a container that
+# says nothing about its payload stays "unknown".
+PLATFORM_BY_FILE_TYPE: dict[str, Platform] = {
+    "pe": "windows",
+    "lnk": "windows",
+    "ps1": "windows",
+    "bat": "windows",
+    "cmd": "windows",
+    "vbs": "windows",
+    "js": "windows",
+    "hta": "windows",
+    "wsf": "windows",
+    "elf": "linux",
+    "sh": "linux",
+    "mach-o": "macos",
+    "apk": "android",
+    "dex": "android",
+    "ipa": "ios",
+    "jar": "multi",
+    "ole2": "multi",
+    "ooxml": "multi",
+    "pdf": "multi",
+    "py": "multi",
+    "pl": "multi",
+}
+
+# Sandbox ``target.os`` / ``target.platform`` substrings. Every entry here is a
+# word no other platform's name contains; the bare ``win`` prefix is checked
+# separately, after these, because ``"win" in "darwin"`` is true and a macOS
+# guest must not read as a Windows one.
+_SANDBOX_OS_HINTS: tuple[tuple[str, Platform], ...] = (
+    ("windows", "windows"),
+    ("darwin", "macos"),
+    ("macos", "macos"),
+    ("mac os", "macos"),
+    ("osx", "macos"),
+    ("android", "android"),
+    ("ios", "ios"),
+    ("iphone", "ios"),
+    ("linux", "linux"),
+    ("ubuntu", "linux"),
+    ("debian", "linux"),
+)
+
+_MIME_HINTS: tuple[tuple[str, Platform], ...] = (
+    ("msdownload", "windows"),
+    ("x-msdos-program", "windows"),
+    ("x-dosexec", "windows"),
+    ("vnd.android.package-archive", "android"),
+    ("x-mach-binary", "macos"),
+    ("x-executable", "linux"),
+    ("x-sharedlib", "linux"),
+)
+
+
+def file_type_category(file_type: str) -> str:
+    """The routing category of a file type: executable, document, script, archive."""
+    ft = (file_type or "").lower()
+    if ft in ARCHIVE_FILE_TYPES:
+        return "archive"
+    if ft in DOCUMENT_FILE_TYPES:
+        return "document"
+    if ft in SCRIPT_FILE_TYPES:
+        return "script"
+    if ft in {"pe", "elf", "mach-o", "apk", "dex", "ipa", "jar"}:
+        return "executable"
     return "unknown"
 
 
-# OS-support scope (2026-06-02): Windows + Linux only. A sample whose magic bytes
-# or extension identify a foreign (non-Win/Linux) executable format is rejected at
-# the pipeline entry (see ``app.arun`` / ``UnsupportedSampleError``) rather than
-# routed to an unsupported sandbox. Magic bytes are authoritative; the extension
-# set is the fallback for foreign formats without a distinctive header. Reasons
-# name the file FORMAT, not the OS, so the rejection stays diagnostic.
-_FOREIGN_FILE_TYPES: dict[str, str] = {
-    "mach-o": "unsupported format (Mach-O)",
-    "zip/apk": "unsupported format (APK)",
-    "zip/ipa": "unsupported format (IPA)",
-}
-_FOREIGN_EXTENSIONS: dict[str, str] = {
-    ".apk": "unsupported format (.apk)",
-    ".dex": "unsupported format (.dex)",
-    ".ipa": "unsupported format (.ipa)",
-    ".dmg": "unsupported format (.dmg)",
-    ".pkg": "unsupported format (.pkg)",
-    ".app": "unsupported format (.app)",
-    ".scpt": "unsupported format (.scpt)",
-}
+def _zip_container_type(path: Path, blob: bytes) -> str:
+    """What a ZIP container actually is, read from its entry names.
 
-
-def unsupported_os_reason(sample_path: str | Path | None) -> str | None:
-    """Return a human reason when the sample targets an unsupported OS, else None.
-
-    Windows + Linux are the only supported targets. Magic bytes are checked first
-    (authoritative — only the 16-byte header is read, never the whole file); the
-    extension set is a fallback for foreign types that lack a distinctive header
-    (.dex/.dmg/.pkg/.app/.scpt). Only *definitely-foreign* samples trip this — a
-    renamed or obscure Windows file (unknown magic + non-foreign extension) is
-    NOT rejected, so legitimate Win/Linux analysis is never blocked.
+    Falls back to the plain ``zip`` label whenever the archive cannot be
+    opened — a truncated header (this function is also called with the first
+    sixteen bytes of a file), an encrypted or corrupt archive. Never raises:
+    an unreadable container is still a sample worth routing.
     """
-    if not sample_path:
-        return None
-    path = Path(sample_path)
+    import zipfile
+
+    names: list[str] = []
     try:
-        if not path.is_file():
-            return None  # phantom path -> nothing to reject; metadata-only path handles it
-        with path.open("rb") as fh:
-            header = fh.read(16)
-    except OSError:
+        if len(blob) >= 22 and path.is_file() and path.stat().st_size == len(blob):
+            with zipfile.ZipFile(io.BytesIO(blob)) as archive:
+                names = archive.namelist()
+        elif path.is_file():
+            with zipfile.ZipFile(path) as archive:
+                names = archive.namelist()
+    except (OSError, zipfile.BadZipFile, ValueError, RuntimeError):
+        return "zip"
+
+    if not names:
+        return "zip"
+    lowered = {name.lower() for name in names}
+    for entry, label in _ZIP_SIGNATURE_ENTRIES:
+        if entry.lower() in lowered:
+            return label
+    if any(name.startswith("payload/") and ".app/" in name for name in lowered):
+        return "ipa"
+    return "zip"
+
+
+def _shebang_type(blob: bytes) -> str | None:
+    """The script type named on a shebang line, when the file opens with one."""
+    if not blob.startswith(b"#!"):
         return None
-    reason = _FOREIGN_FILE_TYPES.get(_detect_file_type(path, header).lower())
-    if reason:
-        return reason
-    return _FOREIGN_EXTENSIONS.get(path.suffix.lower())
+    line = blob[:256].split(b"\n", 1)[0].decode("utf-8", "replace").lower()
+    for needle, label in _SHEBANG_TYPES:
+        if needle in line:
+            return label
+    # An interpreter this table does not name says nothing about the format —
+    # ``#!/usr/bin/env node`` is not a shell script — so the extension table
+    # answers instead, and ``unknown`` is better than a wrong label.
+    return None
 
 
-# Formats the pipeline accepts but cannot open. Distinct from
-# ``_FOREIGN_FILE_TYPES``, which rejects the run outright: these are *plausible*
-# Windows malware carriers, so refusing them would be wrong — but the analysis
-# they receive is a raw-byte string sweep and nothing else, and saying so is the
-# difference between a thin report and a dishonest one.
+def _detect_file_type(path: Path, blob: bytes) -> str:
+    """Return the lowercase routing label for a sample: ``pe``, ``apk``, ``pdf``...
+
+    Magic bytes are authoritative and are read first; the extension table is
+    the fallback for the script and image formats that have no distinctive
+    header. ``unknown`` is the honest answer for anything else — it routes the
+    sample to the neutral analysis path rather than refusing it.
+    """
+    if len(blob) >= 4:
+        head4 = blob[:4]
+        if head4 in _MACHO_THIN_MAGICS:
+            return "mach-o"
+        if head4 == _MACHO_FAT_MAGIC and len(blob) >= 8:
+            nfat = int.from_bytes(blob[4:8], "big")
+            if 1 <= nfat <= _MACHO_FAT_MAX_ARCHS:
+                return "mach-o"
+        if head4 in _ZIP_MAGICS:
+            return _zip_container_type(path, blob)
+    if blob.startswith(_LNK_MAGIC):
+        return "lnk"
+    for prefix, label in _MAGIC_PREFIXES:
+        if blob.startswith(prefix):
+            return label
+    if len(blob) >= _ISO_MAGIC_OFFSET + len(_ISO_MAGIC) and (
+        blob[_ISO_MAGIC_OFFSET : _ISO_MAGIC_OFFSET + len(_ISO_MAGIC)] == _ISO_MAGIC
+    ):
+        return "iso"
+    shebang = _shebang_type(blob)
+    if shebang:
+        return shebang
+    return _EXTENSION_TYPES.get(path.suffix.lower(), "unknown")
+
+
+# The public name. ``_detect_file_type`` stays for the callers that grew up
+# around it; new code across package boundaries reads this one.
+def detect_file_type(path: Path, blob: bytes) -> str:
+    """Return the lowercase routing label for a sample: ``pe``, ``apk``, ``pdf``..."""
+    return _detect_file_type(path, blob)
+
+
+def infer_platform(
+    file_type: str,
+    mime_type: str | None = None,
+    sandbox_report: dict[str, Any] | None = None,
+    language_or_compiler: str | None = None,
+) -> Platform:
+    """Return the platform a detected file type binds the sample to."""
+    return _infer_platform(file_type, mime_type, sandbox_report, language_or_compiler)
+
+
+# Formats the pipeline accepts but has no format-aware extractor for. No sample
+# is refused for its format; the analysis these receive is a raw-byte string
+# sweep and nothing else, and saying so is the difference between a thin report
+# and a dishonest one.
 _UNPARSED_CONTAINER_EXTENSIONS: dict[str, str] = {
     ".doc": "OLE2 document",
     ".docm": "Office macro document",
@@ -291,18 +483,28 @@ _UNPARSED_CONTAINER_EXTENSIONS: dict[str, str] = {
 
 _UNPARSED_CONTAINER_TYPES: dict[str, str] = {
     "pdf": "PDF document",
+    "ole2": "OLE2 document",
+    "ooxml": "Office Open XML document",
     "zip": "ZIP archive",
-    "zip/jar": "Java archive",
-    "zip/zip": "ZIP archive",
+    "jar": "Java archive",
+    "apk": "Android package",
+    "ipa": "iOS application archive",
+    "dex": "Dalvik executable",
+    "7z": "7-Zip archive",
+    "rar": "RAR archive",
+    "gz": "gzip archive",
+    "bz2": "bzip2 archive",
+    "xz": "xz archive",
+    "iso": "disc image",
 }
 
 
 def unparsed_container_reason(sample_path: str | Path | None) -> str | None:
     """Say so when the sample's container was never opened.
 
-    A ``.docm`` is accepted by the upload allow-list and is not rejected by
-    ``unsupported_os_reason`` — correctly, since macro documents are among the
-    most common Windows malware carriers. But ``build_static_analysis`` returns
+    A ``.docm`` is accepted by the upload allow-list — correctly, since macro
+    documents are among the most common malware carriers. But
+    ``build_static_analysis`` returns
     empty sections, imports and exports for it, and only the raw-byte IOC sweep
     runs. The analysis completes, the report renders, and nothing anywhere says
     that the macro stream — the entire payload — was never read.
@@ -322,9 +524,9 @@ def unparsed_container_reason(sample_path: str | Path | None) -> str | None:
     except OSError:
         return None
 
-    # A real PE or ELF was parsed properly; nothing to declare.
+    # A real PE, ELF or Mach-O was parsed properly; nothing to declare.
     detected = _detect_file_type(path, header).lower()
-    if detected in {"pe", "elf"}:
+    if detected in {"pe", "elf", "mach-o"}:
         return None
 
     label = _UNPARSED_CONTAINER_TYPES.get(detected) or _UNPARSED_CONTAINER_EXTENSIONS.get(

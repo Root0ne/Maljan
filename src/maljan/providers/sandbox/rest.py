@@ -188,7 +188,12 @@ class RestSandboxProvider(SandboxProvider):
         files: dict[str, Any] = {
             self._cfg.submit.file_field: (path.name, path.read_bytes(), "application/octet-stream")
         }
+        # Both maps ride along verbatim as extra multipart fields; a
+        # ``submit_fields`` entry wins a name collision, since it is the one an
+        # operator reaches for when tuning a single submission.
         for name, value in self._cfg.submit.extra_fields.items():
+            files[name] = (None, value)
+        for name, value in self._cfg.submit.submit_fields.items():
             files[name] = (None, value)
         response = self._get_http().request(
             self._cfg.submit.method, self._cfg.submit.path, files=files
