@@ -25,9 +25,13 @@ class OllamaProvider:
     ) -> BaseChatModel:
         from langchain_ollama import ChatOllama  # type: ignore[import-untyped]
 
+        # A per-agent endpoint (``llm.agents.<key>.base_url``) wins over the
+        # global one, so two agents can be served by two different Ollama hosts.
+        base_url = kwargs.pop("base_url", None) or self._config.llm.ollama.base_url
+
         return ChatOllama(
             model=model,
-            base_url=self._config.llm.ollama.base_url,
+            base_url=base_url,
             temperature=temperature,
             keep_alive=self._config.llm.ollama.keep_alive,
             num_ctx=self._config.llm.ollama.num_ctx,

@@ -46,6 +46,28 @@ class TestAgentLLMConfig:
         cfg = AgentLLMConfig(provider="ollama", model="llama3.1:8b", temperature=0.2)
         assert cfg.temperature == pytest.approx(0.2)
 
+    def test_base_url_default_is_none(self) -> None:
+        cfg = AgentLLMConfig(provider="openai", model="gpt-4o")
+        assert cfg.base_url is None
+
+    def test_base_url_kept_for_an_endpoint_provider(self) -> None:
+        cfg = AgentLLMConfig(provider="openai", model="qwen", base_url="http://127.0.0.1:8080/v1")
+        assert cfg.base_url == "http://127.0.0.1:8080/v1"
+
+    def test_an_empty_base_url_normalises_to_none(self) -> None:
+        cfg = AgentLLMConfig(provider="ollama", model="llama3.1:8b", base_url="   ")
+        assert cfg.base_url is None
+
+    def test_base_url_rejected_for_a_vendor_only_provider(self) -> None:
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="base_url is only supported"):
+            AgentLLMConfig(
+                provider="anthropic",
+                model="claude-3-5-sonnet",
+                base_url="http://127.0.0.1:8080/v1",
+            )
+
     def test_missing_provider_rejected(self) -> None:
         from pydantic import ValidationError
 
@@ -225,6 +247,125 @@ class TestBuildModelForAgent:
             with patch("maljan.llm.registry._PROVIDER_REGISTRY", {"openai": MagicMock()}):
                 registry.build_model_for_agent("static")
             mock_build.assert_called_once_with(role="expert")
+
+
+class TestPerAgentBaseUrl:
+    """Two agents, two local servers: the endpoint travels with the agent."""
+
+    def _registry(self, agents: dict):
+        from maljan.llm.registry import LLMProviderRegistry
+
+        cfg = Settings(llm=LLMConfig(provider="openai", agents=agents))
+        registry = LLMProviderRegistry.__new__(LLMProviderRegistry)
+        registry._config = cfg
+        return registry
+
+    def test_the_override_is_forwarded_to_the_provider(self) -> None:
+        agents = {
+            "static": AgentLLMConfig(
+                provider="openai", model="qwen", base_url="http://127.0.0.1:8081/v1"
+            )
+        }
+        registry = self._registry(agents)
+        mock_provider = MagicMock(build_model=MagicMock(return_value=MagicMock()))
+        mock_cls = MagicMock(return_value=mock_provider)
+
+        with patch("maljan.llm.registry._PROVIDER_REGISTRY", {"openai": mock_cls}):
+            registry.build_model_for_agent("static")
+
+        kwargs = mock_provider.build_model.call_args.kwargs
+        assert kwargs.get("base_url") == "http://127.0.0.1:8081/v1"
+
+    def test_no_override_sends_no_kwarg_at_all(self) -> None:
+        agents = {"static": AgentLLMConfig(provider="openai", model="gpt-4o")}
+        registry = self._registry(agents)
+        mock_provider = MagicMock(build_model=MagicMock(return_value=MagicMock()))
+        mock_cls = MagicMock(return_value=mock_provider)
+
+        with patch("maljan.llm.registry._PROVIDER_REGISTRY", {"openai": mock_cls}):
+            registry.build_model_for_agent("static")
+
+        assert "base_url" not in mock_provider.build_model.call_args.kwargs
+
+
+class TestProvidersHonourTheKwarg:
+    """A per-agent local server gets the same treatment as a global one."""
+
+    def test_openai_prefers_the_kwarg_and_keeps_the_llama_cpp_extras(self) -> None:
+        from maljan.core.config import OpenAIConfig
+        from maljan.llm.openai_provider import OpenAIProvider
+
+        cfg = Settings(
+            llm=LLMConfig(
+                provider="openai",
+                openai=OpenAIConfig(
+                    api_key="sk-test",
+                    base_url="http://127.0.0.1:8080/v1",
+                    repetition_penalty=1.1,
+                ),
+            )
+        )
+        with patch("langchain_openai.ChatOpenAI") as mock_chat:
+            OpenAIProvider(config=cfg).build_model(
+                model="qwen", temperature=0.1, base_url="http://127.0.0.1:8081/v1"
+            )
+
+        kwargs = mock_chat.call_args.kwargs
+        assert kwargs["base_url"] == "http://127.0.0.1:8081/v1"
+        assert kwargs["extra_body"]["repeat_penalty"] == pytest.approx(1.1)
+        assert kwargs["extra_body"]["repetition_penalty"] == pytest.approx(1.1)
+
+    def test_openai_treats_a_kwarg_only_endpoint_as_local(self) -> None:
+        """No global base_url at all: the per-agent one still turns the extras on."""
+        from maljan.core.config import OpenAIConfig
+        from maljan.llm.openai_provider import OpenAIProvider
+
+        cfg = Settings(
+            llm=LLMConfig(
+                provider="openai",
+                openai=OpenAIConfig(api_key="sk-test", repetition_penalty=1.1),
+            )
+        )
+        with patch("langchain_openai.ChatOpenAI") as mock_chat:
+            OpenAIProvider(config=cfg).build_model(
+                model="qwen", temperature=0.1, base_url="http://127.0.0.1:8081/v1"
+            )
+
+        kwargs = mock_chat.call_args.kwargs
+        assert kwargs["base_url"] == "http://127.0.0.1:8081/v1"
+        assert kwargs["extra_body"]["repeat_penalty"] == pytest.approx(1.1)
+
+    def test_ollama_prefers_the_kwarg(self) -> None:
+        from maljan.core.config import OllamaConfig
+        from maljan.llm.ollama_provider import OllamaProvider
+
+        cfg = Settings(
+            llm=LLMConfig(
+                provider="ollama",
+                ollama=OllamaConfig(base_url="http://localhost:11434"),
+            )
+        )
+        with patch("langchain_ollama.ChatOllama") as mock_chat:
+            OllamaProvider(config=cfg).build_model(
+                model="llama3.1:8b", temperature=0.1, base_url="http://gpu-box:11434"
+            )
+
+        assert mock_chat.call_args.kwargs["base_url"] == "http://gpu-box:11434"
+
+    def test_ollama_falls_back_to_the_global_endpoint(self) -> None:
+        from maljan.core.config import OllamaConfig
+        from maljan.llm.ollama_provider import OllamaProvider
+
+        cfg = Settings(
+            llm=LLMConfig(
+                provider="ollama",
+                ollama=OllamaConfig(base_url="http://localhost:11434"),
+            )
+        )
+        with patch("langchain_ollama.ChatOllama") as mock_chat:
+            OllamaProvider(config=cfg).build_model(model="llama3.1:8b", temperature=0.1)
+
+        assert mock_chat.call_args.kwargs["base_url"] == "http://localhost:11434"
 
 
 # ---------------------------------------------------------------------------

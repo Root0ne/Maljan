@@ -104,11 +104,36 @@ class AgentLLMConfig(BaseModel):
         model:       Model identifier (e.g. "gpt-4o", "claude-3-5-sonnet",
                      "llama3.1:8b"). Required when provider is set.
         temperature: Optional temperature override. Defaults to 0.1 when None.
+        base_url:    Optional per-agent endpoint, so two agents can sit on two
+                     different OpenAI-compatible servers (llama.cpp /
+                     ik_llama.cpp) or two different Ollama servers instead of
+                     sharing the single global one. Only meaningful for the
+                     "openai" and "ollama" providers; the credential stays
+                     global, so an "openai" entry pointing at its own endpoint
+                     still authenticates with llm.openai.api_key.
     """
 
     provider: str
     model: str
     temperature: float | None = None
+    base_url: str | None = None
+
+    @model_validator(mode="after")
+    def _base_url_belongs_to_an_endpoint_provider(self) -> "AgentLLMConfig":
+        """Reject a per-agent endpoint the provider has nowhere to send.
+
+        Anthropic and Gemini are vendor APIs here, with no per-agent endpoint
+        to override, so a base_url set against them would be silently dropped
+        at build time. Saying so is the only useful answer.
+        """
+        if self.base_url is not None and not self.base_url.strip():
+            self.base_url = None
+        if self.base_url and self.provider not in ("openai", "ollama"):
+            raise ValueError(
+                f"base_url is only supported for the 'openai' and 'ollama' providers, "
+                f"not '{self.provider}'; those providers have no per-agent endpoint."
+            )
+        return self
 
 
 class FrontierArm(BaseModel):

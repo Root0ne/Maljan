@@ -142,13 +142,18 @@ async def _probe_llm_anthropic(v: dict[str, Any]) -> ProbeResult:
     return ProbeResult(True, _ms(t0), f"{len(models)} models listed; {model!r} configured", models)
 
 
-def _ollama_agent_models(v: dict[str, Any]) -> dict[str, str]:
-    """Every ``llm.agents`` entry that would be served by Ollama, name to tag.
+def _ollama_agent_models(v: dict[str, Any]) -> dict[str, tuple[str, str | None]]:
+    """Every ``llm.agents`` entry served by Ollama, name to (tag, base_url).
 
     An entry names its own provider; one that leaves it empty inherits the
     global ``llm.provider``. Entries are dicts when they arrive staged from
     the UI and ``AgentLLMConfig`` objects when they come from the effective
     settings, so both are read here.
+
+    The base URL comes back beside the tag because an entry may point at its
+    own Ollama server: checking its tag against the global server's catalogue
+    would report a model missing that is present where the agent will look for
+    it. ``None`` means the entry inherits the global endpoint.
 
     ``run_probe`` always resolves ``core.llm.provider`` into the inputs, so the
     fallback below is only reached by a direct call; it reads the field's own
@@ -161,7 +166,7 @@ def _ollama_agent_models(v: dict[str, Any]) -> dict[str, str]:
     if not isinstance(raw, dict):
         return {}
     global_provider = str(v.get("provider") or LLMConfig.model_fields["provider"].default)
-    out: dict[str, str] = {}
+    out: dict[str, tuple[str, str | None]] = {}
     for name, entry in raw.items():
         if isinstance(entry, dict):
             data: dict[str, Any] = entry
@@ -171,8 +176,9 @@ def _ollama_agent_models(v: dict[str, Any]) -> dict[str, str]:
             continue
         provider = str(data.get("provider") or "") or global_provider
         model = str(data.get("model") or "")
+        base_url = str(data.get("base_url") or "").strip() or None
         if model and provider == "ollama":
-            out[str(name)] = model
+            out[str(name)] = (model, base_url)
     return out
 
 
@@ -192,11 +198,14 @@ async def _probe_llm_ollama(v: dict[str, Any]) -> ProbeResult:
         )
     # A per-agent override is a model name nothing else validates: a typo in
     # it used to surface only when the job reached that agent, minutes in.
-    missing_agents = [
-        f"{name}={model}"
-        for name, model in sorted(_ollama_agent_models(v).items())
-        if model not in models
-    ]
+    # An entry with its own endpoint is asked of that server, not of this one.
+    missing_agents: list[str] = []
+    for name, (model, agent_base) in sorted(_ollama_agent_models(v).items()):
+        if agent_base:
+            if await _ollama_tag_is_absent(agent_base, model):
+                missing_agents.append(f"{name}={model} @ {agent_base}")
+        elif model not in models:
+            missing_agents.append(f"{name}={model}")
     if missing_agents:
         return ProbeResult(
             False,
@@ -639,7 +648,10 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
         # Ollama serves what it has pulled, and a typo there fails the job at
         # the agent rather than here (BUG 8).
         if llm_provider == "ollama" and llm_model:
-            if await _ollama_tag_is_absent(settings.llm.ollama.base_url, llm_model):
+            agent_base_url = (
+                getattr(agent_llm, "base_url", None) if agent_llm else None
+            ) or settings.llm.ollama.base_url
+            if await _ollama_tag_is_absent(agent_base_url, llm_model):
                 ok = False
                 detail = f"model {llm_model!r} is not present on the Ollama server"
         return ProbeResult(

@@ -8,6 +8,9 @@ change landed on `main`.
 
 ### Added
 
+- **A per-agent LLM base URL.** `llm.agents.<agent>.base_url` points one agent
+  at its own OpenAI-compatible or Ollama server while the rest keep the global
+  endpoint, with the provider's API key still shared.
 - **Dependency submission for `uv.lock`.** A workflow posts the resolved Python
   packages to GitHub's dependency graph on every push to `main`, so Dependabot
   alerts close when the lockfile moves instead of lingering on the first parse.

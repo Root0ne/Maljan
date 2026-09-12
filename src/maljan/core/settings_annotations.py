@@ -194,13 +194,16 @@ ANNOTATIONS: dict[str, Annotation] = {
         "title": "Per-agent LLM overrides",
         "description": (
             "Per-agent LLM overrides for the heterogeneous model ensemble "
-            "(LLM__AGENTS__<AGENT>__PROVIDER/MODEL/TEMPERATURE), letting different "
+            "(LLM__AGENTS__<AGENT>__PROVIDER/MODEL/TEMPERATURE/BASE_URL), letting different "
             "analysts (static, dynamic, network) run on different providers/models "
             "instead of sharing one global expert LLM. Empty by default, meaning every "
             "agent uses the global expert LLM. The judge reads this map too; an entry "
             "that sets only provider and model runs at the per-agent default "
             "temperature of 0.1, not the judge role's 0.0, so set temperature "
-            "explicitly to keep the verdict call deterministic. Ordinarily edited from "
+            "explicitly to keep the verdict call deterministic. A per-agent base URL "
+            "applies to openai and ollama entries only and lets different agents use "
+            "different local servers, while the provider's API key stays shared. "
+            "Ordinarily edited from "
             "the Agents page; this raw view is for bulk edits."
         ),
         "probe": "llm",

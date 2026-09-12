@@ -174,17 +174,24 @@ class LLMProviderRegistry:
             return self.build_model(role=fallback_role, **kwargs)
 
         temp = agent_cfg.temperature if agent_cfg.temperature is not None else 0.1
+        agent_base_url = getattr(agent_cfg, "base_url", None)
         logger.info(
-            "Building dedicated LLM for agent '%s': %s/%s (temp=%.2f)",
+            "Building dedicated LLM for agent '%s': %s/%s (temp=%.2f, base_url=%s)",
             agent_name,
             agent_cfg.provider,
             agent_cfg.model,
             temp,
+            agent_base_url or "(global)",
         )
 
         # Build a temporary Settings-like config targeting the agent's provider
         # by patching _config at the provider level — clean duck-typing approach
         provider = provider_cls(config=self._config)
+        # Only forwarded when the agent actually overrides the endpoint: the
+        # providers resolve a missing kwarg to the global value themselves, and
+        # a None passed through would land in the model's own kwargs.
+        if agent_base_url:
+            kwargs["base_url"] = agent_base_url
         return provider.build_model(  # type: ignore[no-any-return]
             model=agent_cfg.model,
             temperature=temp,
@@ -219,6 +226,15 @@ def structured_output_supported(config: Any | None = None, llm: Any | None = Non
         if config is not None:
             provider_name = str(config.llm.provider)
             base_url = getattr(config.llm.openai, "base_url", None)
+            # A per-agent endpoint is as local as a global one, and the model
+            # object is the only place it survives: ChatOpenAI keeps it as
+            # ``openai_api_base`` (``base_url`` is the constructor alias).
+            # Only a real non-empty string counts — anything else is an object
+            # that answers every attribute, not a configured endpoint.
+            if not base_url and llm is not None:
+                candidate = getattr(llm, "openai_api_base", None)
+                if isinstance(candidate, str) and candidate.strip():
+                    base_url = candidate
             if provider_name == "openai" and base_url:
                 return False
         elif llm is not None:

@@ -109,6 +109,25 @@ An entry that has an override can be reset: `DELETE /api/v1/settings/{key}`
 removes one override, `DELETE /api/v1/settings` removes a whole group's. The
 value then falls back to the catalog default and the console shows it as such.
 
+### Per-agent model overrides
+
+`llm.agents` holds one optional override per agent key — provider, model,
+temperature and base URL — so the analysts and the judge need not share a
+single model. It is a JSON leaf of its own and is ordinarily edited from the
+Agents page, one agent at a time.
+
+The base URL is per agent, and applies to the `openai` and `ollama` providers
+only: Anthropic and Gemini are vendor APIs with no endpoint to override, and an
+override set against them is rejected on save. Two agents can therefore sit on
+two different local OpenAI-compatible servers (llama.cpp / ik_llama.cpp) or two
+different Ollama hosts, while the global `llm.openai.base_url` and
+`llm.ollama.base_url` stay the fallback for everything that sets none. The
+credential is not per agent: an `openai` entry with its own endpoint still
+authenticates with `llm.openai.api_key`. A per-agent endpoint gets the same
+treatment a global one does — the llama.cpp sampler keys and the structured
+output the local servers handle badly are decided from the endpoint the agent
+will actually call.
+
 ### Setup guides
 
 **Settings → Setup** offers seven guided flows
