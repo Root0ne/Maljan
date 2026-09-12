@@ -125,12 +125,18 @@ agent may call. Four stdio sidecars ship built in, each a single-file `FastMCP`
 server under `services/`, launched with the same interpreter the worker runs on
 and registered in `_builtin_servers()`:
 
-| Server | Bound to | Offers |
-| :-- | :-- | :-- |
-| `analysis` | `static` | Identity and hashes, strings and typed IOCs, PE/ELF/Mach-O/APK structure, archive and document inspection, payload carving, YARA, Sigma and capa. |
-| `knowledge` | every analyst and the judge | ATT&CK lookup, validation and ranking, the API-behaviour catalog, the LOLBin table, family and prior-case retrieval. |
-| `network` | `network` | DNS, HTTP and packet views of a capture, plus the whole-capture summary. |
-| `threatintel` | `judge` | VirusTotal and AbuseIPDB reputation lookups. |
+| Server | Bound to | How | Offers |
+| :-- | :-- | :-- | :-- |
+| `analysis` | `static` | definition `tools` | Identity and hashes, strings and typed IOCs, PE/ELF/Mach-O/APK structure, archive and document inspection, payload carving, YARA, Sigma and capa. |
+| `knowledge` | every analyst and the judge | definition `tools` | ATT&CK lookup, validation and ranking, the API-behaviour catalog, the LOLBin table, family and prior-case retrieval. |
+| `network` | `network` | role binding | DNS, HTTP and packet views of a capture, plus the whole-capture summary. |
+| `threatintel` | `judge` | role binding | VirusTotal and AbuseIPDB reputation lookups. |
+
+The two tool sidecars carry `agents: []` and are bound only by the `ToolRef`s
+in the agent definitions, so the definition's tool list is the single binding
+and a clone that drops a reference really loses those tools. Both bindings are
+composed the same way for every agent — role-bound servers first, then the
+definition's references, under one collision rule.
 
 The implementations live in `src/maljan/tools/` as plain functions — explicit
 arguments, JSON-serialisable returns, no `Settings` access — so the sidecar is
@@ -144,8 +150,9 @@ in the worker's memory, so `ToolRef(kind="sandbox")` resolves to in-process
 tools over that report (`src/maljan/providers/sandbox_tools.py`) with no
 transport to open.
 
-A tool server that does not share the worker's filesystem is handed the sample
-rather than a path to it; see the remote-delivery section of
+A tool server reached over HTTP does not share the worker's filesystem, so it
+is handed the sample rather than a path to it; a stdio sidecar is handed the
+path. See the remote-delivery section of
 [configuration.md](configuration.md).
 
 ## Providers

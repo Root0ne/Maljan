@@ -254,10 +254,28 @@ def _claim_in_process_tools(
 
 def _mcp_refs(settings: Settings, definition: AgentDefinition) -> list[ToolRef]:
     """The definition's server references, minus the ones the profile excludes."""
+    from maljan.core.config import ALL_SERVERS
+
     excluded = set(active_profile(settings).exclude_servers)
+    if ALL_SERVERS in excluded:
+        return []
     return [
         ref for ref in definition.tools if ref.kind == "mcp" and str(ref.server) not in excluded
     ]
+
+
+def mcp_refs_for(settings: Settings, key: str) -> list[ToolRef]:
+    """Agent ``key``'s server references under the active profile, or ``[]``.
+
+    The built-in analysts and the judge attach their own tools rather than
+    reading a ``ResolvedAgent``, so they need the same answer resolution
+    computes; exporting it here is what keeps the two from disagreeing about
+    what a definition asked for.
+    """
+    definition = settings.agents.definitions.get(key)
+    if definition is None:
+        return []
+    return _mcp_refs(settings, definition)
 
 
 def _excluded_servers(settings: Settings) -> str:
@@ -265,8 +283,8 @@ def _excluded_servers(settings: Settings) -> str:
 
     The registry takes one name, not a list — it grew for the one case of an
     analyst that must not see its own provider's server. A profile excluding
-    several is expressed as a comma-joined value that ``handles_for`` splits;
-    see ``ServerRegistry.handles_for``.
+    several is expressed as a comma-joined value that ``handles_for`` splits,
+    and ``*`` among them means every server; see ``ServerRegistry.for_agent``.
     """
     return ",".join(active_profile(settings).exclude_servers)
 

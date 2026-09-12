@@ -140,13 +140,17 @@ def test_the_sidecar_is_registered_as_a_built_in_with_the_launch_parameters_it_n
     assert server.args == [f"services/{name}-mcp/server.py"]
     assert server.cwd == f"services/{name}-mcp"
     assert server.tools is None, "a built-in exposes its whole manifest"
+    assert server.agents == [], (
+        "a tool sidecar binds through the definitions' tool references only, "
+        "so a definition that drops the reference really loses the tools"
+    )
 
 
 def test_only_the_analysis_sidecar_is_allowed_to_see_the_staging_directory() -> None:
-    """``MALJAN_STAGING_DIR`` is where uploads land, and no other built-in has
-    any business reading it."""
+    """The staging variables say where uploads land and how long they are
+    kept, and no other built-in has any business reading either."""
     from maljan.core.config import Settings
 
     servers = Settings(_env_file=None).mcp.servers
-    assert servers["analysis"].env_allow == ["MALJAN_STAGING_DIR"]
+    assert servers["analysis"].env_allow == ["MALJAN_STAGING_DIR", "MALJAN_STAGING_TTL_HOURS"]
     assert servers["knowledge"].env_allow == []

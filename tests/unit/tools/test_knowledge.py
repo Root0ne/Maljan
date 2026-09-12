@@ -23,7 +23,7 @@ class TestApiCapability:
 
         by_api = {row["api"]: row for row in result["capabilities"]}
         assert by_api["WriteProcessMemory"]["category"] == "process_injection"
-        assert by_api["WriteProcessMemory"]["suspicious"] is True
+        assert by_api["WriteProcessMemory"]["catalog_flags"] == ["suspicious"]
         assert by_api["CreateRemoteThread"]["behaviours"] == ["process_injection"]
 
     def test_an_api_the_catalog_does_not_know_comes_back_empty_not_guessed_at(self) -> None:
@@ -32,6 +32,14 @@ class TestApiCapability:
         assert row["category"] is None
         assert row["behaviours"] == []
         assert row["techniques"] == []
+        assert row["catalog_flags"] == []
+
+    def test_the_catalog_label_names_its_source_rather_than_reading_as_a_verdict(self) -> None:
+        """A bare ``suspicious: true`` would be this tool passing judgement.
+        ``catalog_flags`` says whose judgement it is."""
+        row = knowledge.api_capability(["WriteProcessMemory"])["capabilities"][0]
+        assert "suspicious" not in row
+        assert row["catalog_flags"] == ["suspicious"]
 
     def test_a_missing_catalog_is_named_rather_than_silently_empty(self) -> None:
         result = knowledge.api_capability(["WriteProcessMemory"], behaviour_map="data/nope.json")

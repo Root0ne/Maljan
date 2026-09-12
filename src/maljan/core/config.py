@@ -722,6 +722,9 @@ AgentRole = str
 # It is a path segment in the probe URL and a prefix in a renamed tool name,
 # so it is validated in the model rather than only in the API.
 SERVER_KEY_PATTERN = r"^[a-z][a-z0-9_-]{0,31}$"
+# The one value in ``ProfileDefinition.exclude_servers`` that is not a key.
+# It cannot collide with one: the key pattern above admits no ``*``.
+ALL_SERVERS = "*"
 BUILTIN_SERVER_KEYS: tuple[str, ...] = ("analysis", "knowledge", "network", "threatintel")
 RESERVED_SERVER_KEYS: tuple[str, ...] = (
     "analysis",
@@ -773,11 +776,18 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
 
     ``analysis`` and ``knowledge`` are the tool sidecars: every static-analysis
     capability the pipeline used to run in-process, and every reference lookup
-    it used to consult from one stage, offered to an agent as a tool. They are
-    bound by ``agents`` the same way the older two are, so an operator turns
-    one off by flipping ``enabled`` rather than by editing code. ``analysis``
-    is the one built-in that sees an environment variable of its own —
-    ``MALJAN_STAGING_DIR``, which is where its ``put_sample`` uploads land.
+    it used to consult from one stage, offered to an agent as a tool. An
+    operator turns one off by flipping ``enabled`` rather than by editing code.
+    ``analysis``
+    is the one built-in that sees environment variables of its own —
+    ``MALJAN_STAGING_DIR`` and ``MALJAN_STAGING_TTL_HOURS``, which say where
+    its ``put_sample`` uploads land and how long they are kept.
+
+    The two tool sidecars carry ``agents=[]`` on purpose. They are bound by the
+    ``ToolRef``s in ``_builtin_definitions()`` and by nothing else, so a clone
+    of the static definition with the ``analysis`` reference removed really
+    does run without the analysis tools. Binding them by role as well would
+    make the definition's tool list decorative.
 
     Byte-for-byte the launch parameters ``NetworkAnalyst._initialize_mcp_client``
     and ``JudgeAgent._initialize_mcp_client`` used before the sidecars became
@@ -794,8 +804,8 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
             command=sys.executable,
             args=["services/analysis-mcp/server.py"],
             cwd="services/analysis-mcp",
-            env_allow=["MALJAN_STAGING_DIR"],
-            agents=["static"],
+            env_allow=["MALJAN_STAGING_DIR", "MALJAN_STAGING_TTL_HOURS"],
+            agents=[],
             label="Analysis MCP",
         ),
         "knowledge": MCPServerConfig(
@@ -804,7 +814,7 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
             command=sys.executable,
             args=["services/knowledge-mcp/server.py"],
             cwd="services/knowledge-mcp",
-            agents=["static", "dynamic", "network", "judge"],
+            agents=[],
             label="Knowledge MCP",
         ),
         "network": MCPServerConfig(
@@ -961,6 +971,10 @@ class ProfileDefinition(BaseModel):
 
     ``static_provider=None`` means "leave each definition's own choice alone";
     a value overrides it for every member of the profile.
+
+    ``exclude_servers`` holds server keys, or the single entry ``"*"`` meaning
+    every server there is — including whatever an operator adds later, which
+    is the only form a tool-free baseline can safely take.
     """
 
     label: str = ""
@@ -1027,13 +1041,19 @@ def _builtin_profiles() -> dict[str, ProfileDefinition]:
     three cloned definitions because a clone would have to be kept in step with
     its original by hand, and the first time someone edited one and not the
     other the baseline would silently stop being the same agents.
+
+    Its exclusion is ``["*"]`` rather than the four built-in keys. A fixed list
+    would still hand the baseline any server an operator added afterwards, and
+    the built-in identity check would refuse the edit that repaired it — so a
+    profile whose whole purpose is a measurement claim would quietly stop being
+    tool-free and could not be fixed in place.
     """
     return {
         "default": ProfileDefinition(label="Default", analysts=["static", "dynamic", "network"]),
         "measurement": ProfileDefinition(
             label="Measurement baseline",
             analysts=["static", "dynamic", "network"],
-            exclude_servers=["analysis", "knowledge", "network", "threatintel"],
+            exclude_servers=[ALL_SERVERS],
             exclude_sandbox_tools=True,
             static_provider="none",
         ),
@@ -1113,7 +1133,16 @@ class AgentsConfig(BaseModel):
             if current != expected:
                 raise ValueError(f"{key!r} is built in; clone it to change it")
         for key, profile_seed in _builtin_profiles().items():
-            if self.profiles[key].model_dump() != profile_seed.model_dump():
+            current_profile = self.profiles[key].model_dump()
+            expected_profile = profile_seed.model_dump()
+            # ``exclude_servers`` is the one field an operator may edit on a
+            # built-in profile. It names servers, and the set of servers is
+            # the operator's own: a baseline that has to withhold a server
+            # added this morning would otherwise be unrepairable, because
+            # every edit to it is refused as tampering with a built-in.
+            current_profile.pop("exclude_servers", None)
+            expected_profile.pop("exclude_servers", None)
+            if current_profile != expected_profile:
                 raise ValueError(f"{key!r} is built in; clone it to change it")
 
         for key, definition in self.definitions.items():

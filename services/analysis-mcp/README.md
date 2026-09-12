@@ -6,8 +6,10 @@ pipeline, so there is one implementation and no copy to drift.
 
 Launched by `maljan.core.config._builtin_servers()` as the `analysis` server —
 `sys.executable services/analysis-mcp/server.py`, cwd `services/analysis-mcp`,
-no environment variables passed through except `MALJAN_STAGING_DIR` — and its
-tools are bound to the `static` analyst by the built-in definitions.
+with only `MALJAN_STAGING_DIR` and `MALJAN_STAGING_TTL_HOURS` passed through.
+It is registered with `agents: []` and reaches the static analyst solely
+through the `ToolRef`s in the built-in agent definitions, so a definition that
+drops the reference really runs without these tools.
 
 ## Tools
 
@@ -57,10 +59,25 @@ tools are bound to the `static` analyst by the built-in definitions.
 | `put_sample_chunk` | `upload_id`, `seq`, `content_b64` |
 | `put_sample_finish` | `upload_id` |
 
-Uploads land under `$MALJAN_STAGING_DIR` (a private temp directory when it is
-unset), the directory 0o700 and each file 0o600. `put_sample*` is what lets
-this server run on another host: see the "Tool servers on another host" section
-of `docs/configuration.md`.
+`put_sample*` is what lets this server run on another host. Maljan uploads only
+to servers reached over HTTP: as a stdio sidecar this one shares the worker's
+filesystem and is handed the path instead, so these four tools sit unused in
+the default deployment and exist for the operator who runs this same file
+behind an HTTP transport. See the "Tool servers on another host" section of
+`docs/configuration.md`.
+
+| variable | default | meaning |
+| --- | --- | --- |
+| `MALJAN_STAGING_DIR` | a `maljan-analysis-mcp` directory under the system temp dir | where uploads land |
+| `MALJAN_STAGING_TTL_HOURS` | `24` | how long a staged sample is kept; `0` disables pruning |
+
+The directory is created with mode 0o700 and refused if what is already at that
+path is a symlink or is owned by another user — the default name is predictable
+and the system temp directory is shared with every other local account. Files
+are created with `O_CREAT|O_EXCL|O_NOFOLLOW` at 0o600 rather than written and
+then chmodded, uploads are capped at 2 GiB, an unfinished chunked upload is
+evicted after fifteen minutes, and every `put_sample*` call prunes staged files
+past the TTL.
 
 ## Optional dependencies
 

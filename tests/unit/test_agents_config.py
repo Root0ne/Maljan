@@ -39,7 +39,7 @@ DEFAULT_AGENTS = {
         "measurement": {
             "label": "Measurement baseline",
             "analysts": ["static", "dynamic", "network"],
-            "exclude_servers": ["analysis", "knowledge", "network", "threatintel"],
+            "exclude_servers": ["*"],
             "exclude_sandbox_tools": True,
             "static_provider": "none",
         },
@@ -411,3 +411,83 @@ def test_a_second_definition_with_the_judge_role_is_refused():
     """Spec §3.1: there is one judge and it cannot be cloned."""
     with pytest.raises(ValidationError, match="only the built-in judge may have role judge"):
         _settings(definitions={"judge_2": {"role": "judge", "prompt": "p"}})
+
+
+# ---------------------------------------------------------------------------
+# The legacy-database migration this phase rests on.
+#
+# Every built-in definition seeded an empty tool list before the tool sidecars
+# existed, so that is what an operator database written back then holds — for
+# built-ins nobody ever edited. Left alone, the stored ``[]`` would win the
+# merge, the built-in identity check would see a definition that does not match
+# its seed, and loading those settings would raise over an edit nobody made.
+# ---------------------------------------------------------------------------
+
+
+def _stored_builtin(key: str, role: str, label: str, **over) -> dict:
+    """A built-in definition exactly as a pre-tools database stored it."""
+    return {
+        key: {
+            "role": role,
+            "label": label,
+            "prompt": None,
+            "tools": [],
+            "static_provider": None,
+            "enabled": True,
+            **over,
+        }
+    }
+
+
+class TestALegacyDatabaseGetsTheNewToolDefaults:
+    def test_a_stored_empty_tool_list_is_replaced_by_the_seed(self):
+        cfg = _settings(definitions=_stored_builtin("static", "static", "Static analyst"))
+
+        refs = cfg.agents.definitions["static"].tools
+
+        assert [r.server for r in refs] == ["analysis", "knowledge"]
+
+    def test_loading_such_a_database_does_not_read_as_tampering(self):
+        """The failure mode this guards: settings that refuse to load at all,
+        over a field the operator never touched."""
+        stored: dict = {}
+        for key, role, label in (
+            ("static", "static", "Static analyst"),
+            ("dynamic", "dynamic", "Dynamic analyst"),
+            ("network", "network", "Network analyst"),
+            ("judge", "judge", "Judge"),
+        ):
+            stored.update(_stored_builtin(key, role, label))
+
+        cfg = _settings(definitions=stored)
+
+        assert all(cfg.agents.definitions[k].tools for k in BUILTIN_AGENTS)
+
+    def test_the_operators_own_edits_to_that_definition_survive(self):
+        # A custom active profile that does not name the disabled analyst:
+        # every built-in profile lists it, and no profile may run one.
+        cfg = _settings(
+            profile="pair",
+            profiles={"pair": {"label": "Pair", "analysts": ["static", "dynamic"]}},
+            definitions=_stored_builtin("network", "network", "Network analyst", enabled=False),
+        )
+
+        definition = cfg.agents.definitions["network"]
+
+        assert definition.enabled is False
+        assert [r.server for r in definition.tools] == ["network", "knowledge"]
+
+    def test_a_custom_definition_keeps_its_empty_tool_list(self):
+        """The re-seed reads an empty list as "not set", which is only true for
+        a built-in: a custom agent with no tools chose that."""
+        cfg = _settings(
+            definitions={"strings": {"role": "generic", "prompt": "look at strings", "tools": []}}
+        )
+
+        assert cfg.agents.definitions["strings"].tools == []
+
+    def test_a_legacy_database_gains_the_measurement_profile(self):
+        """A stored map written before the baseline existed holds only what its
+        operator added; the built-in profiles come back on load."""
+        cfg = _settings(profiles={"lean": {"label": "Lean", "analysts": ["static"]}})
+        assert set(cfg.agents.profiles) == {"default", "measurement", "lean"}

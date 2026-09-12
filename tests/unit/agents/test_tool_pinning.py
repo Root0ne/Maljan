@@ -17,6 +17,11 @@ from maljan.agents.tool_pinning import is_path_argument, pin_paths, server_of
 
 LOCAL = "/data/samples/abc123.exe"
 REMOTE = "/remote/staging/abc123.exe"
+# What a real staging directory looks like: the sidecar prefixes the digest, so
+# the remote basename is *not* the local one. The pair above shares a basename
+# and cannot tell a working guard from a broken one.
+STAGED = "/remote/staging/30e555b6093af9fd_evil.exe"
+HOST = "/data/samples/evil.exe"
 
 
 class _Args(BaseModel):
@@ -153,6 +158,71 @@ class TestPerServerPaths:
         pinned[0].invoke({"file_path": "abc123.exe"})
 
         assert seen[0]["file_path"] == REMOTE
+
+    def test_the_name_the_prompt_showed_is_corrected_to_the_name_the_server_has(
+        self,
+    ) -> None:
+        """The regression that matters. The staged file is
+        ``30e555b6093af9fd_evil.exe`` and the prompt header showed the model
+        ``/data/samples/evil.exe``, so the model sends ``evil.exe`` — a name
+        that appears nowhere in the staged path. A guard matching only the
+        target's basename waits for a spelling the model was never given, and
+        the whole static tool surface goes unprotected."""
+        seen: list[dict[str, Any]] = []
+        pinned = pin_paths(
+            [_tool("identify_file", seen, server="analysis")],
+            default_path=HOST,
+            path_by_server={"analysis": STAGED},
+        )
+
+        pinned[0].invoke({"file_path": "evil.exe"})
+
+        assert seen[0]["file_path"] == STAGED
+
+    def test_the_staged_basename_is_corrected_too(self) -> None:
+        """A model that did read the staged name back still gets an absolute
+        path: a bare ``30e555b6093af9fd_evil.exe`` resolves against the
+        server's working directory, not its staging directory."""
+        seen: list[dict[str, Any]] = []
+        pinned = pin_paths(
+            [_tool("identify_file", seen, server="analysis")],
+            default_path=HOST,
+            path_by_server={"analysis": STAGED},
+        )
+
+        pinned[0].invoke({"file_path": "30e555b6093af9fd_evil.exe"})
+
+        assert seen[0]["file_path"] == STAGED
+
+    def test_the_full_worker_path_is_rewritten_for_a_server_that_cannot_open_it(
+        self,
+    ) -> None:
+        """The model obeyed the prompt exactly and sent the worker path. A
+        remote server cannot open it, so obedience must not be punished."""
+        seen: list[dict[str, Any]] = []
+        pinned = pin_paths(
+            [_tool("identify_file", seen, server="analysis")],
+            default_path=HOST,
+            path_by_server={"analysis": STAGED},
+        )
+
+        pinned[0].invoke({"file_path": HOST})
+
+        assert seen[0]["file_path"] == STAGED
+
+    def test_an_unrelated_file_name_is_still_left_alone(self) -> None:
+        """Widening the match set must not widen it to every string: a tool
+        reading a dropped file keeps the name it was given."""
+        seen: list[dict[str, Any]] = []
+        pinned = pin_paths(
+            [_tool("identify_file", seen, server="analysis")],
+            default_path=HOST,
+            path_by_server={"analysis": STAGED},
+        )
+
+        pinned[0].invoke({"file_path": "dropped.dll"})
+
+        assert seen[0]["file_path"] == "dropped.dll"
 
     def test_the_server_stamp_survives_the_wrap(self) -> None:
         seen: list[dict[str, Any]] = []

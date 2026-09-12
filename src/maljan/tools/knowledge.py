@@ -218,6 +218,11 @@ def api_capability(
     are the technique rules that list it. Both are lookups in a vendored table,
     so an API absent from the table comes back with empty lists rather than a
     guess.
+
+    ``catalog_flags`` carries the catalog's own labels — ``suspicious`` for an
+    API it tiers high or medium — named for where they come from rather than
+    presented as this tool's finding. A bare ``suspicious: true`` would be a
+    verdict, and the tools state facts.
     """
     from maljan.analysis.api_capability_db import load_api_attck_map, load_api_behaviour_db
 
@@ -242,9 +247,9 @@ def api_capability(
             {
                 "api": name,
                 "category": category,
-                "suspicious": bool(suspicious),
                 "behaviours": [category] if category else [],
                 "techniques": cited,
+                "catalog_flags": ["suspicious"] if suspicious else [],
             }
         )
     out: dict[str, Any] = {"capabilities": rows}

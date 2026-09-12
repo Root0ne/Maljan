@@ -15,12 +15,26 @@ class _T:
         return _T(update.get("name", self.name))
 
 
+def _only_role_bound(cfg) -> None:
+    """Drop the definitions' tool references from these settings.
+
+    These tests are about the *role-bound* half of an agent's tools — what
+    ``MCPServerConfig.agents`` contributes and in what order. The built-in
+    definitions also name servers by reference, and leaving those in would
+    attach the real analysis and knowledge sidecars to every assertion here.
+    The reference half has its own coverage in ``test_composition``.
+    """
+    for key, definition in cfg.agents.definitions.items():
+        cfg.agents.definitions[key] = definition.model_copy(update={"tools": []})
+
+
 def _container(monkeypatch, **servers):
     from maljan.core.container import ServiceContainer
 
     cfg = Settings(_env_file=None)
     for key, entry in servers.items():
         cfg.mcp.servers[key] = entry
+    _only_role_bound(cfg)
     return ServiceContainer(config=cfg, mock=True)
 
 

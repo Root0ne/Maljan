@@ -42,10 +42,7 @@ def test_the_registry_is_built_once_per_container():
 
     container = ServiceContainer(config=Settings(_env_file=None), mock=True)
     assert container.get_server_registry() is container.get_server_registry()
-    assert [h.name for h in container.get_server_registry().for_agent("judge")] == [
-        "knowledge",
-        "threatintel",
-    ]
+    assert [h.name for h in container.get_server_registry().for_agent("judge")] == ["threatintel"]
 
 
 @pytest.mark.asyncio

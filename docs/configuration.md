@@ -200,13 +200,19 @@ redeploying with a different environment.
 
 ## Tools, and the measurement baseline
 
-Four tool servers are enabled out of the box and bound to the agents that read
-them: `analysis` and `knowledge` to the static analyst, `knowledge` also to the
-dynamic and network analysts and to the judge, `network` to the network
-analyst, `threatintel` to the judge. What each offers is in
+Four tool servers are enabled out of the box. What each offers is in
 [architecture.md](architecture.md); what an operator changes here is the
-binding (`agents`), the exposure (`tools`) and whether the server runs at all
-(`enabled`).
+binding, the exposure (`tools`) and whether the server runs at all (`enabled`).
+
+There are two ways a server reaches an agent, and the built-ins use both.
+`network` and `threatintel` are bound by role (`MCPServerConfig.agents`), as
+they always have been. `analysis` and `knowledge` carry `agents: []` and are
+bound only by the `ToolRef`s in the agent definitions — `analysis` and
+`knowledge` on the static analyst, `knowledge` on the dynamic and network
+analysts and on the judge. That is what makes a definition's tool list
+authoritative: a clone of the static analyst with the `analysis` reference
+removed really runs without the analysis tools, which could not be true if the
+server also bound itself to the role.
 
 The per-format tools of `analysis` rest on optional libraries. Install them
 with `uv sync --extra tools` (the backend image already does); without them
@@ -216,14 +222,22 @@ with `uv sync --extra tools` (the backend image already does); without them
 starts either way.
 
 Two profiles ship built in. `default` is the three analysts with their tools.
-`measurement` is the same three analysts with `exclude_servers` covering every
-tool server, `exclude_sandbox_tools` on and `static_provider` forced to `none`
-— the baseline for measuring what the ensemble contributes without any tool.
-Select it from Settings → Agents and pipeline like any other profile; a run
-under it resolves each analyst to a prompt, a model and no tools at all.
+`measurement` is the same three analysts with `exclude_servers: ["*"]`,
+`exclude_sandbox_tools` on and `static_provider` forced to `none` — the
+baseline for measuring what the ensemble contributes without any tool. Select
+it from Settings → Agents and pipeline like any other profile; a run under it
+resolves each analyst to a prompt, a model and no tools at all.
 
-A profile's three fields are honoured in `agents/composition.resolve_agent`, so
-they apply to a custom profile too: `exclude_servers` withholds servers by key,
+The wildcard is deliberate. A fixed list of the four built-in keys would still
+hand the baseline any server an operator added afterwards, and a measurement
+claim that quietly acquires tools is worse than no baseline. `exclude_servers`
+is also the one field an operator may edit on a built-in profile, so a
+deployment that needs a variant of the baseline can write one without cloning
+it; every other field stays locked.
+
+A profile's three fields are honoured in `agents/composition.resolve_agent` and
+in the analysts' own attach path, so they apply to a custom profile too:
+`exclude_servers` withholds servers by key or `"*"` for all,
 `exclude_sandbox_tools` withholds the in-process sandbox tool set, and
 `static_provider` overrides every member's provider at once.
 
@@ -239,9 +253,9 @@ worker copies the sample there (0o700 directory, 0o600 file, removed when the
 job ends) and the server reads it from its own mount. Nothing is uploaded, and
 the path both sides use has to agree.
 
-**The `put_sample` convention.** A server that cannot share a filesystem
-advertises `put_sample` on its manifest, and Maljan uploads the sample to it
-before the agent's first tool call:
+**The `put_sample` convention.** A server reached over HTTP advertises
+`put_sample` on its manifest, and Maljan uploads the sample to it before the
+agent's first tool call:
 
 | tool | arguments | returns |
 | :-- | :-- | :-- |
@@ -258,17 +272,41 @@ The returned path is what that server's tools are then called with —
 local sidecar's tools and a remote server's at the same time and each gets the
 path it can open. Uploads are cached per `(server, sha256)` for half an hour.
 
-Staging is triggered for any bound server whose transport is not stdio, and for
-any server — stdio included — whose manifest advertises `put_sample`. It never
-fails a run: an upload that goes wrong is recorded as
+**The transport decides, not the manifest.** Staging runs for `http`,
+`streamable-http` and `sse` transports only. A stdio sidecar is a child process
+of the worker reading the same filesystem, so it is handed the path: uploading
+to it would write a second copy of the sample — a full read plus base64 in the
+worker's memory and malware bytes accumulating on disk — to tell the server
+about a file it can already open.
+
+Staging never fails a run. An upload that goes wrong is recorded as
 `sample staging failed for '<server>': <reason>` on the run's degradation
 reasons, and the server is called with the local path exactly as before. The
-paths that were used are recorded on the run under `remote_sample_paths`.
+paths that were used are recorded on the run under `remote_sample_paths`, which
+stays empty on a default install because every built-in server is stdio.
 
-The built-in `analysis` sidecar implements the convention itself, so it is
-exercised end to end by a default install. Its uploads land under
-`$MALJAN_STAGING_DIR` — a private temp directory when that is unset — with the
-directory 0o700 and each file 0o600.
+The path substitution is per server and matches three spellings of the sample:
+the worker path in full, its basename, and the basename of the staged copy. A
+server that stored the sample under a name of its own — the `analysis` sidecar
+prefixes the digest — is therefore still corrected when the model repeats the
+name the prompt showed it.
+
+The built-in `analysis` sidecar implements `put_sample*` even though it ships as
+a stdio server, because an operator may run that same file behind an HTTP
+transport on another host. Two environment variables configure it, and they are
+the only ones it is allowed to see:
+
+| variable | default | meaning |
+| :-- | :-- | :-- |
+| `MALJAN_STAGING_DIR` | a `maljan-analysis-mcp` directory under the system temp dir | where uploads land |
+| `MALJAN_STAGING_TTL_HOURS` | `24` | how long a staged sample is kept; `0` disables pruning |
+
+The directory is created with mode 0o700 and refused if what is already at that
+path is a symlink or belongs to another user — the default name is predictable
+and the system temp directory is shared. Each file is created with
+`O_CREAT|O_EXCL|O_NOFOLLOW` at 0o600 rather than written and then chmodded, and
+every `put_sample*` call prunes entries past the TTL, so a long-lived server
+does not accumulate samples without bound.
 
 ## Export and import
 

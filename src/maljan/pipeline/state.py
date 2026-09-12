@@ -81,8 +81,9 @@ class AnalysisState(TypedDict):
     # bytes rather than a path (``agents.sample_staging``). Written by the
     # analyst nodes from ``ResolvedAgent.path_by_server`` and read by the
     # transcript and the report, so a run against a remote tool server records
-    # which path its tools were actually called with. Empty on every run whose
-    # servers are local stdio sidecars, which is every default-profile run.
+    # which path its tools were actually called with. Empty unless a server is
+    # reached over HTTP: a stdio sidecar shares this filesystem and is handed
+    # the path, so a default-profile run populates nothing here.
     remote_sample_paths: Annotated[dict[str, str], _merge_dicts]
 
     # Per-agent text reports

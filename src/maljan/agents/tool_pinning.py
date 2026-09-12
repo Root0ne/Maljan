@@ -1,16 +1,24 @@
-"""Correct a model that calls a tool with the sample's bare file name.
+"""Correct a model that calls a tool with the wrong spelling of the sample path.
 
-BUG 11, live 2026-09-07. The prompt tells the model the absolute path; a 7-9B
-local model told the path will still send the file name, and there is no
-recovering from that downstream — the tool answers "File not found" and the
-agent spends its whole step budget retrying. So when an argument that is
-*named* like a path arrives holding exactly the sample's own base name, it is
-replaced with the pinned absolute path before the call, and the substitution
-is logged.
+The prompt tells the model the absolute path; a 7-9B local model told the path
+will still send the bare file name, and there is no recovering from that
+downstream — the tool answers "File not found" and the agent spends its whole
+step budget retrying. So when an argument that is *named* like a path arrives
+holding a name that can only mean this sample, it is replaced with the path
+the tool's own server can open, and the substitution is logged.
 
-Deliberately narrow. Only the sample's own basename is rewritten, and only when
-it arrives bare: a model that supplied a directory meant that directory, and a
-tool reading a dropped file or a rule file keeps the name it was given.
+What counts as "can only mean this sample" is three spellings, and getting the
+set wrong is how the guard silently stops guarding:
+
+* the worker path's own basename — what the prompt header showed the model;
+* the target path's basename — different from the first whenever a server was
+  handed the sample under a name of its own;
+* the worker path in full — correct for a local sidecar and unopenable by a
+  remote server, so it has to be rewritten there.
+
+Deliberately narrow otherwise. A model that supplied some other directory meant
+that directory, and a tool reading a dropped file or a rule file keeps the name
+it was given.
 
 ``path_by_server`` is the second half, and the reason this moved out of
 ``ConfigurableAnalyst``: a remote tool server does not see the worker's
@@ -60,6 +68,26 @@ def server_of(tool: Any) -> str:
     return str(metadata.get(SERVER_METADATA_KEY, "") or "")
 
 
+def _spellings(default_path: str | None, target: str) -> frozenset[str]:
+    """The argument values that can only mean this sample, for one tool.
+
+    Separating the values matched from the value substituted is the whole
+    point. Matching only on the basename of the *target* leaves the guard
+    watching for a name the model was never shown: a server handed the sample
+    as ``<sha16>_evil.exe`` would only be corrected if the model volunteered
+    that name, while the prompt header told it ``evil.exe``.
+    """
+    return frozenset(
+        value
+        for value in (
+            os.path.basename(default_path) if default_path else "",
+            os.path.basename(target),
+            default_path or "",
+        )
+        if value and value != target
+    )
+
+
 def pin_paths(
     tools: list[Any],
     *,
@@ -67,7 +95,7 @@ def pin_paths(
     path_by_server: dict[str, str] | None = None,
     agent_name: str = "",
 ) -> list[BaseTool]:
-    """Every tool, each guarded against the bare-filename call.
+    """Every tool, each guarded against a path argument this sample's own name.
 
     With no pinned path and no per-server map the tools are returned exactly as
     they are, unwrapped: the guard costs nothing when there is nothing to
@@ -79,12 +107,15 @@ def pin_paths(
         return list(tools)
     out: list[Any] = []
     for tool in tools:
-        pinned = per_server.get(server_of(tool)) or default_path
-        out.append(_pin_tool(tool, pinned, agent_name) if pinned else tool)
+        target = per_server.get(server_of(tool)) or default_path
+        if not target:
+            out.append(tool)
+            continue
+        out.append(_pin_tool(tool, target, _spellings(default_path, target), agent_name))
     return out
 
 
-def _pin_tool(tool: Any, pinned: str, agent_name: str) -> Any:
+def _pin_tool(tool: Any, pinned: str, spellings: frozenset[str], agent_name: str) -> Any:
     """Rebuild one tool with its path arguments corrected.
 
     A fresh tool is built rather than mutating the original: the resolved tool
@@ -107,15 +138,14 @@ def _pin_tool(tool: Any, pinned: str, agent_name: str) -> Any:
         return tool
 
     name = getattr(tool, "name", "")
-    base = os.path.basename(pinned)
 
     def _correct(kwargs: dict[str, Any]) -> dict[str, Any]:
         out = dict(kwargs)
         for key, value in kwargs.items():
-            if value == base and isinstance(value, str) and is_path_argument(key):
+            if isinstance(value, str) and value in spellings and is_path_argument(key):
                 logger.warning(
-                    "%s: tool '%s' was called with the bare sample name %r for "
-                    "argument '%s'; substituting the known absolute path %r.",
+                    "%s: tool '%s' was called with %r for argument '%s'; "
+                    "substituting the path this server can open, %r.",
                     agent_name or "agent",
                     name,
                     value,

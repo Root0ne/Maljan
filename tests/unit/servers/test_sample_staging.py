@@ -266,6 +266,24 @@ class TestCache:
 
         assert server.calls == ["put_sample", "put_sample"]
 
+    def test_a_caller_that_passes_no_digest_still_hits_the_cache(self, tmp_path: Path) -> None:
+        """The lookup used the caller's hash and the store used the computed
+        one, so ``sha256=""`` missed every time and every agent bound to the
+        server re-uploaded the same sample."""
+        path, _ = _sample(tmp_path, 512)
+        server = _FakeServer()
+        registry = _FakeRegistry(server)
+
+        first = asyncio.run(
+            sample_staging.stage_sample(registry, "remote", path, sha256="", job_id="job-1")
+        )
+        second = asyncio.run(
+            sample_staging.stage_sample(registry, "remote", path, sha256="", job_id="job-1")
+        )
+
+        assert first == second
+        assert server.calls == ["put_sample"]
+
     def test_a_different_sample_is_not_served_the_first_one_s_path(self, tmp_path: Path) -> None:
         first_path, first_digest = _sample(tmp_path, 512)
         other = tmp_path / "other.exe"
@@ -289,27 +307,67 @@ class TestCache:
         assert server.received == b"different bytes entirely"
 
 
+def _tool_from(server: str):
+    from langchain_core.tools import StructuredTool
+
+    return StructuredTool.from_function(
+        func=lambda: "x",
+        name="identify_file",
+        description="x",
+        metadata={"maljan_server": server},
+    )
+
+
 class TestStageForAgent:
     def test_only_the_servers_the_agent_s_tools_came_from_are_staged_to(
         self, tmp_path: Path
     ) -> None:
-        from langchain_core.tools import StructuredTool
-
         path, digest = _sample(tmp_path, 256)
         server = _FakeServer()
         registry = _FakeRegistry(server)
-        tool = StructuredTool.from_function(
-            func=lambda: "x",
-            name="identify_file",
-            description="x",
-            metadata={"maljan_server": "remote"},
-        )
 
         staged = asyncio.run(
-            sample_staging.stage_for_agent(registry, [tool], path, sha256=digest, job_id="job-1")
+            sample_staging.stage_for_agent(
+                registry, [_tool_from("remote")], path, sha256=digest, job_id="job-1"
+            )
         )
 
         assert staged == {"remote": "/remote/staging/sample.exe"}
+
+    def test_a_stdio_server_is_handed_the_path_and_never_the_bytes(self, tmp_path: Path) -> None:
+        """The transport decides, not the manifest. A stdio sidecar is a child
+        of this worker reading this filesystem, so uploading to it would write
+        a second copy of the sample to tell it about a file it can open."""
+        path, digest = _sample(tmp_path, 256)
+        server = _FakeServer()
+        server.config = type("_Cfg", (), {"transport": "stdio"})()
+        registry = _FakeRegistry(server)
+
+        staged = asyncio.run(
+            sample_staging.stage_for_agent(
+                registry, [_tool_from("remote")], path, sha256=digest, job_id="job-1"
+            )
+        )
+
+        assert staged == {}
+        assert server.calls == [], "a stdio server must never be uploaded to"
+        assert registry.degradation_reasons == []
+
+    def test_every_http_style_transport_stages(self, tmp_path: Path) -> None:
+        for transport in ("http", "streamable-http", "sse"):
+            sample_staging.clear_cache()
+            path, digest = _sample(tmp_path, 256)
+            server = _FakeServer()
+            server.config = type("_Cfg", (), {"transport": transport})()
+            registry = _FakeRegistry(server)
+
+            staged = asyncio.run(
+                sample_staging.stage_for_agent(
+                    registry, [_tool_from("remote")], path, sha256=digest, job_id="job-1"
+                )
+            )
+
+            assert staged == {"remote": "/remote/staging/sample.exe"}, transport
 
     def test_an_agent_with_no_sample_path_stages_nothing(self) -> None:
         registry = _FakeRegistry(_FakeServer())

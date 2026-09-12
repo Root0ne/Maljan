@@ -106,13 +106,13 @@ def test_a_cwd_outside_the_repository_is_refused():
 def test_for_agent_returns_only_enabled_servers_bound_to_that_role():
     cfg = Settings(_env_file=None)
     registry = ServerRegistry(cfg)
-    # Built-ins sort before custom keys and alphabetically among themselves,
-    # so ``knowledge`` — bound to every role — leads each list.
-    assert [h.name for h in registry.for_agent("network")] == ["knowledge", "network"]
-    assert [h.name for h in registry.for_agent("judge")] == ["knowledge", "threatintel"]
-    assert [h.name for h in registry.for_agent("static")] == ["analysis", "knowledge"]
+    # ``analysis`` and ``knowledge`` carry ``agents=[]`` and reach an agent
+    # only through its definition's tool references, so role binding sees
+    # neither of them.
+    assert [h.name for h in registry.for_agent("network")] == ["network"]
+    assert [h.name for h in registry.for_agent("judge")] == ["threatintel"]
+    assert registry.for_agent("static") == []
     cfg.mcp.servers["threatintel"].enabled = False
-    cfg.mcp.servers["knowledge"].enabled = False
     assert ServerRegistry(cfg).for_agent("judge") == []
 
 
@@ -123,10 +123,18 @@ def test_for_agent_drops_every_name_the_caller_excludes():
     own provider's server; the ``measurement`` profile needs to withhold four,
     and the single-name form has to keep working unchanged.
     """
-    registry = ServerRegistry(Settings(_env_file=None))
-    assert [h.name for h in registry.for_agent("static", exclude="analysis")] == ["knowledge"]
-    assert registry.for_agent("static", exclude="analysis,knowledge") == []
-    assert registry.for_agent("static", exclude=" analysis , knowledge ") == []
+    cfg = Settings(_env_file=None)
+    cfg.mcp.servers["one"] = MCPServerConfig(enabled=True, command="mcp", agents=["static"])
+    cfg.mcp.servers["two"] = MCPServerConfig(enabled=True, command="mcp", agents=["static"])
+    registry = ServerRegistry(cfg)
+
+    assert [h.name for h in registry.for_agent("static")] == ["one", "two"]
+    assert [h.name for h in registry.for_agent("static", exclude="one")] == ["two"]
+    assert registry.for_agent("static", exclude="one,two") == []
+    assert registry.for_agent("static", exclude=" one , two ") == []
+    # ``*`` is what the measurement baseline uses: it withholds servers that
+    # did not exist when the profile was written.
+    assert registry.for_agent("static", exclude="*") == []
 
 
 def test_get_names_the_servers_that_exist():
@@ -139,7 +147,6 @@ def test_get_names_the_servers_that_exist():
 
 def test_a_collision_prefixes_the_later_server_and_the_first_keeps_its_name(patched, monkeypatch):
     cfg = Settings(_env_file=None)
-    cfg.mcp.servers["knowledge"].enabled = False
     cfg.mcp.servers["network"].agents = ["network"]
     cfg.mcp.servers["zzz"] = MCPServerConfig(enabled=True, command="mcp", agents=["network"])
     registry = ServerRegistry(cfg)
@@ -150,7 +157,6 @@ def test_a_collision_prefixes_the_later_server_and_the_first_keeps_its_name(patc
 
 def test_a_server_that_cannot_open_degrades_and_names_itself(patched, monkeypatch):
     cfg = Settings(_env_file=None)
-    cfg.mcp.servers["knowledge"].enabled = False
     cfg.mcp.servers["broken"] = MCPServerConfig(enabled=True, command="mcp", agents=["network"])
     registry = ServerRegistry(cfg)
     real_open = ServerHandle.open
@@ -168,7 +174,6 @@ def test_a_server_that_cannot_open_degrades_and_names_itself(patched, monkeypatc
 
 def test_the_reasons_accumulate_on_the_registry_for_the_run_summary(patched, monkeypatch):
     cfg = Settings(_env_file=None)
-    cfg.mcp.servers["knowledge"].enabled = False
     cfg.mcp.servers["broken"] = MCPServerConfig(enabled=True, command="mcp", agents=["network"])
     registry = ServerRegistry(cfg)
     monkeypatch.setattr(
@@ -420,9 +425,8 @@ class _LoopBoundToolkit:
 def _registry_with_fake_toolkits(monkeypatch, made: list) -> ServerRegistry:
     """A registry whose handles build `_LoopBoundToolkit`s instead of children.
 
-    Only ``threatintel`` stays bound to the judge: these two tests count
-    toolkits per loop, and a second server bound to the same role would double
-    every count without saying anything about the per-loop rule they check.
+    ``threatintel`` is the only server bound to the judge by role, which is
+    what keeps these two tests counting one toolkit per loop.
     """
 
     def factory(*args, **kwargs):
@@ -430,9 +434,7 @@ def _registry_with_fake_toolkits(monkeypatch, made: list) -> ServerRegistry:
         return made[-1]
 
     monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", factory)
-    cfg = Settings(_env_file=None)
-    cfg.mcp.servers["knowledge"].enabled = False
-    return ServerRegistry(cfg)
+    return ServerRegistry(Settings(_env_file=None))
 
 
 def _serve(loop: asyncio.AbstractEventLoop, name: str):

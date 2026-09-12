@@ -7,13 +7,22 @@ server someone runs on their laptop. Until now the answer was a shared volume
 and a ``mirror_spec``, which works when you control both ends and not
 otherwise.
 
-The convention here is the other answer. If a server's manifest advertises
-``put_sample``, the sample is uploaded to it and the path it returns is the
-path that server's tools are called with — ``agents.tool_pinning.pin_paths``
-takes the per-server map and substitutes accordingly. Large samples go through
+The convention here is the other answer. A server reached over HTTP that
+advertises ``put_sample`` is handed the bytes, and the path it returns is what
+that server's tools are called with — ``agents.tool_pinning.pin_paths`` takes
+the per-server map and substitutes accordingly. Large samples go through
 ``put_sample_begin`` / ``put_sample_chunk`` / ``put_sample_finish`` when the
 manifest has all three; a server offering only the single-shot call gets the
 single-shot call.
+
+**Transport decides, not the manifest.** A stdio sidecar runs on this host and
+opens this filesystem, so uploading to it would write a second copy of the
+sample for nothing — a full read plus base64 in the worker's memory, a
+JSON-RPC transfer, and malware bytes accumulating in a staging directory — to
+hand the server a path it could already read. The built-in ``analysis`` sidecar
+implements ``put_sample*`` all the same, because an operator may run that very
+file behind an HTTP transport on another host, and then it is the case the
+convention exists for.
 
 Staging never fails a run. Anything that goes wrong becomes a degradation
 reason and ``None``, and the agent then calls that server with the local path
@@ -48,6 +57,10 @@ CACHE_TTL_SECONDS = 30 * 60
 
 SINGLE_SHOT_TOOL = "put_sample"
 CHUNKED_TOOLS = ("put_sample_begin", "put_sample_chunk", "put_sample_finish")
+
+# The transports that put a network between the worker and the server. Anything
+# else is a local subprocess reading the local filesystem.
+REMOTE_TRANSPORTS = frozenset({"http", "streamable-http", "sse"})
 
 # ``(server_key, sha256) -> (path, staged_at)``. Process-wide: one worker
 # analyses many samples against the same servers, and a per-job cache would
@@ -127,10 +140,6 @@ async def stage_sample(
     speak the convention, or the upload failed and the reason has been recorded
     on the registry.
     """
-    cached = _cached(server_key, sha256)
-    if cached is not None:
-        return cached
-
     try:
         handle = registry.get(server_key)
     except Exception as exc:  # noqa: BLE001 — staging never fails a run
@@ -149,7 +158,14 @@ async def stage_sample(
 
     try:
         blob = source.read_bytes()
+        # The digest is computed before the cache is consulted, not after. The
+        # store is keyed by the computed value, so a caller that passed no hash
+        # would look up under "", miss every time, and re-upload the sample
+        # once per agent bound to the server.
         digest = sha256 or hashlib.sha256(blob).hexdigest()
+        cached = _cached(server_key, digest)
+        if cached is not None:
+            return cached
         chunked = len(blob) > CHUNK_THRESHOLD_BYTES and all(t in manifest for t in CHUNKED_TOOLS)
         if chunked:
             path = await _stage_chunked(handle, source.name, blob, digest)
@@ -240,13 +256,12 @@ async def stage_for_agent(
     sha256: str,
     job_id: str,
 ) -> dict[str, str]:
-    """Stage the sample to every server among ``tools`` that needs it.
+    """Stage the sample to every server among ``tools`` that cannot read it.
 
-    "Needs it" is either transport — a server that is not stdio cannot be
-    assumed to share the filesystem — or manifest: a stdio server that
-    advertises ``put_sample`` is telling the caller it would rather be handed
-    the bytes, and honouring that costs one upload and removes a whole class of
-    path mismatch.
+    "Cannot read it" is a question about the transport, not the manifest: a
+    stdio server is a child process of this worker and opens the same
+    filesystem, so it is handed the path and nothing is copied. Only an HTTP
+    transport gets the bytes, and only when it advertises the convention.
     """
     if not sample_path:
         return {}
@@ -260,8 +275,8 @@ async def stage_for_agent(
             handle = registry.get(key)
         except Exception:  # noqa: BLE001 — a tool from a server that is gone
             continue
-        remote = str(getattr(handle.config, "transport", "stdio") or "stdio") != "stdio"
-        if not (remote or supports_staging(handle.all_tool_names())):
+        transport = str(getattr(handle.config, "transport", "stdio") or "stdio").lower()
+        if transport not in REMOTE_TRANSPORTS:
             continue
         path = await stage_sample(registry, key, sample_path, sha256=sha256, job_id=job_id)
         if path:

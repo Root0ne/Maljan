@@ -30,11 +30,26 @@ def _wired(container, name: str):
     return agent
 
 
+def _only_role_bound(cfg) -> None:
+    """Drop the definitions' tool references from these settings.
+
+    These tests are about the *role-bound* half of an agent's tools — what
+    ``MCPServerConfig.agents`` contributes and in what order. The built-in
+    definitions also name servers by reference, and leaving those in would
+    attach the real analysis and knowledge sidecars to every assertion here.
+    The reference half has its own coverage in ``test_composition``.
+    """
+    for key, definition in cfg.agents.definitions.items():
+        cfg.agents.definitions[key] = definition.model_copy(update={"tools": []})
+
+
 def test_the_network_analyst_takes_its_tools_from_the_registry(monkeypatch):
     from maljan.core.config import Settings
     from maljan.core.container import ServiceContainer
 
-    container = ServiceContainer(config=Settings(_env_file=None), mock=True)
+    cfg = Settings(_env_file=None)
+    _only_role_bound(cfg)
+    container = ServiceContainer(config=cfg, mock=True)
     registry = container.get_server_registry()
 
     class _T:
@@ -55,6 +70,7 @@ async def test_the_judge_takes_its_tools_from_the_registry(monkeypatch):
     from maljan.core.container import ServiceContainer
 
     cfg = Settings(_env_file=None)
+    _only_role_bound(cfg)
     container = ServiceContainer(config=cfg, mock=True)
     registry = container.get_server_registry()
 

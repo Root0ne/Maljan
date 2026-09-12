@@ -947,11 +947,15 @@ class ServerRegistry:
         and the set a profile withholds (``ProfileDefinition.exclude_servers``,
         which is how the ``measurement`` baseline runs the same analysts with
         no tools). One name or several comma-separated; the single-name form is
-        the older caller and stays exactly what it was.
+        the older caller and stays exactly what it was. ``*`` among them means
+        every server, so a baseline stays tool-free against servers that did
+        not exist when it was written.
         """
-        from maljan.core.config import BUILTIN_SERVER_KEYS
+        from maljan.core.config import ALL_SERVERS, BUILTIN_SERVER_KEYS
 
         excluded = {name.strip() for name in exclude.split(",") if name.strip()}
+        if ALL_SERVERS in excluded:
+            return []
         bound = [
             handle
             for handle in self._handles.values()

@@ -68,9 +68,10 @@ async def test_a_built_in_agent_resolves_to_its_prompt_and_its_tools():
     assert len(result.details["prompt_sha256"]) == 64
     assert result.details["static_provider"] == "ghidra"
     assert result.details["llm"]["provider"] == "openai"
-    # ``knowledge`` is bound to every built-in role, so the network analyst
-    # sees it alongside its own PCAP sidecar.
-    assert [s["key"] for s in result.details["servers"]] == ["knowledge", "network"]
+    # The role-bound half first, then the definition's own references: the
+    # network analyst is bound to ``network`` by role and names ``knowledge``
+    # by reference.
+    assert [s["key"] for s in result.details["servers"]] == ["network", "knowledge"]
     assert {s["status"] for s in result.details["servers"]} == {"ok"}
 
 

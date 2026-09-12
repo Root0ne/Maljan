@@ -6,8 +6,9 @@ cases. Delegates to `maljan.tools.knowledge`.
 
 Launched by `maljan.core.config._builtin_servers()` as the `knowledge` server —
 `sys.executable services/knowledge-mcp/server.py`, cwd `services/knowledge-mcp`,
-no environment variables passed through — and its tools are bound to every
-built-in analyst and to the judge.
+no environment variables passed through. It is registered with `agents: []` and
+reaches every built-in analyst and the judge through the `ToolRef`s in their
+definitions, so the definition's tool list is the only binding.
 
 ## Tools
 

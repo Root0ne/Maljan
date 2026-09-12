@@ -47,7 +47,12 @@ COPY apps/ apps/
 COPY data/ data/
 COPY services/ services/
 
-RUN uv sync --frozen --no-dev --all-packages --extra yara
+# The extras must match the first sync exactly. ``uv sync`` is exact by
+# default, so a second sync naming fewer extras *prunes* the ones it left out —
+# this line without ``--extra tools`` uninstalled androguard, macholib, olefile
+# and py7zr immediately after the layer above installed them, and the shipped
+# analysis sidecar answered "not installed" for four of its tools.
+RUN uv sync --frozen --no-dev --all-packages --extra yara --extra tools
 
 # The workspace venv is the image's interpreter. Without this, a bare `python`
 # is the system one, which sees neither the dependencies nor the two editable

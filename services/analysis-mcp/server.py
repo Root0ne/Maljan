@@ -19,7 +19,9 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
+import stat
 import tempfile
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -34,12 +36,23 @@ from maljan.tools import strings as string_tools
 mcp = FastMCP("AnalysisMCP")
 
 # Chunked uploads in flight, keyed by upload id. Bounded by the number of
-# concurrent stagers, which is the number of agents in a profile.
+# concurrent stagers, which is the number of agents in a profile — but a
+# ``put_sample_begin`` whose caller vanished would otherwise hold its chunks
+# for the process lifetime, so they are evicted by age as well.
 _UPLOADS: dict[str, dict[str, Any]] = {}
+_UPLOAD_TTL_SECONDS = 15 * 60
 
 # A chunk larger than this is refused rather than buffered: the convention
 # splits at 8 MiB and a caller sending more is not speaking it.
 _MAX_CHUNK_BYTES = 16 * 1024 * 1024
+# The largest sample this server will accept by either route. A tool server
+# reachable over HTTP is a place to post arbitrary bytes, and an unbounded
+# accept is an unbounded write.
+_MAX_SAMPLE_BYTES = 2 * 1024 * 1024 * 1024
+
+# How long a staged sample is kept. Every ``put_sample*`` call prunes, so a
+# long-lived server does not accumulate malware bytes without bound.
+_DEFAULT_STAGING_TTL_HOURS = 24.0
 
 
 def _guard(tool: str, call: Any, **kwargs: Any) -> dict[str, Any]:
@@ -250,37 +263,110 @@ def capa(path: str, timeout_s: int = 300, backend: str = "auto") -> dict[str, An
 # ---------------------------------------------------------------------------
 
 
+def _staging_ttl_seconds() -> float:
+    """``MALJAN_STAGING_TTL_HOURS``, or a day. Zero or less disables pruning."""
+    raw = os.environ.get("MALJAN_STAGING_TTL_HOURS", "").strip()
+    try:
+        hours = float(raw) if raw else _DEFAULT_STAGING_TTL_HOURS
+    except ValueError:
+        hours = _DEFAULT_STAGING_TTL_HOURS
+    return hours * 3600.0
+
+
 def _staging_dir() -> Path:
     """Where uploaded samples land: ``MALJAN_STAGING_DIR`` or a private temp dir.
 
-    Created 0o700 and the files inside 0o600. A sample is a live executable;
-    a staging directory that anyone on the host can read is a way to hand it
-    to something that will run it.
+    Created with ``mkdir(mode=0o700)`` rather than created-then-chmodded, and
+    refused if what is already there is a symlink or belongs to somebody else.
+    The default name is predictable and the system temp directory is shared, so
+    without those checks another local user could plant a directory or a link
+    at that path and receive live malware into a location of their choosing —
+    and the chmod would then be applied to their target.
     """
     configured = os.environ.get("MALJAN_STAGING_DIR", "").strip()
     base = Path(configured) if configured else Path(tempfile.gettempdir()) / "maljan-analysis-mcp"
-    base.mkdir(parents=True, exist_ok=True)
-    base.chmod(0o700)
+    try:
+        base.mkdir(mode=0o700, parents=True, exist_ok=True)
+    except FileExistsError as exc:  # a non-directory already sits at that path
+        raise RuntimeError(f"staging path {base} is not a directory") from exc
+    if base.is_symlink():
+        raise RuntimeError(f"staging path {base} is a symlink")
+    info = base.lstat()
+    if not stat.S_ISDIR(info.st_mode):
+        raise RuntimeError(f"staging path {base} is not a directory")
+    if info.st_uid != os.getuid():
+        raise RuntimeError(f"staging path {base} is owned by another user")
+    if info.st_mode & 0o077:
+        base.chmod(0o700)
     return base
 
 
+def _prune_staging(base: Path) -> int:
+    """Delete staged files past their TTL. Returns how many went.
+
+    Called from every ``put_sample*`` entry point rather than on a timer: this
+    server has no scheduler, and the moment a sample arrives is exactly when
+    the last one is most likely to be stale.
+    """
+    ttl = _staging_ttl_seconds()
+    if ttl <= 0:
+        return 0
+    cutoff = time.time() - ttl
+    removed = 0
+    for entry in base.iterdir():
+        try:
+            info = entry.lstat()
+            if stat.S_ISDIR(info.st_mode) or info.st_mtime >= cutoff:
+                continue
+            entry.unlink()
+            removed += 1
+        except OSError:  # a file another call already removed
+            continue
+    return removed
+
+
+def _evict_stale_uploads() -> None:
+    """Drop chunked uploads whose caller never finished them."""
+    cutoff = time.monotonic() - _UPLOAD_TTL_SECONDS
+    for upload_id in [k for k, v in _UPLOADS.items() if v.get("started_at", 0.0) < cutoff]:
+        _UPLOADS.pop(upload_id, None)
+
+
 def _write_sample(filename: str, blob: bytes, sha256: str) -> dict[str, Any]:
-    """Write the bytes under the staging directory, checking the digest first."""
+    """Write the bytes under the staging directory, checking the digest first.
+
+    Created with ``O_CREAT|O_EXCL|O_NOFOLLOW`` at 0o600, not written and then
+    chmodded: the two-step form leaves the file readable at the process umask
+    for as long as the write takes, and would follow a symlink planted at the
+    destination.
+    """
+    if len(blob) > _MAX_SAMPLE_BYTES:
+        return {"error": f"sample exceeds {_MAX_SAMPLE_BYTES} bytes"}
     actual = hashlib.sha256(blob).hexdigest()
     if sha256 and actual != sha256.lower():
         return {"error": f"sha256 mismatch: expected {sha256}, received {actual}"}
+    base = _staging_dir()
+    _prune_staging(base)
     # The caller's filename names the file, never the directory: a name
     # carrying ``..`` or an absolute prefix must not decide where this writes.
     safe = Path(filename or actual).name or actual
-    destination = _staging_dir() / f"{actual[:16]}_{safe}"
-    destination.write_bytes(blob)
-    destination.chmod(0o600)
+    destination = base / f"{actual[:16]}_{safe}"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW
+    if not destination.exists():
+        flags |= os.O_EXCL
+    fd = os.open(destination, flags, 0o600)
+    try:
+        os.write(fd, blob)
+    finally:
+        os.close(fd)
+    os.chmod(destination, 0o600)
     return {"path": str(destination), "sha256": actual, "size": len(blob)}
 
 
 @mcp.tool()
 def put_sample(filename: str, content_b64: str, sha256: str = "") -> dict[str, Any]:
     """Upload a sample in one call and get back the path to analyse it at."""
+    _evict_stale_uploads()
     try:
         blob = base64.b64decode(content_b64, validate=True)
     except Exception as exc:  # noqa: BLE001
@@ -291,12 +377,21 @@ def put_sample(filename: str, content_b64: str, sha256: str = "") -> dict[str, A
 @mcp.tool()
 def put_sample_begin(filename: str, sha256: str, size: int) -> dict[str, Any]:
     """Start a chunked upload for a sample too large to send in one call."""
+    _evict_stale_uploads()
+    declared = int(size)
+    if declared < 0 or declared > _MAX_SAMPLE_BYTES:
+        return {
+            "error": f"declared size must be between 0 and {_MAX_SAMPLE_BYTES} bytes",
+            "tool": "put_sample_begin",
+        }
     upload_id = uuid.uuid4().hex
     _UPLOADS[upload_id] = {
         "filename": filename,
         "sha256": sha256,
-        "size": int(size),
+        "size": declared,
         "chunks": {},
+        "received": 0,
+        "started_at": time.monotonic(),
     }
     return {"upload_id": upload_id}
 
@@ -304,6 +399,7 @@ def put_sample_begin(filename: str, sha256: str, size: int) -> dict[str, Any]:
 @mcp.tool()
 def put_sample_chunk(upload_id: str, seq: int, content_b64: str) -> dict[str, Any]:
     """Send one chunk of a chunked upload, identified by its sequence number."""
+    _evict_stale_uploads()
     upload = _UPLOADS.get(upload_id)
     if upload is None:
         return {"error": f"unknown upload_id {upload_id!r}", "tool": "put_sample_chunk"}
@@ -316,13 +412,23 @@ def put_sample_chunk(upload_id: str, seq: int, content_b64: str) -> dict[str, An
     # Keyed by sequence rather than appended: a transport that reorders or
     # retries a chunk must not silently corrupt the file, and the digest check
     # at finish would only tell the caller *that* it did.
+    previous = upload["chunks"].get(int(seq))
+    running = upload["received"] - (len(previous) if previous else 0) + len(blob)
+    # Enforced as the chunks arrive, not at assembly: refusing a 3 GB upload
+    # after buffering all of it is not a limit, it is a slower way to run out
+    # of memory.
+    if running > min(upload["size"] or _MAX_SAMPLE_BYTES, _MAX_SAMPLE_BYTES):
+        _UPLOADS.pop(upload_id, None)
+        return {"error": "upload exceeds its declared size", "tool": "put_sample_chunk"}
     upload["chunks"][int(seq)] = blob
+    upload["received"] = running
     return {"upload_id": upload_id, "seq": int(seq), "received": len(blob)}
 
 
 @mcp.tool()
 def put_sample_finish(upload_id: str) -> dict[str, Any]:
     """Assemble a chunked upload, verify its digest and return the sample's path."""
+    _evict_stale_uploads()
     upload = _UPLOADS.pop(upload_id, None)
     if upload is None:
         return {"error": f"unknown upload_id {upload_id!r}", "tool": "put_sample_finish"}
