@@ -40,23 +40,23 @@ class ClaimEvidence(BaseModel):
         description="MITRE ATT&CK technique ID if applicable, e.g. 'T1055.001'.",
         pattern=r"^T\d{4}(\.\d{3})?$",
     )
-    # The platforms the source rule/layer explicitly
-    # declared (e.g. ["windows"] for a Sigma rule with
-    # ``logsource.product=windows``, ["any"] for a YARA rule annotated
-    # cross-platform). Cascade engine prefers this over the MITRE catalog
-    # for the platform-compatibility check — that way a YARA rule
-    # explicitly marked cross-platform can still fire on a Linux
-    # sample even when MITRE Enterprise says T1497 only targets
-    # Windows. ``None`` means the producing layer didn't
-    # declare anything (analyst LLM claim or legacy rule); cascade then
-    # falls back to MITRE platforms.
+    # Whether that id survived validation. ``pipeline.validation`` sets this
+    # ``False`` when the analyst kept an id the ATT&CK catalogue does not have,
+    # after being told so and given another turn. The id itself stays exactly
+    # as the analyst wrote it — a wrong id that says it is wrong is worth more
+    # than a right-looking id somebody else substituted — and the flag is what
+    # the report, the FP linter and the STIX minting step read instead.
+    technique_id_valid: bool = Field(
+        default=True,
+        description="False when the technique id is not in the ATT&CK catalogue.",
+    )
+    # The platforms the source rule/layer explicitly declared (``["windows"]``
+    # for a Sigma rule with ``logsource.product=windows``, ``["any"]`` for a
+    # YARA rule annotated cross-platform). ``None`` means the producing layer
+    # declared nothing, which is every analyst claim.
     rule_platforms: list[str] | None = Field(
         default=None,
-        description=(
-            "Platform tags the source rule/layer declared (Sigma "
-            "logsource.product, YARA platform metadata). Used by the TTP "
-            "cascade as the primary platform-compatibility signal."
-        ),
+        description="Platform tags the source rule declared, when it declared any.",
     )
 
 

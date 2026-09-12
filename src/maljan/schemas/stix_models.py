@@ -44,6 +44,8 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
+from maljan.schemas.judgement import JudgeAssessment
+
 
 def _generate_uuid() -> str:
     """Generate a standard UUID string for STIX objects."""
@@ -344,6 +346,12 @@ class Bundle(_SpecConformantModel):
     type: Literal["bundle"] = "bundle"
     id: str = Field(default_factory=lambda: f"bundle--{_generate_uuid()}")
     objects: list[_BundleObject] = Field(default_factory=list)
+    # Severity, malware category and family attribution, as the judge answered
+    # them. A STIX custom property (``x_`` prefixed, per the spec's extension
+    # rule) rather than three bare bundle fields, because the Bundle's property
+    # set is defined by STIX 2.1 and a validator reads it strictly. ``None``
+    # when the judge did not produce one, which the report prints as such.
+    x_maljan_assessment: JudgeAssessment | None = None
 
     def confidence_annotated_relationships(self) -> list[ConfidenceAnnotatedRelationship]:
         """Return only the ConfidenceAnnotatedRelationship objects in this bundle."""
