@@ -1,6 +1,6 @@
 """MITRE ATT&CK STIX 2.1 bundle downloader and parser.
 
-Downloads the Enterprise ATT&CK dataset from the official MITRE
+Downloads the Enterprise, Mobile and ICS ATT&CK datasets from the official MITRE
 ``attack-stix-data`` GitHub repository (the maintained STIX 2.1 source) and
 extracts:
   - ``attack-pattern`` objects -> techniques / sub-techniques, and
@@ -33,16 +33,51 @@ from typing import Any
 from maljan.core.logger import logger
 
 # Official, maintained MITRE ATT&CK STIX 2.1 source. The version-less
-# ``enterprise-attack.json`` always points at the latest release.
-ATTCK_BUNDLE_URL = (
-    "https://raw.githubusercontent.com/mitre-attack/attack-stix-data/master/"
-    "enterprise-attack/enterprise-attack.json"
-)
+# ``<domain>-attack.json`` always points at the latest release.
+_BUNDLE_BASE_URL = "https://raw.githubusercontent.com/mitre-attack/attack-stix-data/master"
+
+# The three ATT&CK domains, in the order a technique id is looked up in them.
+# Enterprise is the one this project cannot run without; Mobile and ICS are
+# loaded when their bundle is reachable or already cached, and their absence
+# costs coverage rather than breaking a run.
+DOMAINS: tuple[str, ...] = ("enterprise", "mobile", "ics")
+
+ATTCK_BUNDLE_URLS: dict[str, str] = {
+    domain: f"{_BUNDLE_BASE_URL}/{domain}-attack/{domain}-attack.json" for domain in DOMAINS
+}
+ATTCK_BUNDLE_URL = ATTCK_BUNDLE_URLS["enterprise"]
 
 # Local cache directory — respects MALJAN_ATTCK_CACHE env var
 _DEFAULT_CACHE_DIR = Path.home() / ".cache" / "maljan" / "attck"
 ATTCK_CACHE_DIR = Path(os.environ.get("MALJAN_ATTCK_CACHE", str(_DEFAULT_CACHE_DIR)))
-ATTCK_CACHE_FILE = ATTCK_CACHE_DIR / "enterprise-attack.json"
+ATTCK_CACHE_FILES: dict[str, Path] = {
+    domain: ATTCK_CACHE_DIR / f"{domain}-attack.json" for domain in DOMAINS
+}
+ATTCK_CACHE_FILE = ATTCK_CACHE_FILES["enterprise"]
+
+# The vendored technique universe, shipped so validation works with no network.
+# New shape: one sorted id list per domain. The former flat list (and the
+# ``{"count", "technique_ids"}`` wrapper it grew) is still read, as enterprise.
+VALID_IDS_FILE = Path(__file__).resolve().parents[3] / "data" / "attck_valid_ids.json"
+
+# Our platform vocabulary translated into MITRE's ``x_mitre_platforms`` strings.
+# An empty tuple means "do not filter on platform": a cross-platform or
+# undetermined sample must not lose techniques to a comparison it cannot make.
+MITRE_PLATFORM_MAP: dict[str, tuple[str, ...]] = {
+    "windows": ("Windows",),
+    "linux": ("Linux",),
+    "macos": ("macOS",),
+    "android": ("Android",),
+    "ios": ("iOS",),
+    "multi": (),
+    "unknown": (),
+}
+
+
+def mitre_platforms(sample_platform: str | None) -> tuple[str, ...]:
+    """The MITRE platform strings a sample platform maps to, empty when it does not."""
+    return MITRE_PLATFORM_MAP.get((sample_platform or "").strip().lower(), ())
+
 
 # Regexes for ATT&CK IDs
 TECHNIQUE_ID_RE = re.compile(r"^T\d{4}(?:\.\d{3})?$")
@@ -332,17 +367,158 @@ def _extract_version(bundle: dict) -> str:
     return ""
 
 
+def load_domain_data(
+    domain: str,
+    force_refresh: bool = False,
+    max_age_days: int | None = None,
+) -> ATTCKData | None:
+    """One domain's bundle, or ``None`` when it is neither cached nor reachable.
+
+    Enterprise is the domain every run needs, and its loader raises when there
+    is nothing to read. Mobile and ICS are additive: a box with no network and
+    no cache for them keeps working with a narrower catalog rather than losing
+    the enterprise techniques it does have.
+    """
+    url = ATTCK_BUNDLE_URLS.get(domain)
+    cache_file = ATTCK_CACHE_FILES.get(domain)
+    if url is None or cache_file is None:
+        raise ValueError(f"Unknown ATT&CK domain {domain!r}; known: {', '.join(DOMAINS)}")
+    try:
+        return load_attck_data(url, cache_file, force_refresh, max_age_days)
+    except Exception as exc:  # noqa: BLE001 — a missing optional domain is not a run failure
+        if domain == "enterprise":
+            raise
+        logger.info("ATT&CK %s bundle unavailable (%s); continuing without it.", domain, exc)
+        return None
+
+
+def load_all_domains(
+    force_refresh: bool = False,
+    max_age_days: int | None = None,
+) -> dict[str, ATTCKData]:
+    """Every domain bundle that is cached or reachable, keyed by domain name."""
+    loaded: dict[str, ATTCKData] = {}
+    for domain in DOMAINS:
+        data = load_domain_data(domain, force_refresh, max_age_days)
+        if data is not None:
+            loaded[domain] = data
+    return loaded
+
+
+def _read_valid_ids_file(path: Path) -> dict[str, list[str]]:
+    """The vendored technique universe per domain, in either shape it has had.
+
+    Accepted, oldest first: a flat list of enterprise ids; a
+    ``{"count", "technique_ids"}`` wrapper around one; and the current
+    ``{"enterprise": [...], "mobile": [...], "ics": [...]}``. An empty or
+    missing list is a domain this checkout does not ship, not an error.
+    """
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        logger.warning("Could not read the ATT&CK id catalog at %s: %s", path, exc)
+        return {domain: [] for domain in DOMAINS}
+
+    if isinstance(raw, list):
+        return {"enterprise": [str(i) for i in raw], "mobile": [], "ics": []}
+    if isinstance(raw, dict) and "technique_ids" in raw:
+        return {
+            "enterprise": [str(i) for i in raw.get("technique_ids") or []],
+            "mobile": [],
+            "ics": [],
+        }
+    if isinstance(raw, dict):
+        return {domain: [str(i) for i in (raw.get(domain) or [])] for domain in DOMAINS}
+    logger.warning("The ATT&CK id catalog at %s is in no shape this loader reads.", path)
+    return {domain: [] for domain in DOMAINS}
+
+
+_valid_ids_cache: dict[str, list[str]] | None = None
+
+
+def _valid_ids_by_domain() -> dict[str, list[str]]:
+    global _valid_ids_cache
+    if _valid_ids_cache is None:
+        _valid_ids_cache = _read_valid_ids_file(VALID_IDS_FILE)
+    return _valid_ids_cache
+
+
+def valid_ids(domain: str | None = None) -> set[str]:
+    """Every active technique id, or one domain's when ``domain`` is given."""
+    by_domain = _valid_ids_by_domain()
+    if domain is not None:
+        return set(by_domain.get(domain, ()))
+    return {tid for ids in by_domain.values() for tid in ids}
+
+
+def domain_of(technique_id: str) -> str | None:
+    """Which ATT&CK domain owns ``technique_id``, or ``None`` when none does.
+
+    A handful of ids appear in more than one domain; the first domain in
+    ``DOMAINS`` that carries the id wins, which makes the answer stable rather
+    than dependent on dict ordering.
+    """
+    tid = (technique_id or "").strip().upper()
+    if not tid:
+        return None
+    by_domain = _valid_ids_by_domain()
+    for domain in DOMAINS:
+        if tid in set(by_domain.get(domain, ())):
+            return domain
+    return None
+
+
+_platform_cache: dict[str, tuple[str, ...]] | None = None
+
+
+def _platform_catalog() -> dict[str, tuple[str, ...]]:
+    """``{technique_id: (MITRE platforms,)}`` across every loadable domain.
+
+    Built once. An unreachable catalog yields an empty map, and every caller
+    reads that as "no platform information", never as "no platforms".
+    """
+    global _platform_cache
+    if _platform_cache is not None:
+        return _platform_cache
+    catalog: dict[str, tuple[str, ...]] = {}
+    try:
+        for data in load_all_domains().values():
+            for technique in data.techniques:
+                catalog.setdefault(technique.technique_id, tuple(technique.platforms or ()))
+    except Exception as exc:  # noqa: BLE001 — platform filtering degrades, the run does not
+        logger.debug("Could not load the ATT&CK platform catalog: %s", exc)
+        return {}
+    _platform_cache = catalog
+    return catalog
+
+
+def platforms_for(technique_id: str) -> tuple[str, ...]:
+    """The MITRE platforms a technique declares; empty when it is not catalogued."""
+    return _platform_catalog().get((technique_id or "").strip().upper(), ())
+
+
+def reset_caches() -> None:
+    """Drop the vendored-id and platform caches. For tests and the refresh CLI."""
+    global _valid_ids_cache, _platform_cache
+    _valid_ids_cache = None
+    _platform_cache = None
+
+
 def _main() -> None:
     """Force-refresh the cached bundle and print a summary.
 
     Run as: ``python -m maljan.memory.attck_loader``
     """
-    data = load_attck_data(force_refresh=True)
-    print(
-        f"ATT&CK refreshed: version={data.version or 'unknown'}, "
-        f"{len(data.techniques)} techniques, {len(data.tactics)} tactics"
-    )
-    for t in data.tactics:
+    loaded = load_all_domains(force_refresh=True)
+    for domain, data in loaded.items():
+        print(
+            f"ATT&CK {domain} refreshed: version={data.version or 'unknown'}, "
+            f"{len(data.techniques)} techniques, {len(data.tactics)} tactics"
+        )
+    missing = [d for d in DOMAINS if d not in loaded]
+    if missing:
+        print(f"Not reachable and not cached: {', '.join(missing)}")
+    for t in loaded["enterprise"].tactics:
         print(f"  {t.tactic_id}  {t.shortname:<24} {t.name}")
 
 

@@ -27,7 +27,7 @@ from collections import Counter
 from dataclasses import dataclass
 
 from maljan.core.logger import logger
-from maljan.memory.attck_loader import ATTCKTactic, ATTCKTechnique, load_attck_data
+from maljan.memory.attck_loader import ATTCKTactic, ATTCKTechnique, load_all_domains
 
 # Stopwords to exclude from TF-IDF tokens (minimal set for security domain)
 _STOPWORDS = frozenset(
@@ -137,14 +137,33 @@ class ATTCKIndex:
         cls,
         force_refresh: bool = False,
     ) -> ATTCKIndex:
-        """Build an index from the official MITRE ATT&CK STIX bundle.
+        """Build an index from the official MITRE ATT&CK STIX bundles.
 
-        Downloads and caches the bundle on first call (~50 MB) and parses both
-        techniques and the tactic catalogue. Subsequent calls use the local
-        cache (which auto-refreshes once stale — see attck_loader).
+        Every domain the loader can reach contributes: an Android or iOS
+        sample's Mobile techniques are as valid as an Enterprise one's, and a
+        validator that only knew Enterprise called them hallucinations. The
+        tactic catalogue stays Enterprise's — that is the matrix the
+        capabilities view draws.
+
+        Downloads and caches each bundle on first call (Enterprise is ~50 MB)
+        and parses both techniques and the tactic catalogue. Subsequent calls
+        use the local cache (which auto-refreshes once stale — see
+        attck_loader).
         """
-        data = load_attck_data(force_refresh=force_refresh)
-        return cls.from_techniques(data.techniques, tactics=data.tactics)
+        loaded = load_all_domains(force_refresh=force_refresh)
+        techniques: list[ATTCKTechnique] = []
+        seen: set[str] = set()
+        for domain in ("enterprise", "mobile", "ics"):
+            data = loaded.get(domain)
+            if data is None:
+                continue
+            for technique in data.techniques:
+                if technique.technique_id in seen:
+                    continue
+                seen.add(technique.technique_id)
+                techniques.append(technique)
+        tactics = loaded["enterprise"].tactics if "enterprise" in loaded else []
+        return cls.from_techniques(techniques, tactics=tactics)
 
     @classmethod
     def from_techniques(
