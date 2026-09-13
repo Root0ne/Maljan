@@ -20,7 +20,12 @@ from app.services.agent_map import (  # noqa: E402
     effective_profiles,
     validate_agent_map,
 )
-from maljan.core.config import Settings
+from maljan.core.config import (
+    BUILTIN_AGENTS,
+    BUILTIN_PROFILES,
+    SEEDED_GENERIC_AGENTS,
+    Settings,
+)
 
 BUILTIN_STATIC = {
     "role": "static",
@@ -41,7 +46,7 @@ def test_a_valid_definition_round_trips_with_the_built_ins_reseeded():
         _defs(strings={"role": "generic", "prompt": "read strings"}), stored={}
     )
     definitions = out[AGENT_DEFINITIONS_KEY]
-    assert set(definitions) == {"static", "dynamic", "network", "judge", "reporter", "strings"}
+    assert set(definitions) == {*BUILTIN_AGENTS, *SEEDED_GENERIC_AGENTS, "strings"}
     assert definitions["strings"]["role"] == "generic"
 
 
@@ -231,13 +236,7 @@ def test_an_explicit_null_clears_a_map_back_to_the_built_ins():
     stored = {AGENT_DEFINITIONS_KEY: {"strings": {"role": "generic", "prompt": "p"}}}
     out = validate_agent_map({AGENT_DEFINITIONS_KEY: None}, stored=stored)
     assert out[AGENT_DEFINITIONS_KEY] is None
-    assert set(effective_definitions({})) == {
-        "static",
-        "dynamic",
-        "network",
-        "judge",
-        "reporter",
-    }
+    assert set(effective_definitions({})) == {*BUILTIN_AGENTS, *SEEDED_GENERIC_AGENTS}
 
 
 def test_clearing_the_definitions_that_a_stored_profile_uses_is_refused():
@@ -251,10 +250,9 @@ def test_clearing_the_definitions_that_a_stored_profile_uses_is_refused():
 
 
 def test_the_effective_maps_layer_stored_over_seeded():
-    assert set(effective_profiles({})) == {"default", "measurement"}
+    assert set(effective_profiles({})) == set(BUILTIN_PROFILES)
     assert set(effective_profiles({AGENT_PROFILES_KEY: {"lean": {"analysts": ["network"]}}})) == {
-        "default",
-        "measurement",
+        *BUILTIN_PROFILES,
         "lean",
     }
 

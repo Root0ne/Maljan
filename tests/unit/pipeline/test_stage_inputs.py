@@ -56,7 +56,7 @@ TEAM = [
     {
         "key": "deep",
         "kind": "analysis",
-        "agents": ["reverser"],
+        "agents": ["unpacker"],
         "depends_on": ["triage"],
         "inject_upstream": "findings",
     },
@@ -65,7 +65,7 @@ TEAM = [
 
 
 def _settings(stages: list[dict] | None = None, **over: Any) -> Settings:
-    definitions = {"reverser": {"role": "generic", "prompt": "reverse it"}}
+    definitions = {"unpacker": {"role": "generic", "prompt": "unpack it"}}
     definitions.update(over.pop("definitions", {}))
     return Settings(
         _env_file=None,
@@ -141,12 +141,12 @@ class TestUpstreamFindings:
         container.agent_role.return_value = "generic"
         agent = MagicMock()
         agent._resolved.static_provider_id = "none"
-        agent.safe_analyze_isr.return_value = _isr("reverser", "found the unpacker")
+        agent.safe_analyze_isr.return_value = _isr("unpacker", "found the unpacker")
         container.get_agent.return_value = agent
         container.load_data_for_agent.return_value = [_chunk("the sample profile")]
 
         stage = settings.agents.profiles["team"].stage("deep")
-        make_stage_agent_node(stage, "reverser", container)(self._state())  # type: ignore[arg-type]
+        make_stage_agent_node(stage, "unpacker", container)(self._state())  # type: ignore[arg-type]
 
         shown = agent.safe_analyze_isr.call_args[0][0]
         assert shown.startswith("## Upstream findings")
@@ -402,7 +402,7 @@ class TestInjectionKeepsTheHeadChunkAContract:
         container.agent_role.return_value = "static"
         agent = MagicMock()
         agent._resolved.static_provider_id = "none"
-        agent.safe_analyze_isr.return_value = _isr("reverser", "found the unpacker")
+        agent.safe_analyze_isr.return_value = _isr("unpacker", "found the unpacker")
         container.get_agent.return_value = agent
         container.load_data_for_agent.return_value = [
             _chunk(json.dumps({"sha256": "abc123", "name": "evil.exe"}))
@@ -419,7 +419,7 @@ class TestInjectionKeepsTheHeadChunkAContract:
             "isr_reports": {"static": _isr("static", "packed with UPX")},
             "reports": {"static": "The full static prose report."},
         }
-        make_stage_agent_node(stage, "reverser", container)(state)  # type: ignore[arg-type]
+        make_stage_agent_node(stage, "unpacker", container)(state)  # type: ignore[arg-type]
         return str(agent.safe_analyze_isr.call_args[0][0])
 
     def test_the_load_hint_still_fires_with_findings_injected(self) -> None:

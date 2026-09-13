@@ -15,6 +15,7 @@ from maljan.core.config import (
     BUILTIN_AGENTS,
     BUILTIN_PROFILES,
     REPORTER_AGENT_KEY,
+    SEEDED_GENERIC_AGENTS,
     SERVER_KEY_PATTERN,
     Settings,
     ToolRef,
@@ -171,12 +172,29 @@ def test_the_key_pattern_is_the_one_the_server_map_already_uses():
 
 
 def test_the_default_settings_dump_is_exactly_the_pinned_dict():
-    assert Settings(_env_file=None).agents.model_dump() == DEFAULT_AGENTS
+    """Every entry the pin spells out, field for field, and nothing extra.
+
+    The pin covers the architecture this project measured itself on — the
+    ``default`` and ``measurement`` teams and the five definitions with a class
+    behind them — so a silent change to any of their fields fails here. The two
+    seeded generic teams are pinned by their own behaviour in
+    ``tests/unit/pipeline/test_seeded_teams.py``; spelling their thirteen
+    stages out a second time would be a copy to keep in step by hand rather
+    than a guard.
+    """
+    dumped = Settings(_env_file=None).agents.model_dump()
+    assert dumped["profile"] == DEFAULT_AGENTS["profile"]
+    for key, expected in DEFAULT_AGENTS["profiles"].items():
+        assert dumped["profiles"][key] == expected, key
+    for key, expected in DEFAULT_AGENTS["definitions"].items():
+        assert dumped["definitions"][key] == expected, key
+    assert set(dumped["profiles"]) == set(BUILTIN_PROFILES)
+    assert set(dumped["definitions"]) == {*BUILTIN_AGENTS, *SEEDED_GENERIC_AGENTS}
 
 
 def test_a_stored_map_holding_only_a_custom_agent_gets_the_built_ins_back():
     cfg = _settings(definitions={"strings": {"role": "generic", "prompt": "look at strings"}})
-    assert set(cfg.agents.definitions) == {*BUILTIN_AGENTS, "strings"}
+    assert set(cfg.agents.definitions) == {*BUILTIN_AGENTS, *SEEDED_GENERIC_AGENTS, "strings"}
     assert set(cfg.agents.profiles) == set(BUILTIN_PROFILES)
     assert cfg.agents.definitions["static"].role == "static"
 
@@ -590,8 +608,8 @@ class TestALegacyDatabaseGetsTheNewToolDefaults:
 
         assert cfg.agents.definitions["strings"].tools == []
 
-    def test_a_legacy_database_gains_the_measurement_profile(self):
-        """A stored map written before the baseline existed holds only what its
-        operator added; the built-in profiles come back on load."""
+    def test_a_legacy_database_gains_the_seeded_profiles(self):
+        """A stored map written before a team shipped holds only what its
+        operator added; every built-in team comes back on load."""
         cfg = _settings(profiles={"lean": {"label": "Lean", "analysts": ["static"]}})
-        assert set(cfg.agents.profiles) == {"default", "measurement", "lean"}
+        assert set(cfg.agents.profiles) == {*BUILTIN_PROFILES, "lean"}
