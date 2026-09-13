@@ -86,28 +86,79 @@ const BUILTIN_ANALYST_STEPS: Record<string, { title: string; description: string
   },
 };
 
+interface StageRow {
+  key: string;
+  kind: "analysis" | "debate" | "verdict" | "report";
+  ran: boolean;
+  reason: string;
+  agents: string[];
+  duration_ms: number;
+}
+
+interface PipelineStep {
+  id: string;
+  title: string;
+  description: string;
+  custom: boolean;
+  /** The stage this step belongs to, when the run recorded stages. */
+  stage?: string;
+  stageKind?: StageRow["kind"];
+  /** Why the stage declined to run. Empty when it ran. */
+  skipped?: string;
+}
+
 /**
- * The analyst steps this run actually had.
+ * The steps this run actually had.
  *
- * `run_summary.profile` says which analysts ran and which of them are not
- * built in. A report written before profiles existed has no such key, so the
- * three built-in ids are the fallback and every old report renders exactly as
- * it did.
+ * `run_summary.stages` is the whole team, in order, including the stages that
+ * declined to run and the reason each gave. It is what this reads first. A
+ * report written before stages existed has no such key, so `profile.analysts`
+ * is the fallback, and one written before profiles existed falls back again to
+ * the three built-in ids — every old report renders exactly as it did.
+ *
+ * An analysis stage becomes one step per agent, because that is the grain the
+ * findings below are keyed by; the debate and the verdict keep the ids the
+ * panel has always used, so the sections underneath them do not move.
  */
-function analystSteps(
-  runSummary: unknown
-): { id: string; title: string; description: string; custom: boolean }[] {
-  const profile = (runSummary as { profile?: { analysts?: string[]; custom?: string[] } } | null)
-    ?.profile;
-  const analysts = profile?.analysts ?? ["static", "dynamic", "network"];
-  const custom = new Set(profile?.custom ?? []);
-  return analysts.map((id) => ({
+function pipelineSteps(runSummary: unknown): PipelineStep[] {
+  const summary = runSummary as {
+    profile?: { analysts?: string[]; custom?: string[] };
+    stages?: StageRow[];
+  } | null;
+  const custom = new Set(summary?.profile?.custom ?? []);
+
+  const analystStep = (id: string, stage?: StageRow): PipelineStep => ({
     id,
     title: BUILTIN_ANALYST_STEPS[id]?.title ?? `${id} analysis`,
     description:
       BUILTIN_ANALYST_STEPS[id]?.description ?? "A custom analyst declared in the settings.",
     custom: custom.has(id),
-  }));
+    stage: stage?.key,
+    stageKind: stage?.kind,
+    skipped: stage && !stage.ran ? stage.reason || "did not run" : "",
+  });
+
+  const stages = Array.isArray(summary?.stages) ? summary.stages : null;
+  if (!stages || stages.length === 0) {
+    const analysts = summary?.profile?.analysts ?? ["static", "dynamic", "network"];
+    return [INGESTION_STEP, ...analysts.map((id) => analystStep(id)), ...TAIL_STEPS];
+  }
+
+  const steps: PipelineStep[] = [INGESTION_STEP];
+  for (const stage of stages) {
+    const skipped = stage.ran ? "" : stage.reason || "did not run";
+    if (stage.kind === "analysis") {
+      steps.push(...stage.agents.map((id) => analystStep(id, stage)));
+      continue;
+    }
+    const tail = TAIL_STEPS.find((t) =>
+      stage.kind === "debate" ? t.id === "negotiation" : t.id === "judge"
+    );
+    if (tail) {
+      steps.push({ ...tail, stage: stage.key, stageKind: stage.kind, skipped });
+    }
+  }
+  return steps;
 }
 
 /* ── Helpers ─────────────────────────────────────────── */
@@ -235,9 +286,10 @@ export default function PipelineTab() {
   );
   const runSummary = report?.run_summary ?? null;
 
-  const analysts = analystSteps(runSummary);
-  const steps = [INGESTION_STEP, ...analysts, ...TAIL_STEPS];
-  const analystIds = new Set(analysts.map((a) => a.id));
+  const steps = pipelineSteps(runSummary);
+  const analystIds = new Set(
+    steps.filter((step) => step.stageKind === "analysis" || step.custom).map((step) => step.id)
+  );
   const findingFor = (id: string) =>
     findings.find((f) => f.agent_name.toLowerCase() === id.toLowerCase()) ??
     findings.find((f) => f.agent_name.toLowerCase().includes(id.toLowerCase()));
@@ -333,6 +385,19 @@ export default function PipelineTab() {
                       {step.custom && (
                         <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-accent/20 text-accent-strong">
                           custom
+                        </span>
+                      )}
+                      {step.stage && step.stage !== step.id && (
+                        <span
+                          className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-bg-active text-text-muted"
+                          title={`stage kind: ${step.stageKind}`}
+                        >
+                          {step.stage}
+                        </span>
+                      )}
+                      {step.skipped && (
+                        <span className="text-[11px] px-1.5 py-0.5 rounded bg-bg-active text-text-muted">
+                          skipped — {step.skipped}
                         </span>
                       )}
                       {status === "done" && (

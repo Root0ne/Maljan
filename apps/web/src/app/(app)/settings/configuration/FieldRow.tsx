@@ -11,7 +11,7 @@ import AgentDefinitionsEditor, {
   type AgentLLMOverride,
   type LlmGlobalFallback,
 } from "./AgentDefinitionsEditor";
-import ProfilesEditor from "./ProfilesEditor";
+import StagesEditor from "./StagesEditor";
 import ServerMapEditor from "./ServerMapEditor";
 import { APPLIES_LABEL, SOURCE_LABEL } from "./vocabulary";
 import { Widget } from "./widgets";
@@ -190,8 +190,8 @@ export default function FieldRow({
             errors={errors ?? {}}
             onChange={onChange}
           />
-        ) : entry.editor === "profiles" ? (
-          <ProfilesEditor
+        ) : entry.editor === "stages" ? (
+          <StagesEditor
             entry={entry}
             current={current}
             staged={staged}

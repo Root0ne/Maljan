@@ -525,7 +525,7 @@ const TOOL_SERVER_GUIDE: GuideDef = {
 const AGENT_GUIDE: GuideDef = {
   id: "agent",
   title: "Create an analyst",
-  blurb: "Clone a built-in analyst or start from a blank one, give it tools and a model, then add it to a profile.",
+  blurb: "Clone a built-in analyst or start from a blank one, give it tools and a model, then add it to a stage.",
   groupHref: "/settings/configuration/agents/agents",
   steps: () => [
     {
@@ -570,8 +570,8 @@ const AGENT_GUIDE: GuideDef = {
     },
     {
       id: "profile",
-      title: "Add to a profile",
-      intro: "An analyst runs only as part of a profile.",
+      title: "Add to a stage",
+      intro: "An analyst runs only as one stage's member of one team.",
       component: "profile-picker",
       reviewKeys: ["core.agents.profiles", "core.agents.profile"],
     },

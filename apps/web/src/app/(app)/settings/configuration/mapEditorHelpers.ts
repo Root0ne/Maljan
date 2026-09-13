@@ -2,7 +2,7 @@
  * What the three keyed-map editors all had a copy of.
  *
  * `ServerMapEditor`, `AgentDefinitionsEditor` and
- * `ProfilesEditor` each carried the same slug regex, the same "already exists"
+ * `StagesEditor` each carried the same slug regex, the same "already exists"
  * branch, the same merge-one-entry helper and the same clone-key arithmetic,
  * near-verbatim. Three copies of one rule drift; this is the rule.
  */

@@ -1,6 +1,33 @@
 import type { Page, Route, WebSocketRoute } from "@playwright/test";
 import type { SettingsSchema, SettingsValues } from "@/types/settings";
 
+/** The four stages a plain analyst list has always meant, as the API dumps
+ *  them. A function rather than a constant so two mocked teams cannot share
+ *  one array and edit each other. */
+const PAPER_STAGES = () => [
+  {
+    key: "analysis", label: "Analysis", kind: "analysis",
+    agents: ["static", "dynamic", "network"], depends_on: [], when: "",
+    mode: "sequential", inject_upstream: "none", debate: null, builtin_tools: true,
+  },
+  {
+    key: "debate", label: "Debate", kind: "debate", agents: [], depends_on: ["analysis"],
+    when: "", mode: "sequential", inject_upstream: "none",
+    debate: { max_rounds: 5, consensus_threshold: 0.85, sycophancy_check: true },
+    builtin_tools: true,
+  },
+  {
+    key: "verdict", label: "Verdict", kind: "verdict", agents: ["judge"],
+    depends_on: ["debate"], when: "", mode: "sequential", inject_upstream: "none",
+    debate: null, builtin_tools: true,
+  },
+  {
+    key: "report", label: "Report", kind: "report", agents: ["reporter"],
+    depends_on: ["verdict"], when: "", mode: "sequential", inject_upstream: "none",
+    debate: null, builtin_tools: true,
+  },
+];
+
 /**
  * The whole API surface the E2E suite is allowed to touch — and a trap for
  * everything it is not.
@@ -547,10 +574,10 @@ export const MOCK_SETTINGS_SCHEMA = {
           key: "core.agents.profiles", namespace: "core", path: "agents.profiles",
           type: "json", default: {}, nullable: false, choices: null,
           minimum: null, maximum: null, secret: false, group: "agents",
-          title: "Profiles",
-          description: "Named analyst line-ups a job can select.",
+          title: "Teams",
+          description: "Named teams, each an ordered list of stages.",
           applies: "next_job", editable: true, reason: null, probe: null,
-          applies_when: null, order: -1, choices_from: null, editor: "profiles", subgroup: null, advanced: false,
+          applies_when: null, order: -1, choices_from: null, editor: "stages", subgroup: null, advanced: false,
         },
         // Task 21: a plain leaf that stays on the *Agents* page while
         // `core.agents.profile` above moves to the virtual *Profiles* page.
@@ -791,7 +818,11 @@ export const MOCK_SETTINGS_VALUES = {
     },
     "core.agents.profiles": {
       value: {
-        default: { label: "Default", analysts: ["static", "dynamic", "network"] },
+        default: {
+          label: "Default",
+          stages: PAPER_STAGES(),
+          analysts: ["static", "dynamic", "network"],
+        },
       },
       is_set: null,
       hint: null,
@@ -1095,10 +1126,10 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           key: "core.agents.profiles", namespace: "core", path: "agents.profiles",
           type: "json", default: {}, nullable: false, choices: null,
           minimum: null, maximum: null, secret: false, group: "agents",
-          title: "Profiles",
-          description: "Named analyst line-ups a job can select.",
+          title: "Teams",
+          description: "Named teams, each an ordered list of stages.",
           applies: "next_job", editable: true, reason: null, probe: null,
-          applies_when: null, order: -1, choices_from: null, editor: "profiles", subgroup: null, advanced: false,
+          applies_when: null, order: -1, choices_from: null, editor: "stages", subgroup: null, advanced: false,
         },
       ],
     },
@@ -1258,11 +1289,16 @@ export const MOCK_SETTINGS_VALUES_FULL: SettingsValues = {
         dynamic: { role: "dynamic", label: "Dynamic analyst", prompt: null, tools: [], static_provider: null, enabled: true },
         network: { role: "network", label: "Network analyst", prompt: null, tools: [], static_provider: null, enabled: true },
         judge: { role: "judge", label: "Judge", prompt: null, tools: [], static_provider: null, enabled: true },
+        reporter: { role: "report", label: "Reporter", prompt: null, tools: [], static_provider: null, enabled: true },
       },
       ...unset(),
     },
     "core.agents.profiles": {
-      value: { default: { label: "Default", analysts: ["static", "dynamic", "network"] } },
+      value: { default: {
+          label: "Default",
+          stages: PAPER_STAGES(),
+          analysts: ["static", "dynamic", "network"],
+        } },
       ...unset(),
     },
     "core.memory.backend": { value: "memory", ...unset() },

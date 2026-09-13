@@ -7,7 +7,7 @@
  * are the same setting.
  *
  * The three keyed-map editors (`ServerMapEditor`, `AgentDefinitionsEditor`,
- * `ProfilesEditor` via `describeChange`/`importPreview`) and `useSettings`
+ * `StagesEditor` via `describeChange`/`importPreview`) and `useSettings`
  * each carried their own copy of this rule; this is the one copy.
  *
  * Unlike the former `JSON.stringify` copies, a key holding `undefined` is a
