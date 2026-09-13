@@ -311,6 +311,11 @@ def validate_profiles(
                 location = ".".join(str(p) for p in err["loc"])
                 errors[f"{name}.{location}" if location else name] = err["msg"]
             continue
+        # ``ProfileDefinition`` clears ``derived_from_analysts`` when the
+        # stages are no longer the plain conversion of the analyst list, so the
+        # dump is what gets stored and a PATCH that edits a migrated team's
+        # stages stops it being re-derived over — whether it came from the
+        # console, a script or an imported document.
         dumped = model.model_dump(mode="json")
 
         seed = seeds.get(name)

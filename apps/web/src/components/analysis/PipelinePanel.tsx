@@ -4,7 +4,7 @@ import { useReport } from "@/app/(app)/analysis/[id]/layout";
 import { useState } from "react";
 import { confidenceBarColor, confidenceClass } from "@/lib/report-utils";
 import { verdictLabel } from "@/lib/verdict";
-import { analystIdsOf, pipelineSteps } from "./pipelineSteps";
+import { analystIdsOf, pipelineSteps, stepStatus as statusOfStep } from "./pipelineSteps";
 
 /* ── Types for pipeline data ─────────────────────────── */
 
@@ -207,23 +207,15 @@ export default function PipelineTab() {
     return f.status === "failed" || f.status === "timeout" ? "failed" : "done";
   };
 
-  const stepStatus = (stepId: string): "done" | "current" | "pending" | "failed" => {
-    if (!report) return "pending";
-    switch (stepId) {
-      case "ingestion":
-        return "done";
-      case "negotiation":
-        if (negotiationFailed) return "failed";
-        return hasNegotiation ? "done" : "pending";
-      case "judge":
-        return report.verdict ? "done" : "pending";
-      // An analyst that crashed still leaves a findings row, so "a row exists"
-      // was never the same question as "the step succeeded". Dynamic has failed
-      // on every run in this deployment and this panel drew it green each time.
-      default:
-        return findingStatus(findingFor(stepId));
-    }
-  };
+  const stepStatus = (stepId: string) =>
+    statusOfStep(stepId, {
+      hasReport: Boolean(report),
+      hasVerdict: Boolean(report?.verdict),
+      hasNegotiation: Boolean(hasNegotiation),
+      negotiationFailed,
+      hasMalwareReport: Boolean(report?.malware_report),
+      findingStatus: (id) => findingStatus(findingFor(id)),
+    });
 
   return (
     <div className="space-y-4">

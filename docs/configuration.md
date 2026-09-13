@@ -308,9 +308,12 @@ limit and threshold from `negotiation.*`) → `verdict` (the judge) → `report`
 (the reporter). The stored `analysts` list is kept alongside the stages it
 produced; the model reads the stages.
 
-Such a team is marked `derived_from_analysts`, and while the mark is set its
-stages are rebuilt from the analyst list and those two global keys on every
-load. That is what keeps a team nobody has opened following
+Such a team is marked `derived_from_analysts`, and while the mark is set *and*
+its stages are still the plain conversion of its analyst list, they are rebuilt
+from that list and those two global keys on every load. The mark is checked
+rather than believed: it travels in the stored document, so it also arrives
+from an import, a script's PATCH or a hand-edited export, and a team whose
+stages someone has written is left as written and the mark cleared. That is what keeps a team nobody has opened following
 `llm.parallel_analysts`: an operator who moves from a hosted API back to the
 single-slot local model changes one setting and the team follows, instead of
 running analysts in parallel forever because it happened to be migrated on a

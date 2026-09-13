@@ -572,3 +572,41 @@ def test_a_debate_that_hands_over_to_one_node_is_stored():
         stored={},
     )
     assert [s["key"] for s in out[AGENT_PROFILES_KEY]["team"]["stages"]] == ["a", "d", "chain", "v"]
+
+
+def _flagged(stages: list[dict]) -> dict:
+    return {
+        AGENT_PROFILES_KEY: {
+            "mine": {
+                "analysts": ["static"],
+                "derived_from_analysts": True,
+                "stages": stages,
+            }
+        }
+    }
+
+
+def test_the_api_clears_the_derived_marker_when_the_stages_were_edited():
+    """A PATCH from a script must not leave a team to be re-derived over."""
+    out = validate_agent_map(
+        _flagged(
+            [
+                {"key": "triage", "kind": "analysis", "agents": ["static"]},
+                {"key": "v", "kind": "verdict", "agents": ["judge"], "depends_on": ["triage"]},
+            ]
+        ),
+        stored={},
+    )
+    stored = out[AGENT_PROFILES_KEY]["mine"]
+    assert stored["derived_from_analysts"] is False
+    assert [s["key"] for s in stored["stages"]] == ["triage", "v"]
+
+
+def test_the_api_keeps_the_marker_on_a_team_nobody_has_touched():
+    from maljan.core.config import stages_from_analysts
+
+    out = validate_agent_map(
+        _flagged([s.model_dump(mode="json") for s in stages_from_analysts(["static"])]),
+        stored={},
+    )
+    assert out[AGENT_PROFILES_KEY]["mine"]["derived_from_analysts"] is True

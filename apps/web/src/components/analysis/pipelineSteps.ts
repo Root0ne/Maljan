@@ -153,6 +153,51 @@ export function pipelineSteps(runSummary: unknown): PipelineStep[] {
   return steps;
 }
 
+export type StepStatus = "done" | "current" | "pending" | "failed";
+
+/** What a run has produced, as the step list needs to read it. */
+export interface StepFacts {
+  /** A persisted report exists at all. Nothing is ``done`` without one. */
+  hasReport: boolean;
+  hasVerdict: boolean;
+  hasNegotiation: boolean;
+  negotiationFailed: boolean;
+  /** The report stage's own output — the built ``MalwareReport``. */
+  hasMalwareReport: boolean;
+  /** The status of the analyst finding with this id, for an analyst step. */
+  findingStatus: (stepId: string) => StepStatus;
+}
+
+/**
+ * Whether a step of this run is done, still pending, or failed.
+ *
+ * Every non-analyst step needs a case of its own: the fallback asks for an
+ * analyst finding by the step id, and there is no finding named ``judge`` or
+ * ``report``. When the report stage became a row of its own it fell through to
+ * that fallback and drew grey on every finished run, telling the operator the
+ * report had never happened.
+ */
+export function stepStatus(stepId: string, facts: StepFacts): StepStatus {
+  if (!facts.hasReport) return "pending";
+  switch (stepId) {
+    case "ingestion":
+      return "done";
+    case "negotiation":
+      if (facts.negotiationFailed) return "failed";
+      return facts.hasNegotiation ? "done" : "pending";
+    case "judge":
+      return facts.hasVerdict ? "done" : "pending";
+    case "report":
+      // A run whose report build raised persists the verdict and no
+      // ``malware_report``, and that is exactly the case this row is for.
+      return facts.hasMalwareReport ? "done" : "pending";
+    // An analyst that crashed still leaves a findings row, so "a row exists"
+    // was never the same question as "the step succeeded".
+    default:
+      return facts.findingStatus(stepId);
+  }
+}
+
 /** The analyst steps of a step list, for the findings disclosure. */
 export function analystIdsOf(steps: PipelineStep[]): Set<string> {
   return new Set(steps.filter((step) => step.stageKind === "analysis").map((step) => step.id));

@@ -500,3 +500,108 @@ class TestAMigratedTeamAndAFreshOneAgree:
         stored.pop("derived_from_analysts", None)
         settings = _settings(profiles={"default": stored})
         assert settings.agents.profiles["default"].analysis_agents == seed.analysis_agents
+
+
+class TestTheDerivedMarkerIsCheckedNotTrusted:
+    """The marker travels in the document, so it arrives from anywhere.
+
+    A team with the marker and stages an operator wrote by hand used to have
+    those stages replaced on the next load, with no error and no log line —
+    reachable from an imported document, a script's PATCH, or an export edited
+    in a text editor. The console was the only thing clearing the marker.
+    """
+
+    def _hand_written(self) -> dict:
+        return {
+            "mine": {
+                "analysts": ["static", "dynamic", "network"],
+                "derived_from_analysts": True,
+                "stages": [
+                    {"key": "triage", "kind": "analysis", "agents": ["static"]},
+                    {"key": "deb", "kind": "debate", "depends_on": ["triage"]},
+                    {"key": "v", "kind": "verdict", "agents": ["judge"], "depends_on": ["deb"]},
+                    {"key": "r", "kind": "report", "agents": ["reporter"], "depends_on": ["v"]},
+                ],
+            }
+        }
+
+    def test_a_flagged_team_with_hand_written_stages_loads_as_written(self) -> None:
+        profile = _settings(profiles=self._hand_written(), profile="mine").agents.profiles["mine"]
+        assert [s.key for s in profile.stages] == ["triage", "deb", "v", "r"]
+        assert profile.derived_from_analysts is False
+
+    def test_the_flag_is_cleared_rather_than_left_to_bite_on_the_next_load(self) -> None:
+        """Loading the corrected document twice must be the same as once."""
+        first = _settings(profiles=self._hand_written(), profile="mine").agents.profiles["mine"]
+        again = _settings(profiles={"mine": first.model_dump()}, profile="mine").agents.profiles[
+            "mine"
+        ]
+        assert [s.key for s in again.stages] == ["triage", "deb", "v", "r"]
+
+    def test_a_flagged_untouched_team_still_follows_the_globals(self) -> None:
+        untouched = {
+            "lean": {
+                "analysts": ["static"],
+                "derived_from_analysts": True,
+                "stages": [s.model_dump() for s in stages_from_analysts(["static"])],
+            }
+        }
+        profile = Settings(
+            _env_file=None,
+            llm={"parallel_analysts": True},
+            negotiation={"max_iterations": 9},
+            agents={"profiles": untouched, "profile": "lean"},
+        ).agents.profiles["lean"]
+        assert profile.derived_from_analysts is True
+        assert profile.stage("analysis").mode == "parallel"
+        assert profile.stage("debate").debate.max_rounds == 9
+
+    def test_one_edited_stage_is_enough_to_stop_the_derivation(self) -> None:
+        for field, value in (
+            ("when", 'platform == "windows"'),
+            ("builtin_tools", False),
+            ("inject_upstream", "full"),
+            ("label", "Renamed"),
+        ):
+            stages = [s.model_dump() for s in stages_from_analysts(["static"])]
+            stages[0][field] = value
+            profile = _settings(
+                profiles={
+                    "lean": {
+                        "analysts": ["static"],
+                        "derived_from_analysts": True,
+                        "stages": stages,
+                    }
+                },
+                profile="lean",
+            ).agents.profiles["lean"]
+            assert profile.derived_from_analysts is False, field
+            assert getattr(profile.stage("analysis"), field) == value
+
+    def test_a_stage_added_or_removed_stops_it_too(self) -> None:
+        stages = [s.model_dump() for s in stages_from_analysts(["static"])]
+        shorter = [s for s in stages if s["key"] != "report"]
+        profile = _settings(
+            profiles={
+                "lean": {
+                    "analysts": ["static"],
+                    "derived_from_analysts": True,
+                    "stages": shorter,
+                }
+            },
+            profile="lean",
+        ).agents.profiles["lean"]
+        assert profile.derived_from_analysts is False
+        assert [s.key for s in profile.stages] == ["analysis", "debate", "verdict"]
+
+    def test_the_marker_means_nothing_without_an_analyst_list_to_derive_from(self) -> None:
+        profile = _settings(
+            profiles={
+                "lean": {
+                    "derived_from_analysts": True,
+                    "stages": [_stage(), _verdict(["analysis"])],
+                }
+            },
+            profile="lean",
+        ).agents.profiles["lean"]
+        assert profile.derived_from_analysts is False

@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { analystIdsOf, pipelineSteps, type StageRow } from "../pipelineSteps";
+import {
+  analystIdsOf,
+  pipelineSteps,
+  stepStatus,
+  type StageRow,
+  type StepFacts,
+} from "../pipelineSteps";
 
 const stage = (over: Partial<StageRow>): StageRow => ({
   key: "analysis",
@@ -134,5 +140,58 @@ describe("analystIdsOf", () => {
   it("names the analysts and nothing else", () => {
     const ids = analystIdsOf(pipelineSteps({ stages: DEFAULT_TEAM }));
     expect([...ids]).toEqual(["static", "dynamic", "network"]);
+  });
+});
+
+describe("stepStatus", () => {
+  const facts = (over: Partial<StepFacts> = {}): StepFacts => ({
+    hasReport: true,
+    hasVerdict: true,
+    hasNegotiation: true,
+    negotiationFailed: false,
+    hasMalwareReport: true,
+    findingStatus: () => "done",
+    ...over,
+  });
+
+  /* The report stage became a row of its own and fell through to the analyst
+   * fallback, which asks for a finding named "report" and never gets one — so
+   * the last row of every finished staged run drew grey. */
+  it("marks the report row done once a report was built", () => {
+    expect(stepStatus("report", facts())).toBe("done");
+  });
+
+  it("marks the report row pending when the build produced nothing", () => {
+    expect(stepStatus("report", facts({ hasMalwareReport: false }))).toBe("pending");
+  });
+
+  it("does not ask for an analyst finding named report", () => {
+    const asked: string[] = [];
+    stepStatus("report", facts({ findingStatus: (id) => (asked.push(id), "failed") }));
+    expect(asked).toEqual([]);
+  });
+
+  it("keeps the steps it always had", () => {
+    expect(stepStatus("ingestion", facts())).toBe("done");
+    expect(stepStatus("judge", facts())).toBe("done");
+    expect(stepStatus("judge", facts({ hasVerdict: false }))).toBe("pending");
+    expect(stepStatus("negotiation", facts())).toBe("done");
+    expect(stepStatus("negotiation", facts({ hasNegotiation: false }))).toBe("pending");
+    expect(stepStatus("negotiation", facts({ negotiationFailed: true }))).toBe("failed");
+  });
+
+  it("asks the findings for an analyst step", () => {
+    expect(stepStatus("static", facts({ findingStatus: () => "failed" }))).toBe("failed");
+  });
+
+  it("is pending all the way down for a run with no report row yet", () => {
+    for (const id of ["ingestion", "static", "negotiation", "judge", "report"]) {
+      expect(stepStatus(id, facts({ hasReport: false }))).toBe("pending");
+    }
+  });
+
+  it("gives every step of a finished default run a status that is not pending", () => {
+    const steps = pipelineSteps({ stages: DEFAULT_TEAM });
+    expect(steps.map((s) => stepStatus(s.id, facts()))).toEqual(steps.map(() => "done"));
   });
 });

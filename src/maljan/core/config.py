@@ -1043,6 +1043,43 @@ def stages_from_analysts(
     ]
 
 
+# What re-derivation is allowed to overwrite, and therefore the only two
+# fields a derived stage list may differ from the plain conversion in: the
+# analysis stage's run mode comes from ``llm.parallel_analysts`` and the debate
+# stage's options from the negotiation settings. Everything else about a stage
+# is the operator's.
+_DERIVED_FIELDS: tuple[str, ...] = ("mode", "debate")
+
+
+def stages_are_derived(analysts: list[str], stages: list["StageDefinition"]) -> bool:
+    """Whether ``stages`` is still the plain conversion of ``analysts``.
+
+    The ``derived_from_analysts`` marker travels in the stored document, so it
+    arrives over the wire from an import, a script's PATCH, or a hand-edited
+    export. Trusting it on its own means a team with the marker and four stages
+    an operator wrote by hand has those stages silently replaced on the next
+    load. The marker says "nobody has touched these"; this is what checks it.
+
+    The two fields re-derivation itself sets cannot take part in the check: the
+    stored ones were written from whatever the globals said at the time, and
+    disagreeing with today's globals is the very thing re-derivation is for. A
+    document that keeps the marker and changes *only* a debate stage's options
+    is therefore still overwritten — the console clears the marker on every
+    stage edit, so that combination only arises from an export edited by hand.
+    """
+    if not analysts:
+        return False
+    expected = stages_from_analysts(list(analysts))
+    if len(expected) != len(stages):
+        return False
+    for want, have in zip(expected, stages, strict=True):
+        left = want.model_dump(exclude=set(_DERIVED_FIELDS))
+        right = have.model_dump(exclude=set(_DERIVED_FIELDS))
+        if left != right:
+            return False
+    return True
+
+
 class ProfileDefinition(BaseModel):
     """A team, as ordered dependent stages.
 
@@ -1108,6 +1145,14 @@ class ProfileDefinition(BaseModel):
         """Everything about the stage list that needs only the stage list."""
         if not self.stages:
             raise ValueError("a profile needs at least one stage")
+
+        # The marker is a stored field, so it arrives from an import, a
+        # script's PATCH or a hand-edited export as readily as from the
+        # migration that sets it. A team whose stages are no longer the plain
+        # conversion of its analyst list has been written, whatever the
+        # document claims, and re-deriving it would throw that writing away.
+        if self.derived_from_analysts and not stages_are_derived(self.analysts, self.stages):
+            self.derived_from_analysts = False
 
         seen: set[str] = set()
         for stage in self.stages:
