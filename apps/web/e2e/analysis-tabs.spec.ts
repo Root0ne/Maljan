@@ -35,7 +35,10 @@ const heading = (name: RegExp | string) => async (page: import("@playwright/test
 
 const TABS: Tab[] = [
   { path: "", expect: heading(/Executive Summary/i) },
-  { path: "/identity", expect: heading(/Sample Identification/i) },
+  // The typed "Sample Identification" block stands down when a header section
+  // covers it, and the fixture has one — so the hashes are what this tab
+  // always renders on a populated report, whichever half draws the rest.
+  { path: "/identity", expect: heading(/File Hashes/i) },
   { path: "/static", expect: heading(/Imports/i) },
   { path: "/dynamic", expect: heading(/Process Tree/i) },
   { path: "/network", expect: heading(/Domains/i) },
