@@ -39,6 +39,15 @@ from typing import Any
 import sqlalchemy as sa
 from alembic import op
 
+# The one exception to this tree's rule that a revision imports nothing from
+# the application. ``set_if_list`` is not a constant that follows the model —
+# it is the mechanical "assign only when the key was already a list" that both
+# this file and the runtime rename need, and the reason it is shared is that
+# applying the guard at two of three call sites is exactly the defect this
+# revision was corrected for. Its semantics are definitional and pinned by
+# tests on both sides.
+from maljan.core.agent_key_migration import set_if_list
+
 revision = "20260917000000"
 down_revision = "20260916000000"
 branch_labels = None
@@ -126,12 +135,6 @@ def _rekey(mapping: Any, renames: dict) -> Any:
     return {renames.get(k, k): v for k, v in mapping.items()}
 
 
-def _relist(values: Any, renames: dict) -> Any:
-    if not isinstance(values, list) or not renames:
-        return values
-    return [renames.get(v, v) if isinstance(v, str) else v for v in values]
-
-
 def _rewrite_profiles(profiles: Any, agent_renames: dict) -> Any:
     """Every team's references to a renamed agent, under both spellings."""
     if not isinstance(profiles, dict) or not agent_renames:
@@ -141,16 +144,12 @@ def _rewrite_profiles(profiles: Any, agent_renames: dict) -> Any:
         if not isinstance(entry, dict):
             out[name] = entry
             continue
-        profile = dict(entry)
-        if isinstance(profile.get("analysts"), list):
-            profile["analysts"] = _relist(profile["analysts"], agent_renames)
-        if isinstance(profile.get("stages"), list):
-            profile["stages"] = [
-                {**stage, "agents": _relist(stage.get("agents"), agent_renames)}
-                if isinstance(stage, dict)
-                else stage
-                for stage in profile["stages"]
-            ]
+        profile = set_if_list(entry, "analysts", agent_renames)
+        stages = profile.get("stages")
+        if isinstance(stages, list):
+            restaged = [set_if_list(stage, "agents", agent_renames) for stage in stages]
+            if restaged != stages:
+                profile = {**profile, "stages": restaged}
         out[name] = profile
     return out
 
@@ -158,14 +157,7 @@ def _rewrite_profiles(profiles: Any, agent_renames: dict) -> Any:
 def _rewrite_servers(servers: Any, agent_renames: dict) -> Any:
     if not isinstance(servers, dict) or not agent_renames:
         return servers
-    return {
-        key: (
-            {**server, "agents": _relist(server.get("agents"), agent_renames)}
-            if isinstance(server, dict)
-            else server
-        )
-        for key, server in servers.items()
-    }
+    return {key: set_if_list(server, "agents", agent_renames) for key, server in servers.items()}
 
 
 def _apply(conn: sa.engine.Connection, agent_renames: dict, profile_renames: dict) -> None:

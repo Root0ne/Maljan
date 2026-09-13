@@ -231,3 +231,75 @@ def test_the_seeded_names_it_knows_are_the_ones_this_release_added():
     mod = _module()
     assert set(mod.SEEDED_DEFINITIONS) == {"triage", "android_static", "reverser"}
     assert set(mod.SEEDED_PROFILES) == {"mobile", "deep_static"}
+
+
+class TestTheRewriteAddsNoKeyThatWasNotThere:
+    """`upgrade()` persists what it writes, so an injected `null` outlives the
+    release that caused it — the runtime validator recomputes on every load,
+    the store does not. Three optional list fields accept no ``None``: a
+    debate stage's `agents`, a team's `analysts` and a server's `agents`."""
+
+    def _document_with_every_absent_field(self, conn):
+        _insert(conn, "core.agents.definitions", {"reverser": {"role": "generic", "prompt": "p"}})
+        _insert(
+            conn,
+            "core.agents.profiles",
+            {
+                # A team that names the renamed agent, with a debate stage that
+                # carries no agents and no `analysts` key of its own.
+                "mine": {
+                    "stages": [
+                        {"key": "a", "kind": "analysis", "agents": ["reverser"]},
+                        {"key": "d", "kind": "debate", "depends_on": ["a"]},
+                    ]
+                },
+                # A team that names nothing renamed at all.
+                "other": {"label": "Other", "stages": [{"key": "a", "agents": ["static"]}]},
+            },
+        )
+        _insert(
+            conn,
+            "core.mcp.servers",
+            {
+                "bound": {"transport": "stdio", "command": "x", "agents": ["reverser"]},
+                "bare": {"transport": "stdio", "command": "y"},
+            },
+        )
+
+    def test_a_debate_stage_does_not_gain_an_agents_key(self):
+        conn = _connect()
+        self._document_with_every_absent_field(conn)
+        _run(_module(), conn)
+        stages = _rows(conn)["core.agents.profiles"]["mine"]["stages"]
+        assert stages[0]["agents"] == ["reverser_custom"]
+        assert "agents" not in stages[1]
+
+    def test_a_team_does_not_gain_an_analysts_key(self):
+        conn = _connect()
+        self._document_with_every_absent_field(conn)
+        _run(_module(), conn)
+        assert "analysts" not in _rows(conn)["core.agents.profiles"]["mine"]
+
+    def test_a_server_does_not_gain_an_agents_binding(self):
+        conn = _connect()
+        self._document_with_every_absent_field(conn)
+        _run(_module(), conn)
+        servers = _rows(conn)["core.mcp.servers"]
+        assert servers["bound"]["agents"] == ["reverser_custom"]
+        assert "agents" not in servers["bare"]
+
+    def test_a_team_and_a_server_that_name_nothing_renamed_come_out_identical(self):
+        conn = _connect()
+        self._document_with_every_absent_field(conn)
+        before = _rows(conn)
+        _run(_module(), conn)
+        after = _rows(conn)
+        assert after["core.agents.profiles"]["other"] == before["core.agents.profiles"]["other"]
+        assert after["core.mcp.servers"]["bare"] == before["core.mcp.servers"]["bare"]
+
+    def test_no_stored_document_gains_a_null_anywhere(self):
+        """The blunt version of the three above, over the whole store."""
+        conn = _connect()
+        self._document_with_every_absent_field(conn)
+        _run(_module(), conn)
+        assert "null" not in json.dumps(_rows(conn))

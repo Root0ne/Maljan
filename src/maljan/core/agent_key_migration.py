@@ -52,6 +52,7 @@ __all__ = [
     "AgentKeyRenames",
     "free_key",
     "rename_colliding_agent_keys",
+    "set_if_list",
 ]
 
 # The names this release took, and the only ones a rename applies to.
@@ -173,10 +174,39 @@ def _is_the_seeded_profile(entry: Any, seed: Any) -> bool:
     return bool(current == expected)
 
 
-def _rewrite_list(values: Any, renames: dict[str, str]) -> Any:
+def set_if_list(mapping: Any, field: str, renames: dict[str, str]) -> Any:
+    """``mapping`` with ``field`` rewritten, and only if it held a list.
+
+    The one place the assignment happens, in this module and in the alembic
+    revision that repairs the stored document, because getting it right at two
+    of three call sites is what happened the first time. Three fields are
+    rewritten — a team's `analysts`, a stage's `agents` and a server's `agents`
+    — and all three are optional lists that accept no ``None``. Writing the key
+    in with a ``None`` value turns a document that would have validated into
+    one that will not, which is the failure this whole module exists to
+    prevent: a debate stage has no `agents`, a team that carries stages needs
+    no `analysts`, and a server with no agent restriction is the common case.
+
+    Returns ``mapping`` itself when there is nothing to do, so a profile or a
+    server that references no renamed key comes out of the rewrite as the same
+    object it went in as. That is what keeps the migration from rewriting rows
+    it has no business touching.
+
+    The rewrite is inlined rather than delegated to a list helper on purpose.
+    A helper that takes a value and hands back whatever it was given when that
+    value is not a list reads as safe and is not: an absent key arrives as
+    ``None`` and leaves as ``None``, and the caller writes it in. There is no
+    such helper to reach for now.
+    """
+    if not isinstance(mapping, dict):
+        return mapping
+    values = mapping.get(field)
     if not isinstance(values, list):
-        return values
-    return [renames.get(v, v) if isinstance(v, str) else v for v in values]
+        return mapping
+    rewritten = [renames.get(v, v) if isinstance(v, str) else v for v in values]
+    if rewritten == values:
+        return mapping
+    return {**mapping, field: rewritten}
 
 
 def _rewrite_keys(mapping: Any, renames: dict[str, str]) -> Any:
@@ -234,16 +264,12 @@ def _rename_agents_document(agents: dict[str, Any]) -> tuple[dict[str, Any], Age
             if not isinstance(entry, dict):
                 rewritten[key] = entry
                 continue
-            profile = dict(entry)
-            profile["analysts"] = _rewrite_list(profile.get("analysts"), renames.definitions)
+            profile = set_if_list(entry, "analysts", renames.definitions)
             stages = profile.get("stages")
             if isinstance(stages, list):
-                profile["stages"] = [
-                    {**stage, "agents": _rewrite_list(stage.get("agents"), renames.definitions)}
-                    if isinstance(stage, dict)
-                    else stage
-                    for stage in stages
-                ]
+                restaged = [set_if_list(stage, "agents", renames.definitions) for stage in stages]
+                if restaged != stages:
+                    profile = {**profile, "stages": restaged}
             rewritten[key] = profile
         out["profiles"] = rewritten
 
@@ -289,14 +315,11 @@ def rename_colliding_agent_keys(document: Any) -> tuple[Any, AgentKeyRenames]:
         mcp = out.get("mcp")
         if isinstance(mcp, dict) and isinstance(mcp.get("servers"), dict):
             servers = {
-                key: (
-                    {**server, "agents": _rewrite_list(server.get("agents"), by_agent)}
-                    if isinstance(server, dict)
-                    else server
-                )
+                key: set_if_list(server, "agents", by_agent)
                 for key, server in mcp["servers"].items()
             }
-            out["mcp"] = {**mcp, "servers": servers}
+            if servers != mcp["servers"]:
+                out["mcp"] = {**mcp, "servers": servers}
 
         for field in ("react_agent_timeout_overrides", "react_agent_max_steps_overrides"):
             if isinstance(out.get(field), dict):

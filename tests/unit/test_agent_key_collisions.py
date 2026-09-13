@@ -180,3 +180,124 @@ class TestThePassItself:
         long_key = "a" * 32
         assert len(free_key(long_key, set())) <= 32
         assert len(free_key(long_key, {f"{'a' * 25}_custom"})) <= 32
+
+
+class TestTheRewriteLeavesAnAbsentFieldAbsent:
+    """Three optional list fields, none of which accepts ``None``.
+
+    The rewrite that follows a rename touches every stored team and every
+    stored server, not only the ones that named the renamed agent. Writing the
+    key in with a ``None`` value turned a document that would have validated
+    into one that will not — the very failure the rename exists to prevent, and
+    on exactly the operator it was written for, since the rewrite only runs
+    when something was renamed.
+    """
+
+    CUSTOM = {"role": "generic", "prompt": "mine"}
+
+    def test_a_team_with_a_debate_stage_still_loads(self) -> None:
+        """A debate stage carries no agents. That is how the seeded teams
+        themselves write one, so a custom team modelled on a built-in hits it."""
+        cfg = _settings(
+            agents={
+                "definitions": {"reverser": self.CUSTOM},
+                "profiles": {
+                    "myteam": {
+                        "stages": [
+                            {"key": "a", "kind": "analysis", "agents": ["reverser"]},
+                            {"key": "d", "kind": "debate", "depends_on": ["a"]},
+                            {
+                                "key": "v",
+                                "kind": "verdict",
+                                "agents": ["judge"],
+                                "depends_on": ["d"],
+                            },
+                        ]
+                    }
+                },
+            }
+        )
+        stages = {s.key: s.agents for s in cfg.agents.profiles["myteam"].stages}
+        assert stages == {"a": ["reverser_custom"], "d": [], "v": ["judge"]}
+
+    def test_a_team_that_omits_analysts_still_loads(self) -> None:
+        """`analysts` is inert once a team carries stages, so omitting it is
+        the modern shape and the one the console writes."""
+        cfg = _settings(
+            agents={
+                "definitions": {"reverser": self.CUSTOM},
+                "profiles": {
+                    "myteam": {
+                        "stages": [
+                            {"key": "a", "kind": "analysis", "agents": ["reverser"]},
+                            {
+                                "key": "v",
+                                "kind": "verdict",
+                                "agents": ["judge"],
+                                "depends_on": ["a"],
+                            },
+                        ]
+                    }
+                },
+            }
+        )
+        assert cfg.agents.profiles["myteam"].analysts == []
+
+    def test_a_server_without_an_agent_binding_still_loads(self) -> None:
+        """A server with no agent restriction is the default and the common
+        case, and one such server anywhere in the store was enough."""
+        cfg = _settings(
+            agents={"definitions": {"reverser": self.CUSTOM}},
+            mcp={"servers": {"srv": {"transport": "stdio", "command": "x"}}},
+        )
+        assert cfg.mcp.servers["srv"].agents == []
+
+    def test_a_team_that_names_no_renamed_agent_is_the_same_object(self) -> None:
+        """The rewrite must not touch what it has no business touching."""
+        from maljan.core.agent_key_migration import rename_colliding_agent_keys
+
+        untouched = {"label": "Other", "stages": [{"key": "a", "agents": ["static"]}]}
+        document = {
+            "agents": {
+                "definitions": {"reverser": self.CUSTOM},
+                "profiles": {"other": untouched},
+            }
+        }
+        out, renames = rename_colliding_agent_keys(document)
+        assert renames.definitions == {"reverser": "reverser_custom"}
+        assert out["agents"]["profiles"]["other"] == untouched
+
+    def test_a_server_that_names_no_renamed_agent_is_the_same_object(self) -> None:
+        from maljan.core.agent_key_migration import rename_colliding_agent_keys
+
+        untouched = {"transport": "stdio", "command": "x", "agents": ["static"]}
+        document = {
+            "agents": {"definitions": {"reverser": self.CUSTOM}},
+            "mcp": {"servers": {"srv": dict(untouched), "bare": {"command": "y"}}},
+        }
+        out, _ = rename_colliding_agent_keys(document)
+        assert out["mcp"]["servers"]["srv"] == untouched
+        assert out["mcp"]["servers"]["bare"] == {"command": "y"}
+
+
+class TestSetIfList:
+    def test_it_leaves_an_absent_field_absent(self) -> None:
+        from maljan.core.agent_key_migration import set_if_list
+
+        assert set_if_list({"key": "d"}, "agents", {"a": "b"}) == {"key": "d"}
+
+    def test_it_leaves_a_field_that_is_not_a_list_alone(self) -> None:
+        from maljan.core.agent_key_migration import set_if_list
+
+        assert set_if_list({"agents": None}, "agents", {"a": "b"}) == {"agents": None}
+
+    def test_it_rewrites_a_list_that_names_a_renamed_key(self) -> None:
+        from maljan.core.agent_key_migration import set_if_list
+
+        assert set_if_list({"agents": ["a", "z"]}, "agents", {"a": "b"}) == {"agents": ["b", "z"]}
+
+    def test_it_returns_the_mapping_itself_when_nothing_changes(self) -> None:
+        from maljan.core.agent_key_migration import set_if_list
+
+        mapping = {"agents": ["z"]}
+        assert set_if_list(mapping, "agents", {"a": "b"}) is mapping
