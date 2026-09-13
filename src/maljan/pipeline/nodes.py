@@ -115,6 +115,28 @@ def _is_placeholder_only(chunks: list, role: str = "") -> bool:
     return bool(_STATIC_PLACEHOLDER_RE.match(content.strip()))
 
 
+# The reason a sandbox-fed analyst is skipped when nothing was detonated.
+SYNTHETIC_SANDBOX_REASON = "no sandbox fixture for this sample"
+
+
+def _sandbox_report_is_synthetic(state: AnalysisState) -> bool:
+    """True when the sandbox report stands in for a run that never happened.
+
+    The mock provider answers with a structurally valid, entirely empty report
+    when it has no fixture for the sample. Read as data that is exactly a
+    detonation that did nothing, and the dynamic and network analysts each
+    wrote half a dozen claims at confidence 1.00 about it. A real run with no
+    behaviour is not synthetic and is analysed as before.
+    """
+    report = state.get("sandbox_report")
+    return isinstance(report, dict) and bool(report.get("synthetic"))
+
+
+def _sandbox_fed(role: str) -> bool:
+    """Whether this role's input is the sandbox report rather than the sample."""
+    return role not in ("static", "generic")
+
+
 def _violations_from_rows(rows: Any) -> list[Violation]:
     """Rebuild the violations an analyst node put on the state channel."""
     out: list[Violation] = []
@@ -804,7 +826,11 @@ def make_stage_agent_node(
             # analyst with nothing to read would spend a whole ReAct loop
             # analysing "No network data available for sample <sha>" and report
             # it back as its one evidence-backed claim.
-            if not chunks or _is_placeholder_only(chunks, role):
+            # A synthetic report is an absence, not an observation, and the
+            # loaders cannot tell: they are handed a well-formed report with
+            # empty sections and produce chunks describing exactly that.
+            synthetic = _sandbox_fed(role) and _sandbox_report_is_synthetic(state)
+            if not chunks or synthetic or _is_placeholder_only(chunks, role):
                 # A Linux ELF audit found that an ELF sample with no PCAP / sandbox network
                 # trace caused the network analyst to fail-hard with an
                 # AnalystError ([ERROR] prefix), which then routed into
@@ -820,8 +846,12 @@ def make_stage_agent_node(
                     agent_name,
                 )
                 no_data_text = (
-                    f"[WARN] {agent_name}: no {agent_name} data available "
-                    "for this sample — analyst skipped."
+                    f"[WARN] {agent_name}: {SYNTHETIC_SANDBOX_REASON} — analyst skipped."
+                    if synthetic
+                    else (
+                        f"[WARN] {agent_name}: no {agent_name} data available "
+                        "for this sample — analyst skipped."
+                    )
                 )
                 emit_agent_message(
                     container.event_sink,
@@ -837,7 +867,9 @@ def make_stage_agent_node(
                         **stage_record(
                             stage,
                             ran=True,
-                            reason="no data for this agent",
+                            reason=(
+                                SYNTHETIC_SANDBOX_REASON if synthetic else "no data for this agent"
+                            ),
                             agents=(agent_name,),
                             duration_ms=_elapsed_ms(),
                         ),
@@ -1063,6 +1095,8 @@ def _revision_input_is_absent(
     exists, and silently deleting an analyst on a transient Qdrant blip is a
     far worse failure than one wasted revise call.
     """
+    if _sandbox_fed(container.agent_role(agent_name)) and _sandbox_report_is_synthetic(state):
+        return True
     sandbox_report = state.get("sandbox_report")
     if isinstance(sandbox_report, dict) and sandbox_report:
         try:

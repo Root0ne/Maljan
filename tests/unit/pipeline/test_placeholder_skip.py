@@ -144,3 +144,106 @@ class TestTheNodeSkipsInsteadOfAnalysing:
         assert "no network data available" in result["reports"]["network"].lower()
         statuses = [d.get("status") for t, d in events if t == "agent_message"]
         assert "no_data" in statuses
+
+
+class TestASyntheticSandboxReportIsAnAbsence:
+    """The mock provider answers with an empty but well-formed report when it
+    has no fixture for the sample. The loaders describe it faithfully, and the
+    dynamic and network analysts each wrote half a dozen claims at confidence
+    1.00 about a detonation that never happened."""
+
+    @staticmethod
+    def _container(chunks: list[_Chunk]) -> tuple[Any, Any, list[tuple[str, dict[str, Any]]]]:
+        agent = MagicMock()
+        agent.safe_analyze_isr = MagicMock(
+            side_effect=AssertionError("the LLM must not be called for a synthetic report")
+        )
+        events: list[tuple[str, dict[str, Any]]] = []
+        container = MagicMock()
+        container.is_mock = False
+        container.event_sink = lambda t, d: events.append((t, d))
+        container.get_agent.return_value = agent
+        container.agent_role.return_value = "dynamic"
+        container.active_profile.return_value = paper_profile(["dynamic"])
+        container.load_data_for_agent.return_value = chunks
+        container.load_chunked.return_value = chunks
+        return container, agent, events
+
+    def _state(self, *, synthetic: bool) -> dict[str, Any]:
+        report: dict[str, Any] = {
+            "target": {"sha256": "abc123", "name": "s.exe"},
+            "behavior": {"apistats": {}, "generic": [], "processes": []},
+            "signatures": [],
+        }
+        if synthetic:
+            report["synthetic"] = True
+        return {"file_hash": "abc123", "sample_path": "/s/abc123.exe", "sandbox_report": report}
+
+    def test_the_analyst_skips_and_says_there_was_no_fixture(self) -> None:
+        from maljan.pipeline.nodes import SYNTHETIC_SANDBOX_REASON, make_stage_agent_node
+
+        container, agent, events = self._container([_Chunk(content="Behaviour: no API calls.")])
+
+        node = make_stage_agent_node(ANALYSIS_STAGE, "dynamic", container)
+        result = node(self._state(synthetic=True))
+
+        agent.safe_analyze_isr.assert_not_called()
+        assert SYNTHETIC_SANDBOX_REASON in result["reports"]["dynamic"]
+        assert "no_data" in [d.get("status") for t, d in events if t == "agent_message"]
+
+    def test_a_real_run_that_observed_nothing_is_still_analysed(self) -> None:
+        """Emptiness a sandbox actually observed is a finding, not an absence."""
+        from maljan.pipeline.nodes import make_stage_agent_node
+        from maljan.schemas.isr_models import AgentISR
+
+        container, agent, _events = self._container([_Chunk(content="Behaviour: no API calls.")])
+        agent.safe_analyze_isr = MagicMock(
+            return_value=AgentISR(agent_id="dynamic", domain="dynamic", claims=[])
+        )
+
+        node = make_stage_agent_node(ANALYSIS_STAGE, "dynamic", container)
+        node(self._state(synthetic=False))
+
+        agent.safe_analyze_isr.assert_called_once()
+
+    def test_the_revision_round_skips_it_too(self) -> None:
+        from maljan.pipeline.nodes import _revision_input_is_absent
+
+        container, _agent, _events = self._container([_Chunk(content="Behaviour: no API calls.")])
+
+        assert _revision_input_is_absent(self._state(synthetic=True), container, "dynamic") is True
+        assert (
+            _revision_input_is_absent(self._state(synthetic=False), container, "dynamic") is False
+        )
+
+    def test_the_static_analyst_is_untouched_by_it(self) -> None:
+        """Static reads the sample, not the sandbox."""
+        from maljan.pipeline.nodes import _revision_input_is_absent
+
+        container, _agent, _events = self._container([_Chunk(content="PE32, 3 sections.")])
+        container.agent_role.return_value = "static"
+
+        assert _revision_input_is_absent(self._state(synthetic=True), container, "static") is False
+
+
+class TestTheMockProviderMarksASyntheticReport:
+    def test_a_sample_with_no_fixture_is_marked(self, tmp_path: Any) -> None:
+        from maljan.loaders.mock_sandbox_client import MockSandboxClient
+
+        sample = tmp_path / "unknown.exe"
+        sample.write_bytes(b"MZ" + b"\x00" * 32)
+        client = MockSandboxClient(fixtures_dir=str(tmp_path))
+
+        result = client.fetch_report(client.submit(sample))
+
+        assert result.report["synthetic"] is True
+
+    def test_the_normalised_report_carries_the_flag(self) -> None:
+        from maljan.schemas.sandbox_report import cape_report_to_sandbox_report
+
+        synthetic = cape_report_to_sandbox_report(
+            {"synthetic": True, "target": {}}, provider="mock", source_format="mock"
+        )
+        real = cape_report_to_sandbox_report({"target": {}}, provider="cape", source_format="cape2")
+
+        assert (synthetic.synthetic, real.synthetic) == (True, False)
