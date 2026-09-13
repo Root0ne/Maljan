@@ -258,6 +258,8 @@ class TestSafeAnalyzeISRChunked:
             # ISR; a duck-typed stub needs the two buffers it drains.
             self._findings_buffer: list = []
             self._artifacts_buffer: list = []
+            self.validation_findings: list = []
+            self.validation_retries = 0
 
         def analyze_isr(self, data: str) -> AgentISR:
             self._call_count += 1
@@ -271,6 +273,12 @@ class TestSafeAnalyzeISRChunked:
         def _infer_domain(self):
             return "static"
 
+        def _system_prompt(self, fallback):
+            return "system"
+
+        def _truncate_input(self, text: str) -> str:
+            return text
+
         # Attach the real method from BaseAnalyst
         from maljan.agents.base_agent import BaseAnalyst
 
@@ -279,6 +287,8 @@ class TestSafeAnalyzeISRChunked:
         # no-op); borrow it too so this duck-typed stub stays compatible.
         _apply_consistency_gate = BaseAnalyst._apply_consistency_gate
         _drain_findings = BaseAnalyst._drain_findings
+        # And the validation loop, which the wrapper runs on the merged ISR.
+        _validate_isr = BaseAnalyst._validate_isr
 
     @pytest.fixture
     def analyst(self) -> _ConcreteAnalyst:

@@ -189,6 +189,22 @@ required; Mobile and ICS are additive, and a box that can reach neither keeps
 working with a narrower catalog. Regenerate the id lists with
 `uv run python scripts/knowledge/prepare_attck_malware_fixtures.py`.
 
+### Rule corpora
+
+The Sigma and YARA corpora belong to the `analysis` tool server, which is what
+runs the scans. Point it at your own with two environment entries on that
+server (Settings → Tool servers → `analysis` → `env`):
+
+| Name | What it names | Default |
+| :-- | :-- | :-- |
+| `MALJAN_SIGMA_RULES_DIR` | Directory of Sigma rule YAML, loaded recursively. | `data/sigma_rules` |
+| `MALJAN_YARA_RULES_DIR` | The YARA rule file the scan compiles. | `data/yara_ttp_rules.yaml` |
+
+An unset value means the corpus the project ships; a path that does not exist
+means an empty corpus and no matches, not a failure. `analysis.sigma_rules_dir`
+was the previous name for the first of these — a stored override moves into the
+server's `env` automatically on upgrade.
+
 ### The evidence budget
 
 `reporting.evidence_budget_bytes` (512 KiB by default) is how many bytes of

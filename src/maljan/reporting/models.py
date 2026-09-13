@@ -79,8 +79,8 @@ class SignatureInfo(BaseModel):
     signature_valid: bool | None = None
 
 
-# Canonical platform vocabulary. Used by SampleIdentity, the rule layers
-# (Sigma/YARA), the TTP cascade, and the FP linter. "multi" is for samples
+# Canonical platform vocabulary. Used by SampleIdentity, the Sigma and YARA
+# scanning tools, and the FP linter. "multi" is for samples
 # that don't bind to one OS (a JAR, a macro document, a PDF). "unknown" is the
 # conservative default when magic bytes don't identify the format and the
 # sandbox couldn't disambiguate either.
@@ -111,9 +111,9 @@ class SampleIdentity(BaseModel):
     file_name: str | None = None
     file_size_bytes: int = 0
     file_type: str = "unknown"
-    # The canonical platform inferred from
-    # file_type with sandbox fallback. Drives Sigma/YARA rule filtering
-    # and TTP cascade platform-aware drop decisions.
+    # The canonical platform inferred from file_type with sandbox fallback.
+    # Drives Sigma and YARA rule filtering, and the FP linter's check that a
+    # reported technique can run on this sample at all.
     platform: Platform = "unknown"
     mime_type: str | None = None
     magic_bytes: str = ""  # hex string of first 16 bytes
@@ -211,9 +211,9 @@ class StaticAnalysis(BaseModel):
     # and it saves every consumer — prompt, report, family RAG — from
     # recomputing the same histogram from ``imports``.
     api_capabilities: dict[str, int] = Field(default_factory=dict)
-    # The audit trail behind the import-capability Layer-0 claims: one row per
-    # technique with the exact imports that evidenced it. Without this a reader
-    # sees a technique in the report and has no way to check the reasoning.
+    # The audit trail behind an import-derived technique: one row per technique
+    # with the exact imports that evidenced it. Without this a reader sees a
+    # technique in the report and has no way to check the reasoning.
     api_technique_hits: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -401,6 +401,12 @@ class CapabilityCell(BaseModel):
     evidence: list[str] = Field(default_factory=list)
     confidence: Annotated[float, Field(ge=0.0, le=1.0)] = 0.5
     contributing_layers: list[str] = Field(default_factory=list)
+    # ``False`` when the ATT&CK catalogue has no entry for this id and the
+    # producer kept it after being told. The row stays — deleting an analyst's
+    # answer is what this pipeline stopped doing — and every renderer prints
+    # the marker beside it. Defaults ``True`` so rows persisted before the flag
+    # existed keep their meaning.
+    technique_id_valid: bool = True
 
 
 class TTPMapping(BaseModel):
@@ -416,6 +422,8 @@ class TTPMapping(BaseModel):
     confidence: Annotated[float, Field(ge=0.0, le=1.0)] = 0.5
     contributing_layers: list[str] = Field(default_factory=list)
     is_corroborated: bool = False
+    # See ``CapabilityCell.technique_id_valid``.
+    technique_id_valid: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -451,7 +459,6 @@ class FamilyAttribution(BaseModel):
     # carved payload. Each row: family, tool, kind, confidence, markers.
     # Sibling of function_hash_matches, and the only family source that works
     # without a sandbox — cti.family[] is otherwise the sole producer.
-    tool_artifact_matches: list[dict[str, Any]] = Field(default_factory=list)
     # Family-feature RAG candidates — families retrieved by static-feature
     # similarity to a reference fingerprint KB, surfaced as evidence the LLM
     # weighed (sibling of function_hash_matches). Each row: family, similarity,
@@ -786,13 +793,17 @@ class MalwareReport(BaseModel):
     verdict: Literal["Malware", "Suspicious", "Benign"] = "Suspicious"
     overall_confidence: Annotated[float, Field(ge=0.0, le=1.0)] = 0.0
     malware_category: str | None = None
-    severity: SeverityAssessment = Field(default_factory=SeverityAssessment)
+    # ``None`` when the judge assessed no severity. It is not defaulted to
+    # "Informational": an unassessed report and a report assessed as harmless
+    # are different findings, and a default would print the second for the first.
+    severity: SeverityAssessment | None = None
 
     # --- Degraded-run signalling ---
-    # True when the run had low/no analyst data (e.g. all LLM analysts errored,
-    # sandbox observed nothing, only Layer-0 rule matches). The report renders a
-    # prominent banner so a numerically high verdict/severity is not read as
-    # authoritative. ``degradation_reasons`` carries human-readable causes.
+    # True when the run had little or no analyst data — every LLM analyst
+    # errored, the sandbox was unreachable, the container could not be opened.
+    # The judge is told the same reasons in its verdict prompt and sets its
+    # confidence knowing them; the report renders a prominent banner so a
+    # reader sees why. ``degradation_reasons`` carries the human-readable list.
     degraded_mode: bool = False
     degradation_reasons: list[str] = Field(default_factory=list)
 

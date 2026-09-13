@@ -13,27 +13,7 @@
       ]
     }
   ],
-  "cascade": {
-    "consensus_count": null,
-    "corroborated_count": null,
-    "dropped_by_platform": [],
-    "platform_filter_summary": {
-      "sample_platform": null,
-      "sigma_dropped": null,
-      "yara_dropped": null
-    },
-    "top_techniques": [
-      {
-        "confidence": null,
-        "label": null,
-        "layers": [
-          null
-        ],
-        "technique_id": null
-      }
-    ],
-    "total_techniques": null
-  },
+  "corroboration": "<data-keyed map>",
   "degradation_reasons": [],
   "degraded_mode": null,
   "elapsed_seconds": null,
@@ -85,10 +65,14 @@
     "tool_output_summarised": null
   },
   "validation": {
-    "hallucination_rate": null,
-    "invalid_ids": null,
-    "low_alignment": null,
-    "total_claims": null,
-    "valid_ids": null
+    "by_code": "<data-keyed map>",
+    "retries": null,
+    "unresolved": [
+      {
+        "agent": null,
+        "code": null,
+        "message": null
+      }
+    ]
   }
 }

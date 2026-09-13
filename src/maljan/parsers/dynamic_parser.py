@@ -17,14 +17,11 @@ class DynamicParser(BaseParser):
         generic_events = behavior.get("generic", [])
         apistats = behavior.get("apistats", {})
 
-        # When the sandbox reports completion
-        # but produced zero behavioral events AND zero network indicators,
-        # this is itself a strong signal — likely T1497 anti-sandbox evasion,
-        # a platform mismatch (an ELF in a Windows VM), or a zero-byte sample. The
-        # analyst LLM previously saw an empty-rows table and emitted a
-        # meta-claim ("no dynamic data available") which the judge then
-        # treated as a 1.0-confidence claim. Surfacing this structured hint
-        # lets the analyst emit a concrete T1497 claim instead.
+        # A sandbox that reported success and traced nothing has said
+        # something, and the table of zero rows does not say it. The parser
+        # states the fact; what it means — evasion, a platform mismatch, an
+        # empty file — is the analyst's reading, and naming a technique here
+        # would be this formatter deciding it.
         _network_root = raw_data.get("network", {}) or {}
         _net_total = sum(
             len(_network_root.get(k, []) or [])
@@ -35,20 +32,10 @@ class DynamicParser(BaseParser):
             return (
                 "### Sandbox Behavioral Summary\n\n"
                 "**SANDBOX COMPLETED WITH ZERO OBSERVED EVENTS.**\n\n"
-                "The sandbox report parsed successfully, but every section "
+                "The sandbox report parsed successfully and every section "
                 "(behavior.generic, behavior.apistats, network.*, signatures) "
-                "is empty. This is itself a behavioural observation — the "
-                "absence of any activity in a sandbox that reported "
-                "successful completion strongly suggests one of:\n\n"
-                "- **T1497 Virtualization/Sandbox Evasion** — the sample "
-                "detected the sandbox and aborted.\n"
-                "- **Platform mismatch** — e.g. a Linux ELF submitted to a "
-                "Windows VM (or vice versa) that cannot execute it.\n"
-                "- **Zero-byte / corrupted sample** — nothing to run.\n\n"
-                "You SHOULD emit at least one structured claim covering "
-                "this observation (typical confidence 0.30-0.50) rather "
-                "than treating it as missing data. Do NOT report 'no "
-                "behaviour available' — the absence IS the evidence.\n"
+                "is empty. That is an observation about the detonation, not "
+                "missing input: the run completed and traced nothing.\n"
             )
 
         # 1. Behavioral Signatures (Injection, Persistence, Evasion, etc.)
@@ -56,12 +43,9 @@ class DynamicParser(BaseParser):
         for event in generic_events:
             category = event.get("category", "N/A")
             desc = event.get("description", "N/A")
-            severity = self._calculate_severity(category, desc)
-            threat_rows.append([category, desc, severity])
+            threat_rows.append([category, desc])
 
-        threat_table = self._format_as_table(
-            headers=["Category", "Observation", "Severity"], rows=threat_rows
-        )
+        threat_table = self._format_as_table(headers=["Category", "Observation"], rows=threat_rows)
 
         # 2. Key API Statistics (Aggregation)
         api_rows: list[list[str]] = []
@@ -104,15 +88,6 @@ class DynamicParser(BaseParser):
             "#### Network Indicators (C2 / Exfiltration):\n"
             f"{net_table}"
         )
-
-    def _calculate_severity(self, category: str, description: str) -> str:
-        """Determines event severity based on keywords."""
-        high_threats = ["persistence", "evasion", "injection", "crypto"]
-        if any(
-            threat in category.lower() or threat in description.lower() for threat in high_threats
-        ):
-            return "[HIGH]"
-        return "[MEDIUM]"
 
     def _is_notable_api(self, api_name: str) -> bool:
         """Filters out noise and keeps sensitive WinAPI calls."""

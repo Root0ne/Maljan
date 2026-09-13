@@ -13,8 +13,9 @@ from typing import Any
 import pytest
 
 from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.models import MalwareReport
+from maljan.reporting.models import CapabilityCell, MalwareReport, TTPMapping
 from maljan.reporting.renderers.markdown import MarkdownRenderer
+from maljan.schemas.isr_models import UNVERIFIED_TECHNIQUE_MARKER
 from tests.unit._ledger_helpers import ledger_from_sandbox, persistence_isr
 
 # The headings every report carries, whatever the run gathered.
@@ -71,7 +72,7 @@ def _build(**kwargs: Any) -> MalwareReport:
         discussion_history=kwargs.pop("discussion_history", []),
         final_decision=kwargs.pop("final_decision", "Malware"),
         overall_confidence=kwargs.pop("overall_confidence", 0.85),
-        cascade_summary=kwargs.pop("cascade_summary", None),
+        judge_assessment=kwargs.pop("judge_assessment", None),
         malware_category=kwargs.pop("malware_category", None),
         evidence_ledger=kwargs.pop("evidence_ledger", None)
         or (ledger_from_sandbox(_sandbox) if _sandbox else []),
@@ -271,10 +272,12 @@ class TestRansomwareReport:
         assert "registry_run" in markdown
         assert "lockbit" in markdown.lower()
 
-    def test_severity_badge_uppercase(self, report: MalwareReport) -> None:
+    def test_an_unassessed_severity_says_so_rather_than_printing_a_rating(
+        self, report: MalwareReport
+    ) -> None:
         markdown = MarkdownRenderer().render(report)
-        # severity badge is wrapped in square brackets and uppercased
-        assert "[CRITICAL]" in markdown or "[HIGH]" in markdown
+        assert "not assessed" in markdown
+        assert "[INFORMATIONAL]" not in markdown
 
 
 class TestSeverityBadge:
@@ -339,3 +342,78 @@ class TestSectionFailureIsolation:
         assert "# Malware Analysis Report" in markdown
         assert "## Sample Identification" in markdown
         assert "section 'network' rendering failed" in markdown
+
+
+class TestAnUnverifiedTechniqueIdIsPrintedWithItsMarker:
+    """An id the ATT&CK catalog does not have stays in the report, labelled.
+
+    The analyst was told and kept its answer; deleting the row would delete the
+    answer from the one surface a reader looks at. Both renderers print the
+    reason beside it — HTML is generated from the markdown, so one source.
+    """
+
+    @staticmethod
+    def _report_with_unverified() -> MalwareReport:
+        report = _build()
+        report.capability_matrix = [
+            CapabilityCell(
+                tactic="TA0005",
+                tactic_name="Defense Evasion",
+                technique_id="T7777",
+                technique_name="Invented Technique",
+                confidence=0.6,
+                contributing_layers=["static"],
+                technique_id_valid=False,
+            )
+        ]
+        report.ttp_mappings = [
+            TTPMapping(
+                technique_id="T7777",
+                technique_name="Invented Technique",
+                tactic="TA0005",
+                evidence_quotes=["the analyst said so"],
+                confidence=0.6,
+                contributing_layers=["static"],
+                technique_id_valid=False,
+            )
+        ]
+        return report
+
+    def test_the_matrix_row_carries_the_marker(self) -> None:
+        markdown = MarkdownRenderer().render(self._report_with_unverified())
+
+        assert "T7777" in markdown
+        assert UNVERIFIED_TECHNIQUE_MARKER in markdown
+
+    def test_the_evidence_block_carries_it_too(self) -> None:
+        markdown = MarkdownRenderer().render(self._report_with_unverified())
+
+        evidence = markdown.split("### Evidence", 1)[1]
+        assert UNVERIFIED_TECHNIQUE_MARKER in evidence
+
+    def test_the_html_export_carries_it(self) -> None:
+        """HTML is generated from the markdown, so the ampersand in "ATT&CK"
+        arrives escaped. The marker is one string in one place either way."""
+        from maljan.reporting.renderers import HtmlRenderer
+
+        html = HtmlRenderer().render(self._report_with_unverified())
+
+        assert UNVERIFIED_TECHNIQUE_MARKER.replace("&", "&amp;") in html
+
+    def test_a_catalogued_id_is_printed_without_one(self) -> None:
+        report = _build()
+        report.capability_matrix = [
+            CapabilityCell(
+                tactic="TA0005",
+                tactic_name="Defense Evasion",
+                technique_id="T1055",
+                technique_name="Process Injection",
+                confidence=0.6,
+                contributing_layers=["static"],
+            )
+        ]
+
+        markdown = MarkdownRenderer().render(report)
+
+        assert "T1055" in markdown
+        assert UNVERIFIED_TECHNIQUE_MARKER not in markdown

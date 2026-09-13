@@ -8,8 +8,8 @@ STIX 2.1 defines a top-level 'confidence' property (0-100 integer) on SDOs
 but it is rarely populated and carries no evidence provenance.
 
 Maljan extends Relationship with three novel fields:
-  - confidence:            Weighted float 0.0-1.0 (from TTP cascade scoring
-                           or agent mean_confidence when cascade unavailable).
+  - confidence:            Float 0.0-1.0, the judge's own confidence in this
+                           relationship. Nothing recomputes it downstream.
   - evidence_basis:        Which data domain(s) support this relationship
                            (e.g. "static+dynamic", "network", "all").
   - contributing_agents:   Which analysis agents observed supporting evidence.
@@ -21,15 +21,16 @@ EvidenceBasis: controlled vocabulary of evidence provenance categories.
   - "static"              PE/ELF binary + decompiled code evidence
   - "dynamic"             Sandbox behavior trace evidence
   - "network"             Network capture evidence
-  - "static+dynamic"      Corroborated by two layers
-  - "dynamic+network"     Corroborated by two layers
-  - "static+network"      Corroborated by two layers
-  - "all"                 Consensus across all three layers
+  - "static+dynamic"      Two of the three corroborate it
+  - "dynamic+network"     Two of the three corroborate it
+  - "static+network"      Two of the three corroborate it
+  - "all"                 All three corroborate it
 
-Usage in judge prompt: The LLM is instructed to populate these fields per
-relationship object. When cascade_summary is available, the judge is given
-pre-computed confidence scores and contributing layers for each TTP, reducing
-LLM uncertainty and hallucination.
+Usage in judge prompt: the judge is instructed to populate these fields per
+relationship object, and is shown the evidence summary
+(``pipeline.evidence_summary``) — every source that named each technique and
+what each of them said its own confidence was. It sets the number; nothing
+computes one for it, and nothing adjusts the one it sets.
 
 Backward compatibility: All new fields are Optional with safe defaults so
 existing code producing plain Relationship objects still works. The Bundle
@@ -43,6 +44,8 @@ from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
+
+from maljan.schemas.judgement import JudgeAssessment
 
 
 def _generate_uuid() -> str:
@@ -210,9 +213,10 @@ class ConfidenceAnnotatedRelationship(STIXObject):
                                 (e.g., "uses", "indicates", "attributed-to").
         source_ref:             STIX ID of the source object.
         target_ref:             STIX ID of the target object.
-        x_maljan_confidence:    Weighted confidence score [0.0, 1.0] for this
-                                relationship claim. Derived from TTP cascade
-                                weighted confidence or agent mean_confidence.
+        x_maljan_confidence:    The judge's confidence [0.0, 1.0] in this
+                                relationship claim, set from the evidence
+                                summary it was shown. Carried through to the
+                                capability matrix unchanged.
         x_maljan_evidence_basis: Which analysis domain(s) produced supporting
                                 evidence. Uses EvidenceBasis controlled vocab.
         x_maljan_contributing_agents: List of agent IDs that observed evidence
@@ -344,6 +348,12 @@ class Bundle(_SpecConformantModel):
     type: Literal["bundle"] = "bundle"
     id: str = Field(default_factory=lambda: f"bundle--{_generate_uuid()}")
     objects: list[_BundleObject] = Field(default_factory=list)
+    # Severity, malware category and family attribution, as the judge answered
+    # them. A STIX custom property (``x_`` prefixed, per the spec's extension
+    # rule) rather than three bare bundle fields, because the Bundle's property
+    # set is defined by STIX 2.1 and a validator reads it strictly. ``None``
+    # when the judge did not produce one, which the report prints as such.
+    x_maljan_assessment: JudgeAssessment | None = None
 
     def confidence_annotated_relationships(self) -> list[ConfidenceAnnotatedRelationship]:
         """Return only the ConfidenceAnnotatedRelationship objects in this bundle."""

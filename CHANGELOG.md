@@ -8,6 +8,36 @@ change landed on `main`.
 
 ### Added
 
+- **Validation loops in place of silent overrides.**
+  `src/maljan/pipeline/validation.py` turns "this answer is wrong" into a
+  `Violation` the producer is shown, in the same conversation that produced the
+  answer, with one turn to fix it. Analysts are told about a technique id the
+  ATT&CK catalogue does not have (with up to three suggestions), a confidence
+  outside `[0, 1]` and a claim citing no evidence; the judge is told about an
+  indicator naming a value no tool saw, an attack-pattern with an unresolvable
+  id, a severity outside the enum and a family named with no evidence ids.
+  What is still wrong after the retry is returned rather than raised, and lands
+  in `run_summary.validation` — the retry count, a count per code, and every
+  unresolved finding with the agent that owns it. An unresolved technique id
+  stays on the claim as the analyst wrote it, flagged `technique_id_valid`.
+- **The judge decides severity, malware category and family.** Its verdict
+  prompt asks for them and they come back on the bundle under
+  `x_maljan_assessment` — severity with the rating and the rationale behind it,
+  category as free text, family with the evidence ids the name was read from.
+  The report prints what the judge answered: a severity nobody assessed prints
+  as "not assessed", and a family the judge could not cite evidence for is kept
+  and flagged unverified.
+- **An evidence summary in place of a cascade score.** The judge's prompt
+  carries, per technique id, every source that named it and each source's own
+  confidence (`pipeline/evidence_summary.py`). Nothing is combined. The same
+  collection is reported as `run_summary.corroboration`, so the metric and what
+  the judge read cannot disagree.
+- **A guard against the whole class of bug.**
+  `tests/unit/test_no_silent_overrides.py` AST-scans `src/maljan` for writes to
+  `technique_id`, `confidence`, `severity`, `malware_category` and `family` on
+  objects that already exist, outside `schemas/`, `tools/` and
+  `pipeline/validation.py`.
+
 - **An evidence ledger.** Every tool call an analysis makes is written down as
   it happens — the agent, the tool server, the arguments, the timing, whether
   it worked, the result text and the parsed result when the tool answered JSON
@@ -94,6 +124,37 @@ change landed on `main`.
   in the `sigma_match` tool, and logged once per scan.
 
 ### Changed
+
+- **A degraded run is explained to the judge instead of capped afterwards.**
+  The reasons a run is thin — no sandbox report, a failed analyst, a container
+  nothing could open, anti-emulation behaviour — go into the verdict prompt and
+  the judge sets its own confidence. The fixed 0.60 ceiling the report node
+  applied afterwards is gone: it made every kind of thinness look identical and
+  told the judge nothing.
+- **The capability matrix is a pure projection.** It is built from the judge's
+  technique list and the analysts' claims, and carries each source's own
+  confidence. The cap that halved an obfuscation or injection claim whose
+  supporting static evidence the module could not find is gone; an analyst that
+  over-claims is told so in its own loop.
+- **The indicator corpus check is feedback, not a filter.** An indicator whose
+  pattern names a value no tool in the run saw comes back to the judge as
+  `stix.ungrounded_indicator`, with the reason in words. Only what survives the
+  retry is dropped, and the drop is recorded in
+  `run_summary.validation.unresolved` — an ungrounded IOC in a STIX bundle is a
+  false positive a reader is entitled to see.
+- **The FP linter's C6, and a new C7.** C6 was "the Sigma/YARA platform filter
+  reported no counters"; it is now "a report section or TTP row with neither an
+  evidence id nor a tool entry behind it". C7 names technique ids the validation
+  loop could not get resolved.
+- **The rule corpora are configured on the `analysis` tool server.**
+  `MALJAN_SIGMA_RULES_DIR` and `MALJAN_YARA_RULES_DIR` in that server's `env`
+  replace `analysis.sigma_rules_dir`; a stored override for the old key moves
+  automatically on upgrade.
+- **Parsers format and nothing else.** The dynamic parser no longer labels an
+  observation `[HIGH]`/`[MEDIUM]` from a keyword table, nor tells the analyst to
+  emit a T1497 claim, and the network parser no longer prints a `[Suspicious]`
+  verdict beside a DNS query. Both state what the sandbox recorded; what it
+  means is the analyst's reading.
 
 - **The report is built from the ledger, not recomputed beside it.**
   `MalwareReportBuilder` no longer calls an extractor per section. Identity
@@ -241,6 +302,34 @@ change landed on `main`.
 
 ### Removed
 
+- **The three-layer TTP cascade** (`analysis/ttp_cascade.py`). It weighted every
+  claim by a table of per-layer constants and cross-layer multipliers nobody
+  could derive from anything, handed the judge one number per technique, and the
+  judge deferred to it. With it go `run_summary.cascade` and every cascade
+  setting.
+- **The ATT&CK autocorrect pass** (`ATTCKValidator.correct_isr_reports` and the
+  `preprocessing.use_attck_autocorrect*` settings). It rewrote a claim's
+  technique id in place against a TF-IDF index, so the report printed an id no
+  analyst had produced, attributed to the analyst. The check runs in the
+  analyst's own loop now.
+- **The Layer-0 ISR producers.** `analysis/import_capability_layer.py`,
+  `analysis/tool_artifact_layer.py`, the YARA/Sigma/LOLBin/DGA ISR builders and
+  the judge node's inline rule scans. Every capability behind them is a tool an
+  agent calls (`yara_scan`, `sigma_match`, `capa`, `api_capability`,
+  `lolbin_lookup`); what a match means is the analyst's reading of it, not a
+  claim minted at a fixed confidence behind the analyst's back. The
+  `preprocessing.use_tool_artifacts` setting and its catalog go with them.
+- **The severity arithmetic, the category classifier and the family veto.**
+  `MalwareReportBuilder._severity_assessment` summed constants chosen in the
+  builder into a score out of ten; `analysis/schema_pruner.py` and
+  `analysis/semantic_category.py` guessed a malware category from analyst prose;
+  `attribution._is_family_grounded` zeroed the confidence of any family no
+  deterministic layer had already named. All three are the judge's answer now.
+  `preprocessing.category_inference_backend` goes with them, and
+  `MalwareReport.severity` is nullable.
+- **`_reconcile_with_cascade`** from the judge post-processor, which added and
+  removed attack-patterns to make the bundle match the cascade's technique set.
+
 - **The report-only extractors.** `extractors/dynamic_extractor` and
   `extractors/persistence_extractor` are deleted, and so are
   `network_extractor.build_network_iocs` with its extraction helpers,
@@ -326,3 +415,10 @@ A JSON export taken before the tool-selection modes were removed may carry
 `use_all_tools` counterparts; the import refuses keys the catalog no longer
 knows, so delete those entries from the file first. Stored overrides are
 cleaned up by the migration.
+
+The same applies to an export carrying the judgement-layer settings —
+`core.preprocessing.use_attck_autocorrect` and its thresholds,
+`core.preprocessing.use_tool_artifacts`, `core.preprocessing.tool_artifacts_path`
+and `core.preprocessing.category_inference_backend`. `core.analysis.sigma_rules_dir`
+is not dropped but moved: it becomes `MALJAN_SIGMA_RULES_DIR` in the `analysis`
+tool server's `env`, and the migration moves a stored value across for you.

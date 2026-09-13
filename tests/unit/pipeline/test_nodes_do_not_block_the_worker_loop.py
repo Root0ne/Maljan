@@ -4,14 +4,14 @@ The live run of 2026-09-07 logged its 15-second "Pipeline heartbeat" and then
 went quiet for 209 seconds during the judge/report phase. The job completed, so
 nothing failed — the worker's event loop was simply not running. The py-spy
 dump taken during the same window caught the main thread mid-callback in
-`sigma_layer.from_rules_dir`, 2902 rules into a `read_text`, reached from
-`nodes._run_sigma_scan` through `container.get_sigma_layer`.
+`sigma_layer.from_rules_dir`, 2902 rules into a `read_text`, reached from a
+rule scan the judge node ran inline. That scan is a tool an agent calls now and
+runs in the sidecar, so the judge node no longer builds a rule corpus at all.
 
-The scans themselves were already on `asyncio.to_thread`. What was not: the
-lazy *construction* of the layers behind them (compiling the YARA corpus,
-parsing the Sigma rule tree), the capa evidence collection in the report node,
-and the deterministic report build. Each is one synchronous call in an `async
-def`, and each is minutes long the first time it runs.
+What remains on this list is the synchronous work the nodes still do
+themselves: the capa evidence collection in the report node and the
+deterministic report build. Each is one synchronous call in an `async def`, and
+each is minutes long the first time it runs.
 
 These tests do not measure how long a layer takes. They assert the property
 that matters and that a reader can check: while the slow synchronous work runs,
@@ -92,65 +92,6 @@ class TestTheHarnessItselfIsHonest:
         assert await _ticks_during(offloaded()) > 5
 
 
-class TestTheRuleLayersAreBuiltOffTheLoop:
-    """`container.get_yara_layer()` / `get_sigma_layer()` build on first use.
-
-    The container caches behind a lock, so the cost lands once — on whichever
-    loop callback happened to ask first, which in a real run is the judge node.
-    """
-
-    @pytest.mark.asyncio
-    async def test_building_the_sigma_layer_does_not_stop_the_loop(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        from maljan.core import container as container_mod
-
-        built: list[str] = []
-
-        def slow_build(self: Any) -> Any:
-            time.sleep(0.4)
-            built.append("sigma")
-            return object()
-
-        monkeypatch.setattr(container_mod.ServiceContainer, "get_sigma_layer", slow_build)
-        container = _mock_container()
-
-        ticks = await _ticks_during(_build_layer(container.get_sigma_layer))
-        assert built == ["sigma"]
-        assert ticks > 5, (
-            "the Sigma layer was compiled on the event loop: 2902 rules of "
-            "`read_text` with the worker's heartbeat stopped (OBS 4)"
-        )
-
-    @pytest.mark.asyncio
-    async def test_building_the_yara_layer_does_not_stop_the_loop(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        from maljan.core import container as container_mod
-
-        def slow_build(self: Any) -> Any:
-            time.sleep(0.4)
-            return object()
-
-        monkeypatch.setattr(container_mod.ServiceContainer, "get_yara_layer", slow_build)
-        container = _mock_container()
-
-        assert await _ticks_during(_build_layer(container.get_yara_layer)) > 5
-
-    def test_the_judge_node_offloads_both_getters(self) -> None:
-        """Read the node itself, so the two tests above cannot pass by accident.
-
-        A getter called bare inside an `async def` is the whole bug; the source
-        check names it at the exact line rather than leaving a timing test to
-        infer it.
-        """
-        from maljan.pipeline import nodes
-
-        source = inspect.getsource(nodes.make_judge_node)
-        for getter in ("get_sigma_layer", "get_yara_layer"):
-            _assert_offloaded(source, getter)
-
-
 class TestTheReportNodeOffloadsItsSynchronousWork:
     def test_capa_evidence_and_the_report_build_are_offloaded(self) -> None:
         """`collect_evidence` shells out to capa under a 900s budget, and
@@ -175,19 +116,3 @@ class TestTheSandboxStageOffloadsItsSynchronousClient:
         source = inspect.getsource(MaljanApp._submit_to_sandbox)
         for call in ("client.submit(", "client.wait_for_completion(", "client.fetch_report("):
             _assert_offloaded(source, call)
-
-
-async def _build_layer(getter: Any) -> Any:
-    """What the node is now expected to do with a lazily built layer."""
-    return await asyncio.to_thread(getter)
-
-
-def _mock_container() -> Any:
-    from unittest.mock import MagicMock
-
-    from maljan.core.container import ServiceContainer
-
-    container = MagicMock(spec=ServiceContainer)
-    container.get_sigma_layer = lambda: ServiceContainer.get_sigma_layer(container)
-    container.get_yara_layer = lambda: ServiceContainer.get_yara_layer(container)
-    return container

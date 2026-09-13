@@ -216,20 +216,7 @@ export const MALWARE_REPORT: MalwareReport = {
     actor: null,
     campaign: null,
     similar_samples: [],
-    // The static byte markers that named the family. Present in the fixture
-    // because this is the attribution path that survives an unreachable
-    // sandbox, and it rendered in the markdown report while being invisible in
-    // the UI until 2026-07-28.
-    tool_artifact_matches: [
-      {
-        tool: "AsyncRAT",
-        family: "AgentTesla",
-        kind: "rat",
-        confidence: 0.71,
-        markers: ["Pastebin_URL", "AsyncRAT_Config"],
-      },
-    ],
-    // The other three evidence sources, dead in the UI for the same reason.
+    // The evidence sources behind the family name.
     function_hash_matches: [
       {
         family: "AgentTesla",
@@ -290,7 +277,8 @@ export const MALWARE_REPORT: MalwareReport = {
     degraded_mode: false,
     degradation_reasons: [],
     failed_analysts: [],
-    cascade: null,
+    corroboration: { T1055: ["static", "dynamic"] },
+    validation: { retries: 0, by_code: {}, unresolved: [] },
     fp_warnings: [],
   },
   negotiation_summary: { rounds: 1, consensus: false },

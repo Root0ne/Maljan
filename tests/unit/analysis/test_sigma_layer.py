@@ -199,19 +199,6 @@ class TestScanLogLines:
 # ---------------------------------------------------------------------------
 
 
-class TestToISR:
-    def test_to_isr_with_matches(self, tmp_rules_dir: Path) -> None:
-        _write_rule(tmp_rules_dir, "rule.yml", VALID_RULE_CONTENT)
-        layer = SigmaLayer.from_rules_dir(tmp_rules_dir)
-        events = [{"TargetImage": "C:\\Windows\\System32\\lsass.exe", "GrantedAccess": "0x1010"}]
-        matches = layer.scan_events(events)
-        isr = layer.to_isr(matches)
-        assert isr.domain == "sigma"
-        assert isr.agent_id == "sigma_layer"
-        assert len(isr.claims) == len(matches)
-        assert isr.claims[0].technique_id == "T1003.001"
-
-
 # ---------------------------------------------------------------------------
 # SigmaMatch property tests
 # ---------------------------------------------------------------------------

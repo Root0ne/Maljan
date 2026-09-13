@@ -64,8 +64,7 @@ class NetworkParser(BaseParser):
             ans = answers[0] if answers else "N/A"
             if isinstance(ans, dict):
                 ans = ans.get("data") or ans.get("ip") or "N/A"
-            is_dga = self._is_suspicious_dns(str(query))
-            dns_rows.append([str(query), str(ans), "[Suspicious]" if is_dga else "Normal"])
+            dns_rows.append([str(query), str(ans)])
 
         # HTTP
         for entry in raw_data.get("http", []):
@@ -120,12 +119,9 @@ class NetworkParser(BaseParser):
             name = domain.get("domain") if isinstance(domain, dict) else domain
             if not name:
                 continue
-            is_dga = self._is_suspicious_dns(str(name))
-            host_rows.append([str(name), "domain", "[Suspicious]" if is_dga else "Normal"])
+            host_rows.append([str(name), "domain", ""])
 
-        dns_table = self._format_as_table(
-            headers=["Target Domain", "IP Address", "Evaluation"], rows=dns_rows
-        )
+        dns_table = self._format_as_table(headers=["Target Domain", "IP Address"], rows=dns_rows)
         http_table = self._format_as_table(headers=["Host", "Request", "Status"], rows=http_rows)
         flow_hdr = ["Destination", "Port", "ASN / Country"]
         tcp_table = self._format_as_table(headers=flow_hdr, rows=tcp_rows)
@@ -159,7 +155,7 @@ class NetworkParser(BaseParser):
 
         return (
             "### Network Traffic Intelligence (Sandbox)\n\n"
-            "#### DNS Exfiltration & DGA Analysis:\n"
+            "#### DNS Queries:\n"
             f"{dns_table}\n\n"
             "#### HTTP Requests:\n"
             f"{http_table}\n\n"
@@ -183,36 +179,20 @@ class NetworkParser(BaseParser):
             port = entry.get("id.resp_p", "N/A")
 
             if service == "dns":
-                query = entry.get("query", "N/A")
-                is_dga = self._is_suspicious_dns(query)
-                dns_rows.append([query, ip, "[Suspicious]" if is_dga else "Normal"])
+                dns_rows.append([entry.get("query", "N/A"), ip])
 
             elif service in ["ssl", "http"]:
                 conn_rows.append([f"{ip}:{port}", service, str(entry.get("resp_bytes", 0))])
 
-        dns_table = self._format_as_table(
-            headers=["Target Domain", "IP Address", "Evaluation"], rows=dns_rows
-        )
+        dns_table = self._format_as_table(headers=["Target Domain", "IP Address"], rows=dns_rows)
         conn_table = self._format_as_table(
             headers=["Endpoint", "Protocol", "Bytes Recv"], rows=conn_rows
         )
 
         return (
             "### Network Traffic Intelligence (Zeek Summarized)\n\n"
-            "#### DNS Exfiltration & DGA Analysis:\n"
+            "#### DNS Queries:\n"
             f"{dns_table}\n\n"
             "#### C2 Connectivity Beaconing:\n"
             f"{conn_table}"
         )
-
-    def _is_suspicious_dns(self, query: str) -> bool:
-        """Flag suspicious domains (DGA / homograph / C2-infra tokens).
-
-        Delegates to the canonical scorer in ``network_extractor`` so the
-        ``[Suspicious]`` markers in this LLM-facing text summary agree with the
-        structured ``MalwareReport.network`` verdicts (single source of truth),
-        instead of the old ``len > 25`` proof-of-concept heuristic.
-        """
-        from maljan.extractors.network_extractor import _assess_domain
-
-        return _assess_domain(query).suspicious

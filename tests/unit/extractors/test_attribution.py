@@ -1,8 +1,8 @@
 """Unit tests for :mod:`maljan.extractors.attribution`.
 
 Covers both attribution concerns the module owns: ``build_family_attribution``
-(deterministic D11 grounding guardrail) and ``populate_similar_samples`` (LTM
-nearest-neighbour enrichment).
+(the judge's family, or the sandbox's, flagged rather than vetoed) and
+``populate_similar_samples`` (LTM nearest-neighbour enrichment).
 """
 
 from __future__ import annotations
@@ -18,63 +18,63 @@ from maljan.extractors.attribution import (
     populate_similar_samples,
 )
 from maljan.memory.long_term_memory import StoredCase
+from maljan.schemas.judgement import FamilyVerdict
 
 
 class TestBuildFamilyAttribution:
-    """Mirror of ``test_builder.py::TestAttributionGrounding`` at the unit level —
-    these exercise the moved logic directly rather than through the builder."""
+    """Mirror of ``test_builder.py::TestAttributionGrounding`` at the unit level.
 
-    def test_none_family_is_grounded_with_zero_confidence(self) -> None:
-        attr = build_family_attribution(
-            malware_category=None,
-            sandbox_report=None,
-            isr_reports=None,
-            overall_confidence=0.9,
-        )
+    The guardrail this replaces zeroed the confidence of any family no
+    deterministic layer had already named, which meant the judge's own reading
+    of the sample could never produce an attribution.
+    """
+
+    def test_nothing_named_a_family_leaves_it_unset(self) -> None:
+        attr = build_family_attribution(judge_family=None, sandbox_report=None)
+
         assert attr.family is None
-        # No family hypothesis => legacy "no claim made" default, not a guardrail trip.
         assert attr.family_grounded is True
-        # Preserved legacy behaviour: with no family to gate, the empty-family
-        # branch is "grounded", so confidence passes through unchanged.
-        assert attr.family_confidence == 0.9
+        assert attr.family_confidence == 0.0
 
-    def test_category_is_not_surfaced_as_family(self) -> None:
-        # A behavioural category ("rat", "dropper")
-        # is a class, NOT a family — it must never become the family attribution.
-        # With no CTI family source, family is left unset.
+    def test_the_judges_family_and_its_own_confidence_are_kept(self) -> None:
         attr = build_family_attribution(
-            malware_category="rat",
-            sandbox_report={},
-            isr_reports={},
-            overall_confidence=0.6,
+            judge_family=FamilyVerdict(name="AsyncRAT", confidence=0.72, evidence_ids=["ev_0004"]),
+            sandbox_report=None,
         )
-        assert attr.family is None
-        assert attr.family_grounded is True  # no claim made => not a guardrail trip
 
-    def test_family_from_cti_is_grounded(self) -> None:
+        assert attr.family == "AsyncRAT"
+        assert attr.family_confidence == 0.72
+        assert attr.family_grounded is True
+
+    def test_a_family_with_no_evidence_ids_is_kept_and_flagged(self) -> None:
         attr = build_family_attribution(
-            malware_category="rat",
+            judge_family=FamilyVerdict(name="LockBit", confidence=0.5), sandbox_report=None
+        )
+
+        assert attr.family == "LockBit"
+        assert attr.family_confidence == 0.5
+        assert attr.family_grounded is False
+
+    def test_the_judge_outranks_the_sandbox(self) -> None:
+        attr = build_family_attribution(
+            judge_family=FamilyVerdict(name="AsyncRAT", evidence_ids=["ev_0001"]),
             sandbox_report={"cti": {"family": ["Trojan/RAT"]}},
-            isr_reports={},
-            overall_confidence=0.6,
         )
+
+        assert attr.family == "AsyncRAT"
+
+    def test_the_sandbox_names_it_when_the_judge_abstained(self) -> None:
+        attr = build_family_attribution(
+            judge_family=None, sandbox_report={"cti": {"family": ["Trojan/RAT"]}}
+        )
+
         assert attr.family == "Trojan/RAT"
         assert attr.family_grounded is True
-        assert attr.family_confidence == 0.6
 
-    def test_cti_family_corroborated_by_signature(self) -> None:
-        attr = build_family_attribution(
-            malware_category="lockbit",
-            sandbox_report={
-                "cti": {"family": ["LockBit"]},
-                "signatures": [{"name": "LockBit ransomware payload"}],
-            },
-            isr_reports={},
-            overall_confidence=0.8,
-        )
-        assert attr.family == "LockBit"
-        assert attr.family_grounded is True
-        assert attr.family_confidence == 0.8
+    def test_a_behavioural_category_is_never_a_family(self) -> None:
+        attr = build_family_attribution(judge_family=None, sandbox_report={"cti": {"type": "rat"}})
+
+        assert attr.family is None
 
 
 def test_build_query_includes_suspicious_network_iocs() -> None:

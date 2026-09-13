@@ -34,7 +34,7 @@ def _build(**kwargs: Any) -> MalwareReport:
         discussion_history=[],
         final_decision=kwargs.pop("final_decision", "Malware"),
         overall_confidence=kwargs.pop("overall_confidence", 0.9),
-        cascade_summary=None,
+        judge_assessment=None,
         malware_category=kwargs.pop("malware_category", "ransomware"),
         evidence_ledger=ledger_from_sandbox(_sandbox) if _sandbox else [],
     ).build_deterministic()

@@ -170,16 +170,22 @@ def attck_validate(ids: list[str]) -> dict[str, Any]:
 
     Only the invalid ones come back. A validator that echoed every id would
     make the caller diff two lists to find the one that matters.
+
+    ``valid_ids`` is the vendored id universe and costs a file read; the
+    catalogue behind the suggestions is the fifty-megabyte bundle. So the
+    catalogue is only consulted once an id has actually failed — a run whose
+    every id is real never loads it, which is what makes this cheap enough to
+    call inside an analyst's own loop.
     """
     from maljan.memory.attck_loader import valid_ids
 
     known = valid_ids()
+    unknown = [t for t in (str(raw).strip().upper() for raw in ids or []) if t and t not in known]
+    if not unknown:
+        return {"invalid": [], "checked": len(ids or [])}
     catalog = _catalog()
     invalid: list[dict[str, Any]] = []
-    for raw in ids or []:
-        tid = str(raw).strip().upper()
-        if not tid or tid in known:
-            continue
+    for tid in unknown:
         row: dict[str, Any] = {"id": tid, "suggestions": []}
         # The parent of a bogus sub-technique is the single most likely intent,
         # and it is a string operation rather than a search — a suggestion that

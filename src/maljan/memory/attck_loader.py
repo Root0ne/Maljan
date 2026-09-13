@@ -488,8 +488,8 @@ def _platform_catalog() -> dict[str, tuple[str, ...]]:
                 catalog.setdefault(technique.technique_id, tuple(technique.platforms or ()))
     except Exception as exc:  # noqa: BLE001 — platform filtering degrades, the run does not
         # The empty result is cached too. A box that cannot reach MITRE would
-        # otherwise re-attempt the download on every technique the cascade
-        # checks, which is thousands of failed fetches in one job.
+        # otherwise re-attempt the download on every technique a rule filter or
+        # the FP linter checks, which is thousands of failed fetches in one job.
         # ``reset_caches`` is the way back once the network returns.
         logger.debug("Could not load the ATT&CK platform catalog: %s", exc)
     _platform_cache = catalog

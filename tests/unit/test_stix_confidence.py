@@ -1,17 +1,15 @@
-"""Unit tests for STIX Confidence Intervals (Phase 7.2).
+"""The STIX confidence annotations, and the union that carries them.
 
-Tests:
   - ConfidenceAnnotatedRelationship: field validation, property helpers
   - EvidenceBasis controlled vocabulary
   - Bundle: union type resolution, helper methods
-  - JudgeAgent._build_confidence_instruction(): cascade hint table generation,
-    graceful degradation
   - Backward compatibility: plain Relationship still accepted in Bundle
+
+The cascade hint table these were written alongside is gone; the schema is not,
+and this is the only thing that covers it.
 """
 
 from __future__ import annotations
-
-from unittest.mock import MagicMock
 
 import pytest
 from pydantic import ValidationError
@@ -297,94 +295,3 @@ class TestBundle:
         assert isinstance(obj, ConfidenceAnnotatedRelationship)
         assert obj.x_maljan_confidence == pytest.approx(0.88)
         assert obj.x_maljan_evidence_basis == "all"
-
-
-# ---------------------------------------------------------------------------
-# JudgeAgent._build_confidence_instruction()
-# ---------------------------------------------------------------------------
-
-
-class TestBuildConfidenceInstruction:
-    """Tests for the cascade-derived confidence hint table in the verdict prompt."""
-
-    def _make_judge(self) -> object:
-        """Create a JudgeAgent with a mock LLM."""
-        from maljan.agents.judge_agent import JudgeAgent
-
-        return JudgeAgent(llm=MagicMock())
-
-    def _make_cascade_result(
-        self,
-        technique_id: str,
-        weighted_confidence: float,
-        layers: list[str],
-    ) -> MagicMock:
-        r = MagicMock()
-        r.technique_id = technique_id
-        r.weighted_confidence = weighted_confidence
-        r.contributing_layers = layers
-        return r
-
-    def _make_cascade_summary(self, results: list) -> MagicMock:
-        summary = MagicMock()
-        summary.top_techniques.return_value = results
-        return summary
-
-    def test_returns_empty_string_when_no_cascade(self) -> None:
-        judge = self._make_judge()
-        result = judge._build_confidence_instruction(None)  # type: ignore[union-attr]
-        assert result == ""
-
-    def test_returns_empty_string_when_no_top_techniques(self) -> None:
-        judge = self._make_judge()
-        summary = self._make_cascade_summary([])
-        result = judge._build_confidence_instruction(summary)  # type: ignore[union-attr]
-        assert result == ""
-
-    def test_returns_table_header(self) -> None:
-        judge = self._make_judge()
-        results = [self._make_cascade_result("T1055", 0.85, ["static", "dynamic"])]
-        summary = self._make_cascade_summary(results)
-        output = judge._build_confidence_instruction(summary)  # type: ignore[union-attr]
-        assert "CONFIDENCE REFERENCE TABLE" in output
-
-    def test_single_layer_basis_maps_correctly(self) -> None:
-        judge = self._make_judge()
-        results = [self._make_cascade_result("T1055", 0.7, ["network"])]
-        summary = self._make_cascade_summary(results)
-        output = judge._build_confidence_instruction(summary)  # type: ignore[union-attr]
-        assert "network" in output
-        # Basis for single layer should be just "network" not "unknown"
-        assert "unknown" not in output
-
-    def test_two_layer_basis_joined_with_plus(self) -> None:
-        judge = self._make_judge()
-        results = [
-            self._make_cascade_result("T1055", 0.8, ["dynamic", "network"]),
-        ]
-        summary = self._make_cascade_summary(results)
-        output = judge._build_confidence_instruction(summary)  # type: ignore[union-attr]
-        assert "dynamic+network" in output
-
-    def test_three_layer_basis_maps_to_all(self) -> None:
-        judge = self._make_judge()
-        results = [
-            self._make_cascade_result("T1055", 0.95, ["static", "dynamic", "network"]),
-        ]
-        summary = self._make_cascade_summary(results)
-        output = judge._build_confidence_instruction(summary)  # type: ignore[union-attr]
-        assert "all" in output
-
-    def test_technique_id_in_output(self) -> None:
-        judge = self._make_judge()
-        results = [self._make_cascade_result("T1547", 0.72, ["static"])]
-        summary = self._make_cascade_summary(results)
-        output = judge._build_confidence_instruction(summary)  # type: ignore[union-attr]
-        assert "T1547" in output
-
-    def test_graceful_degradation_on_cascade_error(self) -> None:
-        judge = self._make_judge()
-        broken_summary = MagicMock()
-        broken_summary.top_techniques.side_effect = RuntimeError("cascade broken")
-        result = judge._build_confidence_instruction(broken_summary)  # type: ignore[union-attr]
-        assert result == ""

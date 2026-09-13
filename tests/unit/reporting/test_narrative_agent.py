@@ -11,12 +11,14 @@ We also pin the prompt builder so we catch unintentional schema drift.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from pydantic import ValidationError
 
+from maljan.pipeline.validation import FEEDBACK_PREAMBLE
 from maljan.reporting.builder import MalwareReportBuilder
 from maljan.reporting.models import DefensiveRecommendation, MalwareReport
 from maljan.reporting.narrative_agent import (
@@ -70,7 +72,7 @@ def _make_report(**overrides: Any) -> MalwareReport:
         discussion_history=overrides.pop("discussion_history", []),
         final_decision=overrides.pop("final_decision", "Malware"),
         overall_confidence=overrides.pop("overall_confidence", 0.9),
-        cascade_summary=overrides.pop("cascade_summary", None),
+        judge_assessment=overrides.pop("judge_assessment", None),
         malware_category=overrides.pop("malware_category", "ransomware"),
     ).build_deterministic()
 
@@ -273,6 +275,63 @@ class TestNarrativeAgentManualParseFallback:
         out = await agent.generate(report)
         assert out is not None
         assert len(out.capabilities_narrative) >= 3
+
+
+class TestTheNarrativeGetsOneTurnToFixItsShape:
+    """``NarrativeOutput`` has real constraints and they are what a model gets
+    wrong. Before the loop the first breach discarded the whole answer and the
+    report shipped the deterministic template, with nothing recording which
+    rule was broken."""
+
+    @staticmethod
+    def _llm(*raw_answers: str) -> MagicMock:
+        llm = MagicMock()
+        structured = MagicMock()
+        structured.ainvoke = AsyncMock(side_effect=Exception("schema bork"))
+        llm.with_structured_output.return_value = structured
+        llm.ainvoke = AsyncMock(side_effect=[MagicMock(content=answer) for answer in raw_answers])
+        return llm
+
+    @pytest.mark.asyncio
+    async def test_an_off_schema_answer_earns_one_retry_and_is_then_accepted(self) -> None:
+        # Two capability paragraphs where the schema needs three.
+        thin = _valid_narrative().model_dump()
+        thin["capabilities_narrative"] = thin["capabilities_narrative"][:2]
+        llm = self._llm(json.dumps(thin), _valid_narrative().model_dump_json())
+
+        out = await NarrativeAgent(llm=llm).generate(_make_report())
+
+        assert out is not None
+        assert len(out.capabilities_narrative) >= 3
+        assert llm.ainvoke.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_the_feedback_names_the_field_and_the_rule(self) -> None:
+        thin = _valid_narrative().model_dump()
+        thin["capabilities_narrative"] = thin["capabilities_narrative"][:2]
+        llm = self._llm(json.dumps(thin), _valid_narrative().model_dump_json())
+
+        await NarrativeAgent(llm=llm).generate(_make_report())
+
+        feedback = str(llm.ainvoke.await_args_list[1].args[0][-1].content)
+        assert FEEDBACK_PREAMBLE in feedback
+        assert "capabilities_narrative" in feedback
+
+    @pytest.mark.asyncio
+    async def test_a_good_first_answer_costs_no_retry(self) -> None:
+        llm = self._llm(_valid_narrative().model_dump_json())
+
+        assert await NarrativeAgent(llm=llm).generate(_make_report()) is not None
+        assert llm.ainvoke.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_an_answer_that_stays_off_schema_ships_no_narrative(self) -> None:
+        thin = _valid_narrative().model_dump()
+        thin["capabilities_narrative"] = thin["capabilities_narrative"][:2]
+        llm = self._llm(json.dumps(thin), json.dumps(thin))
+
+        assert await NarrativeAgent(llm=llm).generate(_make_report()) is None
+        assert llm.ainvoke.await_count == 2
 
 
 class TestNarrativeAgentReturnsNoneOnTotalFailure:

@@ -49,8 +49,6 @@ from maljan.schemas.evidence import EvidenceCounter
 if TYPE_CHECKING:
     from maljan.agents.base_agent import BaseAnalyst
     from maljan.analysis.function_summarizer import FunctionSummarizer
-    from maljan.analysis.sigma_layer import SigmaLayer
-    from maljan.analysis.yara_layer import YaraLayer
     from maljan.loaders.binary_chunker import TextChunk
     from maljan.memory.long_term_memory import MemoryStore
     from maljan.pipeline.events import EventSink
@@ -163,8 +161,6 @@ class ServiceContainer:
         self._sandbox_provider_cache: SandboxProvider | None = None
         self._static_provider_cache: dict[str, StaticProvider] = {}
         self._server_registry_cache: ServerRegistry | None = None
-        self._yara_layer_cache: YaraLayer | None = None
-        self._sigma_layer_cache: SigmaLayer | None = None
         self._function_summarizer_cache: FunctionSummarizer | None = None
         self._narrative_agent_cache: Any | None = None
         self._report_composer_cache: Any | None = None
@@ -529,7 +525,6 @@ class ServiceContainer:
                 llm = self.get_judge_llm() if role == "judge" else self.get_expert_llm()
                 cached = JudgeAgent(
                     llm=llm,
-                    category_backend=self.config.preprocessing.category_inference_backend,
                     # Without this the judge's structured-output capability
                     # check fell back to ``ChatOpenAI._llm_type`` and misread
                     # every provider — see _supports_structured_output.
@@ -661,14 +656,12 @@ class ServiceContainer:
                         exc,
                     )
 
-        # The sample's parsed text and the per-job analysis layers. Not a leak
+        # The sample's parsed text and the per-job caches. Not a leak
         # on their own — the container dies with the job — but dropping them
         # here means a worker that is *not* recycled starts the next job with a
         # clean floor rather than one job's residue.
         with self._lock:
             self._data_cache.clear()
-            self._yara_layer_cache = None
-            self._sigma_layer_cache = None
             self._function_summarizer_cache = None
             self._narrative_agent_cache = None
             self._report_composer_cache = None
@@ -780,33 +773,6 @@ class ServiceContainer:
             text = json.dumps(sandbox_report, indent=2, default=str)
 
         return self.loader.chunk_text(agent_name, text)
-
-    # ------------------------------------------------------------------
-    # Deterministic layers
-    # ------------------------------------------------------------------
-
-    def get_yara_layer(self) -> YaraLayer:
-        with self._lock:
-            if self._yara_layer_cache is None:
-                from maljan.analysis.yara_layer import YaraLayer
-
-                self._yara_layer_cache = YaraLayer.from_default_rules()
-            return self._yara_layer_cache
-
-    def get_sigma_layer(self) -> SigmaLayer:
-        with self._lock:
-            if self._sigma_layer_cache is None:
-                from maljan.analysis.sigma_layer import SigmaLayer
-                from maljan.core.paths import resolve_data
-
-                rules_dir = resolve_data(self.config.analysis.sigma_rules_dir)
-                self._sigma_layer_cache = SigmaLayer.from_rules_dir(rules_dir)
-                logger.info(
-                    "SigmaLayer initialized: %d rules loaded from %s.",
-                    self._sigma_layer_cache.rule_count,
-                    rules_dir,
-                )
-            return self._sigma_layer_cache
 
     def get_function_summarizer(self) -> FunctionSummarizer | None:
         if not self.config.preprocessing.use_function_summarizer:
