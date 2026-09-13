@@ -40,10 +40,22 @@ def _claim(technique_id: str, confidence: float = 0.8, claim: str = "it does the
 
 
 class TestSignalQuality:
-    def test_a_technique_with_no_signal_at_all_is_dropped(self) -> None:
+    def test_a_technique_only_the_judge_named_is_kept_and_credited_to_it(self) -> None:
+        """The judge putting a technique in the verdict is itself the source.
+        Dropping the row would leave the verdict naming a technique the report
+        it is printed in does not carry."""
         cells, mappings = build_capability_matrix(
             stix_output=_bundle(techniques=["T1000"]), isr_reports=None
         )
+
+        assert [c.technique_id for c in cells] == ["T1000"]
+        assert cells[0].contributing_layers == ["judge"]
+        # The judge read the analysts, not the sample, so it corroborates
+        # nothing on its own.
+        assert mappings[0].is_corroborated is False
+
+    def test_a_technique_nothing_asserted_is_dropped(self) -> None:
+        cells, mappings = build_capability_matrix(stix_output=None, isr_reports=None)
 
         assert cells == [] and mappings == []
 
@@ -73,7 +85,7 @@ class TestItProjectsTheJudgeAndTheAnalysts:
         cells, mappings = build_capability_matrix(stix_output=bundle, isr_reports=None)
 
         assert [c.confidence for c in cells] == [0.77]
-        assert cells[0].contributing_layers == ["static", "dynamic"]
+        assert cells[0].contributing_layers == ["judge", "static", "dynamic"]
         assert mappings[0].is_corroborated is True
 
     def test_an_analyst_claim_adds_its_own_evidence_quote(self) -> None:
@@ -83,7 +95,7 @@ class TestItProjectsTheJudgeAndTheAnalysts:
         )
 
         assert cells[0].evidence == ["writes into a peer"]
-        assert cells[0].contributing_layers == ["static"]
+        assert cells[0].contributing_layers == ["judge", "static"]
 
     def test_an_obfuscation_claim_keeps_the_confidence_the_analyst_gave_it(self) -> None:
         """The cap used to pull this to 0.40 whenever no packer was detected."""
@@ -132,3 +144,112 @@ class TestItProjectsTheJudgeAndTheAnalysts:
         )
 
         assert [c.technique_id_valid for c in cells] == [True]
+
+
+class TestAJudgeIdIsCheckedLikeAnAnalystClaim:
+    """The judge has no later loop to be told in, so its ids are checked here.
+
+    Before this, an analyst that kept ``T0000`` was labelled in the report and
+    a judge that emitted the same id was not — one rule for the model that had
+    the last word.
+    """
+
+    @staticmethod
+    def _catalogue(monkeypatch, known: set[str]) -> None:
+        """Point the matrix's catalogue check at a stub, not at MITRE."""
+        import maljan.tools.knowledge as knowledge
+
+        def _validate(ids: list[str]) -> dict[str, object]:
+            return {"invalid": [{"id": t} for t in ids if t not in known], "checked": len(ids)}
+
+        monkeypatch.setattr(knowledge, "attck_validate", _validate, raising=False)
+
+    def test_a_curated_placeholder_reaches_the_report_marked(self, monkeypatch) -> None:
+        self._catalogue(monkeypatch, {"T1055"})
+
+        cells, mappings = build_capability_matrix(
+            stix_output=_bundle(techniques=["T0000"]),
+            isr_reports={"static": _isr("static", _claim("T0000", 0.5))},
+        )
+
+        assert [c.technique_id for c in cells] == ["T0000"]
+        assert [c.technique_id_valid for c in cells] == [False]
+        assert [m.technique_id_valid for m in mappings] == [False]
+
+    def test_a_plausible_but_unknown_judge_id_is_marked(self, monkeypatch) -> None:
+        self._catalogue(monkeypatch, {"T1055"})
+        bundle = _bundle(
+            techniques=["T7777"],
+            relationships=[
+                {
+                    "type": "relationship",
+                    "x_maljan_technique_id": "T7777",
+                    "x_maljan_confidence": 0.9,
+                    "x_maljan_contributing_agents": ["static"],
+                }
+            ],
+        )
+
+        cells, _ = build_capability_matrix(stix_output=bundle, isr_reports=None)
+
+        assert [(c.technique_id, c.technique_id_valid) for c in cells] == [("T7777", False)]
+        # The judge's own number survives the marking untouched.
+        assert cells[0].confidence == 0.9
+
+    def test_a_misshapen_judge_id_is_marked(self, monkeypatch) -> None:
+        self._catalogue(monkeypatch, {"T1055"})
+
+        cells, _ = build_capability_matrix(
+            stix_output=_bundle(techniques=["T123"]), isr_reports=None
+        )
+
+        assert [(c.technique_id, c.technique_id_valid) for c in cells] == [("T123", False)]
+
+    def test_a_catalogued_judge_id_is_left_alone(self, monkeypatch) -> None:
+        self._catalogue(monkeypatch, {"T1055"})
+
+        cells, _ = build_capability_matrix(
+            stix_output=_bundle(techniques=["T1055"]),
+            isr_reports={"static": _isr("static", _claim("T1055"))},
+        )
+
+        assert [(c.technique_id, c.technique_id_valid) for c in cells] == [("T1055", True)]
+
+    def test_an_unreachable_catalogue_marks_nothing(self, monkeypatch) -> None:
+        """Marking every id as invented because MITRE is unreachable would be a
+        worse failure than marking none."""
+        import maljan.tools.knowledge as knowledge
+
+        def _explode(ids: list[str]) -> dict[str, object]:
+            raise RuntimeError("the catalogue is not readable")
+
+        monkeypatch.setattr(knowledge, "attck_validate", _explode, raising=False)
+
+        cells, _ = build_capability_matrix(
+            stix_output=_bundle(techniques=["T7777"]),
+            isr_reports={"static": _isr("static", _claim("T7777"))},
+        )
+
+        assert [c.technique_id_valid for c in cells] == [True]
+
+
+class TestTheJudgeIsNotCountedAsCorroboration:
+    def test_one_analyst_plus_the_judge_is_still_one_source(self) -> None:
+        """The judge read the analysts rather than the sample. Counting it
+        would turn one analyst's claim into two agreeing sources."""
+        bundle = _bundle(
+            techniques=["T1055"],
+            relationships=[
+                {
+                    "type": "relationship",
+                    "x_maljan_technique_id": "T1055",
+                    "x_maljan_confidence": 0.8,
+                    "x_maljan_contributing_agents": ["static"],
+                }
+            ],
+        )
+
+        _cells, mappings = build_capability_matrix(stix_output=bundle, isr_reports=None)
+
+        assert mappings[0].contributing_layers == ["judge", "static"]
+        assert mappings[0].is_corroborated is False

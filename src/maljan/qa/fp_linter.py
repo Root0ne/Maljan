@@ -263,7 +263,7 @@ def lint_report(report: Any, sample_platform: str | None) -> list[FPWarning]:
                     f"{len(invalid)} technique id(s) are not in the ATT&CK catalogue: "
                     f"{', '.join(sorted(invalid))}."
                 ),
-                field="run_summary.validation",
+                field="capability_matrix",
                 explanation=(
                     "The producer was shown the problem and given one turn to "
                     "fix it, and kept the id. It is reported rather than "

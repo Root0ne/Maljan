@@ -8,8 +8,10 @@ A projection, and only a projection. Two inputs:
     the evidence quotes the judge did not carry over.
 
 An id the ATT&CK catalogue does not have is carried through and marked
-(``technique_id_valid``), not dropped: it is the analyst's answer, and the
-report is where a reader is told it does not resolve.
+(``technique_id_valid``), not dropped: it is the producer's answer, and the
+report is where a reader is told it does not resolve. That holds for the judge
+as much as for an analyst — the judge's ids are checked here because the judge
+has no later loop to be told in.
 
 Neither input is adjusted here. The cap this module used to apply — halving the
 confidence of an obfuscation or injection claim whose supporting static
@@ -99,7 +101,9 @@ def build_capability_matrix(
 
         # Never emit a zero-confidence cell with no evidence and no contributing
         # source — it is an empty claim the UI would render as a "verified"
-        # capability and the narrative agent would expand into prose.
+        # capability and the narrative agent would expand into prose. A
+        # technique the judge named always has a source (the judge), so this
+        # only catches a row nothing actually asserted.
         if confidence <= 0.0 and not evidence and not layers:
             continue
 
@@ -125,7 +129,7 @@ def build_capability_matrix(
                 evidence_quotes=evidence[:8],
                 confidence=max(0.0, min(1.0, confidence)),
                 contributing_layers=layers,
-                is_corroborated=len(layers) >= 2,
+                is_corroborated=len([lyr for lyr in layers if lyr != _JUDGE_SOURCE]) >= 2,
                 technique_id_valid=valid,
             )
         )
@@ -134,6 +138,36 @@ def build_capability_matrix(
     mappings.sort(key=lambda m: m.confidence, reverse=True)
     logger.info("capability_matrix: %d cells, %d ttp mappings", len(cells), len(mappings))
     return cells, mappings
+
+
+# What the judge is called in ``contributing_layers``. It is listed, because a
+# technique the judge named and no analyst claimed should say where it came
+# from — but it is left out of the corroboration count: the judge read the
+# analysts rather than the sample, so counting it would turn one analyst's
+# claim into two agreeing sources.
+_JUDGE_SOURCE = "judge"
+
+
+def _unknown_to_the_catalogue(ids: list[str]) -> set[str]:
+    """Which of ``ids`` the ATT&CK catalogue has no entry for.
+
+    The judge's ids go through the same check the analysts' do
+    (``pipeline.validation.unknown_technique_ids``), and for the same reason: an
+    id nothing can resolve is the producer's answer either way, and the report
+    marks it rather than deleting it. Without this a judge that emitted
+    ``T0000`` reached the matrix unmarked while an analyst that did the same was
+    labelled — one rule for the model that had the last word.
+
+    Never raises. An unreachable catalogue marks nothing rather than marking
+    everything.
+    """
+    try:
+        from maljan.pipeline.validation import unknown_technique_ids
+        from maljan.tools import knowledge
+    except Exception as exc:  # noqa: BLE001 — a knowledge lookup degrades, never raises
+        logger.debug("capability_matrix: the ATT&CK check is unavailable (%s)", exc)
+        return set()
+    return unknown_technique_ids(ids, knowledge)
 
 
 def _collect_techniques(
@@ -160,11 +194,26 @@ def _collect_techniques(
 
     # 1. The judge's bundle. An attack-pattern says the technique is in the
     # verdict; the relationship annotations say how sure the judge was and which
-    # agents it credited.
-    for tid in _judge_technique_ids(stix_output):
-        _row(tid)
-    for tid, confidence, agents in _judge_relationship_rows(stix_output):
+    # agents it credited. Its ids are checked against the catalogue here, the
+    # same way an analyst's were checked in the analyst's own loop.
+    judge_ids = _judge_technique_ids(stix_output)
+    judge_relationships = _judge_relationship_rows(stix_output)
+    unknown = _unknown_to_the_catalogue(judge_ids + [tid for tid, _c, _a in judge_relationships])
+    for tid in judge_ids:
         row = _row(tid)
+        if tid in unknown:
+            row["valid"] = False
+        # The judge is credited as the source. Without it an attack-pattern the
+        # judge emitted with no matching relationship carries no confidence, no
+        # evidence and no source, and the zero-signal guard below drops it — so
+        # a technique the verdict names would be missing from the report the
+        # verdict is printed in, marked or not.
+        if _JUDGE_SOURCE not in row["layers"]:
+            row["layers"].append(_JUDGE_SOURCE)
+    for tid, confidence, agents in judge_relationships:
+        row = _row(tid)
+        if tid in unknown:
+            row["valid"] = False
         row["confidences"].append(confidence)
         for agent in agents:
             if agent and agent not in row["layers"]:

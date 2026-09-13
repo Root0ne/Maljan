@@ -155,32 +155,54 @@ def validate_isr(isr: Any, *, attck: Any = None) -> list[Violation]:
     return violations
 
 
-def _technique_is_known(technique_id: str, attck: Any) -> bool:
-    """Whether the id is a real technique. A lookup that fails is not a verdict.
+def unknown_technique_ids(ids: Sequence[str], attck: Any) -> set[str]:
+    """Which of ``ids`` the ATT&CK catalogue has no entry for, across all domains.
 
-    ``attck_validate`` is the cheap question: it answers from the vendored id
+    The single place that answers "is this a real technique", so the analyst
+    loop, the judge's bundle check and the report's capability matrix cannot
+    disagree about one id. A lookup that fails is not a verdict: an unreachable
+    catalogue returns nothing unknown rather than calling everything invented.
+
+    ``attck_validate`` is the cheap question — it answers from the vendored id
     universe and only touches the fifty-megabyte catalogue once an id has
-    already failed. That is what lets this run inside every analyst's loop
-    rather than once per job.
+    already failed — and every id is asked in one call, so a report with forty
+    techniques costs one lookup rather than forty.
     """
+    wanted = [str(i).strip().upper() for i in ids if str(i).strip()]
+    if not wanted or attck is None:
+        return set()
+
     check = getattr(attck, "attck_validate", None)
     if check is not None:
         try:
-            answer = check([technique_id])
+            answer = check(wanted)
         except Exception as exc:  # noqa: BLE001 — a knowledge failure is not a violation
-            logger.debug("validation: the ATT&CK check for %s failed (%s).", technique_id, exc)
-            return True
-        return not (answer or {}).get("invalid")
+            logger.debug("validation: the ATT&CK check failed (%s).", exc)
+            return set()
+        return {
+            str(row.get("id") or "").strip().upper()
+            for row in (answer or {}).get("invalid") or []
+            if row.get("id")
+        }
 
     lookup = getattr(attck, "attck_lookup", None)
     if lookup is None:
-        return True
-    try:
-        answer = lookup(technique_id)
-    except Exception as exc:  # noqa: BLE001 — a knowledge failure is not a violation
-        logger.debug("validation: the ATT&CK lookup for %s failed (%s).", technique_id, exc)
-        return True
-    return not isinstance(answer, dict) or bool(answer.get("valid"))
+        return set()
+    unknown: set[str] = set()
+    for tid in wanted:
+        try:
+            answer = lookup(tid)
+        except Exception as exc:  # noqa: BLE001 — a knowledge failure is not a violation
+            logger.debug("validation: the ATT&CK lookup for %s failed (%s).", tid, exc)
+            continue
+        if isinstance(answer, dict) and not answer.get("valid"):
+            unknown.add(tid)
+    return unknown
+
+
+def _technique_is_known(technique_id: str, attck: Any) -> bool:
+    """Whether the id is a real technique."""
+    return not unknown_technique_ids([technique_id], attck)
 
 
 def _suggest_techniques(claim_text: str, attck: Any) -> list[str]:
