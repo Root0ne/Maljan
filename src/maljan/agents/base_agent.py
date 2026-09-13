@@ -1492,7 +1492,7 @@ class BaseAnalyst(ABC):
         # what gives each call its timing, its outcome and the id the model was
         # shown. What it gathered is appended to the agent's buffer at the end;
         # nothing is reset here, because this may be the second of ten chunks.
-        from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
+        from maljan.agents.evidence_recorder import EvidenceRecorder, RepeatGuard, record_tools
 
         # An agent built outside a container has no counter attached, and one
         # per loop would issue ``ev_0001`` twice to the same buffer. It keeps
@@ -1507,7 +1507,11 @@ class BaseAnalyst(ABC):
             # "analysis" every entry carried when there was only one.
             stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
         )
-        agent_executor = create_react_agent(self.llm, record_tools(self.pinned_tools(), recorder))
+        # The repeat guard is per loop, like the recorder: a second chunk is a
+        # new conversation and the model has not seen the first one's answers.
+        agent_executor = create_react_agent(
+            self.llm, record_tools(self.pinned_tools(), recorder, RepeatGuard())
+        )
 
         messages = prebuilt
 

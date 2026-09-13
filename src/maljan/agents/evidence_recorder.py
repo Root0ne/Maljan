@@ -76,6 +76,7 @@ class EvidenceRecorder:
         error: str | None = None,
         started_at: float = 0.0,
         duration_ms: int = 0,
+        repeated_of: str | None = None,
     ) -> LedgerEntry:
         """Append one entry and return it, so the caller can quote its id."""
         entry_id, seq = self.counter.next_id()
@@ -92,17 +93,71 @@ class EvidenceRecorder:
             started_at=started_at,
             duration_ms=duration_ms,
             stage=self.stage,
+            repeated_of=repeated_of,
         )
         self.entries.append(entry)
         return entry
 
 
-def record_tools(tools: list[Any], recorder: EvidenceRecorder) -> list[BaseTool]:
+class RepeatGuard:
+    """How often each ``(tool, arguments)`` pair has been asked for in one loop.
+
+    A local model that likes an answer will ask for it again, and the live run
+    has a static analyst calling ``identify_file`` with identical arguments ten
+    times in a row -- ten steps of its budget, ten identical ledger entries,
+    and the same bytes back through the context every time.
+
+    One repeat is served: a model re-reading a result it half-remembers is
+    ordinary, and refusing the second call would break a legitimate retry after
+    a transient failure. From the third on the tool is not run and the model is
+    told where the answer already is.
+    """
+
+    SERVED = 2
+
+    def __init__(self) -> None:
+        self._first: dict[str, str] = {}
+        self._count: dict[str, int] = {}
+
+    @staticmethod
+    def _key(tool: str, kwargs: dict[str, Any]) -> str:
+        """The call, canonically: same arguments in any order are the same call."""
+        try:
+            arguments = json.dumps(kwargs, sort_keys=True, default=str)
+        except (TypeError, ValueError):
+            arguments = repr(sorted(kwargs.items()))
+        return f"{tool}({arguments})"
+
+    def answered_by(self, tool: str, kwargs: dict[str, Any]) -> str | None:
+        """The entry that already answers this call, when it must not run again."""
+        key = self._key(tool, kwargs)
+        if self._count.get(key, 0) < self.SERVED:
+            return None
+        return self._first.get(key)
+
+    def note(self, tool: str, kwargs: dict[str, Any], entry_id: str) -> None:
+        """Record that the call ran, and which entry first answered it."""
+        key = self._key(tool, kwargs)
+        self._count[key] = self._count.get(key, 0) + 1
+        self._first.setdefault(key, entry_id)
+
+
+def repeat_notice(tool: str, entry_id: str) -> str:
+    """What the model is told instead of the same answer a third time."""
+    return (
+        f"You already called {tool} with these arguments; the result is in "
+        f"[{entry_id}]. Use it or call something else."
+    )
+
+
+def record_tools(
+    tools: list[Any], recorder: EvidenceRecorder, repeats: RepeatGuard | None = None
+) -> list[BaseTool]:
     """Every tool, each writing its call to ``recorder`` and stamping the id."""
-    return [_record_tool(tool, recorder) for tool in tools]
+    return [_record_tool(tool, recorder, repeats) for tool in tools]
 
 
-def _record_tool(tool: Any, recorder: EvidenceRecorder) -> Any:
+def _record_tool(tool: Any, recorder: EvidenceRecorder, repeats: RepeatGuard | None = None) -> Any:
     """One tool, rebuilt so its result is recorded and stamped.
 
     Fail-safe in both directions: a tool this cannot rebuild faithfully is
@@ -123,6 +178,24 @@ def _record_tool(tool: Any, recorder: EvidenceRecorder) -> Any:
     name = str(getattr(tool, "name", "") or "unknown")
     server = server_of(tool) or None
 
+    def _already_answered(kwargs: dict[str, Any]) -> str | None:
+        """The note for a call that has been made twice already, if it has."""
+        if repeats is None:
+            return None
+        first = repeats.answered_by(name, kwargs)
+        if first is None:
+            return None
+        message = repeat_notice(name, first)
+        entry = recorder.record(
+            tool=name,
+            args=kwargs,
+            server=server,
+            output=message,
+            started_at=time.time(),
+            repeated_of=first,
+        )
+        return f"[{entry.id}]\n{message}"
+
     def _stamp(kwargs: dict[str, Any], started: float, wall_clock: float, value: Any) -> str:
         text = result_text(value)
         entry = recorder.record(
@@ -133,6 +206,8 @@ def _record_tool(tool: Any, recorder: EvidenceRecorder) -> Any:
             started_at=wall_clock,
             duration_ms=int((time.monotonic() - started) * 1000),
         )
+        if repeats is not None:
+            repeats.note(name, kwargs, entry.id)
         # ``text``, not ``entry.output``: the ledger trims what it stores, and
         # what the model reads is not the ledger's business. The size of a tool
         # result in a prompt is decided where it has always been decided —
@@ -162,6 +237,9 @@ def _record_tool(tool: Any, recorder: EvidenceRecorder) -> Any:
     if func is not None:
 
         def wrapped_func(**kwargs: Any) -> str:  # noqa: F811
+            answered = _already_answered(kwargs)
+            if answered is not None:
+                return answered
             # Two clocks: the wall clock says when the call happened and
             # correlates with a log line, the monotonic one measures how long
             # it took and cannot go backwards.
@@ -174,6 +252,9 @@ def _record_tool(tool: Any, recorder: EvidenceRecorder) -> Any:
     if coroutine is not None:
 
         async def wrapped_coroutine(**kwargs: Any) -> str:  # noqa: F811
+            answered = _already_answered(kwargs)
+            if answered is not None:
+                return answered
             started, wall_clock = time.monotonic(), time.time()
             try:
                 return _stamp(kwargs, started, wall_clock, await coroutine(**kwargs))

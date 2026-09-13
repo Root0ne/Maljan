@@ -13,7 +13,7 @@ import pytest
 from langchain_core.tools import StructuredTool
 
 from maljan.agents.base_agent import BaseAnalyst
-from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
+from maljan.agents.evidence_recorder import EvidenceRecorder, RepeatGuard, record_tools
 from maljan.schemas.evidence import EvidenceCounter
 
 
@@ -140,6 +140,81 @@ class TestRecordedCalls:
         record_tools([_tool(probe, "probe")], second)[0].invoke({})
         assert first.entries[0].id == "ev_0001"
         assert second.entries[0].id == "ev_0002"
+
+
+class TestARepeatedCall:
+    """The live run's static analyst called ``identify_file`` with identical
+    arguments ten times in a row: ten steps of its budget spent, and the same
+    bytes back through the context every time."""
+
+    @staticmethod
+    def _counting_tool(calls: list[str]) -> Any:
+        def identify_file(path: str) -> dict[str, str]:
+            """Identify a file."""
+            calls.append(path)
+            return {"file_type": "PE"}
+
+        return identify_file
+
+    def test_the_third_identical_call_is_answered_from_the_first(self) -> None:
+        calls: list[str] = []
+        recorder = EvidenceRecorder("static")
+        wrapped = record_tools(
+            [_tool(self._counting_tool(calls), "identify_file")], recorder, RepeatGuard()
+        )[0]
+
+        for _ in range(4):
+            answer = wrapped.invoke({"path": "/samples/evil.exe"})
+
+        assert calls == ["/samples/evil.exe"] * 2, "one repeat is served, the rest are not"
+        assert "You already called identify_file with these arguments" in answer
+        assert "[ev_0001]" in answer
+
+        third = recorder.entries[2]
+        assert third.repeated_of == "ev_0001"
+        assert third.ok is True
+        assert third.structured is None
+        assert third.output.startswith("You already called identify_file")
+
+    def test_different_arguments_are_not_affected(self) -> None:
+        calls: list[str] = []
+        recorder = EvidenceRecorder("static")
+        wrapped = record_tools(
+            [_tool(self._counting_tool(calls), "identify_file")], recorder, RepeatGuard()
+        )[0]
+
+        for path in ("/samples/a.exe", "/samples/b.exe", "/samples/c.exe", "/samples/a.exe"):
+            wrapped.invoke({"path": path})
+
+        assert calls == ["/samples/a.exe", "/samples/b.exe", "/samples/c.exe", "/samples/a.exe"]
+        assert all(entry.repeated_of is None for entry in recorder.entries)
+
+    def test_argument_order_does_not_make_it_a_different_call(self) -> None:
+        seen: list[dict[str, Any]] = []
+
+        def scan(path: str, deep: bool = False) -> dict[str, Any]:
+            """Scan a file."""
+            seen.append({"path": path, "deep": deep})
+            return {"hits": 0}
+
+        recorder = EvidenceRecorder("static")
+        wrapped = record_tools([_tool(scan, "scan")], recorder, RepeatGuard())[0]
+
+        wrapped.invoke({"path": "/s.exe", "deep": True})
+        wrapped.invoke({"deep": True, "path": "/s.exe"})
+        wrapped.invoke({"deep": True, "path": "/s.exe"})
+
+        assert len(seen) == 2
+
+    def test_without_a_guard_every_call_still_runs(self) -> None:
+        calls: list[str] = []
+        recorder = EvidenceRecorder("static")
+        wrapped = record_tools([_tool(self._counting_tool(calls), "identify_file")], recorder)[0]
+
+        for _ in range(3):
+            wrapped.invoke({"path": "/samples/evil.exe"})
+
+        assert len(calls) == 3
 
 
 class TestPublishing:
