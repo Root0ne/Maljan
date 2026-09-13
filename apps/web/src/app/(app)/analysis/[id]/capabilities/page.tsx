@@ -5,65 +5,12 @@ import { useEffect, useState } from "react";
 import { useReport } from "../layout";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
-
-/* Canonical MITRE Enterprise tactic catalogue in kill-chain (matrix) column
-   order, with display names. TA0005 (Defense Evasion / Stealth in ATT&CK v19)
-   and TA0112 (Defense Impairment, added in v19) are both listed so the columns
-   stay matrix-accurate as the bundle updates.
-
-   The capabilities view renders the Enterprise matrix; the Mobile and ICS
-   matrices are catalogued server-side and are not drawn here yet.
-
-   NOTE: this is the interim STATIC catalogue. The MITRE auto-update work
-   (runtime-refreshed STIX bundle + dynamic taxonomy) replaces it with the live
-   bundle's tactic list / order so new ATT&CK releases flow through with no code
-   edits. Order + names live here only until that endpoint lands. */
-const ENTERPRISE_TACTICS: { id: string; name: string }[] = [
-  { id: "TA0043", name: "Reconnaissance" },
-  { id: "TA0042", name: "Resource Development" },
-  { id: "TA0001", name: "Initial Access" },
-  { id: "TA0002", name: "Execution" },
-  { id: "TA0003", name: "Persistence" },
-  { id: "TA0004", name: "Privilege Escalation" },
-  { id: "TA0005", name: "Defense Evasion" },
-  { id: "TA0112", name: "Defense Impairment" },
-  { id: "TA0006", name: "Credential Access" },
-  { id: "TA0007", name: "Discovery" },
-  { id: "TA0008", name: "Lateral Movement" },
-  { id: "TA0009", name: "Collection" },
-  { id: "TA0011", name: "Command and Control" },
-  { id: "TA0010", name: "Exfiltration" },
-  { id: "TA0040", name: "Impact" },
-];
-
-const ENTERPRISE_NAME_BY_ID: Record<string, string> = Object.fromEntries(
-  ENTERPRISE_TACTICS.map((t) => [t.id, t.name]),
-);
-const ENTERPRISE_ORDER_BY_ID: Record<string, number> = Object.fromEntries(
-  ENTERPRISE_TACTICS.map((t, i) => [t.id, i]),
-);
-
-// Sort key: canonical Enterprise order first, then any unrecognized tactic id
-// after Enterprise by numeric TA-id so columns stay deterministic.
-function tacticOrder(id: string): number {
-  if (id in ENTERPRISE_ORDER_BY_ID) return ENTERPRISE_ORDER_BY_ID[id];
-  const n = parseInt(id.replace(/\D/g, ""), 10);
-  return 1000 + (Number.isFinite(n) ? n : 9999);
-}
-
-interface Technique {
-  id: string;
-  name: string;
-  matches: number;
-  sources: string[];
-}
-
-interface Tactic {
-  id: string;
-  name: string;
-  technique_count: number;
-  techniques: Technique[];
-}
+import {
+  corroborationSources,
+  isCorroborated,
+  orderedTactics,
+  parseTechniques,
+} from "@/components/analysis/capabilityHeatmap";
 
 const SOURCE_COLORS: Record<string, string> = {
   Static: "bg-status-purple/20 text-status-purple",
@@ -72,75 +19,6 @@ const SOURCE_COLORS: Record<string, string> = {
   Code: "bg-status-green/20 text-status-green",
   "Threat Intel": "bg-status-red/20 text-status-red",
 };
-
-function parseTechniques(raw: unknown[]): Tactic[] {
-  // Group a flat technique list into tactic buckets keyed by tactic id.
-  const tacticMap = new Map<string, Tactic>();
-
-  for (const item of raw) {
-    if (!item || typeof item !== "object") continue;
-    const t = item as Record<string, unknown>;
-
-    const techId = String(t.technique_id ?? t.id ?? "");
-    const techName = String(t.technique_name ?? t.name ?? techId);
-    // Use ``||`` not ``??`` so an empty-string tactic (the
-    // TTPMapping default) falls through to "TA0000" instead of collapsing
-    // every un-tacticked technique into one mislabeled "Unknown Tactic".
-    const tacticId = String(t.tactic_id || t.tactic || "TA0000");
-    let tacticName = String(t.tactic_name ?? "");
-    // The primary (cached) source is ``TTPMapping`` which exposes
-    // ``contributing_layers`` — NOT ``sources`` / ``match_count`` (those
-    // only exist on the /mitre fallback ``MitreTechnique``). Read both so
-    // the per-technique source badges render on both paths and the match
-    // count reflects the number of contributing layers rather than a
-    // hardcoded "1".
-    const sources = Array.isArray(t.sources)
-      ? (t.sources as string[])
-      : Array.isArray(t.contributing_layers)
-        ? (t.contributing_layers as string[])
-        : [];
-    const matches =
-      Number(
-        t.matches ??
-          t.match_count ??
-          (Array.isArray(t.contributing_layers) ? t.contributing_layers.length : 1),
-      ) || 1;
-
-    // Canonical Enterprise display name wins for any KNOWN tactic id. This
-    // covers two cases: (a) the mapping only carried the TA-id (TTPMapping has
-    // no tactic_name, so columns would read "TA0005" instead of "Defense
-    // Evasion"), and (b) a persisted/bundle tactic_name that is
-    // non-canonical (e.g. "Stealth" for TA0005) would otherwise mislabel the
-    // column. Unknown/new tactic ids keep whatever name the mapping supplied.
-    const canonicalName = ENTERPRISE_NAME_BY_ID[tacticId];
-    if (canonicalName) {
-      tacticName = canonicalName;
-    } else if (!tacticName || tacticName === tacticId || tacticName === "Unknown Tactic") {
-      tacticName = tacticId || "Unknown Tactic";
-    }
-
-    if (!tacticMap.has(tacticId)) {
-      tacticMap.set(tacticId, {
-        id: tacticId,
-        name: tacticName,
-        technique_count: 0,
-        techniques: [],
-      });
-    }
-
-    const tactic = tacticMap.get(tacticId)!;
-    // Deduplicate techniques within a tactic, summing match counts.
-    const existing = tactic.techniques.find((x) => x.id === techId);
-    if (existing) {
-      existing.matches += matches;
-    } else {
-      tactic.techniques.push({ id: techId, name: techName, matches, sources });
-      tactic.technique_count++;
-    }
-  }
-
-  return Array.from(tacticMap.values());
-}
 
 export default function AttackTab() {
   const { report, job, loading } = useReport();
@@ -190,7 +68,8 @@ export default function AttackTab() {
   const tactics = parseTechniques(rawTechniques);
 
   // Columns in canonical Enterprise matrix order.
-  const activeTactics = [...tactics].sort((a, b) => tacticOrder(a.id) - tacticOrder(b.id));
+  const activeTactics = orderedTactics(tactics);
+  const corroboration = report?.malware_report?.run_summary?.corroboration ?? null;
 
   const filteredTactics = activeTactics
     .map((tactic) => ({
@@ -260,10 +139,23 @@ export default function AttackTab() {
                       <p className="text-xs text-text-primary font-medium leading-tight mb-1">
                         {tech.name}
                       </p>
+                      {!tech.valid && (
+                        <span
+                          className="inline-block mb-1 text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-dashed border-status-orange text-status-orange"
+                          title="The ATT&CK catalog has no entry for this id. The producer kept it after being told, so it is printed and marked rather than deleted."
+                        >
+                          not in catalog
+                        </span>
+                      )}
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-1">
                           <span className="text-[11px] text-text-muted font-mono">{tech.id}</span>
-                          {tech.sources.map((src) => (
+                          {/* The judge is not a source badge. It read the
+                              analysts, so listing it beside them would show a
+                              technique nobody observed twice as one two layers
+                              agreed on. The backend leaves it out of
+                              `is_corroborated` for the same reason. */}
+                          {tech.corroborating.map((src) => (
                             <span
                               key={src}
                               className={`inline-block w-4 h-4 rounded-full text-center text-[11px] leading-4 ${SOURCE_COLORS[src] || "bg-text-muted/20 text-text-muted"}`}
@@ -276,10 +168,10 @@ export default function AttackTab() {
                           ))}
                         </div>
                         <div className="flex items-center gap-2">
-                          {tech.sources.length >= 2 ? (
+                          {isCorroborated(tech) ? (
                             <span
                               className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-status-green/10 text-status-green"
-                              title={`Corroborated across ${tech.sources.length} independent analysis layers (${tech.sources.join(", ")})`}
+                              title={`Corroborated across ${tech.corroborating.length} independent analysis layers (${tech.corroborating.join(", ")})`}
                             >
                               corroborated
                             </span>
@@ -296,6 +188,23 @@ export default function AttackTab() {
                           </span>
                         </div>
                       </div>
+                      {/* What the run itself recorded for this id, kept apart
+                          from the matrix so the two can be compared rather
+                          than conflated. */}
+                      {corroborationSources(corroboration, tech.id).length > 0 && (
+                        <details className="mt-1">
+                          <summary className="text-[10px] uppercase tracking-wider text-text-muted cursor-pointer">
+                            Named by {corroborationSources(corroboration, tech.id).length}
+                          </summary>
+                          <ul className="mt-1 space-y-0.5">
+                            {corroborationSources(corroboration, tech.id).map((source) => (
+                              <li key={source} className="text-[11px] font-mono text-text-secondary">
+                                {source}
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      )}
                     </div>
                   ))}
                 </div>

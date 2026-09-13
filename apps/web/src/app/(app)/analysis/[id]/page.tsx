@@ -372,13 +372,30 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
             ) : (
               <span className="text-sm text-text-muted">not assessed</span>
             )}
+            {/* The rating alone is a number with no argument behind it. The
+                judge writes why it chose that rating, and printing the rating
+                without it leaves a reader with nothing to disagree with. */}
+            {mr.severity?.business_impact && (
+              <p className="mt-1 text-[11px] text-text-muted leading-relaxed">
+                {mr.severity.business_impact}
+              </p>
+            )}
+            {(mr.severity?.affected_platforms?.length ?? 0) > 0 && (
+              <p className="mt-1 text-[11px] text-text-muted">
+                Affects: {mr.severity?.affected_platforms.join(", ")}
+              </p>
+            )}
           </div>
           <div>
             <div className="text-[11px] text-text-muted uppercase tracking-wider mb-1">
               Category
             </div>
+            {/* Free text, printed as written. The category is whatever the
+                judge called the behaviour; mapping it onto a fixed list would
+                be this console overruling the run. A family is a different
+                claim and is not a substitute for one. */}
             <div className="text-sm text-text-primary">
-              {mr.malware_category || mr.attribution.family || "Uncategorized"}
+              {mr.malware_category || "Uncategorized"}
             </div>
           </div>
         </div>
