@@ -614,10 +614,10 @@ def network_from_ledger(
 def network_from_sandbox_report(report: dict[str, Any] | None) -> NetworkIOCs | None:
     """The network block a sandbox report yields when read through its own tool.
 
-    For the Layer-0 scanners, which run before any analyst and therefore before
-    there is a ledger to read. They ask the same tool an analyst would and get
-    the same block back, so the DGA claim a layer makes and the domains the
-    report prints cannot disagree.
+    For a caller holding a raw sandbox report and no ledger — a provider test,
+    a mapping check. It asks the same tool an analyst would and gets the same
+    block back, so what a probe sees and what the report prints cannot
+    disagree.
     """
     from maljan.providers.sandbox_tools import sandbox_network
 

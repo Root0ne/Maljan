@@ -82,9 +82,9 @@ def analyst_keys(settings: Settings) -> list[str]:
 def current_analyst_keys() -> list[str]:
     """``analyst_keys`` for the process-wide settings.
 
-    For the two consumers that have no container to ask — ``ttp_cascade``'s
-    ``is_consensus`` and ``run_summary``'s per-layer ordering — both of which
-    run inside a job whose settings the worker has already installed.
+    For the consumers that have no container to ask — ``run_summary``'s
+    per-source ordering, the judge node's claimless-analyst check — all of
+    which run inside a job whose settings the worker has already installed.
     """
     from maljan.core.config import get_settings
 

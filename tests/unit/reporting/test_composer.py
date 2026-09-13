@@ -8,11 +8,14 @@ output maps onto the report.
 from __future__ import annotations
 
 import asyncio
+import json
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
 import pytest
 
+from maljan.pipeline.validation import FEEDBACK_PREAMBLE
 from maljan.reporting.composer import ReportComposer, _bundle_text, _has_content
 from maljan.reporting.models import (
     EncryptionScheme,
@@ -282,3 +285,75 @@ class TestFactsOutrankClaimsInThePrompt:
             },
         )
         assert "BINARY FACTS" not in text
+
+
+# One field, one real constraint: ``_IntroOut.text`` is capped at 1800.
+_OVERLONG_INTRO = json.dumps({"text": "x" * 2000})
+
+
+class TestTheManualPathGetsOneTurnToFixItsShape:
+    """A section whose shape is wrong is a section missing from a delivered
+    report. The model is told which field broke which rule and answers again.
+
+    ``_invoke`` is driven directly: ``compose`` authors several sections from
+    one queue, and what is under test here is what one section's round does.
+    """
+
+    class _RawLLM:
+        """Structured output unavailable; the raw path answers from a queue."""
+
+        def __init__(self, *answers: str) -> None:
+            self._answers = list(answers)
+            self.sent: list[Any] = []
+
+        def with_structured_output(self, schema: type) -> Any:  # pragma: no cover - unused
+            raise RuntimeError("structured output is unavailable")
+
+        async def ainvoke(self, messages: Any) -> Any:
+            self.sent.append(list(messages))
+            return SimpleNamespace(content=self._answers.pop(0))
+
+    def _invoke(self, *answers: str) -> tuple[Any, _RawLLM]:
+        from langchain_core.messages import HumanMessage
+
+        from maljan.reporting.composer import _IntroOut
+
+        llm = self._RawLLM(*answers)
+        comp = ReportComposer(llm=llm, per_section_timeout=5)  # type: ignore[arg-type]
+        with patch(
+            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+        ):
+            result = asyncio.run(
+                comp._invoke([HumanMessage(content="write it")], _IntroOut, section="intro")
+            )
+        return result, llm
+
+    def test_an_off_schema_section_is_retried_once_and_then_accepted(self) -> None:
+        # ``_IntroOut.text`` is capped at 1800 characters; the first answer
+        # runs past it, which is the shape of breach a real model produces.
+        result, llm = self._invoke(_OVERLONG_INTRO, '{"text": "A Windows malware sample."}')
+
+        assert result is not None and result.text == "A Windows malware sample."
+        feedback = str(llm.sent[1][-1].content)
+        assert FEEDBACK_PREAMBLE in feedback
+        assert "text" in feedback
+
+    def test_a_good_first_answer_costs_no_retry(self) -> None:
+        result, llm = self._invoke('{"text": "A Windows malware sample."}')
+
+        assert result is not None and result.text == "A Windows malware sample."
+        assert len(llm.sent) == 1
+
+    def test_a_declined_section_is_not_argued_with(self) -> None:
+        """``{"intro": null}`` is the model saying the section is empty. Asking
+        again would be arguing with a correct answer."""
+        result, llm = self._invoke('{"intro": null}')
+
+        assert result is None
+        assert len(llm.sent) == 1
+
+    def test_a_section_that_stays_off_schema_is_skipped(self) -> None:
+        result, llm = self._invoke(_OVERLONG_INTRO, _OVERLONG_INTRO)
+
+        assert result is None
+        assert len(llm.sent) == 2

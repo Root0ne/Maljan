@@ -1,11 +1,10 @@
 """Analysis subsystem for Maljan.
 
 Modules:
-  - yara_layer:  Layer 0 — deterministic signature-based ATT&CK technique detection
-                 via YAML-configured pattern rules. Zero hard dependencies.
-  - ttp_cascade: Multi-layer TTP evidence cascade engine that cross-correlates
-                 ClaimEvidence objects across yara, static, dynamic, and network layers.
-  - schema_pruner: Malware category inference for dynamic STIX schema pruning.
+  - yara_layer:    The compiled YARA corpus and its match model, behind
+                   ``tools.rules.yara_scan``.
+  - sigma_layer:   The Sigma rule collection and its event builder, behind
+                   ``tools.rules.sigma_match``.
   - run_summary:   RunSummary builder for pipeline observability.
   - chunk_merger:  ISR merging across BinaryChunker text windows.
 """

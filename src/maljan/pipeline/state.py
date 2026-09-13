@@ -49,11 +49,9 @@ class AnalysisState(TypedDict):
     sample_path: str | None
     sandbox_report: dict[str, Any] | None
 
-    # file_type + canonical platform inferred at
-    # pipeline bootstrap. Consumed by the Sigma/YARA scan helpers in the
-    # judge node (filter out platform-incompatible rules) and the TTP
-    # cascade (drop platform-mismatched techniques). Optional because
-    # legacy state dicts persisted earlier don't carry them.
+    # file_type + canonical platform inferred at pipeline bootstrap. Read by
+    # the report's identity block and the FP linter's platform checks.
+    # Optional because legacy state dicts persisted earlier don't carry them.
     file_type: str | None
     platform: str | None
 
@@ -144,12 +142,10 @@ class AnalysisState(TypedDict):
     # a quietly successful run.
     report_error: str | None
 
-    # Flag set by the judge node when a
-    # run produced TTPs but zero LLM analyst corroboration, or when one
-    # or more analyst reports are tagged ``[ERROR]``. Consumers (report
-    # node + dashboard) cap ``overall_confidence`` and surface a clear
-    # "degraded" indicator instead of displaying the inflated cascade-
-    # only confidence as if it were a fully corroborated verdict.
+    # Set by the judge node when a run produced no corroborated technique, or
+    # when an analyst failed, or when the sandbox was unreachable. It is put to
+    # the judge in the verdict prompt so the confidence it sets already
+    # reflects it, and rendered in the report header so a reader sees why.
     degraded_mode: bool
     degradation_reasons: list[str]
 
@@ -164,4 +160,13 @@ class AnalysisState(TypedDict):
     function_hash_matches: list[dict[str, Any]]
     family_rag_candidates: list[dict[str, Any]]
     attck_case_candidates: list[dict[str, Any]]
-    tool_artifact_matches: list[dict[str, Any]]
+
+    # What each analyst was told was wrong with its answer and did not fix,
+    # after its one retry (``pipeline.validation``). Per agent, so the run
+    # summary can name who; merged rather than appended because an agent that
+    # revises replaces its own findings, and never another agent's.
+    validation_findings: Annotated[dict[str, list[dict[str, str]]], _merge_dicts]
+
+    # How many feedback retries the run spent, across every producer.
+    # Append-only: two analysts running in parallel each add their own.
+    validation_retries: Annotated[int, operator.add]

@@ -12,15 +12,23 @@
 [![Licence](https://img.shields.io/badge/licence-MIT-blue)](LICENSE)
 
 Maljan maps evidence about a Windows PE sample to MITRE ATT&CK technique
-identifiers and emits a STIX 2.1 bundle. It is mostly not a language model: six
-deterministic evidence layers assert techniques from signatures and rules, three
-LLM analysts describe behaviour over three channels of evidence, a judge
-synthesises a verdict, and a deterministic reconciliation and gating stage
-decides what the analyst actually receives. The organising rule is that the
-model proposes and code disposes: **the model never emits a technique identifier
-or a final set.** Samples are submitted, tracked and read in a web console; the
-whole configuration of a deployment lives in that console as well, not in
-environment files.
+identifiers and emits a STIX 2.1 bundle. Three LLM analysts describe behaviour
+over three channels of evidence, calling deterministic tools — signature
+scanners, rule engines, binary and capture readers, an ATT&CK catalogue — and
+citing what each one returned; a judge reads their claims and the evidence
+behind them and decides the verdict, the severity, the category and the family.
+
+The organising rule is that **the agent decides and the code says what is wrong
+with the decision.** Nothing rewrites a claim, a technique id, a confidence or
+an attribution behind the producer's back: a problem is put back to the producer
+as feedback, it gets one turn to fix it, and what it will not fix stays on the
+record where a reader can see it. Every tool call is written to an evidence
+ledger with a citable id, and every section of the report names the ids it was
+built from.
+
+Samples are submitted, tracked and read in a web console; the whole
+configuration of a deployment lives in that console as well, not in environment
+files.
 
 ## The console
 

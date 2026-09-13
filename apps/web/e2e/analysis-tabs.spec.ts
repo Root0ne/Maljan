@@ -103,34 +103,12 @@ test.describe("Analysis tabs", () => {
     });
   }
 
-  test("/attribution shows the byte markers that named the family", async ({
+  test("/attribution shows every evidence source, not just the name", async ({
     sessionPage: page,
   }) => {
-    /* Separate from the tab walk above, which only proves the tab rendered
-     * *something*. This asserts the specific section that was missing until
-     * 2026-07-28: `tool_artifact_matches` was produced by the pipeline and
-     * printed in the markdown report, and the UI never read the field. It is
-     * the only attribution source that works with the sandbox unreachable, so
-     * its absence was worst exactly when it mattered most. */
-    await page.goto(`/analysis/${JOB_ID}/attribution`);
-
-    await expect(
-      page.getByRole("heading", { name: /Offensive-Tool Artifacts \(1\)/i })
-    ).toBeVisible();
-    // `exact` matters: the tool cell says "AsyncRAT" and one of the markers is
-    // "AsyncRAT_Config", so a substring match resolves to two nodes and trips
-    // strict mode.
-    await expect(page.getByText("AsyncRAT", { exact: true })).toBeVisible();
-    await expect(page.getByText("AsyncRAT_Config")).toBeVisible();
-  });
-
-  test("/attribution shows all four evidence sources, not just the name", async ({
-    sessionPage: page,
-  }) => {
-    /* The byte markers were one of four sibling fields on FamilyAttribution;
-     * the other three were dead in exactly the same way. A family name with no
-     * visible derivation is the failure this guards against — the tab used to
-     * show a verdict and withhold every deterministic reason for it. */
+    /* A family name with no visible derivation is the failure this guards
+     * against — the tab used to show a verdict and withhold every reason for
+     * it. */
     await page.goto(`/analysis/${JOB_ID}/attribution`);
 
     await expect(

@@ -126,3 +126,138 @@ def test_upgrade_is_idempotent_and_keeps_the_new_row_on_collision(caplog):
         reverted = dict(conn.execute(sa.text("SELECT key, value FROM runtime_settings")).fetchall())
         assert reverted["core.sandbox.backend"] == '"cape2"'
         assert reverted["core.sandbox.cape2_api_token"] == '"enc:v1:NEW"'
+
+
+# ---------------------------------------------------------------------------
+# 20260915000000 — the judgement-layer settings go, the rule directory moves
+# ---------------------------------------------------------------------------
+
+_JUDGEMENT_REV = _API / "alembic" / "versions" / "20260915000000_drop_judgement_layer_settings.py"
+
+
+def _load_judgement_rev():
+    spec = importlib.util.spec_from_file_location("drop_judgement_layer_settings", _JUDGEMENT_REV)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_no_dropped_judgement_key_is_still_a_catalog_key():
+    """A key the revision deletes must be one the catalog no longer knows.
+
+    The inverse of ``test_every_renamed_key_is_a_real_catalog_key``: a drop
+    that removes a setting still in the catalog would delete an operator's
+    live configuration.
+    """
+    from app.services.settings_catalog_api import catalog_index
+
+    mod = _load_judgement_rev()
+    index = catalog_index()
+    for key in (*mod.DROPPED_KEYS, *mod.MOVED_KEYS):
+        assert key not in index, f"{key} is still a catalog key"
+
+
+def test_the_move_target_is_the_analysis_server_entry():
+    from app.services.settings_catalog_api import catalog_index
+
+    mod = _load_judgement_rev()
+    assert mod.MAP_KEY in catalog_index()
+
+
+def _judgement_engine(rows: dict[str, str]):
+    import sqlalchemy as sa
+
+    engine = sa.create_engine("sqlite://")
+    conn = engine.connect()
+    conn.execute(
+        sa.text(
+            "CREATE TABLE runtime_settings "
+            "(key TEXT PRIMARY KEY, value TEXT, is_secret BOOLEAN DEFAULT 0)"
+        )
+    )
+    for key, value in rows.items():
+        conn.execute(
+            sa.text("INSERT INTO runtime_settings (key, value, is_secret) VALUES (:k, :v, 0)"),
+            {"k": key, "v": value},
+        )
+    conn.commit()
+    return conn
+
+
+def test_the_judgement_keys_are_dropped_and_the_rule_dir_moves():
+    import json
+
+    import sqlalchemy as sa
+    from alembic.operations import Operations
+    from alembic.runtime.migration import MigrationContext
+
+    mod = _load_judgement_rev()
+    conn = _judgement_engine(
+        {
+            "core.preprocessing.use_attck_autocorrect": "true",
+            "core.preprocessing.use_tool_artifacts": "false",
+            "core.analysis.sigma_rules_dir": '"/srv/rules/sigma"',
+            "core.llm.provider": '"ollama"',
+        }
+    )
+    with conn:
+        ctx = MigrationContext.configure(conn)
+        with Operations.context(ctx):
+            mod.upgrade()
+        first = dict(conn.execute(sa.text("SELECT key, value FROM runtime_settings")).fetchall())
+        with Operations.context(ctx):
+            mod.upgrade()  # second pass: nothing left to do
+        assert (
+            dict(conn.execute(sa.text("SELECT key, value FROM runtime_settings")).fetchall())
+            == first
+        )
+
+        assert "core.preprocessing.use_attck_autocorrect" not in first
+        assert "core.preprocessing.use_tool_artifacts" not in first
+        assert "core.analysis.sigma_rules_dir" not in first
+        # An unrelated override is untouched.
+        assert first["core.llm.provider"] == '"ollama"'
+
+        servers = json.loads(first[mod.MAP_KEY])
+        assert servers["analysis"]["env"][mod.SIGMA_ENV_NAME] == "/srv/rules/sigma"
+
+        with Operations.context(ctx):
+            mod.downgrade()
+        reverted = dict(conn.execute(sa.text("SELECT key, value FROM runtime_settings")).fetchall())
+        assert json.loads(reverted["core.analysis.sigma_rules_dir"]) == "/srv/rules/sigma"
+
+
+def test_a_secret_row_is_never_folded_into_the_server_document():
+    """``is_secret`` values are encrypted and the registry has no key for them."""
+    import sqlalchemy as sa
+    from alembic.operations import Operations
+    from alembic.runtime.migration import MigrationContext
+
+    mod = _load_judgement_rev()
+    conn = _judgement_engine({})
+    with conn:
+        conn.execute(
+            sa.text("INSERT INTO runtime_settings (key, value, is_secret) VALUES (:k, :v, 1)"),
+            {"k": "core.analysis.sigma_rules_dir", "v": '"enc:v1:SECRET"'},
+        )
+        conn.commit()
+        ctx = MigrationContext.configure(conn)
+        with Operations.context(ctx):
+            mod.upgrade()
+        rows = dict(conn.execute(sa.text("SELECT key, value FROM runtime_settings")).fetchall())
+        assert mod.MAP_KEY not in rows
+
+
+def test_a_database_with_nothing_stored_is_left_alone():
+    import sqlalchemy as sa
+    from alembic.operations import Operations
+    from alembic.runtime.migration import MigrationContext
+
+    mod = _load_judgement_rev()
+    conn = _judgement_engine({})
+    with conn:
+        ctx = MigrationContext.configure(conn)
+        with Operations.context(ctx):
+            mod.upgrade()
+        assert conn.execute(sa.text("SELECT COUNT(*) FROM runtime_settings")).scalar() == 0

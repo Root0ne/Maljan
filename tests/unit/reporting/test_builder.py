@@ -13,6 +13,7 @@ import pytest
 
 from maljan.reporting.builder import MalwareReportBuilder
 from maljan.reporting.models import MalwareReport
+from maljan.schemas.judgement import FamilyVerdict, JudgeAssessment, SeverityVerdict
 from tests.unit._ledger_helpers import ledger_from_sandbox
 
 
@@ -25,6 +26,7 @@ def _build(
     category: str | None = None,
     isr_reports: dict[str, Any] | None = None,
     ledger: list[Any] | None = None,
+    assessment: Any | None = None,
 ) -> MalwareReport:
     # The report is built from the calls the run made, so a sandbox fixture
     # reaches it the way it does in production: through the sandbox tools a
@@ -49,7 +51,7 @@ def _build(
         discussion_history=[],
         final_decision=decision,
         overall_confidence=confidence,
-        cascade_summary=None,
+        judge_assessment=assessment,
         malware_category=category,
         evidence_ledger=ledger,
     ).build_deterministic()
@@ -60,8 +62,9 @@ class TestMinimalBuild:
         report = _build()
         assert isinstance(report, MalwareReport)
         assert report.identity.hashes.sha256 == "a" * 64
-        # Severity drops to "Low"/"Medium" range with no signal beyond confidence
-        assert report.severity.rating in {"Low", "Medium", "High"}
+        # No judge assessment means no severity. It is not defaulted to a
+        # rating the run never established.
+        assert report.severity is None
         # References include VT + MalwareBazaar even with no TTPs
         assert any(r.source == "VirusTotal" for r in report.references)
 
@@ -163,9 +166,66 @@ class TestRansomwareFixture:
         names = {s.name for s in report.dynamic.sandbox_signatures}
         assert "InstallsAutoRun" in names
 
-    def test_severity_high_or_critical(self, sandbox: dict[str, Any]) -> None:
-        report = _build(sandbox=sandbox, category="ransomware", confidence=0.9)
-        assert report.severity.rating in {"High", "Critical"}
+    def test_severity_is_the_judges_rating_and_its_rationale(self, sandbox: dict[str, Any]) -> None:
+        report = _build(
+            sandbox=sandbox,
+            category="ransomware",
+            confidence=0.9,
+            assessment=JudgeAssessment(
+                severity=SeverityVerdict(rating="Critical", rationale="it encrypts every file")
+            ),
+        )
+        assert report.severity is not None
+        assert report.severity.rating == "Critical"
+        assert report.severity.business_impact == "it encrypts every file"
+
+    def test_severity_is_not_invented_when_the_judge_gave_none(
+        self, sandbox: dict[str, Any]
+    ) -> None:
+        """The arithmetic this replaces read "0.9 confidence + persistence +
+        suspicious domains" and printed 9.4/10 Critical over the judge's head."""
+        assert _build(sandbox=sandbox, category="ransomware", confidence=0.9).severity is None
+
+
+class TestAttributionGrounding:
+    """Family attribution: the judge's answer, flagged rather than vetoed.
+
+    The guardrail this replaces zeroed the confidence of any family no
+    deterministic layer had already named. That meant the judge's own reading
+    of a sample could never produce an attribution at all, and a family with a
+    caveat became a family with 0.00 next to it, which reads as a bug.
+    """
+
+    def test_no_family_anywhere_leaves_it_unset(self) -> None:
+        report = _build(category=None)
+        assert report.attribution.family is None
+        assert report.attribution.family_grounded is True
+
+    def test_the_category_is_never_echoed_as_a_family(self) -> None:
+        report = _build(category="rat", confidence=0.6)
+        assert report.attribution.family is None
+        assert report.malware_category == "rat"
+
+    def test_the_judges_family_wins_and_carries_its_own_confidence(self) -> None:
+        report = _build(
+            sandbox={"cti": {"family": ["Trojan/RAT"]}},
+            assessment=JudgeAssessment(
+                family=FamilyVerdict(name="AsyncRAT", confidence=0.72, evidence_ids=["ev_0009"])
+            ),
+        )
+        assert report.attribution.family == "AsyncRAT"
+        assert report.attribution.family_confidence == 0.72
+        assert report.attribution.family_grounded is True
+
+    def test_a_family_with_no_evidence_ids_is_kept_and_flagged(self) -> None:
+        report = _build(assessment=JudgeAssessment(family=FamilyVerdict(name="LockBit")))
+        assert report.attribution.family == "LockBit"
+        assert report.attribution.family_grounded is False
+
+    def test_the_sandbox_names_the_family_when_the_judge_abstained(self) -> None:
+        report = _build(sandbox={"cti": {"family": ["Trojan/RAT"]}}, confidence=0.6)
+        assert report.attribution.family == "Trojan/RAT"
+        assert report.attribution.family_grounded is True
 
 
 class TestFallbackNarrative:
@@ -175,69 +235,3 @@ class TestFallbackNarrative:
         assert len(report.executive_summary) > 100
         assert report.capabilities_narrative  # non-empty
         assert report.defensive_recommendations  # non-empty
-
-
-class TestAttributionGrounding:
-    """D11 — family attribution guardrail.
-
-    The judge fallback path can hallucinate a family string when local
-    LLMs time out (the 2026-05-23 zararli.apk run produced
-    ``attribution.family = 'rat'`` with no Triage / signature / claim
-    corroboration). The builder must mark that case as ungrounded so the
-    UI can render it with a low-confidence badge.
-    """
-
-    def test_no_family_treated_as_grounded(self) -> None:
-        report = _build(category=None)
-        assert report.attribution.family is None
-        # Legacy behaviour: missing family => no grounding claim to make.
-        assert report.attribution.family_grounded is True
-
-    def test_category_not_surfaced_as_family(self) -> None:
-        # The behavioural category is never echoed
-        # into the family attribution; family stays unset without a CTI source.
-        report = _build(category="rat", confidence=0.6)
-        assert report.attribution.family is None
-        assert report.attribution.family_grounded is True
-        # The category is still available on the report, just not as a family.
-        assert report.malware_category == "rat"
-
-    def test_family_grounded_via_triage_cti(self) -> None:
-        sandbox = {"cti": {"family": ["Trojan/RAT"]}}
-        report = _build(sandbox=sandbox, category="rat", confidence=0.6)
-        assert report.attribution.family_grounded is True
-        assert report.attribution.family_confidence == 0.6
-
-    def test_family_grounded_via_signature_name(self) -> None:
-        sandbox = {
-            "signatures": [
-                {"name": "LockBit ransomware payload", "severity": 9},
-            ]
-        }
-        report = _build(sandbox=sandbox, category="lockbit", confidence=0.8)
-        assert report.attribution.family_grounded is True
-        assert report.attribution.family_confidence == 0.8
-
-    def test_family_grounded_via_isr_claim(self) -> None:
-        from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-
-        isr = AgentISR(
-            agent_id="static",
-            domain="static",
-            claims=[
-                ClaimEvidence(
-                    claim="Sample matches Cobalt Strike beacon pattern",
-                    evidence_ref="strings: cobaltstrike-beacon-config",
-                    confidence=0.7,
-                    technique_id="T1059",
-                )
-            ],
-            dissent_items=[],
-            revision_round=0,
-        )
-        report = _build(
-            isr_reports={"static": isr},
-            category="cobaltstrike",
-            confidence=0.7,
-        )
-        assert report.attribution.family_grounded is True

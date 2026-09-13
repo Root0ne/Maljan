@@ -3,8 +3,8 @@
 After a complete analysis run, the pipeline has produced:
   - ISR reports (per-agent structured claims)
   - Negotiation history (mediator arguments + confidence evolution)
-  - ATT&CK TTP validation results (hallucinated / suspicious IDs)
-  - Three-layer TTP cascade results (corroboration scoring)
+  - What the validation loop found and could not get fixed
+  - Which sources corroborated each technique id
   - Final STIX 2.1 bundle
 
 RunSummary aggregates all of these into a single inspectable object that
@@ -27,8 +27,6 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from typing import Any
-
-from maljan.core.logger import logger
 
 # ---------------------------------------------------------------------------
 # Sub-components
@@ -86,13 +84,16 @@ class ISRAgentStats:
 
 @dataclass
 class ValidationMetrics:
-    """Summary of ATT&CK TTP validation results."""
+    """What the validation loop found, and what it could not get fixed.
 
-    total_claims: int
-    valid_ids: int
-    invalid_ids: int
-    low_alignment: int
-    hallucination_rate: float
+    ``unresolved`` is the part that matters. A violation a producer was shown
+    and did not fix is the honest residue of this pipeline: it is not silently
+    corrected any more, so it has to be somewhere a reader can see it.
+    """
+
+    retries: int = 0
+    by_code: dict[str, int] = field(default_factory=dict)
+    unresolved: list[dict[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -147,26 +148,6 @@ class TruncationMetrics:
         )
 
 
-@dataclass
-class CascadeMetrics:
-    """Summary of three-layer TTP cascade results."""
-
-    total_techniques: int
-    corroborated_count: int
-    consensus_count: int
-    top_techniques: list[dict[str, Any]]  # technique_id, label, confidence, layers
-    # Claims rejected for platform incompatibility.
-    # Empty for legacy runs that didn't supply a sample_platform.
-    dropped_by_platform: list[dict[str, Any]] = field(default_factory=list)
-    # Pre-cascade platform-filter counters. A Linux ELF audit
-    # found ``dropped_by_platform`` empty
-    # because Sigma/YARA layers correctly pre-filter platform-mismatched
-    # rules BEFORE claims reach the cascade — so the cascade has nothing
-    # to drop. Surfacing per-layer counters lets the audit gate prove the
-    # filter ran without requiring shadow claims.
-    platform_filter_summary: dict[str, Any] | None = None
-
-
 def _attribution_layers() -> list[str]:
     """The layer order the per-layer breakdown renders, profile first.
 
@@ -200,8 +181,8 @@ class RunSummary:
         stix_object_count:  Number of objects in the STIX Bundle.
         negotiation:        Negotiation loop metrics.
         agent_stats:        Per-agent ISR statistics.
-        validation:         ATT&CK TTP validation metrics (None if skipped).
-        cascade:            Three-layer cascade metrics (None if no TTP claims).
+        validation:         What the validation loop found (None if it never ran).
+        corroboration:      Per technique id, the sources that named it.
         elapsed_seconds:    Wall-clock time from start to verdict.
         timestamp:          Unix timestamp of verdict generation.
 
@@ -212,11 +193,9 @@ class RunSummary:
                             is flagged as degraded.
         failed_analysts:    Names of analysts whose ``reports[name]`` started
                             with ``[ERROR]``.
-        techniques_by_layer: Per-layer (yara / sigma / static / dynamic /
-                            network) technique counts so the report can show
-                            "1 yara + 9 sigma + 1 network + 0 static +
-                            0 dynamic = 11 total" attribution instead of the
-                            opaque "11 techniques".
+        techniques_by_layer: How many techniques each source named, so the
+                            report can show "1 capa + 9 static + 1 network"
+                            instead of the opaque "11 techniques".
         profile:            which profile ran, the analysts it named, and
                             which of them are not built in.
     """
@@ -228,8 +207,8 @@ class RunSummary:
     negotiation: NegotiationMetrics
     agent_stats: list[ISRAgentStats]
     validation: ValidationMetrics | None
-    cascade: CascadeMetrics | None
     elapsed_seconds: float
+    corroboration: dict[str, list[str]] = field(default_factory=dict)
     tokens: TokenUsageMetrics | None = None
     truncation: TruncationMetrics | None = None
     timestamp: float = field(default_factory=time.time)
@@ -259,13 +238,14 @@ class RunSummary:
             "",
         ]
 
-        # Banner the degraded
-        # run prominently so a reader can't miss it when scrolling.
+        # Banner the degraded run prominently so a reader can't miss it when
+        # scrolling. It names the reasons and nothing else: the confidence
+        # above is the one the judge set knowing them, not a ceiling something
+        # downstream applied to it.
         if self.degraded_mode:
             lines += [
                 "> [!WARNING]",
-                "> **DEGRADED RUN.** The verdict above was produced with "
-                "reduced signal — confidence has been capped at 0.60.",
+                "> **DEGRADED RUN.** The verdict above was produced with reduced signal.",
                 "",
             ]
             if self.degradation_reasons:
@@ -313,46 +293,34 @@ class RunSummary:
         else:
             lines += ["*No ISR reports collected.*", ""]
 
-        # TTP Cascade
-        if self.cascade:
-            c = self.cascade
+        # Corroboration
+        if self.corroboration:
             lines += [
-                "## Three-Layer TTP Cascade",
+                "## Corroboration",
                 "",
-                "| Metric | Value |",
+                "Which sources named each technique. A count of sources, not a combined",
+                "confidence: nothing here multiplies one layer's number by another's.",
+                "",
+                "| Technique | Sources |",
                 "|---|---|",
-                f"| Total techniques | {c.total_techniques} |",
-                f"| Corroborated (2+ layers) | {c.corroborated_count} |",
-                f"| Consensus (3 layers) | {c.consensus_count} |",
-                "",
             ]
-            if c.top_techniques:
-                lines.append("**Top techniques by weighted confidence:**")
-                lines.append("")
-                lines.append("| Technique | Label | Confidence | Layers |")
-                lines.append("|---|---|---|---|")
-                for t in c.top_techniques:
-                    layers = ", ".join(t.get("layers", []))
-                    lines.append(
-                        f"| {t['technique_id']} | {t['label']} | {t['confidence']:.3f} | {layers} |"
-                    )
-                lines.append("")
-            # Per-layer breakdown.
+            for tid, sources in sorted(
+                self.corroboration.items(), key=lambda item: (-len(item[1]), item[0])
+            ):
+                lines.append(f"| {tid} | {', '.join(sources)} |")
+            lines.append("")
             if self.techniques_by_layer:
-                lines.append("**Per-layer attribution:**")
+                lines.append("**Per-source attribution:**")
                 lines.append("")
-                # Stable order so the report is diffable run-to-run.
                 layers_in_order = _attribution_layers()
                 for layer in layers_in_order:
-                    count = self.techniques_by_layer.get(layer, 0)
-                    lines.append(f"- `{layer}`: {count}")
-                # Surface any other layers we didn't enumerate above.
+                    lines.append(f"- `{layer}`: {self.techniques_by_layer.get(layer, 0)}")
                 for layer, count in sorted(self.techniques_by_layer.items()):
                     if layer not in set(layers_in_order):
                         lines.append(f"- `{layer}`: {count}")
                 lines.append("")
         else:
-            lines += ["## Three-Layer TTP Cascade", "", "*No TTP claims found.*", ""]
+            lines += ["## Corroboration", "", "*No technique was named by any source.*", ""]
 
         # Always render the
         # failed-analyst section so operators see "0 failures" rather than
@@ -365,23 +333,33 @@ class RunSummary:
             lines.append("*No analyst failures recorded.*")
         lines.append("")
 
-        # ATT&CK Validation
+        # Validation loop
         if self.validation:
             v = self.validation
             lines += [
-                "## ATT&CK TTP Validation",
+                "## Validation",
                 "",
                 "| Metric | Value |",
                 "|---|---|",
-                f"| Total claims | {v.total_claims} |",
-                f"| Valid IDs | {v.valid_ids} |",
-                f"| Hallucinated IDs | {v.invalid_ids} |",
-                f"| Low alignment | {v.low_alignment} |",
-                f"| Hallucination rate | {v.hallucination_rate:.1%} |",
+                f"| Feedback retries | {v.retries} |",
+                f"| Unresolved findings | {len(v.unresolved)} |",
                 "",
             ]
+            if v.by_code:
+                lines += ["| Code | Count |", "|---|---|"]
+                lines += [f"| {code} | {count} |" for code, count in sorted(v.by_code.items())]
+                lines.append("")
+            if v.unresolved:
+                lines.append("**Still wrong after the retry:**")
+                lines.append("")
+                for row in v.unresolved:
+                    lines.append(
+                        f"- `{row.get('agent', '?')}` / `{row.get('code', '?')}`: "
+                        f"{row.get('message', '')}"
+                    )
+                lines.append("")
         else:
-            lines += ["## ATT&CK TTP Validation", "", "*Validation skipped (cache not built).*", ""]
+            lines += ["## Validation", "", "*Validation did not run.*", ""]
 
         # Token / cost usage (findings-log §4 Item 1).
         if self.tokens:
@@ -458,8 +436,8 @@ class RunSummary:
                 }
                 for s in self.agent_stats
             ],
-            "cascade": None,
             "validation": None,
+            "corroboration": {k: list(v) for k, v in sorted(self.corroboration.items())},
             "tokens": None,
             "degraded_mode": self.degraded_mode,
             "degradation_reasons": list(self.degradation_reasons),
@@ -468,23 +446,11 @@ class RunSummary:
             "profile": dict(self.profile) if self.profile else None,
         }
 
-        if self.cascade:
-            result["cascade"] = {
-                "total_techniques": self.cascade.total_techniques,
-                "corroborated_count": self.cascade.corroborated_count,
-                "consensus_count": self.cascade.consensus_count,
-                "top_techniques": self.cascade.top_techniques,
-                "dropped_by_platform": list(self.cascade.dropped_by_platform),
-                "platform_filter_summary": self.cascade.platform_filter_summary,
-            }
-
         if self.validation:
             result["validation"] = {
-                "total_claims": self.validation.total_claims,
-                "valid_ids": self.validation.valid_ids,
-                "invalid_ids": self.validation.invalid_ids,
-                "low_alignment": self.validation.low_alignment,
-                "hallucination_rate": round(self.validation.hallucination_rate, 4),
+                "retries": self.validation.retries,
+                "by_code": dict(sorted(self.validation.by_code.items())),
+                "unresolved": [dict(row) for row in self.validation.unresolved],
             }
 
         if self.tokens:
@@ -534,8 +500,8 @@ class RunSummaryBuilder:
         builder.set_verdict(final_decision, stix_object_count)
         builder.set_negotiation(state)
         builder.set_isr_stats(isr_reports)
-        builder.set_validation_summary(ttp_validation_summary)
-        builder.set_cascade_summary(cascade_summary)
+        builder.set_validation(validation_metrics)
+        builder.set_corroboration(corroboration)
         summary = builder.build()
     """
 
@@ -548,7 +514,7 @@ class RunSummaryBuilder:
         self._negotiation: NegotiationMetrics | None = None
         self._agent_stats: list[ISRAgentStats] = []
         self._validation: ValidationMetrics | None = None
-        self._cascade: CascadeMetrics | None = None
+        self._corroboration: dict[str, list[str]] = {}
         self._degraded_mode: bool = False
         self._degradation_reasons: list[str] = []
         self._failed_analysts: list[str] = []
@@ -726,105 +692,25 @@ class RunSummaryBuilder:
         self._agent_stats = stats
         return self
 
-    def set_validation_summary(self, validation_summary: Any) -> RunSummaryBuilder:
-        """Extract metrics from a TTPValidationSummary (duck-typed)."""
-        if validation_summary is None:
+    def set_validation(self, metrics: dict[str, Any] | None) -> RunSummaryBuilder:
+        """Record the validation loop's tally (``pipeline.validation``)."""
+        if not metrics:
             return self
-        try:
-            self._validation = ValidationMetrics(
-                total_claims=validation_summary.total_claims,
-                valid_ids=validation_summary.valid_ids,
-                invalid_ids=validation_summary.invalid_ids,
-                low_alignment=validation_summary.low_alignment,
-                hallucination_rate=validation_summary.hallucination_rate,
-            )
-        except Exception as exc:
-            logger.debug("set_validation_summary failed: %s", exc, exc_info=True)
+        self._validation = ValidationMetrics(
+            retries=int(metrics.get("retries") or 0),
+            by_code=dict(metrics.get("by_code") or {}),
+            unresolved=[dict(row) for row in metrics.get("unresolved") or []],
+        )
         return self
 
-    def set_cascade_summary(self, cascade_summary: Any, top_k: int = 5) -> RunSummaryBuilder:
-        """Extract metrics from a CascadeSummary (duck-typed)."""
-        if cascade_summary is None:
-            return self
-        try:
-            top = cascade_summary.top_techniques(n=top_k)
-            top_techniques = [
-                {
-                    "technique_id": r.technique_id,
-                    "label": r.corroboration_label(),
-                    "confidence": round(r.weighted_confidence, 4),
-                    "layers": r.contributing_layers,
-                }
-                for r in top
-            ]
-            dropped = []
-            for d in getattr(cascade_summary, "dropped_by_platform", None) or []:
-                dropped.append(
-                    {
-                        "technique_id": getattr(d, "technique_id", ""),
-                        "source_layer": getattr(d, "source_layer", ""),
-                        "rule_platforms": getattr(d, "rule_platforms", []) or [],
-                        "sample_platform": getattr(d, "sample_platform", "unknown"),
-                        "reason": getattr(d, "reason", ""),
-                    }
-                )
-            self._cascade = CascadeMetrics(
-                total_techniques=cascade_summary.total_techniques,
-                corroborated_count=cascade_summary.corroborated_count,
-                consensus_count=cascade_summary.consensus_count,
-                top_techniques=top_techniques,
-                dropped_by_platform=dropped,
-            )
-            # Bucket every
-            # cascade result by *every* contributing layer (a technique can
-            # contribute to multiple layers if more than one analyst hit it).
-            # Use ``results`` not ``top_techniques(n=k)`` so the breakdown
-            # covers the whole cascade, not just the top-K.
-            counts: dict[str, int] = {}
-            try:
-                all_results = (
-                    list(cascade_summary.results.values())
-                    if hasattr(cascade_summary, "results")
-                    else top
-                )
-                for r in all_results:
-                    layers = getattr(r, "contributing_layers", None) or []
-                    for layer in layers:
-                        counts[str(layer)] = counts.get(str(layer), 0) + 1
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("techniques_by_layer compute failed: %s", exc)
-            self._techniques_by_layer = counts
-        except Exception as exc:
-            logger.debug("set_cascade_summary failed: %s", exc, exc_info=True)
-        return self
-
-    def set_platform_filter_summary(
-        self,
-        sigma_dropped: int,
-        yara_dropped: int,
-        sample_platform: str,
-    ) -> RunSummaryBuilder:
-        """Record pre-cascade platform-filter counters.
-
-        The Sigma/YARA Layer 0 evaluators pre-filter rules by sample
-        platform before the cascade ever runs. Surfacing the drop counts
-        here lets the audit gate prove the filter executed even when the
-        cascade's ``dropped_by_platform`` list is empty (the normal case,
-        because the cascade only sees claims that survived the upstream
-        filter).
-        """
-        if self._cascade is None:
-            self._cascade = CascadeMetrics(
-                total_techniques=0,
-                corroborated_count=0,
-                consensus_count=0,
-                top_techniques=[],
-            )
-        self._cascade.platform_filter_summary = {
-            "sigma_dropped": int(sigma_dropped),
-            "yara_dropped": int(yara_dropped),
-            "sample_platform": sample_platform,
-        }
+    def set_corroboration(self, corroboration: dict[str, list[str]] | None) -> RunSummaryBuilder:
+        """Record which sources named each technique, and count them per source."""
+        self._corroboration = {tid: list(sources) for tid, sources in (corroboration or {}).items()}
+        counts: dict[str, int] = {}
+        for sources in self._corroboration.values():
+            for source in sources:
+                counts[str(source)] = counts.get(str(source), 0) + 1
+        self._techniques_by_layer = counts
         return self
 
     def build(self) -> RunSummary:
@@ -847,8 +733,8 @@ class RunSummaryBuilder:
             negotiation=self._negotiation,
             agent_stats=self._agent_stats,
             validation=self._validation,
-            cascade=self._cascade,
             elapsed_seconds=time.time() - self._start_time,
+            corroboration=self._corroboration,
             tokens=self._tokens,
             truncation=self._truncation,
             degraded_mode=self._degraded_mode,

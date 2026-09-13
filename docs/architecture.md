@@ -78,8 +78,8 @@ negotiation  <-------- revision
   └─ no consensus -----------------------┘
   │
 judge
-  │   inside this node: the YARA and Sigma scanners, the per-technique
-  │   TTP cascade, ATT&CK validation, then the STIX 2.1 bundle
+  │   inside this node: the evidence summary, the degradation note, then
+  │   the STIX 2.1 bundle and the judge's own severity, category and family
   │
 report  ->  END
 ```
@@ -93,10 +93,57 @@ and a confidence — rather than raw text. Objects are built and cached in one
 composition root (`src/maljan/core/container.py`), and agents are discovered
 through the `@register_agent` decorator in `src/maljan/agents/registry.py`.
 
-The organising rule is that the model proposes and code disposes: the
-deterministic layers under `src/maljan/analysis/` assert techniques on their
-own, and a reconciliation and gating stage after the model decides what the
-analyst actually receives.
+The organising rule is that the agent decides and the code says what is wrong
+with the decision. No component rewrites a claim, a technique id, a confidence,
+a severity, a category or a family behind the producer's back; a finding is put
+back to the producer as feedback and it gets one turn to fix it. What it will
+not fix stays on the record. `tests/unit/test_no_silent_overrides.py` enforces
+this by scanning the source for the writes it forbids.
+
+## Validation loops
+
+`src/maljan/pipeline/validation.py` is where a wrong answer is dealt with. A
+`Violation` carries a code, a message written for the producer to read, and the
+path it applies to. `retry_with_feedback` appends the model's own answer plus
+"Your previous answer had these problems: … Fix them and answer again in the
+same format", re-runs once, and *returns* whatever is still wrong rather than
+raising it.
+
+Two producers use it:
+
+* **Analysts** (`agents/base_agent.py`) — `validate_isr` reports a technique id
+  the ATT&CK catalogue does not have (with up to three suggestions from
+  `tools.knowledge.resolve_technique`), a confidence outside `[0, 1]`, and a
+  claim citing no evidence. An id that survives the retry keeps the analyst's
+  spelling and is flagged `technique_id_valid=False`; the report, the STIX
+  minting step and the FP linter read the flag.
+* **The judge** (`agents/judge_agent.py`) — `validate_verdict_bundle` reports an
+  indicator whose pattern names a value no tool in the run saw, an
+  attack-pattern with an unresolvable id, a severity outside the enum, and a
+  family named with no evidence ids. An ungrounded indicator that survives the
+  retry is dropped, because a STIX consumer has no way to read a caveat — and
+  recorded, because the false positive is a fact about the run.
+
+What the judge decides is the judge's: `severity` (with its rationale),
+`malware_category` and `family` come back on the bundle under
+`x_maljan_assessment` and the report prints them as answered. A severity nobody
+assessed prints as "not assessed" rather than defaulting to Informational; a
+family the judge could not cite evidence for is kept and flagged unverified
+rather than silently zeroed.
+
+Two metrics record the outcome:
+
+* `run_summary.validation` — how many feedback retries the run spent, a count
+  per violation code, and every finding that stayed unresolved with the agent
+  that owns it.
+* `run_summary.corroboration` — per technique id, the sources that named it:
+  analysts by name and tools by tool name. A count of distinct sources, not a
+  combined confidence. The same collection builds the judge's evidence-summary
+  block, so the metric and what the judge read cannot disagree.
+
+A degraded run is not capped. The judge is told in the prompt why the run is
+thin — no sandbox report, an analyst that failed, a container nothing could
+open — and sets its own confidence; the report header states the same reasons.
 
 ## Agents and profiles
 
@@ -243,9 +290,20 @@ is assembled from what the run gathered rather than recomputed beside it:
 * Identity comes from `identify_file` and `hashes` when they ran, and from the
   routing minimum (format, platform, and hashes the builder computes) when they
   did not.
+* Severity, malware category and family attribution are the judge's, read off
+  `x_maljan_assessment` on its bundle. Nothing in the builder computes a
+  replacement — the CVSS-shaped sum that used to print a score out of ten was
+  arithmetic over constants chosen in the builder, by code that had read no
+  evidence.
+* The capability matrix is a projection of the judge's technique list and the
+  analysts' claims, carrying each source's own confidence unadjusted.
 * `run_summary.evidence` counts the calls and `run_summary.sections_without_
   evidence` counts the sections that can name neither an entry nor a finding —
   the number that says whether the report is standing on anything.
+* `qa/fp_linter.py` runs last and reports; it changes nothing. Its findings land
+  in `run_summary.fp_warnings`, including C6 (a section or TTP row with nothing
+  citable behind it) and C7 (a technique id the validation loop could not get
+  resolved).
 
 The API renders the report as Markdown, HTML and PDF, and exposes the STIX 2.1
 bundle, a MITRE view, the extracted indicators, the detection signatures that

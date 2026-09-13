@@ -3,16 +3,13 @@
 The TRAM2 evaluation (findings-log §1.5.1) found the two index backends are
 complementary: the semantic (BGE-384) index *ranks* candidate techniques better
 (top-3 / MRR), while the TF-IDF index gives a *cleaner alignment gate* (it scores
-near 0 for unrelated evidence, which the §1.5 autocorrect's low-alignment swap
-relies on — the semantic scores cram near 0.7 regardless of correctness).
+near 0 for unrelated evidence, while the semantic scores cram near 0.7
+regardless of correctness).
 
 This index combines both: it answers ``search()`` (candidate RANKING) with
 semantic embeddings and ``validate_and_score()`` (absolute alignment GATE) with
-TF-IDF. ``correct_isr_reports`` already routes ranking through ``search`` and
-gating through ``validate_and_score``, so it gets best-of-both with no change.
-
-Because the gate is TF-IDF, the existing TF-IDF alignment threshold
-(``attck_autocorrect_min_alignment``) applies directly to this backend too.
+TF-IDF. ``tools.knowledge.resolve_technique`` returns both numbers per candidate
+for exactly that reason, and says which one is safe to threshold on.
 """
 
 from __future__ import annotations

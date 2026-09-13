@@ -2,9 +2,9 @@
 
 The audit that produced this file asked a simple question — "does any of the new
 static-analysis work actually reach a reader?" — and the answer for most of it
-was no. `api_capabilities`, `packer_matches`, `api_technique_hits` and
-`tool_artifact_matches` were all populated (one of them was not even that) and
-none of them were rendered anywhere.
+was no. `api_capabilities`, `packer_matches` and `api_technique_hits` were all
+populated (one of them was not even that) and none of them were rendered
+anywhere.
 
 That is a specific kind of failure worth a test: the pipeline gets measurably
 better, every unit test passes, and the person reading the report sees exactly
@@ -145,32 +145,6 @@ class TestCarvedPayloadsAreLocatable:
         assert "Carved payloads" in md
 
 
-class TestTheFamilyEvidenceIsShown:
-    def test_tool_artifact_markers_are_rendered(self) -> None:
-        """Without them the reader sees a family name and nothing to check."""
-        md = _render(
-            None,
-            family="CobaltStrike",
-            family_confidence=0.75,
-            tool_artifact_matches=[
-                {
-                    "tool": "Cobalt Strike",
-                    "family": "CobaltStrike",
-                    "kind": "c2_framework",
-                    "confidence": 0.75,
-                    "markers": ["beacon.x64.dll", "ReflectiveLoader"],
-                }
-            ],
-        )
-        assert "Cobalt Strike" in md
-        assert "beacon.x64.dll" in md
-        assert "ReflectiveLoader" in md
-
-    def test_no_artifacts_means_no_empty_table(self) -> None:
-        md = _render(None, family="Emotet", family_confidence=0.8)
-        assert "Offensive-tool artifacts" not in md
-
-
 class TestASectionCanBeFoundInTheFile:
     """``PESection.raw_offset`` is PointerToRawData. It was extracted, stored
     on the model and declared in the TypeScript interface, and printed by
@@ -221,13 +195,13 @@ class TestASectionCanBeFoundInTheFile:
 
 
 class TestTheFamilyNameShowsItsWorking:
-    """``tool_artifact_matches`` had three siblings on ``FamilyAttribution``
-    and all three were dead in the same way: produced by the judge, carried
-    through ``AnalysisState``, stored on the model, printed by no renderer.
+    """The evidence sources on ``FamilyAttribution`` were dead in the same way:
+    carried through ``AnalysisState``, stored on the model, printed by no
+    renderer.
 
-    The effect was a report that named a family and withheld every
-    deterministic reason for it — the exact position the grounding flag exists
-    to warn about, reached silently.
+    The effect was a report that named a family and withheld every reason for
+    it — the exact position the grounding flag exists to warn about, reached
+    silently.
     """
 
     def test_function_hash_matches_are_rendered(self) -> None:

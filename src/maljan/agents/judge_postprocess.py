@@ -8,12 +8,16 @@ Three jobs, all defensive:
   from the example schema (``malware--12345678-1234-1234-1234-123456789012``
   or non-UUID ``attack-pattern--T1497``) with spec-compliant UUIDs and
   rewrite every cross-reference so the bundle stays internally consistent.
-* Indicator corpus filter — drop ``Indicator`` SDOs whose STIX pattern value does not
-  appear verbatim in the deterministic evidence corpus (interesting
-  strings + sandbox observations). Eliminates the hallucinated
-  ``[domain-name:value = 'c2-beacon.net']`` class of artefact.
 * Reference back-fill — add ``external_references`` to each ``AttackPattern``
   SDO with the canonical MITRE ATT&CK URL when the LLM left it empty.
+* Integrity pass — drop empty patterns, deduplicate, and sweep references that
+  point at nothing.
+
+The indicator corpus check is no longer here. It is a
+``stix.ungrounded_indicator`` violation the judge is shown and given a turn to
+fix (``pipeline.validation``); only what survives that turn is dropped, and the
+drop is recorded in the run summary rather than happening quietly.
+:func:`build_evidence_corpus` stays, because that check still needs a corpus.
 """
 
 from __future__ import annotations
@@ -22,14 +26,6 @@ import re
 import uuid
 from typing import Any
 
-from maljan.agents._indicator_denylists import (
-    COMPILE_ARTIFACT_RE,
-    FOREIGN_CLASS_REF_RE,
-    IOC_FILE_EXTENSIONS,
-    IOC_OS_RESOURCE_PREFIXES,
-    MAX_FILE_NAME_INDICATORS,
-    URL_DENY_HOSTS,
-)
 from maljan.core.logger import logger
 
 # UUID5 namespace for ATT&CK technique IDs — same value on every run so a
@@ -97,28 +93,16 @@ def _technique_display_name(tid: str) -> str | None:
 
 def postprocess_judge_bundle(
     bundle_dict: dict[str, Any],
-    evidence_corpus: set[str] | None = None,
-    valid_technique_ids: frozenset[str] | None = None,
     *,
     ledger: Any | None = None,
 ) -> dict[str, Any]:
     """Apply the defensive bundle fixes in place; return the same dict.
 
     ``bundle_dict`` is the parsed JSON Bundle returned by the verdict LLM
-    (and already filtered for hallucinated technique IDs upstream).
-
-    ``evidence_corpus`` is an optional set of lower-cased string tokens
-    drawn from the deterministic findings — interesting strings, sandbox
-    observations, network IOCs. When provided, indicators whose pattern
-    value isn't a substring of any corpus entry are dropped.
-
-    ``valid_technique_ids`` is the set of TIDs that
-    survived the cascade and are present in the report's
-    capability_matrix. When provided, the orphan-pattern drop removes
-    AttackPattern SDOs whose technique_id is not in the set, along
-    with any Relationship SDOs that referenced them. This prevents the
-    judge LLM from synthesizing a TTP the deterministic pipeline
-    rejected and giving it MITRE legitimacy via external_references.
+    (and already filtered for structurally impossible technique IDs upstream).
+    Everything done here is a shape repair — a STIX id that is not a UUID, a
+    missing MITRE reference, a relationship pointing at an object that is not
+    in the bundle. None of it changes what the judge decided.
     """
     objects = bundle_dict.get("objects")
     if not isinstance(objects, list):
@@ -145,93 +129,6 @@ def postprocess_judge_bundle(
             ", ".join(f"{k} -> {v}" for k, v in list(id_remap.items())[:5]),
         )
         _rewrite_references(objects, id_remap)
-
-    # ── drop hallucinated indicators ───────────────────────────────
-    if evidence_corpus is not None:
-        haystack = " ".join(evidence_corpus).lower()
-        # Sandbox-derived "real activity" corpus for tightened file:name
-        # admission. Carried separately because evidence
-        # corpus is permissive (whole interesting_strings list); the
-        # sandbox set is the only positive runtime signal.
-        runtime_paths: set[str] = set()
-        for tok in evidence_corpus:
-            # Heuristic: any literal that itself contains a known prefix
-            # or extension is "runtime-like" enough to anchor admission.
-            t = tok.strip()
-            if any(t.startswith(p.lower()) for p in IOC_OS_RESOURCE_PREFIXES):
-                runtime_paths.add(t)
-
-        kept: list[dict[str, Any]] = []
-        dropped = 0
-        file_name_kept = 0
-        for obj in objects:
-            if not isinstance(obj, dict) or obj.get("type") != "indicator":
-                kept.append(obj)
-                continue
-            pattern = obj.get("pattern", "")
-            literals: list[str] = (
-                _PATTERN_LITERAL_RE.findall(pattern) if isinstance(pattern, str) else []
-            )
-
-            verdict = _admit_indicator(
-                pattern=str(pattern),
-                literals=literals,
-                haystack=haystack,
-                runtime_paths=runtime_paths,
-                file_name_kept=file_name_kept,
-            )
-            if verdict == "keep":
-                kept.append(obj)
-                if isinstance(pattern, str) and pattern.lstrip().startswith("[file:name"):
-                    file_name_kept += 1
-            else:
-                dropped += 1
-                logger.warning(
-                    "judge_postprocess: dropping indicator (reason=%s name=%s pattern=%s)",
-                    verdict,
-                    obj.get("name", "<unnamed>"),
-                    pattern[:120],
-                )
-        if dropped:
-            objects = kept
-            bundle_dict["objects"] = kept
-
-    # ── drop orphan attack-patterns absent from the
-    # report's capability_matrix. Sweep relationships pointing to them.
-    if valid_technique_ids is not None:
-        orphan_ap_ids: set[str] = set()
-        kept_ap: list[dict[str, Any]] = []
-        for obj in objects:
-            if not isinstance(obj, dict) or obj.get("type") != "attack-pattern":
-                kept_ap.append(obj)
-                continue
-            tid = _attack_pattern_technique_id(obj)
-            if tid and tid not in valid_technique_ids:
-                ap_id = obj.get("id")
-                if isinstance(ap_id, str):
-                    orphan_ap_ids.add(ap_id)
-                logger.warning(
-                    "judge_postprocess: dropping orphan attack-pattern (tid=%s "
-                    "not in capability_matrix; id=%s)",
-                    tid,
-                    obj.get("id", "<no-id>"),
-                )
-                continue
-            kept_ap.append(obj)
-        if orphan_ap_ids:
-            objects = [
-                obj
-                for obj in kept_ap
-                if not (
-                    isinstance(obj, dict)
-                    and obj.get("type") == "relationship"
-                    and (
-                        obj.get("source_ref") in orphan_ap_ids
-                        or obj.get("target_ref") in orphan_ap_ids
-                    )
-                )
-            ]
-            bundle_dict["objects"] = objects
 
     # ── back-fill external_references on AttackPatterns ────────────
     _VALID_TID_RE_LOCAL = re.compile(r"^T\d{4}(?:\.\d{3})?$")
@@ -263,11 +160,6 @@ def postprocess_judge_bundle(
         if not obj.get("name") or obj.get("name") == tid:
             obj["name"] = name
 
-    # ── reconcile the bundle against the cascade ────────────────────
-    if valid_technique_ids is not None:
-        objects = _reconcile_with_cascade(objects, valid_technique_ids)
-        bundle_dict["objects"] = objects
-
     # ── Final integrity pass: empty-pattern drop, dedup, dangling-ref sweep ──
     before = len(objects)
     objects = enforce_bundle_integrity(objects, ledger=ledger)
@@ -285,102 +177,6 @@ def postprocess_judge_bundle(
 # ---------------------------------------------------------------------------
 # Indicator admission
 # ---------------------------------------------------------------------------
-
-
-def _admit_indicator(
-    *,
-    pattern: str,
-    literals: list[str],
-    haystack: str,
-    runtime_paths: set[str],
-    file_name_kept: int,
-) -> str:
-    """Return ``"keep"`` or a short reason string for indicator-filter logging.
-
-    Acceptance-based filter for ``file:name`` indicators (tightened after
-    a noise audit found ~45 noisy SDOs); falls back to the
-    original "any-literal-in-corpus" check for every other kind.
-    """
-    if not pattern:
-        return "empty_pattern"
-
-    stripped = pattern.lstrip()
-
-    # ── URL denylist ────────────────────────────────────────────────
-    if stripped.startswith("[url:value"):
-        for lit in literals:
-            host = _extract_url_host(lit)
-            if host and any(host.endswith(d) or d in host for d in URL_DENY_HOSTS):
-                return "url_denylist"
-        # URLs surviving the denylist still need corpus presence.
-        if not any(lit.lower() in haystack for lit in literals if lit):
-            return "url_not_in_corpus"
-        return "keep"
-
-    # ── file:name admission ────────────────────────────────────────
-    if stripped.startswith("[file:name"):
-        # Cap reached → drop.
-        if file_name_kept >= MAX_FILE_NAME_INDICATORS:
-            return "file_name_cap"
-        if not literals:
-            return "file_name_no_literal"
-
-        # Every literal must (a) not be a denylisted compile artefact
-        # AND (b) satisfy at least one acceptance signal.
-        for lit in literals:
-            if COMPILE_ARTIFACT_RE.search(lit):
-                return "file_name_compile_artifact"
-            if FOREIGN_CLASS_REF_RE.match(lit):
-                return "file_name_foreign_class_ref"
-
-        for lit in literals:
-            if _looks_like_real_file_path(lit, runtime_paths):
-                return "keep"
-        return "file_name_no_acceptance_signal"
-
-    # ── default (hash / domain / ip / etc.): keep if any literal hits.
-    if any(lit.lower() in haystack for lit in literals if lit):
-        return "keep"
-    return "not_in_corpus"
-
-
-def _looks_like_real_file_path(literal: str, runtime_paths: set[str]) -> bool:
-    """Acceptance signals for a ``file:name`` literal (Step 5)."""
-    if not literal:
-        return False
-    lit_lower = literal.lower()
-
-    # Real, persisted file extension wins immediately.
-    for ext in IOC_FILE_EXTENSIONS:
-        if lit_lower.endswith(ext):
-            return True
-
-    # Known OS-resource prefix anchors the path into a real FS location.
-    for prefix in IOC_OS_RESOURCE_PREFIXES:
-        if literal.startswith(prefix):
-            return True
-
-    # Sandbox actually observed this path at runtime (file_operations /
-    # registry_mods). When present, even an extension-less literal is fine.
-    if lit_lower in runtime_paths:
-        return True
-
-    return False
-
-
-def _extract_url_host(raw_url: str) -> str | None:
-    """Best-effort host extraction without a full URL parser."""
-    if not raw_url:
-        return None
-    try:
-        from urllib.parse import urlparse
-
-        parsed = urlparse(raw_url)
-        if parsed.hostname:
-            return parsed.hostname.lower()
-    except (ValueError, TypeError):
-        pass
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -662,112 +458,3 @@ def build_evidence_corpus(
             corpus.add(s.lower())
 
     return corpus
-
-
-def _reconcile_with_cascade(objects: list[Any], valid_technique_ids: frozenset[str]) -> list[Any]:
-    """Make the bundle carry exactly the cascade's technique set.
-
-    The reference back-fill and the orphan-pattern drop both key off a
-    technique ID the LLM has to have supplied: the orphan drop is ``if tid and tid not in valid_ids``, so a ``None`` tid
-    survives, and the reference back-fill only runs once a tid resolves. When
-    the model answers with prose names and no IDs anywhere, both are no-ops —
-    and nothing in the pipeline ever *added* the techniques it left out, so the
-    bundle was only ever a filtered view of the model's output.
-
-    Measured on one sample, 2026-08-07: the run where the verdict LLM succeeded
-    produced 5 attack-patterns with **zero** external_ids, against 39 techniques
-    in the same report's ttp_mappings; the run where it timed out and fell back
-    to the deterministic builder produced 33, all with IDs. The fallback was the
-    better artefact, which is the wrong way round.
-
-    Two directions, both necessary:
-
-    * An ``attack-pattern`` whose technique ID cannot be resolved is dropped.
-      Without an ``external_id`` there is no ATT&CK mapping — the object claims
-      a technique without naming one, and a consumer cannot act on it.
-    * Every cascade technique missing from the bundle is added, carrying the
-      same ``external_references`` shape the deterministic fallback emits.
-
-    ``objects`` is returned as a new list; relationships pointing at dropped
-    patterns go with them (the integrity pass would sweep them anyway, but
-    leaving dangling refs for it to find hides *why* they dangle).
-    """
-    malware_ids = [
-        o.get("id") for o in objects if isinstance(o, dict) and o.get("type") == "malware"
-    ]
-    malware_id = next((m for m in malware_ids if isinstance(m, str)), None)
-
-    kept: list[Any] = []
-    dropped_ap_ids: set[str] = set()
-    present: set[str] = set()
-    for obj in objects:
-        if not isinstance(obj, dict) or obj.get("type") != "attack-pattern":
-            kept.append(obj)
-            continue
-        tid = _attack_pattern_technique_id(obj)
-        if not tid:
-            ap_id = obj.get("id")
-            if isinstance(ap_id, str):
-                dropped_ap_ids.add(ap_id)
-            logger.warning(
-                "judge_postprocess: dropping attack-pattern with no resolvable "
-                "technique id (name=%r) — an ATT&CK mapping without an ID is unusable.",
-                obj.get("name", "<unnamed>"),
-            )
-            continue
-        present.add(tid)
-        kept.append(obj)
-
-    if dropped_ap_ids:
-        kept = [
-            o
-            for o in kept
-            if not (
-                isinstance(o, dict)
-                and o.get("type") == "relationship"
-                and (o.get("source_ref") in dropped_ap_ids or o.get("target_ref") in dropped_ap_ids)
-            )
-        ]
-
-    missing = sorted(valid_technique_ids - present)
-    for tid in missing:
-        name = _technique_display_name(tid)
-        if not name and tid in _MITRE_LOOKUP:
-            name = _MITRE_LOOKUP[tid][0]
-        url = (
-            _MITRE_LOOKUP[tid][1]
-            if tid in _MITRE_LOOKUP
-            else f"https://attack.mitre.org/techniques/{tid.replace('.', '/')}/"
-        )
-        ap_id = f"attack-pattern--{uuid.uuid5(_MITRE_NS, tid)}"
-        kept.append(
-            {
-                "type": "attack-pattern",
-                "id": ap_id,
-                "name": name or tid,
-                "external_references": [
-                    {"source_name": "mitre-attack", "external_id": tid, "url": url}
-                ],
-            }
-        )
-        if malware_id:
-            kept.append(
-                {
-                    "type": "relationship",
-                    "id": f"relationship--{uuid.uuid5(_MITRE_NS, f'{malware_id}:{tid}')}",
-                    "relationship_type": "uses",
-                    "source_ref": malware_id,
-                    "target_ref": ap_id,
-                    "x_maljan_technique_id": tid,
-                }
-            )
-
-    if missing:
-        logger.info(
-            "judge_postprocess: added %d cascade technique(s) the verdict LLM omitted "
-            "from the bundle (%s%s).",
-            len(missing),
-            ", ".join(missing[:6]),
-            "…" if len(missing) > 6 else "",
-        )
-    return kept

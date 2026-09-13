@@ -230,61 +230,45 @@ class TestBuilderSetISRStats:
 
 
 # ---------------------------------------------------------------------------
-# RunSummaryBuilder — set_validation_summary / set_cascade_summary
+# RunSummaryBuilder — set_validation / set_corroboration
 # ---------------------------------------------------------------------------
 
 
 class TestBuilderOptionalSummaries:
     def test_validation_none_if_not_set(self) -> None:
-        summary = _make_builder().build()
-        assert summary.validation is None
+        assert _make_builder().build().validation is None
 
-    def test_cascade_none_if_not_set(self) -> None:
-        summary = _make_builder().build()
-        assert summary.cascade is None
+    def test_corroboration_is_empty_if_not_set(self) -> None:
+        assert _make_builder().build().corroboration == {}
 
-    def test_validation_extracted_from_duck_type(self) -> None:
-        from unittest.mock import MagicMock
-
-        mock_val = MagicMock()
-        mock_val.total_claims = 5
-        mock_val.valid_ids = 4
-        mock_val.invalid_ids = 1
-        mock_val.low_alignment = 1
-        mock_val.hallucination_rate = 0.2
-
+    def test_the_validation_tally_is_recorded_verbatim(self) -> None:
         builder = _make_builder()
-        builder.set_validation_summary(mock_val)
+        builder.set_validation(
+            {
+                "retries": 2,
+                "by_code": {"attck.unknown_id": 1},
+                "unresolved": [{"agent": "static", "code": "attck.unknown_id", "message": "no"}],
+            }
+        )
+
         v = builder.build().validation
         assert v is not None
-        assert v.total_claims == 5
-        assert v.hallucination_rate == pytest.approx(0.2)
+        assert v.retries == 2
+        assert v.by_code == {"attck.unknown_id": 1}
+        assert v.unresolved[0]["agent"] == "static"
 
-    def test_cascade_extracted_from_real_cascade_summary(self) -> None:
-        from maljan.analysis.ttp_cascade import TTPCascadeEngine
-
-        isr_s = _make_isr("s", "static", [_claim("T1055", 0.8)])
-        isr_d = _make_isr("d", "dynamic", [_claim("T1055", 0.9)])
-        cascade_summary = TTPCascadeEngine().compute({"s": isr_s, "d": isr_d})
-
+    def test_corroboration_counts_per_source_without_combining_anything(self) -> None:
         builder = _make_builder()
-        builder.set_cascade_summary(cascade_summary, top_k=3)
-        c = builder.build().cascade
-        assert c is not None
-        assert c.total_techniques == 1
-        assert c.corroborated_count == 1
-        assert len(c.top_techniques) == 1
-        assert c.top_techniques[0]["technique_id"] == "T1055"
+        builder.set_corroboration({"T1055": ["static", "dynamic"], "T1071": ["static"]})
 
-    def test_graceful_on_bad_validation_object(self) -> None:
+        summary = builder.build()
+        assert summary.corroboration == {"T1055": ["static", "dynamic"], "T1071": ["static"]}
+        assert summary.techniques_by_layer == {"static": 2, "dynamic": 1}
+
+    def test_an_empty_tally_leaves_validation_unset(self) -> None:
         builder = _make_builder()
-        builder.set_validation_summary(object())  # no attributes
+        builder.set_validation(None)
         assert builder.build().validation is None
-
-    def test_graceful_on_bad_cascade_object(self) -> None:
-        builder = _make_builder()
-        builder.set_cascade_summary(object())
-        assert builder.build().cascade is None
 
 
 # ---------------------------------------------------------------------------
@@ -322,13 +306,13 @@ class TestRunSummaryToMarkdown:
         assert "## Agent ISR" in md
         assert "static" in md
 
-    def test_contains_cascade_section(self) -> None:
+    def test_contains_corroboration_section(self) -> None:
         md = self._make_summary().to_markdown()
-        assert "## Three-Layer TTP Cascade" in md
+        assert "## Corroboration" in md
 
     def test_contains_validation_section(self) -> None:
         md = self._make_summary().to_markdown()
-        assert "## ATT&CK TTP Validation" in md
+        assert "## Validation" in md
 
     def test_confidence_history_shown(self) -> None:
         md = self._make_summary().to_markdown()
@@ -358,56 +342,17 @@ class TestRunSummaryToDict:
         assert "file_hash" in d
         assert "negotiation" in d
         assert "agent_stats" in d
-        assert "cascade" in d
+        assert "corroboration" in d
         assert "validation" in d
 
     def test_elapsed_seconds_present(self) -> None:
         d = self._make_summary().to_dict()
         assert d["elapsed_seconds"] > 0
 
-    def test_cascade_none_when_not_set(self) -> None:
+    def test_corroboration_is_empty_when_not_set(self) -> None:
         d = self._make_summary().to_dict()
-        assert d["cascade"] is None
+        assert d["corroboration"] == {}
 
     def test_validation_none_when_not_set(self) -> None:
         d = self._make_summary().to_dict()
         assert d["validation"] is None
-
-
-# ---------------------------------------------------------------------------
-# Wave 9 — platform_filter_summary plumbing
-# ---------------------------------------------------------------------------
-
-
-class TestPlatformFilterSummary:
-    """The Wave 9 audit gate G-FP-8 needs visible evidence the pre-cascade
-    Sigma/YARA platform filter actually ran. The RunSummaryBuilder exposes
-    `set_platform_filter_summary(sigma_dropped, yara_dropped, sample_platform)`
-    which lands on `run_summary.cascade.platform_filter_summary`."""
-
-    def _build_summary(self, sigma_dropped: int, yara_dropped: int, sample_platform: str) -> dict:
-        builder = (
-            RunSummaryBuilder(start_time=time.time())
-            .set_sample("abcd", "x.elf")
-            .set_verdict("Malware", 5)
-            .set_platform_filter_summary(
-                sigma_dropped=sigma_dropped,
-                yara_dropped=yara_dropped,
-                sample_platform=sample_platform,
-            )
-        )
-        return builder.build().to_dict()
-
-    def test_summary_surfaces_in_cascade(self) -> None:
-        d = self._build_summary(12, 0, "linux")
-        pfs = d["cascade"]["platform_filter_summary"]
-        assert pfs == {
-            "sigma_dropped": 12,
-            "yara_dropped": 0,
-            "sample_platform": "linux",
-        }
-
-    def test_summary_safe_when_dropped_zero(self) -> None:
-        d = self._build_summary(0, 0, "windows")
-        assert d["cascade"]["platform_filter_summary"]["sample_platform"] == "windows"
-        assert d["cascade"]["platform_filter_summary"]["sigma_dropped"] == 0

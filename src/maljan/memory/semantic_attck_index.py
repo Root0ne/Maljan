@@ -11,7 +11,7 @@ Design: subclass ATTCKIndex and reuse all of its non-vector machinery (technique
 lookup, tactic catalogue, the ``from_loader`` / ``from_techniques`` factories,
 ``SearchResult``). Only the three vector operations are overridden — ``_build``
 (embed every technique once), ``search``, and ``validate_and_score`` — so every
-downstream caller (ATTCKValidator, correct_isr_reports) works unchanged.
+downstream caller (``ATTCKValidator``, ``tools.knowledge``) works unchanged.
 
 NOTE: semantic cosine scores live on a different scale than TF-IDF (BGE puts even
 loosely related text around 0.3-0.5), so the alignment thresholds tuned for the

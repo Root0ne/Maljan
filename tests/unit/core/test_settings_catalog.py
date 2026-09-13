@@ -182,7 +182,6 @@ def test_subgroup_and_advanced_assignments_follow_the_design() -> None:
     assert e["core.sandbox.cape2.mcp.transport"].subgroup == "Connection"
     assert e["core.preprocessing.use_packer_signatures"].subgroup == "Feature switches"
     assert e["core.preprocessing.packer_signatures_path"].subgroup == "Reference data"
-    assert e["core.analysis.sigma_rules_dir"].subgroup == "Reference data"
     assert e["core.preprocessing.max_tool_output_chars"].subgroup == "Thresholds and limits"
     assert e["core.preprocessing.attck_case_rag_min_score"].advanced
     assert e["core.preprocessing.summarizer_model"].subgroup == "Function summarizer"

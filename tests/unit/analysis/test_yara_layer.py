@@ -213,56 +213,6 @@ class TestYaraLayerScan:
 
 
 # ---------------------------------------------------------------------------
-# YaraLayer.to_isr()
-# ---------------------------------------------------------------------------
-
-
-class TestYaraLayerToISR:
-    def test_to_isr_domain(self, yara_layer: YaraLayer) -> None:
-        text = "VirtualAllocEx detected"
-        matches = yara_layer.scan(text)
-        isr = yara_layer.to_isr(matches)
-        assert isr.domain == "yara"
-
-    def test_to_isr_agent_id(self, yara_layer: YaraLayer) -> None:
-        text = "VirtualAllocEx detected"
-        matches = yara_layer.scan(text)
-        isr = yara_layer.to_isr(matches)
-        assert isr.agent_id == "yara_layer"
-
-    def test_to_isr_claims_count(self, yara_layer: YaraLayer) -> None:
-        text = "VirtualAllocEx CryptEncrypt"
-        matches = yara_layer.scan(text)
-        isr = yara_layer.to_isr(matches)
-        assert len(isr.claims) == len(matches)
-
-    def test_to_isr_claim_technique_ids(self, yara_layer: YaraLayer) -> None:
-        text = "VirtualAllocEx CryptEncrypt"
-        matches = yara_layer.scan(text)
-        isr = yara_layer.to_isr(matches)
-        claim_tids = {c.technique_id for c in isr.claims}
-        assert "T1055" in claim_tids
-        assert "T1486" in claim_tids
-
-    def test_to_isr_no_dissent(self, yara_layer: YaraLayer) -> None:
-        text = "VirtualAllocEx"
-        matches = yara_layer.scan(text)
-        isr = yara_layer.to_isr(matches)
-        assert isr.dissent_items == []
-
-    def test_to_isr_revision_round_zero(self, yara_layer: YaraLayer) -> None:
-        text = "VirtualAllocEx"
-        matches = yara_layer.scan(text)
-        isr = yara_layer.to_isr(matches)
-        assert isr.revision_round == 0
-
-    def test_to_isr_empty_matches(self, yara_layer: YaraLayer) -> None:
-        isr = yara_layer.to_isr([])
-        assert isr.claims == []
-        assert isr.domain == "yara"
-
-
-# ---------------------------------------------------------------------------
 # YaraLayer.from_default_rules()
 # ---------------------------------------------------------------------------
 

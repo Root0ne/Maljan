@@ -4,8 +4,7 @@ Modules:
   ATT&CK Index:
     - attck_loader:    Downloads and parses MITRE ATT&CK STIX 2.1 bundle.
     - attck_index:     In-memory TF-IDF index over ATT&CK technique descriptions.
-    - attck_validator: Validates proposed TTP IDs against the authoritative ATT&CK dataset.
-    - ttp_validation:  TTPValidationSummary dataclass and helpers.
+    - attck_validator: The shared ATT&CK index, and the id-exists lookup over it.
 
   Long-Term Memory:
     - long_term_memory: StoredCase dataclass, MemoryStore Protocol, build_stored_case().

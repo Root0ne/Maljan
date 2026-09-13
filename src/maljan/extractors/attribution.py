@@ -2,11 +2,12 @@
 
 Two concerns live here:
 
-1. ``build_family_attribution`` — the deterministic *build-phase* step that
-   constructs ``FamilyAttribution`` from the inferred family plus the D11
-   grounding guardrail (a family is only assigned confidence when some
-   deterministic layer corroborates it). Called by ``MalwareReportBuilder.
-   build_deterministic`` alongside the other ``build_*`` extractors.
+1. ``build_family_attribution`` — the build-phase step that constructs
+   ``FamilyAttribution`` from what the judge decided, falling back to the
+   sandbox's own ``cti.family[]``. It vetoes nothing: a family the judge could
+   not cite evidence for is kept and flagged unverified, because a name with a
+   caveat is more useful than a name silently zeroed. Called by
+   ``MalwareReportBuilder.build_deterministic``.
 2. ``populate_similar_samples`` — the post-hoc *enrichment* step that fills
    ``attribution.similar_samples`` from the Qdrant LTM store.
 
@@ -42,71 +43,6 @@ if TYPE_CHECKING:
     from maljan.memory.long_term_memory import MemoryStore
 
 
-def _is_family_grounded(
-    family: str | None,
-    sandbox_report: dict[str, Any] | None,
-    isr_reports: dict[str, Any] | None,
-) -> bool:
-    """Return True when ``family`` is corroborated by deterministic evidence.
-
-    D11 fix: in the 2026-05-23 E2E run the judge fallback path emitted
-    ``attribution.family = "rat"`` despite the sandbox returning an empty
-    ``families[]`` and no analyst claim ever naming the family. The previous
-    builder copied the value through unconditionally with the global
-    ``overall_confidence`` as ``family_confidence`` — UI consumers had no way to
-    tell which family assertions had grounding.
-
-    Grounding sources (any one is enough):
-    - Sandbox CTI ``family[]`` list contains the candidate (case insensitive
-      substring match — CTI often emits multi-token entries like
-      ``"trojan/rat"``).
-    - Sandbox ``signatures[].name`` mentions the family literally.
-    - Any ISR claim's ``claim``, ``evidence_ref``, or ``technique_id`` text
-      contains the family name.
-
-    Returns ``True`` for an empty family input so callers that pass ``None`` get
-    the legacy "no claim made" default and don't trip the guardrail on samples
-    that simply have no family hypothesis.
-    """
-    if not family:
-        return True
-    needle = family.strip().lower()
-    if not needle:
-        return True
-
-    # Sandbox CTI block (when the sandbox synthesises one)
-    cti = (sandbox_report or {}).get("cti") or {}
-    if isinstance(cti.get("family"), list):
-        for f in cti["family"]:
-            if isinstance(f, str) and needle in f.lower():
-                return True
-
-    # Sandbox signatures
-    sigs = (sandbox_report or {}).get("signatures") or []
-    for sig in sigs:
-        if not isinstance(sig, dict):
-            continue
-        name = str(sig.get("name") or "").lower()
-        desc = str(sig.get("description") or "").lower()
-        if needle in name or needle in desc:
-            return True
-
-    # ISR claims (analyst / yara_layer / sigma_layer)
-    for isr in (isr_reports or {}).values():
-        for claim in getattr(isr, "claims", []) or []:
-            _ctext = " ".join(
-                (
-                    str(getattr(claim, "claim", "") or ""),
-                    str(getattr(claim, "evidence_ref", "") or ""),
-                    str(getattr(claim, "technique_id", "") or ""),
-                )
-            ).lower()
-            if needle in _ctext:
-                return True
-
-    return False
-
-
 def _extract_sandbox_family(sandbox_report: dict[str, Any] | None) -> str | None:
     """Return a real malware family name from sandbox CTI, or ``None``.
 
@@ -124,39 +60,44 @@ def _extract_sandbox_family(sandbox_report: dict[str, Any] | None) -> str | None
 
 def build_family_attribution(
     *,
-    malware_category: str | None,
+    judge_family: Any | None,
     sandbox_report: dict[str, Any] | None,
-    isr_reports: dict[str, Any] | None,
-    overall_confidence: float,
 ) -> FamilyAttribution:
-    """Construct ``FamilyAttribution`` with the D11 grounding guardrail.
+    """Construct ``FamilyAttribution`` from the judge's answer, or the sandbox's.
 
-    ``family_confidence`` is the run's ``overall_confidence`` only when the
-    family is corroborated by a deterministic layer; otherwise it is forced to
-    ``0.0`` so ungrounded (often hallucinated) family strings cannot inherit the
-    verdict confidence. ``similar_samples`` / ``function_hash_matches`` are left
-    at their defaults here and filled later by the enrichment / report nodes.
+    The judge's ``family`` wins when it named one, because the judge read the
+    evidence and this function did not. The sandbox's ``cti.family[]`` is the
+    fallback for a run where the judge abstained — a real detonation naming a
+    family is a fact, and the behavioural *category* is not a family and is
+    never echoed here.
 
-    The family is drawn ONLY from a real family
-    source (sandbox CTI ``family[]``). The behavioural *category*
-    (``malware_category`` — "dropper", "loader", …) is a class, NOT a family, so
-    it is no longer echoed into ``family``; that echo produced the contradictory
-    "Family: dropper (confidence 0.00)" line. The category is surfaced
-    separately by the renderer.
+    ``grounded`` is now descriptive rather than a veto: a family the judge could
+    not cite evidence ids for is kept, flagged, and printed as unverified. The
+    previous guardrail deleted the confidence of any family no deterministic
+    layer had already named, which meant the judge's own reading of the sample
+    could never produce an attribution at all.
     """
-    family = _extract_sandbox_family(sandbox_report)
-    grounded = _is_family_grounded(family, sandbox_report, isr_reports)
-    if family and not grounded:
-        logger.info(
-            "Attribution guardrail: family=%r marked as ungrounded — no "
-            "sandbox CTI / sandbox sig / ISR claim corroborates it. "
-            "family_confidence forced to 0.0.",
-            family,
+    name = str(getattr(judge_family, "name", "") or "").strip()
+    if name:
+        evidence_ids = list(getattr(judge_family, "evidence_ids", None) or [])
+        confidence = float(getattr(judge_family, "confidence", 0.0) or 0.0)
+        if not evidence_ids:
+            logger.info(
+                "Attribution: the judge named family=%r without citing evidence ids; "
+                "it is kept and flagged unverified.",
+                name,
+            )
+        return FamilyAttribution(
+            family=name,
+            family_confidence=max(0.0, min(1.0, confidence)),
+            family_grounded=bool(evidence_ids),
         )
+
+    sandbox_family = _extract_sandbox_family(sandbox_report)
     return FamilyAttribution(
-        family=family,
-        family_confidence=(overall_confidence if grounded else 0.0),
-        family_grounded=grounded if family else True,
+        family=sandbox_family,
+        family_confidence=0.0,
+        family_grounded=True,
     )
 
 

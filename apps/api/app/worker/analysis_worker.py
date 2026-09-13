@@ -1352,15 +1352,12 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
 def _extract_confidence(result: dict) -> float:
     """Extract overall confidence from the pipeline result.
 
-    The degraded-run confidence cap
-    (``nodes.py`` ``_DEGRADED_CONFIDENCE_CAP``) is applied while building the
-    ``MalwareReport``; ``run_summary`` and ``confidence_history`` still carry the
-    RAW judge value. Persisting the raw value here made the API, the reports
-    list and the analysis header show an uncapped confidence — the UI displayed
-    "DEGRADED RUN" and "Confidence: 91/100" side by side, which is precisely the
-    inflation the guardrail exists to prevent. The ``MalwareReport`` is therefore
-    the authoritative source and is checked FIRST; the other two remain as
-    fallbacks for legacy/partial results that carry no report.
+    The ``MalwareReport`` is the authoritative source and is checked first; the
+    other two are fallbacks for legacy or partial results that carry no report.
+    The order is load-bearing rather than arbitrary: the report, the run summary
+    and the confidence history are three places one number is written, and a
+    reader who saw the DEGRADED RUN banner next to a confidence the report did
+    not carry was reading whichever of them this function happened to reach.
     """
     malware_report = result.get("malware_report")
     if isinstance(malware_report, dict):
