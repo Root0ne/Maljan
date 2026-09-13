@@ -15,13 +15,18 @@ from typing import Any
 from maljan.core.config import (
     AGENT_KEY_PATTERN,
     BUILTIN_PROFILES,
+    REPORTER_AGENT_KEY,
     AgentDefinition,
     ProfileDefinition,
     _builtin_definitions,
     _builtin_profiles,
 )
+from maljan.core.logger import logger
 from maljan.core.settings_overrides import build_settings
+from maljan.pipeline.conditions import validate_condition
 from pydantic import ValidationError
+
+from app.logsafe import log_safe
 
 AGENT_DEFINITIONS_KEY = "core.agents.definitions"
 AGENT_PROFILES_KEY = "core.agents.profiles"
@@ -190,6 +195,35 @@ def validate_definitions(
     return out
 
 
+def validate_stage_conditions(profile: str, entry: Any) -> dict[str, str]:
+    """Every stage of ``entry`` whose ``when`` does not parse, keyed by field.
+
+    Run against the raw body, before ``ProfileDefinition`` sees it.
+    ``StageDefinition`` refuses a bad condition too, but it reports it as
+    ``stages.3`` with pydantic's wrapper text around it, and the editor routes
+    a message to a card by ``<profile>.stages.<key>.<field>``. Checking here
+    first is what puts the message under the box the operator typed it into.
+    """
+    errors: dict[str, str] = {}
+    stages = entry.get("stages") if isinstance(entry, dict) else None
+    if not isinstance(stages, list):
+        return errors
+    for index, stage in enumerate(stages):
+        if not isinstance(stage, dict):
+            continue
+        key = str(stage.get("key") or index)
+        problems = validate_condition(str(stage.get("when") or ""))
+        if problems:
+            errors[f"{profile}.stages.{key}.when"] = problems[0]
+            logger.info(
+                "profile %s stage %s: rejected condition %s",
+                log_safe(profile),
+                log_safe(key),
+                log_safe(stage.get("when")),
+            )
+    return errors
+
+
 def validate_profiles(
     value: Any, *, definitions: dict[str, Any], active: str = "default"
 ) -> dict[str, Any]:
@@ -222,39 +256,37 @@ def validate_profiles(
         if not isinstance(entry, dict):
             errors[name] = "a profile entry must be an object"
             continue
+        condition_errors = validate_stage_conditions(name, entry)
+        if condition_errors:
+            errors.update(condition_errors)
+            continue
         try:
             model = ProfileDefinition.model_validate(entry)
         except ValidationError as exc:
             for err in exc.errors():
-                errors[f"{name}." + ".".join(str(p) for p in err["loc"])] = err["msg"]
+                location = ".".join(str(p) for p in err["loc"])
+                errors[f"{name}.{location}" if location else name] = err["msg"]
             continue
         dumped = model.model_dump(mode="json")
 
         seed = seeds.get(name)
-        if seed is not None and dumped != seed:
-            errors[name] = f"{name!r} is built in; clone it to change it"
-            continue
+        if seed is not None:
+            # A built-in profile's stages may differ from the seed's in the
+            # two fields an operator legitimately tunes; everything else about
+            # it is the architecture, and the settings model refuses the rest.
+            comparable = {**dumped, "stages": _stage_identity(dumped.get("stages"))}
+            expected = {**seed, "stages": _stage_identity(seed.get("stages"))}
+            for field in ("exclude_servers", "analysts"):
+                comparable.pop(field, None)
+                expected.pop(field, None)
+            if comparable != expected:
+                errors[name] = f"{name!r} is built in; clone it to change it"
+                continue
 
-        if not model.analysts:
-            errors[name] = "a profile needs at least one analyst"
+        stage_errors = _stage_member_errors(name, model, definitions, active)
+        if stage_errors:
+            errors.update(stage_errors)
             continue
-        seen: set[str] = set()
-        for analyst in model.analysts:
-            if analyst in seen:
-                errors[name] = f"lists {analyst!r} twice"
-                break
-            seen.add(analyst)
-            definition = definitions.get(analyst)
-            if definition is None:
-                errors[name] = f"lists unknown analyst {analyst!r}"
-                break
-            if definition.get("role") == "judge":
-                errors[name] = f"lists {analyst!r}: the judge cannot be an analyst"
-                break
-            exempt = name in BUILTIN_PROFILES and name != active
-            if not exempt and definition.get("enabled") is False:
-                errors[name] = f"lists disabled analyst {analyst!r}"
-                break
         out[name] = dumped
 
     if errors:
@@ -262,6 +294,58 @@ def validate_profiles(
     for name, seed in seeds.items():
         out.setdefault(name, seed)
     return out
+
+
+def _stage_identity(stages: Any) -> Any:
+    """A built-in's stages with the two operator-editable fields removed."""
+    if not isinstance(stages, list):
+        return stages
+    return [
+        {k: v for k, v in stage.items() if k not in ("debate", "builtin_tools")}
+        if isinstance(stage, dict)
+        else stage
+        for stage in stages
+    ]
+
+
+def _stage_member_errors(
+    name: str, model: ProfileDefinition, definitions: dict[str, Any], active: str
+) -> dict[str, str]:
+    """Whether every agent a stage names exists, may run, and fits the kind.
+
+    The same rules ``AgentsConfig._check_profile_members`` applies, reported per
+    stage instead of as the first ``ValueError`` the model raised: an operator
+    editing a team of seven stages needs to know which card is wrong.
+    """
+    errors: dict[str, str] = {}
+    exempt = name in BUILTIN_PROFILES and name != active
+    for stage in model.stages:
+        field = f"{name}.stages.{stage.key}"
+        for agent in stage.agents:
+            definition = definitions.get(agent)
+            if definition is None:
+                errors[f"{field}.agents"] = f"unknown agent {agent!r}"
+                break
+            role = definition.get("role")
+            if stage.kind == "analysis" and role in ("judge", "report"):
+                errors[f"{field}.agents"] = f"{agent!r} has role {role!r} and cannot be an analyst"
+                break
+            if not exempt and definition.get("enabled") is False:
+                errors[f"{field}.agents"] = f"{agent!r} is disabled"
+                break
+        if f"{field}.agents" in errors:
+            continue
+        if stage.kind == "verdict":
+            judge = definitions.get(stage.agents[0]) if stage.agents else None
+            if len(stage.agents) != 1 or judge is None or judge.get("role") != "judge":
+                errors[f"{field}.agents"] = "a verdict stage names exactly one judge definition"
+        elif stage.kind == "report" and stage.agents != [REPORTER_AGENT_KEY]:
+            errors[f"{field}.agents"] = f"a report stage is run by {REPORTER_AGENT_KEY!r}"
+        elif stage.kind == "debate" and stage.agents:
+            errors[f"{field}.agents"] = (
+                "a debate stage names no agent; it argues over the analysis stages upstream of it"
+            )
+    return errors
 
 
 def validate_agent_map(changes: dict[str, Any], stored: dict[str, Any]) -> dict[str, Any]:

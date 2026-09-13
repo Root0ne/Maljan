@@ -20,8 +20,9 @@ import pytest
 
 from maljan.app import MaljanApp
 from maljan.core.config import ChunkingConfig, NegotiationConfig, Settings
-from maljan.pipeline.nodes import make_analyst_node
+from maljan.pipeline.nodes import make_stage_agent_node
 from maljan.schemas.isr_models import AgentISR
+from tests.stages import ANALYSIS_STAGE, paper_profile
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -176,7 +177,7 @@ class TestNewStateFields:
 
 
 class TestAnalystNodeChunkedWiring:
-    """Tests that make_analyst_node() correctly uses load_chunked().
+    """Tests that make_stage_agent_node(ANALYSIS_STAGE, ) correctly uses load_chunked().
 
     These are 'semi-integration' tests: they use the real node factory but
     replace the container and LLM with mocks. This verifies the wiring
@@ -208,6 +209,13 @@ class TestAnalystNodeChunkedWiring:
         container = MagicMock()
         container.is_mock = is_mock
         container.load_chunked.return_value = chunks
+        container.active_profile.return_value = paper_profile(["static"])
+        # The node asks the container which slice its stage's agent reads; the
+        # cases below configure ``load_chunked``, so the double forwards to it
+        # rather than answering the same question twice.
+        container.load_data_for_agent.side_effect = lambda name, *, file_hash, **_: (
+            container.load_chunked(file_hash, name)
+        )
 
         # Mock agent: safe_analyze_isr returns a minimal ISR
         mock_agent = MagicMock()
@@ -231,7 +239,7 @@ class TestAnalystNodeChunkedWiring:
     def test_single_chunk_calls_safe_analyze_isr(self) -> None:
         """Single chunk → safe_analyze_isr() called, not chunked path."""
         container = self._make_mock_container()
-        node_fn = make_analyst_node("static", container)
+        node_fn = make_stage_agent_node(ANALYSIS_STAGE, "static", container)
         result = node_fn(self._make_state())
 
         agent = container.get_agent.return_value
@@ -258,7 +266,7 @@ class TestAnalystNodeChunkedWiring:
             for i in range(3)
         ]
         container = self._make_mock_container(chunks=chunks)
-        node_fn = make_analyst_node("static", container)
+        node_fn = make_stage_agent_node(ANALYSIS_STAGE, "static", container)
         result = node_fn(self._make_state())
 
         agent = container.get_agent.return_value
@@ -270,7 +278,7 @@ class TestAnalystNodeChunkedWiring:
     def test_node_uses_load_chunked_not_load_data(self) -> None:
         """Analyst node must call container.load_chunked(), not container.load_data()."""
         container = self._make_mock_container()
-        node_fn = make_analyst_node("static", container)
+        node_fn = make_stage_agent_node(ANALYSIS_STAGE, "static", container)
         node_fn(self._make_state())
 
         container.load_chunked.assert_called_once_with("abc123", "static")
@@ -282,7 +290,7 @@ class TestAnalystNodeChunkedWiring:
 
         container = self._make_mock_container()
         container.load_chunked.side_effect = LLMError("loader failed")
-        node_fn = make_analyst_node("static", container)
+        node_fn = make_stage_agent_node(ANALYSIS_STAGE, "static", container)
         result = node_fn(self._make_state())
 
         isr = result.get("isr_reports", {}).get("static")
@@ -294,7 +302,7 @@ class TestAnalystNodeChunkedWiring:
     def test_mock_mode_bypasses_load_chunked(self) -> None:
         """In mock mode, node returns before calling load_chunked."""
         container = self._make_mock_container(is_mock=True)
-        node_fn = make_analyst_node("static", container)
+        node_fn = make_stage_agent_node(ANALYSIS_STAGE, "static", container)
         result = node_fn(self._make_state())
 
         container.load_chunked.assert_not_called()

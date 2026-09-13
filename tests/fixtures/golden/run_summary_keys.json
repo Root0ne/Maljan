@@ -39,6 +39,18 @@
     "custom": [],
     "name": null
   },
+  "stages": [
+    {
+      "agents": [
+        null
+      ],
+      "duration_ms": null,
+      "key": null,
+      "kind": null,
+      "ran": null,
+      "reason": null
+    }
+  ],
   "stix_object_count": null,
   "techniques_by_layer": "<data-keyed map>",
   "timestamp": null,

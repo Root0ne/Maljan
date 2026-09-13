@@ -35,8 +35,8 @@ class TestServiceContainer:
         assert isinstance(agents, list)
         assert len(agents) > 0
 
-    def test_load_sandbox_data_for_agent(self) -> None:
-        """load_sandbox_data_for_agent distributes report fields correctly."""
+    def test_load_data_for_agent(self) -> None:
+        """An empty ``data_sources`` gives each role the slice it always read."""
         container = ServiceContainer(config=Settings(), mock=True)
         report = {
             "target": {"file": {"sha256": "abc123", "name": "test.exe"}},
@@ -52,14 +52,20 @@ class TestServiceContainer:
             "ttp_tags": [],
         }
 
-        static_chunks = container.load_sandbox_data_for_agent("static", report)
+        static_chunks = container.load_data_for_agent(
+            "static", file_hash="abc123", sandbox_report=report
+        )
         assert len(static_chunks) >= 1
         assert "abc123" in static_chunks[0].content
 
-        dynamic_chunks = container.load_sandbox_data_for_agent("dynamic", report)
+        dynamic_chunks = container.load_data_for_agent(
+            "dynamic", file_hash="abc123", sandbox_report=report
+        )
         assert len(dynamic_chunks) >= 1
 
-        network_chunks = container.load_sandbox_data_for_agent("network", report)
+        network_chunks = container.load_data_for_agent(
+            "network", file_hash="abc123", sandbox_report=report
+        )
         assert len(network_chunks) >= 1
         assert "evil.com" in network_chunks[0].content
 

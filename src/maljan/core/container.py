@@ -738,41 +738,115 @@ class ServiceContainer:
             return self.loader.chunk_text(data_type, cached_text)
         return self.loader.load_chunked(sample_id, data_type)
 
-    def load_sandbox_data_for_agent(
-        self, agent_name: str, sandbox_report: dict[str, Any]
+    def load_data_for_agent(
+        self,
+        agent_name: str,
+        *,
+        file_hash: str,
+        sandbox_report: dict[str, Any] | None = None,
+        sample_path: str | None = None,
     ) -> list[TextChunk]:
-        """Parse and chunk sandbox report data for a specific agent.
+        """The input text agent ``agent_name`` is handed, as chunks.
 
-        The slice an agent gets follows its *role*, not its key: a clone of the
-        static analyst runs ``StaticAnalyst``, which is written against the
-        report's ``target`` block, so it must be handed that block under
-        whatever key the operator gave it. The chunker still keys on the agent's
-        own name, which is what the loader's ``data_type`` means.
+        Driven by ``AgentDefinition.data_sources``. An empty list means the
+        slice the agent's *role* used to get, which is spelled out in
+        ``_legacy_role_data`` below and is what every definition written before
+        stages relies on: a static analyst read the sandbox report's ``target``
+        block when there was one and the parsed sample otherwise, a dynamic
+        analyst read the behaviour log, a network analyst the network block,
+        and a generic agent read the sample plus the whole report.
+
+        A non-empty list is taken literally and in order, which is the point of
+        the field: a clone of the static analyst can be pointed at the network
+        block without also becoming a network analyst.
         """
+        definition = self.config.agents.definitions.get(agent_name)
+        sources = list(definition.data_sources) if definition is not None else []
+        if not sources:
+            return self._legacy_role_data(agent_name, file_hash, sandbox_report)
+
+        chunks: list[TextChunk] = []
+        for source in sources:
+            chunks.extend(
+                self._data_source_chunks(agent_name, source, file_hash, sandbox_report, sample_path)
+            )
+        return chunks
+
+    def _data_source_chunks(
+        self,
+        agent_name: str,
+        source: str,
+        file_hash: str,
+        sandbox_report: dict[str, Any] | None,
+        sample_path: str | None,
+    ) -> list[TextChunk]:
+        """One vocabulary entry, resolved. A source with nothing behind it is empty.
+
+        Empty rather than a placeholder: an agent that asked for the sandbox
+        network block on a sample that was never detonated has no network
+        block, and the no-data guard in the analyst node is the right place for
+        that to be reported once, not once per source.
+        """
+        if source == "sample.path":
+            path = sample_path or ""
+            if not path:
+                return []
+            return self.loader.chunk_text(agent_name, f"analysis_file_path: {path}")
+        if source == "sample.chunks":
+            return self.load_chunked(file_hash, agent_name)
+        if not sandbox_report:
+            return []
+        return self._sandbox_slice(agent_name, source, sandbox_report)
+
+    def _sandbox_slice(
+        self, agent_name: str, source: str, sandbox_report: dict[str, Any]
+    ) -> list[TextChunk]:
         import json
 
-        role = self.agent_role(agent_name)
-
-        if role == "static":
-            target = sandbox_report.get("target", {})
-            text = json.dumps(target, indent=2, default=str)
-        elif role == "network":
+        if source == "sandbox.target":
+            return self.loader.chunk_text(
+                agent_name, json.dumps(sandbox_report.get("target", {}), indent=2, default=str)
+            )
+        if source == "sandbox.network":
             network = sandbox_report.get("network", {})
             try:
-                parser = self.parser_registry.create("network")
-                text = parser.parse(network)
+                text = self.parser_registry.create("network").parse(network)
             except KeyError:
                 text = json.dumps(network, indent=2, default=str)
-        elif role == "dynamic":
+            return self.loader.chunk_text(agent_name, text)
+        if source == "sandbox.behavior":
             try:
-                parser = self.parser_registry.create("dynamic")
-                text = parser.parse(sandbox_report)
+                text = self.parser_registry.create("dynamic").parse(sandbox_report)
             except KeyError:
                 text = json.dumps(sandbox_report, indent=2, default=str)
-        else:
-            text = json.dumps(sandbox_report, indent=2, default=str)
+            return self.loader.chunk_text(agent_name, text)
+        return self.loader.chunk_text(agent_name, json.dumps(sandbox_report, indent=2, default=str))
 
-        return self.loader.chunk_text(agent_name, text)
+    def _legacy_role_data(
+        self, agent_name: str, file_hash: str, sandbox_report: dict[str, Any] | None
+    ) -> list[TextChunk]:
+        """What the agent's role read before ``data_sources`` existed.
+
+        Kept as one branch rather than expressed as a default source list,
+        because it is not a list: the static role's slice *depends on whether a
+        sandbox report exists*, and writing that as ``["sandbox.target",
+        "sample.chunks"]`` would hand a detonated sample both instead of one.
+        """
+        role = self.agent_role(agent_name)
+        if role == "generic":
+            static_context = self.load_chunked(file_hash, agent_name)
+            sandbox_chunks: list[TextChunk] = []
+            if sandbox_report:
+                sandbox_chunks = self._sandbox_slice(agent_name, "sandbox.full", sandbox_report)
+            return [*static_context, *sandbox_chunks]
+        if sandbox_report:
+            slice_name = {
+                "static": "sandbox.target",
+                "network": "sandbox.network",
+                "dynamic": "sandbox.behavior",
+            }.get(role, "sandbox.full")
+            return self._sandbox_slice(agent_name, slice_name, sandbox_report)
+        return self.load_chunked(file_hash, agent_name)
 
     def get_function_summarizer(self) -> FunctionSummarizer | None:
         if not self.config.preprocessing.use_function_summarizer:

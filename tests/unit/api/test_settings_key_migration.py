@@ -261,3 +261,153 @@ def test_a_database_with_nothing_stored_is_left_alone():
         with Operations.context(ctx):
             mod.upgrade()
         assert conn.execute(sa.text("SELECT COUNT(*) FROM runtime_settings")).scalar() == 0
+
+
+# ---------------------------------------------------------------------------
+# 20260916000000 — a stored profile becomes a stage list
+# ---------------------------------------------------------------------------
+
+_STAGES_REV = _API / "alembic" / "versions" / "20260916000000_migrate_profiles_to_stages.py"
+
+
+def _load_stages_rev():
+    spec = importlib.util.spec_from_file_location("migrate_profiles_to_stages", _STAGES_REV)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_revision_follows_the_one_before_it():
+    mod = _load_stages_rev()
+    judgement = _load_judgement_rev()
+    assert mod.down_revision == judgement.revision
+
+
+def test_the_migration_s_stage_form_is_the_one_the_settings_model_produces():
+    """Two copies of the conversion, and they have to agree on the day it runs.
+
+    The revision keeps its own copy on purpose — a migration must keep
+    producing the document that was correct when it was written — so this is
+    the check that the copy was correct in the first place.
+    """
+    from maljan.core.config import stages_from_analysts
+
+    mod = _load_stages_rev()
+    assert mod.stage_form(["static", "dynamic"], parallel=False, max_rounds=5, consensus=0.85) == [
+        stage.model_dump()
+        for stage in stages_from_analysts(
+            ["static", "dynamic"], parallel=False, max_rounds=5, consensus_threshold=0.85
+        )
+    ]
+
+
+def test_a_stored_profile_gains_stages_from_the_two_global_keys_and_can_go_back():
+    import json
+
+    import sqlalchemy as sa
+    from alembic.operations import Operations
+    from alembic.runtime.migration import MigrationContext
+
+    mod = _load_stages_rev()
+    conn = _judgement_engine(
+        {
+            mod.PROFILES_KEY: json.dumps(
+                {
+                    "lean": {"label": "Lean", "analysts": ["static", "network"]},
+                    "written": {
+                        "label": "Written",
+                        "stages": [{"key": "only", "kind": "analysis", "agents": ["static"]}],
+                    },
+                }
+            ),
+            mod.PARALLEL_KEY: "true",
+            mod.MAX_ROUNDS_KEY: "9",
+            "core.llm.provider": '"ollama"',
+        }
+    )
+    with conn:
+        ctx = MigrationContext.configure(conn)
+        with Operations.context(ctx):
+            mod.upgrade()
+        first = dict(conn.execute(sa.text("SELECT key, value FROM runtime_settings")).fetchall())
+        with Operations.context(ctx):
+            mod.upgrade()  # second pass: every profile already has stages
+        assert (
+            dict(conn.execute(sa.text("SELECT key, value FROM runtime_settings")).fetchall())
+            == first
+        )
+
+        profiles = json.loads(first[mod.PROFILES_KEY])
+        lean = profiles["lean"]
+        assert [s["key"] for s in lean["stages"]] == ["analysis", "debate", "verdict", "report"]
+        assert lean["stages"][0]["agents"] == ["static", "network"]
+        assert lean["stages"][0]["mode"] == "parallel"
+        assert lean["stages"][1]["debate"]["max_rounds"] == 9
+        # The analyst list is kept: it is what the downgrade restores from.
+        assert lean["analysts"] == ["static", "network"]
+        # A profile that already had stages is left exactly as it was.
+        assert profiles["written"]["stages"] == [
+            {"key": "only", "kind": "analysis", "agents": ["static"]}
+        ]
+        assert first["core.llm.provider"] == '"ollama"'
+
+        with Operations.context(ctx):
+            mod.downgrade()
+        reverted = json.loads(
+            dict(conn.execute(sa.text("SELECT key, value FROM runtime_settings")).fetchall())[
+                mod.PROFILES_KEY
+            ]
+        )
+        assert "stages" not in reverted["lean"]
+        assert reverted["lean"]["analysts"] == ["static", "network"]
+        # A team written as stages has its members recovered rather than lost.
+        assert reverted["written"]["analysts"] == ["static"]
+
+
+def test_the_converted_document_loads_as_the_settings_it_describes():
+    """The point of the migration: the stored document still validates."""
+    import json
+
+    import sqlalchemy as sa
+    from alembic.operations import Operations
+    from alembic.runtime.migration import MigrationContext
+
+    from maljan.core.config import Settings
+
+    mod = _load_stages_rev()
+    conn = _judgement_engine(
+        {mod.PROFILES_KEY: json.dumps({"lean": {"label": "Lean", "analysts": ["static"]}})}
+    )
+    with conn:
+        ctx = MigrationContext.configure(conn)
+        with Operations.context(ctx):
+            mod.upgrade()
+        stored = json.loads(
+            dict(conn.execute(sa.text("SELECT key, value FROM runtime_settings")).fetchall())[
+                mod.PROFILES_KEY
+            ]
+        )
+    settings = Settings(_env_file=None, agents={"profiles": stored, "profile": "lean"})
+    assert settings.agents.profiles["lean"].analysis_agents == ["static"]
+
+
+def test_a_secret_profiles_row_is_never_rewritten():
+    """No profile was ever stored as a secret, and none is decrypted here."""
+    import sqlalchemy as sa
+    from alembic.operations import Operations
+    from alembic.runtime.migration import MigrationContext
+
+    mod = _load_stages_rev()
+    conn = _judgement_engine({})
+    with conn:
+        conn.execute(
+            sa.text("INSERT INTO runtime_settings (key, value, is_secret) VALUES (:k, :v, 1)"),
+            {"k": mod.PROFILES_KEY, "v": '"enc:v1:SECRET"'},
+        )
+        conn.commit()
+        ctx = MigrationContext.configure(conn)
+        with Operations.context(ctx):
+            mod.upgrade()
+        rows = dict(conn.execute(sa.text("SELECT key, value FROM runtime_settings")).fetchall())
+        assert rows[mod.PROFILES_KEY] == '"enc:v1:SECRET"'

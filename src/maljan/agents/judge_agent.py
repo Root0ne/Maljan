@@ -212,7 +212,7 @@ class JudgeAgent:
             return ""
         from maljan.agents.composition import _excluded_servers
 
-        return _excluded_servers(container.config)
+        return _excluded_servers(container.config, "judge")
 
     async def _initialize_mcp_client(self) -> None:
         """Attach every tool server bound to the ``judge`` role, on this loop.

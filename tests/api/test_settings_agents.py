@@ -41,7 +41,7 @@ def test_a_valid_definition_round_trips_with_the_built_ins_reseeded():
         _defs(strings={"role": "generic", "prompt": "read strings"}), stored={}
     )
     definitions = out[AGENT_DEFINITIONS_KEY]
-    assert set(definitions) == {"static", "dynamic", "network", "judge", "strings"}
+    assert set(definitions) == {"static", "dynamic", "network", "judge", "reporter", "strings"}
     assert definitions["strings"]["role"] == "generic"
 
 
@@ -180,7 +180,7 @@ def test_a_disabled_built_in_profile_member_is_refused_once_that_profile_is_acti
             },
             stored={},
         )
-    assert "network" in exc.value.errors[f"{AGENT_PROFILES_KEY}.default"]
+    assert "network" in exc.value.errors[f"{AGENT_PROFILES_KEY}.default.stages.analysis.agents"]
 
 
 def test_a_profile_naming_a_missing_analyst_is_reported_under_the_profile():
@@ -188,7 +188,7 @@ def test_a_profile_naming_a_missing_analyst_is_reported_under_the_profile():
         validate_agent_map(
             {AGENT_PROFILES_KEY: {"two": {"analysts": ["static", "ghost"]}}}, stored={}
         )
-    assert "ghost" in exc.value.errors[f"{AGENT_PROFILES_KEY}.two"]
+    assert "ghost" in exc.value.errors[f"{AGENT_PROFILES_KEY}.two.stages.analysis.agents"]
 
 
 def test_the_default_profile_may_not_be_edited():
@@ -231,7 +231,13 @@ def test_an_explicit_null_clears_a_map_back_to_the_built_ins():
     stored = {AGENT_DEFINITIONS_KEY: {"strings": {"role": "generic", "prompt": "p"}}}
     out = validate_agent_map({AGENT_DEFINITIONS_KEY: None}, stored=stored)
     assert out[AGENT_DEFINITIONS_KEY] is None
-    assert set(effective_definitions({})) == {"static", "dynamic", "network", "judge"}
+    assert set(effective_definitions({})) == {
+        "static",
+        "dynamic",
+        "network",
+        "judge",
+        "reporter",
+    }
 
 
 def test_clearing_the_definitions_that_a_stored_profile_uses_is_refused():
@@ -241,7 +247,7 @@ def test_clearing_the_definitions_that_a_stored_profile_uses_is_refused():
     }
     with pytest.raises(AgentMapError) as exc:
         validate_agent_map({AGENT_DEFINITIONS_KEY: None}, stored=stored)
-    assert "strings" in exc.value.errors[f"{AGENT_PROFILES_KEY}.wide"]
+    assert "strings" in exc.value.errors[f"{AGENT_PROFILES_KEY}.wide.stages.analysis.agents"]
 
 
 def test_the_effective_maps_layer_stored_over_seeded():
@@ -265,7 +271,7 @@ def test_the_catalog_resolves_the_two_new_choice_sources():
     assert entries["core.agents.profile"].choices == ["default", "lean"]
     assert entries["core.mcp.servers"].editor == "server_map"
     assert entries["core.agents.definitions"].editor == "agent_definitions"
-    assert entries["core.agents.profiles"].editor == "profiles"
+    assert entries["core.agents.profiles"].editor == "stages"
 
 
 def test_a_server_binding_offers_the_effective_definition_keys():
@@ -444,3 +450,50 @@ def test_a_cloned_judge_is_refused_with_the_rule_that_names_it():
         exc.value.errors[f"{AGENT_DEFINITIONS_KEY}.judge_2"]
         == "'judge_2': only the built-in judge may have role judge"
     )
+
+
+# ---------------------------------------------------------------------------
+# Stage conditions
+# ---------------------------------------------------------------------------
+
+
+def _team(**stage: object) -> dict:
+    return {
+        AGENT_PROFILES_KEY: {
+            "team": {
+                "stages": [
+                    {"key": "triage", "kind": "analysis", "agents": ["static"], **stage},
+                    {
+                        "key": "verdict",
+                        "kind": "verdict",
+                        "agents": ["judge"],
+                        "depends_on": ["triage"],
+                    },
+                ]
+            }
+        }
+    }
+
+
+def test_a_stage_condition_that_parses_is_stored_as_written():
+    out = validate_agent_map(_team(when='platform == "windows"'), stored={})
+    stored = out[AGENT_PROFILES_KEY]["team"]["stages"][0]
+    assert stored["when"] == 'platform == "windows"'
+
+
+def test_a_stage_condition_that_does_not_parse_is_reported_under_that_stage():
+    with pytest.raises(AgentMapError) as exc:
+        validate_agent_map(_team(when="verdict == 'Malware'"), stored={})
+    message = exc.value.errors[f"{AGENT_PROFILES_KEY}.team.stages.triage.when"]
+    assert "unknown name 'verdict'" in message
+
+
+def test_a_condition_that_could_run_code_is_refused_before_it_is_ever_stored():
+    with pytest.raises(AgentMapError) as exc:
+        validate_agent_map(_team(when='__import__("os").system("id")'), stored={})
+    assert "function call" in exc.value.errors[f"{AGENT_PROFILES_KEY}.team.stages.triage.when"]
+
+
+def test_an_empty_condition_is_accepted_and_means_always():
+    out = validate_agent_map(_team(when=""), stored={})
+    assert out[AGENT_PROFILES_KEY]["team"]["stages"][0]["when"] == ""

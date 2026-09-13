@@ -10,30 +10,51 @@ a job that fails minutes after it was accepted.
 from __future__ import annotations
 
 from maljan.agents.registry import AgentRegistry
-from maljan.core.config import BUILTIN_AGENTS, BUILTIN_PROFILES, Settings
+from maljan.core.config import (
+    BUILTIN_AGENTS,
+    BUILTIN_PROFILES,
+    JUDGE_AGENT_KEY,
+    REPORTER_AGENT_KEY,
+    Settings,
+)
 
 
-def test_the_built_in_definitions_are_the_registered_classes_plus_the_judge():
+def test_the_built_in_definitions_are_the_registered_classes_plus_the_two_that_are_not_analysts():
     registered = set(AgentRegistry().list_agents(include_disabled=True))
-    assert set(BUILTIN_AGENTS) == registered | {"judge"}
+    assert set(BUILTIN_AGENTS) == registered | {JUDGE_AGENT_KEY, REPORTER_AGENT_KEY}
 
 
 def test_every_built_in_definition_names_its_own_role():
     definitions = Settings(_env_file=None).agents.definitions
     for key in BUILTIN_AGENTS:
-        assert definitions[key].role == key
+        # The reporter is the one key that is not its role: ``report`` is what
+        # the stage kind is called and ``reporter`` is who runs it, and naming
+        # both the same would make the definition map read as a stage list.
+        expected = "report" if key == REPORTER_AGENT_KEY else key
+        assert definitions[key].role == expected
 
 
-def test_the_default_profile_is_every_built_in_analyst_and_not_the_judge():
+def test_the_default_profile_is_every_built_in_analyst_and_neither_of_the_others():
     profile = Settings(_env_file=None).agents.profiles["default"]
-    assert set(profile.analysts) == set(BUILTIN_AGENTS) - {"judge"}
-    assert profile.analysts == ["static", "dynamic", "network"]
+    analysis_agents = set(profile.analysis_agents)
+    assert analysis_agents == set(BUILTIN_AGENTS) - {JUDGE_AGENT_KEY, REPORTER_AGENT_KEY}
+    assert profile.analysis_agents == ["static", "dynamic", "network"]
+    # The team is the paper's pipeline written as the four stages it always
+    # was: the analysts, the debate over them, the verdict and the report.
+    assert [(s.key, s.kind) for s in profile.stages] == [
+        ("analysis", "analysis"),
+        ("debate", "debate"),
+        ("verdict", "verdict"),
+        ("report", "report"),
+    ]
+    assert profile.stage("verdict").agents == [JUDGE_AGENT_KEY]
+    assert profile.stage("report").agents == [REPORTER_AGENT_KEY]
     # ``measurement`` is the second built-in: the same three analysts with
     # every tool server withheld, which is the baseline the tool sidecars are
     # measured against.
     assert BUILTIN_PROFILES == ("default", "measurement")
     baseline = Settings(_env_file=None).agents.profiles["measurement"]
-    assert baseline.analysts == profile.analysts
+    assert baseline.analysis_agents == profile.analysis_agents
     assert baseline.static_provider == "none"
     assert baseline.exclude_sandbox_tools is True
 

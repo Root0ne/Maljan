@@ -28,11 +28,12 @@ from maljan.pipeline.events import (
     emit_agent_message,
 )
 from maljan.pipeline.nodes import (
-    make_analyst_node,
     make_negotiation_node,
     make_revision_node,
+    make_stage_agent_node,
 )
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from tests.stages import ANALYSIS_STAGE, paper_profile
 
 
 class Recorder:
@@ -57,6 +58,13 @@ def _container(sink: Any, agents: list[str] | None = None) -> Any:
     container.analyst_keys.return_value = agents or ["network"]
 
     container.agent_role.side_effect = lambda n: n
+    container.active_profile.return_value = paper_profile(agents or ["network"])
+    # The node asks for its stage's data through one call; the tests below set
+    # ``load_chunked`` because that is what the container reaches for, so the
+    # double forwards rather than answering twice.
+    container.load_data_for_agent.side_effect = lambda n, *, file_hash, **_: container.load_chunked(
+        file_hash, n
+    )
     return container
 
 
@@ -172,7 +180,7 @@ class TestAnalystNodeEmits:
         container.load_chunked.return_value = []
         container.get_agent.return_value = MagicMock()
 
-        node = make_analyst_node("network", container)
+        node = make_stage_agent_node(ANALYSIS_STAGE, "network", container)
         node({"file_hash": "a" * 64})
 
         # It announces that it started, then that it had nothing to work with.
@@ -188,7 +196,7 @@ class TestAnalystNodeEmits:
         container = _container(rec)
         container.get_agent.side_effect = RuntimeError("ghidra died")
 
-        node = make_analyst_node("network", container)
+        node = make_stage_agent_node(ANALYSIS_STAGE, "network", container)
         node({"file_hash": "a" * 64})
 
         message = rec.messages()[0]
@@ -217,7 +225,7 @@ class TestAnalystNodeEmits:
         container.get_agent.return_value = agent
         container.load_chunked.return_value = [MagicMock(content="chunk")]
 
-        node = make_analyst_node("network", container)
+        node = make_stage_agent_node(ANALYSIS_STAGE, "network", container)
         node({"file_hash": "a" * 64})
 
         message = rec.messages()[0]
@@ -319,7 +327,7 @@ class TestProseTravelsWithTheMessage:
         container.get_agent.return_value = agent
         container.load_chunked.return_value = [MagicMock(content="chunk")]
 
-        node = make_analyst_node("network", container)
+        node = make_stage_agent_node(ANALYSIS_STAGE, "network", container)
         node({"file_hash": "a" * 64})
 
         message = rec.messages()[0]

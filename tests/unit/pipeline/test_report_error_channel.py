@@ -19,6 +19,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from tests.stages import paper_profile
+
 
 @pytest.fixture
 def fake_container() -> Any:
@@ -33,6 +35,9 @@ def fake_container() -> Any:
     container.config.reporting.enabled = True
     container.config.llm.parallel_analysts = True
     container.config.negotiation.max_iterations = 3
+    container.active_profile.return_value = paper_profile(
+        ["static", "dynamic", "network"], parallel=True
+    )
     return container
 
 
