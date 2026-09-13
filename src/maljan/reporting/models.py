@@ -401,6 +401,12 @@ class CapabilityCell(BaseModel):
     evidence: list[str] = Field(default_factory=list)
     confidence: Annotated[float, Field(ge=0.0, le=1.0)] = 0.5
     contributing_layers: list[str] = Field(default_factory=list)
+    # ``False`` when the ATT&CK catalogue has no entry for this id and the
+    # producer kept it after being told. The row stays — deleting an analyst's
+    # answer is what this pipeline stopped doing — and every renderer prints
+    # the marker beside it. Defaults ``True`` so rows persisted before the flag
+    # existed keep their meaning.
+    technique_id_valid: bool = True
 
 
 class TTPMapping(BaseModel):
@@ -416,6 +422,8 @@ class TTPMapping(BaseModel):
     confidence: Annotated[float, Field(ge=0.0, le=1.0)] = 0.5
     contributing_layers: list[str] = Field(default_factory=list)
     is_corroborated: bool = False
+    # See ``CapabilityCell.technique_id_valid``.
+    technique_id_valid: bool = True
 
 
 # ---------------------------------------------------------------------------

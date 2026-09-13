@@ -7,7 +7,11 @@ A projection, and only a projection. Two inputs:
   - ``isr_reports`` — the analysts' own claims, which add the technique ids and
     the evidence quotes the judge did not carry over.
 
-Neither is adjusted here. The cap this module used to apply — halving the
+An id the ATT&CK catalogue does not have is carried through and marked
+(``technique_id_valid``), not dropped: it is the analyst's answer, and the
+report is where a reader is told it does not resolve.
+
+Neither input is adjusted here. The cap this module used to apply — halving the
 confidence of an obfuscation or injection claim whose supporting static
 evidence the module could not find — is gone: the analyst's number is the
 analyst's, and an unsupported claim is now something the analyst is told about
@@ -91,6 +95,7 @@ def build_capability_matrix(
         # rather than accumulated into the row as it was collected.
         confidence = max((float(c) for c in info.get("confidences") or ()), default=0.0)
         layers = info.get("layers") or []
+        valid = bool(info.get("valid", True))
 
         # Never emit a zero-confidence cell with no evidence and no contributing
         # source — it is an empty claim the UI would render as a "verified"
@@ -108,6 +113,7 @@ def build_capability_matrix(
                 evidence=evidence[:6],
                 confidence=max(0.0, min(1.0, confidence)),
                 contributing_layers=layers,
+                technique_id_valid=valid,
             )
         )
         mappings.append(
@@ -120,6 +126,7 @@ def build_capability_matrix(
                 confidence=max(0.0, min(1.0, confidence)),
                 contributing_layers=layers,
                 is_corroborated=len(layers) >= 2,
+                technique_id_valid=valid,
             )
         )
 
@@ -147,7 +154,9 @@ def _collect_techniques(
         # takes the max once, where a reader can see it happen; a row that
         # rewrites its own ``confidence`` key as it goes reads like the thing
         # this phase removed even when it is only accumulating.
-        return techniques.setdefault(tid, {"evidence": [], "confidences": [], "layers": []})
+        return techniques.setdefault(
+            tid, {"evidence": [], "confidences": [], "layers": [], "valid": True}
+        )
 
     # 1. The judge's bundle. An attack-pattern says the technique is in the
     # verdict; the relationship annotations say how sure the judge was and which
@@ -167,9 +176,15 @@ def _collect_techniques(
         for agent_name, isr in isr_reports.items():
             for claim in getattr(isr, "claims", None) or []:
                 claim_tid = getattr(claim, "technique_id", None)
-                if not claim_tid or not getattr(claim, "technique_id_valid", True):
+                if not claim_tid:
                     continue
                 row = _row(str(claim_tid))
+                # An id the catalogue does not have stays in the matrix and is
+                # marked. Dropping it deleted the analyst's answer from the one
+                # surface a reader looks at, which is the behaviour this whole
+                # phase replaced; the marker is how a reader learns instead.
+                if not getattr(claim, "technique_id_valid", True):
+                    row["valid"] = False
                 row["confidences"].append(float(getattr(claim, "confidence", 0.0) or 0.0))
                 layer = getattr(isr, "domain", None) or agent_name or "agent"
                 if layer and str(layer) not in row["layers"]:

@@ -24,7 +24,11 @@ from maljan.pipeline.validation import (
     validation_metrics,
 )
 from maljan.schemas.evidence import LedgerEntry
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from maljan.schemas.isr_models import (
+    UNVERIFIED_TECHNIQUE_MARKER,
+    AgentISR,
+    ClaimEvidence,
+)
 from maljan.schemas.judgement import FamilyVerdict, JudgeAssessment, SeverityVerdict
 from maljan.schemas.stix_models import AttackPattern, Bundle, Indicator
 
@@ -436,3 +440,27 @@ class TestMetrics:
         isr.claims[0].technique_id_valid = False
 
         assert corroboration({"static": isr}, []) == {}
+
+
+class TestTheMarkerReachesTheJudge:
+    """An unresolvable id is labelled in the summary the judge reads.
+
+    The judge is the next reader of the analyst's answer, and it has to be able
+    to tell an id the catalogue confirmed from one the analyst was told about
+    and kept.
+    """
+
+    def test_the_summary_labels_a_flagged_id(self):
+        isr = _isr([_claim(technique_id="T7777")])
+        mark_invalid_technique_ids(isr, validate_isr(isr, attck=_Attck()))
+
+        summary = isr.to_text_summary()
+
+        assert "T7777" in summary
+        assert UNVERIFIED_TECHNIQUE_MARKER in summary
+
+    def test_a_catalogued_id_is_left_plain(self):
+        summary = _isr([_claim(technique_id="T1055")]).to_text_summary()
+
+        assert "(T1055)" in summary
+        assert UNVERIFIED_TECHNIQUE_MARKER not in summary

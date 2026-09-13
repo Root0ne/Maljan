@@ -29,6 +29,7 @@ from maljan.reporting.models import (
     SeverityAssessment,
     StringIOC,
 )
+from maljan.schemas.isr_models import UNVERIFIED_TECHNIQUE_MARKER
 
 
 class MarkdownRenderer:
@@ -522,8 +523,11 @@ class MarkdownRenderer:
             for cell in cells:
                 tactic = f"{cell.tactic_name} ({cell.tactic})" if cell.tactic else cell.tactic_name
                 layers = ", ".join(cell.contributing_layers) or "-"
+                # The id an analyst kept after being told it does not resolve
+                # is printed as it was written, with the reason beside it.
+                marker = "" if cell.technique_id_valid else f" _({UNVERIFIED_TECHNIQUE_MARKER})_"
                 lines.append(
-                    f"| {tactic} | {cell.technique_id} {cell.technique_name} | "
+                    f"| {tactic} | {cell.technique_id} {cell.technique_name}{marker} | "
                     f"{cell.confidence:.2f} | {layers} |"
                 )
             lines.append("")
@@ -533,9 +537,10 @@ class MarkdownRenderer:
             lines.append("")
             for mapping in mappings:
                 corroborated = "corroborated" if mapping.is_corroborated else "single-source"
+                marker = "" if mapping.technique_id_valid else f", {UNVERIFIED_TECHNIQUE_MARKER}"
                 lines.append(
                     f"**{mapping.technique_id} — {mapping.technique_name}**  "
-                    f"`(conf={mapping.confidence:.2f}, {corroborated})`"
+                    f"`(conf={mapping.confidence:.2f}, {corroborated}{marker})`"
                 )
                 lines.append("")
                 for quote in mapping.evidence_quotes[:6]:

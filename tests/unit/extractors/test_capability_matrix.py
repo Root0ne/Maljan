@@ -102,10 +102,33 @@ class TestItProjectsTheJudgeAndTheAnalysts:
 
         assert [c.confidence for c in cells] == [0.80]
 
-    def test_a_claim_whose_technique_id_failed_validation_is_left_out(self) -> None:
+    def test_a_claim_whose_technique_id_failed_validation_is_kept_and_marked(self) -> None:
+        """Dropping it would delete the analyst's answer from the one surface a
+        reader looks at, which is the behaviour this phase replaced."""
         isr = _isr("static", _claim("T1055", 0.9))
         isr.claims[0].technique_id_valid = False
 
-        cells, _ = build_capability_matrix(stix_output=None, isr_reports={"static": isr})
+        cells, mappings = build_capability_matrix(stix_output=None, isr_reports={"static": isr})
 
-        assert cells == []
+        assert [c.technique_id for c in cells] == ["T1055"]
+        assert [c.technique_id_valid for c in cells] == [False]
+        assert [m.technique_id_valid for m in mappings] == [False]
+
+    def test_one_source_flagging_an_id_marks_the_row(self) -> None:
+        """Two analysts, one of which kept an id it was told does not resolve."""
+        good = _isr("dynamic", _claim("T1055", 0.5))
+        bad = _isr("static", _claim("T1055", 0.9))
+        bad.claims[0].technique_id_valid = False
+
+        cells, _ = build_capability_matrix(
+            stix_output=None, isr_reports={"static": bad, "dynamic": good}
+        )
+
+        assert [c.technique_id_valid for c in cells] == [False]
+
+    def test_a_row_no_source_flagged_stays_valid(self) -> None:
+        cells, _ = build_capability_matrix(
+            stix_output=None, isr_reports={"static": _isr("static", _claim("T1055"))}
+        )
+
+        assert [c.technique_id_valid for c in cells] == [True]

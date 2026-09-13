@@ -16,6 +16,11 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+# What a claim carrying an id the catalogue does not have is labelled with,
+# wherever it is printed. One string so the ISR summary the judge reads, the
+# Markdown report and the HTML report cannot word it three different ways.
+UNVERIFIED_TECHNIQUE_MARKER = "technique id not in the ATT&CK catalog"
+
 
 class ClaimEvidence(BaseModel):
     """A single verifiable claim with supporting evidence.
@@ -162,7 +167,12 @@ class AgentISR(BaseModel):
         ]
 
         for i, claim in enumerate(self.claims, 1):
+            # The marker travels with the id rather than replacing it. The
+            # analyst was told and kept its answer; the judge is entitled to
+            # see both the answer and that it does not resolve.
             tech = f" ({claim.technique_id})" if claim.technique_id else ""
+            if claim.technique_id and not claim.technique_id_valid:
+                tech = f" ({claim.technique_id} — {UNVERIFIED_TECHNIQUE_MARKER})"
             lines.append(
                 f"  Claim {i}: {claim.claim}{tech}"
                 f" | Evidence: {claim.evidence_ref}"

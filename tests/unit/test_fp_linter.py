@@ -270,28 +270,41 @@ class TestRuleC6:
 
 class TestRuleC7:
     def test_an_unresolved_technique_id_is_named(self) -> None:
+        """Read off the flag the report carries, not out of the prose. The
+        violation message is written for a model and its wording is free to
+        change; the flag is the fact."""
         report = _stub_report(
-            run_summary={
-                "validation": {
-                    "retries": 1,
-                    "by_code": {"attck.unknown_id": 1},
-                    "unresolved": [
-                        {
-                            "agent": "static",
-                            "code": "attck.unknown_id",
-                            "message": "TECHNIQUE T9999 is not in the MITRE ATT&CK catalogue.",
-                        }
-                    ],
-                }
-            }
+            capability_matrix=[_ns(technique_id="T7777", technique_id_valid=False, platforms=None)]
         )
 
         c7 = [w for w in lint_report(report, "windows") if w.rule == "C7"]
         assert len(c7) == 1
-        assert "T9999" in c7[0].message
+        assert "T7777" in c7[0].message
         assert c7[0].explanation
 
+    def test_a_ttp_row_carries_the_flag_too(self) -> None:
+        report = _stub_report(
+            ttp_mappings=[
+                _ns(
+                    technique_id="T7777",
+                    technique_id_valid=False,
+                    contributing_layers=["static"],
+                    evidence_quotes=["x"],
+                )
+            ]
+        )
+
+        assert [w.rule for w in lint_report(report, "windows") if w.rule == "C7"] == ["C7"]
+
     def test_a_run_with_nothing_unresolved_does_not_warn(self) -> None:
-        report = _stub_report(run_summary={"validation": {"retries": 0, "unresolved": []}})
+        report = _stub_report(
+            capability_matrix=[_ns(technique_id="T1055", technique_id_valid=True, platforms=None)]
+        )
+
+        assert not any(w.rule == "C7" for w in lint_report(report, "windows"))
+
+    def test_a_legacy_row_without_the_flag_is_treated_as_valid(self) -> None:
+        """Rows persisted before the flag existed have no attribute at all."""
+        report = _stub_report(capability_matrix=[_ns(technique_id="T1055", platforms=None)])
 
         assert not any(w.rule == "C7" for w in lint_report(report, "windows"))

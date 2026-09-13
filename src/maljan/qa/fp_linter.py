@@ -21,7 +21,8 @@ or more :class:`FPWarning` rows for any anomaly:
 * **C6** a claim or finding that carries neither an evidence id nor a tool
   entry behind it.
 * **C7** a technique id the ATT&CK catalogue does not have, kept on a claim
-  after the analyst was told and given a retry.
+  after the analyst was told and given a retry. The row stays in the report,
+  marked; this is the audit line that counts them.
 
 Results land in ``run_summary.fp_warnings`` so the API + UI can render
 an audit banner without re-running the pipeline.
@@ -301,15 +302,22 @@ def _ungrounded_claim_count(report: Any) -> int:
 
 
 def _invalid_technique_ids(report: Any) -> set[str]:
-    """Technique ids the validation loop could not get resolved."""
+    """Technique ids the validation loop could not get resolved.
+
+    Read off the flag the report carries (``technique_id_valid``) rather than
+    regexed out of the violation message. The message is prose written for a
+    model to read and its wording is free to change; the flag is the fact.
+    """
     found: set[str] = set()
-    for row in (getattr(report, "run_summary", None) or {}).get("validation", {}).get(
-        "unresolved", []
-    ) or []:
-        if isinstance(row, dict) and row.get("code") == "attck.unknown_id":
-            for token in _TID_RE.findall(str(row.get("message") or "")):
-                found.add(token)
-                break
+    for rows in (
+        getattr(report, "capability_matrix", None) or [],
+        getattr(report, "ttp_mappings", None) or [],
+    ):
+        for row in rows:
+            if not getattr(row, "technique_id_valid", True):
+                tid = str(getattr(row, "technique_id", "") or "").strip()
+                if tid:
+                    found.add(tid)
     return found
 
 
