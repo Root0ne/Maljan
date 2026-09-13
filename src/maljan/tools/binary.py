@@ -104,6 +104,7 @@ def pe_info(
                 pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_EXPORT"],
                 pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_RESOURCE"],
                 pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_DEBUG"],
+                pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT"],
             ]
         )
     except Exception as exc:  # noqa: BLE001 — a malformed PE is an answer
@@ -140,11 +141,35 @@ def pe_info(
             }
             for s in parsed_sections
         ]
+    warnings = _pe_warnings(pe)
+    out["warnings"] = warnings
+    # A sample whose import directory is deliberately corrupt reads as a
+    # binary that imports nothing, which is a very different claim. pefile
+    # says so in its warnings and said it only there until now.
+    out["import_table_damaged"] = _import_table_damaged(warnings)
+    out["characteristics"] = _flag_names(
+        pefile,
+        "IMAGE_CHARACTERISTICS",
+        "IMAGE_FILE_",
+        getattr(pe.FILE_HEADER, "Characteristics", 0),
+    )
+    out["dll_characteristics"] = _flag_names(
+        pefile,
+        "DLL_CHARACTERISTICS",
+        "IMAGE_DLLCHARACTERISTICS_",
+        getattr(pe.OPTIONAL_HEADER, "DllCharacteristics", 0),
+    )
+    out["linker_version"] = (
+        f"{int(getattr(pe.OPTIONAL_HEADER, 'MajorLinkerVersion', 0) or 0)}."
+        f"{int(getattr(pe.OPTIONAL_HEADER, 'MinorLinkerVersion', 0) or 0)}"
+    )
+    out["rich_header_present"] = _has_rich_header(pe)
     if imports:
         out["imports"] = [
             {"dll": row.dll, "function": row.function, "category": row.category}
             for row in _pe_imports(pe)
         ]
+        out["delay_imports"] = _delay_imports(pe)
     if exports:
         out["exports"] = list(_pe_exports(pe))
     if resources:
@@ -162,6 +187,62 @@ def pe_info(
         [s.name for s in parsed_sections], packer_catalog
     )
     return out
+
+
+def _pe_warnings(pe: Any) -> list[str]:
+    """Everything pefile complained about while parsing, as plain strings."""
+    try:
+        return [str(w) for w in (pe.get_warnings() or [])]
+    except Exception:  # noqa: BLE001 — a warning list is never worth an error
+        return []
+
+
+def _import_table_damaged(warnings: list[str]) -> bool:
+    """Whether any warning is about the import directory itself."""
+    return any("import" in w.lower() for w in warnings)
+
+
+def _flag_names(pefile: Any, table: str, prefix: str, value: Any) -> list[str]:
+    """The names of the flags set in ``value``, from one of pefile's tables."""
+    try:
+        bits = int(value or 0)
+        flags = pefile.retrieve_flags(getattr(pefile, table), prefix)
+        return [name for name, bit in flags if bits & bit]
+    except Exception:  # noqa: BLE001 — an unreadable header field names no flags
+        return []
+
+
+def _has_rich_header(pe: Any) -> bool:
+    """Whether the sample carries a Rich header (a Microsoft toolchain left it)."""
+    try:
+        return bool(pe.parse_rich_header())
+    except Exception:  # noqa: BLE001 — an absent or malformed Rich header is "no"
+        return False
+
+
+def _delay_imports(pe: Any) -> list[dict[str, Any]]:
+    """The delay-load imports, in the same shape as the ordinary ones.
+
+    A binary that resolves its interesting APIs through ``.didat`` looked
+    import-free here, which is the same false picture a damaged import table
+    gives.
+    """
+    from maljan.extractors.pe_extractor import classify_import
+
+    rows: list[dict[str, Any]] = []
+    for entry in getattr(pe, "DIRECTORY_ENTRY_DELAY_IMPORT", []) or []:
+        try:
+            dll = (entry.dll or b"").decode("utf-8", errors="replace")
+        except Exception:  # noqa: BLE001
+            dll = "(unknown)"
+        for imp in getattr(entry, "imports", None) or []:
+            name = getattr(imp, "name", None)
+            function = name.decode("utf-8", errors="replace") if name else ""
+            if not function:
+                function = f"Ordinal_{getattr(imp, 'ordinal', '?')}"
+            category, _suspicious = classify_import(function)
+            rows.append({"dll": dll, "function": function, "category": category})
+    return rows
 
 
 def packer_section_matches(

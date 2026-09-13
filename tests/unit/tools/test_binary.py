@@ -30,6 +30,72 @@ def _elf(machine: int = 0x3E) -> bytes:
     return ident + struct.pack("<HHI", 2, machine, 1) + b"\x00" * 512
 
 
+def _pe(import_rva: int = 0x1000, delay: bool = True) -> bytes:
+    """A 32-bit PE with one real import and, optionally, one delay-load import.
+
+    Hand-built rather than checked in as a fixture: the point of the damaged
+    case is that the import directory RVA is wrong and everything else is
+    right, and that is one argument here instead of a second binary nobody can
+    read in a diff.
+    """
+    idata = bytearray(0x200)
+    idata[0x00:0x14] = struct.pack("<IIIII", 0x1028, 0, 0, 0x1060, 0x1030)
+    idata[0x28:0x30] = struct.pack("<II", 0x1040, 0)
+    idata[0x30:0x38] = struct.pack("<II", 0x1040, 0)
+    idata[0x40:0x4E] = struct.pack("<H", 0) + b"CreateFileA\x00"
+    idata[0x60:0x6D] = b"KERNEL32.dll\x00"
+
+    didat = bytearray(0x200)
+    didat[0x00:0x20] = struct.pack("<IIIIIIII", 1, 0x2080, 0x2090, 0x2048, 0x2040, 0, 0, 0)
+    didat[0x40:0x48] = struct.pack("<II", 0x2060, 0)
+    didat[0x48:0x50] = struct.pack("<II", 0x2060, 0)
+    didat[0x60:0x73] = struct.pack("<H", 0) + b"HttpSendRequestA\x00"
+    didat[0x80:0x8C] = b"WININET.dll\x00"
+
+    sections = 2 if delay else 1
+    opt = bytearray()
+    opt += struct.pack("<HBB", 0x10B, 14, 29)
+    opt += struct.pack("<III", 0x200, 0, 0)
+    opt += struct.pack("<III", 0x1000, 0x1000, 0x1000)
+    opt += struct.pack("<III", 0x400000, 0x1000, 0x200)
+    opt += struct.pack("<HHHHHH", 6, 0, 0, 0, 6, 0)
+    opt += struct.pack("<I", 0)
+    opt += struct.pack("<II", 0x1000 * (sections + 1), 0x200)
+    # Subsystem 3 (console), DllCharacteristics = DYNAMIC_BASE | NX_COMPAT |
+    # NO_SEH | TERMINAL_SERVER_AWARE.
+    opt += struct.pack("<IHH", 0, 3, 0x8140)
+    opt += struct.pack("<IIII", 0x100000, 0x1000, 0x100000, 0x1000)
+    opt += struct.pack("<II", 0, 16)
+    directories = [(0, 0)] * 16
+    directories[1] = (import_rva, 40)
+    if delay:
+        directories[13] = (0x2000, 64)
+    for rva, size in directories:
+        opt += struct.pack("<II", rva, size)
+
+    # Characteristics = EXECUTABLE_IMAGE | 32BIT_MACHINE.
+    file_header = struct.pack("<HHIIIHH", 0x14C, sections, 0x5F5E0FF, 0, 0, len(opt), 0x0102)
+    headers = bytearray(0x200)
+    headers[0:2] = b"MZ"
+    headers[0x3C:0x40] = struct.pack("<I", 0x40)
+    at = 0x40
+    headers[at : at + 4] = b"PE\x00\x00"
+    at += 4
+    headers[at : at + len(file_header)] = file_header
+    at += len(file_header)
+    headers[at : at + len(opt)] = opt
+    at += len(opt)
+
+    def _section(name: bytes, rva: int, raw: int) -> bytes:
+        return struct.pack("<8sIIIIIIHHI", name, 0x200, rva, 0x200, raw, 0, 0, 0, 0, 0xC0000040)
+
+    headers[at : at + 40] = _section(b".idata\x00\x00", 0x1000, 0x200)
+    at += 40
+    if delay:
+        headers[at : at + 40] = _section(b".didat\x00\x00", 0x2000, 0x400)
+    return bytes(headers) + bytes(idata) + (bytes(didat) if delay else b"")
+
+
 class TestPeInfo:
     def test_a_file_without_the_mz_magic_is_refused_by_name(self, tmp_path: Path) -> None:
         target = tmp_path / "s.bin"
@@ -39,6 +105,61 @@ class TestPeInfo:
 
     def test_a_missing_file_is_an_error_and_not_an_exception(self) -> None:
         assert tool.pe_info("/nonexistent/s.exe")["tool"] == "pe_info"
+
+    def test_a_healthy_pe_reports_its_header_facts(self, tmp_path: Path) -> None:
+        pytest.importorskip("pefile")
+        target = tmp_path / "clean.exe"
+        target.write_bytes(_pe())
+
+        result = tool.pe_info(str(target))
+
+        assert result["warnings"] == []
+        assert result["import_table_damaged"] is False
+        assert [row["function"] for row in result["imports"]] == ["CreateFileA"]
+        assert result["characteristics"] == [
+            "IMAGE_FILE_EXECUTABLE_IMAGE",
+            "IMAGE_FILE_32BIT_MACHINE",
+        ]
+        assert "IMAGE_DLLCHARACTERISTICS_NX_COMPAT" in result["dll_characteristics"]
+        assert result["linker_version"] == "14.29"
+        assert result["rich_header_present"] is False
+
+    def test_a_damaged_import_table_is_said_out_loud(self, tmp_path: Path) -> None:
+        """The live sample's import directory RVA pointed nowhere and the tool
+        answered ``imports: []`` — indistinguishable from a binary that imports
+        nothing at all."""
+        pytest.importorskip("pefile")
+        target = tmp_path / "damaged.exe"
+        target.write_bytes(_pe(import_rva=0x9000))
+
+        result = tool.pe_info(str(target))
+
+        assert result["imports"] == []
+        assert result["import_table_damaged"] is True
+        assert any("import directory" in w for w in result["warnings"])
+
+    def test_delay_load_imports_are_reported_too(self, tmp_path: Path) -> None:
+        pytest.importorskip("pefile")
+        target = tmp_path / "delay.exe"
+        target.write_bytes(_pe())
+
+        result = tool.pe_info(str(target))
+
+        assert result["delay_imports"] == [
+            {"dll": "WININET.dll", "function": "HttpSendRequestA", "category": "network"}
+        ]
+
+    def test_the_import_blocks_are_omitted_when_imports_are_not_asked_for(
+        self, tmp_path: Path
+    ) -> None:
+        pytest.importorskip("pefile")
+        target = tmp_path / "clean.exe"
+        target.write_bytes(_pe())
+
+        result = tool.pe_info(str(target), imports=False)
+
+        assert "imports" not in result
+        assert "delay_imports" not in result
 
 
 class TestPackerSectionMatches:
