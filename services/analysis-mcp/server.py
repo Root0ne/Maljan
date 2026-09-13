@@ -104,8 +104,17 @@ def strings(
     encodings: list[str] | None = None,
     limit: int = 2000,
     offset: int = 0,
+    pattern: str | None = None,
+    start: int | None = None,
+    end: int | None = None,
 ) -> dict[str, Any]:
-    """List printable ASCII and UTF-16LE runs with their byte offsets."""
+    """List printable ASCII and UTF-16LE runs with their byte offsets.
+
+    ``offset`` pages through runs, not bytes: ``offset=2000, limit=1000``
+    returns the 2001st to 3000th run. Use ``start``/``end`` for a byte range
+    and ``pattern`` to keep only the runs containing a marker (case-insensitive
+    substring, or ``re:<expression>`` for a regular expression).
+    """
     return _guard(
         "strings",
         string_tools.strings,
@@ -114,6 +123,9 @@ def strings(
         encodings=tuple(encodings or ("ascii", "utf16le")),
         limit=limit,
         offset=offset,
+        pattern=pattern,
+        start=start,
+        end=end,
     )
 
 

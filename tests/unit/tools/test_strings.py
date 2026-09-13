@@ -71,6 +71,73 @@ class TestStrings:
         assert result["tool"] == "strings"
         assert "ebcdic" in result["error"] and "ascii" in result["error"]
 
+    def test_a_pattern_finds_a_marker_anywhere_in_the_file(self, tmp_path: Path) -> None:
+        """The live run's model passed byte offsets to ``offset`` and got empty
+        pages back; what it wanted was to search for a family marker."""
+        target = tmp_path / "s.bin"
+        target.write_bytes(
+            b"".join(_pad(f"filler{i:03d}".encode()) for i in range(200))
+            + _pad(b"AsyncRAT client v0.5.7B")
+        )
+
+        found = tool.strings(str(target), pattern="asyncrat")
+
+        assert [r["text"] for r in found["strings"]] == ["AsyncRAT client v0.5.7B"]
+        assert found["matched_total"] == 1
+        assert found["total"] == 201
+
+    def test_a_regex_pattern_is_written_with_the_re_prefix(self, tmp_path: Path) -> None:
+        target = tmp_path / "s.bin"
+        target.write_bytes(_pad(b"host: c2-01.example") + _pad(b"nothing to see"))
+
+        found = tool.strings(str(target), pattern=r"re:c2-\d+\.")
+
+        assert [r["text"] for r in found["strings"]] == ["host: c2-01.example"]
+
+    def test_a_pattern_that_does_not_compile_is_named(self, tmp_path: Path) -> None:
+        target = tmp_path / "s.bin"
+        target.write_bytes(_pad(b"anything at all"))
+
+        result = tool.strings(str(target), pattern="re:(unclosed")
+
+        assert result["tool"] == "strings"
+        assert "bad pattern" in result["error"]
+
+    def test_a_byte_range_narrows_the_scan_to_one_region(self, tmp_path: Path) -> None:
+        target = tmp_path / "s.bin"
+        blob = _pad(b"first-run-here") + _pad(b"second-run-here")
+        target.write_bytes(blob)
+
+        tail = tool.strings(str(target), start=16)
+        head = tool.strings(str(target), end=16)
+
+        assert [r["text"] for r in tail["strings"]] == ["second-run-here"]
+        assert [r["text"] for r in head["strings"]] == ["first-run-here"]
+        assert (tail["total"], tail["matched_total"]) == (2, 1)
+
+    def test_the_page_the_answer_was_cut_with_is_echoed(self, tmp_path: Path) -> None:
+        target = tmp_path / "s.bin"
+        target.write_bytes(b"".join(_pad(f"marker{i:03d}".encode()) for i in range(10)))
+
+        page = tool.strings(str(target), limit=3, offset=4)
+
+        assert page["page_offset"] == 4
+        assert page["page_limit"] == 3
+        assert page["matched_total"] == 10
+
+    def test_paging_counts_matches_rather_than_every_run(self, tmp_path: Path) -> None:
+        target = tmp_path / "s.bin"
+        target.write_bytes(
+            b"".join(_pad(f"marker{i:03d}".encode()) for i in range(10))
+            + b"".join(_pad(f"other{i:03d}".encode()) for i in range(10))
+        )
+
+        page = tool.strings(str(target), pattern="marker", offset=8)
+
+        assert [r["text"] for r in page["strings"]] == ["marker008", "marker009"]
+        assert page["matched_total"] == 10
+        assert page["truncated"] is False
+
 
 class TestIocsFromText:
     def test_a_url_a_host_and_a_public_ip_are_each_typed(self) -> None:

@@ -86,10 +86,13 @@
     ],
     "strings": [
       "encodings",
+      "end",
       "limit",
       "min_len",
       "offset",
-      "path"
+      "path",
+      "pattern",
+      "start"
     ],
     "yara_scan": [
       "path",
