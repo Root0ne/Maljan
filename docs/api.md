@@ -47,13 +47,50 @@ negotiates the `maljan.v1` subprotocol when the client asks for it.
 
 `GET /jobs/{job_id}/evidence` is the analysis's evidence ledger: one entry per
 tool call, in the order the calls were made. An entry carries the citation id
-the report quotes (`entry_id`, e.g. `ev_0007`), the agent, the tool server (null
-for an in-process tool), the tool, the arguments, whether the call succeeded,
-its duration, the result text and the parsed result when the tool answered
-JSON. `agent` and `tool` narrow it; `page` and `page_size` (up to 200) page it.
+the report quotes (`entry_id`, e.g. `ev_0007`), the stage, the agent, the tool
+server (null for an in-process tool), the tool, the arguments, whether the call
+succeeded, its duration, the result text and the parsed result when the tool
+answered JSON. `stage`, `agent` and `tool` narrow it — the three grains the
+console groups by — and `page` and `page_size` (up to 200) page it. Ordering is
+by the sequence the ids were issued in across the whole run, so paging walks
+the analysis rather than one agent at a time, and the page an id is on is
+therefore arithmetic: `ev_0051` is the first entry of page two at the default
+page size.
+
 Ownership is the job's own — the same rule the job's report endpoint applies —
 and an entry whose output was dropped to the per-agent byte budget comes back
 with an empty `output` and the rest of its record intact.
+
+### The run summary
+
+A finished report carries `run_summary`, and five of its keys describe the run
+rather than the sample:
+
+| Key | What it says |
+| :-- | :-- |
+| `evidence` | `entries`, `ok`, `failed`, `trimmed` and `by_tool` — how many calls the run made, how many worked, and how many lost their output to the per-agent byte budget. |
+| `sections_without_evidence` | Report sections that can name neither a ledger entry nor the finding they came from. Not zero is a defect. |
+| `validation` | `retries`, `by_code` and `unresolved` — what the feedback loops cost and what stayed wrong, with the agent that owns each. |
+| `corroboration` | Per technique id, the sources that named it. A count of distinct sources, not a combined confidence; the judge is listed as a source but does not corroborate, because it read the analysts. |
+| `stages` | Every stage of the active team in declaration order: `key`, `kind`, `ran`, `reason`, `agents`, `duration_ms`. A stage that declined is a row saying so, not an absent row. |
+
+### The analysis WebSocket
+
+`/ws/analysis/{job_id}` streams one run. Alongside `status_change`,
+`phase_change`, `agent_progress`, `agent_message`, `completed`, `error` and
+`cancelled`, the team announces each of its stages exactly once:
+
+| Event | Payload | When |
+| :-- | :-- | :-- |
+| `stage_started` | `stage`, `kind`, `agents` | The stage's first node runs. |
+| `stage_skipped` | `stage`, `kind`, `reason` | That node instead, when the stage's `when` condition is false. |
+| `stage_finished` | `stage`, `kind`, `ran`, `reason`, `agents`, `duration_ms` | The one node that runs after everything in the stage is done. |
+
+A stage that was skipped is never finished — the skip was its terminator — and
+no stage is announced twice, whatever shape it has. Events are also mirrored
+into a bounded Redis stream and served by `GET /jobs/{job_id}/events` for a tab
+that opens mid-run; the stream expires after 24 hours, after which
+`run_summary.stages` is the record.
 
 ### Reports
 
@@ -73,7 +110,11 @@ of changes in one write; `DELETE /settings/{key}` and `DELETE /settings` remove
 one override or a group's. `GET /settings/export` and `POST /settings/import`
 carry configuration between instances, and `POST /settings/test/{probe}` (plus
 `/test/mcp` and `/test/agent`, which take a body) run the connection probes.
-See [configuration.md](configuration.md).
+`POST /settings/validate-condition` checks one stage's `when` expression
+against the parser that will run it and answers `{"valid": …, "problems":
+[…]}`; it stores nothing, and the console calls it as each condition box loses
+focus so a typo is answered next to the box rather than at apply time. See
+[configuration.md](configuration.md).
 
 ## Conventions
 

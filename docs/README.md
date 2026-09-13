@@ -11,12 +11,12 @@ routers under `apps/api/app/api/v1/` and the compose stack in `docker/`.
 | :-- | :-- |
 | [getting-started.md](getting-started.md) | Prerequisites, the two configuration files, starting the stack, first login and first analysis. |
 | [configuration.md](configuration.md) | The bootstrap environment contract, Settings → Configuration, the setup guides, connection probes, JSON export and import, secret storage. |
-| [architecture.md](architecture.md) | Components, the request and job lifecycle, agents and profiles, providers, memory and reporting. |
+| [architecture.md](architecture.md) | Components, the request and job lifecycle, teams as stages, agents and their tools, the evidence ledger, validation loops and report assembly. |
 | [deployment.md](deployment.md) | Compose services and healthchecks, required secrets, health endpoints, Kubernetes and systemd notes, upgrades and migrations. |
-| [operations.md](operations.md) | Logs, the audit trail, rate limits, sample storage, backups and a troubleshooting table. |
+| [operations.md](operations.md) | Logs, what a run's metrics mean, staged samples, the audit trail, rate limits, backups and a troubleshooting table. |
 | [security.md](security.md) | Authentication, roles, API keys, secret encryption, what an export leaves out, CORS and cookie flags, vulnerability reporting. |
 | [development.md](development.md) | Repository layout, `make` targets, the test suites, CI jobs and the branch workflow. |
-| [api.md](api.md) | Router groups, OpenAPI, authentication headers and pagination conventions. |
+| [api.md](api.md) | Router groups, the evidence endpoint, the run-summary fields, the stage events on the WebSocket, authentication and pagination. |
 | [paper.md](paper.md) | Where the published evaluation, its harness and its fixtures live. |
 
 Images used by these documents and by the top-level [README.md](../README.md)

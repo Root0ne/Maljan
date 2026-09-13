@@ -5,6 +5,13 @@ import { useMemo, useState } from "react";
 import { useReport } from "../layout";
 import { entropyClass, formatBytes } from "@/lib/report-utils";
 import Th from "@/components/ui/Th";
+import { ArtifactSections } from "@/components/analysis/ArtifactTable";
+import {
+  binarySectionKeys,
+  importContainerLabel,
+  isCoveredBySection,
+  sectionsForTab,
+} from "@/components/analysis/reportSections";
 import { fileTypeLabel } from "@/types/malware-report";
 import type { StringIOC, StringIOCKind } from "@/types/malware-report";
 
@@ -34,6 +41,19 @@ export default function StaticTab() {
   const staticData = report?.malware_report?.static;
   const fileType = report?.malware_report?.identity?.file_type;
   const sectionsLabel = fileType ? `${fileTypeLabel(fileType)} Sections` : "Sections";
+  // The sections the tools produced lead the page; the extractor's typed
+  // tables draw underneath them, and only where a section has not already
+  // said the same thing.
+  const reportSections = report?.malware_report?.sections;
+  const evidenceSections = sectionsForTab(reportSections, "static");
+  const showsExtractedSections = !isCoveredBySection(
+    reportSections,
+    binarySectionKeys("sections")
+  );
+  const showsImports = !isCoveredBySection(reportSections, binarySectionKeys("imports"));
+  const showsExports = !isCoveredBySection(reportSections, binarySectionKeys("exports"));
+  const showsStrings = !isCoveredBySection(reportSections, ["strings"]);
+  const importContainer = importContainerLabel(fileType);
 
   const filteredImports = useMemo(() => {
     if (!staticData) return [];
@@ -73,17 +93,23 @@ export default function StaticTab() {
 
   if (!staticData) {
     return (
-      <div className="p-8 text-center text-sm text-text-secondary">
-        No static analysis data for this{" "}
-        {fileType ? <code>{fileTypeLabel(fileType)}</code> : "sample"} —
-        no format-aware extractor produced anything for it, or the loader was
-        unable to parse the file.
+      <div className="space-y-4">
+        <ArtifactSections sections={evidenceSections} />
+        <div className="p-8 text-center text-sm text-text-secondary">
+          No format-aware extractor produced a typed static block for this{" "}
+          {fileType ? <code>{fileTypeLabel(fileType)}</code> : "sample"}.{" "}
+          {evidenceSections.length > 0
+            ? "What the tools returned is above."
+            : "No static tool returned anything either."}
+        </div>
       </div>
     );
   }
 
   return (
     <div className="space-y-4">
+      <ArtifactSections sections={evidenceSections} />
+
       {/* Carved payloads lead the page. A nested executable inside a dropper
         * is the actual malware, and it was invisible here — `embedded_resources`
         * was in the type and rendered nowhere. */}
@@ -244,6 +270,7 @@ export default function StaticTab() {
         </div>
       )}
 
+      {showsExtractedSections && (
       <div className="bg-bg-surface border border-border rounded">
         <div className="px-4 py-3 border-b border-border flex items-center justify-between">
           <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
@@ -305,7 +332,9 @@ export default function StaticTab() {
           </table>
         )}
       </div>
+      )}
 
+      {showsImports && (
       <div className="bg-bg-surface border border-border rounded">
         <div className="px-4 py-3 border-b border-border flex items-center justify-between">
           <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
@@ -327,7 +356,7 @@ export default function StaticTab() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-border">
-                <Th>Module</Th>
+                <Th>{importContainer}</Th>
                 <Th>Function</Th>
                 <Th>Category</Th>
               </tr>
@@ -355,7 +384,9 @@ export default function StaticTab() {
           </div>
         )}
       </div>
+      )}
 
+      {showsStrings && (
       <div className="bg-bg-surface border border-border rounded">
         <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3 flex-wrap">
           <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
@@ -411,8 +442,9 @@ export default function StaticTab() {
           </div>
         )}
       </div>
+      )}
 
-      {staticData.exports.length > 0 && (
+      {showsExports && staticData.exports.length > 0 && (
         <div className="bg-bg-surface border border-border rounded">
           <div className="px-4 py-3 border-b border-border">
             <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">

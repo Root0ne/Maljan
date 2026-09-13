@@ -221,6 +221,10 @@ export interface SettingsValues {
 export interface PatchResult {
   applied: string[];
   applies: Partial<Record<Applies, number>>; // only the buckets that changed are present
+  /** Advisory notes about the configuration that resulted, keyed by the same
+   *  dotted path a 422 error uses. A warning never refused the write; it is
+   *  drawn on the card it names. */
+  warnings?: Record<string, string>;
 }
 
 /** The wire format both `GET /settings/export` and `POST /settings/import`

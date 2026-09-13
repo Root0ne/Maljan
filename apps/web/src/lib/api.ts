@@ -548,6 +548,17 @@ class ApiClient {
     );
   }
 
+  /**
+   * Check one stage's `when` expression against the grammar that will run it.
+   * Nothing is stored; the answer is the parser's own list of problems.
+   */
+  validateStageCondition(expression: string) {
+    return this.request<{ valid: boolean; problems: string[] }>(
+      "/api/v1/settings/validate-condition",
+      { method: "POST", body: JSON.stringify({ expression }) }
+    );
+  }
+
   /** Run a REST-sandbox mapping against a pasted response. Nothing is stored. */
   previewSandboxMapping(sample: unknown, mapping: Record<string, string>) {
     return this.request<MappingPreview>("/api/v1/settings/sandbox-rest/preview", {
@@ -691,8 +702,8 @@ class ApiClient {
 
   /**
    * One page of a job's evidence ledger — the tool calls its report cites.
-   * Filters narrow to one agent or one tool; the order is always the order
-   * the calls were made in.
+   * Filters narrow to one stage, one agent or one tool; the order is always
+   * the order the calls were made in.
    */
   getJobEvidence(jobId: string, query: EvidenceQuery = {}) {
     const params = new URLSearchParams({
@@ -701,6 +712,7 @@ class ApiClient {
     });
     if (query.agent) params.set("agent", query.agent);
     if (query.tool) params.set("tool", query.tool);
+    if (query.stage) params.set("stage", query.stage);
     return this.request<EvidenceListResponse>(
       `/api/v1/jobs/${jobId}/evidence?${params}`
     );

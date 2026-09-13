@@ -249,7 +249,19 @@ def _add_debate_stage(
             f"stage {stage.key!r} is a debate that feeds {len(heads)} nodes; "
             "a debate hands over to exactly one stage"
         )
-    onward = heads[0] if heads else END
+    # A terminal debate leaves through a barrier of its own rather than
+    # straight to END, because that barrier is the only node that can see the
+    # finished debate and announce it. Every other debate hands over to the
+    # single entry node of the stage that follows.
+    if entry.exit:
+        barrier = entry.exit[0]
+        builder.add_node(
+            barrier,
+            instrument_node(barrier, make_join_node(stage, container, closes.get(barrier, ()))),
+        )
+        onward = barrier
+    else:
+        onward = heads[0] if heads else END
 
     router = ConsensusRouter(container.config, stage=stage)
     builder.add_conditional_edges(

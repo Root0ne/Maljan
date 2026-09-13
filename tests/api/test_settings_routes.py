@@ -67,7 +67,11 @@ def test_patch_returns_applies_summary(client):
     ):
         r = client.patch("/api/v1/settings", json={"changes": {"core.llm.provider": "openai"}})
     assert r.status_code == 200
-    assert r.json() == {"applied": ["core.llm.provider"], "applies": {"next_job": 1}}
+    assert r.json() == {
+        "applied": ["core.llm.provider"],
+        "applies": {"next_job": 1},
+        "warnings": {},
+    }
 
 
 def test_patch_validation_error_is_422_with_field_map(client):
@@ -180,3 +184,48 @@ def test_the_preview_route_is_admin_only():
         "/api/v1/settings/sandbox-rest/preview", json={"sample": {}, "mapping": {}}
     )
     assert r.status_code in (401, 403)
+
+
+class TestValidatingOneStageCondition:
+    """The editor asks the parser, per blur, rather than waiting for apply.
+
+    The grammar has exactly one implementation and this endpoint is a thin
+    door onto it, so what is worth pinning is that the door is open, that it
+    answers with the parser's own words, and that it stores nothing.
+    """
+
+    def test_an_empty_condition_is_valid(self, client):
+        r = client.post("/api/v1/settings/validate-condition", json={"expression": "  "})
+        assert r.status_code == 200
+        assert r.json() == {"valid": True, "problems": []}
+
+    def test_a_condition_over_the_sample_is_valid(self, client):
+        r = client.post(
+            "/api/v1/settings/validate-condition",
+            json={"expression": 'platform == "windows"'},
+        )
+        assert r.json() == {"valid": True, "problems": []}
+
+    def test_an_unknown_name_comes_back_as_a_problem(self, client):
+        r = client.post(
+            "/api/v1/settings/validate-condition",
+            json={"expression": 'verdict == "Malware"'},
+        )
+        body = r.json()
+        assert body["valid"] is False
+        assert body["problems"]
+        assert "verdict" in body["problems"][0]
+
+    def test_a_call_is_refused_rather_than_evaluated(self, client):
+        r = client.post(
+            "/api/v1/settings/validate-condition",
+            json={"expression": '__import__("os").system("id")'},
+        )
+        assert r.json()["valid"] is False
+
+    def test_an_oversized_expression_is_refused_by_the_schema(self, client):
+        r = client.post(
+            "/api/v1/settings/validate-condition",
+            json={"expression": "a" * 2001},
+        )
+        assert r.status_code == 422

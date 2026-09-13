@@ -382,6 +382,113 @@ def _stage_member_errors(
     return errors
 
 
+STATIC_PROVIDER_KEY = "core.static.provider"
+
+
+def _effective_static_provider(overrides: dict[str, Any]) -> str:
+    """The static provider a run would open, from the store or the default."""
+    stored = overrides.get(STATIC_PROVIDER_KEY)
+    if isinstance(stored, str) and stored:
+        return stored
+    return str(build_settings({}).static.provider)
+
+
+def profile_warnings(
+    profiles: dict[str, Any],
+    *,
+    definitions: dict[str, Any],
+    overrides: dict[str, Any],
+) -> dict[str, str]:
+    """What is worth saying about a team that is nonetheless legal to save.
+
+    One rule so far, and it is the one `deep_static` needs: an agent given a
+    `provider` tool reference is given the tools of whichever static provider
+    the deployment configured, and when that provider is `none` the reference
+    resolves to nothing. The stage still runs, and its prompt still asks it to
+    open a decompiler, so what comes out is a confident ungrounded answer
+    rather than a visible failure.
+
+    Two degrees of it, because they are different problems. An agent whose
+    *whole* tool list is the provider has nothing at all to call. One that also
+    holds a tool server keeps that server and loses only the decompiler — which
+    is `deep_static`'s reverser, and still worth saying, because the prompt is
+    written around a decompiler it will not have.
+
+    A warning rather than a refusal, deliberately. A team validated against a
+    runtime provider setting is a team that cannot be saved before the provider
+    is configured, and the order an operator does those two things in is
+    theirs. Keyed by the same dotted path the errors use, so the console draws
+    it on the stage card the operator is looking at.
+    """
+    provider = _effective_static_provider(overrides)
+    if provider != "none":
+        return {}
+
+    warnings: dict[str, str] = {}
+    for name, entry in (profiles or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        # A team may force a provider of its own, in which case the global
+        # setting is not what its members open.
+        if entry.get("static_provider") not in (None, "none"):
+            continue
+        for stage in entry.get("stages") or []:
+            if not isinstance(stage, dict) or stage.get("kind") != "analysis":
+                continue
+            agents = [a for a in (stage.get("agents") or []) if isinstance(a, str)]
+            affected = [a for a in agents if _reads_the_static_provider(definitions.get(a))]
+            if not affected:
+                continue
+            toolless = all(_only_provider_tools(definitions.get(a)) for a in affected)
+            path = f"{AGENT_PROFILES_KEY}.{name}.stages.{stage.get('key', '')}"
+            members = ", ".join(affected)
+            consequence = (
+                "The stage will run with no tools at all."
+                if toolless and len(affected) == len(agents)
+                else "The stage will run without the decompiler its prompt asks for."
+            )
+            warnings[path] = (
+                f"{members} reads the static provider's tools, and this deployment's "
+                f"static provider is 'none'. {consequence} Choose a static provider, "
+                "or give the agents a tool server of their own."
+            )
+    return warnings
+
+
+def _agent_tools_and_provider(definition: Any) -> tuple[list[dict[str, Any]], Any] | None:
+    """One definition's tool list and its own provider override, or ``None``."""
+    if isinstance(definition, AgentDefinition):
+        return [ref.model_dump() for ref in definition.tools], definition.static_provider
+    if isinstance(definition, dict):
+        tools = definition.get("tools")
+        return (
+            [t for t in tools if isinstance(t, dict)] if isinstance(tools, list) else []
+        ), definition.get("static_provider")
+    return None
+
+
+def _reads_the_static_provider(definition: Any) -> bool:
+    """An agent that was given the tools of whatever provider is configured."""
+    pair = _agent_tools_and_provider(definition)
+    if pair is None:
+        return False
+    tools, own_provider = pair
+    if own_provider not in (None, "none"):
+        return False
+    return any(t.get("kind") == "provider" for t in tools)
+
+
+def _only_provider_tools(definition: Any) -> bool:
+    """An agent whose entire tool list is its static provider."""
+    pair = _agent_tools_and_provider(definition)
+    if pair is None:
+        return False
+    tools, _ = pair
+    if not tools:
+        return False
+    return {t.get("kind") for t in tools} == {"provider"}
+
+
 def validate_agent_map(changes: dict[str, Any], stored: dict[str, Any]) -> dict[str, Any]:
     """Validate whichever of the three agent keys this PATCH touches, together.
 

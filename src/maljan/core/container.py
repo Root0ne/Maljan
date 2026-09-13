@@ -130,6 +130,14 @@ class ServiceContainer:
         # worker (CLI, tests), which makes every emit a no-op — see
         # maljan.pipeline.events.
         self.event_sink = event_sink
+        # The stages that have already announced their end on this run. A
+        # stage's end is announced by whichever node runs after everything in
+        # it is done, and for a terminal fan-out or a terminal debate that is
+        # every one of its own nodes — so the announcement has to be claimed
+        # rather than simply made. Guarded by a lock because a parallel
+        # analysis stage's agents run in LangGraph worker threads.
+        self._finished_stages: set[str] = set()
+        self._finished_stages_lock = threading.Lock()
 
         self.agent_registry = AgentRegistry()
         self.parser_registry = ParserRegistry()
@@ -220,6 +228,24 @@ class ServiceContainer:
     @property
     def is_mock(self) -> bool:
         return self.mock
+
+    def claim_stage_finished(self, key: str) -> bool:
+        """Claim the right to announce ``key`` finished, once per run.
+
+        Returns ``True`` to the first caller for a stage and ``False`` to every
+        caller after it. Three shapes reach here more than once for the same
+        stage: a terminal parallel analysis stage with no barrier and a
+        terminal debate, whose own nodes all end at the same time and all see
+        the finished state, and the report node's closing rollup, which exists
+        to repair a run whose stages crashed before they could announce
+        themselves. The console draws one row per stage, so the second and
+        third announcements are noise at best and a duplicated row at worst.
+        """
+        with self._finished_stages_lock:
+            if key in self._finished_stages:
+                return False
+            self._finished_stages.add(key)
+            return True
 
     # ------------------------------------------------------------------
     # LLM accessors

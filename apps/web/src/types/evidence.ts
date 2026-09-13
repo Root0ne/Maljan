@@ -36,6 +36,7 @@ export interface EvidenceListResponse {
 export interface EvidenceQuery {
   agent?: string;
   tool?: string;
+  stage?: string;
   page?: number;
   pageSize?: number;
 }

@@ -16,7 +16,8 @@ Maljan/
 ├── scripts/
 │   ├── ci/            the uv.lock dependency-graph submission the workflow runs
 │   ├── dev/           fetch_external.sh and the Ghidra image manager
-│   ├── goldens/       one-off capture scripts that write tests/fixtures/golden/
+│   ├── goldens/       capture scripts that write tests/fixtures/golden/, plus
+│   │                  render_team_graphs.py, which draws docs/assets/team-*.svg
 │   └── knowledge/     builders for the data/ assets
 ├── tests/             unit/ api/ integration/ fixtures/
 ├── data/              tracked knowledge assets, loaded lazily, each with a fallback

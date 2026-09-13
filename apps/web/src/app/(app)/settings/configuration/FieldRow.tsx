@@ -113,6 +113,7 @@ export default function FieldRow({
   activeProfile,
   onSetActive,
   errors,
+  warnings,
   variant = "console",
 }: {
   entry: CatalogEntry;
@@ -147,6 +148,8 @@ export default function FieldRow({
    *  `core.agents.profiles.<key>` and land it on the card that caused it
    *  rather than a leaf-wide banner. */
   errors?: Record<string, string>;
+  /** Advisory notes from the last apply, keyed the way the errors are. */
+  warnings?: Record<string, string>;
   /** `console` is the settings page's compact row. `guide` is the setup
    *  guides' step field: no key/meta line, the whole description, and no
    *  Discard/Remove links — a guide step owns those decisions itself. */
@@ -198,6 +201,7 @@ export default function FieldRow({
             definitions={definitions ?? {}}
             activeProfile={activeProfile ?? "default"}
             errors={errors ?? {}}
+            warnings={warnings ?? {}}
             onChange={onChange}
             onSetActive={onSetActive ?? (() => undefined)}
           />

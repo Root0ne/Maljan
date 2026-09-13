@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { api } from "@/lib/api";
 import type {
   AgentDefinitionEntry,
   CatalogEntry,
@@ -22,7 +23,7 @@ const input =
   "w-full bg-bg-deep border border-border rounded px-2 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent";
 
 /** Seeded by the settings model, so they lock rather than delete. */
-const BUILTIN_PROFILES = new Set(["default", "measurement"]);
+const BUILTIN_PROFILES = new Set(["default", "measurement", "mobile", "deep_static"]);
 
 const KINDS: StageKind[] = ["analysis", "debate", "verdict", "report"];
 
@@ -56,10 +57,13 @@ const blankStage = (key: string): StageEntry => ({
  * rather than merely detectable. Moving a stage up past something it depends
  * on is therefore refused here rather than sent to the API to be rejected.
  *
- * Conditions are not validated in the browser. The grammar lives in
- * `pipeline/conditions.py` and the API answers with a per-stage error keyed
- * `core.agents.profiles.<team>.stages.<stage>.when`, which lands under the box
- * the operator typed it into — one grammar, one answer.
+ * Conditions are never parsed in the browser. The grammar lives in
+ * `pipeline/conditions.py`, and both answers about a condition come from it:
+ * the apply path rejects a bad one with a per-stage error keyed
+ * `core.agents.profiles.<team>.stages.<stage>.when`, and each condition box
+ * asks `POST /settings/validate-condition` as it loses focus so the operator
+ * hears about a typo while they are still on the stage that has it. One
+ * grammar, one answer, two moments.
  */
 export default function StagesEditor({
   entry,
@@ -68,6 +72,7 @@ export default function StagesEditor({
   definitions,
   activeProfile,
   errors,
+  warnings,
   onChange,
   onSetActive,
 }: {
@@ -81,6 +86,10 @@ export default function StagesEditor({
    *  `core.agents.profiles.<team>.stages.<stage>.<field>`), so a rejected
    *  stage is named on its own card rather than in a leaf-wide banner. */
   errors: Record<string, string>;
+  /** Advisory notes from the last apply, keyed by the same dotted path. A
+   *  warning is a legal configuration that will not do what it looks like it
+   *  does, so it sits on the stage card rather than blocking the save. */
+  warnings: Record<string, string>;
   onChange: (value: Record<string, ProfileEntry>) => void;
   onSetActive: (name: string) => void;
 }) {
@@ -199,6 +208,12 @@ export default function StagesEditor({
   const errorFor = (path: string, exact = false) =>
     Object.entries(errors).find(([k]) => (exact ? k === path : k === path || k.startsWith(`${path}.`)))?.[1];
 
+  // The API keys a warning by the same dotted path it keys an error by —
+  // `core.agents.profiles.<team>.stages.<stage>` — so the same lookup serves
+  // both and a warning lands on the card the operator was editing.
+  const warningFor = (path: string) =>
+    Object.entries(warnings).find(([k]) => k === path || k.startsWith(`${path}.`))?.[1];
+
   return (
     <div className="space-y-3" data-testid="stages-editor">
       {Object.entries(value).map(([key, profile]) => {
@@ -271,6 +286,7 @@ export default function StagesEditor({
                   analysts={analysts}
                   locked={locked}
                   error={errorFor(`${entry.key}.${key}.stages.${stage.key}`)}
+                  warning={warningFor(`${entry.key}.${key}.stages.${stage.key}`)}
                   onPatch={(next) => putStage(key, index, next)}
                   onMove={(by) => moveStage(key, index, by)}
                   onRemove={() => removeStage(key, index)}
@@ -338,6 +354,7 @@ function StageCard({
   analysts,
   locked,
   error,
+  warning,
   onPatch,
   onMove,
   onRemove,
@@ -350,6 +367,7 @@ function StageCard({
   analysts: string[];
   locked: boolean;
   error: string | undefined;
+  warning: string | undefined;
   onPatch: (next: Partial<StageEntry>) => void;
   onMove: (by: number) => void;
   onRemove: () => void;
@@ -359,6 +377,25 @@ function StageCard({
   // the built-in tool switch. Everything else on the card is read-only there.
   const fixed = locked;
   const debate = stage.debate;
+  // What the condition parser said about this box the last time it lost focus.
+  // `null` while nothing has been checked, so an untouched stage shows the
+  // help text alone rather than a green tick nobody asked for.
+  const [conditionProblems, setConditionProblems] = useState<string[] | null>(null);
+
+  const checkCondition = async (expression: string) => {
+    if (!expression.trim()) {
+      setConditionProblems(null);
+      return;
+    }
+    try {
+      const result = await api.validateStageCondition(expression);
+      setConditionProblems(result.problems);
+    } catch {
+      // The condition is still checked on apply, so a validator the browser
+      // could not reach must not read as a condition that failed.
+      setConditionProblems(null);
+    }
+  };
   const unused = analysts.filter((a) => !stage.agents.includes(a));
   const label = `${profile} ${stage.key}`;
 
@@ -523,8 +560,25 @@ function StageCard({
           placeholder="always"
           disabled={fixed}
           value={stage.when}
-          onChange={(e) => onPatch({ when: e.target.value })}
+          onChange={(e) => {
+            setConditionProblems(null);
+            onPatch({ when: e.target.value });
+          }}
+          onBlur={(e) => void checkCondition(e.target.value)}
         />
+        {conditionProblems && conditionProblems.length > 0 ? (
+          <ul className="text-[11px] text-status-red" role="alert">
+            {conditionProblems.map((problem) => (
+              <li key={problem}>{problem}</li>
+            ))}
+          </ul>
+        ) : (
+          conditionProblems && (
+            <span className="text-[10px] text-status-green">
+              The condition parses and every name in it resolves.
+            </span>
+          )
+        )}
         <span className="text-[10px] text-text-muted">
           Empty means always. Otherwise an expression over the sample and the stages before it,
           such as <code>platform == &quot;windows&quot;</code> or{" "}
@@ -627,6 +681,13 @@ function StageCard({
       {error && (
         <p className="text-[11px] text-status-red mt-2" role="alert">
           {error}
+        </p>
+      )}
+      {/* A warning is not a refusal: the team saved, and this says what it
+        * will do that the card does not show. */}
+      {warning && (
+        <p className="text-[11px] text-status-orange mt-2" role="status">
+          {warning}
         </p>
       )}
     </li>

@@ -25,6 +25,11 @@ export function buildFieldRowProps(ctx: SettingsContextValue, entry: CatalogEntr
     staged: ctx.pending[entry.key],
     error: ctx.errors[entry.key],
     errors: ctx.errors,
+    // Advisory notes from the last apply. They live on the result rather than
+    // on the staged edits because a warning is about the configuration that
+    // resulted, and the PATCH that produces one often names no team at all —
+    // switching the static provider to `none` is exactly that patch.
+    warnings: ctx.lastResult?.warnings ?? {},
     models: entry.probe === "llm" ? ctx.models : undefined,
     servers: (ctx.pending["core.mcp.servers"] ??
       ctx.values["core.mcp.servers"]?.value ??

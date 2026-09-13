@@ -615,12 +615,21 @@ def announce_finished(
     *,
     extra: dict[str, Any] | None = None,
 ) -> None:
-    """``stage_finished`` for every stage in ``keys`` that ran.
+    """``stage_finished`` for every stage in ``keys`` that ran, once each.
 
     Read from ``stage_results`` rather than from a node's return value, because
     the node closing a stage is often the first node of the *next* one and all
     it has is the merged state. A stage that declined to run is not announced
     again: ``stage_skipped`` was its terminator.
+
+    The announcement is claimed from the container rather than simply emitted.
+    A terminal parallel stage with no barrier and a terminal debate have no
+    single node that runs after them, so every one of their own nodes is a
+    finisher and would otherwise announce the stage once per node; the report
+    node's closing rollup would announce every stage a second time. Claiming
+    leaves the first announcement standing and drops the rest, which is what
+    makes the rollup a repair for a run that crashed mid-way rather than a
+    duplicate of a run that did not.
     """
     # ``extra`` is the closing node's own contribution, which LangGraph has
     # not merged into the state yet. Merged here with the channel's own
@@ -630,6 +639,8 @@ def announce_finished(
     for key in keys:
         record = recorded.get(key)
         if not isinstance(record, dict) or not record.get("ran"):
+            continue
+        if not container.claim_stage_finished(key):
             continue
         emit(
             container.event_sink,

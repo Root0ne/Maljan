@@ -351,8 +351,11 @@ class PersistenceMechanism(BaseModel):
 
     model_config = _STRICT_CONFIG
 
-    # Linux ELF persistence kinds, so the Mirai ELF audit's PERSISTENCE
-    # tab renders real signal instead of empty. Windows kinds remain canonical for PE.
+    # One vocabulary per platform the router accepts. A Windows-only list made
+    # every macOS launch agent and every Android boot receiver arrive as
+    # "other", which is the same as not reporting the mechanism at all: the
+    # kind is what a reader scans for and what the technique id is checked
+    # against.
     kind: Literal[
         # ── Windows (PE) ─────────────────────────────────────
         "registry_run",
@@ -375,6 +378,21 @@ class PersistenceMechanism(BaseModel):
         "rc_local",
         "ld_preload",
         "xdg_autostart",
+        "shell_profile",
+        "udev_rule",
+        "kernel_module",
+        # ── macOS (Mach-O) ───────────────────────────────────
+        "launch_agent",
+        "launch_daemon",
+        "login_item",
+        "kernel_extension",
+        "configuration_profile",
+        # ── Android (APK/DEX) ────────────────────────────────
+        "boot_receiver",
+        "device_admin",
+        "accessibility_service",
+        "foreground_service",
+        "work_scheduler",
         # ── Fallback ─────────────────────────────────────────
         "other",
     ]
