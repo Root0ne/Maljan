@@ -108,13 +108,25 @@ test("a citation chip on a report section links to its entry", async ({
   );
 });
 
-test("a section no tab claims is drawn beside the ledger", async ({
+test("a section no tab draws is shown beside the ledger", async ({
   authenticatedPage: page,
 }) => {
   await page.goto(`/analysis/${JOB_ID}/evidence`);
-  await expect(page.getByRole("heading", { name: /Sections no tab claims/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Sections no tab draws/i })).toBeVisible();
   await expect(page.getByRole("heading", { name: /R2 analysis/i })).toBeVisible();
   await expect(page.getByText("fcn.00401000")).toBeVisible();
+});
+
+test("the identity tab draws the sections routed to it", async ({
+  authenticatedPage: page,
+}) => {
+  await page.goto(`/analysis/${JOB_ID}/identity`);
+  await expect(page.getByRole("heading", { name: /PE header/i })).toBeVisible();
+  await expect(page.getByText("0x14c")).toBeVisible();
+  // The typed identity block stands down where a header section covers it,
+  // and the hashes stay, because no section carries them.
+  await expect(page.getByRole("heading", { name: /Sample Identification/i })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: /File Hashes/i })).toBeVisible();
 });
 
 test("a section covering a typed panel replaces it rather than repeating it", async ({

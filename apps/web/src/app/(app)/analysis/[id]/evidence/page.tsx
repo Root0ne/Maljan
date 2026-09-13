@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import { useReport } from "../layout";
 import EvidencePanel from "@/components/analysis/EvidencePanel";
 import { ArtifactSections } from "@/components/analysis/ArtifactTable";
-import { sectionsForTab } from "@/components/analysis/reportSections";
+import { unrenderedSections } from "@/components/analysis/reportSections";
 
 /**
  * The EVIDENCE tab: the ledger the whole report is standing on.
@@ -21,8 +21,10 @@ export default function EvidencePage() {
   const id = typeof params?.id === "string" ? params.id : "";
   // A section from a tool server nobody wrote this console against belongs to
   // no tab, and dropping it would undo the whole point of an open report. It
-  // lands here, next to the calls it was built from.
-  const unclaimed = sectionsForTab(report?.malware_report?.sections, "other");
+  // lands here, next to the calls it was built from — and so does a section
+  // routed to a tab that does not draw sections, which is the failure this net
+  // exists to catch rather than a case anyone will remember to check for.
+  const unclaimed = unrenderedSections(report?.malware_report?.sections);
 
   return (
     <div className="p-4 space-y-4">
@@ -38,7 +40,7 @@ export default function EvidencePage() {
       {unclaimed.length > 0 && (
         <div className="space-y-4">
           <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-            Sections no tab claims
+            Sections no tab draws
           </h2>
           <p className="text-[11px] text-text-muted">
             Built from this ledger by tools the typed tabs were not written against.

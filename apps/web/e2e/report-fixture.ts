@@ -335,6 +335,17 @@ export const MALWARE_REPORT: MalwareReport = {
       source: "tool:pe_info",
     },
     {
+      key: "pe_header",
+      title: "PE header",
+      kind: "kv" as const,
+      columns: ["Field", "Value"],
+      rows: [["machine", "0x14c"]],
+      text: "",
+      items: [],
+      evidence_ids: ["ev_0001"],
+      source: "tool:pe_info",
+    },
+    {
       key: "tool_r2_analysis",
       title: "R2 analysis",
       kind: "list" as const,

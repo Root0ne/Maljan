@@ -820,12 +820,22 @@ JUDGE_AGENT_KEY = "judge"
 # report stage names an agent like every other stage does.
 REPORTER_AGENT_KEY = "reporter"
 BUILTIN_AGENTS: tuple[str, ...] = ("static", "dynamic", "network", "judge", "reporter")
+
+
 # The generic agents the seeded ``mobile`` and ``deep_static`` teams are built
 # from. Kept apart from ``BUILTIN_AGENTS``, which names the roles that have a
 # class behind them: a generic agent is a definition, a prompt and a tool list,
 # and the whole point of seeding these is that a team of one's own is written
 # the same way. They are seeded and locked like any other built-in definition.
-SEEDED_GENERIC_AGENTS: tuple[str, ...] = ("triage", "android_static", "reverser")
+#
+# Derived from the seeds rather than written out beside them. A second
+# hand-kept copy of the same three names is a copy that goes stale the first
+# time a fourth is added.
+def seeded_generic_agents() -> tuple[str, ...]:
+    """The seeded definitions that are a prompt rather than a class."""
+    return tuple(key for key, d in _builtin_definitions().items() if d.role == "generic")
+
+
 BUILTIN_PROFILES: tuple[str, ...] = ("default", "measurement", "mobile", "deep_static")
 
 # What an agent may be handed as its input text. ``sample.path`` is the
@@ -1627,6 +1637,31 @@ class AgentsConfig(BaseModel):
                 merged[key] = entry
         return {**data, "definitions": merged}
 
+    @model_validator(mode="before")
+    @classmethod
+    def _rename_keys_a_seed_has_taken(cls, data: Any) -> Any:
+        """Move an operator's own agent or team off a key that is now built in.
+
+        Runs before anything else, because the identity check below refuses a
+        stored built-in that does not match its seed and it refuses it on every
+        construction — including the one the worker makes at boot. A key that
+        was legal when it was saved must not become a service that will not
+        start. See ``core.agent_key_migration``; ``Settings`` runs the same
+        pass over the whole document so the references outside this model are
+        rewritten too, and running it twice changes nothing.
+
+        Declared below the merge above deliberately: pydantic runs ``before``
+        validators in reverse declaration order, and the rename has to see the
+        stored entry as the operator wrote it. Merged first, an operator's own
+        `reverser` would be renamed carrying the seed's tools and label.
+        """
+        from maljan.core.agent_key_migration import rename_colliding_agent_keys
+
+        if not isinstance(data, dict):
+            return data
+        renamed, _ = rename_colliding_agent_keys({"agents": data})
+        return renamed["agents"]
+
     @model_validator(mode="after")
     def _seed_and_check(self) -> "AgentsConfig":
         """Re-seed the built-ins, then apply every rule that needs only this model.
@@ -2318,6 +2353,24 @@ class Settings(BaseSettings):
             self.llm.anthropic.api_key = self.anthropic_api_key
         if self.google_api_key and not self.llm.gemini.api_key:
             self.llm.gemini.api_key = self.google_api_key
+
+    @model_validator(mode="before")
+    @classmethod
+    def _rename_agent_keys_a_seed_has_taken(cls, data: Any) -> Any:
+        """The same rename as ``AgentsConfig``, over the whole document.
+
+        ``AgentsConfig`` can only reach the references inside itself. An agent
+        key appears three more times outside it — as a key of ``llm.agents``,
+        in each MCP server's ``agents`` binding, and in the two
+        ``react_*_overrides`` maps — and leaving any of them pointing at the
+        old name would silently drop a per-agent model choice or a timeout the
+        operator set. Both passes are idempotent, so the nested one finds
+        nothing left to do.
+        """
+        from maljan.core.agent_key_migration import rename_colliding_agent_keys
+
+        renamed, _ = rename_colliding_agent_keys(data)
+        return renamed
 
     @model_validator(mode="after")
     def _validate_agent_composition(self) -> "Settings":

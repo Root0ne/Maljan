@@ -29,6 +29,24 @@ export type SectionTab =
   | "persistence"
   | "other";
 
+/**
+ * The tabs that actually draw their sections, and the only list that decides.
+ *
+ * A tab in this set has a page that calls `sectionsForTab` and renders the
+ * result; a key routed to a tab that is not in it would be built, persisted,
+ * counted in the evidence metrics and drawn nowhere. `unrenderedSections`
+ * below is the net that catches exactly that, so adding a tab to `SectionTab`
+ * without giving it a renderer costs a section its page but never loses it.
+ */
+export const RENDERED_TABS: ReadonlySet<SectionTab> = new Set<SectionTab>([
+  "identity",
+  "static",
+  "dynamic",
+  "network",
+  "persistence",
+]);
+
+/** The heads a dotted key may carry, which is every tab but the fallback. */
 const TABS = new Set<string>([
   "identity",
   "static",
@@ -120,6 +138,23 @@ export function isCoveredBySection(
   const wanted = new Set(keys);
   return (sections ?? []).some(
     (section) => wanted.has(section.key) && sectionHasContent(section)
+  );
+}
+
+/**
+ * Every section whose tab does not draw it, plus the ones no tab claims.
+ *
+ * The EVIDENCE tab shows these beside the calls they were built from. It is a
+ * net rather than a list: a section is lost only if it is routed to a tab that
+ * renders sections and that tab then fails to draw it, which is a bug in one
+ * page rather than a hole in the routing. Everything else lands here.
+ */
+export function unrenderedSections(
+  sections: EvidenceSection[] | null | undefined
+): EvidenceSection[] {
+  return (sections ?? []).filter(
+    (section) =>
+      sectionHasContent(section) && !RENDERED_TABS.has(tabOfSection(section.key))
   );
 }
 

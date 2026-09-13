@@ -5,6 +5,12 @@ import { useState } from "react";
 import { useReport } from "../layout";
 import { copyToClipboard, formatBytes } from "@/lib/report-utils";
 import Field from "@/components/ui/Field";
+import { ArtifactSections } from "@/components/analysis/ArtifactTable";
+import {
+  binarySectionKeys,
+  isCoveredBySection,
+  sectionsForTab,
+} from "@/components/analysis/reportSections";
 import { fileTypeLabel, platformLabel } from "@/types/malware-report";
 import type { SampleIdentity } from "@/types/malware-report";
 
@@ -16,10 +22,23 @@ export default function IdentityTab() {
   }
 
   const identity: SampleIdentity | undefined = report?.malware_report?.identity;
+  // What the identifying tools returned, in their own shape: the `identity`
+  // key/value block and the header table of whichever binary-info tool ran.
+  // These lead the page; the typed block below is the report's own summary of
+  // the same facts and stands down when a header section already carries them.
+  const reportSections = report?.malware_report?.sections;
+  const evidenceSections = sectionsForTab(reportSections, "identity");
+  const showsTypedIdentity = !isCoveredBySection(reportSections, binarySectionKeys("header"));
+
   if (!identity) {
     return (
-      <div className="p-8 text-center text-sm text-text-secondary">
-        No identity payload available for this report.
+      <div className="space-y-4">
+        <ArtifactSections sections={evidenceSections} />
+        {evidenceSections.length === 0 && (
+          <div className="p-8 text-center text-sm text-text-secondary">
+            No identity payload available for this report.
+          </div>
+        )}
       </div>
     );
   }
@@ -33,6 +52,9 @@ export default function IdentityTab() {
 
   return (
     <div className="space-y-4">
+      <ArtifactSections sections={evidenceSections} />
+
+      {showsTypedIdentity && (
       <div className="bg-bg-surface border border-border rounded">
         <div className="px-4 py-3 border-b border-border flex items-center justify-between">
           <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
@@ -71,7 +93,10 @@ export default function IdentityTab() {
           />
         </div>
       </div>
+      )}
 
+      {/* The hashes are always drawn: no header section carries them, and they
+        * are what a reader copies out of this page. */}
       <div className="bg-bg-surface border border-border rounded">
         <div className="px-4 py-3 border-b border-border">
           <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">

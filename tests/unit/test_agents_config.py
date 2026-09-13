@@ -15,10 +15,10 @@ from maljan.core.config import (
     BUILTIN_AGENTS,
     BUILTIN_PROFILES,
     REPORTER_AGENT_KEY,
-    SEEDED_GENERIC_AGENTS,
     SERVER_KEY_PATTERN,
     Settings,
     ToolRef,
+    seeded_generic_agents,
 )
 
 
@@ -189,12 +189,12 @@ def test_the_default_settings_dump_is_exactly_the_pinned_dict():
     for key, expected in DEFAULT_AGENTS["definitions"].items():
         assert dumped["definitions"][key] == expected, key
     assert set(dumped["profiles"]) == set(BUILTIN_PROFILES)
-    assert set(dumped["definitions"]) == {*BUILTIN_AGENTS, *SEEDED_GENERIC_AGENTS}
+    assert set(dumped["definitions"]) == {*BUILTIN_AGENTS, *seeded_generic_agents()}
 
 
 def test_a_stored_map_holding_only_a_custom_agent_gets_the_built_ins_back():
     cfg = _settings(definitions={"strings": {"role": "generic", "prompt": "look at strings"}})
-    assert set(cfg.agents.definitions) == {*BUILTIN_AGENTS, *SEEDED_GENERIC_AGENTS, "strings"}
+    assert set(cfg.agents.definitions) == {*BUILTIN_AGENTS, *seeded_generic_agents(), "strings"}
     assert set(cfg.agents.profiles) == set(BUILTIN_PROFILES)
     assert cfg.agents.definitions["static"].role == "static"
 

@@ -49,8 +49,16 @@ describe("the judge as a source", () => {
     expect(isCorroborated(tech)).toBe(false);
   });
 
-  it("is recognised whatever case the producer wrote it in", () => {
+  it("is matched exactly, the way capability_matrix.py matches it", () => {
+    // A layer name is a validated agent key, so `"Judge"` cannot arrive from
+    // the pipeline. If one ever did, the backend would count it towards
+    // `is_corroborated` — and the badge here has to say the same thing the
+    // persisted flag says, even when both are wrong about the same row.
     expect(only([row({ contributing_layers: ["Judge", "static"] })]).corroborating).toEqual([
+      "Judge",
+      "static",
+    ]);
+    expect(only([row({ contributing_layers: ["judge", "static"] })]).corroborating).toEqual([
       "static",
     ]);
   });

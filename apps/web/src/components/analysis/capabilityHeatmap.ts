@@ -9,7 +9,14 @@
  * technique the judge named and no analyst claimed should say where it came
  * from. It is left out of the count, because the judge read the analysts:
  * agreeing with what it was shown is not a second observation.
- * `capability_matrix.py` computes `is_corroborated` exactly this way.
+ *
+ * The comparison is exact, and that is the whole of the rule:
+ * `capability_matrix.py` writes `lyr != _JUDGE_SOURCE`, and a layer name is a
+ * validated agent key — lowercase, trimmed, matched against
+ * `AGENT_KEY_PATTERN` — so there is no `"Judge"` or `" judge"` for a looser
+ * comparison to catch. Normalising here and not there would make the persisted
+ * `is_corroborated` and the badge on this page disagree about the same run,
+ * which is the one thing this module exists to prevent.
  *
  * **An id the catalog does not have keeps its row and gains a marker.** The
  * pipeline stopped deleting a producer's answer; a row nobody can resolve is
@@ -51,9 +58,9 @@ const ENTERPRISE_ORDER_BY_ID: Record<string, number> = Object.fromEntries(
 /** What the judge is called in `contributing_layers`. */
 export const JUDGE_SOURCE = "judge";
 
-/** A source that is the judge, whatever case the producer wrote it in. */
+/** A source that is the judge. Exact, because the backend's is. */
 function isJudge(source: string): boolean {
-  return source.trim().toLowerCase() === JUDGE_SOURCE;
+  return source === JUDGE_SOURCE;
 }
 
 // Sort key: canonical Enterprise order first, then any unrecognized tactic id
