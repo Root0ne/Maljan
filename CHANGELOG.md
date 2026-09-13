@@ -8,6 +8,50 @@ change landed on `main`.
 
 ### Added
 
+- **A team is a list of stages, not a list of analysts.** A profile
+  (`core.agents.profiles.<key>`) is now an ordered list of dependent,
+  conditional stages — the way a human analysis team works: triage, static,
+  dynamic, reversing, network and threat intel, correlation, report. Each stage
+  says what it is (`analysis`, `debate`, `verdict` or `report`), who is in it,
+  what it runs after, whether it runs at all (`when`), whether its members run
+  at once or in turn, what it is told about the stages before it, how hard it
+  argues if it is a debate, and whether its agents keep the built-in tool
+  servers. `pipeline/builder.py` builds the graph from the stages;
+  `pipeline/topology.py` names the nodes, and the default team's graph is the
+  graph it always was, node for node and edge for edge.
+- **A condition language for stages.** `pipeline/conditions.py` evaluates a
+  stage's `when` against the sample and the stages before it, using Python's
+  own parser with an allow-list on top: comparisons, boolean operators,
+  literals, and `stages.<key>.<field>` — no calls, no arithmetic, no attribute
+  access anywhere else. A condition that does not parse is refused when the
+  team is saved, per stage and per field; one that fails at run time skips its
+  stage with the reason recorded rather than failing the job. A stage that
+  declines to run is still a node in the graph, so the topology is a property
+  of the configuration and never of the sample.
+- **What each stage did, recorded and announced.** `state["stage_results"]`
+  carries a per-stage record — whether it ran, why not, the claims and
+  techniques it produced, who was in it and how long it took — merged per stage
+  so a parallel stage's agents add up instead of overwriting one another. It
+  reaches the reader as `run_summary.stages` and the console as
+  `stage_started` / `stage_skipped` / `stage_finished` events, and evidence
+  ledger entries now carry the stage they were made in.
+- **A stage can hand its findings to the next one.** `inject_upstream`
+  (`none`, `findings`, `full`) puts the upstream stages' claims — and
+  optionally their prose — at the head of a stage's prompt, capped by the new
+  `core.reporting.upstream_findings_max_chars`.
+- **An agent reads the data it is pointed at.** `agents.definitions.<key>.data_sources`
+  names slices from `sample.path`, `sample.chunks`, `sandbox.target`,
+  `sandbox.behavior`, `sandbox.network` and `sandbox.full`. Empty keeps the
+  slice the agent's role has always read, so nothing changes until it is set.
+- **`reporter`, a built-in definition.** The narrative and composer step has an
+  LLM entry (`llm.agents.reporter`) and a prompt of its own instead of
+  borrowing the judge's, and a report stage names it the way every other stage
+  names its agents.
+- **Debate options per stage.** `max_rounds`, `consensus_threshold` and
+  `sycophancy_check` belong to the debate stage that uses them, seeded from
+  the global negotiation settings, so a team with two debates can run them
+  differently.
+
 - **Validation loops in place of silent overrides.**
   `src/maljan/pipeline/validation.py` turns "this answer is wrong" into a
   `Violation` the producer is shown, in the same conversation that produced the
@@ -125,6 +169,15 @@ change landed on `main`.
 
 ### Changed
 
+- **The settings console edits teams, not profiles.** `StagesEditor` replaces
+  `ProfilesEditor`: a card per team, a card per stage, with the key, kind,
+  agents, dependencies, condition, run mode, upstream setting, debate options
+  and built-in tool switch on each, and move up/down that refuses a move which
+  would put a stage above something it depends on. The setup guide's last step
+  is "Add to a stage". `20260916000000_migrate_profiles_to_stages` gives every
+  stored profile the stage list its analysts have always meant, using the
+  stored `llm.parallel_analysts` and `negotiation.max_iterations`, and keeps
+  the analyst list so the downgrade can put it back.
 - **A degraded run is explained to the judge instead of capped afterwards.**
   The reasons a run is thin — no sandbox report, a failed analyst, a container
   nothing could open, anti-emulation behaviour — go into the verdict prompt and
