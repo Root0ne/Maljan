@@ -15,11 +15,16 @@ nodes import the builder that imports them.
     stage prefix: a profile may not put the same agent in two stages, so the
     agent key is already unique across the graph.
   * A parallel analysis stage contributes a barrier ``<stage>__join`` when its
-    dependents start at more than one node. With a single downstream entry the
-    barrier is redundant — LangGraph already waits for every predecessor of a
-    node — and adding it would have renamed the fan-in of the default profile.
+    dependents start at more than one node, and when nothing depends on it at
+    all. With a single downstream entry the barrier is redundant — LangGraph
+    already waits for every predecessor of a node — and adding it would have
+    renamed the fan-in of the default profile. With no downstream at all there
+    is nowhere the stage could be closed from, and each of its agents would
+    announce the stage finished from its own half of the merged result.
   * A debate stage contributes ``negotiation`` and ``revision``, prefixed
-    ``<stage>__`` when a profile holds more than one debate. One debate is the
+    ``<stage>__`` when a profile holds more than one debate, and a barrier
+    ``<stage>__join`` when nothing depends on it — the router's way out has to
+    lead somewhere that sees the finished debate. One debate is the
     overwhelmingly common case and the one the console was written against.
   * The verdict stage is ``judge`` and the report stage is ``report``. A
     profile has exactly one of the first and at most one of the second, so
@@ -65,7 +70,9 @@ class StageNodes:
     ``entry`` is what a dependency's exit points at; ``exit`` is what points at
     the next stage. A debate stage's outgoing edge is conditional and the
     builder wires it itself, which is why ``exit`` is empty there — an empty
-    exit means "this stage arranges its own way out".
+    exit means "this stage arranges its own way out". A terminal debate is the
+    exception: it leaves through a barrier of its own, so that the stage has
+    one node that runs after everything in it is done.
 
     ``starter`` is the one node that announces the stage began, so a stage of
     three analysts announces itself once rather than three times.
@@ -175,13 +182,16 @@ def _stage_nodes(
             if dependent.key in live_keys
             for node in entries[dependent.key]
         }
-        if len(downstream) > 1:
+        if len(downstream) > 1 or (not downstream and len(agents) > 1):
             barrier = join_node(stage)
             return StageNodes(stage, (*agents, barrier), entry, (barrier,))
         return StageNodes(stage, agents, entry, agents)
     if stage.kind == "debate":
         negotiation, revision = debate_nodes(profile, stage)
-        return StageNodes(stage, (negotiation, revision), entry, ())
+        if any(dependent.key in live_keys for dependent in dependents(profile, stage.key)):
+            return StageNodes(stage, (negotiation, revision), entry, ())
+        barrier = join_node(stage)
+        return StageNodes(stage, (negotiation, revision, barrier), entry, (barrier,))
     if stage.kind == "verdict":
         return StageNodes(stage, (JUDGE_NODE,), entry, (JUDGE_NODE,))
     return StageNodes(stage, (REPORT_NODE,), entry, (REPORT_NODE,))
