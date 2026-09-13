@@ -54,6 +54,46 @@ from maljan.schemas.stix_models import Bundle
 if TYPE_CHECKING:
     from maljan.memory.long_term_memory import MemoryStore
 
+# How many times the judge is asked again about a verdict answer that was
+# wrong. One: a second correction has never produced a better bundle than the
+# first, and every turn is a full judge timeout.
+_VERDICT_RETRIES = 1
+
+# The correction the judge is given for an answer that was not a bundle.
+_NOT_JSON_FEEDBACK = (
+    "Your previous answer was not a JSON STIX bundle. Return the JSON bundle only, "
+    "no tool calls, no prose."
+)
+
+# What is recorded when even the retry was not a bundle. The code lands in
+# ``run_summary.validation.unresolved``; the reason joins the report's
+# degradation reasons, where a reader looking at a verdict with no severity
+# will find out why it has none.
+VERDICT_FALLBACK_CODE = "verdict.fallback"
+VERDICT_FALLBACK_REASON = "judge verdict fell back to text extraction"
+
+
+def _answer_text(answer: Any) -> str:
+    """The text of a model answer, whatever shape it arrived in."""
+    content = getattr(answer, "content", answer)
+    return str(content if content is not None else "")
+
+
+def _is_not_json(answer: Any) -> bool:
+    """Whether an answer is something other than a JSON object.
+
+    An empty ``content`` carrying ``tool_calls`` counts: the judge binds no
+    tools on the verdict path, so a tool call there is the local model
+    emitting its own control tokens rather than an answer.
+    """
+    from maljan.utils.json_cleaner import safe_parse_json
+
+    text = _answer_text(answer).strip()
+    if not text:
+        return True
+    return not isinstance(safe_parse_json(text), dict)
+
+
 # Consensus threshold: mediator confidence must reach this to stop negotiation early
 CONSENSUS_THRESHOLD = 0.85
 
@@ -671,9 +711,30 @@ class JudgeAgent:
                 timed_out = True
                 return "[TIMEOUT]"
 
+        # Whether the answer being validated was a JSON bundle at all, and how
+        # many turns have been spent. A model that answered with prose or with
+        # a tool call has said nothing about the sample, and the fallback
+        # extraction over that text is worth building only once the model has
+        # had its one chance to answer properly.
+        not_json = False
+        attempts = 0
+
         def _parse(answer: Any) -> Bundle:
+            nonlocal not_json, attempts
+            attempts += 1
             if timed_out:
+                not_json = False
                 return self._fallback_bundle_from_text("[TIMEOUT]", reports, isr_reports)
+            not_json = _is_not_json(answer)
+            if not_json:
+                self.logger.warning(
+                    "Judge verdict: the model answered with %d character(s) that are not a JSON "
+                    "bundle; asking once more before falling back to text extraction.",
+                    len(_answer_text(answer)),
+                )
+                if attempts <= _VERDICT_RETRIES:
+                    # A retry is coming and this bundle would be thrown away.
+                    return Bundle(objects=[])
             return self._bundle_from_response(answer, reports, isr_reports)
 
         # The same catalogue the analyst loop consults. Absent (an air-gapped
@@ -692,11 +753,24 @@ class JudgeAgent:
             # same fallback bundle.
             if timed_out:
                 return []
+            if not_json:
+                return [Violation(code="verdict.not_json", message=_NOT_JSON_FEEDBACK)]
             return validate_verdict_bundle(bundle, evidence_corpus, attck=_knowledge)
 
         bundle, violations, retries = await retry_with_feedback(
-            _run, messages, [_validate], parse=_parse
+            _run, messages, [_validate], max_retries=_VERDICT_RETRIES, parse=_parse
         )
+        if not_json:
+            # The retry answered with prose or a tool call as well, so the
+            # bundle is whatever the text extraction could make of it. That is
+            # a fact about this run, not a schema problem the model can fix:
+            # the feedback violation is replaced by one that says the verdict
+            # is a fallback, and it stays unresolved so the run summary and the
+            # report's degradation reasons both carry it.
+            violations = [v for v in violations if v.code != "verdict.not_json"]
+            violations.append(
+                Violation(code=VERDICT_FALLBACK_CODE, message=VERDICT_FALLBACK_REASON)
+            )
         dropped = drop_ungrounded_indicators(bundle, violations)
         if dropped:
             self.logger.warning(

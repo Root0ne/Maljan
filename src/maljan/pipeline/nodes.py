@@ -15,6 +15,7 @@ from contextlib import suppress
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, cast
 
+from maljan.agents.judge_agent import VERDICT_FALLBACK_CODE, VERDICT_FALLBACK_REASON
 from maljan.analysis.run_summary import RunSummaryBuilder
 from maljan.core.config import BUILTIN_AGENTS
 from maljan.core.container import ServiceContainer
@@ -1917,6 +1918,14 @@ def make_judge_node(
                 evidence_corpus=evidence_corpus or None,
                 current_sample_id=state.get("file_hash"),
             )
+            # A verdict the judge never expressed as a bundle is the thinnest
+            # answer this pipeline can produce — no severity, no reasoning the
+            # model stands behind — and before this it reached the reader as an
+            # ordinary verdict with a slightly emptier STIX object.
+            if any(v.code == VERDICT_FALLBACK_CODE for v in verdict.violations):
+                _degradation_reasons.append(VERDICT_FALLBACK_REASON)
+                _degraded_mode = True
+
             bundle = verdict.bundle
             stix_output: dict[str, Any] = bundle.model_dump() if isinstance(bundle, Bundle) else {}
             decision = _decide_from_bundle(bundle) if isinstance(bundle, Bundle) else "Suspicious"
