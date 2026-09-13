@@ -119,6 +119,19 @@ class MappingPreviewRequest(BaseModel):
     mapping: dict[str, Any]
 
 
+class ConditionValidateRequest(BaseModel):
+    """One stage's ``when`` expression, as the operator has typed it so far."""
+
+    expression: str = Field("", max_length=2000)
+
+
+class ConditionValidateResponse(BaseModel):
+    """Everything wrong with the expression. An empty list means it is fine."""
+
+    valid: bool
+    problems: list[str]
+
+
 class ChannelPreview(BaseModel):
     matched: int
     kept: int

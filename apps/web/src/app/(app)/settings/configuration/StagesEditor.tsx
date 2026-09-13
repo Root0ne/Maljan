@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { api } from "@/lib/api";
 import type {
   AgentDefinitionEntry,
   CatalogEntry,
@@ -56,10 +57,13 @@ const blankStage = (key: string): StageEntry => ({
  * rather than merely detectable. Moving a stage up past something it depends
  * on is therefore refused here rather than sent to the API to be rejected.
  *
- * Conditions are not validated in the browser. The grammar lives in
- * `pipeline/conditions.py` and the API answers with a per-stage error keyed
- * `core.agents.profiles.<team>.stages.<stage>.when`, which lands under the box
- * the operator typed it into — one grammar, one answer.
+ * Conditions are never parsed in the browser. The grammar lives in
+ * `pipeline/conditions.py`, and both answers about a condition come from it:
+ * the apply path rejects a bad one with a per-stage error keyed
+ * `core.agents.profiles.<team>.stages.<stage>.when`, and each condition box
+ * asks `POST /settings/validate-condition` as it loses focus so the operator
+ * hears about a typo while they are still on the stage that has it. One
+ * grammar, one answer, two moments.
  */
 export default function StagesEditor({
   entry,
@@ -359,6 +363,25 @@ function StageCard({
   // the built-in tool switch. Everything else on the card is read-only there.
   const fixed = locked;
   const debate = stage.debate;
+  // What the condition parser said about this box the last time it lost focus.
+  // `null` while nothing has been checked, so an untouched stage shows the
+  // help text alone rather than a green tick nobody asked for.
+  const [conditionProblems, setConditionProblems] = useState<string[] | null>(null);
+
+  const checkCondition = async (expression: string) => {
+    if (!expression.trim()) {
+      setConditionProblems(null);
+      return;
+    }
+    try {
+      const result = await api.validateStageCondition(expression);
+      setConditionProblems(result.problems);
+    } catch {
+      // The condition is still checked on apply, so a validator the browser
+      // could not reach must not read as a condition that failed.
+      setConditionProblems(null);
+    }
+  };
   const unused = analysts.filter((a) => !stage.agents.includes(a));
   const label = `${profile} ${stage.key}`;
 
@@ -523,8 +546,25 @@ function StageCard({
           placeholder="always"
           disabled={fixed}
           value={stage.when}
-          onChange={(e) => onPatch({ when: e.target.value })}
+          onChange={(e) => {
+            setConditionProblems(null);
+            onPatch({ when: e.target.value });
+          }}
+          onBlur={(e) => void checkCondition(e.target.value)}
         />
+        {conditionProblems && conditionProblems.length > 0 ? (
+          <ul className="text-[11px] text-status-red" role="alert">
+            {conditionProblems.map((problem) => (
+              <li key={problem}>{problem}</li>
+            ))}
+          </ul>
+        ) : (
+          conditionProblems && (
+            <span className="text-[10px] text-status-green">
+              The condition parses and every name in it resolves.
+            </span>
+          )
+        )}
         <span className="text-[10px] text-text-muted">
           Empty means always. Otherwise an expression over the sample and the stages before it,
           such as <code>platform == &quot;windows&quot;</code> or{" "}

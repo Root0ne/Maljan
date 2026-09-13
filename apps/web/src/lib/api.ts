@@ -548,6 +548,17 @@ class ApiClient {
     );
   }
 
+  /**
+   * Check one stage's `when` expression against the grammar that will run it.
+   * Nothing is stored; the answer is the parser's own list of problems.
+   */
+  validateStageCondition(expression: string) {
+    return this.request<{ valid: boolean; problems: string[] }>(
+      "/api/v1/settings/validate-condition",
+      { method: "POST", body: JSON.stringify({ expression }) }
+    );
+  }
+
   /** Run a REST-sandbox mapping against a pasted response. Nothing is stored. */
   previewSandboxMapping(sample: unknown, mapping: Record<string, string>) {
     return this.request<MappingPreview>("/api/v1/settings/sandbox-rest/preview", {
