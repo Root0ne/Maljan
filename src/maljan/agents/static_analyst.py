@@ -31,10 +31,19 @@ _ISR_HEAD = (
     "You are an expert Static Malware Analyst with 15 years of reverse engineering experience. "
 )
 
+# What a claim is for. A live run produced 39 claims of which most were the
+# sample's own metadata at confidence 1.00 -- "the binary has a sha256 hash of
+# ...", "mime type consistent" -- which the judge then weighed as evidence of
+# something. Those facts belong in the artifacts block, which exists for them.
+_CLAIMS_BEAR_ON_THE_VERDICT = (
+    "\n\nClaims state findings that bear on the verdict. File metadata — hashes, size, "
+    "mime type, machine type, timestamps — goes in the artifacts block, not in claims."
+)
+
 # The optional structured channel, appended after the provider fragment so it
 # is the last thing the analyst reads before it answers. The assembly order is
 # the contract the tool-server and agent-composition layers build prompts from.
-_ISR_TAIL = FINDINGS_BLOCK_FRAGMENT
+_ISR_TAIL = FINDINGS_BLOCK_FRAGMENT + _CLAIMS_BEAR_ON_THE_VERDICT
 
 
 def _static_prompt(provider: Any | None = None) -> str:
