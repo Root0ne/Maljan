@@ -241,6 +241,7 @@ async def get_job_evidence(
     job_id: uuid.UUID,
     agent: str | None = Query(None, max_length=100),
     tool: str | None = Query(None, max_length=200),
+    stage: str | None = Query(None, max_length=100),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     user: User = Depends(get_current_user),
@@ -253,6 +254,9 @@ async def get_job_evidence(
     checks it: a ledger is as sensitive as the report built from it. Ordered by
     ``seq``, which is the order the ids were issued in across the whole run,
     so paging walks the analysis rather than one agent at a time.
+
+    The three filters are the three grains the console groups by: the stage a
+    call belongs to, the agent that made it and the tool it called.
     """
     from sqlalchemy import func as sa_func
     from sqlalchemy import select as sa_select
@@ -272,6 +276,8 @@ async def get_job_evidence(
         filters.append(EvidenceEntry.agent == agent)
     if tool:
         filters.append(EvidenceEntry.tool == tool)
+    if stage:
+        filters.append(EvidenceEntry.stage == stage)
 
     total = (
         await db.execute(sa_select(sa_func.count()).select_from(EvidenceEntry).where(*filters))

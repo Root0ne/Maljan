@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 
 import { useReport } from "./layout";
 import { api } from "@/lib/api";
@@ -253,6 +254,8 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
   // banner. ``explanation`` is shown as small muted text below each rule.
   const fpWarnings: FpWarning[] = runSummary?.fp_warnings ?? [];
   const hasErrorWarning = fpWarnings.some((w) => w.severity === "error");
+  const evidence = runSummary?.evidence ?? null;
+  const ungroundedSections = runSummary?.sections_without_evidence ?? 0;
 
   return (
     <div className="grid grid-cols-2 gap-4">
@@ -442,6 +445,48 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
           </div>
         )}
       </div>
+
+      {/* What the report is standing on. Counted at build time from the
+          ledger, so it says how much of the report is checkable and how much
+          of it is not — a section with neither a ledger entry nor a named
+          finding behind it is a defect, and this is where it shows. */}
+      {evidence && (
+        <div className="col-span-2 bg-bg-surface border border-border rounded">
+          <div className="px-4 py-3 border-b border-border flex items-center gap-3">
+            <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+              Evidence
+            </h2>
+            <Link
+              href={`/analysis/${report?.job_id ?? ""}/evidence`}
+              className="ml-auto text-[11px] text-accent-strong hover:underline"
+            >
+              Open the ledger
+            </Link>
+          </div>
+          <div className="p-4 grid grid-cols-5 gap-3 text-center">
+            <Stat label="Calls" value={evidence.entries ?? 0} />
+            <Stat label="Succeeded" value={evidence.ok ?? 0} accent="text-status-green" />
+            <Stat
+              label="Failed"
+              value={evidence.failed ?? 0}
+              accent={(evidence.failed ?? 0) > 0 ? "text-status-red" : undefined}
+            />
+            <Stat label="Trimmed" value={evidence.trimmed ?? 0} />
+            <Stat
+              label="Ungrounded sections"
+              value={ungroundedSections}
+              accent={ungroundedSections > 0 ? "text-status-orange" : undefined}
+            />
+          </div>
+          {ungroundedSections > 0 && (
+            <p className="px-4 pb-4 text-[11px] text-text-muted">
+              {ungroundedSections} report{" "}
+              {ungroundedSections === 1 ? "section names" : "sections name"} neither a ledger
+              entry nor the finding it came from, so nothing in the console can resolve it.
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Executive summary */}
       <div className="col-span-2 bg-bg-reading border border-border rounded">

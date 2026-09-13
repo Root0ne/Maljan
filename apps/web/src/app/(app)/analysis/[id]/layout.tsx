@@ -93,6 +93,9 @@ const TABS: TabDef[] = [
   { key: "/defense", label: "DEFENSE", group: "intel" },
   // AGENTS + PIPELINE + TIMELINE merged into one PROCESS tab.
   { key: "/process", label: "PROCESS", group: "advanced" },
+  // The ledger every other tab cites. Its own tab rather than a section of
+  // PROCESS: a citation chip anywhere in the report links straight to a row.
+  { key: "/evidence", label: "EVIDENCE", group: "advanced" },
   // LIVE shown only while the job is running (see filter below).
   { key: "/live", label: "LIVE", group: "advanced", liveOnly: true },
 ];

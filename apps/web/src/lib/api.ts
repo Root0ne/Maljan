@@ -702,8 +702,8 @@ class ApiClient {
 
   /**
    * One page of a job's evidence ledger — the tool calls its report cites.
-   * Filters narrow to one agent or one tool; the order is always the order
-   * the calls were made in.
+   * Filters narrow to one stage, one agent or one tool; the order is always
+   * the order the calls were made in.
    */
   getJobEvidence(jobId: string, query: EvidenceQuery = {}) {
     const params = new URLSearchParams({
@@ -712,6 +712,7 @@ class ApiClient {
     });
     if (query.agent) params.set("agent", query.agent);
     if (query.tool) params.set("tool", query.tool);
+    if (query.stage) params.set("stage", query.stage);
     return this.request<EvidenceListResponse>(
       `/api/v1/jobs/${jobId}/evidence?${params}`
     );
