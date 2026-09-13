@@ -129,7 +129,7 @@ Connection tests are available on the settings that have a probe. An instance
 that is already configured can be reproduced with a JSON export instead; see
 [configuration.md](configuration.md).
 
-## First analysis
+## First analysis, with the default team
 
 Upload a sample from the console and start an analysis, or drive the API:
 
@@ -147,10 +147,61 @@ curl -X POST http://localhost:8000/api/v1/jobs \
 ```
 
 Progress streams over the WebSocket at `/ws/analysis/{job_id}`, which is what
-the console's analysis page subscribes to. When the run finishes, the report
-appears under the analysis detail page, and the same content is available as
-Markdown, HTML, PDF, STIX 2.1 and a MITRE view under
+the console's analysis page subscribes to. The **PROCESS** tab draws the run as
+the stages the team has, each one filling in as it starts and finishes; the
+**EVIDENCE** tab is the ledger of every tool call the run made. When the run
+finishes, the report appears under the analysis detail page, and the same
+content is available as Markdown, HTML, PDF, STIX 2.1 and a MITRE view under
 `/api/v1/reports/{report_id}/...` — see [api.md](api.md).
+
+![The analysis summary](assets/analysis-summary.png)
+
+Read the report from the evidence up rather than from the verdict down. Every
+section of it carries the ledger ids it was built from, rendered as chips; a
+chip opens that call on the EVIDENCE tab with its arguments, its result and how
+long it took. The **Evidence** card on the summary tab counts what the whole
+report is standing on — how many calls were made, how many failed, and how many
+sections can name nothing at all.
+
+## Then: measure the model without tools
+
+`measurement` is the same three analysts as `default` with every tool server
+withheld and the static provider forced to `none`. Running the same sample
+under it answers a question the default team cannot: how much of the verdict
+was the tools and how much was the model.
+
+Switch teams under **Settings → Agents and pipeline → Teams**, or per job:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/jobs \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"sample_id":"<id>","config":{"profile":"measurement"}}'
+```
+
+The run will produce a report with an all but empty evidence ledger, and that
+is the point: compare its verdict, its techniques and its
+`run_summary.corroboration` against the same sample's default run. A
+measurement team is a profile rather than three tool-free clones of the
+definitions, so the agents it measures cannot drift from the ones `default`
+runs.
+
+## Then: an APK, with the mobile team
+
+`mobile` is a six-stage team for a mobile sample — `triage`, `android_static`
+and `dynamic`, then the debate, the verdict and the report. Upload an APK and run
+it under `profile: "mobile"`.
+
+Two things are worth watching on the PROCESS tab. The `android_static` stage
+runs only when the sample really is an APK or a DEX (`when: file_type in
+("apk", "dex")`), and the `dynamic` stage only when a sandbox report reached
+the run. Submit a PE under the same team and the Android stage appears as a row
+that declined, with the condition it failed written next to it — the team was
+applied, and the console shows what it chose not to do.
+
+The third seeded team, `deep_static`, adds a `reversing` stage that is handed
+the static stage's findings and asked to confirm or refute each of them at
+function level. It needs a static provider with a decompiler behind it —
+Ghidra or r2 — to be worth running.
 
 ## Without Docker
 

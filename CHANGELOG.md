@@ -8,6 +8,44 @@ change landed on `main`.
 
 ### Added
 
+- **Two more teams ship: `mobile` and `deep_static`.** `mobile` is triage, an
+  Android static pass conditional on `file_type in ("apk", "dex")`, detonation
+  conditional on a sandbox report, then the debate, the verdict and the report.
+  `deep_static` is triage, the static pass, a `reversing` stage handed the
+  static stage's findings and asked to confirm or refute each at function
+  level, then a network stage conditional on a capture or a sandbox report.
+  Both are built from three seeded generic agents — `triage`, `android_static`
+  and `reverser` — whose prompts live in `src/maljan/agents/prompts/` and name
+  no Windows artefact. Submitting a PE under `mobile` produces a run whose
+  Android stage declines and says which condition it failed, rather than one
+  that shows nothing.
+- **The evidence ledger is a console tab.** `analysis/{id}/evidence` is the
+  ledger itself: one row per tool call with its stage, agent, server, tool,
+  arguments, duration and outcome, narrowable by stage, agent or tool, paged,
+  and expandable to the full output and the parsed result. Every citation in
+  the report renders as a chip linking to `?evidence=ev_0007`, which opens that
+  row and scrolls to it, and the summary tab counts what the report is standing
+  on. `GET /jobs/{id}/evidence` gains the `stage` filter the panel groups by.
+- **Report sections lead the analysis tabs.** `ArtifactTable` renders an
+  `EvidenceSection` from its own declared shape — table, key/value, list or
+  prose — with the ledger ids behind it, so a tool server nobody wrote this
+  console against reaches the report with its citations intact. Each typed tab
+  draws its sections first and falls back to the extractor's own table only
+  where no section covers the same ground.
+- **The console draws a run as its stages.** The pipeline panel builds one row
+  per stage — key, kind, agents, running or done or skipped with the reason,
+  duration — from the live stage events while the run happens and from
+  `run_summary.stages` afterwards, with the analyst rows nested inside the
+  stage that ran them. The live page shows the same strip, and the agents table
+  groups by stage and counts each agent's tool calls from the ledger. A run
+  stored before the team was stages keeps the flat chain it always had.
+- **A stage condition is checked as it is typed.** `POST
+  /api/v1/settings/validate-condition` runs the same `pipeline.conditions`
+  parser against one expression and stores nothing; the stage editor calls it
+  per blur, so a typo is answered under the box rather than at apply time.
+- **The team diagrams are generated.** `scripts/goldens/render_team_graphs.py`
+  draws each seeded team from the profile itself into `docs/assets/`, and a
+  smoke test fails if the committed SVGs stop matching the teams.
 - **A team is a list of stages, not a list of analysts.** A profile
   (`core.agents.profiles.<key>`) is now an ordered list of dependent,
   conditional stages — the way a human analysis team works: triage, static,
@@ -170,6 +208,24 @@ change landed on `main`.
 
 ### Fixed
 
+- **A stage announced its end once per node.** Two shapes had no node of their
+  own that runs after everything in them is done — a parallel analysis stage
+  nothing depends on, whose agents all end at once, and a terminal debate,
+  which leaves through a conditional edge — so every one of their nodes
+  announced `stage_finished`, each carrying only the half of the merged result
+  that node could see. Both now get the barrier they were missing, and the
+  announcement is claimed once per stage, which also turns the report node's
+  closing rollup back into the repair for a crashed run that it was meant to
+  be.
+- **The console stopped presenting Windows shapes as the default.** The imports
+  table names the format's own container instead of saying Module for every
+  sample, the registry panel appears because something touched a key rather
+  than because the sample is a PE, the persistence labels cover macOS and
+  Android as well as Windows and Linux, the ATT&CK matrix counts the judge as a
+  source and not as a corroboration — exactly as `capability_matrix.py` does —
+  an id the catalog does not have is printed with a marker instead of reading
+  as a normal row, and the severity prints the judge's own reasoning under the
+  rating rather than a rating with no argument behind it.
 - **Sigma Layer 0 was contributing nothing.** 272 of the 4241 rules under
   `data/sigma_rules` parse into a detection object with no `parsed_condition`,
   and reading that attribute raised out of the first such rule every scan

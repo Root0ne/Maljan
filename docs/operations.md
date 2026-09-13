@@ -26,6 +26,37 @@ make dev-logs                                   # the whole dev stack
 cd docker && docker compose logs -f backend-worker
 ```
 
+## What a run's metrics mean
+
+Every finished report carries a `run_summary`, and five of its keys are about
+the run rather than the sample. They are the numbers to read before the
+verdict, because each of them says how much the verdict is standing on.
+
+| Metric | Healthy | What a bad number means, and what to do |
+| :-- | :-- | :-- |
+| `validation.retries` | A handful | Every retry is one extra model round trip. A run spending dozens of them is a model that keeps answering in the wrong shape; check `by_code` for which rule it keeps breaking, and the agent's prompt or its model choice. |
+| `validation.unresolved` | Empty | A producer was told what was wrong, got its turn, and did not fix it. The finding is on the record with the agent that owns it. A recurring code from one agent is a prompt problem; a recurring `technique_id` code across agents usually means the ATT&CK cache is stale. |
+| `sections_without_evidence` | `0` | A report section that can name neither a ledger entry nor the finding it came from. Nothing in the console can resolve it, so a reader has no way to check it. Not an operator setting — it is a defect in whichever builder produced the section. |
+| `evidence.failed` | Low | Tool calls that raised. A few are normal (a parser that cannot open a container); a large share against one server means that server is misconfigured or down, and the analysts spent the run guessing. |
+| `evidence.trimmed` | `0` | Entries whose output was dropped to keep an agent inside `report.evidence_budget_bytes`. The call and its result still stand and are still citable; the text is gone. Persistent trimming means the budget is too small for the tools this deployment runs, or one tool is answering with a log file. |
+| `stages` | Every stage `ran` | A stage that declined records the condition that turned it off. A team where the same stage always declines is a condition that does not match the samples this deployment sees, not a broken run. |
+
+`fp_warnings` is the post-run linter and changes nothing: C6 flags a section or
+a TTP row with nothing citable behind it, C7 a technique id the validation loop
+could not get resolved.
+
+## Staged samples
+
+A tool server reached over HTTP does not share the worker's filesystem, so the
+sample is delivered to it rather than named. The worker writes each delivery
+into the staging directory (`MALJAN_STAGING_DIR`, a `maljan-analysis-mcp` directory under the
+system temp directory by default) and the sidecars sweep it on a TTL
+(`MALJAN_STAGING_TTL_HOURS`, 24 hours by default; `0` disables pruning).
+Everything in it is live malware, on the same terms as `SAMPLES_DIR`: exclude
+it from on-access scanning and keep it off shared storage. A staging write that
+fails costs that server its tools for the run and is logged; it does not fail
+the job.
+
 ## Audit trail
 
 Security-relevant actions are written to the `audit_log` table by

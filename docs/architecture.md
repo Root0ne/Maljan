@@ -147,8 +147,11 @@ open — and sets its own confidence; the report header states the same reasons.
 
 ## Agents and teams
 
-Five agent definitions ship built in: the `static`, `dynamic` and `network`
-analysts, the `judge`, and the `reporter`. Each definition carries its role,
+Eight agent definitions ship built in. Five have a class behind them: the
+`static`, `dynamic` and `network` analysts, the `judge` and the `reporter`.
+Three are generic — `triage`, `android_static` and `reverser` — which means
+they are a prompt and a tool list and nothing else, and are what the `mobile`
+and `deep_static` teams are built from. Each definition carries its role,
 whether it is enabled, the tools it may call, the data it reads and — for an
 analyst — the static provider it reads through. The judge and the reporter are
 not analysts: a team names them from its verdict and report stages, and no
@@ -169,16 +172,54 @@ names. A `debate` stage runs the mediation loop over the analysis stages
 upstream of it. The one `verdict` stage runs the judge. The optional `report`
 stage, always last, builds the report.
 
-`default` is that pipeline as four stages — `analysis` (static, dynamic,
+### The teams that ship
+
+Four teams are seeded, and every one of them is editable only in its debate
+options, its built-in tool switches and `exclude_servers`. The rest of a
+seeded team is a claim the product makes about how the analysis is arranged,
+so changing it means cloning the team.
+
+**`default`** is the pipeline as four stages — `analysis` (static, dynamic,
 network) → `debate` → `verdict` → `report` — which is the architecture this
-project measured itself on. `measurement` is the same four with every tool
-server withheld and the static provider forced to `none`, the baseline for what
-the ensemble contributes on its own. It is a team rather than three tool-free
-clones of the definitions, so the agents it measures cannot drift from the ones
-`default` runs. Both are editable from Settings → Agents and pipeline, but only
-in their debate options, their built-in tool switches and `exclude_servers`;
-every other part of a built-in team is the architecture, and changing it means
-cloning the team.
+project measured itself on.
+
+![The default team](assets/team-default.svg)
+
+**`measurement`** is the same four with every tool server withheld and the
+static provider forced to `none`: the baseline for what the ensemble
+contributes on its own. It is a team rather than three tool-free clones of the
+definitions, so the agents it measures cannot drift from the ones `default`
+runs.
+
+**`mobile`** is a team for a mobile sample. `triage` identifies the sample and
+says which artefacts matter; `android_static` reads the manifest, the
+permissions, the components, the DEX strings and the native libraries, and runs
+only when the sample really is one — `when: file_type in ("apk", "dex")`;
+`dynamic` detonates when a sandbox report reached the run. On a PE the Android
+stage is still in the graph, still declines and still says why, so the console
+shows what the team chose not to do rather than nothing at all.
+
+![The mobile team](assets/team-mobile.svg)
+
+**`deep_static`** is a team that reads the code. `triage`, then the built-in
+`static` stage, then `reversing` — a generic `reverser` agent that is handed
+the static stage's findings and asked to confirm or refute each of them at
+function level, with the tools of whichever static provider is configured — and
+then `network`, conditional on there being a capture or a sandbox report to
+read.
+
+![The deep_static team](assets/team-deep-static.svg)
+
+The diagrams are generated from the seeded profiles by
+`scripts/goldens/render_team_graphs.py`, and
+`tests/unit/scripts/test_render_team_graphs.py` fails if the committed SVGs
+stop matching the teams, so a stage that moves cannot leave the page behind.
+
+The three generic agents these teams are built from — `triage`,
+`android_static` and `reverser` — are seeded definitions like any other, with
+their prompts in `src/maljan/agents/prompts/`. A generic agent is a definition
+and a prompt and nothing else, which is what makes a team something an operator
+can write rather than something that needs a class.
 
 ### The stage graph
 

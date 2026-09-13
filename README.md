@@ -11,12 +11,13 @@
 [![Python](https://img.shields.io/badge/python-3.13-blue)](https://www.python.org/)
 [![Licence](https://img.shields.io/badge/licence-MIT-blue)](LICENSE)
 
-Maljan maps evidence about a Windows PE sample to MITRE ATT&CK technique
-identifiers and emits a STIX 2.1 bundle. Three LLM analysts describe behaviour
-over three channels of evidence, calling deterministic tools — signature
-scanners, rule engines, binary and capture readers, an ATT&CK catalogue — and
-citing what each one returned; a judge reads their claims and the evidence
-behind them and decides the verdict, the severity, the category and the family.
+Maljan connects LLM agent teams to malware-analysis tools. A team is an ordered
+list of **stages** — triage, then the passes the sample is worth, then a debate,
+a verdict and a report — and each stage runs the agents it names over the tools
+they are given: signature scanners, rule engines, binary and capture readers, a
+sandbox, an ATT&CK catalogue. A stage carries a condition, so a team applies to
+a sample rather than being written for one; a stage that declines says why. The
+output is a report against MITRE ATT&CK and a STIX 2.1 bundle.
 
 The organising rule is that **the agent decides and the code says what is wrong
 with the decision.** Nothing rewrites a claim, a technique id, a confidence or
@@ -24,7 +25,24 @@ an attribution behind the producer's back: a problem is put back to the producer
 as feedback, it gets one turn to fix it, and what it will not fix stays on the
 record where a reader can see it. Every tool call is written to an evidence
 ledger with a citable id, and every section of the report names the ids it was
-built from.
+built from — so a claim in a report resolves back to the call it came out of.
+
+Nothing is bound to Windows. Routing is by the sample's own format, and a
+format nothing recognises gets the neutral path and a report that says so
+rather than a rejection.
+
+## The teams that ship
+
+| Team | Stages | For |
+| :-- | :-- | :-- |
+| `default` | `analysis` (static, dynamic, network) → `debate` → `verdict` → `report` | The general case, and the architecture this project measured itself on. |
+| `measurement` | The same four, with every tool server withheld | What the ensemble contributes on its own, with nothing to call. |
+| `mobile` | `triage` → `android_static` → `dynamic` → `debate` → `verdict` → `report` | An APK or a DEX. The Android stage declines on anything else and says so. |
+| `deep_static` | `triage` → `static` → `reversing` → `network` → `debate` → `verdict` → `report` | Reading the code: the reversing stage takes each static finding into the decompiler. |
+
+Teams are configuration, not code. A team of your own is an ordered list of
+stages and a prompt per agent, written in the console; see
+[docs/configuration.md](docs/configuration.md).
 
 Samples are submitted, tracked and read in a web console; the whole
 configuration of a deployment lives in that console as well, not in environment
@@ -35,7 +53,7 @@ files.
 | | |
 |---|---|
 | <img src="docs/assets/dashboard.png" alt="Dashboard"> | <img src="docs/assets/analysis-summary.png" alt="Analysis summary"> |
-| **Dashboard.** Totals, failure rate, recent analyses and verdict distribution. | **Analysis.** One run across nineteen sub-pages, with Markdown, PDF, HTML, STIX 2.1 and MISP export. |
+| **Dashboard.** Totals, failure rate, recent analyses and verdict distribution. | **Analysis.** One run, its stages, its evidence ledger and the report built from it, with Markdown, PDF, HTML, STIX 2.1 and MISP export. |
 | <img src="docs/assets/settings-configuration.png" alt="Settings configuration"> | <img src="docs/assets/settings-guide.png" alt="Setup guide"> |
 | **Configuration.** Every application setting, grouped, searchable, with its origin and when a change takes effect. | **Setup guides.** Short walkthroughs that configure one subsystem at a time and test the connection before saving. |
 
@@ -76,12 +94,12 @@ code in this repository.
 | :-- | :-- |
 | [getting-started.md](docs/getting-started.md) | Prerequisites, the two configuration files, starting the stack, first login and first analysis. |
 | [configuration.md](docs/configuration.md) | The bootstrap environment contract, Settings → Configuration, the setup guides, connection probes, JSON export and import, secret storage. |
-| [architecture.md](docs/architecture.md) | Components, the request and job lifecycle, agents and profiles, providers, memory and reporting. |
+| [architecture.md](docs/architecture.md) | Components, the request and job lifecycle, teams as stages, agents and their tools, the evidence ledger, validation loops and report assembly. |
 | [deployment.md](docs/deployment.md) | Compose services and healthchecks, required secrets, health endpoints, Kubernetes and systemd notes, upgrades and migrations. |
-| [operations.md](docs/operations.md) | Logs, the audit trail, rate limits, sample storage, backups and a troubleshooting table. |
+| [operations.md](docs/operations.md) | Logs, what a run's metrics mean, staged samples, the audit trail, rate limits, backups and a troubleshooting table. |
 | [security.md](docs/security.md) | Authentication, roles, API keys, secret encryption, what an export leaves out, CORS and cookie flags, vulnerability reporting. |
 | [development.md](docs/development.md) | Repository layout, `make` targets, the test suites, CI jobs and the branch workflow. |
-| [api.md](docs/api.md) | Router groups, OpenAPI, authentication headers and pagination conventions. |
+| [api.md](docs/api.md) | Router groups, the evidence endpoint, the run-summary fields, the stage events on the WebSocket, authentication and pagination. |
 
 Release notes are in [CHANGELOG.md](CHANGELOG.md).
 
