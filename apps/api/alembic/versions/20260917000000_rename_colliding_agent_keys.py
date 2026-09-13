@@ -39,15 +39,6 @@ from typing import Any
 import sqlalchemy as sa
 from alembic import op
 
-# The one exception to this tree's rule that a revision imports nothing from
-# the application. ``set_if_list`` is not a constant that follows the model —
-# it is the mechanical "assign only when the key was already a list" that both
-# this file and the runtime rename need, and the reason it is shared is that
-# applying the guard at two of three call sites is exactly the defect this
-# revision was corrected for. Its semantics are definitional and pinned by
-# tests on both sides.
-from maljan.core.agent_key_migration import set_if_list
-
 revision = "20260917000000"
 down_revision = "20260916000000"
 branch_labels = None
@@ -127,6 +118,36 @@ def _rename_map(stored: Any, seeded: tuple, extra_taken: set) -> dict:
             taken.add(new_key)
             renames[key] = new_key
     return renames
+
+
+def set_if_list(mapping: Any, field: str, renames: dict) -> Any:
+    """``mapping`` with ``field`` rewritten, and only if it held a list.
+
+    A copy of ``maljan.core.agent_key_migration.set_if_list`` rather than a
+    call to it, for the reason every alembic revision keeps its own copies:
+    alembic imports every revision file on every run, so a rename or removal in
+    the application would stop the whole migration history from loading.
+
+    The rule it enforces is the reason this revision was corrected once. Three
+    optional list fields are rewritten — a team's `analysts`, a stage's
+    `agents` and a server's `agents` — and none of them accepts ``None``, so
+    writing the key in for a document that never had it turns a document that
+    would have validated into one that will not. A debate stage has no agents,
+    a team that carries stages needs no `analysts`, and a server with no agent
+    restriction is the common case.
+
+    Returns ``mapping`` itself when there is nothing to do, so a team or a
+    server that references no renamed key is not rewritten at all.
+    """
+    if not isinstance(mapping, dict):
+        return mapping
+    values = mapping.get(field)
+    if not isinstance(values, list):
+        return mapping
+    rewritten = [renames.get(v, v) if isinstance(v, str) else v for v in values]
+    if rewritten == values:
+        return mapping
+    return {**mapping, field: rewritten}
 
 
 def _rekey(mapping: Any, renames: dict) -> Any:
