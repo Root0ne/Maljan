@@ -45,6 +45,17 @@ def _isr(claims: list[ClaimEvidence], agent_id: str = "static") -> AgentISR:
     return AgentISR(agent_id=agent_id, domain="static", claims=claims)
 
 
+def _attack_pattern_bundle(external_id: str) -> Bundle:
+    return Bundle(
+        objects=[  # type: ignore[list-item]
+            AttackPattern(
+                name="Process Injection",
+                external_references=[{"source_name": "mitre-attack", "external_id": external_id}],
+            )
+        ]
+    )
+
+
 def _claim(**kwargs: object) -> ClaimEvidence:
     payload: dict[str, object] = {
         "claim": "the sample allocates memory in another process",
@@ -124,17 +135,60 @@ class TestValidateVerdictBundle:
 
         assert validate_verdict_bundle(bundle, {"saw real.example once"}) == []
 
-    def test_an_attack_pattern_with_an_unresolvable_id_is_reported(self):
+    def test_a_misshapen_technique_id_is_reported_without_a_catalogue(self):
+        bundle = _attack_pattern_bundle("TX")
+
+        violations = validate_verdict_bundle(bundle)
+
+        assert [v.code for v in violations] == ["stix.unknown_technique"]
+        assert "not shaped like" in violations[0].message
+
+    def test_a_plausible_but_imaginary_id_is_reported_against_the_catalogue(self):
+        """``T7777`` passes the regex and does not exist. This is the case the
+        violation is for, and it was unreachable while a filter upstream
+        dropped the object before the validator ever saw it."""
+        bundle = _attack_pattern_bundle("T7777")
+
+        violations = validate_verdict_bundle(bundle, attck=_Attck())
+
+        assert [v.code for v in violations] == ["stix.unknown_technique"]
+        assert "no entry for in any domain" in violations[0].message
+
+    def test_a_catalogued_id_passes(self):
+        assert validate_verdict_bundle(_attack_pattern_bundle("T1055"), attck=_Attck()) == []
+
+    def test_without_a_catalogue_a_plausible_id_is_not_questioned(self):
+        assert validate_verdict_bundle(_attack_pattern_bundle("T7777")) == []
+
+    def test_a_sigma_reference_is_not_read_as_an_attck_id(self):
+        """An attack-pattern may carry a Sigma rule id first. Holding the judge
+        to the ATT&CK vocabulary for one of those would burn the single retry
+        on nothing."""
         bundle = Bundle(
             objects=[  # type: ignore[list-item]
                 AttackPattern(
-                    name="NOTATECHNIQUE",
-                    external_references=[{"source_name": "mitre-attack", "external_id": "TX"}],
+                    name="Process Injection",
+                    external_references=[
+                        {"source_name": "sigma", "external_id": "5f1c6b0d-1e1a-4f5e-9d31-000000"},
+                        {"source_name": "mitre-attack", "external_id": "T1055"},
+                    ],
                 )
             ]
         )
 
-        assert [v.code for v in validate_verdict_bundle(bundle)] == ["stix.unknown_technique"]
+        assert validate_verdict_bundle(bundle, attck=_Attck()) == []
+
+    def test_an_attack_pattern_with_no_mitre_reference_at_all_is_not_questioned(self):
+        bundle = Bundle(
+            objects=[  # type: ignore[list-item]
+                AttackPattern(
+                    name="Custom detection",
+                    external_references=[{"source_name": "sigma", "external_id": "abc-123"}],
+                )
+            ]
+        )
+
+        assert validate_verdict_bundle(bundle, attck=_Attck()) == []
 
     def test_a_severity_outside_the_enum_is_reported(self):
         bundle = Bundle()

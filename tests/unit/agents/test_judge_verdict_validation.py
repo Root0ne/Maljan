@@ -27,6 +27,7 @@ def _bundle_json(
     severity: str = "High",
     indicators: list[str] | None = None,
     family: dict[str, Any] | None = None,
+    attack_patterns: list[dict[str, Any]] | None = None,
 ) -> str:
     objects: list[dict[str, Any]] = [
         {
@@ -36,6 +37,7 @@ def _bundle_json(
             "is_family": False,
         }
     ]
+    objects.extend(attack_patterns or [])
     objects.extend(
         {
             "type": "indicator",
@@ -245,3 +247,66 @@ class TestTheAnswerStillDegradesGracefully:
         )
 
         assert verdict.bundle.objects
+
+
+def _attack_pattern(external_id: str, source_name: str = "mitre-attack") -> dict[str, Any]:
+    return {
+        "type": "attack-pattern",
+        "id": "attack-pattern--0f1e2d3c-4b5a-4968-8776-655443332299",
+        "name": "Process Injection",
+        "external_references": [{"source_name": source_name, "external_id": external_id}],
+    }
+
+
+class TestUnknownTechniqueIds:
+    """The case the violation exists for: well-formed, and imaginary.
+
+    It was unreachable while ``_filter_invalid_technique_ids`` dropped the
+    object before the validator ran — the judge never learned it had invented
+    an id, and the report simply showed one fewer attack-pattern.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_plausible_but_unknown_id_earns_one_retry(self) -> None:
+        judge, llm = _judge(
+            _bundle_json(attack_patterns=[_attack_pattern("T7777")]),
+            _bundle_json(attack_patterns=[_attack_pattern("T1055")]),
+        )
+
+        verdict = await judge.give_verdict(reports=REPORTS, history=[])
+
+        assert verdict.retries == 1
+        assert verdict.violations == []
+        feedback = str(llm.calls[1][-1].content)
+        assert "stix.unknown_technique" in feedback
+        assert "T7777" in feedback
+
+    @pytest.mark.asyncio
+    async def test_a_real_id_costs_no_retry(self) -> None:
+        judge, llm = _judge(_bundle_json(attack_patterns=[_attack_pattern("T1055")]))
+
+        verdict = await judge.give_verdict(reports=REPORTS, history=[])
+
+        assert (verdict.retries, len(llm.calls)) == (0, 1)
+
+    @pytest.mark.asyncio
+    async def test_a_sigma_reference_does_not_trigger_the_check(self) -> None:
+        judge, llm = _judge(
+            _bundle_json(attack_patterns=[_attack_pattern("5f1c6b0d-1e1a", source_name="sigma")])
+        )
+
+        verdict = await judge.give_verdict(reports=REPORTS, history=[])
+
+        assert (verdict.retries, verdict.violations, len(llm.calls)) == (0, [], 1)
+
+    @pytest.mark.asyncio
+    async def test_the_object_is_reported_rather_than_dropped_before_the_judge_sees_it(
+        self,
+    ) -> None:
+        stubborn = _bundle_json(attack_patterns=[_attack_pattern("T7777")])
+        judge, _llm = _judge(stubborn, stubborn)
+
+        verdict = await judge.give_verdict(reports=REPORTS, history=[])
+
+        assert [v.code for v in verdict.violations] == ["stix.unknown_technique"]
+        assert any(getattr(o, "type", "") == "attack-pattern" for o in verdict.bundle.objects)

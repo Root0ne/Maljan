@@ -25,6 +25,8 @@ from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from pydantic import ValidationError
+
 from maljan.core.logger import logger
 from maljan.schemas.judgement import SEVERITY_RATINGS
 
@@ -32,6 +34,11 @@ from maljan.schemas.judgement import SEVERITY_RATINGS
 # line of feedback; a longer list reads as a menu and the model picks from the
 # middle of it.
 MAX_SUGGESTIONS = 3
+
+# How many schema complaints one feedback turn carries. A model that answered
+# with the wrong shape produces one error per field, and a wall of them reads
+# as noise rather than as a correction.
+MAX_SCHEMA_VIOLATIONS = 6
 
 _TID_RE = re.compile(r"^T\d{4}(?:\.\d{3})?$")
 
@@ -222,14 +229,56 @@ def _claim_index(path: str) -> int | None:
 
 
 # ---------------------------------------------------------------------------
+# Anything with a pydantic schema
+# ---------------------------------------------------------------------------
+
+
+def schema_violations(model: Any, payload: Any, *, code: str) -> list[Violation]:
+    """Pydantic's complaints about ``payload``, in words the model can act on.
+
+    The narrative and the report composer answer against a schema with real
+    constraints — three to five capability paragraphs, an executive summary
+    between 120 and 1200 characters, six required fields per recommendation —
+    and the constraints are exactly the things a model gets wrong. Before this
+    the whole answer was discarded on the first one and the report shipped the
+    deterministic template instead, with nothing telling anyone which rule was
+    broken. Each pydantic error becomes one violation naming the field and the
+    rule, which is what the retry turn shows the model.
+    """
+    if payload is None:
+        return [Violation(code=code, message="the answer was not JSON at all.")]
+    try:
+        model.model_validate(payload)
+    except ValidationError as exc:
+        return [
+            Violation(
+                code=code,
+                message=str(error.get("msg") or "is not valid"),
+                path=".".join(str(part) for part in error.get("loc") or ()),
+            )
+            for error in exc.errors()
+        ][:MAX_SCHEMA_VIOLATIONS]
+    except Exception as exc:  # noqa: BLE001 — a coercion failure is still a finding
+        return [Violation(code=code, message=str(exc))]
+    return []
+
+
+# ---------------------------------------------------------------------------
 # The judge's bundle
 # ---------------------------------------------------------------------------
 
 
 def validate_verdict_bundle(
-    bundle: Any, evidence_corpus: set[str] | None = None
+    bundle: Any, evidence_corpus: set[str] | None = None, *, attck: Any = None
 ) -> list[Violation]:
-    """What is wrong with the judge's answer, in the judge's own terms."""
+    """What is wrong with the judge's answer, in the judge's own terms.
+
+    ``attck`` is the same knowledge module the analyst loop consults, and it is
+    the same check: an id is unresolvable when the catalogue does not have it,
+    not when it fails a regex. ``T7777`` is well-formed and imaginary, which is
+    exactly the case this violation exists for. Passing ``None`` skips the
+    catalogue question rather than answering it wrongly.
+    """
     violations: list[Violation] = []
     objects = list(getattr(bundle, "objects", None) or [])
 
@@ -253,13 +302,27 @@ def validate_verdict_bundle(
                 )
         elif kind == "attack-pattern":
             tid = _attack_pattern_technique_id(obj)
-            if tid and not _TID_RE.match(tid):
+            if not tid:
+                continue
+            if not _TID_RE.match(tid):
                 violations.append(
                     Violation(
                         code="stix.unknown_technique",
                         message=(
-                            f"the attack-pattern names {tid}, which is not a MITRE "
-                            "ATT&CK technique id (T#### or T####.###)."
+                            f"the attack-pattern names {tid}, which is not shaped like a "
+                            "MITRE ATT&CK technique id (T#### or T####.###)."
+                        ),
+                        path=f"objects[{index}]",
+                    )
+                )
+            elif attck is not None and not _technique_is_known(tid, attck):
+                violations.append(
+                    Violation(
+                        code="stix.unknown_technique",
+                        message=(
+                            f"the attack-pattern names {tid}, which the MITRE ATT&CK "
+                            "catalogue has no entry for in any domain. Use a real "
+                            "technique id or drop the attack-pattern."
                         ),
                         path=f"objects[{index}]",
                     )
@@ -383,10 +446,21 @@ def _url_host(raw_url: str) -> str | None:
         return None
 
 
+# The ``source_name`` values that mean "this external_id is an ATT&CK id".
+# Only these are read: an attack-pattern may legitimately carry a Sigma rule id
+# or a CVE first in its reference list, and holding the judge to the ATT&CK
+# vocabulary for one of those would burn the single retry on nothing.
+_MITRE_SOURCES = frozenset({"mitre-attack", "mitre attack"})
+
+
 def _attack_pattern_technique_id(obj: Any) -> str:
-    """The technique id an attack-pattern declares, from refs or from its name."""
+    """The ATT&CK id an attack-pattern declares, from its MITRE ref or its name."""
     for ref in getattr(obj, "external_references", None) or []:
-        external_id = (ref or {}).get("external_id") if isinstance(ref, dict) else None
+        if not isinstance(ref, dict):
+            continue
+        if str(ref.get("source_name") or "").strip().lower() not in _MITRE_SOURCES:
+            continue
+        external_id = ref.get("external_id")
         if external_id:
             return str(external_id).strip().upper()
     name = str(getattr(obj, "name", "") or "").strip().upper()

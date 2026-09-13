@@ -112,7 +112,7 @@ def analyze(
 def _print_run_summary_inline(run_summary_dict: dict) -> None:
     """Print a compact inline summary from the run_summary dict."""
     neg = run_summary_dict.get("negotiation", {})
-    cascade = run_summary_dict.get("cascade") or {}
+    corroboration = run_summary_dict.get("corroboration") or {}
     validation = run_summary_dict.get("validation") or {}
     agent_stats = run_summary_dict.get("agent_stats", [])
 
@@ -133,26 +133,29 @@ def _print_run_summary_inline(run_summary_dict: dict) -> None:
                 f"conf={s['mean_confidence']:.2f}  TTPs=[{ttps}]"
             )
 
-    if cascade:
+    if corroboration:
+        multi = sum(1 for sources in corroboration.values() if len(sources) > 1)
         typer.echo(
-            f"\nTTP Cascade: {cascade.get('total_techniques', 0)} techniques | "
-            f"{cascade.get('corroborated_count', 0)} corroborated | "
-            f"{cascade.get('consensus_count', 0)} consensus"
+            f"\nCorroboration: {len(corroboration)} technique(s) | "
+            f"{multi} named by more than one source"
         )
-        for t in (cascade.get("top_techniques") or [])[:3]:
-            layers = ", ".join(t.get("layers", []))
-            typer.echo(
-                f"  [{t['label']:13s}] {t['technique_id']}  "
-                f"conf={t['confidence']:.3f}  layers=[{layers}]"
-            )
+        # Best-corroborated first, which is the order a reader wants and the
+        # same order the judge was shown them in.
+        ranked = sorted(corroboration.items(), key=lambda item: (-len(item[1]), item[0]))
+        for tid, sources in ranked[:3]:
+            typer.echo(f"  {tid:14s} {', '.join(sources)}")
 
     if validation:
-        rate = validation.get("hallucination_rate", 0.0)
+        unresolved = validation.get("unresolved") or []
         typer.echo(
-            f"\nATT&CK Validation: {validation.get('valid_ids', 0)}/"
-            f"{validation.get('total_claims', 0)} valid | "
-            f"hallucination rate={rate:.1%}"
+            f"\nValidation: {validation.get('retries', 0)} feedback retr"
+            f"{'y' if validation.get('retries', 0) == 1 else 'ies'} | "
+            f"{len(unresolved)} unresolved"
         )
+        for row in unresolved[:3]:
+            typer.echo(
+                f"  {row.get('agent', '?')}/{row.get('code', '?')}: {row.get('message', '')}"
+            )
 
 
 def _write_markdown_report(result: dict, report_path: str) -> None:

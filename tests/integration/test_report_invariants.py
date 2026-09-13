@@ -133,6 +133,22 @@ class TestDegradedConfidenceAgreesAcrossLayers:
         assert "0.91" in MarkdownRenderer().render(report)
 
     @pytest.mark.parametrize("renderer", ["markdown", "html"])
+    def test_no_export_claims_the_confidence_was_capped(self, renderer: str) -> None:
+        """There is no cap. A banner still saying so describes a mechanism that
+        was deleted, and tells the reader the number above it is not the one
+        the judge set."""
+        report = _report(degraded=True, confidence=0.91)
+        body = (
+            MarkdownRenderer().render(report)
+            if renderer == "markdown"
+            else HtmlRenderer().render(report)
+        )
+
+        lowered = body.lower()
+        for claim in ("capped", "capping", "confidence cap"):
+            assert claim not in lowered, f"the export still says the confidence was {claim}"
+
+    @pytest.mark.parametrize("renderer", ["markdown", "html"])
     def test_no_export_shows_a_degraded_run_without_its_warning(self, renderer: str) -> None:
         report = _report(degraded=True)
         body = (

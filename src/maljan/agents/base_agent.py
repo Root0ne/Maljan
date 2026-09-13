@@ -2326,6 +2326,24 @@ class BaseAnalyst(ABC):
             return isr
 
         self.validation_retries += retries
+
+        # A retry that came back with fewer claims than it started with lost
+        # work. ``_text_to_isr`` over a garbled second answer parses to an empty
+        # ISR just as happily as over a good one, and taking it would delete the
+        # analyst's original findings with nothing recording that it happened —
+        # the exact silence this whole phase is about. Keep the first answer and
+        # label whatever was wrong with it.
+        if retries and len(revised.claims) < len(isr.claims):
+            self.logger.warning(
+                "Validation: the retry for '%s' returned %d claim(s) against %d; "
+                "keeping the first answer and recording what is wrong with it.",
+                self.name,
+                len(revised.claims),
+                len(isr.claims),
+            )
+            revised = isr
+            violations = self._revalidate(isr, _validator)
+
         if violations:
             mark_invalid_technique_ids(revised, violations)
             self.validation_findings.extend(violations)
@@ -2336,6 +2354,16 @@ class BaseAnalyst(ABC):
                 ", ".join(sorted({v.code for v in violations})),
             )
         return revised
+
+    def _revalidate(
+        self, isr: AgentISR, validator: Callable[[AgentISR], list[Violation]]
+    ) -> list[Violation]:
+        """What is wrong with the answer being kept, re-asked. Never raises."""
+        try:
+            return validator(isr)
+        except Exception as exc:  # noqa: BLE001 — a metric is never worth a lost run
+            self.logger.warning("Validation: re-check skipped (%s).", exc)
+            return []
 
     def drain_validation_findings(self) -> tuple[list[dict[str, str]], int]:
         """What this analyst was told and did not fix, and how many retries it cost."""

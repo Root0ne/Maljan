@@ -26,14 +26,6 @@ import re
 import uuid
 from typing import Any
 
-from maljan.agents._indicator_denylists import (
-    COMPILE_ARTIFACT_RE,
-    FOREIGN_CLASS_REF_RE,
-    IOC_FILE_EXTENSIONS,
-    IOC_OS_RESOURCE_PREFIXES,
-    MAX_FILE_NAME_INDICATORS,
-    URL_DENY_HOSTS,
-)
 from maljan.core.logger import logger
 
 # UUID5 namespace for ATT&CK technique IDs — same value on every run so a
@@ -185,102 +177,6 @@ def postprocess_judge_bundle(
 # ---------------------------------------------------------------------------
 # Indicator admission
 # ---------------------------------------------------------------------------
-
-
-def _admit_indicator(
-    *,
-    pattern: str,
-    literals: list[str],
-    haystack: str,
-    runtime_paths: set[str],
-    file_name_kept: int,
-) -> str:
-    """Return ``"keep"`` or a short reason string for indicator-filter logging.
-
-    Acceptance-based filter for ``file:name`` indicators (tightened after
-    a noise audit found ~45 noisy SDOs); falls back to the
-    original "any-literal-in-corpus" check for every other kind.
-    """
-    if not pattern:
-        return "empty_pattern"
-
-    stripped = pattern.lstrip()
-
-    # ── URL denylist ────────────────────────────────────────────────
-    if stripped.startswith("[url:value"):
-        for lit in literals:
-            host = _extract_url_host(lit)
-            if host and any(host.endswith(d) or d in host for d in URL_DENY_HOSTS):
-                return "url_denylist"
-        # URLs surviving the denylist still need corpus presence.
-        if not any(lit.lower() in haystack for lit in literals if lit):
-            return "url_not_in_corpus"
-        return "keep"
-
-    # ── file:name admission ────────────────────────────────────────
-    if stripped.startswith("[file:name"):
-        # Cap reached → drop.
-        if file_name_kept >= MAX_FILE_NAME_INDICATORS:
-            return "file_name_cap"
-        if not literals:
-            return "file_name_no_literal"
-
-        # Every literal must (a) not be a denylisted compile artefact
-        # AND (b) satisfy at least one acceptance signal.
-        for lit in literals:
-            if COMPILE_ARTIFACT_RE.search(lit):
-                return "file_name_compile_artifact"
-            if FOREIGN_CLASS_REF_RE.match(lit):
-                return "file_name_foreign_class_ref"
-
-        for lit in literals:
-            if _looks_like_real_file_path(lit, runtime_paths):
-                return "keep"
-        return "file_name_no_acceptance_signal"
-
-    # ── default (hash / domain / ip / etc.): keep if any literal hits.
-    if any(lit.lower() in haystack for lit in literals if lit):
-        return "keep"
-    return "not_in_corpus"
-
-
-def _looks_like_real_file_path(literal: str, runtime_paths: set[str]) -> bool:
-    """Acceptance signals for a ``file:name`` literal (Step 5)."""
-    if not literal:
-        return False
-    lit_lower = literal.lower()
-
-    # Real, persisted file extension wins immediately.
-    for ext in IOC_FILE_EXTENSIONS:
-        if lit_lower.endswith(ext):
-            return True
-
-    # Known OS-resource prefix anchors the path into a real FS location.
-    for prefix in IOC_OS_RESOURCE_PREFIXES:
-        if literal.startswith(prefix):
-            return True
-
-    # Sandbox actually observed this path at runtime (file_operations /
-    # registry_mods). When present, even an extension-less literal is fine.
-    if lit_lower in runtime_paths:
-        return True
-
-    return False
-
-
-def _extract_url_host(raw_url: str) -> str | None:
-    """Best-effort host extraction without a full URL parser."""
-    if not raw_url:
-        return None
-    try:
-        from urllib.parse import urlparse
-
-        parsed = urlparse(raw_url)
-        if parsed.hostname:
-            return parsed.hostname.lower()
-    except (ValueError, TypeError):
-        pass
-    return None
 
 
 # ---------------------------------------------------------------------------

@@ -337,9 +337,11 @@ def _stix_pattern_for_string_ioc(ioc: StringIOC) -> str | None:
 def _accept_string_ioc(ioc: StringIOC, pattern: str, file_name_kept: int) -> bool:
     """Gate StringIOC → Indicator emission.
 
-    Mirrors :func:`maljan.agents.judge_postprocess._admit_indicator` so the
-    extended renderer can't bypass the indicator noise floor. Mocking out the
-    LLM (or any judge bundle path) no longer means the bundle ships with
+    Applies the same rules as :func:`maljan.pipeline.validation._indicator_problem`
+    so the extended renderer cannot bypass the indicator noise floor. These IOCs
+    come from the deterministic string scan rather than from a model, so there
+    is nobody to hand a violation back to: the gate is the whole check. Mocking
+    out the LLM (or any judge bundle path) no longer means the bundle ships with
     NDK build paths / bundled bytecode class refs / random short strings.
     """
     stripped = pattern.lstrip()

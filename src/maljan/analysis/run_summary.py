@@ -238,13 +238,14 @@ class RunSummary:
             "",
         ]
 
-        # Banner the degraded
-        # run prominently so a reader can't miss it when scrolling.
+        # Banner the degraded run prominently so a reader can't miss it when
+        # scrolling. It names the reasons and nothing else: the confidence
+        # above is the one the judge set knowing them, not a ceiling something
+        # downstream applied to it.
         if self.degraded_mode:
             lines += [
                 "> [!WARNING]",
-                "> **DEGRADED RUN.** The verdict above was produced with "
-                "reduced signal — confidence has been capped at 0.60.",
+                "> **DEGRADED RUN.** The verdict above was produced with reduced signal.",
                 "",
             ]
             if self.degradation_reasons:

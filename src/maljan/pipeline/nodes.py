@@ -1652,9 +1652,9 @@ def make_judge_node(container: ServiceContainer) -> Any:
                     + (
                         " Run flagged as degraded — "
                         + "; ".join(_degradation_reasons)
-                        + ". Confidence is capped accordingly."
+                        + ". The judge was told this and set its confidence knowing it."
                         if _degraded_mode
-                        else " All layers corroborated."
+                        else f" {_corroborated} technique(s) named by more than one source."
                     )
                 ),
                 round_index=state.get("iteration_count", 0),

@@ -907,15 +907,17 @@ class MarkdownRenderer:
         ungrounded = run_summary.get("sections_without_evidence")
         if ungrounded:
             lines.append(f"- Report sections with no evidence: {ungrounded}")
-        cascade = run_summary.get("cascade") or {}
-        if cascade:
-            total = cascade.get("total_techniques")
-            corr = cascade.get("corroborated_count")
-            cons = cascade.get("consensus_count")
-            if total is not None:
-                lines.append(
-                    f"- TTPs: {total} total, {corr or 0} corroborated, {cons or 0} consensus"
-                )
+        corroboration = run_summary.get("corroboration") or {}
+        if corroboration:
+            multi = sum(1 for sources in corroboration.values() if len(sources) > 1)
+            lines.append(f"- TTPs: {len(corroboration)} named, {multi} by more than one source")
+        validation = run_summary.get("validation") or {}
+        if validation:
+            unresolved = validation.get("unresolved") or []
+            lines.append(
+                f"- Validation: {validation.get('retries', 0)} feedback retries, "
+                f"{len(unresolved)} finding(s) left unresolved"
+            )
         return "\n".join(lines)
 
     # ------------------------------------------------------------------

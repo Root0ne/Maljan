@@ -632,10 +632,15 @@ class JudgeAgent:
         timeout = float(_overrides.get("judge", _settings.react_agent_timeout))
         self.logger.info("JudgeAgent invoking verdict LLM (timeout=%ds)...", timeout)
 
+        # Reset per call, not once: a first call that timed out and left the
+        # flag set made every later parse return the fallback, and a fallback
+        # that happened to validate dirty would then spend a second full judge
+        # timeout and throw the answer away.
         timed_out = False
 
         async def _run(turns: list[Any]) -> Any:
             nonlocal timed_out
+            timed_out = False
             try:
                 return await asyncio.wait_for(
                     retry_on_connection_error(
@@ -655,8 +660,23 @@ class JudgeAgent:
                 return self._fallback_bundle_from_text("[TIMEOUT]", reports, isr_reports)
             return self._bundle_from_response(answer, reports, isr_reports)
 
+        # The same catalogue the analyst loop consults. Absent (an air-gapped
+        # box with no vendored id list) the technique question is skipped
+        # rather than answered wrongly.
+        try:
+            from maljan.tools import knowledge as _knowledge
+        except Exception as exc:  # noqa: BLE001 — a knowledge lookup degrades, never raises
+            self.logger.debug("Judge verdict: the knowledge tools are unavailable (%s).", exc)
+            _knowledge = None  # type: ignore[assignment]
+
         def _validate(bundle: Bundle) -> list[Violation]:
-            return validate_verdict_bundle(bundle, evidence_corpus)
+            # A timeout produced no answer, so there is nothing to give
+            # feedback about. Reporting no violations ends the loop: a retry
+            # would cost a second full judge timeout and could only produce the
+            # same fallback bundle.
+            if timed_out:
+                return []
+            return validate_verdict_bundle(bundle, evidence_corpus, attck=_knowledge)
 
         bundle, violations, retries = await retry_with_feedback(
             _run, messages, [_validate], parse=_parse
@@ -690,11 +710,11 @@ class JudgeAgent:
             return self._fallback_bundle_from_text(raw, reports, isr_reports)
 
         try:
-            # Structurally impossible technique ids (T123, T0000, ...) name
-            # objects a STIX consumer cannot resolve, so they are dropped
-            # rather than labelled. A *plausible but unknown* id is a different
-            # thing and comes back as a violation instead.
-            data = self._filter_invalid_technique_ids(data)
+            # No technique-id filter here. Dropping the object silently is what
+            # made ``stix.unknown_technique`` unreachable: the judge never
+            # learned it had invented an id, and the report showed one fewer
+            # attack-pattern with nothing saying why. ``pipeline.validation`` is
+            # the single place that decides an id is wrong, and it says so.
             from maljan.agents.judge_postprocess import postprocess_judge_bundle
 
             data = postprocess_judge_bundle(data, ledger=getattr(self, "truncation_ledger", None))
@@ -794,73 +814,6 @@ class JudgeAgent:
                 if prev not in negators:
                     return "Benign"
         return "Suspicious"
-
-    def _filter_invalid_technique_ids(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Remove objects with invalid / hallucinated technique IDs from the Bundle data.
-
-        Valid MITRE ATT&CK technique IDs match the pattern T#### or T####.###
-        (e.g. T1055, T1055.001). Anything else (T0000, T123, T12345, etc.) is
-        treated as hallucinated and the object is removed.
-
-        The previous implementation only
-        inspected the Maljan-custom ``x_maljan_technique_id`` field. STIX-
-        standard technique IDs surface in ``external_references[*].external_id``
-        and (for LLM-emitted SDOs) the ``name`` field, so we now check those
-        as well. ``_INVALID_TIDS`` is reused so curated placeholders such as
-        ``T0000`` get filtered even though they match the regex.
-        """
-        import re
-
-        _VALID_TID_RE = re.compile(r"^T\d{4}(?:\.\d{3})?$")
-        _CURATED_PLACEHOLDERS = frozenset({"T0000", "T0000.000", "T9999", "T1234"})
-
-        def _technique_id_is_bad(tid: str) -> bool:
-            if not tid:
-                return False
-            if tid in _CURATED_PLACEHOLDERS:
-                return True
-            return not bool(_VALID_TID_RE.match(tid))
-
-        def _extract_ids_from(obj: dict[str, Any]) -> list[str]:
-            candidates: list[str] = []
-            tid = obj.get("x_maljan_technique_id")
-            if isinstance(tid, str):
-                candidates.append(tid)
-            for ref in obj.get("external_references") or []:
-                if isinstance(ref, dict):
-                    ext_id = ref.get("external_id")
-                    src = (ref.get("source_name") or "").lower()
-                    # Only enforce on MITRE-tagged refs; Sigma rule IDs etc.
-                    # would otherwise fail the T#### regex.
-                    if isinstance(ext_id, str) and src in {"mitre-attack", "mitre attack"}:
-                        candidates.append(ext_id)
-            # AttackPattern SDOs whose ``name`` is itself a T#### string
-            # (a known leak path) — only check ``name`` for
-            # attack-pattern objects.
-            if obj.get("type") == "attack-pattern":
-                name = obj.get("name")
-                if isinstance(name, str) and name.startswith("T") and len(name) <= 12:
-                    candidates.append(name)
-            return candidates
-
-        objects = data.get("objects", [])
-        filtered: list[dict[str, Any]] = []
-        removed = 0
-        for obj in objects:
-            offending = [tid for tid in _extract_ids_from(obj) if _technique_id_is_bad(tid)]
-            if offending:
-                removed += 1
-                self.logger.warning(
-                    "Removing STIX object %s with invalid technique ID(s) %s.",
-                    obj.get("id", "unknown"),
-                    offending,
-                )
-                continue
-            filtered.append(obj)
-        if removed:
-            self.logger.info("Filtered %d objects with invalid technique IDs.", removed)
-            data["objects"] = filtered
-        return data
 
     def _fallback_bundle_from_text(
         self,

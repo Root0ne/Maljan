@@ -87,7 +87,9 @@ def build_capability_matrix(
     for tid, info in techniques.items():
         name, tactic_slug = _resolve_technique_meta(index, tid)
         evidence = info["evidence"]
-        confidence = float(info.get("confidence") or 0.0)
+        # The highest number any source put on this technique. Taken once, here,
+        # rather than accumulated into the row as it was collected.
+        confidence = max((float(c) for c in info.get("confidences") or ()), default=0.0)
         layers = info.get("layers") or []
 
         # Never emit a zero-confidence cell with no evidence and no contributing
@@ -131,11 +133,21 @@ def _collect_techniques(
     stix_output: dict[str, Any] | None,
     isr_reports: dict[str, Any] | None,
 ) -> dict[str, dict[str, Any]]:
-    """Merge the judge's technique list and the analysts' claims, by technique."""
+    """Merge the judge's technique list and the analysts' claims, by technique.
+
+    Each row collects what every source said — the evidence quotes, the source
+    names, and every confidence — without deciding anything. The caller reduces
+    the confidences to one number, once.
+    """
     techniques: dict[str, dict[str, Any]] = {}
 
     def _row(tid: str) -> dict[str, Any]:
-        return techniques.setdefault(tid, {"evidence": [], "confidence": 0.0, "layers": []})
+        # ``confidences`` is every number a source put on this technique, kept
+        # as a list rather than folded into a running maximum. The projection
+        # takes the max once, where a reader can see it happen; a row that
+        # rewrites its own ``confidence`` key as it goes reads like the thing
+        # this phase removed even when it is only accumulating.
+        return techniques.setdefault(tid, {"evidence": [], "confidences": [], "layers": []})
 
     # 1. The judge's bundle. An attack-pattern says the technique is in the
     # verdict; the relationship annotations say how sure the judge was and which
@@ -144,7 +156,7 @@ def _collect_techniques(
         _row(tid)
     for tid, confidence, agents in _judge_relationship_rows(stix_output):
         row = _row(tid)
-        row["confidence"] = max(float(row["confidence"]), confidence)
+        row["confidences"].append(confidence)
         for agent in agents:
             if agent and agent not in row["layers"]:
                 row["layers"].append(str(agent))
@@ -158,9 +170,7 @@ def _collect_techniques(
                 if not claim_tid or not getattr(claim, "technique_id_valid", True):
                     continue
                 row = _row(str(claim_tid))
-                row["confidence"] = max(
-                    float(row["confidence"]), float(getattr(claim, "confidence", 0.0) or 0.0)
-                )
+                row["confidences"].append(float(getattr(claim, "confidence", 0.0) or 0.0))
                 layer = getattr(isr, "domain", None) or agent_name or "agent"
                 if layer and str(layer) not in row["layers"]:
                     row["layers"].append(str(layer))

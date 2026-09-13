@@ -180,16 +180,15 @@ def lint_report(report: Any, sample_platform: str | None) -> list[FPWarning]:
                 message=(
                     f"{file_name_count} file:name indicators present "
                     f"(threshold {MAX_FILE_NAME_INDICATORS}). The judge "
-                    "post-processor's cap may not be running."
+                    "renderer's cap may not be running."
                 ),
                 field="stix_bundle_extended.objects[indicator]",
                 explanation=(
-                    "The judge post-processor caps file:name indicators in the STIX "
-                    "bundle to keep low-signal IOCs from drowning the high-"
-                    "signal ones. When this fires, _admit_indicator's cap "
-                    "loop in judge_postprocess.py either didn't run or the "
-                    "bundle was rebuilt downstream without re-applying the "
-                    "limit."
+                    "file:name indicators are capped in the STIX bundle to keep "
+                    "low-signal IOCs from drowning the high-signal ones. When "
+                    "this fires, the cap in the extended renderer "
+                    "(``_accept_string_ioc``) either did not run or the bundle "
+                    "was rebuilt downstream without re-applying the limit."
                 ),
             )
         )

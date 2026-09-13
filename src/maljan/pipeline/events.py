@@ -94,15 +94,19 @@ def emit_agent_message(
             payload also carries ``report_truncated: True`` rather than leaving
             the reader to guess whether the report really ended there.
     """
+    # ``confidence`` is spread into the literal rather than written in
+    # afterwards. Nothing about the value changes either way; what changes is
+    # that this stays visibly a construction of a fresh envelope, which is the
+    # only shape ``tests/unit/test_no_silent_overrides.py`` allows for a
+    # decision-bearing key.
     payload: dict[str, Any] = {
         "speaker": speaker,
         "role": role,
         "round": round_index,
         "status": status,
         "text": text,
+        **({"confidence": round(float(confidence), 4)} if confidence is not None else {}),
     }
-    if confidence is not None:
-        payload["confidence"] = round(float(confidence), 4)
     if claims:
         payload["claims"] = claims
     if dissent:

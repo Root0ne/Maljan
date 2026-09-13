@@ -29,6 +29,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from maljan.agents.base_agent import retry_on_connection_error
 from maljan.core.logger import logger
 from maljan.llm.registry import structured_output_supported_for_llm
+from maljan.pipeline.validation import retry_with_feedback, schema_violations
 from maljan.reporting.models import DefensiveRecommendation, MalwareReport
 from maljan.utils.json_cleaner import safe_parse_json
 
@@ -139,6 +140,20 @@ def _parse_keeping_duplicate_keys(text: str) -> dict[str, Any] | None:
     except Exception:  # noqa: BLE001 — an unparseable body is the other path's problem
         return None
     return parsed if isinstance(parsed, dict) else None
+
+
+def _narrative_payload(answer: Any) -> dict[str, Any] | None:
+    """The model's answer as the dict ``NarrativeOutput`` is validated against.
+
+    Returns ``None`` when there is no JSON in it at all, which
+    ``schema_violations`` reports as its own violation rather than treating as
+    an empty answer.
+    """
+    text = _message_text(answer)
+    payload = _parse_keeping_duplicate_keys(text) or safe_parse_json(text)
+    if not isinstance(payload, dict):
+        return None
+    return _coerce_narrative_payload(payload)
 
 
 def _coerce_narrative_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -339,12 +354,17 @@ class NarrativeAgent:
                     exc,
                 )
 
-        # Manual-parse fallback. Useful for local llama.cpp servers that
-        # occasionally return text wrapped in ```json fences. A dropped socket
-        # is retried (see ``retry_on_connection_error``); a bad parse is not.
-        try:
+        # Manual-parse fallback, through the validation loop. Useful for local
+        # llama.cpp servers that occasionally return text wrapped in ```json
+        # fences. ``NarrativeOutput`` carries real constraints — three to five
+        # capability paragraphs, six required fields per recommendation — and
+        # those are what a model gets wrong; before the loop the first breach
+        # discarded the whole answer and the report shipped the deterministic
+        # template with nothing saying which rule was broken. A dropped socket
+        # is still retried separately (``retry_on_connection_error``).
+        async def _run(turns: list[BaseMessage]) -> Any:
             raw = await retry_on_connection_error(
-                lambda: self.llm.ainvoke(messages), what="NarrativeAgent raw"
+                lambda: self.llm.ainvoke(turns), what="NarrativeAgent raw"
             )
             if self.token_ledger is not None:
                 try:
@@ -354,15 +374,34 @@ class NarrativeAgent:
                 except Exception as exc:  # noqa: BLE001
                     # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure — record_response_usage() swallows its own exceptions, so exc here is only an import/attribute error  # noqa: E501
                     logger.debug("NarrativeAgent: token usage not recorded (%s).", exc)
-            text = _message_text(raw)
-            payload = _parse_keeping_duplicate_keys(text) or safe_parse_json(text)
-            if not payload:
-                return None
-            return NarrativeOutput.model_validate(_coerce_narrative_payload(payload))
+            return raw
+
+        try:
+            payload, violations, retries = await retry_with_feedback(
+                _run,
+                list(messages),
+                [lambda p: schema_violations(NarrativeOutput, p, code="narrative.schema")],
+                parse=_narrative_payload,
+            )
         except Exception as exc:  # noqa: BLE001
+            logger.error("NarrativeAgent: manual-parse fallback failed (%s); NO NARRATIVE.", exc)
+            return None
+
+        if violations:
             # ``error``: reaching here means the report ships with no narrative
             # at all, which is a visible hole rather than a degraded detail.
-            logger.error("NarrativeAgent: manual-parse fallback failed (%s); NO NARRATIVE.", exc)
+            logger.error(
+                "NarrativeAgent: the answer still breaks the schema after %d retr%s (%s); "
+                "NO NARRATIVE.",
+                retries,
+                "y" if retries == 1 else "ies",
+                "; ".join(f"{v.path}: {v.message}" for v in violations),
+            )
+            return None
+        try:
+            return NarrativeOutput.model_validate(payload)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("NarrativeAgent: the validated payload would not build (%s).", exc)
             return None
 
     def _build_prompt(self, report: MalwareReport) -> list[BaseMessage]:

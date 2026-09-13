@@ -146,6 +146,18 @@ class TestTheAnalystGetsOneTurnToFixIt:
 
         assert len(analyst.seen_turns) == 1
 
+    def test_a_retry_that_loses_claims_keeps_the_first_answer(self) -> None:
+        """``_text_to_isr`` over a garbled second answer parses to an empty ISR
+        as happily as over a good one, and taking it would delete the analyst's
+        original findings with nothing recording that it happened."""
+        analyst = _Analyst(_isr(_claim("T1699"), _claim("T1055")), ["   "])
+
+        result = analyst.safe_analyze_isr("raw data")
+
+        assert [c.technique_id for c in result.claims] == ["T1699", "T1055"]
+        assert [v.code for v in analyst.validation_findings] == ["attck.unknown_id"]
+        assert analyst.validation_retries == 1
+
     def test_a_retry_that_raises_keeps_the_first_answer(self) -> None:
         class _Broken(_Analyst):
             def _invoke_llm_with_timeout(self, messages: list, timeout: int) -> str:

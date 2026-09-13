@@ -27,6 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from maljan.agents.base_agent import retry_on_connection_error
 from maljan.core.logger import logger
 from maljan.llm.registry import structured_output_supported_for_llm
+from maljan.pipeline.validation import Violation, retry_with_feedback, schema_violations
 from maljan.reporting.evidence_bundles import bundle_for, is_empty
 from maljan.reporting.models import (
     C2Channel,
@@ -288,31 +289,64 @@ class ReportComposer:
                 return schema.model_validate(result)
         except Exception as exc:  # noqa: BLE001
             logger.debug("ReportComposer: structured path failed (%s); manual parse.", exc)
-        # Manual JSON fallback for local servers returning fenced JSON.
-        raw = await retry_on_connection_error(
-            lambda: self.llm.ainvoke(messages), what="ReportComposer raw"
-        )
-        if self.token_ledger is not None:
-            try:
-                from maljan.core.token_ledger import record_response_usage
+        # Manual JSON fallback for local servers returning fenced JSON, through
+        # the validation loop: a section whose shape is wrong is a section
+        # missing from a delivered report, and the model can usually fix it
+        # when told which field broke which rule.
+        declined = False
 
-                record_response_usage(self.token_ledger, raw)
-            except Exception as exc:  # noqa: BLE001
-                # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure — record_response_usage() swallows its own exceptions, so exc here is only an import/attribute error  # noqa: E501
-                logger.debug("ReportComposer: token usage not recorded (%s).", exc)
-        payload = safe_parse_json(_message_text(raw))
-        if not payload:
-            return None
-        if _section_declined(payload, schema):
-            # Not a failure: the model looked at the bundle and said the
-            # section has nothing in it. Logged at info so the skip is still
-            # traceable, and never as an error a reader would go chasing.
+        async def _run(turns: list[BaseMessage]) -> Any:
+            raw = await retry_on_connection_error(
+                lambda: self.llm.ainvoke(turns), what="ReportComposer raw"
+            )
+            if self.token_ledger is not None:
+                try:
+                    from maljan.core.token_ledger import record_response_usage
+
+                    record_response_usage(self.token_ledger, raw)
+                except Exception as exc:  # noqa: BLE001
+                    # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure — record_response_usage() swallows its own exceptions, so exc here is only an import/attribute error  # noqa: E501
+                    logger.debug("ReportComposer: token usage not recorded (%s).", exc)
+            return raw
+
+        def _parse(answer: Any) -> Any:
+            nonlocal declined
+            payload = safe_parse_json(_message_text(answer))
+            declined = bool(payload) and _section_declined(payload, schema)
+            if not payload or declined:
+                return None
+            return _unwrap_section_envelope(payload, schema)
+
+        def _validate(payload: Any) -> list[Violation]:
+            # A declined section is an empty one, not a broken one: the model
+            # looked at the bundle and said there is nothing here. Asking it
+            # again would be arguing with a correct answer.
+            if declined:
+                return []
+            return schema_violations(schema, payload, code="composer.schema")
+
+        payload, violations, retries = await retry_with_feedback(
+            _run, list(messages), [_validate], parse=_parse
+        )
+        if declined:
+            # Logged at info so the skip is still traceable, and never as an
+            # error a reader would go chasing.
             logger.info(
                 "ReportComposer: section '%s' declined by the model (no content); skipping.",
                 section or schema.__name__,
             )
             return None
-        return schema.model_validate(_unwrap_section_envelope(payload, schema))
+        if violations:
+            logger.error(
+                "ReportComposer: section '%s' still breaks its schema after %d retr%s (%s); "
+                "SKIPPED.",
+                section or schema.__name__,
+                retries,
+                "y" if retries == 1 else "ies",
+                "; ".join(f"{v.path}: {v.message}" for v in violations),
+            )
+            return None
+        return schema.model_validate(payload)
 
 
 def _section_declined(payload: Any, schema: type[BaseModel]) -> bool:
