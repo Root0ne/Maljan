@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="508" height="600" viewBox="0 0 508 600" role="img" aria-label="The mobile team, stage by stage">
+<title>Mobile team</title>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#4b5563"/></marker></defs>
+<text x="24" y="24" fill="#e5e7eb" font-family="monospace" font-size="14">Mobile</text>
+<rect x="24" y="50" width="460" height="58" rx="6" fill="#1f2937" stroke="#4b5563"/>
+<text x="38" y="73" fill="#e5e7eb" font-family="monospace" font-size="13">triage<tspan fill="#9ca3af" font-size="11">  analysis</tspan></text>
+<text x="38" y="93" fill="#9ca3af" font-family="monospace" font-size="11">triage</text>
+<line x1="254.0" y1="108" x2="254.0" y2="138" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="264.0" y="130" fill="#9ca3af" font-family="monospace" font-size="10">reads findings</text>
+<rect x="24" y="142" width="460" height="58" rx="6" fill="#1f2937" stroke="#4b5563"/>
+<text x="38" y="165" fill="#e5e7eb" font-family="monospace" font-size="13">android_static<tspan fill="#9ca3af" font-size="11">  analysis</tspan></text>
+<text x="38" y="185" fill="#9ca3af" font-family="monospace" font-size="11">android_static</text>
+<text x="470" y="185" fill="#7dd3fc" text-anchor="end" font-family="monospace" font-size="11">when file_type in (&quot;apk&quot;, &quot;dex&quot;)</text>
+<line x1="254.0" y1="200" x2="254.0" y2="230" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="264.0" y="222" fill="#9ca3af" font-family="monospace" font-size="10">reads findings</text>
+<rect x="24" y="234" width="460" height="58" rx="6" fill="#1f2937" stroke="#4b5563"/>
+<text x="38" y="257" fill="#e5e7eb" font-family="monospace" font-size="13">dynamic<tspan fill="#9ca3af" font-size="11">  analysis</tspan></text>
+<text x="38" y="277" fill="#9ca3af" font-family="monospace" font-size="11">dynamic</text>
+<text x="470" y="277" fill="#7dd3fc" text-anchor="end" font-family="monospace" font-size="11">when has_sandbox_report</text>
+<line x1="254.0" y1="292" x2="254.0" y2="322" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="264.0" y="314" fill="#9ca3af" font-family="monospace" font-size="10">reads none</text>
+<rect x="24" y="326" width="460" height="58" rx="6" fill="#312e28" stroke="#4b5563"/>
+<text x="38" y="349" fill="#e5e7eb" font-family="monospace" font-size="13">debate<tspan fill="#9ca3af" font-size="11">  debate</tspan></text>
+<text x="38" y="369" fill="#9ca3af" font-family="monospace" font-size="11">—</text>
+<line x1="254.0" y1="384" x2="254.0" y2="414" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="264.0" y="406" fill="#9ca3af" font-family="monospace" font-size="10">reads none</text>
+<rect x="24" y="418" width="460" height="58" rx="6" fill="#26313a" stroke="#4b5563"/>
+<text x="38" y="441" fill="#e5e7eb" font-family="monospace" font-size="13">verdict<tspan fill="#9ca3af" font-size="11">  verdict</tspan></text>
+<text x="38" y="461" fill="#9ca3af" font-family="monospace" font-size="11">judge</text>
+<line x1="254.0" y1="476" x2="254.0" y2="506" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="264.0" y="498" fill="#9ca3af" font-family="monospace" font-size="10">reads none</text>
+<rect x="24" y="510" width="460" height="58" rx="6" fill="#2a2536" stroke="#4b5563"/>
+<text x="38" y="533" fill="#e5e7eb" font-family="monospace" font-size="13">report<tspan fill="#9ca3af" font-size="11">  report</tspan></text>
+<text x="38" y="553" fill="#9ca3af" font-family="monospace" font-size="11">reporter</text>
+</svg>
