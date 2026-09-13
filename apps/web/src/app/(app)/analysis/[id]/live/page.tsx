@@ -8,6 +8,11 @@ import { getErrorMessage } from "@/lib/errors";
 import { verdictLabel } from "@/lib/verdict";
 import { messagesFromEvents } from "@/lib/transcript";
 import TranscriptPanel from "@/components/TranscriptPanel";
+import {
+  formatStageDuration,
+  stageTimeline,
+  type StageEvent,
+} from "@/components/analysis/stageTimeline";
 import type { WSEvent } from "@/types";
 
 type AgentPhase = "waiting" | "analyzing" | "done";
@@ -40,6 +45,12 @@ function buildMessage(type: string, data: Record<string, unknown>): string {
     }
     case "phase_change":
       return `Pipeline phase: ${data.phase}`;
+    case "stage_started":
+      return `Stage [${data.stage}] started`;
+    case "stage_skipped":
+      return `Stage [${data.stage}] skipped — ${data.reason}`;
+    case "stage_finished":
+      return `Stage [${data.stage}] finished`;
     case "completed":
       // The WS payload carries the raw backend verdict
       // ("Malware"); show the same normalised label as every other surface.
@@ -100,6 +111,7 @@ export default function LiveAnalysisPage() {
 
   const [agents, setAgents] = useState<AgentState[]>([]);
   const [messageEvents, setMessageEvents] = useState<WSEvent[]>([]);
+  const [stageEvents, setStageEvents] = useState<StageEvent[]>([]);
   const [eventLog, setEventLog] = useState<EventEntry[]>([]);
   const [phase, setPhase] = useState<PipelinePhase>("waiting");
   const [jobMockMode, setJobMockMode] = useState<boolean | null>(null);
@@ -172,6 +184,18 @@ export default function LiveAnalysisPage() {
             prev.map((a) => (a.name === speaker ? { ...a, phase: "done" } : a))
           );
         }
+      }
+
+      // The team announces each of its stages exactly once. Kept as raw
+      // events and folded into rows by the same function the PROCESS tab
+      // uses, so the live view and the stored rollup cannot disagree about
+      // what the run's shape was.
+      if (
+        ev.type === "stage_started" ||
+        ev.type === "stage_skipped" ||
+        ev.type === "stage_finished"
+      ) {
+        setStageEvents((prev) => [...prev, { type: ev.type, data }]);
       }
 
       if (ev.type === "phase_change") {
@@ -287,6 +311,7 @@ export default function LiveAnalysisPage() {
 
   const phaseConfig = PHASE_CONFIG[phase];
   const transcript = useMemo(() => messagesFromEvents(messageEvents), [messageEvents]);
+  const stages = useMemo(() => stageTimeline(stageEvents, null), [stageEvents]);
   const activeSpeaker = agents.find((a) => a.phase === "analyzing")?.name ?? null;
 
   return (
@@ -322,6 +347,34 @@ export default function LiveAnalysisPage() {
           </span>
         </span>
       </div>
+
+      {/* The team, as it happens. A run is a list of stages now, and until
+        * this strip existed the only thing the live page could say about
+        * shape was which analysts were busy — which is the inside of one
+        * stage, not the run. */}
+      {stages.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {stages.map((stage) => (
+            <span
+              key={stage.key}
+              className={`flex items-baseline gap-2 rounded border px-2 py-1 text-[11px] ${
+                stage.status === "running"
+                  ? "border-status-blue/30 bg-status-blue/10 text-status-blue"
+                  : stage.status === "done"
+                  ? "border-status-green/30 bg-status-green/10 text-status-green"
+                  : "border-border bg-bg-surface text-text-muted"
+              }`}
+              title={stage.reason || `${stage.kind} stage`}
+            >
+              <span className="font-mono">{stage.key}</span>
+              <span className="uppercase tracking-wider">{stage.status}</span>
+              {formatStageDuration(stage.duration_ms) && (
+                <span className="tabular-nums">{formatStageDuration(stage.duration_ms)}</span>
+              )}
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* The conversation itself, above the status grid and the raw log:
         * what the agents actually found is the reason to watch a live run,
