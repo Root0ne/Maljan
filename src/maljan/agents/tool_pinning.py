@@ -88,6 +88,25 @@ def _spellings(default_path: str | None, target: str) -> frozenset[str]:
     )
 
 
+def _basenames(default_path: str | None, target: str) -> frozenset[str]:
+    """The file names that can only be this sample, wherever they are written.
+
+    The third spelling a local model produces, after the bare name and the
+    worker path: the right file name under a directory that does not exist. A
+    live run sent ``/home/user/Belleges/.../<sample>`` -- one letter wrong in a
+    directory the model half-remembered from the prompt -- and the tool
+    answered "no such file" for the rest of the loop.
+    """
+    return frozenset(
+        name
+        for name in (
+            os.path.basename(default_path) if default_path else "",
+            os.path.basename(target),
+        )
+        if name
+    )
+
+
 def pin_paths(
     tools: list[Any],
     *,
@@ -111,11 +130,25 @@ def pin_paths(
         if not target:
             out.append(tool)
             continue
-        out.append(_pin_tool(tool, target, _spellings(default_path, target), agent_name))
+        out.append(
+            _pin_tool(
+                tool,
+                target,
+                _spellings(default_path, target),
+                _basenames(default_path, target),
+                agent_name,
+            )
+        )
     return out
 
 
-def _pin_tool(tool: Any, pinned: str, spellings: frozenset[str], agent_name: str) -> Any:
+def _pin_tool(
+    tool: Any,
+    pinned: str,
+    spellings: frozenset[str],
+    basenames: frozenset[str],
+    agent_name: str,
+) -> Any:
     """Rebuild one tool with its path arguments corrected.
 
     A fresh tool is built rather than mutating the original: the resolved tool
@@ -139,10 +172,25 @@ def _pin_tool(tool: Any, pinned: str, spellings: frozenset[str], agent_name: str
 
     name = getattr(tool, "name", "")
 
+    def _means_this_sample(value: str) -> bool:
+        """Whether a path argument can only be the sample, spelled wrongly.
+
+        Two ways: one of the spellings the model was shown, or the sample's own
+        file name under a directory that holds no such file. The second stays
+        narrow because of the existence check -- a model that named a real file
+        elsewhere named a real file, and only a path that leads nowhere is
+        worth second-guessing.
+        """
+        if value in spellings:
+            return True
+        if value == pinned or os.path.basename(value) not in basenames:
+            return False
+        return not os.path.exists(value)
+
     def _correct(kwargs: dict[str, Any]) -> dict[str, Any]:
         out = dict(kwargs)
         for key, value in kwargs.items():
-            if isinstance(value, str) and value in spellings and is_path_argument(key):
+            if isinstance(value, str) and is_path_argument(key) and _means_this_sample(value):
                 logger.warning(
                     "%s: tool '%s' was called with %r for argument '%s'; "
                     "substituting the path this server can open, %r.",

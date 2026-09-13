@@ -284,12 +284,12 @@ class TestABareFilenameToolArgIsRewritten:
         self._invoke(agent, {"query": "abc123.exe"})
         assert calls == [{"query": "abc123.exe"}]
 
-    def test_a_relative_path_ending_in_the_sample_name_is_not_touched(self):
-        """The failure is a *bare* name resolved against a foreign cwd. A model
-        that supplied a directory meant that directory."""
+    def test_a_relative_path_ending_in_the_sample_name_leads_nowhere(self):
+        """The sample's own name under a directory that holds no such file is
+        the same mistake as the bare name, one directory deeper."""
         agent, calls = self._agent_with_recording_tool()
         self._invoke(agent, {"file_path": "dropped/abc123.exe"})
-        assert calls == [{"file_path": "dropped/abc123.exe"}]
+        assert calls == [{"file_path": _PATH}]
 
     def test_the_rewrite_survives_the_schema_bound_invoke_path(self):
         """The wrapped tool is what the ReAct loop actually calls, and it calls
