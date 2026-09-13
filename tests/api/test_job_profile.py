@@ -109,3 +109,51 @@ def test_a_profile_naming_a_disabled_analyst_is_a_422_naming_both(client):
     assert response.status_code == 422
     assert "default" in response.text
     assert "network" in response.text
+
+
+def test_a_stage_form_profile_naming_a_disabled_analyst_is_refused_too(client):
+    """A stage-form profile leaves the retired flat ``analysts`` list empty, so
+    reading that list made the refusal vacuous and the worker met the conflict
+    minutes later instead."""
+    stored = {
+        "core.agents.definitions": {"network": {"role": "network", "enabled": False}},
+        "core.agents.profiles": {
+            "staged": {
+                "stages": [
+                    {"key": "analysis", "kind": "analysis", "agents": ["network"]},
+                    {
+                        "key": "verdict",
+                        "kind": "verdict",
+                        "agents": ["judge"],
+                        "depends_on": ["analysis"],
+                    },
+                ]
+            }
+        },
+    }
+    with patch("app.api.v1.jobs.SettingsService.load_overrides", AsyncMock(return_value=stored)):
+        response = _submit(client, {"profile": "staged"})
+    assert response.status_code == 422
+    assert "staged" in response.text
+    assert "network" in response.text
+
+
+def test_a_stage_form_profile_whose_members_are_all_enabled_is_accepted(client):
+    stored = {
+        "core.agents.profiles": {
+            "staged": {
+                "stages": [
+                    {"key": "analysis", "kind": "analysis", "agents": ["network"]},
+                    {
+                        "key": "verdict",
+                        "kind": "verdict",
+                        "agents": ["judge"],
+                        "depends_on": ["analysis"],
+                    },
+                ]
+            }
+        },
+    }
+    with patch("app.api.v1.jobs.SettingsService.load_overrides", AsyncMock(return_value=stored)):
+        response = _submit(client, {"profile": "staged"})
+    assert response.status_code == 201
