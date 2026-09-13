@@ -16,6 +16,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from tests.stages import paper_profile
+
 # The real coroutine function, captured before any test patches the reference
 # on ``maljan.pipeline.nodes.asyncio.gather``. Spies ``wraps`` this so the
 # concurrent branch keeps working while call-count stays observable.
@@ -41,6 +43,9 @@ def fake_container() -> Any:
     container.is_mock = True
     container.config.reporting.enabled = False  # keep the topology compact
     container.config.llm.parallel_analysts = True
+    container.active_profile.return_value = paper_profile(
+        ["static", "dynamic", "network"], parallel=True
+    )
     return container
 
 
@@ -106,6 +111,9 @@ def sequential_container() -> Any:
     container.is_mock = True
     container.config.reporting.enabled = False
     container.config.llm.parallel_analysts = False
+    container.active_profile.return_value = paper_profile(
+        ["static", "dynamic", "network"], parallel=False
+    )
     return container
 
 

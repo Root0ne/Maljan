@@ -152,8 +152,8 @@ def test_a_clone_gets_the_sandbox_slice_its_role_gets():
         "network": {"dns": [], "http": [], "tcp": [], "hosts": [], "domains": []},
     }
 
-    built_in = container.load_sandbox_data_for_agent("static", report)
-    clone = container.load_sandbox_data_for_agent("static_r2", report)
+    built_in = container.load_data_for_agent("static", file_hash="abc123", sandbox_report=report)
+    clone = container.load_data_for_agent("static_r2", file_hash="abc123", sandbox_report=report)
 
     assert [c.content for c in clone] == [c.content for c in built_in]
     assert "behavior" not in clone[0].content

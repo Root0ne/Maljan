@@ -30,7 +30,7 @@ class Annotation(TypedDict):
     choices_from: NotRequired[
         Literal["static_providers", "sandbox_providers", "mcp_servers", "agent_roles", "profiles"]
     ]
-    editor: NotRequired[Literal["server_map", "rest_sandbox", "agent_definitions", "profiles"]]
+    editor: NotRequired[Literal["server_map", "rest_sandbox", "agent_definitions", "stages"]]
     subgroup: NotRequired[str]  # heading inside the group; absent = top of the group
     advanced: NotRequired[bool]  # folded into the group's closed "Advanced" disclosure
 
@@ -491,11 +491,13 @@ ANNOTATIONS: dict[str, Annotation] = {
     "llm.parallel_analysts": {
         "title": "Run analysts in parallel",
         "description": (
-            "When true, the static/dynamic/network analysts run concurrently — correct "
-            "only for a hosted, multi-slot LLM API. When false (the default), they run "
-            "one at a time, which is required for a single-slot local llama.cpp/Ollama "
-            "server where parallel requests would clobber each other's KV/recurrent "
-            "state and cause timeouts."
+            "The run mode a team gets when it is still written as a plain list of "
+            "analysts rather than as stages: true runs them concurrently, which is "
+            "correct only for a hosted, multi-slot LLM API, and false (the default) "
+            "runs them one at a time, which is required for a single-slot local "
+            "llama.cpp/Ollama server where parallel requests would clobber each "
+            "other's KV/recurrent state and cause timeouts. A team written as stages "
+            "sets this per analysis stage and ignores this key."
         ),
     },
     "llm.provider": {
@@ -1025,6 +1027,16 @@ ANNOTATIONS: dict[str, Annotation] = {
         ),
         "subgroup": "Report content",
     },
+    "reporting.upstream_findings_max_chars": {
+        "title": "Upstream findings budget",
+        "description": (
+            "How many characters of the upstream stages' findings a stage is given "
+            "in its prompt, when its 'inject upstream' setting asks for them. Past "
+            "this the block is cut and says so, so a long pipeline cannot spend a "
+            "late stage's whole context on a summary of the stages before it."
+        ),
+        "subgroup": "Report content",
+    },
     "reporting.product_type": {
         "title": "Product type",
         "description": (
@@ -1505,14 +1517,19 @@ ANNOTATIONS.update(
             "order": -1,
         },
         "agents.profiles": {
-            "title": "Profiles",
+            "title": "Teams",
             "description": (
-                "Named ensembles, each an ordered list of enabled analyst "
-                "definitions. The order is the order the analysts run in when "
-                "analysts run sequentially. 'default' is read-only; clone it."
+                "Named teams, each an ordered list of stages: an analysis stage "
+                "runs the agents it names, a debate stage argues over the "
+                "analysis upstream of it, the verdict stage runs the judge and "
+                "the report stage builds the report. A stage may depend on "
+                "earlier stages, read their findings, and carry a condition "
+                "that decides whether it runs at all. 'default' and "
+                "'measurement' are read-only apart from their debate options "
+                "and their built-in tool switches; clone one to change it."
             ),
             "group": "agents",
-            "editor": "profiles",
+            "editor": "stages",
             "order": -1,
         },
         "agents.definitions": {
@@ -1520,7 +1537,7 @@ ANNOTATIONS.update(
             "description": (
                 "Every agent Maljan can run, keyed by a short name: its role, "
                 "its prompt, the tool servers it receives and the static "
-                "provider it reads. The four built-ins are read-only apart from "
+                "provider it reads. The built-ins are read-only apart from "
                 "their enabled switch; clone one to change it."
             ),
             "group": "agents",

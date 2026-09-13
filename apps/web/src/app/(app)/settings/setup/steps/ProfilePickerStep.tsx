@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { ProfileEntry } from "@/types/settings";
 import { mapKeyError } from "../../configuration/mapEditorHelpers";
 import { useSettingsContext } from "../../configuration/SettingsContext";
-import { withAgentInProfile, withoutProfile } from "./profilePicker";
+import { analysisStages, withAgentInStage, withoutProfile } from "./profilePicker";
 import { stateString, type GuideStepProps } from "./types";
 
 const PROFILES_KEY = "core.agents.profiles";
@@ -16,12 +16,12 @@ const input =
   "w-full bg-bg-deep border border-border rounded px-2 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent";
 
 /**
- * "Add this analyst to a profile": the last question the agent guide asks.
+ * "Add this analyst to a stage": the last question the agent guide asks.
  *
  * A definition nothing runs is a definition nobody sees, so the guide ends by
- * putting the new agent into a run order — an existing profile, or a new one
- * copied from whichever profile is active now — and optionally makes that
- * profile the active one. Both are ordinary catalog leaves
+ * putting the new agent into one stage of one team — an existing team, or a
+ * new one copied from whichever team is active now — and optionally makes that
+ * team the active one. Both are ordinary catalog leaves
  * (`core.agents.profiles`, `core.agents.profile`), staged the way the
  * console's profiles editor stages them, so the guide's Apply is still one
  * PATCH.
@@ -45,6 +45,9 @@ export default function ProfilePickerStep({ state, setState }: GuideStepProps) {
    *  so a pick is never applied on top of the previous one. */
   const [base] = useState<Record<string, ProfileEntry>>(profiles);
   const [choice, setChoice] = useState<string>("");
+  /** Which stage of the chosen team the agent joins. Empty means its first
+   *  analysis stage, which is the answer for every team of one. */
+  const [stageKey, setStageKey] = useState<string>("");
   const [newKey, setNewKey] = useState("");
   const [makeActive, setMakeActive] = useState(false);
   const [keyError, setKeyError] = useState<string | null>(null);
@@ -66,7 +69,12 @@ export default function ProfilePickerStep({ state, setState }: GuideStepProps) {
     );
   }
 
-  const stageChoice = (nextChoice: string, nextName: string, active: boolean) => {
+  const stageChoice = (
+    nextChoice: string,
+    nextName: string,
+    active: boolean,
+    nextStage: string = stageKey
+  ) => {
     /* This step's previous pick, undone: a profile it created goes away, a
      * profile it edited goes back to the entry it had when the step opened.
      * Everything else in the map — including edits made in the console before
@@ -109,7 +117,7 @@ export default function ProfilePickerStep({ state, setState }: GuideStepProps) {
         return;
       }
       setKeyError(null);
-      commit(withAgentInProfile(undone, key, agentKey, activeProfile), key);
+      commit(withAgentInStage(undone, key, agentKey, nextStage, activeProfile), key);
       return;
     }
     if (nextChoice === "") {
@@ -118,12 +126,12 @@ export default function ProfilePickerStep({ state, setState }: GuideStepProps) {
       return;
     }
     setKeyError(null);
-    commit(withAgentInProfile(undone, nextChoice, agentKey), nextChoice);
+    commit(withAgentInStage(undone, nextChoice, agentKey, nextStage), nextChoice);
   };
 
   return (
     <fieldset className="border-0 p-0 m-0" data-testid="profile-picker">
-      <legend className="sr-only">Add to a profile</legend>
+      <legend className="sr-only">Add to a stage</legend>
       <div className="space-y-2">
         {Object.entries(base).map(([key, profile]) => (
           <label key={key} className="flex gap-2 items-center text-sm text-text-primary">
@@ -140,8 +148,8 @@ export default function ProfilePickerStep({ state, setState }: GuideStepProps) {
             <span className="font-mono">{key}</span>
             <span className="text-xs text-text-secondary">
               {profile.label ? `${profile.label} — ` : ""}
-              {profile.analysts.length} analyst
-              {profile.analysts.length === 1 ? "" : "s"}
+              {(profile.stages ?? []).length} stage
+              {(profile.stages ?? []).length === 1 ? "" : "s"}
             </span>
           </label>
         ))}
@@ -170,6 +178,27 @@ export default function ProfilePickerStep({ state, setState }: GuideStepProps) {
           }}
         />
         <label className="flex gap-2 items-center text-sm text-text-primary">
+          <span>Stage</span>
+          <select
+            className={input}
+            aria-label="add to stage"
+            value={stageKey}
+            onChange={(e) => {
+              setStageKey(e.target.value);
+              stageChoice(choice, newKey, makeActive, e.target.value);
+            }}
+          >
+            <option value="">first analysis stage</option>
+            {analysisStages(
+              choice === NEW_PROFILE ? base[activeProfile] : base[choice]
+            ).map((key) => (
+              <option key={key} value={key}>
+                {key}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex gap-2 items-center text-sm text-text-primary">
           <input
             type="checkbox"
             checked={makeActive}
@@ -178,7 +207,7 @@ export default function ProfilePickerStep({ state, setState }: GuideStepProps) {
               stageChoice(choice, newKey, e.target.checked);
             }}
           />
-          Make it the active profile
+          Make it the active team
         </label>
       </div>
       {keyError && (

@@ -27,6 +27,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 from maljan.pipeline.nodes import _is_placeholder_only
+from tests.stages import ANALYSIS_STAGE, paper_profile
 
 
 @dataclass
@@ -116,7 +117,7 @@ class TestTheStaticAnalystIsNotDisabledByTheFix:
 class TestTheNodeSkipsInsteadOfAnalysing:
     def test_a_placeholder_only_analyst_emits_no_data_and_never_calls_the_llm(self) -> None:
         """End to end through the real node factory, with a mock container."""
-        from maljan.pipeline.nodes import make_analyst_node
+        from maljan.pipeline.nodes import make_stage_agent_node
 
         agent = MagicMock()
         agent.safe_analyze_isr = MagicMock(
@@ -128,11 +129,15 @@ class TestTheNodeSkipsInsteadOfAnalysing:
         container.is_mock = False
         container.event_sink = lambda t, d: events.append((t, d))
         container.get_agent.return_value = agent
+        container.active_profile.return_value = paper_profile(["network"])
+        container.load_data_for_agent.side_effect = lambda n, *, file_hash, **_: (
+            container.load_chunked(file_hash, n)
+        )
         container.load_chunked.return_value = [
             _Chunk(content="No network data available for sample abc123.")
         ]
 
-        node = make_analyst_node("network", container)
+        node = make_stage_agent_node(ANALYSIS_STAGE, "network", container)
         result = node({"file_hash": "abc123", "sample_path": "/s/abc123.exe"})
 
         agent.safe_analyze_isr.assert_not_called()

@@ -18,6 +18,11 @@ wheels/
 node_modules/
 apps/web/.next/
 apps/web/out/
+# Notes ``next dev`` writes for coding agents on every start. They were taken
+# out of the tree deliberately; an untracked file that comes back on every
+# dev-server start is one ``git add -A`` away from being committed by accident.
+apps/web/AGENTS.md
+apps/web/CLAUDE.md
 # Playwright run artefacts: screenshots, traces, error contexts from failures.
 apps/web/test-results/
 apps/web/playwright-report/

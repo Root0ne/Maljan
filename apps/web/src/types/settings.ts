@@ -24,7 +24,7 @@ export type ChoicesFrom =
   | "agent_roles"
   | "profiles";
 
-export type Editor = "server_map" | "rest_sandbox" | "agent_definitions" | "profiles";
+export type Editor = "server_map" | "rest_sandbox" | "agent_definitions" | "stages";
 
 export interface CatalogEntry {
   key: string;
@@ -117,7 +117,7 @@ export interface ToolRefEntry {
  * exported as-is.
  */
 export interface AgentDefinitionEntry {
-  role: "static" | "dynamic" | "network" | "judge" | "generic";
+  role: "static" | "dynamic" | "network" | "judge" | "generic" | "report";
   label: string;
   prompt: string | null;
   tools: ToolRefEntry[];
@@ -125,10 +125,60 @@ export interface AgentDefinitionEntry {
   enabled: boolean;
 }
 
-/** One entry of the `agents.profiles` map: an ordered list of analyst keys. */
+/** How hard one debate stage argues before it hands over, mirroring
+ *  `maljan.core.config.DebateOptions`. `null` on a stage means the global
+ *  negotiation settings it was seeded from. */
+export interface DebateOptionsEntry {
+  max_rounds: number;
+  consensus_threshold: number;
+  sycophancy_check: boolean;
+}
+
+export type StageKind = "analysis" | "debate" | "verdict" | "report";
+export type StageMode = "parallel" | "sequential";
+export type InjectUpstream = "none" | "findings" | "full";
+
+/**
+ * One stage of a team, mirroring `maljan.core.config.StageDefinition`.
+ *
+ * `depends_on` may only name stages declared earlier, which is what makes the
+ * card order the run order and a cycle unrepresentable. `when` is an
+ * expression in the small condition language the API validates; empty means
+ * the stage always runs.
+ */
+export interface StageEntry {
+  key: string;
+  label: string;
+  kind: StageKind;
+  agents: string[];
+  depends_on: string[];
+  when: string;
+  mode: StageMode;
+  inject_upstream: InjectUpstream;
+  debate: DebateOptionsEntry | null;
+  builtin_tools: boolean;
+}
+
+/**
+ * One entry of the `agents.profiles` map: a team, as ordered stages.
+ *
+ * `analysts` is what a profile used to be. It is kept on the wire so a stored
+ * document written before stages still round-trips, and the settings model
+ * ignores it whenever `stages` is present.
+ */
 export interface ProfileEntry {
   label: string;
+  stages: StageEntry[];
   analysts: string[];
+  /** True while the stages are still a derivation of `analysts` rather than
+   *  something an operator wrote. The API keeps re-deriving them from the
+   *  global analyst-mode and negotiation settings until this is cleared, which
+   *  is what the editor does on the first stage edit. Round-tripped, never
+   *  shown. */
+  derived_from_analysts?: boolean;
+  exclude_servers?: string[];
+  exclude_sandbox_tools?: boolean;
+  static_provider?: string | null;
 }
 
 /** `ProbeResult.details` as the agent probe fills it in. */

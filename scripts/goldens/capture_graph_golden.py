@@ -26,8 +26,7 @@ def graph_shape(parallel: bool) -> dict[str, Any]:
     from maljan.core.container import ServiceContainer
     from maljan.pipeline.builder import build_graph
 
-    cfg = Settings(_env_file=None)
-    cfg.llm.parallel_analysts = parallel
+    cfg = Settings(_env_file=None, llm={"parallel_analysts": parallel})
     container = ServiceContainer(cfg, mock=True)
     compiled = build_graph(container)
     drawn = compiled.get_graph()

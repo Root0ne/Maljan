@@ -23,13 +23,14 @@ from maljan.agents.base_agent import BaseAnalyst
 from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
 from maljan.core.container import ServiceContainer
 from maljan.pipeline.nodes import (
-    make_analyst_node,
     make_judge_node,
     make_negotiation_node,
     make_revision_node,
+    make_stage_agent_node,
 )
 from maljan.schemas.evidence import EvidenceCounter
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from tests.stages import ANALYSIS_STAGE, paper_profile
 
 
 @dataclass
@@ -122,6 +123,10 @@ def _container(agents: dict[str, _Analyst], chunks: dict[str, list[_Chunk]]) -> 
     container.get_agent.side_effect = lambda n: agents[n]
     container.load_chunked.side_effect = lambda _h, n: chunks[n]
     container.load_data.side_effect = lambda _h, n: chunks[n][0].content
+    # What the stage hands its agent. The node asks the container for it now
+    # rather than branching on the role itself, so the double answers there.
+    container.load_data_for_agent.side_effect = lambda n, **_: chunks[n]
+    container.active_profile.return_value = paper_profile(list(agents))
     return container
 
 
@@ -149,7 +154,7 @@ class TestTheAnalystNode:
         agents = {"static": _Analyst("static", counter)}
         container = _container(agents, {"static": [_Chunk("PE32 executable, 9 sections.")]})
 
-        update = make_analyst_node("static", container)(_analysis_state())
+        update = make_stage_agent_node(ANALYSIS_STAGE, "static", container)(_analysis_state())
 
         assert _ids(update) == ["ev_0001"]
         assert [row["tool_name"] for row in update["tool_evidence"]["static"]] == ["probe"]
@@ -162,7 +167,7 @@ class TestTheAnalystNode:
         chunks = [_Chunk(f"chunk {i}", index=i, total=3) for i in range(3)]
         container = _container(agents, {"static": chunks})
 
-        update = make_analyst_node("static", container)(_analysis_state())
+        update = make_stage_agent_node(ANALYSIS_STAGE, "static", container)(_analysis_state())
 
         assert agents["static"].calls_made == 3
         assert _ids(update) == ["ev_0001", "ev_0002", "ev_0003"]
@@ -184,7 +189,7 @@ class TestTheAnalystNode:
 
         agent.safe_analyze_isr = _die  # type: ignore[method-assign]
 
-        update = make_analyst_node("static", container)(_analysis_state())
+        update = make_stage_agent_node(ANALYSIS_STAGE, "static", container)(_analysis_state())
 
         assert update["reports"]["static"].startswith("[ERROR]")
         assert _ids(update) == ["ev_0001"]
@@ -202,7 +207,7 @@ class TestTheAnalystNode:
 
         agent.safe_analyze_isr = _crash  # type: ignore[method-assign]
 
-        update = make_analyst_node("static", container)(_analysis_state())
+        update = make_stage_agent_node(ANALYSIS_STAGE, "static", container)(_analysis_state())
 
         assert "crashed" in update["reports"]["static"]
         assert _ids(update) == ["ev_0001"]
@@ -212,7 +217,7 @@ class TestTheAnalystNode:
         agents = {"static": _Analyst("static", counter)}
         container = _container(agents, {"static": [_Chunk("PE32 executable.")]})
 
-        make_analyst_node("static", container)(_analysis_state())
+        make_stage_agent_node(ANALYSIS_STAGE, "static", container)(_analysis_state())
 
         assert agents["static"].drain_evidence_entries() == []
 
@@ -227,7 +232,7 @@ class TestTheRevisionNode:
         chunks = {"static": [_Chunk("PE32 executable, 9 sections.")]}
         container = _container(agents, chunks)
 
-        analysis = make_analyst_node("static", container)(_analysis_state())
+        analysis = make_stage_agent_node(ANALYSIS_STAGE, "static", container)(_analysis_state())
         revision = asyncio.run(make_revision_node(container)(_revision_state()))
 
         assert _ids(analysis) == ["ev_0001"]
@@ -240,7 +245,7 @@ class TestTheRevisionNode:
         chunks = {"static": [_Chunk("PE32 executable, 9 sections.")]}
         container = _container(agents, chunks)
 
-        make_analyst_node("static", container)(_analysis_state())
+        make_stage_agent_node(ANALYSIS_STAGE, "static", container)(_analysis_state())
         # A composed agent's revision does run the loop.
         agent.safe_revise_isr = lambda *a, **k: (  # type: ignore[method-assign]
             agent._run_one_loop() or ("revised", agent._isr())
@@ -424,7 +429,9 @@ class TestOneSequenceAcrossTheRun:
 
         persisted: list[str] = []
         for name in names:
-            persisted += _ids(make_analyst_node(name, container)(_analysis_state()))
+            persisted += _ids(
+                make_stage_agent_node(ANALYSIS_STAGE, name, container)(_analysis_state())
+            )
         persisted += _ids(asyncio.run(make_revision_node(container)(_revision_state())))
 
         assert persisted == ["ev_0001", "ev_0002", "ev_0003"]

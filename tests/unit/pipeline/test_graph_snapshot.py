@@ -47,8 +47,11 @@ def compiled_shape(container: ServiceContainer) -> dict[str, Any]:
 
 
 def _container(parallel: bool) -> ServiceContainer:
-    cfg = Settings(_env_file=None)
-    cfg.llm.parallel_analysts = parallel
+    # Set at construction, not after it: a profile stored as a plain analyst
+    # list becomes stages while the settings are validated, and the analyst
+    # mode is one of the two global keys that conversion reads. Assigning the
+    # flag afterwards would leave a stage list that already said "sequential".
+    cfg = Settings(_env_file=None, llm={"parallel_analysts": parallel})
     return ServiceContainer(cfg, mock=True)
 
 
@@ -123,9 +126,9 @@ def test_a_custom_profile_produces_its_own_nodes_and_chain():
 def test_a_custom_profile_fans_out_from_start_in_parallel_mode():
     cfg = Settings(
         _env_file=None,
+        llm={"parallel_analysts": True},
         agents={"profiles": {"lean": {"analysts": ["network", "static"]}}, "profile": "lean"},
     )
-    cfg.llm.parallel_analysts = True
     shape = compiled_shape(ServiceContainer(cfg, mock=True))
     assert "__start__->network_analyst" in shape["edges"]
     assert "__start__->static_analyst" in shape["edges"]

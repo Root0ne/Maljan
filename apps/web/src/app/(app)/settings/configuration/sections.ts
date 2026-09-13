@@ -23,11 +23,13 @@ export const VIRTUAL_GROUPS: Record<
   string,
   { fromGroup: string; title: string; description: string; keys: string[] }
 > = {
+  // The route key stays `profiles`: it is the settings key this page edits,
+  // and renaming it would break every bookmark into the console for a word.
   profiles: {
     fromGroup: "agents",
-    title: "Profiles",
+    title: "Teams",
     description:
-      "Which analysts run, in which order, and which profile is active.",
+      "Which stages a team runs, in which order, on which condition, and which team is active.",
     keys: ["core.agents.profiles", "core.agents.profile"],
   },
 };

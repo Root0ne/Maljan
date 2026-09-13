@@ -77,6 +77,26 @@ def _default_profile_summary() -> RunSummary:
     )
     builder.set_corroboration({"T1055": ["static", "dynamic", "network"]})
     builder.set_profile("default", analysts, [])
+    builder.set_stages(
+        [
+            {
+                "key": "analysis",
+                "kind": "analysis",
+                "ran": True,
+                "reason": "",
+                "agents": analysts,
+                "duration_ms": 1200,
+            },
+            {
+                "key": "debate",
+                "kind": "debate",
+                "ran": True,
+                "reason": "",
+                "agents": [],
+                "duration_ms": 300,
+            },
+        ]
+    )
     builder.set_degraded_mode(False, [])
     builder.set_failed_analysts([])
     builder.set_token_usage(

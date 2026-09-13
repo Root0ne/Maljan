@@ -283,11 +283,12 @@ test.describe("Settings → Setup guides (admin)", () => {
     await expect(continueButton).toBeEnabled();
     await continueButton.click();
 
-    // Step: add to a profile.
-    await expect(page.getByRole("heading", { name: "Add to a profile" })).toBeVisible();
+    // Step: add to a stage.
+    await expect(page.getByRole("heading", { name: "Add to a stage" })).toBeVisible();
     await page.getByRole("radio", { name: /Create a new profile from default/ }).click();
     await page.getByLabel("new profile name").fill("full");
-    await page.getByRole("checkbox", { name: "Make it the active profile" }).check();
+    await page.getByLabel("add to stage").selectOption("analysis");
+    await page.getByRole("checkbox", { name: "Make it the active team" }).check();
     await page.getByRole("button", { name: "Continue" }).click();
 
     const patches: Record<string, unknown>[] = [];
@@ -314,8 +315,12 @@ test.describe("Settings → Setup guides (admin)", () => {
     >;
     expect(definitions.static_r2).toMatchObject({ role: "static", label: "Static analyst (copy)" });
 
-    const profiles = changes["core.agents.profiles"] as Record<string, { analysts: string[] }>;
-    expect(profiles.full.analysts.at(-1)).toBe("static_r2");
+    const profiles = changes["core.agents.profiles"] as Record<
+      string,
+      { stages: { key: string; agents: string[] }[] }
+    >;
+    const analysis = profiles.full.stages.find((stage) => stage.key === "analysis");
+    expect(analysis?.agents.at(-1)).toBe("static_r2");
 
     expect(changes["core.agents.profile"]).toBe("full");
   });

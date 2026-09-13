@@ -40,6 +40,52 @@ def _merge_dicts[V](left: dict[str, V], right: dict[str, V]) -> dict[str, V]:
     return merged
 
 
+def _merge_stage_results(
+    left: dict[str, dict[str, Any]], right: dict[str, dict[str, Any]]
+) -> dict[str, dict[str, Any]]:
+    """LangGraph reducer for ``stage_results``: merge per stage, not per key.
+
+    A parallel analysis stage is several nodes and each of them writes the
+    stage it belongs to, so a plain shallow merge would record whichever agent
+    LangGraph happened to finish last and throw the rest away. The counts add
+    up, the agent and technique lists union, and ``ran`` is true when any node
+    of the stage ran — which is what "did this stage happen" means for a stage
+    of three analysts, one of which had no data.
+    """
+    merged: dict[str, dict[str, Any]] = {k: dict(v) for k, v in left.items()}
+    for key, entry in right.items():
+        existing = merged.get(key)
+        if existing is None:
+            merged[key] = dict(entry)
+            continue
+        agents = list(dict.fromkeys([*existing.get("agents", []), *entry.get("agents", [])]))
+        techniques = list(
+            dict.fromkeys([*existing.get("technique_ids", []), *entry.get("technique_ids", [])])
+        )
+        merged[key] = {
+            **existing,
+            **entry,
+            "ran": bool(existing.get("ran")) or bool(entry.get("ran")),
+            "reason": entry.get("reason") or existing.get("reason") or "",
+            "claim_count": int(existing.get("claim_count") or 0)
+            + int(entry.get("claim_count") or 0),
+            "finding_count": int(existing.get("finding_count") or 0)
+            + int(entry.get("finding_count") or 0),
+            # A chain's nodes each took their turn, so their times add up; a
+            # fan-out's ran at once, so the stage took as long as its slowest
+            # member. Summing a parallel stage reported three times the wall
+            # clock the operator watched.
+            "duration_ms": (
+                max(int(existing.get("duration_ms") or 0), int(entry.get("duration_ms") or 0))
+                if str(entry.get("mode") or existing.get("mode") or "") == "parallel"
+                else int(existing.get("duration_ms") or 0) + int(entry.get("duration_ms") or 0)
+            ),
+            "agents": agents,
+            "technique_ids": techniques,
+        }
+    return merged
+
+
 class AnalysisState(TypedDict):
     """State dictionary passed between all nodes in the LangGraph workflow."""
 
@@ -166,6 +212,14 @@ class AnalysisState(TypedDict):
     # summary can name who; merged rather than appended because an agent that
     # revises replaces its own findings, and never another agent's.
     validation_findings: Annotated[dict[str, list[dict[str, str]]], _merge_dicts]
+
+    # What each stage of the active profile did: whether it ran, why it did
+    # not, what it produced and how long it took. Written by every node of
+    # every stage and read by the report node for ``run_summary.stages`` and by
+    # the conditions of the stages downstream. A dict keyed by stage rather
+    # than a list because the writers are concurrent, and merged per stage
+    # rather than per key because a parallel stage has several of them.
+    stage_results: Annotated[dict[str, dict[str, Any]], _merge_stage_results]
 
     # How many feedback retries the run spent, across every producer.
     # Append-only: two analysts running in parallel each add their own.

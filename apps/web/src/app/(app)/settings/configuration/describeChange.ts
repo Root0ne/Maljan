@@ -9,6 +9,7 @@ import type {
   AgentDefinitionEntry,
   CatalogEntry,
   ProfileEntry,
+  StageEntry,
 } from "@/types/settings";
 import type { AgentLLMOverride } from "./AgentDefinitionsEditor";
 import { deepEqual } from "./deepEqual";
@@ -299,6 +300,51 @@ function describeDefinitionsMap(before: unknown, after: unknown): {
 // core.agents.profiles / core.agents.profile
 // ---------------------------------------------------------------------------
 
+function stageSummary(stage: StageEntry): string {
+  const parts: string[] = [stage.kind];
+  if (stage.agents.length) parts.push(stage.agents.join("+"));
+  if (stage.depends_on.length) parts.push(`after ${stage.depends_on.join("+")}`);
+  if (stage.when.trim()) parts.push(`when ${stage.when.trim()}`);
+  return parts.join(", ");
+}
+
+function describeStage(profile: string, before: StageEntry, after: StageEntry): string[] {
+  const lines: string[] = [];
+  const field = `${profile}/${after.key}`;
+  if (before.kind !== after.kind) lines.push(`${field}: kind ${before.kind} → ${after.kind}`);
+  if (!deepEqual(before.agents, after.agents)) {
+    const gained = after.agents.filter((a) => !before.agents.includes(a));
+    const lost = before.agents.filter((a) => !after.agents.includes(a));
+    lines.push(
+      gained.length || lost.length
+        ? `${field}: agents changed (+${gained.length} −${lost.length})`
+        : `${field}: agents reordered (${after.agents.join(", ")})`
+    );
+  }
+  if (!deepEqual(before.depends_on, after.depends_on)) {
+    lines.push(`${field}: depends on ${after.depends_on.join(", ") || "nothing"}`);
+  }
+  if (before.when !== after.when) {
+    lines.push(`${field}: condition ${before.when || "always"} → ${after.when || "always"}`);
+  }
+  if (before.mode !== after.mode) lines.push(`${field}: runs ${after.mode}`);
+  if (before.inject_upstream !== after.inject_upstream) {
+    lines.push(`${field}: upstream findings ${after.inject_upstream}`);
+  }
+  if (before.builtin_tools !== after.builtin_tools) {
+    lines.push(`${field}: built-in tools ${after.builtin_tools ? "on" : "off"}`);
+  }
+  if (!deepEqual(before.debate, after.debate)) {
+    lines.push(
+      after.debate
+        ? `${field}: debate ${after.debate.max_rounds} round(s), threshold ${after.debate.consensus_threshold}`
+        : `${field}: debate options cleared`
+    );
+  }
+  if (before.label !== after.label) lines.push(`${field}: label changed`);
+  return lines;
+}
+
 function describeProfilesMap(before: unknown, after: unknown): {
   summary: string;
   detail?: string[];
@@ -325,23 +371,33 @@ function describeProfilesMap(before: unknown, after: unknown): {
 
     const bp = b[key];
     const ap = a[key];
-    const beforeSet = new Set(bp.analysts);
-    const afterSet = new Set(ap.analysts);
-    const added = ap.analysts.filter((x) => !beforeSet.has(x));
-    const removed = bp.analysts.filter((x) => !afterSet.has(x));
-    const sameSet = added.length === 0 && removed.length === 0;
-    const analystsDiffer = !deepEqual(bp.analysts, ap.analysts);
-    const labelChanged = bp.label !== ap.label;
+    const beforeStages = bp.stages ?? [];
+    const afterStages = ap.stages ?? [];
+    const beforeByKey = new Map(beforeStages.map((s) => [s.key, s]));
+    const afterByKey = new Map(afterStages.map((s) => [s.key, s]));
 
-    // A rename and an analyst edit are two separate facts about one profile:
-    // both get a line, and the profile still counts once.
+    // A team's stages are its shape, so an added, removed or reordered stage
+    // is reported as such before any per-stage field is: an operator who moved
+    // the dynamic stage after the reversing stage should read that sentence,
+    // not four lines about dependency lists.
     const lines: string[] = [];
-    if (!sameSet) {
-      lines.push(`${key}: analysts changed (+${added.length} −${removed.length})`);
-    } else if (analystsDiffer) {
-      lines.push(`${key}: analysts reordered (${ap.analysts.join(", ")})`);
+    for (const stage of afterStages) {
+      if (!beforeByKey.has(stage.key)) lines.push(`${key}/${stage.key}: added (${stageSummary(stage)})`);
     }
-    if (labelChanged) lines.push(`${key}: label changed`);
+    for (const stage of beforeStages) {
+      if (!afterByKey.has(stage.key)) lines.push(`${key}/${stage.key}: removed`);
+    }
+    const beforeOrder = beforeStages.filter((s) => afterByKey.has(s.key)).map((s) => s.key);
+    const afterOrder = afterStages.filter((s) => beforeByKey.has(s.key)).map((s) => s.key);
+    if (!deepEqual(beforeOrder, afterOrder)) {
+      lines.push(`${key}: stages reordered (${afterStages.map((s) => s.key).join(" → ")})`);
+    }
+    for (const stage of afterStages) {
+      const previous = beforeByKey.get(stage.key);
+      if (previous) lines.push(...describeStage(key, previous, stage));
+    }
+    if (bp.label !== ap.label) lines.push(`${key}: label changed`);
+
     if (lines.length > 0) {
       detail.push(...lines);
       changedCount++;
@@ -349,7 +405,7 @@ function describeProfilesMap(before: unknown, after: unknown): {
   }
 
   return {
-    summary: `${changedCount} profile(s) changed`,
+    summary: `${changedCount} team(s) changed`,
     detail: detail.length ? detail : undefined,
   };
 }

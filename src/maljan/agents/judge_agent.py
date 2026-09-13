@@ -156,6 +156,10 @@ class JudgeAgent:
         # Per-run token ledger (findings-log §4 Item 1); attached by the
         # container in get_judge_agent(). None when run standalone.
         self.token_ledger: TokenLedger | None = None
+        # Which stage of the active team this judge is running as. Set by the
+        # node before it works — the debate stage when it mediates, the verdict
+        # stage when it rules — and read by the evidence recorder.
+        self.pipeline_stage: str = "analysis"
         # Per-run truncation ledger (pitfall P6); same lifecycle. The judge is
         # where ``judge_max_tokens`` binds and where the STIX integrity pass
         # runs, so this is the most load-bearing attachment point of the three.
@@ -212,7 +216,7 @@ class JudgeAgent:
             return ""
         from maljan.agents.composition import _excluded_servers
 
-        return _excluded_servers(container.config)
+        return _excluded_servers(container.config, "judge")
 
     async def _initialize_mcp_client(self) -> None:
         """Attach every tool server bound to the ``judge`` role, on this loop.
@@ -319,7 +323,15 @@ class JudgeAgent:
         # no counter, and one per mediation round would reissue ``ev_0001``.
         if self.evidence_counter is None:
             self.evidence_counter = EvidenceCounter()
-        recorder = EvidenceRecorder("judge", counter=self.evidence_counter)
+        recorder = EvidenceRecorder(
+            "judge",
+            counter=self.evidence_counter,
+            # The stage the node set before it called: mediation happens in a
+            # debate stage and the verdict in the verdict stage, and a ledger
+            # entry that says "analysis" for either sends a reader looking for
+            # an analyst that never made the call.
+            stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
+        )
         agent_executor = create_react_agent(self.llm, record_tools(self.tools, recorder))
 
         messages = messages_pre
@@ -382,6 +394,7 @@ class JudgeAgent:
         reports: dict[str, str],
         history: list[AgentArgument],
         isr_reports: dict[str, AgentISR] | None = None,
+        consensus_threshold: float | None = None,
     ) -> tuple[AgentArgument, bool]:
         """Find contradictions between expert reports and determine consensus.
 
@@ -528,7 +541,7 @@ class JudgeAgent:
         # negotiation loop can keep running.
         verdict = await self._extract_mediator_verdict(extract_prompt, reasoning_text)
 
-        is_consensus = verdict.confidence >= self._consensus_threshold()
+        is_consensus = verdict.confidence >= self._consensus_threshold(consensus_threshold)
         log_msg = "Consensus reached" if is_consensus else "No consensus yet"
         self.logger.info("%s (confidence=%.2f)", log_msg, verdict.confidence)
 
@@ -931,14 +944,17 @@ class JudgeAgent:
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _consensus_threshold(self) -> float:
+    def _consensus_threshold(self, override: float | None = None) -> float:
         """The confidence at which mediation counts as consensus.
 
         ``NEGOTIATION__CONSENSUS_THRESHOLD`` was documented, validated and
         never read: the check used the module constant, so setting the
-        variable changed nothing. The configured value wins when a config is
-        present; the constant remains the default for standalone use.
+        variable changed nothing. The debate stage's own threshold wins when
+        the caller passes one, then the configured global, and the constant
+        remains the default for standalone use.
         """
+        if override is not None:
+            return float(override)
         negotiation = getattr(self._config, "negotiation", None)
         value = getattr(negotiation, "consensus_threshold", None)
         return float(value) if value is not None else CONSENSUS_THRESHOLD

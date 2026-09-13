@@ -640,8 +640,11 @@ class PreprocessingConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 # The role a definition plays in the fixed skeleton. ``generic`` is the one
-# role with no class of its own: it runs as ``ConfigurableAnalyst``.
-AnalystRole = Literal["static", "dynamic", "network", "judge", "generic"]
+# role with no class of its own: it runs as ``ConfigurableAnalyst``. ``report``
+# is the one role that is only a prompt template: the reporter definition picks
+# the LLM and the prompt the narrative and composer steps run with, and the
+# report stage is a deterministic build around them rather than an agent loop.
+AnalystRole = Literal["static", "dynamic", "network", "judge", "generic", "report"]
 
 # Deprecated. ``MCPServerConfig.agents`` used to be a Literal of the four
 # built-in roles; an operator can now bind a server to any definition key, so
@@ -809,8 +812,33 @@ class MCPConfig(BaseModel):
 # ``llm.agents``. Sharing the pattern rather than re-declaring it keeps the two
 # maps' rules from drifting apart.
 AGENT_KEY_PATTERN = SERVER_KEY_PATTERN
-BUILTIN_AGENTS: tuple[str, ...] = ("static", "dynamic", "network", "judge")
+JUDGE_AGENT_KEY = "judge"
+# The narrative/composer step, as a definition. It exists so the report has an
+# LLM entry and a prompt of its own instead of borrowing the judge's, and so a
+# report stage names an agent like every other stage does.
+REPORTER_AGENT_KEY = "reporter"
+BUILTIN_AGENTS: tuple[str, ...] = ("static", "dynamic", "network", "judge", "reporter")
 BUILTIN_PROFILES: tuple[str, ...] = ("default", "measurement")
+
+# What an agent may be handed as its input text. ``sample.path`` is the
+# container-visible path its tools load the sample from; ``sample.chunks`` the
+# parsed sample profile; the ``sandbox.*`` entries are slices of the job's
+# sandbox report, ``sandbox.full`` being the whole document. Empty on a
+# definition means the role's historical default, spelled out in
+# ``container.load_data_for_agent``.
+DATA_SOURCES: tuple[str, ...] = (
+    "sample.path",
+    "sample.chunks",
+    "sandbox.target",
+    "sandbox.behavior",
+    "sandbox.network",
+    "sandbox.full",
+)
+
+# ``container.load_data_for_agent`` documents what an empty list means per
+# role; it is deliberately not restated as a constant here, because the empty
+# case runs the loader's own historical branch and a second copy of it would be
+# a second answer to the same question.
 
 _AGENT_KEY_RE = re.compile(AGENT_KEY_PATTERN)
 _KEY_RULE = (
@@ -888,10 +916,172 @@ class AgentDefinition(BaseModel):
     tools: list[ToolRef] = Field(default_factory=list)
     static_provider: str | None = None
     enabled: bool = True
+    # Which slices of the job this agent is handed as its input text. Empty
+    # means the role's historical default, which is what every definition
+    # written before stages existed relies on: the data an agent read used to
+    # be a switch on its role, so a clone of the static analyst could not be
+    # pointed at the sandbox behaviour log without also becoming a dynamic
+    # analyst. Naming the sources makes that a two-word edit.
+    data_sources: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _data_sources_are_known(self) -> "AgentDefinition":
+        seen: set[str] = set()
+        for source in self.data_sources:
+            if source not in DATA_SOURCES:
+                known = ", ".join(DATA_SOURCES)
+                raise ValueError(f"unknown data source {source!r}. Available: {known}")
+            if source in seen:
+                raise ValueError(f"data source {source!r} is listed twice")
+            seen.add(source)
+        return self
+
+
+class DebateOptions(BaseModel):
+    """How hard one debate stage argues before it hands over.
+
+    These were three global settings, which meant a profile with two debates
+    had to run both of them the same way. They are per stage now; a stage that
+    sets none inherits the global values it was seeded from, so an operator who
+    never opens a stage card sees the behaviour they had.
+    """
+
+    max_rounds: Annotated[int, Field(ge=1)] = 3
+    consensus_threshold: Annotated[float, Field(ge=0, le=1)] = 0.8
+    sycophancy_check: bool = True
+
+
+class StageDefinition(BaseModel):
+    """One step of a team, in the order and on the condition an operator sets.
+
+    A human analysis team is a sequence of dependent steps — triage, then
+    static, then dynamic if it is worth detonating, then reversing, then the
+    network and threat-intel pass, then correlation, then the report — and each
+    step reads what the ones before it produced. A flat list of analysts could
+    express none of that: every member saw the same input, ran at the same
+    point, and ran always.
+
+    ``kind`` says what the stage *is*, which is what the builder turns into
+    nodes. ``when`` says whether it runs at all (see ``pipeline.conditions``);
+    a stage whose condition is false is still part of the graph and still
+    records a result, so the topology is a property of the configuration alone
+    and never of the sample.
+    """
+
+    key: Annotated[str, Field(pattern=SERVER_KEY_PATTERN)]
+    label: str = ""
+    kind: Literal["analysis", "debate", "verdict", "report"] = "analysis"
+    agents: list[str] = Field(default_factory=list)
+    depends_on: list[str] = Field(default_factory=list)
+    when: str = ""
+    mode: Literal["parallel", "sequential"] = "sequential"
+    inject_upstream: Literal["none", "findings", "full"] = "findings"
+    debate: DebateOptions | None = None
+    builtin_tools: bool = True
+
+    @model_validator(mode="after")
+    def _condition_parses(self) -> "StageDefinition":
+        from maljan.pipeline.conditions import validate_condition
+
+        problems = validate_condition(self.when)
+        if problems:
+            raise ValueError(f"stage {self.key!r}: {problems[0]}")
+        return self
+
+
+def stages_from_analysts(
+    analysts: list[str],
+    *,
+    parallel: bool = False,
+    max_rounds: int = 3,
+    consensus_threshold: float = 0.8,
+) -> list[StageDefinition]:
+    """The four-stage form of a profile that was written as a list of analysts.
+
+    This is the whole of the compatibility story: every profile in every
+    operator database predates stages, and the pipeline they describe is one
+    analysis stage, one debate, one verdict and one report. Written once here
+    so the settings model, the alembic migration and the tests cannot each
+    invent a slightly different translation.
+    """
+    return [
+        StageDefinition(
+            key="analysis",
+            label="Analysis",
+            kind="analysis",
+            agents=list(analysts),
+            mode="parallel" if parallel else "sequential",
+            inject_upstream="none",
+        ),
+        StageDefinition(
+            key="debate",
+            label="Debate",
+            kind="debate",
+            depends_on=["analysis"],
+            inject_upstream="none",
+            debate=DebateOptions(
+                max_rounds=max_rounds,
+                consensus_threshold=consensus_threshold,
+            ),
+        ),
+        StageDefinition(
+            key="verdict",
+            label="Verdict",
+            kind="verdict",
+            agents=[JUDGE_AGENT_KEY],
+            depends_on=["debate"],
+            inject_upstream="none",
+        ),
+        StageDefinition(
+            key="report",
+            label="Report",
+            kind="report",
+            agents=[REPORTER_AGENT_KEY],
+            depends_on=["verdict"],
+            inject_upstream="none",
+        ),
+    ]
+
+
+# What re-derivation is allowed to overwrite, and therefore the only two
+# fields a derived stage list may differ from the plain conversion in: the
+# analysis stage's run mode comes from ``llm.parallel_analysts`` and the debate
+# stage's options from the negotiation settings. Everything else about a stage
+# is the operator's.
+_DERIVED_FIELDS: tuple[str, ...] = ("mode", "debate")
+
+
+def stages_are_derived(analysts: list[str], stages: list["StageDefinition"]) -> bool:
+    """Whether ``stages`` is still the plain conversion of ``analysts``.
+
+    The ``derived_from_analysts`` marker travels in the stored document, so it
+    arrives over the wire from an import, a script's PATCH, or a hand-edited
+    export. Trusting it on its own means a team with the marker and four stages
+    an operator wrote by hand has those stages silently replaced on the next
+    load. The marker says "nobody has touched these"; this is what checks it.
+
+    The two fields re-derivation itself sets cannot take part in the check: the
+    stored ones were written from whatever the globals said at the time, and
+    disagreeing with today's globals is the very thing re-derivation is for. A
+    document that keeps the marker and changes *only* a debate stage's options
+    is therefore still overwritten — the console clears the marker on every
+    stage edit, so that combination only arises from an export edited by hand.
+    """
+    if not analysts:
+        return False
+    expected = stages_from_analysts(list(analysts))
+    if len(expected) != len(stages):
+        return False
+    for want, have in zip(expected, stages, strict=True):
+        left = want.model_dump(exclude=set(_DERIVED_FIELDS))
+        right = have.model_dump(exclude=set(_DERIVED_FIELDS))
+        if left != right:
+            return False
+    return True
 
 
 class ProfileDefinition(BaseModel):
-    """An ordered set of analyst keys. The order is the sequential run order.
+    """A team, as ordered dependent stages.
 
     The three ``exclude``/override fields are what make a tool-free baseline
     possible without cloning every definition: a profile says which servers its
@@ -907,17 +1097,212 @@ class ProfileDefinition(BaseModel):
     ``exclude_servers`` holds server keys, or the single entry ``"*"`` meaning
     every server there is — including whatever an operator adds later, which
     is the only form a tool-free baseline can safely take.
+
+    ``analysts`` is what a profile used to be and is kept so a stored document
+    still loads, still exports, and can still be read back by the migration's
+    downgrade. A profile that carries it and no ``stages`` is converted below.
     """
 
     label: str = ""
-    analysts: list[str]
+    stages: list[StageDefinition] = Field(default_factory=list)
+    analysts: list[str] = Field(default_factory=list)
     exclude_servers: list[str] = Field(default_factory=list)
     exclude_sandbox_tools: bool = False
     static_provider: str | None = None
+    # True when ``stages`` was derived from ``analysts`` rather than written.
+    # ``Settings`` re-derives those stages once the whole document is loaded,
+    # because the conversion needs ``llm.parallel_analysts`` and the
+    # negotiation settings and a profile cannot see either from in here.
+    #
+    # Stored rather than dropped, because the alembic revision that writes
+    # stages into an operator's database sets it: without it, a team the
+    # operator never opened would freeze whatever those two global keys said
+    # on migration day, and an operator who later moved from a hosted API back
+    # to the single-slot local model would keep running analysts in parallel.
+    # The console clears it on any stage edit — from that point the stages are
+    # the operator's, not a derivation of the analyst list.
+    derived_from_analysts: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def _analysts_become_stages(cls, data: Any) -> Any:
+        """A profile written as a list of analysts is read as the four stages."""
+        if not isinstance(data, dict):
+            return data
+        if data.get("stages"):
+            return data
+        analysts = data.get("analysts")
+        if not analysts:
+            return data
+        return {
+            **data,
+            "stages": [s.model_dump() for s in stages_from_analysts(list(analysts))],
+            "derived_from_analysts": True,
+        }
+
+    @model_validator(mode="after")
+    def _stages_are_a_pipeline(self) -> "ProfileDefinition":
+        """Everything about the stage list that needs only the stage list."""
+        if not self.stages:
+            raise ValueError("a profile needs at least one stage")
+
+        # The marker is a stored field, so it arrives from an import, a
+        # script's PATCH or a hand-edited export as readily as from the
+        # migration that sets it. A team whose stages are no longer the plain
+        # conversion of its analyst list has been written, whatever the
+        # document claims, and re-deriving it would throw that writing away.
+        if self.derived_from_analysts and not stages_are_derived(self.analysts, self.stages):
+            self.derived_from_analysts = False
+
+        seen: set[str] = set()
+        for stage in self.stages:
+            if stage.key in seen:
+                raise ValueError(f"stage {stage.key!r} is declared twice")
+            seen.add(stage.key)
+
+        # ``depends_on`` may only name a stage declared earlier. That is a
+        # stronger rule than "no cycles" and a much kinder one: it makes the
+        # written order the run order, so a reader of the profile card reads
+        # the pipeline top to bottom, and it makes a cycle unrepresentable
+        # rather than merely detectable. The topological check below is what
+        # reports the failure in those terms.
+        earlier: set[str] = set()
+        for stage in self.stages:
+            for dependency in stage.depends_on:
+                if dependency == stage.key:
+                    raise ValueError(f"stage {stage.key!r} depends on itself")
+                if dependency not in seen:
+                    raise ValueError(f"stage {stage.key!r} depends on unknown stage {dependency!r}")
+                if dependency not in earlier:
+                    raise ValueError(
+                        f"stage {stage.key!r} depends on {dependency!r}, which is declared "
+                        "after it; a stage may only depend on an earlier stage"
+                    )
+            earlier.add(stage.key)
+
+        # Only analysis stages: an agent's node is named after the agent
+        # (``<agent>_analyst``), so two analysis stages naming one agent would
+        # collide in the graph. The verdict and report nodes are named after
+        # the stage kind, and the judge that runs the verdict is *expected* to
+        # be named again wherever the operator went wrong — reporting that as
+        # a name collision would hide the real error, which is the role.
+        agent_owner: dict[str, str] = {}
+        for stage in self.stages:
+            if stage.kind != "analysis":
+                continue
+            for agent in stage.agents:
+                previous = agent_owner.get(agent)
+                if previous is not None:
+                    raise ValueError(
+                        f"{agent!r} is in stage {previous!r} and again in {stage.key!r}; "
+                        "an agent belongs to one stage"
+                    )
+                agent_owner[agent] = stage.key
+
+        for stage in self.stages:
+            if stage.kind == "analysis" and not stage.agents:
+                raise ValueError(f"stage {stage.key!r} is an analysis stage with no agent")
+            if stage.kind == "debate":
+                upstream = self._reachable(stage.key)
+                if not any(s.kind == "analysis" for s in self.stages if s.key in upstream):
+                    raise ValueError(
+                        f"stage {stage.key!r} debates nothing: it needs an analysis stage "
+                        "upstream of it"
+                    )
+
+        for stage in self.stages:
+            if stage.kind != "debate":
+                continue
+            problem = self.debate_handover_error(stage)
+            if problem:
+                raise ValueError(problem)
+
+        verdicts = [s.key for s in self.stages if s.kind == "verdict"]
+        if len(verdicts) != 1:
+            found = ", ".join(verdicts) or "none"
+            raise ValueError(f"a profile needs exactly one verdict stage; found {found}")
+        reports = [s.key for s in self.stages if s.kind == "report"]
+        if len(reports) > 1:
+            raise ValueError(f"a profile has at most one report stage; found {', '.join(reports)}")
+        if reports and self.stages[-1].kind != "report":
+            raise ValueError("the report stage is the last stage of a profile")
+        return self
+
+    def entry_node_count(self, stage: "StageDefinition") -> int:
+        """How many graph nodes a dependency of ``stage`` has to point at.
+
+        One for every stage but a parallel analysis stage, which starts at all
+        of its agents at once. ``pipeline.topology`` derives the same number
+        from the same rule; it is restated here because the check below has to
+        run before a graph is ever built.
+        """
+        if stage.kind == "analysis" and stage.mode == "parallel":
+            return len(stage.agents)
+        return 1
+
+    def debate_handover_error(self, stage: "StageDefinition") -> str:
+        """Why ``stage`` cannot hand over, or an empty string when it can.
+
+        A debate leaves through a conditional edge, and a conditional edge has
+        exactly one destination per branch. A debate that feeds two stages — or
+        one parallel analysis stage with two agents, which is two nodes — has
+        no single destination for the branch that stops arguing.
+
+        This is checked when the team is saved rather than only when the graph
+        is built. The builder still refuses it, but by then the sample has been
+        uploaded and detonated and every job under that team fails; an operator
+        has to be told while they are still editing.
+        """
+        heads = 0
+        fed: list[str] = []
+        for candidate in self.stages:
+            if stage.key in candidate.depends_on:
+                heads += self.entry_node_count(candidate)
+                fed.append(candidate.key)
+        if heads <= 1:
+            return ""
+        return (
+            f"stage {stage.key!r} is a debate that hands over to {heads} nodes "
+            f"({', '.join(fed)}); a debate hands over to exactly one stage, and not "
+            "to a parallel analysis stage with more than one agent"
+        )
+
+    def _reachable(self, key: str) -> set[str]:
+        """Every stage ``key`` transitively depends on."""
+        by_key = {s.key: s for s in self.stages}
+        out: set[str] = set()
+        pending = list(by_key[key].depends_on) if key in by_key else []
+        while pending:
+            current = pending.pop()
+            if current in out or current not in by_key:
+                continue
+            out.add(current)
+            pending.extend(by_key[current].depends_on)
+        return out
+
+    def stage(self, key: str) -> StageDefinition | None:
+        for candidate in self.stages:
+            if candidate.key == key:
+                return candidate
+        return None
+
+    @property
+    def analysis_agents(self) -> list[str]:
+        """Every agent of every analysis stage, in stage order.
+
+        What ``analysts`` used to mean, computed rather than stored, so the
+        roster the worker announces and the roster the graph runs cannot
+        disagree once a profile is edited as stages.
+        """
+        out: list[str] = []
+        for stage in self.stages:
+            if stage.kind == "analysis":
+                out.extend(stage.agents)
+        return out
 
 
 def _builtin_definitions() -> dict[str, AgentDefinition]:
-    """The four agents the pipeline has always had, as settings.
+    """The agents the pipeline has always had, as settings.
 
     The prompt and the static provider stay neutral — a null prompt and a null
     provider are what "the built-in behaviour" *means*. The tool lists are not
@@ -931,8 +1316,9 @@ def _builtin_definitions() -> dict[str, AgentDefinition]:
     job's sandbox report is already in this process, so the tools over it are
     closures, not a transport.
 
-    The judge is here so that its LLM and its tool servers have the same
-    editing surface as the analysts; it can never appear in a profile.
+    The judge and the reporter are here so that their LLM and their tool
+    servers have the same editing surface as the analysts. Neither can be an
+    analyst: a profile names them from its verdict and report stages.
     """
     return {
         "static": AgentDefinition(
@@ -956,16 +1342,29 @@ def _builtin_definitions() -> dict[str, AgentDefinition]:
                 ToolRef(kind="mcp", server="knowledge"),
             ],
         ),
-        "judge": AgentDefinition(
+        JUDGE_AGENT_KEY: AgentDefinition(
             role="judge",
             label="Judge",
             tools=[ToolRef(kind="mcp", server="knowledge")],
+        ),
+        REPORTER_AGENT_KEY: AgentDefinition(
+            role="report",
+            label="Reporter",
+            tools=[],
         ),
     }
 
 
 def _builtin_profiles() -> dict[str, ProfileDefinition]:
-    """The paper's architecture, named. The order is the order the graph ran in.
+    """The paper's architecture, named — written as the stages it always was.
+
+    Four stages, because that is what the pipeline does: the analysts, the
+    debate they hold, the verdict a judge draws from it and the report built
+    from the verdict. The seeds are written as the analyst list they always
+    were and converted by ``ProfileDefinition`` like any other stored profile,
+    which is what keeps ``llm.parallel_analysts`` and the negotiation settings
+    in charge of a profile nobody has opened: an operator who raises the round
+    limit still raises it for the default profile.
 
     ``measurement`` is the same three analysts with every tool server taken
     away and every static provider forced to ``none``: the honest baseline for
@@ -980,16 +1379,34 @@ def _builtin_profiles() -> dict[str, ProfileDefinition]:
     profile whose whole purpose is a measurement claim would quietly stop being
     tool-free and could not be fixed in place.
     """
+    paper_analysts = ["static", "dynamic", "network"]
     return {
-        "default": ProfileDefinition(label="Default", analysts=["static", "dynamic", "network"]),
+        "default": ProfileDefinition(label="Default", analysts=list(paper_analysts)),
         "measurement": ProfileDefinition(
             label="Measurement baseline",
-            analysts=["static", "dynamic", "network"],
+            analysts=list(paper_analysts),
             exclude_servers=[ALL_SERVERS],
             exclude_sandbox_tools=True,
             static_provider="none",
         ),
     }
+
+
+def _profile_stage_identity(stages: Any) -> Any:
+    """A built-in profile's stages with the two editable fields taken out.
+
+    Used only by the identity check: ``debate`` options and ``builtin_tools``
+    are what an operator may tune on a seeded profile, so they are removed from
+    both sides of the comparison rather than compared and forgiven afterwards.
+    """
+    if not isinstance(stages, list):
+        return stages
+    return [
+        {k: v for k, v in stage.items() if k not in ("debate", "builtin_tools")}
+        if isinstance(stage, dict)
+        else stage
+        for stage in stages
+    ]
 
 
 class AgentsConfig(BaseModel):
@@ -1074,6 +1491,24 @@ class AgentsConfig(BaseModel):
             # every edit to it is refused as tampering with a built-in.
             current_profile.pop("exclude_servers", None)
             expected_profile.pop("exclude_servers", None)
+            # ``analysts`` is inert once a profile carries stages — the model
+            # reads the stages and nothing else — so a document that dropped
+            # the deprecated copy is the same built-in profile.
+            current_profile.pop("analysts", None)
+            expected_profile.pop("analysts", None)
+            # Bookkeeping, not a setting: a built-in whose stages were written
+            # out by the migration and one that was derived on load are the
+            # same built-in team.
+            current_profile.pop("derived_from_analysts", None)
+            expected_profile.pop("derived_from_analysts", None)
+            # The stages of a built-in are the paper's architecture and stay
+            # fixed, with two exceptions an operator legitimately needs: how
+            # hard the debate argues, and whether a stage gets the built-in
+            # tool servers. Everything else about a stage — its kind, its
+            # agents, what it depends on, when it runs — is the architecture
+            # itself, and editing it means cloning the profile.
+            current_profile["stages"] = _profile_stage_identity(current_profile.get("stages"))
+            expected_profile["stages"] = _profile_stage_identity(expected_profile.get("stages"))
             if current_profile != expected_profile:
                 raise ValueError(f"{key!r} is built in; clone it to change it")
 
@@ -1081,8 +1516,10 @@ class AgentsConfig(BaseModel):
             # Spec §3.1: one judge, and it cannot be cloned. A second judge
             # definition is inert — no profile may name it — so the operator
             # would get a card that can never run anything.
-            if definition.role == "judge" and key != "judge":
+            if definition.role == "judge" and key != JUDGE_AGENT_KEY:
                 raise ValueError(f"{key!r}: only the built-in judge may have role judge")
+            if definition.role == "report" and key != REPORTER_AGENT_KEY:
+                raise ValueError(f"{key!r}: only the built-in reporter may have role report")
             if definition.role == "generic" and not (definition.prompt or "").strip():
                 raise ValueError(f"{key!r}: a generic agent needs a prompt")
             has_provider_ref = any(ref.kind == "provider" for ref in definition.tools)
@@ -1093,35 +1530,66 @@ class AgentsConfig(BaseModel):
                 )
 
         for name, profile in self.profiles.items():
-            if not profile.analysts:
-                raise ValueError(f"profile {name!r} needs at least one analyst")
-            seen: set[str] = set()
-            for analyst in profile.analysts:
-                if analyst in seen:
-                    raise ValueError(f"profile {name!r} lists {analyst!r} twice")
-                seen.add(analyst)
-                member = self.definitions.get(analyst)
-                if member is None:
-                    raise ValueError(f"profile {name!r} lists unknown analyst {analyst!r}")
-                if member.role == "judge":
-                    raise ValueError(
-                        f"profile {name!r} lists {analyst!r}: the judge cannot be an analyst"
-                    )
-                # A built-in profile is exempt from this check only while it
-                # is not the active profile: disabling a member of ``default``
-                # is harmless as long as some other profile is actually
-                # running, but the moment ``default`` itself is selected the
-                # disabled member would be asked to run. A custom profile has
-                # no such exemption — its author chose every member, active
-                # or not.
-                exempt = name in BUILTIN_PROFILES and name != self.profile
-                if not exempt and not member.enabled:
-                    raise ValueError(f"profile {name!r} lists disabled analyst {analyst!r}")
+            self._check_profile_members(name, profile)
 
         if self.profile not in self.profiles:
             available = ", ".join(sorted(self.profiles))
             raise ValueError(f"unknown profile {self.profile!r}. Available: {available}")
         return self
+
+    def _check_profile_members(self, name: str, profile: ProfileDefinition) -> None:
+        """Every rule about a profile's stages that needs the definition map.
+
+        ``ProfileDefinition`` can check the shape of a pipeline but not who is
+        in it: it cannot see the definitions. Everything that compares a stage's
+        agents against the map that has to contain them lives here.
+        """
+        # A built-in profile is exempt from the enabled check only while it is
+        # not the active profile: disabling a member of ``default`` is harmless
+        # as long as some other profile is actually running, but the moment
+        # ``default`` itself is selected the disabled member would be asked to
+        # run. A custom profile has no such exemption — its author chose every
+        # member, active or not.
+        exempt = name in BUILTIN_PROFILES and name != self.profile
+        for stage in profile.stages:
+            for agent in stage.agents:
+                member = self.definitions.get(agent)
+                if member is None:
+                    raise ValueError(
+                        f"profile {name!r}, stage {stage.key!r}: unknown agent {agent!r}"
+                    )
+                if stage.kind == "analysis" and member.role in ("judge", "report"):
+                    raise ValueError(
+                        f"profile {name!r}, stage {stage.key!r}: {agent!r} has role "
+                        f"{member.role!r} and cannot be an analyst"
+                    )
+                if not exempt and not member.enabled:
+                    raise ValueError(
+                        f"profile {name!r}, stage {stage.key!r}: {agent!r} is disabled"
+                    )
+            if stage.kind == "verdict":
+                if len(stage.agents) != 1:
+                    raise ValueError(
+                        f"profile {name!r}, stage {stage.key!r}: a verdict stage names "
+                        "exactly one judge"
+                    )
+                judge = self.definitions.get(stage.agents[0])
+                if judge is None or judge.role != "judge":
+                    raise ValueError(
+                        f"profile {name!r}, stage {stage.key!r}: "
+                        f"{stage.agents[0]!r} is not a judge definition"
+                    )
+            if stage.kind == "report":
+                if stage.agents != [REPORTER_AGENT_KEY]:
+                    raise ValueError(
+                        f"profile {name!r}, stage {stage.key!r}: a report stage is run by "
+                        f"{REPORTER_AGENT_KEY!r}"
+                    )
+            if stage.kind == "debate" and stage.agents:
+                raise ValueError(
+                    f"profile {name!r}, stage {stage.key!r}: a debate stage names no agent; "
+                    "it argues over the analysis stages upstream of it"
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -1415,6 +1883,11 @@ class ReportingConfig(BaseModel):
     enabled: bool = True
     include_extended_stix: bool = True
     narrative_max_tokens: Annotated[int, Field(ge=1)] = 1500
+    # How much of the upstream stages' findings a stage is handed. A pipeline
+    # of six stages would otherwise put the whole run into every prompt after
+    # the second one, and the last stage would spend its context on a summary
+    # of a summary instead of on the sample.
+    upstream_findings_max_chars: Annotated[int, Field(ge=0)] = 6000
     auto_generate_detection_rules: bool = True
 
     # --- Report-reshaping (professional-report front-matter + Composer) ---
@@ -1704,6 +2177,8 @@ class Settings(BaseSettings):
                             f"{key!r}: {ref.name!r} is not allowed on server {ref.server!r}"
                         )
 
+        self._rederive_converted_profiles()
+
         known = set(self.agents.definitions)
         for name, server in self.mcp.servers.items():
             for agent in server.agents:
@@ -1714,6 +2189,25 @@ class Settings(BaseSettings):
                         f"Available: {available}"
                     )
         return self
+
+    def _rederive_converted_profiles(self) -> None:
+        """Give a converted profile the global values it is supposed to inherit.
+
+        ``ProfileDefinition`` turns a stored list of analysts into four stages,
+        but it cannot see ``llm.parallel_analysts`` or the negotiation settings
+        from inside itself, so it converts with the model defaults and marks the
+        profile. This is where those two global keys are applied — the promise
+        that a profile nobody has opened yet runs exactly as it ran before.
+        """
+        for profile in self.agents.profiles.values():
+            if not profile.derived_from_analysts:
+                continue
+            profile.stages = stages_from_analysts(
+                list(profile.analysts),
+                parallel=bool(self.llm.parallel_analysts),
+                max_rounds=self.negotiation.max_iterations,
+                consensus_threshold=self.negotiation.consensus_threshold,
+            )
 
 
 # ---------------------------------------------------------------------------

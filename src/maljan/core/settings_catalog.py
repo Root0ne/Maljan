@@ -25,7 +25,7 @@ Applies = Literal["next_job", "live", "restart"]
 ChoicesFrom = Literal[
     "static_providers", "sandbox_providers", "mcp_servers", "agent_roles", "profiles"
 ]
-Editor = Literal["server_map", "rest_sandbox", "agent_definitions", "profiles"]
+Editor = Literal["server_map", "rest_sandbox", "agent_definitions", "stages"]
 
 # Field names that are secrets although typed as plain str.
 _SECRET_NAMES = {"auth_token", "api_key", "cape2_api_token"}

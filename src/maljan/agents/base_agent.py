@@ -1128,6 +1128,10 @@ class BaseAnalyst(ABC):
         # Per-run token ledger (findings-log §4 Item 1). The container attaches
         # the shared ledger in get_agent(); None when an agent runs standalone.
         self.token_ledger: TokenLedger | None = None
+        # Which stage of the active team this agent is running as, set by the
+        # node before it works. Read by the evidence recorder, so a ledger
+        # entry says which step of the team made the call.
+        self.pipeline_stage: str = "analysis"
         # Per-run truncation ledger (pitfall P6, findings-log §2.0). Same
         # lifecycle as token_ledger; None disables counting.
         self.truncation_ledger: Any | None = None
@@ -1368,7 +1372,7 @@ class BaseAnalyst(ABC):
             return ""
         from maljan.agents.composition import _excluded_servers
 
-        return _excluded_servers(container.config)
+        return _excluded_servers(container.config, self.name)
 
     def _attach_registry_tools(self, role: str, *, exclude: str = "", **context: Any) -> list[Any]:
         """Tools from every server this agent is bound to, minus one it owns.
@@ -1492,7 +1496,14 @@ class BaseAnalyst(ABC):
         # its own from the first loop on.
         if self.evidence_counter is None:
             self.evidence_counter = EvidenceCounter()
-        recorder = EvidenceRecorder(self.name, counter=self.evidence_counter)
+        recorder = EvidenceRecorder(
+            self.name,
+            counter=self.evidence_counter,
+            # The stage the node set on this agent, so a ledger entry says
+            # which step of the team made the call rather than the constant
+            # "analysis" every entry carried when there was only one.
+            stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
+        )
         agent_executor = create_react_agent(self.llm, record_tools(self.pinned_tools(), recorder))
 
         messages = prebuilt

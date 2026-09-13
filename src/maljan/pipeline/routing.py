@@ -24,6 +24,7 @@ statistical estimator for small windows.
 from __future__ import annotations
 
 import math
+from typing import Any
 
 from maljan.core.config import Settings
 from maljan.core.logger import logger
@@ -92,8 +93,43 @@ def is_confidence_stable(
 class ConsensusRouter:
     """Routes the workflow based on consensus detection and iteration limits."""
 
-    def __init__(self, config: Settings) -> None:
+    def __init__(self, config: Settings, *, stage: Any = None) -> None:
         self._config = config
+        # The debate stage this router belongs to. Its ``DebateOptions`` are
+        # what the round limit and the sycophancy check come from; a profile
+        # with two debates gives each of them its own. ``None`` — the shape
+        # every test that builds a router by hand uses — falls back to the
+        # global negotiation settings, which is what those options were seeded
+        # from in the first place.
+        self._stage = stage
+
+    @property
+    def _max_rounds(self) -> int:
+        options = getattr(self._stage, "debate", None)
+        if options is not None:
+            return int(options.max_rounds)
+        return int(self._config.negotiation.max_iterations)
+
+    @property
+    def _consensus_threshold(self) -> float:
+        """The bar this debate calls agreement at.
+
+        Read by nothing in ``should_continue`` — the mediator applies it when
+        it sets ``is_consensus`` — and exposed here so a caller that wants the
+        stage's effective value has one place to ask, rather than reaching into
+        ``stage.debate`` and re-deciding the fallback.
+        """
+        options = getattr(self._stage, "debate", None)
+        if options is not None:
+            return float(options.consensus_threshold)
+        return float(self._config.negotiation.consensus_threshold)
+
+    @property
+    def _sycophancy_check(self) -> bool:
+        options = getattr(self._stage, "debate", None)
+        if options is not None:
+            return bool(options.sycophancy_check)
+        return True
 
     def should_continue(self, state: AnalysisState) -> str:
         """Conditional router for LangGraph.
@@ -105,7 +141,7 @@ class ConsensusRouter:
         consensus = state.get("is_consensus", False)
         syco = state.get("sycophancy_detected", False)
         confidence_history: list[float] = state.get("confidence_history") or []
-        max_iter = self._config.negotiation.max_iterations
+        max_iter = self._max_rounds
 
         # 1. Hard limit always wins.
         if iteration >= max_iter:
@@ -145,7 +181,7 @@ class ConsensusRouter:
 
         # 2. Sycophancy override: a "consensus" that comes with sycophancy
         # is treated as premature → force another revision.
-        if syco and consensus:
+        if syco and consensus and self._sycophancy_check:
             logger.info(
                 "Sycophancy override: consensus premature at round %d. Forcing revision.",
                 iteration,
