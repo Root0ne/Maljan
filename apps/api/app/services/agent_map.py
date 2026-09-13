@@ -25,7 +25,6 @@ from maljan.core.settings_overrides import build_settings
 from maljan.pipeline.conditions import validate_condition
 from pydantic import ValidationError
 
-
 AGENT_DEFINITIONS_KEY = "core.agents.definitions"
 AGENT_PROFILES_KEY = "core.agents.profiles"
 AGENT_PROFILE_KEY = "core.agents.profile"
