@@ -32,10 +32,6 @@ const VERDICT_TEXT: Record<string, string> = {
   unknown: "text-text-muted",
 };
 
-// Mirrors the backend degraded-run ceiling (report_node caps a degraded
-// run's overall_confidence at 0.60). Expressed in percent for the banner.
-const DEGRADED_CONFIDENCE_CAP_PCT = 60;
-
 function lc(v: string | null | undefined): string {
   return (v || "unknown").toLowerCase();
 }
@@ -245,9 +241,10 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
   const sha256 = mr.identity.hashes.sha256;
   const shortHash = sha256.slice(0, 12);
 
-  // Surface the degraded flag from run_summary. Without this banner a 0.6
-  // capped verdict reads the same as a confidently-low real one. The type is
-  // narrow enough that no cast is needed.
+  // Surface the degraded flag from run_summary. Nothing lowers the confidence
+  // for a degraded run — the judge is told why the run is thin and sets its own
+  // number — so this banner is the only thing that says the verdict rests on
+  // partial signal. The type is narrow enough that no cast is needed.
   const runSummary = report?.run_summary ?? null;
   const isDegraded = Boolean(runSummary?.degraded_mode);
   const degradationReasons = runSummary?.degradation_reasons ?? [];
@@ -272,18 +269,8 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
           <div className="text-text-secondary space-y-1">
             <p>
               The pipeline produced only partial signal, so the verdict and
-              severity should be treated as preliminary.
-              {/* The 0.60 ceiling only actually lowers the
-                  score when the raw confidence exceeded it. Claiming "capped
-                  at 0.60" while showing e.g. 0.50 is misleading, so only state
-                  it when the displayed confidence reached the cap. */}
-              {confidence >= DEGRADED_CONFIDENCE_CAP_PCT ? (
-                <>
-                  {" "}
-                  Confidence was capped at{" "}
-                  <span className="font-mono">0.60</span>.
-                </>
-              ) : null}
+              severity should be treated as preliminary. The confidence shown
+              above is the judge&apos;s own, set knowing the reasons below.
             </p>
             {degradationReasons.length > 0 && (
               <ul className="list-disc list-inside text-xs">
