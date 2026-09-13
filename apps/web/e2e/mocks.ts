@@ -123,6 +123,77 @@ export const MOCK_JOB_DETAIL = {
   error_message: null,
 };
 
+/**
+ * One evidence ledger, big enough to page and varied enough to filter.
+ *
+ * `ev_0001` carries a long output so the "show more" disclosure has something
+ * to hold back, `ev_0003` is a failed call, and `ev_0004` lost its output to
+ * the per-agent byte budget — the three rows a reader of the panel has to be
+ * able to tell apart.
+ */
+export const MOCK_EVIDENCE = [
+  {
+    id: "1",
+    entry_id: "ev_0001",
+    stage: "analysis",
+    agent: "static",
+    server: "analysis",
+    tool: "pe_info",
+    ok: true,
+    duration_ms: 412,
+    seq: 1,
+    args: { path: "/samples/evil.exe", include_sections: true },
+    output: "MACHINE 0x14c\n".repeat(400),
+    structured: { machine: 332, sections: 6 },
+    created_at: "2026-09-01T10:00:00Z",
+  },
+  {
+    id: "2",
+    entry_id: "ev_0002",
+    stage: "analysis",
+    agent: "network",
+    server: null,
+    tool: "sandbox_network",
+    ok: true,
+    duration_ms: 1800,
+    seq: 2,
+    args: null,
+    output: "dns: updates.example.test",
+    structured: null,
+    created_at: "2026-09-01T10:01:00Z",
+  },
+  {
+    id: "3",
+    entry_id: "ev_0003",
+    stage: "verdict",
+    agent: "judge",
+    server: "threatintel",
+    tool: "virustotal_lookup",
+    ok: false,
+    duration_ms: 95,
+    seq: 3,
+    args: { indicator: "updates.example.test" },
+    output: "upstream refused the lookup",
+    structured: null,
+    created_at: "2026-09-01T10:02:00Z",
+  },
+  {
+    id: "4",
+    entry_id: "ev_0004",
+    stage: "analysis",
+    agent: "static",
+    server: "analysis",
+    tool: "strings_extract",
+    ok: true,
+    duration_ms: 220,
+    seq: 4,
+    args: { min_length: 6 },
+    output: "",
+    structured: null,
+    created_at: "2026-09-01T10:03:00Z",
+  },
+];
+
 export const MOCK_DASHBOARD_STATS = {
   total_jobs: 42,
   total_samples: 15,
@@ -1401,6 +1472,27 @@ export async function installApiMocks(
   await page.route("**/api/v1/jobs/*/events**", (route) =>
     json(route, { job_id: MOCK_JOB_DETAIL.id, events: [], count: 0 })
   );
+  // The evidence ledger. Answered from the fixture and narrowed here rather
+  // than in the panel, because the endpoint filters server-side and a mock
+  // that ignored the query would let a broken filter pass.
+  await page.route("**/api/v1/jobs/*/evidence**", (route) => {
+    const params = new URL(route.request().url()).searchParams;
+    const pageSize = Number(params.get("page_size") ?? 50);
+    const pageNumber = Number(params.get("page") ?? 1);
+    const matches = MOCK_EVIDENCE.filter(
+      (entry) =>
+        (!params.get("stage") || entry.stage === params.get("stage")) &&
+        (!params.get("agent") || entry.agent === params.get("agent")) &&
+        (!params.get("tool") || entry.tool === params.get("tool"))
+    );
+    return json(route, {
+      job_id: MOCK_JOB_DETAIL.id,
+      entries: matches.slice((pageNumber - 1) * pageSize, pageNumber * pageSize),
+      total: matches.length,
+      page: pageNumber,
+      page_size: pageSize,
+    });
+  });
   await page.route("**/api/v1/jobs/*", (route) => {
     const id = new URL(route.request().url()).pathname.split("/").pop() ?? "";
     return json(route, { ...MOCK_JOB_DETAIL, id });

@@ -11,15 +11,19 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
 from maljan.core.settings_annotations import GROUP_DESCRIPTIONS, GROUP_ORDER
+from maljan.pipeline.conditions import validate_condition
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.deps import require_admin
 from app.logging_config import get_logger
+from app.logsafe import log_safe
 from app.models.user import User
 from app.runtime_config import runtime_config
 from app.schemas.settings import (
     CatalogEntryDTO,
+    ConditionValidateRequest,
+    ConditionValidateResponse,
     ExportResponse,
     GroupDTO,
     ImportRequest,
@@ -100,6 +104,32 @@ async def get_values(
     return ValuesResponse(values={k: ValueDTO(**vars(v)) for k, v in vals.items()})
 
 
+async def _agent_warnings(db: AsyncSession) -> dict[str, str]:
+    """What is worth saying about the teams as they now stand.
+
+    Read after the write rather than from the patch, because a warning is
+    about the configuration that resulted: a PATCH that only changed the
+    static provider is exactly the one that can turn a team's reversing stage
+    tool-free, and it names no team at all.
+
+    Never raises. The write has already succeeded and been audited by the time
+    this runs, so a failure here must cost the operator an advisory note, not
+    turn a saved change into a 500 that says it was not saved.
+    """
+    from app.services.agent_map import effective_definitions, effective_profiles, profile_warnings
+
+    try:
+        stored = await SettingsService(db).load_overrides()
+        return profile_warnings(
+            effective_profiles(stored),
+            definitions=effective_definitions(stored),
+            overrides=stored,
+        )
+    except Exception as exc:  # noqa: BLE001 — advisory, and the write is done
+        logger.debug("Could not compute settings warnings (%s); continuing.", log_safe(str(exc)))
+        return {}
+
+
 @router.patch("", response_model=PatchResponse)
 async def patch_values(
     body: PatchRequest,
@@ -115,7 +145,9 @@ async def patch_values(
         )
     runtime_config.invalidate()
     core_settings_cache.invalidate()
-    return PatchResponse(applied=res.applied, applies=res.applies)
+    return PatchResponse(
+        applied=res.applied, applies=res.applies, warnings=await _agent_warnings(db)
+    )
 
 
 @router.delete("", response_model=ResetResponse)
@@ -319,7 +351,11 @@ async def import_values(
         )
     runtime_config.invalidate()
     core_settings_cache.invalidate()
-    return PatchResponse(applied=res.applied, applies=res.applies)
+    # An import can bring in a whole team just as a patch can, so it answers
+    # with the same advisory notes.
+    return PatchResponse(
+        applied=res.applied, applies=res.applies, warnings=await _agent_warnings(db)
+    )
 
 
 async def _probe_response(coro: Awaitable[Any]) -> ProbeResponse:
@@ -427,6 +463,29 @@ async def _capped_body(request: Request) -> dict[str, Any]:
         return parsed
     except json.JSONDecodeError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"invalid JSON body: {exc}") from exc
+
+
+@router.post("/validate-condition", response_model=ConditionValidateResponse)
+async def validate_stage_condition(
+    body: ConditionValidateRequest,
+    _: User = Depends(require_admin),
+) -> ConditionValidateResponse:
+    """Check one stage's ``when`` expression without storing anything.
+
+    The grammar lives in ``pipeline.conditions`` and the apply path already
+    refuses a bad condition, but only once the operator has finished the whole
+    team and pressed apply. The editor calls this as each condition field
+    loses focus, so a typo is answered next to the box it was typed into by
+    the same parser that will run it.
+    """
+    problems = validate_condition(body.expression)
+    if problems:
+        logger.info(
+            "Stage condition rejected: %s",
+            log_safe("; ".join(problems)),
+            extra={"expression": log_safe(body.expression)},
+        )
+    return ConditionValidateResponse(valid=not problems, problems=problems)
 
 
 @router.post("/sandbox-rest/preview", response_model=MappingPreviewResponse)

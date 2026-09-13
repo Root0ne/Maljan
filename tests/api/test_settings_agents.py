@@ -20,7 +20,12 @@ from app.services.agent_map import (  # noqa: E402
     effective_profiles,
     validate_agent_map,
 )
-from maljan.core.config import Settings
+from maljan.core.config import (
+    BUILTIN_AGENTS,
+    BUILTIN_PROFILES,
+    Settings,
+    seeded_generic_agents,
+)
 
 BUILTIN_STATIC = {
     "role": "static",
@@ -41,7 +46,7 @@ def test_a_valid_definition_round_trips_with_the_built_ins_reseeded():
         _defs(strings={"role": "generic", "prompt": "read strings"}), stored={}
     )
     definitions = out[AGENT_DEFINITIONS_KEY]
-    assert set(definitions) == {"static", "dynamic", "network", "judge", "reporter", "strings"}
+    assert set(definitions) == {*BUILTIN_AGENTS, *seeded_generic_agents(), "strings"}
     assert definitions["strings"]["role"] == "generic"
 
 
@@ -231,13 +236,7 @@ def test_an_explicit_null_clears_a_map_back_to_the_built_ins():
     stored = {AGENT_DEFINITIONS_KEY: {"strings": {"role": "generic", "prompt": "p"}}}
     out = validate_agent_map({AGENT_DEFINITIONS_KEY: None}, stored=stored)
     assert out[AGENT_DEFINITIONS_KEY] is None
-    assert set(effective_definitions({})) == {
-        "static",
-        "dynamic",
-        "network",
-        "judge",
-        "reporter",
-    }
+    assert set(effective_definitions({})) == {*BUILTIN_AGENTS, *seeded_generic_agents()}
 
 
 def test_clearing_the_definitions_that_a_stored_profile_uses_is_refused():
@@ -251,10 +250,9 @@ def test_clearing_the_definitions_that_a_stored_profile_uses_is_refused():
 
 
 def test_the_effective_maps_layer_stored_over_seeded():
-    assert set(effective_profiles({})) == {"default", "measurement"}
+    assert set(effective_profiles({})) == set(BUILTIN_PROFILES)
     assert set(effective_profiles({AGENT_PROFILES_KEY: {"lean": {"analysts": ["network"]}}})) == {
-        "default",
-        "measurement",
+        *BUILTIN_PROFILES,
         "lean",
     }
 
@@ -610,3 +608,175 @@ def test_the_api_keeps_the_marker_on_a_team_nobody_has_touched():
         stored={},
     )
     assert out[AGENT_PROFILES_KEY]["mine"]["derived_from_analysts"] is True
+
+
+class TestTheProviderWarningOnATeamThatNeedsOne:
+    """`deep_static` runs a reverser that reads whatever static provider is set.
+
+    With `static.provider = none` that reference resolves to nothing, and the
+    stage runs a prompt written around a decompiler it will not have — a
+    confident, ungrounded stage rather than a visible failure. Refusing the
+    team would be wrong: a team validated against a runtime provider setting
+    cannot be saved before the provider is configured, and the order those two
+    happen in is the operator's. So it warns, and the warning is keyed the way
+    an error is.
+    """
+
+    def _definitions(self, **over):
+        base = {
+            "reverser": {
+                "role": "generic",
+                "prompt": "reverse",
+                "tools": [{"kind": "provider"}],
+            }
+        }
+        base.update(over)
+        return base
+
+    def _profiles(self):
+        return {
+            "team": {
+                "label": "Team",
+                "stages": [
+                    {"key": "reversing", "kind": "analysis", "agents": ["reverser"]},
+                ],
+            }
+        }
+
+    def test_it_warns_when_the_deployment_has_no_static_provider(self):
+        from app.services.agent_map import profile_warnings
+
+        warnings = profile_warnings(
+            self._profiles(),
+            definitions=self._definitions(),
+            overrides={"core.static.provider": "none"},
+        )
+        assert "core.agents.profiles.team.stages.reversing" in warnings
+        assert "no tools" in warnings["core.agents.profiles.team.stages.reversing"]
+
+    def test_it_says_nothing_when_a_provider_is_configured(self):
+        from app.services.agent_map import profile_warnings
+
+        assert (
+            profile_warnings(
+                self._profiles(),
+                definitions=self._definitions(),
+                overrides={"core.static.provider": "ghidra"},
+            )
+            == {}
+        )
+
+    def test_a_stage_with_nothing_to_call_says_so_in_those_words(self):
+        from app.services.agent_map import profile_warnings
+
+        warnings = profile_warnings(
+            self._profiles(),
+            definitions=self._definitions(),
+            overrides={"core.static.provider": "none"},
+        )
+        assert "no tools at all" in warnings["core.agents.profiles.team.stages.reversing"]
+
+    def test_an_agent_that_also_holds_a_tool_server_loses_only_the_decompiler(self):
+        """Which is `deep_static`'s reverser: it keeps the knowledge sidecar
+        and loses the thing its prompt is written around. Still worth saying,
+        and worth saying differently from a stage with nothing at all."""
+        from app.services.agent_map import profile_warnings
+
+        definitions = self._definitions()
+        definitions["reverser"]["tools"].append({"kind": "mcp", "server": "knowledge"})
+        warnings = profile_warnings(
+            self._profiles(),
+            definitions=definitions,
+            overrides={"core.static.provider": "none"},
+        )
+        message = warnings["core.agents.profiles.team.stages.reversing"]
+        assert "without the decompiler" in message
+        assert "no tools at all" not in message
+
+    def test_a_team_that_forces_its_own_provider_is_not_warned_about(self):
+        from app.services.agent_map import profile_warnings
+
+        profiles = self._profiles()
+        profiles["team"]["static_provider"] = "r2"
+        assert (
+            profile_warnings(
+                profiles,
+                definitions=self._definitions(),
+                overrides={"core.static.provider": "none"},
+            )
+            == {}
+        )
+
+    def test_a_stage_names_only_the_agents_the_provider_setting_reaches(self):
+        from app.services.agent_map import profile_warnings
+
+        definitions = self._definitions(
+            static={"role": "static", "tools": [{"kind": "mcp", "server": "analysis"}]}
+        )
+        profiles = self._profiles()
+        profiles["team"]["stages"][0]["agents"] = ["reverser", "static"]
+        message = profile_warnings(
+            profiles,
+            definitions=definitions,
+            overrides={"core.static.provider": "none"},
+        )["core.agents.profiles.team.stages.reversing"]
+        assert message.startswith("reverser reads")
+        assert "static" not in message.split(" reads")[0]
+
+    def test_a_stage_whose_agents_never_read_the_provider_is_not_warned_about(self):
+        from app.services.agent_map import profile_warnings
+
+        definitions = {"static": {"role": "static", "tools": [{"kind": "mcp", "server": "a"}]}}
+        profiles = self._profiles()
+        profiles["team"]["stages"][0]["agents"] = ["static"]
+        assert (
+            profile_warnings(
+                profiles,
+                definitions=definitions,
+                overrides={"core.static.provider": "none"},
+            )
+            == {}
+        )
+
+    def test_the_seeded_deep_static_team_is_the_one_this_is_for(self):
+        """The whole point: the team that ships with a provider-only agent
+        must be the team the warning fires on, and no other seeded team may
+        acquire a warning it does not deserve."""
+        warnings = _profile_warnings_for_the_seeds()
+        assert set(warnings) == {"core.agents.profiles.deep_static.stages.reversing"}
+        assert (
+            "without the decompiler"
+            in warnings["core.agents.profiles.deep_static.stages.reversing"]
+        )
+
+    def test_the_seeded_teams_are_silent_once_a_provider_is_configured(self):
+        from app.services.agent_map import (
+            effective_definitions,
+            effective_profiles,
+            profile_warnings,
+        )
+
+        overrides = {"core.static.provider": "ghidra"}
+        assert (
+            profile_warnings(
+                effective_profiles(overrides),
+                definitions=effective_definitions(overrides),
+                overrides=overrides,
+            )
+            == {}
+        )
+
+
+def _profile_warnings_for_the_seeds():
+    from app.services.agent_map import (
+        effective_definitions,
+        effective_profiles,
+        profile_warnings,
+    )
+
+    overrides = {"core.static.provider": "none"}
+    return profile_warnings(
+        effective_profiles(overrides),
+        definitions=effective_definitions(overrides),
+        overrides=overrides,
+    )

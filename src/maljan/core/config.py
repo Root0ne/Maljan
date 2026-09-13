@@ -34,6 +34,8 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
+from maljan.agents.prompts import ANDROID_STATIC_PROMPT, REVERSER_PROMPT, TRIAGE_PROMPT
+
 # ---------------------------------------------------------------------------
 # Per-provider LLM configs
 # ---------------------------------------------------------------------------
@@ -818,7 +820,23 @@ JUDGE_AGENT_KEY = "judge"
 # report stage names an agent like every other stage does.
 REPORTER_AGENT_KEY = "reporter"
 BUILTIN_AGENTS: tuple[str, ...] = ("static", "dynamic", "network", "judge", "reporter")
-BUILTIN_PROFILES: tuple[str, ...] = ("default", "measurement")
+
+
+# The generic agents the seeded ``mobile`` and ``deep_static`` teams are built
+# from. Kept apart from ``BUILTIN_AGENTS``, which names the roles that have a
+# class behind them: a generic agent is a definition, a prompt and a tool list,
+# and the whole point of seeding these is that a team of one's own is written
+# the same way. They are seeded and locked like any other built-in definition.
+#
+# Derived from the seeds rather than written out beside them. A second
+# hand-kept copy of the same three names is a copy that goes stale the first
+# time a fourth is added.
+def seeded_generic_agents() -> tuple[str, ...]:
+    """The seeded definitions that are a prompt rather than a class."""
+    return tuple(key for key, d in _builtin_definitions().items() if d.role == "generic")
+
+
+BUILTIN_PROFILES: tuple[str, ...] = ("default", "measurement", "mobile", "deep_static")
 
 # What an agent may be handed as its input text. ``sample.path`` is the
 # container-visible path its tools load the sample from; ``sample.chunks`` the
@@ -1352,6 +1370,39 @@ def _builtin_definitions() -> dict[str, AgentDefinition]:
             label="Reporter",
             tools=[],
         ),
+        # The generic agents the seeded teams below are built from. A generic
+        # agent is a definition and a prompt: it has no class of its own, so
+        # what it does is entirely what its prompt says and which tools it is
+        # given. Seeded rather than left as an example in the documentation,
+        # because a team an operator can only run after transcribing three
+        # prompts is a team nobody runs.
+        "triage": AgentDefinition(
+            role="generic",
+            label="Triage",
+            prompt=TRIAGE_PROMPT,
+            tools=[
+                ToolRef(kind="mcp", server="analysis"),
+                ToolRef(kind="mcp", server="knowledge"),
+            ],
+        ),
+        "android_static": AgentDefinition(
+            role="generic",
+            label="Android static analyst",
+            prompt=ANDROID_STATIC_PROMPT,
+            tools=[
+                ToolRef(kind="mcp", server="analysis"),
+                ToolRef(kind="mcp", server="knowledge"),
+            ],
+        ),
+        "reverser": AgentDefinition(
+            role="generic",
+            label="Reverser",
+            prompt=REVERSER_PROMPT,
+            tools=[
+                ToolRef(kind="provider"),
+                ToolRef(kind="mcp", server="knowledge"),
+            ],
+        ),
     }
 
 
@@ -1389,7 +1440,146 @@ def _builtin_profiles() -> dict[str, ProfileDefinition]:
             exclude_sandbox_tools=True,
             static_provider="none",
         ),
+        "mobile": ProfileDefinition(label="Mobile", stages=_mobile_stages()),
+        "deep_static": ProfileDefinition(label="Deep static", stages=_deep_static_stages()),
     }
+
+
+def _triage_stage() -> StageDefinition:
+    """The first stage of every team that has one, written once.
+
+    Triage reads nothing upstream because there is nothing upstream: it is the
+    step that decides what the rest of the team should look at, and a stage
+    that was handed conclusions would be deciding under their influence.
+    """
+    return StageDefinition(
+        key="triage",
+        label="Triage",
+        kind="analysis",
+        agents=["triage"],
+        inject_upstream="none",
+    )
+
+
+def _mobile_stages() -> list[StageDefinition]:
+    """A team for a mobile sample: triage, the Android pass, detonation, verdict.
+
+    The Android stage carries a condition rather than a platform check inside
+    an agent, which is the whole point of a staged team — on a PE the stage is
+    still in the graph, still declines, and still says why, so the console can
+    show an operator that the team was applied and what it chose not to do.
+
+    The dynamic stage is the built-in one: whichever sandbox is configured has
+    already been asked for the options this sample's format needs, so nothing
+    about detonating an APK belongs in the team definition.
+    """
+    return [
+        _triage_stage(),
+        StageDefinition(
+            key="android_static",
+            label="Android static",
+            kind="analysis",
+            agents=["android_static"],
+            depends_on=["triage"],
+            when='file_type in ("apk", "dex")',
+            inject_upstream="findings",
+        ),
+        StageDefinition(
+            key="dynamic",
+            label="Detonation",
+            kind="analysis",
+            agents=["dynamic"],
+            depends_on=["android_static"],
+            when="has_sandbox_report",
+            inject_upstream="findings",
+        ),
+        StageDefinition(
+            key="debate",
+            label="Debate",
+            kind="debate",
+            depends_on=["dynamic"],
+            inject_upstream="none",
+        ),
+        StageDefinition(
+            key="verdict",
+            label="Verdict",
+            kind="verdict",
+            agents=[JUDGE_AGENT_KEY],
+            depends_on=["debate"],
+            inject_upstream="none",
+        ),
+        StageDefinition(
+            key="report",
+            label="Report",
+            kind="report",
+            agents=[REPORTER_AGENT_KEY],
+            depends_on=["verdict"],
+            inject_upstream="none",
+        ),
+    ]
+
+
+def _deep_static_stages() -> list[StageDefinition]:
+    """A team that reads the code: triage, static, reversing, network.
+
+    The reversing stage is the one that makes this team worth having. It runs
+    after the static stage and is handed its findings, so its prompt can ask
+    for each of them to be confirmed or refuted at function level rather than
+    for another pass over the same imports. It takes the tools of whichever
+    static provider is configured — Ghidra, r2 or neither — because a team
+    should not have to name the decompiler an operator happens to run.
+    """
+    return [
+        _triage_stage(),
+        StageDefinition(
+            key="static",
+            label="Static",
+            kind="analysis",
+            agents=["static"],
+            depends_on=["triage"],
+            inject_upstream="findings",
+        ),
+        StageDefinition(
+            key="reversing",
+            label="Reversing",
+            kind="analysis",
+            agents=["reverser"],
+            depends_on=["static"],
+            inject_upstream="findings",
+        ),
+        StageDefinition(
+            key="network",
+            label="Network",
+            kind="analysis",
+            agents=["network"],
+            depends_on=["reversing"],
+            when="has_pcap or has_sandbox_report",
+            inject_upstream="findings",
+        ),
+        StageDefinition(
+            key="debate",
+            label="Debate",
+            kind="debate",
+            depends_on=["network"],
+            inject_upstream="none",
+        ),
+        StageDefinition(
+            key="verdict",
+            label="Verdict",
+            kind="verdict",
+            agents=[JUDGE_AGENT_KEY],
+            depends_on=["debate"],
+            inject_upstream="none",
+        ),
+        StageDefinition(
+            key="report",
+            label="Report",
+            kind="report",
+            agents=[REPORTER_AGENT_KEY],
+            depends_on=["verdict"],
+            inject_upstream="none",
+        ),
+    ]
 
 
 def _profile_stage_identity(stages: Any) -> Any:
@@ -1446,6 +1636,31 @@ class AgentsConfig(BaseModel):
             else:
                 merged[key] = entry
         return {**data, "definitions": merged}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _rename_keys_a_seed_has_taken(cls, data: Any) -> Any:
+        """Move an operator's own agent or team off a key that is now built in.
+
+        Runs before anything else, because the identity check below refuses a
+        stored built-in that does not match its seed and it refuses it on every
+        construction — including the one the worker makes at boot. A key that
+        was legal when it was saved must not become a service that will not
+        start. See ``core.agent_key_migration``; ``Settings`` runs the same
+        pass over the whole document so the references outside this model are
+        rewritten too, and running it twice changes nothing.
+
+        Declared below the merge above deliberately: pydantic runs ``before``
+        validators in reverse declaration order, and the rename has to see the
+        stored entry as the operator wrote it. Merged first, an operator's own
+        `reverser` would be renamed carrying the seed's tools and label.
+        """
+        from maljan.core.agent_key_migration import rename_colliding_agent_keys
+
+        if not isinstance(data, dict):
+            return data
+        renamed, _ = rename_colliding_agent_keys({"agents": data})
+        return renamed["agents"]
 
     @model_validator(mode="after")
     def _seed_and_check(self) -> "AgentsConfig":
@@ -2138,6 +2353,24 @@ class Settings(BaseSettings):
             self.llm.anthropic.api_key = self.anthropic_api_key
         if self.google_api_key and not self.llm.gemini.api_key:
             self.llm.gemini.api_key = self.google_api_key
+
+    @model_validator(mode="before")
+    @classmethod
+    def _rename_agent_keys_a_seed_has_taken(cls, data: Any) -> Any:
+        """The same rename as ``AgentsConfig``, over the whole document.
+
+        ``AgentsConfig`` can only reach the references inside itself. An agent
+        key appears three more times outside it — as a key of ``llm.agents``,
+        in each MCP server's ``agents`` binding, and in the two
+        ``react_*_overrides`` maps — and leaving any of them pointing at the
+        old name would silently drop a per-agent model choice or a timeout the
+        operator set. Both passes are idempotent, so the nested one finds
+        nothing left to do.
+        """
+        from maljan.core.agent_key_migration import rename_colliding_agent_keys
+
+        renamed, _ = rename_colliding_agent_keys(data)
+        return renamed
 
     @model_validator(mode="after")
     def _validate_agent_composition(self) -> "Settings":

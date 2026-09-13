@@ -247,7 +247,8 @@ with `uv sync --extra tools` (the backend image already does); without them
 `{"error": "<module> is not installed"}`. Nothing else changes, and the server
 starts either way.
 
-Two teams ship built in. `default` is the three analysts with their tools.
+Four teams ship built in; they are listed under **Teams** below. `default` is
+the three analysts with their tools.
 `measurement` is the same three analysts with `exclude_servers: ["*"]`,
 `exclude_sandbox_tools` on and `static_provider` forced to `none` — the
 baseline for measuring what the ensemble contributes without any tool. Select
@@ -286,6 +287,73 @@ pipeline → Teams) is an ordered list of stages. Each stage is:
 | `inject_upstream` | `none`, `findings` (default) or `full`. |
 | `debate` | Round limit, consensus threshold and sycophancy check, for a debate stage. |
 | `builtin_tools` | `false` withholds `analysis`, `knowledge`, `network` and `threatintel` from this stage's agents. |
+
+### The teams that ship
+
+| Team | Stages | What it is for |
+| :-- | :-- | :-- |
+| `default` | `analysis` (static, dynamic, network) → `debate` → `verdict` → `report` | The general case. |
+| `measurement` | The same four, with every tool server withheld | What the ensemble contributes with nothing to call. |
+| `mobile` | `triage` → `android_static` → `dynamic` → `debate` → `verdict` → `report` | An APK or a DEX. |
+| `deep_static` | `triage` → `static` → `reversing` → `network` → `debate` → `verdict` → `report` | Reading the code. |
+
+`mobile` and `deep_static` are built from three seeded generic agent
+definitions — `triage`, `android_static` and `reverser` — whose prompts live in
+`src/maljan/agents/prompts/`. A generic agent has no class: it is a definition,
+a prompt and a tool list, which is what makes a team of your own something to
+write rather than something to build. Clone one of these as the starting point.
+
+Their conditions are the interesting part. `android_static` runs on
+`file_type in ("apk", "dex")` and `dynamic` on `has_sandbox_report`, so
+submitting a PE under `mobile` produces a run where the Android stage is a row
+that declined with the condition it failed printed beside it — the team was
+applied and the console shows what it chose not to do, rather than showing
+nothing. `deep_static`'s `network` stage runs on
+`has_pcap or has_sandbox_report`, and its `reversing` stage depends on `static`
+with `inject_upstream: findings`, so the reverser is handed each static finding
+and asked to confirm or refute it at function level.
+
+`reverser` takes `ToolRef(kind="provider")` rather than a named server, which
+means the tools of whichever static provider this deployment configured. On a
+deployment with `static.provider = none` that reference resolves to nothing:
+the stage still runs, and its prompt still asks it to open a decompiler, so
+what comes out is a confident ungrounded answer rather than a visible failure.
+
+Saving such a team is allowed and says so. A team validated against a runtime
+provider setting could not be saved before the provider was configured, and the
+order those two happen in is the operator's — so the settings API answers a
+successful write with a **warning** on that stage instead of refusing it, and
+the console draws it on the stage card: *"reverser reads the static provider's
+tools, and this deployment's static provider is 'none'."* A stage whose agents
+have no other tools at all is named as running with nothing to call; one that
+also holds a tool server, as `deep_static`'s reverser does, is named as running
+without the decompiler.
+
+Like every built-in team, all four are editable only in their debate options,
+their `builtin_tools` switches and `exclude_servers`. Everything else means
+cloning the team, which the console does in one click.
+
+### A name a later release takes
+
+Seeding a built-in takes a name. `triage`, `android_static`, `reverser`,
+`mobile` and `deep_static` were all legal names for an operator's own agent or
+team before they were seeded, and a stored entry under one of them would
+otherwise be refused as tampering with a built-in — on every read, which is to
+say at boot.
+
+So a stored entry under one of those five names that is not the seed is renamed
+out of the way on load: `reverser` becomes `reverser_custom`, and every
+reference to it moves with it — the teams that named it, the per-agent model
+entry under `llm.agents`, each server's `agents` binding and both
+`react_*_overrides` maps. The rename is logged once at warning level, and
+`alembic upgrade head` writes it into the stored document so the console shows
+the new name rather than renaming the same document on every read.
+
+This applies only to names a release newly reserved. `static`, `dynamic`,
+`network`, `judge`, `reporter`, `default` and `measurement` have been reserved
+for as long as there has been a settings store, so a stored document that edits
+one of those is still refused, and a name typed into the console after the seed
+exists is still refused per field while it is being typed.
 
 A team needs exactly one `verdict` stage and at most one `report` stage, which
 is always last. A stage may only depend on a stage declared **above** it, which
@@ -328,7 +396,10 @@ Python's own grammar with an allow-list on top: comparisons (`==`, `!=`, `in`,
 lists of literals. There are no function calls, no arithmetic, no
 comprehensions and no attribute access except into `stages`. A condition that
 does not parse is refused when the team is saved; one that fails at run time
-skips its stage with the reason recorded rather than failing the job.
+skips its stage with the reason recorded rather than failing the job. The
+console checks each condition box against the same parser as it loses focus
+(`POST /api/v1/settings/validate-condition`), so a typo is answered next to the
+box it was typed into rather than when the whole team is applied.
 
 The names it may use:
 

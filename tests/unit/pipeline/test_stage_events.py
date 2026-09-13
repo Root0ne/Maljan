@@ -316,3 +316,102 @@ class TestALedgerEntrySaysWhichStageMadeTheCall:
         from maljan.agents.evidence_recorder import EvidenceRecorder
 
         assert EvidenceRecorder("static", stage="triage").stage == "triage"
+
+
+class TestAStageNothingRunsAfter:
+    """The two shapes with no node of their own to close them.
+
+    ``topology._finisher`` gives a stage with a single terminal node — a
+    sequential chain, a barrier, the judge, the report — that node as its
+    finisher, and a stage with several gets the single node of the stage that
+    follows. A stage nothing depends on has no such node, so every one of its
+    own nodes is a finisher: a fan-out of three analysts announced the stage
+    finished three times, and a debate that loops announced it once per node
+    it left through. The console draws one row per stage from these events.
+    """
+
+    def _fan_out(self) -> Settings:
+        return Settings(
+            _env_file=None,
+            agents={
+                "profiles": {
+                    "team": {
+                        "label": "Team",
+                        "stages": [
+                            {
+                                "key": "analysis",
+                                "kind": "analysis",
+                                "agents": ["static"],
+                            },
+                            {
+                                "key": "verdict",
+                                "kind": "verdict",
+                                "agents": ["judge"],
+                                "depends_on": ["analysis"],
+                            },
+                            {
+                                "key": "sweep",
+                                "kind": "analysis",
+                                "mode": "parallel",
+                                "agents": ["dynamic", "network"],
+                                "depends_on": ["verdict"],
+                            },
+                        ],
+                    }
+                },
+                "profile": "team",
+            },
+        )
+
+    def test_a_terminal_fan_out_announces_its_end_exactly_once(self) -> None:
+        events, _ = _run(self._fan_out())
+        finished = [p for k, p in events if k == "stage_finished" and p["stage"] == "sweep"]
+        assert len(finished) == 1
+        assert finished[0]["agents"] == ["dynamic", "network"]
+
+    def test_every_stage_of_that_team_is_announced_once(self) -> None:
+        events, _ = _run(self._fan_out())
+        assert _stage_events(events) == [
+            ("stage_started", "analysis"),
+            ("stage_finished", "analysis"),
+            ("stage_started", "verdict"),
+            ("stage_finished", "verdict"),
+            ("stage_started", "sweep"),
+            ("stage_finished", "sweep"),
+        ]
+
+    def _terminal_debate(self) -> Settings:
+        return Settings(
+            _env_file=None,
+            agents={
+                "profiles": {
+                    "team": {
+                        "label": "Team",
+                        "stages": [
+                            {
+                                "key": "analysis",
+                                "kind": "analysis",
+                                "agents": ["static", "dynamic"],
+                            },
+                            {
+                                "key": "verdict",
+                                "kind": "verdict",
+                                "agents": ["judge"],
+                                "depends_on": ["analysis"],
+                            },
+                            {
+                                "key": "debate",
+                                "kind": "debate",
+                                "depends_on": ["verdict"],
+                            },
+                        ],
+                    }
+                },
+                "profile": "team",
+            },
+        )
+
+    def test_a_terminal_debate_announces_its_end_exactly_once(self) -> None:
+        events, _ = _run(self._terminal_debate())
+        finished = [p for k, p in events if k == "stage_finished" and p["stage"] == "debate"]
+        assert len(finished) == 1

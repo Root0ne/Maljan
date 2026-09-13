@@ -83,6 +83,7 @@ async def test_a_job_the_caller_does_not_own_is_not_found():
             job_id=uuid.uuid4(),
             agent=None,
             tool=None,
+            stage=None,
             page=1,
             page_size=50,
             user=_User(),
@@ -100,6 +101,7 @@ async def test_the_page_carries_the_entries_and_the_total():
         job_id=job_id,
         agent=None,
         tool=None,
+        stage=None,
         page=1,
         page_size=2,
         user=_User(),
@@ -119,6 +121,7 @@ async def test_the_filters_and_the_offset_reach_the_query():
         job_id=uuid.uuid4(),
         agent="static",
         tool="pe_info",
+        stage="analysis",
         page=3,
         page_size=25,
         user=_User(),
@@ -128,6 +131,7 @@ async def test_the_filters_and_the_offset_reach_the_query():
     page_query = str(session.statements[1].compile(compile_kwargs={"literal_binds": True}))
     assert "evidence_entries.agent = 'static'" in page_query
     assert "evidence_entries.tool = 'pe_info'" in page_query
+    assert "evidence_entries.stage = 'analysis'" in page_query
     assert "ORDER BY evidence_entries.seq" in page_query
     assert "LIMIT 25" in page_query
     assert "OFFSET 50" in page_query

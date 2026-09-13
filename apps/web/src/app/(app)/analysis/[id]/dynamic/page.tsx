@@ -7,6 +7,8 @@ import type { AgentFindingDTO } from "@/lib/api";
 import type { ProcessNode } from "@/types/malware-report";
 import { confidenceClass } from "@/lib/report-utils";
 import Th from "@/components/ui/Th";
+import { ArtifactSections } from "@/components/analysis/ArtifactTable";
+import { hasSection, isCoveredBySection, sectionsForTab } from "@/components/analysis/reportSections";
 
 /** One claim of an analyst's final ISR, as the pipeline records it. */
 interface AnalystClaim {
@@ -98,18 +100,28 @@ export default function DynamicTab() {
 
   const analystFindings = dynamicClaims(report?.agent_findings);
   const dyn = report?.malware_report?.dynamic;
-  // The registry exists on Windows and nowhere else. On a Linux, macOS or
-  // Android sample an empty "Registry Modifications" panel reads as a sandbox
-  // that found nothing rather than a concept the platform does not have, so
-  // the panel is drawn only where it can be populated.
-  const platform = report?.malware_report?.identity?.platform;
-  const showsRegistry = platform === "windows" || !!dyn?.registry_mods.length;
+  // The registry exists on Windows and nowhere else, and an empty "Registry
+  // Modifications" panel on a Linux, macOS or Android sample reads as a
+  // sandbox that found nothing rather than a concept the platform does not
+  // have. The panel is therefore drawn from evidence — a registry section on
+  // the ledger, or typed rows the extractor produced — rather than from a
+  // guess about the platform, which drew it on every Windows run whether or
+  // not anything had ever touched a key.
+  const reportSections = report?.malware_report?.sections;
+  const evidenceSections = sectionsForTab(reportSections, "dynamic");
+  const showsRegistry =
+    Boolean(dyn?.registry_mods.length) || hasSection(reportSections, "sandbox_registry");
+  const showsProcessTree = !isCoveredBySection(reportSections, ["sandbox_processes"]);
+  const showsSignatures = !isCoveredBySection(reportSections, ["sandbox_signatures"]);
   if (!dyn) {
     return (
       <div className="space-y-4">
-        <div className="p-8 text-center text-sm text-text-secondary">
-          No dynamic-analysis data available — the sample may not have been detonated.
-        </div>
+        <ArtifactSections sections={evidenceSections} />
+        {evidenceSections.length === 0 && (
+          <div className="p-8 text-center text-sm text-text-secondary">
+            No dynamic-analysis data available — the sample may not have been detonated.
+          </div>
+        )}
         {analystFindings.length > 0 && <AnalystFindings findings={analystFindings} />}
       </div>
     );
@@ -132,6 +144,8 @@ export default function DynamicTab() {
 
   return (
     <div className="space-y-4">
+      <ArtifactSections sections={evidenceSections} />
+
       {analystFindings.length > 0 && <AnalystFindings findings={analystFindings} />}
 
       {dyn.unavailable && dyn.unavailable.length > 0 && (
@@ -140,6 +154,7 @@ export default function DynamicTab() {
         </div>
       )}
 
+      {showsProcessTree && (
       <div className="bg-bg-surface border border-border rounded">
         <div className="px-4 py-3 border-b border-border">
           <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
@@ -172,6 +187,9 @@ export default function DynamicTab() {
         </div>
       </div>
 
+      )}
+
+      {showsSignatures && (
       <div className="bg-bg-surface border border-border rounded">
         <div className="px-4 py-3 border-b border-border">
           <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
@@ -237,6 +255,7 @@ export default function DynamicTab() {
           </div>
         )}
       </div>
+      )}
 
       {showsRegistry && (
         <div className="bg-bg-surface border border-border rounded">

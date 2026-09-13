@@ -2,6 +2,8 @@
 
 import { useReport } from "../layout";
 import type { PersistenceKind } from "@/types/malware-report";
+import { ArtifactSections } from "@/components/analysis/ArtifactTable";
+import { sectionsForTab } from "@/components/analysis/reportSections";
 
 const KIND_LABELS: Record<PersistenceKind, string> = {
   // Windows (PE)
@@ -25,6 +27,21 @@ const KIND_LABELS: Record<PersistenceKind, string> = {
   rc_local: "rc.local Modification",
   ld_preload: "LD_PRELOAD Hijack",
   xdg_autostart: "XDG Autostart",
+  shell_profile: "Shell Profile",
+  udev_rule: "udev Rule",
+  kernel_module: "Kernel Module",
+  // macOS (Mach-O)
+  launch_agent: "Launch Agent",
+  launch_daemon: "Launch Daemon",
+  login_item: "Login Item",
+  kernel_extension: "Kernel Extension",
+  configuration_profile: "Configuration Profile",
+  // Android (APK/DEX)
+  boot_receiver: "Boot Receiver",
+  device_admin: "Device Admin",
+  accessibility_service: "Accessibility Service",
+  foreground_service: "Foreground Service",
+  work_scheduler: "Scheduled Work",
   // Fallback
   other: "Other",
 };
@@ -49,6 +66,19 @@ const KIND_COLORS: Record<PersistenceKind, string> = {
   rc_local: "text-status-red bg-status-red/10",
   ld_preload: "text-status-red bg-status-red/10",
   xdg_autostart: "text-status-orange bg-status-orange/10",
+  shell_profile: "text-status-orange bg-status-orange/10",
+  udev_rule: "text-status-red bg-status-red/10",
+  kernel_module: "text-status-red bg-status-red/10",
+  launch_agent: "text-status-orange bg-status-orange/10",
+  launch_daemon: "text-status-red bg-status-red/10",
+  login_item: "text-status-orange bg-status-orange/10",
+  kernel_extension: "text-status-red bg-status-red/10",
+  configuration_profile: "text-status-red bg-status-red/10",
+  boot_receiver: "text-status-orange bg-status-orange/10",
+  device_admin: "text-status-red bg-status-red/10",
+  accessibility_service: "text-status-red bg-status-red/10",
+  foreground_service: "text-status-orange bg-status-orange/10",
+  work_scheduler: "text-status-orange bg-status-orange/10",
   other: "text-text-secondary bg-bg-active",
 };
 
@@ -60,7 +90,8 @@ export default function PersistenceTab() {
   }
 
   const items = report?.malware_report?.persistence;
-  if (!items || items.length === 0) {
+  const evidenceSections = sectionsForTab(report?.malware_report?.sections, "persistence");
+  if ((!items || items.length === 0) && evidenceSections.length === 0) {
     return (
       <div className="p-8 text-center text-sm text-text-secondary">
         No persistence mechanisms identified for this sample.
@@ -70,7 +101,8 @@ export default function PersistenceTab() {
 
   return (
     <div className="space-y-3">
-      {items.map((p, i) => (
+      <ArtifactSections sections={evidenceSections} />
+      {(items ?? []).map((p, i) => (
         <div
           key={`${p.kind}-${i}`}
           className="bg-bg-surface border border-border rounded p-4"

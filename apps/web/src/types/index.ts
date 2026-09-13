@@ -34,6 +34,13 @@ export type WSEventType =
    * participant needs no client change. See maljan/pipeline/events.py. */
   | "agent_message"
   | "phase_change"
+  /* One stage of the team announcing itself, exactly once each: `started`
+   * from its first node, `skipped` instead when its condition is false, and
+   * `finished` from the one node that runs after everything in it is done.
+   * See maljan/pipeline/nodes.py. */
+  | "stage_started"
+  | "stage_skipped"
+  | "stage_finished"
   | "completed"
   | "enrichment_complete"
   | "error"

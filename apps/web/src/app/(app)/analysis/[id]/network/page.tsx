@@ -6,6 +6,8 @@ import { useReport } from "../layout";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import Th from "@/components/ui/Th";
+import { ArtifactSections } from "@/components/analysis/ArtifactTable";
+import { isCoveredBySection, sectionsForTab } from "@/components/analysis/reportSections";
 import { ENRICH_STATUS_MESSAGE, ENRICH_BUTTON_LABEL } from "@/lib/enrichment";
 import type { NetworkDomain, NetworkIP } from "@/types/malware-report";
 
@@ -28,7 +30,15 @@ export default function NetworkTab() {
   const staticIocs = (mr?.static?.interesting_strings ?? []).filter(
     (s) => s.kind === "domain" || s.kind === "ip" || s.kind === "url",
   );
-  if (!net && staticIocs.length === 0) {
+  const reportSections = mr?.sections;
+  const evidenceSections = sectionsForTab(reportSections, "network");
+  // The observed-traffic tables and the static-string list each have one
+  // section that says the same thing; where it exists, the typed table stands
+  // down rather than printing the same endpoints a second time.
+  const showsObservedTraffic = !isCoveredBySection(reportSections, ["sandbox_network"]);
+  const showsStaticIocs =
+    staticIocs.length > 0 && !isCoveredBySection(reportSections, ["iocs"]);
+  if (!net && staticIocs.length === 0 && evidenceSections.length === 0) {
     return (
       <div className="p-8 text-center text-sm text-text-secondary">
         No network IOCs available — the sample may not have contacted the network
@@ -57,6 +67,8 @@ export default function NetworkTab() {
 
   return (
     <div className="space-y-4">
+      <ArtifactSections sections={evidenceSections} />
+
       <div className="flex items-center justify-between">
         <div className="text-xs text-text-muted">
           {(net?.domains.length ?? 0) +
@@ -86,7 +98,7 @@ export default function NetworkTab() {
         </div>
       )}
 
-      {staticIocs.length > 0 && (
+      {showsStaticIocs && (
         <div className="bg-bg-surface border border-border rounded">
           <div className="px-4 py-3 border-b border-border">
             <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
@@ -121,7 +133,7 @@ export default function NetworkTab() {
         </div>
       )}
 
-      {net && (
+      {net && showsObservedTraffic && (
       <>
       <div className="bg-bg-surface border border-border rounded">
         <div className="px-4 py-3 border-b border-border">
@@ -197,6 +209,11 @@ export default function NetworkTab() {
         )}
       </div>
 
+      </>
+      )}
+
+      {net && (
+      <>
       <div className="bg-bg-surface border border-border rounded">
         <div className="px-4 py-3 border-b border-border">
           <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">

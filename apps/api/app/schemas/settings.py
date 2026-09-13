@@ -70,6 +70,11 @@ class PatchRequest(BaseModel):
 class PatchResponse(BaseModel):
     applied: list[str]
     applies: dict[str, int]
+    # Advisory, keyed by the same dotted path the 422 errors use. A warning
+    # never refuses the write — it is what the console draws on the card the
+    # operator was editing, for a configuration that is legal and will not do
+    # what they expect.
+    warnings: dict[str, str] = Field(default_factory=dict)
 
 
 class ResetResponse(BaseModel):
@@ -117,6 +122,19 @@ class ProbeResponse(BaseModel):
 class MappingPreviewRequest(BaseModel):
     sample: dict[str, Any]
     mapping: dict[str, Any]
+
+
+class ConditionValidateRequest(BaseModel):
+    """One stage's ``when`` expression, as the operator has typed it so far."""
+
+    expression: str = Field("", max_length=2000)
+
+
+class ConditionValidateResponse(BaseModel):
+    """Everything wrong with the expression. An empty list means it is fine."""
+
+    valid: bool
+    problems: list[str]
 
 
 class ChannelPreview(BaseModel):
