@@ -46,7 +46,8 @@ change landed on `main`.
 - **`reporter`, a built-in definition.** The narrative and composer step has an
   LLM entry (`llm.agents.reporter`) and a prompt of its own instead of
   borrowing the judge's, and a report stage names it the way every other stage
-  names its agents.
+  names its agents. With no entry set it falls back to the judge role, which is
+  the model those rounds already ran on.
 - **Debate options per stage.** `max_rounds`, `consensus_threshold` and
   `sycophancy_check` belong to the debate stage that uses them, seeded from
   the global negotiation settings, so a team with two debates can run them

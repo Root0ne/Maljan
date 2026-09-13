@@ -36,7 +36,7 @@ from typing import TYPE_CHECKING, Any, cast
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from maljan.agents.registry import AgentRegistry
-from maljan.core.config import Settings
+from maljan.core.config import REPORTER_AGENT_KEY, Settings
 from maljan.core.exceptions import ConfigurationError
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger
@@ -100,6 +100,7 @@ def _drop_llm_caches_on_retirement(loop: object) -> None:
         with container._lock:
             container._expert_llm_cache = None
             container._judge_llm_cache = None
+            container._reporter_llm_cache = None
             container._agent_llm_cache.clear()
 
 
@@ -153,6 +154,7 @@ class ServiceContainer:
         # --- Caches ---
         self._expert_llm_cache: BaseChatModel | None = None
         self._judge_llm_cache: BaseChatModel | None = None
+        self._reporter_llm_cache: BaseChatModel | None = None
         self._agent_llm_cache: dict[str, BaseChatModel] = {}
         self._agent_cache: dict[str, BaseAnalyst] = {}
         self._judge_agent_cache: dict[str, Any] = {}
@@ -267,6 +269,27 @@ class ServiceContainer:
                     "judge", fallback_role="judge", **extra
                 )
             return self._judge_llm_cache
+
+    def get_reporter_llm(self) -> BaseChatModel:
+        """The model the report stage's narrative and composer rounds run on.
+
+        Through the per-agent path, like the judge: a configured
+        ``llm.agents.reporter`` decides provider, model and temperature, and
+        with no such entry the judge role picks the model exactly as it did
+        when the report had no definition of its own to be configured through.
+        """
+        if self._llm_registry is None:
+            raise ConfigurationError("Cannot build LLM in mock mode.")
+        with self._lock:
+            if self._reporter_llm_cache is None:
+                extra: dict[str, Any] = {}
+                cap = self.config.llm.judge_max_tokens
+                if cap and cap > 0:
+                    extra["max_tokens"] = cap
+                self._reporter_llm_cache = self._llm_registry.build_model_for_agent(
+                    REPORTER_AGENT_KEY, fallback_role="judge", **extra
+                )
+            return self._reporter_llm_cache
 
     def get_agent_llm(self, agent_name: str) -> BaseChatModel:
         if self._llm_registry is None:
@@ -681,7 +704,7 @@ class ServiceContainer:
             if self._narrative_agent_cache is None:
                 from maljan.reporting.narrative_agent import NarrativeAgent
 
-                llm = self.get_judge_llm()
+                llm = self.get_reporter_llm()
                 max_tokens = self.config.reporting.narrative_max_tokens
                 self._narrative_agent_cache = NarrativeAgent(
                     llm=llm,
@@ -694,8 +717,8 @@ class ServiceContainer:
         """Return the singleton section-wise ReportComposer, or ``None``.
 
         ``None`` in mock mode or when ``composer_enabled`` is
-        off (callers then simply skip the professional spine). Reuses the judge
-        LLM like the NarrativeAgent.
+        off (callers then simply skip the professional spine). Runs on the
+        reporter's model like the NarrativeAgent.
         """
         if self.is_mock or not self.config.reporting.composer_enabled:
             return None
@@ -705,7 +728,7 @@ class ServiceContainer:
 
                 rc = self.config.reporting
                 self._report_composer_cache = ReportComposer(
-                    llm=self.get_judge_llm(),
+                    llm=self.get_reporter_llm(),
                     section_max_tokens=rc.composer_section_max_tokens,
                     per_section_timeout=rc.composer_per_section_timeout,
                     token_ledger=getattr(self, "_token_ledger", None),

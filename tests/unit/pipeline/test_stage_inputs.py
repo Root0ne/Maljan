@@ -281,3 +281,100 @@ class TestDataSources:
                     }
                 }
             )
+
+
+class TestTheReporterIsADefinitionLikeAnyOther:
+    def test_it_is_seeded_with_the_report_role_and_no_tools(self) -> None:
+        definition = Settings(_env_file=None).agents.definitions["reporter"]
+        assert definition.role == "report"
+        assert definition.tools == []
+
+    def test_the_report_stage_runs_on_the_judge_model_until_it_is_given_one(self) -> None:
+        """The behaviour the report has always had, now reachable as a setting.
+
+        ``llm.agents.reporter`` decides the model when it is set; with nothing
+        set the reporter falls back to the *judge* role rather than the expert
+        one, which is the model the narrative and composer rounds were built
+        with before the reporter was a definition.
+        """
+        from maljan.llm.registry import LLMProviderRegistry
+
+        registry = LLMProviderRegistry(Settings(_env_file=None))
+        roles: list[str] = []
+        registry.build_model = lambda role, **_: roles.append(role)  # type: ignore[assignment]
+        registry.build_model_for_agent("reporter", fallback_role="judge")
+        assert roles == ["judge"]
+
+    def test_a_configured_reporter_model_is_the_one_it_uses(self) -> None:
+        settings = Settings(
+            _env_file=None,
+            llm={"agents": {"reporter": {"provider": "ollama", "model": "qwen3:8b"}}},
+        )
+        assert settings.llm.agents["reporter"].model == "qwen3:8b"
+
+
+class TestASandboxReferenceIsNotOnlyForTheDynamicRole:
+    def test_a_generic_agent_in_any_stage_gets_the_in_process_sandbox_tools(self) -> None:
+        """``ToolRef(kind="sandbox")`` is a definition's choice, not a role's.
+
+        The dynamic analyst is only the obvious holder of one. A generic agent
+        in a stage of its own asks for the same thing and must get the same
+        closures over the job's report.
+        """
+        from maljan.agents.composition import _sandbox_tools
+
+        settings = _settings(
+            [
+                {"key": "triage", "kind": "analysis", "agents": ["static"]},
+                {
+                    "key": "detonate",
+                    "kind": "analysis",
+                    "agents": ["watcher"],
+                    "depends_on": ["triage"],
+                },
+                {
+                    "key": "verdict",
+                    "kind": "verdict",
+                    "agents": ["judge"],
+                    "depends_on": ["detonate"],
+                },
+            ],
+            definitions={
+                "watcher": {
+                    "role": "generic",
+                    "prompt": "watch it run",
+                    "tools": [{"kind": "sandbox"}],
+                }
+            },
+        )
+        container = ServiceContainer(settings, mock=True)
+        container.sandbox_report = REPORT
+        names = [t.name for t in _sandbox_tools(container, settings.agents.definitions["watcher"])]
+        assert "sandbox_processes" in names
+        assert "sandbox_network" in names
+
+    def test_the_team_s_sandbox_exclusion_still_withholds_them(self) -> None:
+        from maljan.agents.composition import _sandbox_tools
+
+        settings = _settings(
+            [
+                {"key": "detonate", "kind": "analysis", "agents": ["watcher"]},
+                {
+                    "key": "verdict",
+                    "kind": "verdict",
+                    "agents": ["judge"],
+                    "depends_on": ["detonate"],
+                },
+            ],
+            definitions={
+                "watcher": {
+                    "role": "generic",
+                    "prompt": "watch it run",
+                    "tools": [{"kind": "sandbox"}],
+                }
+            },
+        )
+        settings.agents.profiles["team"].exclude_sandbox_tools = True
+        container = ServiceContainer(settings, mock=True)
+        container.sandbox_report = REPORT
+        assert _sandbox_tools(container, settings.agents.definitions["watcher"]) == []
