@@ -21,12 +21,10 @@ from maljan.core.config import (
     _builtin_definitions,
     _builtin_profiles,
 )
-from maljan.core.logger import logger
 from maljan.core.settings_overrides import build_settings
 from maljan.pipeline.conditions import validate_condition
 from pydantic import ValidationError
 
-from app.logsafe import log_safe
 
 AGENT_DEFINITIONS_KEY = "core.agents.definitions"
 AGENT_PROFILES_KEY = "core.agents.profiles"
@@ -215,12 +213,6 @@ def validate_stage_conditions(profile: str, entry: Any) -> dict[str, str]:
         problems = validate_condition(str(stage.get("when") or ""))
         if problems:
             errors[f"{profile}.stages.{key}.when"] = problems[0]
-            logger.info(
-                "profile %s stage %s: rejected condition %s",
-                log_safe(profile),
-                log_safe(key),
-                log_safe(stage.get("when")),
-            )
     return errors
 
 
@@ -255,12 +247,6 @@ def validate_stage_handovers(profile: str, entry: Any) -> dict[str, str]:
         errors[f"{profile}.stages.{key}.depends_on"] = (
             f"this debate hands over to {total} nodes ({names}); a debate hands over to "
             "exactly one stage, and not to a parallel analysis stage with more than one agent"
-        )
-        logger.info(
-            "profile %s stage %s: rejected debate handover to %s",
-            log_safe(profile),
-            log_safe(key),
-            log_safe(names),
         )
     return errors
 
