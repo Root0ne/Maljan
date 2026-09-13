@@ -422,13 +422,19 @@ def _render_yara(hits: list[dict[str, Any]]) -> str:
     return trim_output("\n".join(lines), MAX_OUTPUT_CHARS)
 
 
-def ledger_entries(bundle: StaticEvidenceBundle, counter: Any) -> list[Any]:
+def ledger_entries(
+    bundle: StaticEvidenceBundle, counter: Any, stage: str = "analysis"
+) -> list[Any]:
     """The bundle as evidence-ledger entries, one per pass that found anything.
 
     A provider without a tool loop has no seam that records its calls, so it
     records them itself. Timing is not available after the fact and is left at
     zero rather than invented; what matters is that the rows are citable and
     reach the report's sections through the same path a tool call does.
+
+    ``stage`` is the team stage the entries were recorded in. These are written
+    by the report node, so it is that stage's key; the default is what a caller
+    outside a staged run gets.
     """
     from maljan.schemas.evidence import build_entry
 
@@ -458,6 +464,7 @@ def ledger_entries(bundle: StaticEvidenceBundle, counter: Any) -> list[Any]:
                 args={},
                 server=None,
                 output=json.dumps(payload),
+                stage=stage,
             )
         )
     return out

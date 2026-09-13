@@ -38,7 +38,9 @@ change landed on `main`.
   `stage_skipped` instead when its condition is false, and `stage_finished`
   from the one node that runs after everything in it is done — its own last
   node, or the next stage's first node for a fan-out with no barrier and for a
-  debate that loops.
+  debate that loops. Every producer's ledger entries name their stage: an
+  analyst's, the judge's mediation and verdict calls, and the report's own
+  capa/YARA rows, which all recorded the constant `analysis` before.
 - **A stage can hand its findings to the next one.** `inject_upstream`
   (`none`, `findings`, `full`) gives a stage the upstream stages' claims — and
   optionally their prose — capped by the new
@@ -55,7 +57,9 @@ change landed on `main`.
   LLM entry (`llm.agents.reporter`) and a prompt of its own instead of
   borrowing the judge's, and a report stage names it the way every other stage
   names its agents. With no entry set it falls back to the judge role, which is
-  the model those rounds already ran on.
+  the model those rounds already ran on. The console treats it as the built-in
+  it is: read-only, no Clone, `report` absent from the role list for a new
+  definition, and not counted as a custom analyst on the setup hub.
 - **Debate options per stage.** `max_rounds`, `consensus_threshold` and
   `sycophancy_check` belong to the debate stage that uses them, seeded from
   the global negotiation settings, so a team with two debates can run them

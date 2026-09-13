@@ -287,7 +287,7 @@ test.describe("Settings → Setup guides (admin)", () => {
     await expect(page.getByRole("heading", { name: "Add to a stage" })).toBeVisible();
     await page.getByRole("radio", { name: /Create a new profile from default/ }).click();
     await page.getByLabel("new profile name").fill("full");
-    await page.getByLabel("stage").selectOption("analysis");
+    await page.getByLabel("add to stage").selectOption("analysis");
     await page.getByRole("checkbox", { name: "Make it the active team" }).check();
     await page.getByRole("button", { name: "Continue" }).click();
 

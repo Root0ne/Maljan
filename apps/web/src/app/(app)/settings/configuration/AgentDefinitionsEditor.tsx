@@ -27,12 +27,18 @@ const input =
   "w-full bg-bg-deep border border-border rounded px-2 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent";
 
 /** Re-seeded by the settings model, so they lock rather than delete. */
-export const BUILTIN_AGENT_KEYS = new Set(["static", "dynamic", "network", "judge"]);
+export const BUILTIN_AGENT_KEYS = new Set([
+  "static",
+  "dynamic",
+  "network",
+  "judge",
+  "reporter",
+]);
 /** Roles that read a static provider; the others have nothing to point at. */
 const PROVIDER_ROLES = new Set(["static", "generic"]);
-/** The roles a custom definition may take. `judge` is missing on purpose:
- *  there is exactly one judge and it is a built-in, so offering the role here
- *  would only produce a definition the settings model rejects. */
+/** The roles a custom definition may take. `judge` and `report` are missing on
+ *  purpose: there is exactly one of each and both are built-ins, so offering
+ *  either here would only produce a definition the settings model rejects. */
 const ROLE_CHOICES: AgentDefinitionEntry["role"][] = [
   "static", "dynamic", "network", "generic",
 ];
@@ -459,9 +465,9 @@ export function AgentDetail({
                 enabled
               </label>
               {resolveButton}
-              {/* Spec §3.1: there is one judge and it cannot be cloned, so the
-                  detail that offers it does not offer Clone either. */}
-              {agent.role !== "judge" && onClone && (
+              {/* There is one judge and one reporter and neither can be
+                  cloned, so the detail that offers them offers no Clone. */}
+              {agent.role !== "judge" && agent.role !== "report" && onClone && (
                 <button
                   type="button"
                   className="text-xs text-accent-strong"

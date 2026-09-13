@@ -218,3 +218,101 @@ class TestADebateWithNothingUpstreamThatRan:
         _, final = _run(self._team())
         assert final["is_consensus"] is True
         assert final["final_decision"] is not None
+
+
+class TestALedgerEntrySaysWhichStageMadeTheCall:
+    """``LedgerEntry.stage`` was the constant ``"analysis"`` for two producers.
+
+    The analyst nodes set it from their stage; the judge's mediation and
+    verdict calls, and the report's own capa/YARA rows, still said "analysis",
+    which sends a reader of the evidence endpoint looking for an analyst that
+    never made the call.
+    """
+
+    def test_the_judge_records_the_stage_the_node_put_it_in(self) -> None:
+        from maljan.agents.evidence_recorder import EvidenceRecorder
+        from maljan.agents.judge_agent import JudgeAgent
+
+        judge = JudgeAgent.__new__(JudgeAgent)
+        # The default, for a judge nobody staged — a script, a test, the CLI.
+        assert getattr(judge, "pipeline_stage", "analysis") == "analysis"
+
+        judge.pipeline_stage = "verdict"
+        recorder = EvidenceRecorder("judge", stage=str(judge.pipeline_stage))
+        assert recorder.stage == "verdict"
+
+    def test_the_verdict_node_stages_its_judge_before_it_rules(self) -> None:
+        """Set before anything else the node does, so a verdict that fails
+        half way still has its tool calls filed under the verdict stage."""
+        from unittest.mock import MagicMock
+
+        from maljan.pipeline.nodes import make_judge_node
+
+        settings = Settings(_env_file=None)
+        stage = settings.agents.profiles["default"].stage("verdict")
+        judge = MagicMock()
+        container = MagicMock()
+        container.is_mock = False
+        container.event_sink = None
+        container.config = settings
+        container.active_profile.return_value = settings.agents.profiles["default"]
+        container.get_judge_agent.return_value = judge
+        container.drain_all_judge_evidence.return_value = []
+        # The verdict itself is not what is under test: whatever it does, the
+        # judge has already been told which stage it is running as.
+        container.get_evidence_counter.side_effect = RuntimeError("no verdict here")
+
+        out = asyncio.run(make_judge_node(container, stage=stage)(_state()))
+        assert judge.pipeline_stage == "verdict"
+        assert out["final_decision"] == "Suspicious"
+
+    def test_the_debate_node_stages_its_mediator_as_the_debate(self) -> None:
+        from unittest.mock import MagicMock
+
+        from maljan.pipeline.nodes import make_negotiation_node
+
+        settings = Settings(_env_file=None)
+        stage = settings.agents.profiles["default"].stage("debate")
+        judge = MagicMock()
+        container = MagicMock()
+        container.is_mock = False
+        container.event_sink = None
+        container.config = settings
+        container.active_profile.return_value = settings.agents.profiles["default"]
+        container.analyst_keys.return_value = ["static"]
+        container.get_judge_agent.return_value = judge
+        container.drain_all_judge_evidence.return_value = []
+
+        asyncio.run(
+            make_negotiation_node(container, stage=stage)(
+                _state(stage_results={"analysis": {"ran": True, "agents": ["static"]}})
+            )
+        )
+        assert judge.pipeline_stage == "debate"
+
+    def test_the_report_s_own_rows_carry_the_report_stage(self) -> None:
+        from maljan.providers.base import StaticEvidenceBundle
+        from maljan.providers.static.capa_yara import ledger_entries
+        from maljan.schemas.evidence import EvidenceCounter
+
+        bundle = StaticEvidenceBundle(
+            yara_matches=[{"rule": "ransom_note", "strings": [], "technique": "T1486"}]
+        )
+        (entry,) = ledger_entries(bundle, EvidenceCounter(), "report")
+        assert entry.stage == "report"
+
+    def test_those_rows_default_to_analysis_outside_a_staged_run(self) -> None:
+        from maljan.providers.base import StaticEvidenceBundle
+        from maljan.providers.static.capa_yara import ledger_entries
+        from maljan.schemas.evidence import EvidenceCounter
+
+        bundle = StaticEvidenceBundle(
+            yara_matches=[{"rule": "ransom_note", "strings": [], "technique": "T1486"}]
+        )
+        (entry,) = ledger_entries(bundle, EvidenceCounter())
+        assert entry.stage == "analysis"
+
+    def test_an_analyst_s_own_entries_still_carry_their_stage(self) -> None:
+        from maljan.agents.evidence_recorder import EvidenceRecorder
+
+        assert EvidenceRecorder("static", stage="triage").stage == "triage"

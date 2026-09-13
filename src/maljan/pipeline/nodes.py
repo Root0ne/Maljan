@@ -1322,6 +1322,9 @@ def make_negotiation_node(
 
         try:
             judge = container.get_judge_agent(role="expert")
+            # Mediation is this debate stage's work, so the tool calls it makes
+            # are recorded against it rather than against "analysis".
+            judge.pipeline_stage = stage.key if stage is not None else "analysis"
             # Mediation runs on the shared agent loop, not this one. The openai
             # SDK's httpx pool is process-wide and bound to whichever loop first
             # awaited it — always the agent loop, because the analysts ran
@@ -1687,6 +1690,7 @@ def make_judge_node(
 
         try:
             judge = container.get_judge_agent(role="judge")
+            judge.pipeline_stage = verdict_stage.key if verdict_stage is not None else "analysis"
 
             revised = state.get("revised_reports") or {}
             original = state.get("reports") or {}
@@ -2390,7 +2394,11 @@ def make_report_node(
             try:
                 from maljan.providers.static.capa_yara import ledger_entries
 
-                _capa_entries = ledger_entries(_static_bundle, container.get_evidence_counter())
+                _capa_entries = ledger_entries(
+                    _static_bundle,
+                    container.get_evidence_counter(),
+                    stage.key if stage is not None else "analysis",
+                )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("report_node: capa/YARA evidence not recorded (%s).", exc)
         _ledger.extend(_capa_entries)

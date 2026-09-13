@@ -156,6 +156,10 @@ class JudgeAgent:
         # Per-run token ledger (findings-log §4 Item 1); attached by the
         # container in get_judge_agent(). None when run standalone.
         self.token_ledger: TokenLedger | None = None
+        # Which stage of the active team this judge is running as. Set by the
+        # node before it works — the debate stage when it mediates, the verdict
+        # stage when it rules — and read by the evidence recorder.
+        self.pipeline_stage: str = "analysis"
         # Per-run truncation ledger (pitfall P6); same lifecycle. The judge is
         # where ``judge_max_tokens`` binds and where the STIX integrity pass
         # runs, so this is the most load-bearing attachment point of the three.
@@ -319,7 +323,15 @@ class JudgeAgent:
         # no counter, and one per mediation round would reissue ``ev_0001``.
         if self.evidence_counter is None:
             self.evidence_counter = EvidenceCounter()
-        recorder = EvidenceRecorder("judge", counter=self.evidence_counter)
+        recorder = EvidenceRecorder(
+            "judge",
+            counter=self.evidence_counter,
+            # The stage the node set before it called: mediation happens in a
+            # debate stage and the verdict in the verdict stage, and a ledger
+            # entry that says "analysis" for either sends a reader looking for
+            # an analyst that never made the call.
+            stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
+        )
         agent_executor = create_react_agent(self.llm, record_tools(self.tools, recorder))
 
         messages = messages_pre

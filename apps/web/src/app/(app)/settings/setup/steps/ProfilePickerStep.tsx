@@ -181,7 +181,7 @@ export default function ProfilePickerStep({ state, setState }: GuideStepProps) {
           <span>Stage</span>
           <select
             className={input}
-            aria-label="stage"
+            aria-label="add to stage"
             value={stageKey}
             onChange={(e) => {
               setStageKey(e.target.value);
