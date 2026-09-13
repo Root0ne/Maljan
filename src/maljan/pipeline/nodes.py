@@ -1702,7 +1702,7 @@ def make_judge_node(container: ServiceContainer) -> Any:
                 text=(
                     f"[ERROR] Judge failed ({type(e).__name__}): {e or ''}. "
                     "Falling back to a conservative Suspicious verdict; the run is "
-                    "marked degraded and its confidence capped."
+                    "marked degraded and the report says why."
                 ),
                 round_index=state.get("iteration_count", 0),
                 status="failed",

@@ -1,15 +1,14 @@
 """What each technique id was claimed by, put in front of the judge.
 
-The block this produces replaces the TTP cascade's. The cascade handed the
-judge one number per technique — a weighted sum over per-layer constants and
-cross-layer multipliers — and the judge, reasonably, treated that number as the
-answer and its own reading of the evidence as commentary. Nobody could say
-where 0.87 came from, because it came from a table of weights.
+Deliberately no arithmetic. Hand a judge one weighted number per technique and
+it treats that number as the answer and its own reading of the evidence as
+commentary — and nobody can say where the number came from, because it comes
+from a table of constants rather than from the sample.
 
-What is offered instead is the same information without the arithmetic: the
-technique id, every source that named it, and what each source said its own
-confidence was. Two analysts and a capa rule agreeing is visible as three
-lines; the judge decides what that is worth, which is the judge's job.
+So the block carries the same information without the summing: the technique
+id, every source that named it, and what each source said its own confidence
+was. Two analysts and a capa rule agreeing is three lines; what that is worth
+is the judge's decision, which is the judge's job.
 """
 
 from __future__ import annotations

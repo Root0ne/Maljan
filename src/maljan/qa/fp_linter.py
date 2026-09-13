@@ -8,16 +8,14 @@ corrects any of it — the linter reports, and the report carries what it says.
 It runs after the NarrativeAgent has populated the MalwareReport and emits one
 or more :class:`FPWarning` rows for any anomaly:
 
-* **C1** capability_matrix entry whose technique platform doesn't
-  intersect the sample's canonical platform (should be impossible after
-  Step 4; the linter calls it out anyway).
+* **C1** capability_matrix entry whose technique platform does not intersect
+  the sample's canonical platform.
 * **C2** ``defensive_recommendations[].action`` mentions a technique ID
-  that's not in the capability matrix (NarrativeAgent hallucination).
+  that is not in the capability matrix.
 * **C3** ``executive_summary`` mentions a platform-specific concept
-  (PowerShell, RDP, macOS, raw disk, cloud auth) that doesn't apply to
-  the sample (narrative cascade FP).
-* **C4** total ``file:name`` indicators above ``MAX_FILE_NAME_INDICATORS``
-  (Step 5 cap escaped).
+  (PowerShell, RDP, macOS, raw disk, cloud auth) that cannot apply to
+  the sample.
+* **C4** ``file:name`` or total indicators above their caps.
 * **C5** family attribution set with ``family_grounded=false`` — the judge
   named a family and cited no evidence ids for it.
 * **C6** a claim or finding that carries neither an evidence id nor a tool
@@ -100,18 +98,16 @@ def lint_report(report: Any, sample_platform: str | None) -> list[FPWarning]:
                     rule="C1",
                     severity="warn",
                     message=(
-                        f"Capability {tid} survived cascade but its declared "
-                        f"platforms {sorted(norm)} don't include sample={sp}."
+                        f"Capability {tid} is in the matrix but its declared "
+                        f"platforms {sorted(norm)} do not include sample={sp}."
                     ),
                     field=f"capability_matrix.{tid}",
                     explanation=(
-                        "The TTP cascade is expected to drop "
-                        "platform-mismatched claims via "
-                        "_is_claim_platform_compatible. This warning means a "
-                        "claim slipped through with rule_platforms intact — "
-                        "investigate whether the Sigma/YARA source layer "
-                        "populated platforms but the cascade trusted a "
-                        "different signal (e.g. MITRE catalog overlap)."
+                        "A technique that cannot run on this platform is in "
+                        "the report. Either the sample's platform was inferred "
+                        "wrongly, or an agent claimed a technique the sample "
+                        "has no way to perform. Nothing drops it — the claim "
+                        "belongs to whoever made it — so read it here."
                     ),
                 )
             )
@@ -129,17 +125,16 @@ def lint_report(report: Any, sample_platform: str | None) -> list[FPWarning]:
                         severity="warn",
                         message=(
                             f"defensive_recommendations[{i}] references {tid} which is not "
-                            f"in capability_matrix — NarrativeAgent likely hallucinated."
+                            f"in capability_matrix."
                         ),
                         field=f"defensive_recommendations[{i}]",
                         explanation=(
-                            "NarrativeAgent freely cites TTPs in its prose; "
-                            "the cascade is the source of truth. When a "
-                            "recommendation names a TID absent from "
-                            "capability_matrix, treat the recommendation as "
-                            "advisory only — the underlying capability was "
-                            "either dropped (platform mismatch) or never "
-                            "claimed by any analyst."
+                            "The narrative agent cites techniques in its prose "
+                            "freely, and the capability matrix is what the "
+                            "judge and the analysts actually established. A "
+                            "recommendation naming a technique absent from it "
+                            "is advisory only: no analyst claimed it and the "
+                            "judge did not put it in the verdict."
                         ),
                     )
                 )
@@ -154,17 +149,15 @@ def lint_report(report: Any, sample_platform: str | None) -> list[FPWarning]:
                         rule="C3",
                         severity="warn",
                         message=(
-                            f"executive_summary mentions '{term}' but sample platform is "
-                            f"{sp}; likely narrative cascade FP."
+                            f"executive_summary mentions '{term}' but sample platform is {sp}."
                         ),
                         field="executive_summary",
                         explanation=(
-                            f"NarrativeAgent emitted a platform-specific "
-                            f"concept ('{term}') that cannot apply to a {sp} "
-                            f"sample. This was the failure mode of the "
-                            f"2026-05-23 cross-platform narrative audit; treat the "
-                            f"entire executive summary sentence with skepticism and "
-                            f"prefer the deterministic capability_matrix."
+                            f"The narrative names a platform-specific concept "
+                            f"('{term}') that cannot apply to a {sp} sample. "
+                            f"Read the sentence carrying it with scepticism "
+                            f"and prefer the capability matrix, which is built "
+                            f"from what the tools returned."
                         ),
                     )
                 )

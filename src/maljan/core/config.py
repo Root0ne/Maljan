@@ -545,14 +545,13 @@ class PreprocessingConfig(BaseModel):
     api_behaviour_map_path: str = "data/api_behaviour_map_v1.json"
 
     # Deterministic API→ATT&CK mapping, computed from the same resolved-import
-    # set as the behaviour map above (one parse, two projections). This is what
-    # gives a sandbox-unreachable run real technique coverage: without it the
-    # import layer emits at most three techniques, all hand-coded.
-    # Every claim is capped below the YARA floor (0.70) so it corroborates other
-    # layers without solo-driving a verdict, and each technique declares a
-    # ``min_apis`` so a single ubiquitous import cannot promote itself to a
-    # finding. ON by default; absent the catalog the layer keeps its previous
-    # three-technique behaviour.
+    # set as the behaviour map above (one parse, two projections). It fills
+    # ``StaticAnalysis.api_technique_hits``: one row per technique with the
+    # exact imports that evidenced it, which an analyst reads and decides about.
+    # Each row carries the catalog's own confidence, deliberately modest — a
+    # resolved import merely being present is weak — and each technique declares
+    # a ``min_apis`` so one ubiquitous import cannot produce a row on its own.
+    # ON by default; absent the catalog the audit trail is simply empty.
     use_api_attck_map: bool = True
     api_attck_map_path: str = "data/api_attck_map_v1.json"
 

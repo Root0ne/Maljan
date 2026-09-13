@@ -10,7 +10,7 @@ Design goals:
   - Protocol-based: swappable backends without changing caller code.
   - StoredCase captures all signals needed for few-shot retrieval: the
     free-text summary (used for similarity search), extracted technique IDs
-    (for TTP-level deduplication), malware category (from schema_pruner),
+    (for TTP-level deduplication), the malware category the judge assessed,
     and the full STIX bundle JSON (for future cross-case correlation).
 
 MemoryStore.retrieve() contract:

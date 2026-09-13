@@ -2443,9 +2443,9 @@ class BaseAnalyst(ABC):
         flags=re.UNICODE,
     )
 
-    # Recognise meta-claim text so the
-    # judge / cascade / LTM gate can treat it as "no real claims" instead
-    # of inflating verdict confidence with a 1.0 sentence. The fallback
+    # Recognise meta-claim text so the judge, the corroboration count and the
+    # long-term-memory gate all read it as "no real claims" rather than as a
+    # finding the analyst stated at 1.0 confidence. The fallback
     # strings come from ``file_loader.py:107`` ("No * data available for
     # sample ...") and from analyst LLM fallbacks that copy that wording.
     # Widened beyond the bare file_loader
@@ -2510,9 +2510,9 @@ class BaseAnalyst(ABC):
 
         # When the agent returned only the placeholder
         # ("No static data available for sample ..."), emit a *zero-claim*
-        # ISR rather than one with a meta-sentence. Downstream cascade +
-        # judge already drop empty-claim ISRs from the confidence math, so
-        # this is the single tightest place to plug the leak.
+        # ISR rather than one with a meta-sentence. Every consumer already
+        # skips an empty-claim ISR, so this is the single tightest place to
+        # stop "I had nothing to read" being counted as a finding.
         if self._is_meta_claim_text(text):
             self.logger.info(
                 "%s: meta-claim text detected; emitting zero-claim ISR.",
@@ -2548,11 +2548,11 @@ class BaseAnalyst(ABC):
         ]
         claims: list[ClaimEvidence] = []
         for sentence in raw_sentences[:10]:
-            # Bind a technique ID to the sentence that
-            # actually mentions it, not by positional index. The previous
-            # ``technique_ids[i]`` stapled a T-code extracted anywhere in the
-            # report onto an unrelated sentence, injecting mis-attributed
-            # static claims into the TTP cascade at a fixed 0.5 confidence.
+            # Bind a technique ID to the sentence that actually mentions it,
+            # not by positional index. The previous ``technique_ids[i]``
+            # stapled a T-code extracted anywhere in the report onto an
+            # unrelated sentence, so the report attributed a technique to a
+            # claim that never mentioned it.
             _sentence_tids = _extract_technique_ids(sentence)
             tid = _sentence_tids[0] if _sentence_tids else None
             claims.append(
@@ -2583,8 +2583,8 @@ class BaseAnalyst(ABC):
 
         Falls back to a clearly-marked default and emits a warning rather than
         silently mislabelling unknown agents. The previous behaviour silently
-        mapped *any* unrecognised name to "network", which broke cascade
-        weighting for new agent kinds.
+        mapped *any* unrecognised name to "network", so a new agent kind was
+        reported under a domain it had nothing to do with.
 
         Returns ``str`` rather than a three-way Literal:
         a custom analyst's domain is its own definition key, and ``AgentISR``

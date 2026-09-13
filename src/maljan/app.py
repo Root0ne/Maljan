@@ -307,14 +307,13 @@ class MaljanApp:
         # Submit to sandbox if sample_path is provided
         sandbox_report = await self._submit_to_sandbox(sample_path)
 
-        # Compute file_type + canonical platform up
-        # front so the judge node's Sigma/YARA scanners + TTP cascade can
-        # filter platform-incompatible rules. Without this the pipeline is
-        # platform-blind and yields cross-OS FPs (e.g. a Windows-only rule
-        # firing against a Linux sample). The detector is deterministic +
-        # cheap so we just run it here, even on samples we couldn't read off
-        # disk (platform stays "unknown", which the cascade treats as
-        # fall-open).
+        # Compute file_type + canonical platform up front. It routes the
+        # analysis (which prompt fragment an analyst is given, which rules the
+        # scanning tools keep), fills the report's identity block, and is what
+        # the FP linter checks a technique's platform against. The detector is
+        # deterministic and cheap, so it runs here even for a sample that could
+        # not be read off disk — the platform then stays "unknown", which every
+        # consumer treats as "do not filter on this".
         file_type, platform = self._infer_sample_platform(sample_path, sandbox_report)
         logger.info("Sample platform inferred: file_type=%s platform=%s", file_type, platform)
         # The analysts are built lazily by the container, from nodes that do

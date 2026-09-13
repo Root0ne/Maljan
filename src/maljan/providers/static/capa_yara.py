@@ -58,19 +58,16 @@ _BACKEND_NAMES: dict[str, str] = {
     "binja": "BACKEND_BINJA",
 }
 
-# ``api_technique_hits`` already has one producer — the import-capability
-# Layer 0 (analysis/import_capability_layer.py) — whose rows start at
-# confidence_base ~0.38-0.5 (data/api_attck_map_v1.json) and rise slowly with
-# the number of *distinct imports* corroborating the technique, because a
-# resolved import merely *being present* in the table is weak evidence on its
-# own. A fired capa rule is not that: capa already requires the matching
-# code pattern (an instruction sequence, a string, an API call in the right
-# context) to be present, the same bar the deterministic YARA layer clears —
-# so this reuses YARA's own deterministic floor
-# (``analysis/yara_layer._CONFIDENCE_FLOOR`` = 0.70) rather than
-# import_capability_layer's low-and-rising scheme: the corroboration
-# import_capability_layer earns via extra imports, a capa match already has
-# by construction.
+# The confidence a fired capa rule reports for the technique it names. The
+# other producer of ``api_technique_hits`` is the API-to-ATT&CK map, whose rows
+# start around 0.38-0.5 (data/api_attck_map_v1.json) and rise with the number
+# of distinct imports corroborating the technique, because a resolved import
+# merely *being present* is weak evidence on its own. A fired capa rule is not
+# that: capa requires the matching code pattern — an instruction sequence, a
+# string, an API call in the right context — to be there, which is the same bar
+# a YARA rule clears. So this matches the YARA corpus's own floor rather than
+# the map's low-and-rising scheme: the corroboration the map earns through
+# extra imports, a capa match already has by construction.
 _CAPA_TECHNIQUE_CONFIDENCE: float = 0.70
 
 

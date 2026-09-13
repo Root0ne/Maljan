@@ -11,11 +11,11 @@ It has two distinct responsibilities:
 What the judge is shown:
   - The analysts' reports and, compactly, their ISR summaries.
   - An evidence summary (``pipeline.evidence_summary``): per technique id, the
-    sources that named it and each source's own confidence. No combined number
-    — the cascade that used to compute one is gone, and with it the judge's
-    habit of deferring to it.
-  - Why the run is degraded, when it is, so the judge can weigh its own
-    confidence accordingly rather than have a cap applied afterwards.
+    sources that named it and each source's own confidence. No combined number,
+    because a combined number is one the judge defers to instead of reading the
+    evidence.
+  - Why the run is degraded, when it is. The judge weighs it and sets its own
+    confidence; nothing caps the number afterwards.
   - Similar prior cases from long-term memory, as few-shot context.
 
 What comes back is checked by ``pipeline.validation`` and, when something is

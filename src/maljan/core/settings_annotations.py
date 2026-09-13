@@ -659,7 +659,7 @@ ANNOTATIONS: dict[str, Annotation] = {
     "preprocessing.attck_index_backend": {
         "title": "ATT&CK index backend",
         "description": (
-            "Backend for the ATT&CK technique index used for grounding and autocorrect: "
+            "Backend for the ATT&CK technique index the knowledge tools rank against: "
             "tfidf (keyword bag-of-words, clean alignment gate), semantic (dense "
             "embeddings, better ranking but a poor gate), or hybrid (semantic ranking "
             "with a TF-IDF gate — the default and best-performing option in "
@@ -791,8 +791,9 @@ ANNOTATIONS: dict[str, Annotation] = {
         "description": (
             "Enables deterministic API-to-ATT&CK-technique mapping computed from the "
             "sample's resolved imports, the main source of technique coverage on a "
-            "sandbox-unreachable run. On by default; each claim is capped below the "
-            "YARA floor so it corroborates other layers without solo-driving a verdict."
+            "sandbox-unreachable run. On by default. Each row carries the catalog's "
+            "own modest confidence and names the imports behind it, so an analyst "
+            "reading it can check the reasoning rather than take the number."
         ),
         "subgroup": "Feature switches",
     },

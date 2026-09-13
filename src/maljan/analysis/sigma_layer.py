@@ -74,7 +74,8 @@ class SigmaMatch:
 
     ``rule_platforms``: the canonical platform bucket(s) the rule
     declared via ``logsource.product``. Empty when the rule is generic.
-    Carried into the ISR so the TTP cascade can do platform-aware filtering.
+    Reported with the match so the agent reading it can weigh a Windows-only
+    rule that fired on a Linux sample for itself.
     """
 
     rule_id: str
@@ -275,9 +276,9 @@ def _is_rule_compatible(rule_product: str | None, sample_platform: str | None) -
     * ``None`` → legacy / no-filter caller (older tests / direct CLI
       usage). Keep every rule so existing behaviour is preserved.
     * ``"unknown"`` → caller explicitly declared "platform inference
-      failed" (Step 1 bootstrap couldn't disambiguate). Drop
-      non-generic rules to avoid the platform-blind cascade FPs that
-      motivated the filter. Generic rules still run.
+      failed" (the bootstrap could not disambiguate). Drop non-generic rules
+      rather than report a Windows rule firing on a sample nobody could
+      identify. Generic rules still run.
     * any concrete platform string → exact match against the rule's
       ``logsource.product``.
 
@@ -318,7 +319,7 @@ def _rule_platforms_tuple(product: str | None) -> tuple[str, ...]:
 
 
 class SigmaLayer:
-    """Sigma rule-based log analysis — ATT&CK Layer 0 deterministic detection.
+    """The compiled Sigma corpus, behind ``tools.rules.sigma_match``.
 
     Uses pySigma to parse rules into an AST and the in-tree
     ``SigmaMemoryEvaluator`` to evaluate events.
@@ -396,13 +397,10 @@ class SigmaLayer:
     def _extract_technique_id(self, rule: SigmaRule) -> str | None:
         """Return the MITRE ATT&CK technique ID for a Sigma rule, or None.
 
-        Previously returned the hardcoded ``"T0000"`` sentinel when a rule
-        had no ``attack.t####`` tag — that placeholder leaked through the
-        cascade into the STIX bundle as an invalid AttackPattern SDO.
-        Now we return ``None`` so
-        downstream consumers that already accept ``Optional[str]`` (the
-        ISR ClaimEvidence model, the cascade engine's regex filter) treat
-        the rule as "untagged" rather than "T0000".
+        ``None`` and not the ``"T0000"`` sentinel this once returned: a
+        placeholder id reads as a technique everywhere it goes, and the one
+        thing an untagged rule is certain about is that it names no technique.
+        Every consumer accepts ``Optional[str]`` and treats it as untagged.
         """
         for tag in rule.tags:
             tag_str = str(tag).lower()

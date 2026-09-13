@@ -145,9 +145,10 @@ class YaraMatch:
         description:  Human-readable rule description.
         matched_patterns: Specific patterns from the rule that were found.
         rule_platforms: Source rule's declared platform tuple —
-                        ``("any",)`` for cross-platform rules. Propagated
-                        into the ISR so the TTP cascade can honour the
-                        layer-declared platform over the MITRE catalog.
+                        ``("any",)`` for cross-platform rules. Reported with
+                        the match so the agent reading it knows what the rule
+                        author said the rule was for, which is often narrower
+                        than what the MITRE catalog says the technique targets.
         source_label: Which blob matched. Empty for the sample itself, and set
                         to the carve label (``"overlay+0x1a400"``) when the hit
                         came from an embedded payload. A rule firing on a
@@ -189,12 +190,12 @@ class YaraMatch:
 
 
 class YaraLayer:
-    """Deterministic YARA-based ATT&CK technique detection layer.
+    """The compiled YARA corpus, behind ``tools.rules.yara_scan``.
 
-    Scans analysis text against a YAML-configured pattern rule set and
-    returns a list of YaraMatch objects. Each match is converted to a
-    ClaimEvidence, which is then packaged into a synthetic AgentISR
-    (domain="yara") for injection into the TTP cascade engine.
+    Scans the sample's bytes against a YAML-configured pattern rule set and
+    returns a list of ``YaraMatch`` objects: which rule fired, where, what it
+    matched, and the technique and confidence its author wrote down. What a
+    hit means is the reading of whichever agent asked.
 
     Usage:
         layer = YaraLayer.from_default_rules()
@@ -486,7 +487,8 @@ class YaraLayer:
             if sample_platform is not None:
                 active_ids = {r.id for r in active_rules}
                 matches = [m for m in matches if m.rule_id in active_ids]
-            # Attach rule_platforms metadata for the cascade.
+            # Attach the rule's declared platforms to the match, so the
+            # answer carries what its author said it was for.
             id_to_platforms = {r.id: r.platform for r in self._rules}
             for m in matches:
                 m.rule_platforms = id_to_platforms.get(m.rule_id, ())

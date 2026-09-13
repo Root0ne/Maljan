@@ -1,11 +1,10 @@
 """Rule engines as tools: YARA over bytes, Sigma over events, capa over code.
 
-What is deliberately *not* here is the part the pipeline layers add on top of
-these engines — the platform pre-filter, the confidence floor, the conversion
-into a synthetic ``AgentISR``. Those exist because the cascade needs a
-comparable number from every layer. A tool has no such need: an agent asking
-"what fired" wants every rule that fired, on its own terms, and gets to decide
-what a Windows-only rule hitting a Linux sample means.
+What is deliberately *not* here is the part the pipeline layers used to add on
+top of these engines — a platform pre-filter, a confidence floor, and the
+conversion of every hit into a claim of its own. A tool has no need of any of
+it: an agent asking "what fired" wants every rule that fired, on its own terms,
+and gets to decide what a Windows-only rule hitting a Linux sample means.
 
 Rule corpora are loaded once per path and kept for the process lifetime — a
 sidecar answers many calls and recompiling a few hundred YARA rules per call

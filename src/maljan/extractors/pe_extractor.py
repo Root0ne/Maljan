@@ -222,10 +222,10 @@ def build_static_analysis(
 ) -> StaticAnalysis | None:
     """Return ``StaticAnalysis`` for ``sample_path`` or ``None`` if unreadable.
 
-    Memoized. One analysis calls this **nine** times — three inside the judge
-    node alone (import-capability Layer 0, the family-feature RAG hint and the
-    ATT&CK-case RAG hint), plus the analyst node, the report builder and three
-    sites in the static analyst. Each call used to re-read the file from disk
+    Memoized. One analysis calls this many times — twice inside the judge node
+    alone (the family-feature RAG hint and the ATT&CK-case RAG hint), plus the
+    analyst node, the report builder and three sites in the static analyst and
+    its tools. Each call used to re-read the file from disk
     and re-run ``pefile`` from scratch, which was merely wasteful when this
     module only classified 51 imports and became a real latency cliff once
     carving and per-string IOC classification were added on top.
