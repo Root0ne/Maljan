@@ -177,7 +177,7 @@ class TestNewStateFields:
 
 
 class TestAnalystNodeChunkedWiring:
-    """Tests that make_stage_agent_node(ANALYSIS_STAGE, ) correctly uses load_chunked().
+    """Tests that an analysis stage's agent node correctly uses load_chunked().
 
     These are 'semi-integration' tests: they use the real node factory but
     replace the container and LLM with mocks. This verifies the wiring

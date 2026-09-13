@@ -294,12 +294,28 @@ than merely detected. A debate stage needs an analysis stage upstream of it,
 and an analysis stage needs at least one agent. An agent belongs to one
 analysis stage.
 
+A debate stage hands over to exactly one **node**. It leaves through a
+conditional edge, and a conditional edge has one destination per branch, so a
+debate may not feed two stages — and may not feed a parallel analysis stage
+with more than one agent, which is two nodes even though it is one stage. A
+sequential stage of any size is one node and is fine. This is refused when the
+team is saved, not when the first job builds its graph.
+
 A team stored as a plain list of analysts — every team written before stages
 existed — is read as the four stages that list has always meant: `analysis`
 (those analysts, in `llm.parallel_analysts`' mode) → `debate` (with the round
 limit and threshold from `negotiation.*`) → `verdict` (the judge) → `report`
 (the reporter). The stored `analysts` list is kept alongside the stages it
 produced; the model reads the stages.
+
+Such a team is marked `derived_from_analysts`, and while the mark is set its
+stages are rebuilt from the analyst list and those two global keys on every
+load. That is what keeps a team nobody has opened following
+`llm.parallel_analysts`: an operator who moves from a hosted API back to the
+single-slot local model changes one setting and the team follows, instead of
+running analysts in parallel forever because it happened to be migrated on a
+day when parallel was on. The console clears the mark on the first stage edit
+— from then the stages are the operator's, and nothing rewrites them.
 
 ### Conditions
 
@@ -344,12 +360,21 @@ size > 10485760
 
 `inject_upstream` decides what a stage is told about the stages it depends on.
 `none` tells it nothing, which is what the default team uses — its analysts
-have never seen each other's work before the debate. `findings` puts an
-"Upstream findings" block at the head of the stage's prompt: each upstream
-agent's claims with their technique, confidence and evidence id. `full` adds
-each upstream agent's prose report. Both are capped by
+have never seen each other's work before the debate. `findings` gives it each
+upstream agent's claims with their technique, confidence and evidence id.
+`full` adds each upstream agent's prose report. Both are capped by
 `core.reporting.upstream_findings_max_chars` (6000 by default), and a block
 that is cut says so.
+
+The block arrives as an `upstream_findings` field inside the stage's first
+chunk when that chunk is a JSON document, and in front of it when it is not. A
+static or generic agent's first chunk is JSON with a contract on it — the
+container-visible `analysis_file_path` is read back out of it, and putting
+prose in front would leave the agent inventing a path again.
+
+Injection never changes whether a stage has data. An agent whose loaders
+produced nothing but a "no data available" placeholder is still skipped, with
+or without a block to read.
 
 Which slice of the job an agent reads is its own setting,
 `agents.definitions.<key>.data_sources`. Empty means the slice the agent's

@@ -170,6 +170,12 @@ export interface ProfileEntry {
   label: string;
   stages: StageEntry[];
   analysts: string[];
+  /** True while the stages are still a derivation of `analysts` rather than
+   *  something an operator wrote. The API keeps re-deriving them from the
+   *  global analyst-mode and negotiation settings until this is cleared, which
+   *  is what the editor does on the first stage edit. Round-tripped, never
+   *  shown. */
+  derived_from_analysts?: boolean;
   exclude_servers?: string[];
   exclude_sandbox_tools?: boolean;
   static_provider?: string | null;

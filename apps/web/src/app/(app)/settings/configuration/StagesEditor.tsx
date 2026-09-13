@@ -95,10 +95,23 @@ export default function StagesEditor({
 
   const put = (key: string, next: Partial<ProfileEntry>) => onChange(putEntry(value, key, next));
 
+  /**
+   * A stage edit, which also stops the API deriving this team's stages.
+   *
+   * A team the migration converted still carries `derived_from_analysts`, and
+   * while it does the settings model rebuilds its stages from the analyst list
+   * and the two global keys on every load — which is what keeps an untouched
+   * team following `llm.parallel_analysts`. The moment an operator changes a
+   * stage the stages are theirs, and leaving the flag set would throw the edit
+   * away on the next read.
+   */
+  const putStages = (profile: string, stages: StageEntry[]) =>
+    put(profile, { stages, derived_from_analysts: false });
+
   const putStage = (profile: string, index: number, next: Partial<StageEntry>) => {
     const stages = [...value[profile].stages];
     stages[index] = { ...stages[index], ...next };
-    put(profile, { stages });
+    putStages(profile, stages);
   };
 
   const moveStage = (profile: string, index: number, by: number) => {
@@ -115,7 +128,7 @@ export default function StagesEditor({
       if (stage.depends_on.some((d) => !seen.has(d))) return;
       seen.add(stage.key);
     }
-    put(profile, { stages });
+    putStages(profile, stages);
   };
 
   const addStage = (profile: string) => {
@@ -135,17 +148,18 @@ export default function StagesEditor({
             { ...fresh, depends_on: stages[reportIndex].depends_on },
             { ...stages[reportIndex], depends_on: [fresh.key] },
           ];
-    put(profile, { stages: next });
+    putStages(profile, next);
   };
 
   const removeStage = (profile: string, index: number) => {
     const stages = value[profile].stages;
     const gone = stages[index].key;
-    put(profile, {
-      stages: stages
+    putStages(
+      profile,
+      stages
         .filter((_, i) => i !== index)
-        .map((s) => ({ ...s, depends_on: s.depends_on.filter((d) => d !== gone) })),
-    });
+        .map((s) => ({ ...s, depends_on: s.depends_on.filter((d) => d !== gone) }))
+    );
   };
 
   const add = (from?: string) => {
@@ -171,20 +185,26 @@ export default function StagesEditor({
             label: source.label ? `${source.label} (copy)` : key,
             stages: source.stages.map((s) => ({ ...s, depends_on: [...s.depends_on] })),
             analysts: [...source.analysts],
+            derived_from_analysts: false,
           }
-        : { label: "", stages: [], analysts: [] },
+        : { label: "", stages: [], analysts: [], derived_from_analysts: false },
     });
   };
 
-  const errorFor = (path: string) =>
-    Object.entries(errors).find(([k]) => k === path || k.startsWith(`${path}.`))?.[1];
+  /** The message for exactly ``path``, or for something under it.
+   *
+   *  ``exact`` is what the team card asks for: a stage's own error is keyed
+   *  under the team, so a prefix match would render a stage's condition error
+   *  a second time in the team-wide banner above it. */
+  const errorFor = (path: string, exact = false) =>
+    Object.entries(errors).find(([k]) => (exact ? k === path : k === path || k.startsWith(`${path}.`)))?.[1];
 
   return (
     <div className="space-y-3" data-testid="stages-editor">
       {Object.entries(value).map(([key, profile]) => {
         const locked = BUILTIN_PROFILES.has(key);
         const stages = profile.stages ?? [];
-        const cardError = errorFor(`${entry.key}.${key}`);
+        const cardError = errorFor(`${entry.key}.${key}`, true);
         return (
           <div key={key} className="border border-border rounded p-3" data-profile={key}>
             <div className="flex items-center justify-between gap-2 mb-2">

@@ -309,3 +309,194 @@ class TestTheBuiltInTeamsStayTheArchitecture:
         stages[0]["agents"] = ["static"]
         with pytest.raises(ValidationError, match="'default' is built in; clone it to change it"):
             _settings(profiles={"default": {"label": "Default", "stages": stages}})
+
+
+class TestADebateNeedsSomewhereToHandOver:
+    """A conditional edge has one destination per branch, so a debate has one.
+
+    Refused when the team is saved rather than only when the graph is built:
+    the builder still raises, but by then the sample has been uploaded and
+    detonated and every job under that team fails.
+    """
+
+    def _team(self, downstream: list[dict]) -> dict:
+        return {
+            "own": {
+                "stages": [
+                    _stage(),
+                    {"key": "d", "kind": "debate", "depends_on": ["analysis"]},
+                    *downstream,
+                ]
+            }
+        }
+
+    def test_a_debate_feeding_a_parallel_stage_of_two_agents_is_refused(self) -> None:
+        with pytest.raises(ValidationError, match="hands over to 2 nodes"):
+            _settings(
+                profiles=self._team(
+                    [
+                        {
+                            "key": "wide",
+                            "kind": "analysis",
+                            "agents": ["dynamic", "network"],
+                            "mode": "parallel",
+                            "depends_on": ["d"],
+                        },
+                        {
+                            "key": "v",
+                            "kind": "verdict",
+                            "agents": ["judge"],
+                            "depends_on": ["wide"],
+                        },
+                    ]
+                )
+            )
+
+    def test_a_debate_feeding_two_stages_is_refused(self) -> None:
+        with pytest.raises(ValidationError, match="hands over to 2 nodes \\(one, two\\)"):
+            _settings(
+                profiles=self._team(
+                    [
+                        {
+                            "key": "one",
+                            "kind": "analysis",
+                            "agents": ["dynamic"],
+                            "depends_on": ["d"],
+                        },
+                        {
+                            "key": "two",
+                            "kind": "analysis",
+                            "agents": ["network"],
+                            "depends_on": ["d"],
+                        },
+                        {
+                            "key": "v",
+                            "kind": "verdict",
+                            "agents": ["judge"],
+                            "depends_on": ["one", "two"],
+                        },
+                    ]
+                )
+            )
+
+    def test_the_message_says_what_a_parallel_stage_has_to_do_with_it(self) -> None:
+        with pytest.raises(
+            ValidationError,
+            match="not to a parallel analysis stage with more than one agent",
+        ):
+            _settings(
+                profiles=self._team(
+                    [
+                        {
+                            "key": "wide",
+                            "kind": "analysis",
+                            "agents": ["dynamic", "network"],
+                            "mode": "parallel",
+                            "depends_on": ["d"],
+                        },
+                        {
+                            "key": "v",
+                            "kind": "verdict",
+                            "agents": ["judge"],
+                            "depends_on": ["wide"],
+                        },
+                    ]
+                )
+            )
+
+    def test_a_debate_feeding_a_sequential_stage_of_two_agents_is_fine(self) -> None:
+        """A chain starts at one node however many agents it holds."""
+        settings = _settings(
+            profiles=self._team(
+                [
+                    {
+                        "key": "chain",
+                        "kind": "analysis",
+                        "agents": ["dynamic", "network"],
+                        "depends_on": ["d"],
+                    },
+                    {"key": "v", "kind": "verdict", "agents": ["judge"], "depends_on": ["chain"]},
+                ]
+            )
+        )
+        assert settings.agents.profiles["own"].stage("d").kind == "debate"
+
+    def test_a_debate_feeding_one_parallel_agent_is_fine(self) -> None:
+        settings = _settings(
+            profiles=self._team(
+                [
+                    {
+                        "key": "solo",
+                        "kind": "analysis",
+                        "agents": ["dynamic"],
+                        "mode": "parallel",
+                        "depends_on": ["d"],
+                    },
+                    {"key": "v", "kind": "verdict", "agents": ["judge"], "depends_on": ["solo"]},
+                ]
+            )
+        )
+        assert settings.agents.profiles["own"].stage("solo").mode == "parallel"
+
+
+class TestAMigratedTeamAndAFreshOneAgree:
+    """A team the migration wrote stages for keeps following the global keys.
+
+    Without the marker the migration froze whatever those two keys said on the
+    day it ran, and an operator who migrated on a hosted API and later moved
+    back to the single-slot local model kept running analysts in parallel.
+    """
+
+    def _globals(self) -> dict:
+        return {"llm": {"parallel_analysts": True}, "negotiation": {"max_iterations": 9}}
+
+    def test_the_two_produce_the_same_stages(self) -> None:
+        fresh = Settings(
+            _env_file=None,
+            **self._globals(),
+            agents={"profiles": {"lean": {"label": "Lean", "analysts": ["static"]}}},
+        ).agents.profiles["lean"]
+
+        migrated_doc = {
+            "label": "Lean",
+            "analysts": ["static"],
+            "derived_from_analysts": True,
+            "stages": [s.model_dump() for s in stages_from_analysts(["static"])],
+        }
+        migrated = Settings(
+            _env_file=None,
+            **self._globals(),
+            agents={"profiles": {"lean": migrated_doc}},
+        ).agents.profiles["lean"]
+
+        assert migrated.model_dump()["stages"] == fresh.model_dump()["stages"]
+        assert migrated.stage("analysis").mode == "parallel"
+        assert migrated.stage("debate").debate.max_rounds == 9
+
+    def test_a_team_the_operator_has_edited_keeps_its_edit(self) -> None:
+        """The console clears the marker on the first stage edit."""
+        written = [s.model_dump() for s in stages_from_analysts(["static"])]
+        written[0]["mode"] = "sequential"
+        edited = Settings(
+            _env_file=None,
+            **self._globals(),
+            agents={
+                "profiles": {
+                    "lean": {
+                        "label": "Lean",
+                        "analysts": ["static"],
+                        "derived_from_analysts": False,
+                        "stages": written,
+                    }
+                }
+            },
+        ).agents.profiles["lean"]
+        assert edited.stage("analysis").mode == "sequential"
+
+    def test_the_marker_is_not_what_makes_a_built_in_look_edited(self) -> None:
+        """A built-in whose stages the migration wrote out is the same built-in."""
+        seed = Settings(_env_file=None).agents.profiles["default"]
+        stored = seed.model_dump()
+        stored.pop("derived_from_analysts", None)
+        settings = _settings(profiles={"default": stored})
+        assert settings.agents.profiles["default"].analysis_agents == seed.analysis_agents

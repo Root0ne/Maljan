@@ -382,6 +382,7 @@ class JudgeAgent:
         reports: dict[str, str],
         history: list[AgentArgument],
         isr_reports: dict[str, AgentISR] | None = None,
+        consensus_threshold: float | None = None,
     ) -> tuple[AgentArgument, bool]:
         """Find contradictions between expert reports and determine consensus.
 
@@ -528,7 +529,7 @@ class JudgeAgent:
         # negotiation loop can keep running.
         verdict = await self._extract_mediator_verdict(extract_prompt, reasoning_text)
 
-        is_consensus = verdict.confidence >= self._consensus_threshold()
+        is_consensus = verdict.confidence >= self._consensus_threshold(consensus_threshold)
         log_msg = "Consensus reached" if is_consensus else "No consensus yet"
         self.logger.info("%s (confidence=%.2f)", log_msg, verdict.confidence)
 
@@ -931,14 +932,17 @@ class JudgeAgent:
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _consensus_threshold(self) -> float:
+    def _consensus_threshold(self, override: float | None = None) -> float:
         """The confidence at which mediation counts as consensus.
 
         ``NEGOTIATION__CONSENSUS_THRESHOLD`` was documented, validated and
         never read: the check used the module constant, so setting the
-        variable changed nothing. The configured value wins when a config is
-        present; the constant remains the default for standalone use.
+        variable changed nothing. The debate stage's own threshold wins when
+        the caller passes one, then the configured global, and the constant
+        remains the default for standalone use.
         """
+        if override is not None:
+            return float(override)
         negotiation = getattr(self._config, "negotiation", None)
         value = getattr(negotiation, "consensus_threshold", None)
         return float(value) if value is not None else CONSENSUS_THRESHOLD

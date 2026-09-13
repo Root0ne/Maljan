@@ -30,15 +30,23 @@ change landed on `main`.
   of the configuration and never of the sample.
 - **What each stage did, recorded and announced.** `state["stage_results"]`
   carries a per-stage record — whether it ran, why not, the claims and
-  techniques it produced, who was in it and how long it took — merged per stage
-  so a parallel stage's agents add up instead of overwriting one another. It
-  reaches the reader as `run_summary.stages` and the console as
-  `stage_started` / `stage_skipped` / `stage_finished` events, and evidence
-  ledger entries now carry the stage they were made in.
+  techniques it produced, who was in it and how long it took — merged per stage,
+  with a chain's durations adding up and a fan-out's taken as its slowest
+  member. It reaches the reader as `run_summary.stages`, and evidence ledger
+  entries now carry the stage they were made in. Each stage also announces
+  itself live exactly once: `stage_started` from its first node,
+  `stage_skipped` instead when its condition is false, and `stage_finished`
+  from the one node that runs after everything in it is done — its own last
+  node, or the next stage's first node for a fan-out with no barrier and for a
+  debate that loops.
 - **A stage can hand its findings to the next one.** `inject_upstream`
-  (`none`, `findings`, `full`) puts the upstream stages' claims — and
-  optionally their prose — at the head of a stage's prompt, capped by the new
-  `core.reporting.upstream_findings_max_chars`.
+  (`none`, `findings`, `full`) gives a stage the upstream stages' claims — and
+  optionally their prose — capped by the new
+  `core.reporting.upstream_findings_max_chars`. The block goes in as a field of
+  the stage's first chunk when that chunk is a JSON document, so a static or
+  generic agent keeps the `analysis_file_path` contract its tools read, and
+  never in front of it. It also cannot hide a missing input: the no-data guard
+  runs on what the loaders produced.
 - **An agent reads the data it is pointed at.** `agents.definitions.<key>.data_sources`
   names slices from `sample.path`, `sample.chunks`, `sandbox.target`,
   `sandbox.behavior`, `sandbox.network` and `sandbox.full`. Empty keeps the
@@ -170,6 +178,24 @@ change landed on `main`.
 
 ### Changed
 
+- **A debate hands over to exactly one node, and the settings say so.** A team
+  whose debate feeds two stages — or one parallel analysis stage with two
+  agents, which is two nodes — is refused when it is saved, per stage, instead
+  of building cleanly and then failing every job in the graph builder after the
+  sample was uploaded and detonated. The builder still refuses it, as the
+  backstop for a document that reached it out of band.
+- **The debate stage's consensus threshold decides something.** It was
+  validated, migrated, round-tripped and editable, and nothing read it: the
+  mediator used the global `negotiation.consensus_threshold`. A stage that sets
+  one now argues to its own bar, and a stage that sets none still uses the
+  global one it was seeded from.
+- **A migrated team keeps following the global analyst-mode and round-limit
+  keys.** The alembic revision marks the stages it writes as derived, so a
+  database that was migrated and a fresh install produce the same team. Without
+  the mark a team froze whatever those keys said on migration day, and an
+  operator moving from a hosted API back to the single-slot local model would
+  have kept running analysts in parallel. The console clears the mark on the
+  first stage edit.
 - **The settings console edits teams, not profiles.** `StagesEditor` replaces
   `ProfilesEditor`: a card per team, a card per stage, with the key, kind,
   agents, dependencies, condition, run mode, upstream setting, debate options

@@ -497,3 +497,78 @@ def test_a_condition_that_could_run_code_is_refused_before_it_is_ever_stored():
 def test_an_empty_condition_is_accepted_and_means_always():
     out = validate_agent_map(_team(when=""), stored={})
     assert out[AGENT_PROFILES_KEY]["team"]["stages"][0]["when"] == ""
+
+
+def _fanout_team(downstream: list[dict]) -> dict:
+    return {
+        AGENT_PROFILES_KEY: {
+            "team": {
+                "stages": [
+                    {"key": "a", "kind": "analysis", "agents": ["static"]},
+                    {"key": "d", "kind": "debate", "depends_on": ["a"]},
+                    *downstream,
+                ]
+            }
+        }
+    }
+
+
+def test_a_debate_that_hands_over_to_a_parallel_stage_is_refused_before_it_is_stored():
+    """The team built cleanly and then made every job crash in the builder."""
+    with pytest.raises(AgentMapError) as exc:
+        validate_agent_map(
+            _fanout_team(
+                [
+                    {
+                        "key": "wide",
+                        "kind": "analysis",
+                        "agents": ["dynamic", "network"],
+                        "mode": "parallel",
+                        "depends_on": ["d"],
+                    },
+                    {"key": "v", "kind": "verdict", "agents": ["judge"], "depends_on": ["wide"]},
+                ]
+            ),
+            stored={},
+        )
+    message = exc.value.errors[f"{AGENT_PROFILES_KEY}.team.stages.d.depends_on"]
+    assert "hands over to 2 nodes" in message
+    assert "parallel analysis stage with more than one agent" in message
+
+
+def test_a_debate_that_feeds_two_stages_is_reported_under_that_debate():
+    with pytest.raises(AgentMapError) as exc:
+        validate_agent_map(
+            _fanout_team(
+                [
+                    {"key": "one", "kind": "analysis", "agents": ["dynamic"], "depends_on": ["d"]},
+                    {"key": "two", "kind": "analysis", "agents": ["network"], "depends_on": ["d"]},
+                    {
+                        "key": "v",
+                        "kind": "verdict",
+                        "agents": ["judge"],
+                        "depends_on": ["one", "two"],
+                    },
+                ]
+            ),
+            stored={},
+        )
+    assert "one, two" in exc.value.errors[f"{AGENT_PROFILES_KEY}.team.stages.d.depends_on"]
+
+
+def test_a_debate_that_hands_over_to_one_node_is_stored():
+    out = validate_agent_map(
+        _fanout_team(
+            [
+                {
+                    "key": "chain",
+                    "kind": "analysis",
+                    "agents": ["dynamic", "network"],
+                    "depends_on": ["d"],
+                },
+                {"key": "v", "kind": "verdict", "agents": ["judge"], "depends_on": ["chain"]},
+            ]
+        ),
+        stored={},
+    )
+    assert [s["key"] for s in out[AGENT_PROFILES_KEY]["team"]["stages"]] == ["a", "d", "chain", "v"]

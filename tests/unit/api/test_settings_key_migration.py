@@ -411,3 +411,79 @@ def test_a_secret_profiles_row_is_never_rewritten():
             mod.upgrade()
         rows = dict(conn.execute(sa.text("SELECT key, value FROM runtime_settings")).fetchall())
         assert rows[mod.PROFILES_KEY] == '"enc:v1:SECRET"'
+
+
+def test_a_migrated_team_keeps_following_the_two_global_keys():
+    """Finding 7: a migrated database and a fresh install must not diverge.
+
+    Without the marker the migration froze whatever the analyst mode and the
+    round limit said on the day it ran, and an operator who migrated on a
+    hosted API and later moved back to the single-slot local model kept
+    running analysts in parallel — having never chosen to write stages at all.
+    """
+    import json
+
+    import sqlalchemy as sa
+    from alembic.operations import Operations
+    from alembic.runtime.migration import MigrationContext
+
+    from maljan.core.config import Settings
+
+    mod = _load_stages_rev()
+    conn = _judgement_engine(
+        {
+            mod.PROFILES_KEY: json.dumps({"lean": {"label": "Lean", "analysts": ["static"]}}),
+            mod.PARALLEL_KEY: "false",
+            mod.MAX_ROUNDS_KEY: "5",
+        }
+    )
+    with conn:
+        ctx = MigrationContext.configure(conn)
+        with Operations.context(ctx):
+            mod.upgrade()
+        stored = json.loads(
+            dict(conn.execute(sa.text("SELECT key, value FROM runtime_settings")).fetchall())[
+                mod.PROFILES_KEY
+            ]
+        )
+    assert stored["lean"]["derived_from_analysts"] is True
+
+    # The operator later moves to a hosted API and raises the round limit.
+    moved = {"llm": {"parallel_analysts": True}, "negotiation": {"max_iterations": 9}}
+    migrated = Settings(
+        _env_file=None, **moved, agents={"profiles": stored, "profile": "lean"}
+    ).agents.profiles["lean"]
+    fresh = Settings(
+        _env_file=None,
+        **moved,
+        agents={"profiles": {"lean": {"label": "Lean", "analysts": ["static"]}}, "profile": "lean"},
+    ).agents.profiles["lean"]
+
+    assert migrated.model_dump()["stages"] == fresh.model_dump()["stages"]
+    assert migrated.stage("analysis").mode == "parallel"
+    assert migrated.stage("debate").debate.max_rounds == 9
+
+
+def test_the_downgrade_takes_the_marker_out_with_the_stages():
+    import json
+
+    import sqlalchemy as sa
+    from alembic.operations import Operations
+    from alembic.runtime.migration import MigrationContext
+
+    mod = _load_stages_rev()
+    conn = _judgement_engine(
+        {mod.PROFILES_KEY: json.dumps({"lean": {"label": "Lean", "analysts": ["static"]}})}
+    )
+    with conn:
+        ctx = MigrationContext.configure(conn)
+        with Operations.context(ctx):
+            mod.upgrade()
+            mod.downgrade()
+        reverted = json.loads(
+            dict(conn.execute(sa.text("SELECT key, value FROM runtime_settings")).fetchall())[
+                mod.PROFILES_KEY
+            ]
+        )
+    assert "derived_from_analysts" not in reverted["lean"]
+    assert reverted["lean"]["analysts"] == ["static"]

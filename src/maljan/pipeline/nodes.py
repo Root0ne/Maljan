@@ -8,6 +8,7 @@ no per-agent branching exists.
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import time
 from contextlib import suppress
@@ -33,7 +34,7 @@ from maljan.pipeline.events import (
     summarize_claims,
 )
 from maljan.pipeline.evidence_summary import summarise
-from maljan.pipeline.state import AgentArgument, AnalysisState
+from maljan.pipeline.state import AgentArgument, AnalysisState, _merge_stage_results
 from maljan.pipeline.sycophancy_detector import build_revision_directive, detect_sycophancy
 from maljan.pipeline.validation import Violation, corroboration, validation_metrics
 from maljan.reporting.ledger_report import section_is_grounded
@@ -253,7 +254,6 @@ def _augment_static_chunks_with_path(
     The chunk objects are immutable dataclasses; rebuild with the same
     chunker so downstream code (token budget, chunk_text) keeps working.
     """
-    import json
 
     # ``provider_id`` is the agent's own static provider: with two static
     # analysts on two providers each is shown the mirror its own tools point
@@ -461,6 +461,9 @@ def stage_record(
         agents=agents,
     ).to_dict()
     entry["kind"] = str(getattr(stage, "kind", "analysis"))
+    # The reducer adds durations up across a stage's nodes, which is right for
+    # a chain and wrong for a fan-out; it needs the mode to tell them apart.
+    entry["mode"] = str(getattr(stage, "mode", "sequential"))
     entry["duration_ms"] = int(duration_ms)
     return {"stage_results": {str(getattr(stage, "key", "")): entry}}
 
@@ -525,17 +528,38 @@ def upstream_findings(stage: Any, state: AnalysisState, container: ServiceContai
 
 
 def _with_upstream(chunks: list, block: str) -> list:
-    """Put the upstream block at the head of the first chunk.
+    """Put the upstream block into the first chunk, without breaking its shape.
 
-    Prepended into the chunk rather than added as a chunk of its own: a single
-    chunk and a list of chunks take different paths through the analyst below,
-    and a stage's upstream context must not be what decides which one a sample
-    gets.
+    Two constraints meet here. The block has to go into an existing chunk
+    rather than become one of its own, because a single chunk and a list of
+    chunks take different paths through the analyst below and a stage's
+    upstream context must not be what decides which one a sample gets. And the
+    head chunk of a static or generic agent is a JSON document with a contract
+    on it — ``analysis_file_path`` is read back out of it by
+    ``StaticAnalyst._extract_load_hint``, ``_extract_analysis_path`` and
+    ``ConfigurableAnalyst._analysis_path_in``, all of which bail the moment the
+    text does not start with ``{``.
+
+    So a JSON head gains a field and keeps being JSON; anything else takes the
+    prose in front of it. Prepending prose onto the JSON, which is what this
+    did first, silently cost every injecting static stage its
+    ``LOAD THIS BINARY FIRST`` line and sent it back to inventing a path.
     """
     if not block or not chunks:
         return chunks
     head = chunks[0]
-    content = f"{block}\n\n{head.content}"
+    stripped = head.content.strip()
+    content: str | None = None
+    if stripped.startswith("{"):
+        try:
+            parsed = json.loads(stripped)
+        except (json.JSONDecodeError, ValueError):
+            parsed = None
+        if isinstance(parsed, dict):
+            parsed["upstream_findings"] = block
+            content = json.dumps(parsed, indent=2, default=str)
+    if content is None:
+        content = f"{block}\n\n{head.content}"
     return [replace(head, content=content, char_count=len(content)), *chunks[1:]]
 
 
@@ -567,7 +591,61 @@ def stage_rollup(
     return rows
 
 
-def make_join_node(stage: Any) -> Any:
+def announce_started(container: ServiceContainer, stage: Any) -> None:
+    """``stage_started``, from the one node of the stage that announces it."""
+    emit(
+        container.event_sink,
+        "stage_started",
+        {"stage": stage.key, "kind": stage.kind, "agents": list(stage.agents)},
+    )
+
+
+def announce_skipped(container: ServiceContainer, stage: Any, reason: str) -> None:
+    emit(
+        container.event_sink,
+        "stage_skipped",
+        {"stage": stage.key, "kind": stage.kind, "reason": reason},
+    )
+
+
+def announce_finished(
+    container: ServiceContainer,
+    state: AnalysisState,
+    keys: tuple[str, ...],
+    *,
+    extra: dict[str, Any] | None = None,
+) -> None:
+    """``stage_finished`` for every stage in ``keys`` that ran.
+
+    Read from ``stage_results`` rather than from a node's return value, because
+    the node closing a stage is often the first node of the *next* one and all
+    it has is the merged state. A stage that declined to run is not announced
+    again: ``stage_skipped`` was its terminator.
+    """
+    # ``extra`` is the closing node's own contribution, which LangGraph has
+    # not merged into the state yet. Merged here with the channel's own
+    # reducer, so a chain's last analyst announces the whole stage rather than
+    # only itself.
+    recorded = _merge_stage_results(dict(state.get("stage_results") or {}), dict(extra or {}))
+    for key in keys:
+        record = recorded.get(key)
+        if not isinstance(record, dict) or not record.get("ran"):
+            continue
+        emit(
+            container.event_sink,
+            "stage_finished",
+            {
+                "stage": key,
+                "kind": record.get("kind", ""),
+                "ran": True,
+                "reason": record.get("reason", ""),
+                "agents": list(record.get("agents") or []),
+                "duration_ms": int(record.get("duration_ms") or 0),
+            },
+        )
+
+
+def make_join_node(stage: Any, container: ServiceContainer, finishes: tuple[str, ...] = ()) -> Any:
     """The barrier at the end of a parallel analysis stage.
 
     Does nothing but exist. LangGraph waits for every predecessor of a node, so
@@ -576,6 +654,7 @@ def make_join_node(stage: Any) -> Any:
     """
 
     async def node_fn(state: AnalysisState) -> dict[str, Any]:
+        announce_finished(container, state, finishes)
         return {}
 
     node_fn.__name__ = f"{stage.key}_join_node"
@@ -587,6 +666,9 @@ def make_stage_agent_node(
     stage: Any,
     agent_name: str,
     container: ServiceContainer,
+    *,
+    announces: bool = True,
+    finishes: tuple[str, ...] = (),
 ) -> Any:
     """Factory: the node one agent of one analysis stage runs as.
 
@@ -599,42 +681,49 @@ def make_stage_agent_node(
 
     def node_fn(state: AnalysisState) -> dict[str, Any]:
         started = time.monotonic()
+        # Whatever finished upstream of this node, announced before this stage
+        # begins: for a fan-out with no barrier, the first node of the next
+        # stage is the only place the merged result is visible.
+        announce_finished(container, state, tuple(k for k in finishes if k != stage.key))
+
         runs, skip_reason = stage_runs(stage, state)
         if not runs:
             logger.info("stage %s skipped for %s: %s", stage.key, agent_name, skip_reason)
-            emit(
-                container.event_sink,
-                "stage_skipped",
-                {"stage": stage.key, "kind": stage.kind, "reason": skip_reason},
-            )
+            if announces:
+                announce_skipped(container, stage, skip_reason)
             return stage_record(stage, ran=False, reason=skip_reason)
 
-        emit(
-            container.event_sink,
-            "stage_started",
-            {"stage": stage.key, "kind": stage.kind, "agent": agent_name},
-        )
+        if announces:
+            announce_started(container, stage)
+        # Analysts run sequentially on the single-slot local model, so a
+        # per-agent "working now" event is the only way the UI can say which
+        # one is actually working — the worker's up-front announcement marks
+        # them all busy at once and is a poor proxy, and the stage event above
+        # is one per stage rather than one per agent.
+        emit(container.event_sink, "agent_progress", {"agent": agent_name, "phase": "analyzing"})
 
         def _elapsed_ms() -> int:
             return int((time.monotonic() - started) * 1000)
 
-        if container.is_mock:
-            return {
-                "reports": {agent_name: f"MOCK: {agent_name} analysis complete."},
-                "isr_reports": {agent_name: _empty_isr(agent_name)},
-                **stage_record(
-                    stage,
-                    ran=True,
-                    agents=(agent_name,),
-                    duration_ms=_elapsed_ms(),
-                ),
-            }
+        def _closing(update: dict[str, Any]) -> dict[str, Any]:
+            """Announce this stage's end, when this node is the one that does."""
+            if stage.key in finishes:
+                announce_finished(container, state, (stage.key,), extra=update.get("stage_results"))
+            return update
 
-        # Analysts run sequentially on the single-slot local model, so a
-        # per-agent "started" event is the only way the UI can say which one is
-        # actually working — the worker's up-front announcement marks them all
-        # busy at once and is a poor proxy.
-        emit(container.event_sink, "agent_progress", {"agent": agent_name, "phase": "analyzing"})
+        if container.is_mock:
+            return _closing(
+                {
+                    "reports": {agent_name: f"MOCK: {agent_name} analysis complete."},
+                    "isr_reports": {agent_name: _empty_isr(agent_name)},
+                    **stage_record(
+                        stage,
+                        ran=True,
+                        agents=(agent_name,),
+                        duration_ms=_elapsed_ms(),
+                    ),
+                }
+            )
 
         bound_agent: Any = None
 
@@ -698,8 +787,11 @@ def make_stage_agent_node(
                     provider_id=agent._resolved.static_provider_id,
                 )
 
-            chunks = _with_upstream(chunks, upstream_findings(stage, state, container))
-
+            # The no-data guard runs on what the *loaders* produced. Injecting
+            # first would hide a placeholder behind the upstream block, and an
+            # analyst with nothing to read would spend a whole ReAct loop
+            # analysing "No network data available for sample <sha>" and report
+            # it back as its one evidence-backed claim.
             if not chunks or _is_placeholder_only(chunks, role):
                 # A Linux ELF audit found that an ELF sample with no PCAP / sandbox network
                 # trace caused the network analyst to fail-hard with an
@@ -726,17 +818,21 @@ def make_stage_agent_node(
                     text=no_data_text,
                     status="no_data",
                 )
-                return {
-                    "reports": {agent_name: no_data_text},
-                    "isr_reports": {agent_name: _empty_isr(agent_name)},
-                    **stage_record(
-                        stage,
-                        ran=True,
-                        reason="no data for this agent",
-                        agents=(agent_name,),
-                        duration_ms=_elapsed_ms(),
-                    ),
-                }
+                return _closing(
+                    {
+                        "reports": {agent_name: no_data_text},
+                        "isr_reports": {agent_name: _empty_isr(agent_name)},
+                        **stage_record(
+                            stage,
+                            ran=True,
+                            reason="no data for this agent",
+                            agents=(agent_name,),
+                            duration_ms=_elapsed_ms(),
+                        ),
+                    }
+                )
+
+            chunks = _with_upstream(chunks, upstream_findings(stage, state, container))
 
             if len(chunks) == 1:
                 # View-decomposition pilot (findings-log §3.6): when enabled,
@@ -844,7 +940,7 @@ def make_stage_agent_node(
             if staged:
                 node_out["remote_sample_paths"] = staged
             node_out.update(_evidence_update())
-            return node_out
+            return _closing(node_out)
         except (AnalystError, LLMError) as e:
             # Structured error event so Loki/Promtail
             # can aggregate ``event_type=analyst_error`` instead of regex-
@@ -869,18 +965,20 @@ def make_stage_agent_node(
                 text=failed_text,
                 status="failed",
             )
-            return {
-                "reports": {agent_name: failed_text},
-                "isr_reports": {agent_name: _empty_isr(agent_name)},
-                **_evidence_update(),
-                **stage_record(
-                    stage,
-                    ran=True,
-                    reason=f"{agent_name} failed",
-                    agents=(agent_name,),
-                    duration_ms=_elapsed_ms(),
-                ),
-            }
+            return _closing(
+                {
+                    "reports": {agent_name: failed_text},
+                    "isr_reports": {agent_name: _empty_isr(agent_name)},
+                    **_evidence_update(),
+                    **stage_record(
+                        stage,
+                        ran=True,
+                        reason=f"{agent_name} failed",
+                        agents=(agent_name,),
+                        duration_ms=_elapsed_ms(),
+                    ),
+                }
+            )
         except (ValueError, RuntimeError) as e:
             logger.exception(
                 "%s analysis crashed with %s.",
@@ -902,18 +1000,20 @@ def make_stage_agent_node(
                 text=crashed_text,
                 status="failed",
             )
-            return {
-                "reports": {agent_name: crashed_text},
-                "isr_reports": {agent_name: _empty_isr(agent_name)},
-                **_evidence_update(),
-                **stage_record(
-                    stage,
-                    ran=True,
-                    reason=f"{agent_name} crashed",
-                    agents=(agent_name,),
-                    duration_ms=_elapsed_ms(),
-                ),
-            }
+            return _closing(
+                {
+                    "reports": {agent_name: crashed_text},
+                    "isr_reports": {agent_name: _empty_isr(agent_name)},
+                    **_evidence_update(),
+                    **stage_record(
+                        stage,
+                        ran=True,
+                        reason=f"{agent_name} crashed",
+                        agents=(agent_name,),
+                        duration_ms=_elapsed_ms(),
+                    ),
+                }
+            )
 
     node_fn.__name__ = f"{agent_name}_analyst_node"
     node_fn.__doc__ = f"Analysis node for '{agent_name}' in stage '{stage.key}'."
@@ -1039,6 +1139,12 @@ def _build_revision_context(
 # ---------------------------------------------------------------------------
 
 
+def _debate_threshold(stage: Any) -> float | None:
+    """A debate stage's consensus threshold, or ``None`` for the global one."""
+    options = getattr(stage, "debate", None)
+    return None if options is None else float(options.consensus_threshold)
+
+
 def _debate_record(stage: Any, started: float, *, reason: str = "") -> dict[str, Any]:
     """One round's contribution to the debate stage's result.
 
@@ -1053,6 +1159,31 @@ def _debate_record(stage: Any, started: float, *, reason: str = "") -> dict[str,
         reason=reason,
         duration_ms=int((time.monotonic() - started) * 1000),
     )
+
+
+def _agents_that_ran(container: ServiceContainer, state: AnalysisState) -> list[str]:
+    """Every analysis-stage agent of the active profile whose stage ran.
+
+    ``container.analyst_keys()`` is the whole roster, skipped stages included,
+    which is the right answer for the worker's up-front announcement and the
+    wrong one for anything that reads a run's output: an agent of a stage the
+    condition turned off produced nothing, and handing the judge an empty
+    report for it makes a skipped stage look like a failed analyst.
+    """
+    results = state.get("stage_results") or {}
+    try:
+        stages = container.active_profile().stages
+    except Exception:  # noqa: BLE001 — a double without a profile keeps the roster
+        return container.analyst_keys()
+    names: list[str] = []
+    for stage in stages:
+        if stage.kind != "analysis":
+            continue
+        record = results.get(stage.key)
+        if isinstance(record, dict) and not record.get("ran", True):
+            continue
+        names.extend(stage.agents)
+    return names
 
 
 def _debate_participants(
@@ -1090,14 +1221,27 @@ def _debate_participants(
         if isinstance(record, dict) and not record.get("ran", True):
             continue
         names.extend(candidate.agents)
-    return names or container.analyst_keys()
+    # No fallback to the whole roster. A debate whose only upstream analysis
+    # stage was skipped has nothing to argue over, and arguing over agents that
+    # never ran would put empty reports in front of the mediator and spend the
+    # round limit disagreeing about nothing.
+    return names
 
 
-def make_negotiation_node(container: ServiceContainer, *, stage: Any = None) -> Any:
+def make_negotiation_node(
+    container: ServiceContainer,
+    *,
+    stage: Any = None,
+    announces: bool = True,
+    finishes: tuple[str, ...] = (),
+) -> Any:
     """Factory: creates the mediator negotiation node of one debate stage."""
 
     async def node_fn(state: AnalysisState) -> dict[str, Any]:
         started = time.monotonic()
+        first_round = not (state.get("discussion_history") or [])
+        if first_round:
+            announce_finished(container, state, finishes)
         if stage is not None:
             runs, skip_reason = stage_runs(stage, state)
             if not runs:
@@ -1105,20 +1249,27 @@ def make_negotiation_node(container: ServiceContainer, *, stage: Any = None) -> 
                 # standing and hands them straight on: ``is_consensus`` is set
                 # so the router's own branch takes the way out rather than
                 # looping a stage the operator asked to skip.
-                emit(
-                    container.event_sink,
-                    "stage_skipped",
-                    {"stage": stage.key, "kind": stage.kind, "reason": skip_reason},
-                )
+                if announces:
+                    announce_skipped(container, stage, skip_reason)
                 return {
                     "is_consensus": True,
                     **stage_record(stage, ran=False, reason=skip_reason),
                 }
-            emit(
-                container.event_sink,
-                "stage_started",
-                {"stage": stage.key, "kind": stage.kind},
-            )
+            if not _debate_participants(container, stage, state):
+                # Nothing upstream of it ran, so there is nothing to argue
+                # over. Announced as a skip before the start, because a debate
+                # that announces itself and then declines reads as one that
+                # failed. ``is_consensus`` sends the router straight on.
+                reason = "no analysis stage upstream of it ran"
+                logger.info("stage %s skipped: %s", stage.key, reason)
+                if announces:
+                    announce_skipped(container, stage, reason)
+                return {
+                    "is_consensus": True,
+                    **stage_record(stage, ran=False, reason=reason),
+                }
+            if announces and first_round:
+                announce_started(container, stage)
         iteration = state.get("iteration_count", 0)
         agent_names = _debate_participants(container, stage, state)
 
@@ -1192,6 +1343,10 @@ def make_negotiation_node(container: ServiceContainer, *, stage: Any = None) -> 
                     reports=active_reports,
                     history=state.get("discussion_history") or [],
                     isr_reports=state.get("isr_reports") or {},
+                    # The stage's own bar for calling it agreement. ``None``
+                    # leaves the mediator on the global setting, which is what
+                    # the stage's options were seeded from.
+                    consensus_threshold=_debate_threshold(stage),
                 ),
                 hard_timeout=mediation_timeout,
                 label="mediation",
@@ -1474,24 +1629,45 @@ def _verdict_record(stage: Any, started: float, *, ran: bool, reason: str = "") 
     )
 
 
-def make_judge_node(container: ServiceContainer, *, stage: Any = None) -> Any:
+def make_judge_node(
+    container: ServiceContainer,
+    *,
+    stage: Any = None,
+    announces: bool = True,
+    finishes: tuple[str, ...] = (),
+) -> Any:
     """Factory: creates the final judge verdict node of the verdict stage."""
 
     async def node_fn(state: AnalysisState) -> dict[str, Any]:
         started = time.monotonic()
         verdict_stage = stage
+        announce_finished(
+            container, state, tuple(k for k in finishes if stage is None or k != stage.key)
+        )
+        if announces and verdict_stage is not None:
+            announce_started(container, verdict_stage)
+
+        def _closing(update: dict[str, Any]) -> dict[str, Any]:
+            if verdict_stage is not None and verdict_stage.key in finishes:
+                announce_finished(
+                    container, state, (verdict_stage.key,), extra=update.get("stage_results")
+                )
+            return update
+
         if container.is_mock:
-            return {
-                "final_decision": "Malware",
-                "judge_report": "MOCK: Evaluated all indicators.",
-                "stix_output": {},
-                "run_summary": None,
-                **(
-                    stage_record(verdict_stage, ran=True, agents=tuple(verdict_stage.agents))
-                    if verdict_stage is not None
-                    else {}
-                ),
-            }
+            return _closing(
+                {
+                    "final_decision": "Malware",
+                    "judge_report": "MOCK: Evaluated all indicators.",
+                    "stix_output": {},
+                    "run_summary": None,
+                    **(
+                        stage_record(verdict_stage, ran=True, agents=tuple(verdict_stage.agents))
+                        if verdict_stage is not None
+                        else {}
+                    ),
+                }
+            )
 
         def _judge_evidence() -> list[dict[str, Any]]:
             """Whatever the judges still hold, drained once, whichever way this ends.
@@ -1514,10 +1690,8 @@ def make_judge_node(container: ServiceContainer, *, stage: Any = None) -> Any:
 
             revised = state.get("revised_reports") or {}
             original = state.get("reports") or {}
-            reports = {
-                name: revised.get(name) or original.get(name, "")
-                for name in container.analyst_keys()
-            }
+            _ran = _agents_that_ran(container, state)
+            reports = {name: revised.get(name) or original.get(name, "") for name in _ran}
 
             isr_reports: dict[str, AgentISR] = dict(state.get("isr_reports") or {})
 
@@ -1584,7 +1758,7 @@ def make_judge_node(container: ServiceContainer, *, stage: Any = None) -> Any:
             # presented at full confidence. (A benign sample still yields at
             # least one observational claim, so a truly empty ISR is a
             # failure signal, not a clean result.)
-            _analyst_keys = container.analyst_keys()
+            _analyst_keys = _ran
             _empty_analysts = [
                 name
                 for name in _analyst_keys
@@ -2001,34 +2175,36 @@ def make_judge_node(container: ServiceContainer, *, stage: Any = None) -> Any:
                 status="complete",
             )
 
-            return {
-                **_verdict_record(verdict_stage, started, ran=True),
-                "final_decision": decision,
-                "judge_report": "Analyzed negotiation history and expert reports.",
-                "stix_output": stix_output,
-                "run_summary": run_summary_dict,
-                # The judge's own tool calls — threat intel on a disputed
-                # indicator, a knowledge lookup — on the same append-only
-                # channel the analysts use, so a verdict that leans on one can
-                # cite it and the citation resolves.
-                "evidence_ledger": _judge_evidence(),
-                "isr_reports": isr_reports,
-                # Surface the degraded-mode signal to the report
-                # node and downstream consumers (API/dashboard).
-                "degraded_mode": _degraded_mode,
-                "degradation_reasons": _degradation_reasons,
-                # Exact opcode-hash family overlap, surfaced into the report's
-                # FamilyAttribution.function_hash_matches by the report node.
-                "function_hash_matches": _func_hash_report,
-                # Family-feature RAG candidates (retrieved by static-feature
-                # similarity), surfaced into FamilyAttribution.family_rag_candidates
-                # by the report node. Empty unless the RAG is enabled with a catalog.
-                "family_rag_candidates": _family_rag_report,
-                # ATT&CK case-prior RAG candidates (recurring TTPs from similar prior
-                # cases), surfaced into FamilyAttribution.attck_case_candidates by the
-                # report node. Empty unless the RAG is enabled with a case corpus.
-                "attck_case_candidates": _attck_case_report,
-            }
+            return _closing(
+                {
+                    **_verdict_record(verdict_stage, started, ran=True),
+                    "final_decision": decision,
+                    "judge_report": "Analyzed negotiation history and expert reports.",
+                    "stix_output": stix_output,
+                    "run_summary": run_summary_dict,
+                    # The judge's own tool calls — threat intel on a disputed
+                    # indicator, a knowledge lookup — on the same append-only
+                    # channel the analysts use, so a verdict that leans on one can
+                    # cite it and the citation resolves.
+                    "evidence_ledger": _judge_evidence(),
+                    "isr_reports": isr_reports,
+                    # Surface the degraded-mode signal to the report
+                    # node and downstream consumers (API/dashboard).
+                    "degraded_mode": _degraded_mode,
+                    "degradation_reasons": _degradation_reasons,
+                    # Exact opcode-hash family overlap, surfaced into the report's
+                    # FamilyAttribution.function_hash_matches by the report node.
+                    "function_hash_matches": _func_hash_report,
+                    # Family-feature RAG candidates (retrieved by static-feature
+                    # similarity), surfaced into FamilyAttribution.family_rag_candidates
+                    # by the report node. Empty unless the RAG is enabled with a catalog.
+                    "family_rag_candidates": _family_rag_report,
+                    # ATT&CK case-prior RAG candidates (recurring TTPs from similar prior
+                    # cases), surfaced into FamilyAttribution.attck_case_candidates by the
+                    # report node. Empty unless the RAG is enabled with a case corpus.
+                    "attck_case_candidates": _attck_case_report,
+                }
+            )
         except Exception as e:  # noqa: BLE001 — per-run fault-isolation boundary
             # give_verdict() drives the LLM; on a constrained / local host it can
             # fail with a bare asyncio TimeoutError or a transient openai
@@ -2053,17 +2229,22 @@ def make_judge_node(container: ServiceContainer, *, stage: Any = None) -> Any:
             # DEGRADED banner. Without these keys the report
             # node saw ``degraded_mode`` unset and could ship an uncapped
             # confidence for a verdict the judge never actually produced.
-            return {
-                **_verdict_record(
-                    verdict_stage, started, ran=True, reason=f"judge failed ({type(e).__name__})"
-                ),
-                "final_decision": "Suspicious",
-                "judge_report": f"[ERROR] Judge failed ({type(e).__name__}): {e or ''}",
-                "stix_output": {},
-                "degraded_mode": True,
-                "degradation_reasons": [f"judge failed ({type(e).__name__})"],
-                "evidence_ledger": _judge_evidence(),
-            }
+            return _closing(
+                {
+                    **_verdict_record(
+                        verdict_stage,
+                        started,
+                        ran=True,
+                        reason=f"judge failed ({type(e).__name__})",
+                    ),
+                    "final_decision": "Suspicious",
+                    "judge_report": f"[ERROR] Judge failed ({type(e).__name__}): {e or ''}",
+                    "stix_output": {},
+                    "degraded_mode": True,
+                    "degradation_reasons": [f"judge failed ({type(e).__name__})"],
+                    "evidence_ledger": _judge_evidence(),
+                }
+            )
 
     node_fn.__name__ = "judge_node"
     return node_fn
@@ -2074,7 +2255,13 @@ def make_judge_node(container: ServiceContainer, *, stage: Any = None) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def make_report_node(container: ServiceContainer, *, stage: Any = None) -> Any:
+def make_report_node(
+    container: ServiceContainer,
+    *,
+    stage: Any = None,
+    announces: bool = True,
+    finishes: tuple[str, ...] = (),
+) -> Any:
     """Factory: builds the final ``MalwareReport`` and renders markdown + STIX.
 
     Runs after the judge node. The narrative LLM round and the auto-generated
@@ -2096,20 +2283,17 @@ def make_report_node(container: ServiceContainer, *, stage: Any = None) -> Any:
             return {}
 
         started = time.monotonic()
+        announce_finished(
+            container, state, tuple(k for k in finishes if stage is None or k != stage.key)
+        )
         if stage is not None:
             runs, skip_reason = stage_runs(stage, state)
             if not runs:
-                emit(
-                    container.event_sink,
-                    "stage_skipped",
-                    {"stage": stage.key, "kind": stage.kind, "reason": skip_reason},
-                )
+                if announces:
+                    announce_skipped(container, stage, skip_reason)
                 return _verdict_record(stage, started, ran=False, reason=skip_reason)
-            emit(
-                container.event_sink,
-                "stage_started",
-                {"stage": stage.key, "kind": stage.kind},
-            )
+            if announces:
+                announce_started(container, stage)
 
         from maljan.reporting.builder import MalwareReportBuilder
         from maljan.reporting.renderers import ExtendedSTIXRenderer, MarkdownRenderer
@@ -2530,19 +2714,10 @@ def make_report_node(container: ServiceContainer, *, stage: Any = None) -> Any:
             result["run_summary"] = {**(state.get("run_summary") or {}), **_state_summary}
         if own:
             result["stage_results"] = own
-        for row in stage_rollup(container, state, own):
-            emit(
-                container.event_sink,
-                "stage_finished",
-                {
-                    "stage": row["key"],
-                    "kind": row["kind"],
-                    "ran": row["ran"],
-                    "reason": row["reason"],
-                    "agents": row["agents"],
-                    "duration_ms": row["duration_ms"],
-                },
-            )
+        # Every stage announces its own end from the node that closes it, so
+        # there is nothing to replay here; this one is the report's own.
+        if stage is not None and stage.key in finishes:
+            announce_finished(container, state, (stage.key,), extra=own)
         return result
 
     node_fn.__name__ = "report_node"

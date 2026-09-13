@@ -200,9 +200,22 @@ pins it in both analyst modes.
 stage's nodes at run time, so a stage that declines to run is still a node and
 still writes a `StageResult` saying it did not run and why. A topology that
 depended on the sample could not be drawn, compared or reasoned about before
-the sample arrived. What each stage did lands in `state["stage_results"]`,
-reaches the reader as `run_summary.stages`, and is announced live as
-`stage_started` / `stage_skipped` / `stage_finished` events.
+the sample arrived. What each stage did lands in `state["stage_results"]` and
+reaches the reader as `run_summary.stages`.
+
+Each stage also announces itself live, once: `stage_started` from its first
+node, `stage_skipped` from that node instead when the condition is false, and
+`stage_finished` from the one node that runs after everything in it is done.
+That last node is usually the stage's own — a sequential chain's tail, a
+barrier, the judge, the report — and for the two shapes with no single terminal
+node of their own, a fan-out without a barrier and a debate that loops, it is
+the single node of the next stage. Nothing replays the events at the end, so a
+run with reporting disabled still terminates every stage it ran.
+
+An agent whose stage was skipped reaches neither the debate nor the judge: both
+read the roster from `stage_results` rather than from the profile, so a stage
+the condition turned off does not arrive as three empty reports. A debate whose
+upstream analysis stages all skipped skips itself and says so.
 
 A custom agent runs as a `ConfigurableAnalyst` with the tools its definition
 names. A team may not put one agent in two analysis stages — the node name is

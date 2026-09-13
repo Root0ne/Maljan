@@ -71,8 +71,15 @@ def _merge_stage_results(
             + int(entry.get("claim_count") or 0),
             "finding_count": int(existing.get("finding_count") or 0)
             + int(entry.get("finding_count") or 0),
-            "duration_ms": int(existing.get("duration_ms") or 0)
-            + int(entry.get("duration_ms") or 0),
+            # A chain's nodes each took their turn, so their times add up; a
+            # fan-out's ran at once, so the stage took as long as its slowest
+            # member. Summing a parallel stage reported three times the wall
+            # clock the operator watched.
+            "duration_ms": (
+                max(int(existing.get("duration_ms") or 0), int(entry.get("duration_ms") or 0))
+                if str(entry.get("mode") or existing.get("mode") or "") == "parallel"
+                else int(existing.get("duration_ms") or 0) + int(entry.get("duration_ms") or 0)
+            ),
             "agents": agents,
             "technique_ids": techniques,
         }

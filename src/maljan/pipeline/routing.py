@@ -111,6 +111,20 @@ class ConsensusRouter:
         return int(self._config.negotiation.max_iterations)
 
     @property
+    def _consensus_threshold(self) -> float:
+        """The bar this debate calls agreement at.
+
+        Read by nothing in ``should_continue`` — the mediator applies it when
+        it sets ``is_consensus`` — and exposed here so a caller that wants the
+        stage's effective value has one place to ask, rather than reaching into
+        ``stage.debate`` and re-deciding the fallback.
+        """
+        options = getattr(self._stage, "debate", None)
+        if options is not None:
+            return float(options.consensus_threshold)
+        return float(self._config.negotiation.consensus_threshold)
+
+    @property
     def _sycophancy_check(self) -> bool:
         options = getattr(self._stage, "debate", None)
         if options is not None:

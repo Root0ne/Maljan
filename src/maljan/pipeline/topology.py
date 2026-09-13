@@ -28,7 +28,7 @@ nodes import the builder that imports them.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover — types only
@@ -66,12 +66,20 @@ class StageNodes:
     the next stage. A debate stage's outgoing edge is conditional and the
     builder wires it itself, which is why ``exit`` is empty there — an empty
     exit means "this stage arranges its own way out".
+
+    ``starter`` is the one node that announces the stage began, so a stage of
+    three analysts announces itself once rather than three times.
+    ``finisher`` is the one node that announces it ended, filled in by ``plan``
+    once every stage's entry points are known — see ``_finisher`` for why it is
+    sometimes a node belonging to the *next* stage.
     """
 
     stage: StageDefinition
     nodes: tuple[str, ...]
     entry: tuple[str, ...]
     exit: tuple[str, ...]
+    starter: str = ""
+    finisher: tuple[str, ...] = ()
 
 
 def dependents(profile: ProfileDefinition, key: str) -> list[StageDefinition]:
@@ -99,7 +107,43 @@ def plan(profile: ProfileDefinition, *, reporting_enabled: bool = True) -> list[
 
     for stage in live:
         out.append(_stage_nodes(profile, stage, entries, live_keys))
-    return out
+
+    by_key = {planned.stage.key: planned for planned in out}
+    return [
+        replace(planned, starter=planned.entry[0], finisher=_finisher(profile, planned, by_key))
+        for planned in out
+    ]
+
+
+def _finisher(
+    profile: ProfileDefinition, planned: StageNodes, by_key: dict[str, StageNodes]
+) -> tuple[str, ...]:
+    """The node(s) that announce ``planned`` finished, and when.
+
+    A stage with a single terminal node of its own — a sequential chain, a
+    barrier, the judge, the report — announces its own end from it. Two shapes
+    have no such node: a parallel analysis stage without a barrier, whose
+    agents all end at once, and a debate, which loops and leaves through a
+    conditional edge. Both of them already have exactly one node downstream
+    that runs after they are done and sees their merged state, and that node is
+    what announces them. It is the barrier they did not need.
+
+    The remaining case is a stage nothing depends on and that has no single
+    exit: each of its own nodes announces it, because there is nothing after it
+    that could.
+    """
+    if len(planned.exit) == 1:
+        return (planned.exit[0],)
+    downstream: list[str] = []
+    for dependent in profile.stages:
+        if planned.stage.key not in dependent.depends_on:
+            continue
+        following = by_key.get(dependent.key)
+        if following is not None:
+            downstream.extend(following.entry)
+    if len(downstream) == 1:
+        return (downstream[0],)
+    return tuple(planned.exit) or tuple(planned.nodes)
 
 
 def _entry_nodes(profile: ProfileDefinition, stage: StageDefinition) -> tuple[str, ...]:

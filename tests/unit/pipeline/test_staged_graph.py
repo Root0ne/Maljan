@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.core.config import Settings
+from maljan.core.config import Settings, StageDefinition
 from maljan.core.container import ServiceContainer
 from maljan.pipeline.builder import build_graph
 from maljan.pipeline.nodes import make_stage_agent_node, stage_context, stage_rollup
@@ -48,6 +48,7 @@ def _container(stages: list[dict], **definitions: dict) -> ServiceContainer:
 
 
 ANALYST = {"role": "generic", "prompt": "look"}
+_STAGE_MODEL = StageDefinition
 
 
 class TestATeamBuildsTheTopologyItDescribes:
@@ -230,6 +231,7 @@ class TestAStageThatDeclinesToRunSaysSo:
                     "finding_count": 0,
                     "agents": [],
                     "kind": "analysis",
+                    "mode": "sequential",
                     "duration_ms": 0,
                 }
             }
@@ -368,9 +370,10 @@ class TestTheConsoleEvents:
 
     def test_a_stage_that_runs_announces_itself(self) -> None:
         events = self._events("", {"file_hash": "abc", "file_name": "x.exe"})
-        assert ("stage_started", {"stage": "triage", "kind": "analysis", "agent": "static"}) in (
-            events
-        )
+        assert (
+            "stage_started",
+            {"stage": "triage", "kind": "analysis", "agents": ["static"]},
+        ) in events
         assert not [e for e in events if e[0] == "stage_skipped"]
 
     def test_a_stage_that_declines_announces_the_reason(self) -> None:
@@ -380,3 +383,48 @@ class TestTheConsoleEvents:
         assert payload["stage"] == "triage"
         assert payload["reason"] == 'condition not met: platform == "linux"'
         assert not [e for e in events if e[0] == "stage_started"]
+
+
+class TestTheBuilderIsStillTheBackstop:
+    """The settings model refuses a fan-out debate; the builder refuses it too.
+
+    A stored document can reach the builder without passing through the model
+    that would have caught it — an import from an older export, a row written
+    by hand — and a graph that silently routes a debate to one of two stages is
+    worse than one that will not build.
+    """
+
+    def test_a_debate_feeding_two_nodes_will_not_build(self) -> None:
+        import pytest
+
+        from maljan.core.config import ProfileDefinition
+
+        stages = [
+            {"key": "a", "kind": "analysis", "agents": ["static"]},
+            {"key": "d", "kind": "debate", "depends_on": ["a"]},
+            {
+                "key": "wide",
+                "kind": "analysis",
+                "agents": ["dynamic", "network"],
+                "mode": "parallel",
+                "depends_on": ["d"],
+            },
+            {"key": "v", "kind": "verdict", "agents": ["judge"], "depends_on": ["wide"]},
+        ]
+        container = _container(
+            [
+                {"key": "a", "kind": "analysis", "agents": ["static"]},
+                {"key": "d", "kind": "debate", "depends_on": ["a"]},
+                {"key": "v", "kind": "verdict", "agents": ["judge"], "depends_on": ["d"]},
+            ]
+        )
+        # Past the model's own refusal, which is what an out-of-band document
+        # does: build the profile without validation and hand it to the builder.
+        unchecked = ProfileDefinition.model_construct(
+            label="Team",
+            stages=[_STAGE_MODEL.model_validate(s) for s in stages],
+            analysts=[],
+        )
+        container.active_profile = lambda: unchecked  # type: ignore[method-assign]
+        with pytest.raises(RuntimeError, match="a debate hands over to exactly one stage"):
+            build_graph(container)

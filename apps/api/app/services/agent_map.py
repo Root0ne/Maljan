@@ -224,6 +224,47 @@ def validate_stage_conditions(profile: str, entry: Any) -> dict[str, str]:
     return errors
 
 
+def validate_stage_handovers(profile: str, entry: Any) -> dict[str, str]:
+    """Every debate in ``entry`` that has no single stage to hand over to.
+
+    Run against the raw body, before ``ProfileDefinition`` sees it, for the
+    reason the condition pre-pass is: the model refuses the same team, but it
+    refuses it with one message about the whole profile, and the editor routes
+    a message to a stage card by ``<profile>.stages.<key>.<field>``.
+    """
+    errors: dict[str, str] = {}
+    stages = entry.get("stages") if isinstance(entry, dict) else None
+    if not isinstance(stages, list):
+        return errors
+    typed = [s for s in stages if isinstance(s, dict)]
+
+    def heads(stage: dict) -> int:
+        if stage.get("kind") == "analysis" and stage.get("mode") == "parallel":
+            return len(stage.get("agents") or [])
+        return 1
+
+    for index, stage in enumerate(typed):
+        if stage.get("kind") != "debate":
+            continue
+        key = str(stage.get("key") or index)
+        fed = [s for s in typed if key in (s.get("depends_on") or [])]
+        total = sum(heads(s) for s in fed)
+        if total <= 1:
+            continue
+        names = ", ".join(str(s.get("key") or "?") for s in fed)
+        errors[f"{profile}.stages.{key}.depends_on"] = (
+            f"this debate hands over to {total} nodes ({names}); a debate hands over to "
+            "exactly one stage, and not to a parallel analysis stage with more than one agent"
+        )
+        logger.info(
+            "profile %s stage %s: rejected debate handover to %s",
+            log_safe(profile),
+            log_safe(key),
+            log_safe(names),
+        )
+    return errors
+
+
 def validate_profiles(
     value: Any, *, definitions: dict[str, Any], active: str = "default"
 ) -> dict[str, Any]:
@@ -256,9 +297,12 @@ def validate_profiles(
         if not isinstance(entry, dict):
             errors[name] = "a profile entry must be an object"
             continue
-        condition_errors = validate_stage_conditions(name, entry)
-        if condition_errors:
-            errors.update(condition_errors)
+        shape_errors = {
+            **validate_stage_conditions(name, entry),
+            **validate_stage_handovers(name, entry),
+        }
+        if shape_errors:
+            errors.update(shape_errors)
             continue
         try:
             model = ProfileDefinition.model_validate(entry)
@@ -276,7 +320,7 @@ def validate_profiles(
             # it is the architecture, and the settings model refuses the rest.
             comparable = {**dumped, "stages": _stage_identity(dumped.get("stages"))}
             expected = {**seed, "stages": _stage_identity(seed.get("stages"))}
-            for field in ("exclude_servers", "analysts"):
+            for field in ("exclude_servers", "analysts", "derived_from_analysts"):
                 comparable.pop(field, None)
                 expected.pop(field, None)
             if comparable != expected:

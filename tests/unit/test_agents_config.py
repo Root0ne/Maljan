@@ -87,6 +87,9 @@ DEFAULT_AGENTS = {
             "label": "Default",
             "stages": _paper_stages(),
             "analysts": ["static", "dynamic", "network"],
+            # Written as an analyst list, so the model keeps the stages in step
+            # with ``llm.parallel_analysts`` and the negotiation settings.
+            "derived_from_analysts": True,
             "exclude_servers": [],
             "exclude_sandbox_tools": False,
             "static_provider": None,
@@ -97,6 +100,7 @@ DEFAULT_AGENTS = {
             "label": "Measurement baseline",
             "stages": _paper_stages(),
             "analysts": ["static", "dynamic", "network"],
+            "derived_from_analysts": True,
             "exclude_servers": ["*"],
             "exclude_sandbox_tools": True,
             "static_provider": "none",

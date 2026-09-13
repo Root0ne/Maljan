@@ -10,6 +10,7 @@ which is why the goldens did not move.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -378,3 +379,161 @@ class TestASandboxReferenceIsNotOnlyForTheDynamicRole:
         container = ServiceContainer(settings, mock=True)
         container.sandbox_report = REPORT
         assert _sandbox_tools(container, settings.agents.definitions["watcher"]) == []
+
+
+class TestInjectionKeepsTheHeadChunkAContract:
+    """The block goes *into* the JSON, never in front of it.
+
+    A static or generic agent's head chunk is a JSON document that
+    ``StaticAnalyst._extract_load_hint``, ``_extract_analysis_path`` and
+    ``ConfigurableAnalyst._analysis_path_in`` read ``analysis_file_path`` back
+    out of, and all three bail the moment the text does not begin with ``{``.
+    Prose in front of it cost an injecting static stage its
+    ``LOAD THIS BINARY FIRST`` line and sent it back to inventing a path.
+    """
+
+    def _head(self, mode: str) -> str:
+        settings = _settings()
+        container = MagicMock()
+        container.is_mock = False
+        container.event_sink = None
+        container.config = settings
+        container.active_profile.return_value = settings.agents.profiles["team"]
+        container.agent_role.return_value = "static"
+        agent = MagicMock()
+        agent._resolved.static_provider_id = "none"
+        agent.safe_analyze_isr.return_value = _isr("reverser", "found the unpacker")
+        container.get_agent.return_value = agent
+        container.load_data_for_agent.return_value = [
+            _chunk(json.dumps({"sha256": "abc123", "name": "evil.exe"}))
+        ]
+
+        stage = (
+            settings.agents.profiles["team"]
+            .stage("deep")
+            .model_copy(update={"inject_upstream": mode})
+        )
+        state = {
+            "file_hash": "abc123",
+            "sample_path": "/srv/samples/abc123.exe",
+            "isr_reports": {"static": _isr("static", "packed with UPX")},
+            "reports": {"static": "The full static prose report."},
+        }
+        make_stage_agent_node(stage, "reverser", container)(state)  # type: ignore[arg-type]
+        return str(agent.safe_analyze_isr.call_args[0][0])
+
+    def test_the_load_hint_still_fires_with_findings_injected(self) -> None:
+        from maljan.agents.static_analyst import _extract_analysis_path, _extract_load_hint
+
+        head = self._head("findings")
+        assert head.lstrip().startswith("{")
+        assert "LOAD THIS BINARY FIRST" in _extract_load_hint(head)
+        assert _extract_analysis_path(head) == "/srv/samples/abc123.exe"
+
+    def test_the_load_hint_still_fires_with_full_reports_injected(self) -> None:
+        from maljan.agents.static_analyst import _extract_load_hint
+
+        head = self._head("full")
+        assert "LOAD THIS BINARY FIRST" in _extract_load_hint(head)
+        assert "The full static prose report." in head
+
+    def test_the_block_arrives_as_a_field_of_the_document(self) -> None:
+        parsed = json.loads(self._head("findings"))
+        assert parsed["analysis_file_path"] == "/srv/samples/abc123.exe"
+        assert parsed["sha256"] == "abc123"
+        assert "packed with UPX" in parsed["upstream_findings"]
+
+    def test_a_head_that_is_not_json_still_takes_the_block_in_front(self) -> None:
+        from maljan.pipeline.nodes import _with_upstream
+
+        (head,) = _with_upstream([_chunk("raw decompiled output")], "## Upstream findings\n\n- x")
+        assert head.content.startswith("## Upstream findings")
+        assert head.content.endswith("raw decompiled output")
+
+
+class TestInjectionDoesNotHideTheNoDataGuard:
+    """Finding 2: the guard runs on what the loaders produced, not on the block.
+
+    An analyst with nothing to read used to spend a whole ReAct loop analysing
+    "No network data available for sample <sha>" once a stage injected findings
+    in front of it, and report that back as its one evidence-backed claim.
+    """
+
+    def _node_out(self, mode: str) -> dict[str, Any]:
+        settings = _settings()
+        container = MagicMock()
+        container.is_mock = False
+        container.event_sink = None
+        container.config = settings
+        container.active_profile.return_value = settings.agents.profiles["team"]
+        container.agent_role.return_value = "network"
+        agent = MagicMock()
+        agent._resolved.static_provider_id = "none"
+        container.get_agent.return_value = agent
+        container.load_data_for_agent.return_value = [
+            _chunk("No network data available for sample abc123.")
+        ]
+
+        stage = (
+            settings.agents.profiles["team"]
+            .stage("deep")
+            .model_copy(update={"inject_upstream": mode, "agents": ["network"]})
+        )
+        state = {
+            "file_hash": "abc123",
+            "isr_reports": {"static": _isr("static", "packed with UPX")},
+            "reports": {"static": "prose"},
+        }
+        out = make_stage_agent_node(stage, "network", container)(state)  # type: ignore[arg-type]
+        agent.safe_analyze_isr.assert_not_called()
+        agent.safe_analyze_isr_chunked.assert_not_called()
+        return out
+
+    def test_a_dataless_analyst_still_skips_when_findings_are_injected(self) -> None:
+        out = self._node_out("findings")
+        assert "no network data available" in out["reports"]["network"].lower()
+        assert out["stage_results"]["deep"]["reason"] == "no data for this agent"
+
+    def test_it_skips_with_full_reports_injected_too(self) -> None:
+        out = self._node_out("full")
+        assert "no network data available" in out["reports"]["network"].lower()
+
+
+class TestTheDebateStageThresholdIsRead:
+    """Finding 6: a stage's ``consensus_threshold`` decided nothing."""
+
+    def _stage(self, threshold: float) -> Any:
+        from maljan.core.config import DebateOptions, StageDefinition
+
+        return StageDefinition(
+            key="debate",
+            kind="debate",
+            debate=DebateOptions(max_rounds=3, consensus_threshold=threshold),
+        )
+
+    def test_the_router_reports_the_stage_s_threshold_over_the_global(self) -> None:
+        from maljan.pipeline.routing import ConsensusRouter
+
+        settings = Settings(_env_file=None, negotiation={"consensus_threshold": 0.85})
+        assert ConsensusRouter(settings)._consensus_threshold == 0.85
+        assert ConsensusRouter(settings, stage=self._stage(0.55))._consensus_threshold == 0.55
+
+    def test_the_mediator_calls_agreement_at_the_stage_s_bar(self) -> None:
+        """0.6 is consensus under a stage that asks for 0.55 and not under 0.85."""
+        from maljan.agents.judge_agent import JudgeAgent
+
+        settings = Settings(_env_file=None, negotiation={"consensus_threshold": 0.85})
+        judge = JudgeAgent.__new__(JudgeAgent)
+        judge._config = settings
+        assert judge._consensus_threshold() == 0.85
+        assert judge._consensus_threshold(0.55) == 0.55
+        assert 0.6 >= judge._consensus_threshold(0.55)
+        assert not 0.6 >= judge._consensus_threshold()
+
+    def test_the_node_hands_the_mediator_the_stage_s_number(self) -> None:
+        from maljan.pipeline.nodes import _debate_threshold
+
+        assert _debate_threshold(self._stage(0.55)) == 0.55
+        # No options on the stage means the global one, which is what the
+        # options were seeded from in the first place.
+        assert _debate_threshold(None) is None

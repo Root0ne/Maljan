@@ -86,6 +86,14 @@ def build_graph(container: ServiceContainer) -> CompiledStateGraph:
 
     builder = StateGraph(AnalysisState)
     by_key: dict[str, StageNodes] = {entry.stage.key: entry for entry in staged}
+    # Which stages each node closes. A stage announces its own end from the one
+    # node that runs after everything in it is done — usually its own last
+    # node, and for a fan-out with no barrier or a debate that loops, the
+    # single node of the next stage. See ``topology._finisher``.
+    closes: dict[str, tuple[str, ...]] = {}
+    for entry in staged:
+        for node in entry.finisher:
+            closes[node] = (*closes.get(node, ()), entry.stage.key)
 
     # 1. Nodes, and the edges that live inside one stage. Every node is wrapped
     #    in ``instrument_node`` so resident memory is reported on each side of
@@ -94,7 +102,7 @@ def build_graph(container: ServiceContainer) -> CompiledStateGraph:
     #    the first analyst to the judge as one ``analyzing`` phase. See
     #    ``core/memprobe`` for why this exists.
     for entry in staged:
-        _add_stage(builder, container, profile, entry, by_key)
+        _add_stage(builder, container, profile, entry, by_key, closes)
 
     # 2. Edges between stages. A stage with no live dependency starts at START;
     #    a stage nothing live depends on ends at END. A debate stage's way out
@@ -124,31 +132,63 @@ def _add_stage(
     profile: ProfileDefinition,
     entry: StageNodes,
     by_key: dict[str, StageNodes],
+    closes: dict[str, tuple[str, ...]],
 ) -> None:
     """Add one stage's nodes and every edge that lives inside it."""
     stage = entry.stage
     if stage.kind == "analysis":
-        _add_analysis_stage(builder, container, entry)
+        _add_analysis_stage(builder, container, entry, closes)
     elif stage.kind == "debate":
-        _add_debate_stage(builder, container, profile, entry, by_key)
+        _add_debate_stage(builder, container, profile, entry, by_key, closes)
     elif stage.kind == "verdict":
         builder.add_node(
-            JUDGE_NODE, instrument_node(JUDGE_NODE, make_judge_node(container, stage=stage))
+            JUDGE_NODE,
+            instrument_node(
+                JUDGE_NODE,
+                make_judge_node(
+                    container,
+                    stage=stage,
+                    announces=entry.starter == JUDGE_NODE,
+                    finishes=closes.get(JUDGE_NODE, ()),
+                ),
+            ),
         )
     else:
         builder.add_node(
-            REPORT_NODE, instrument_node(REPORT_NODE, make_report_node(container, stage=stage))
+            REPORT_NODE,
+            instrument_node(
+                REPORT_NODE,
+                make_report_node(
+                    container,
+                    stage=stage,
+                    announces=entry.starter == REPORT_NODE,
+                    finishes=closes.get(REPORT_NODE, ()),
+                ),
+            ),
         )
 
 
 def _add_analysis_stage(
-    builder: StateGraph, container: ServiceContainer, entry: StageNodes
+    builder: StateGraph,
+    container: ServiceContainer,
+    entry: StageNodes,
+    closes: dict[str, tuple[str, ...]],
 ) -> None:
     stage = entry.stage
     for agent in stage.agents:
         name = analyst_node(agent)
         builder.add_node(
-            name, instrument_node(name, make_stage_agent_node(stage, agent, container))
+            name,
+            instrument_node(
+                name,
+                make_stage_agent_node(
+                    stage,
+                    agent,
+                    container,
+                    announces=name == entry.starter,
+                    finishes=closes.get(name, ()),
+                ),
+            ),
         )
     if stage.mode != "parallel":
         for previous, following in zip(stage.agents, stage.agents[1:], strict=False):
@@ -156,7 +196,10 @@ def _add_analysis_stage(
         return
     barriers = [node for node in entry.nodes if node.endswith(JOIN_SUFFIX)]
     for barrier in barriers:
-        builder.add_node(barrier, instrument_node(barrier, make_join_node(stage)))
+        builder.add_node(
+            barrier,
+            instrument_node(barrier, make_join_node(stage, container, closes.get(barrier, ()))),
+        )
         for agent in stage.agents:
             builder.add_edge(analyst_node(agent), barrier)
 
@@ -167,6 +210,7 @@ def _add_debate_stage(
     profile: ProfileDefinition,
     entry: StageNodes,
     by_key: dict[str, StageNodes],
+    closes: dict[str, tuple[str, ...]],
 ) -> None:
     """The negotiation/revision pair, and the router that decides between them.
 
@@ -181,7 +225,15 @@ def _add_debate_stage(
     negotiation, revision = debate_nodes(profile, stage)
     builder.add_node(
         negotiation,
-        instrument_node(negotiation, make_negotiation_node(container, stage=stage)),
+        instrument_node(
+            negotiation,
+            make_negotiation_node(
+                container,
+                stage=stage,
+                announces=entry.starter == negotiation,
+                finishes=closes.get(negotiation, ()),
+            ),
+        ),
     )
     builder.add_node(
         revision, instrument_node(revision, make_revision_node(container, stage=stage))

@@ -16,6 +16,14 @@ a profile comes out of this running exactly as it ran into it.
 ``stages`` when both are present, so the copy is inert; it is what
 ``downgrade`` restores from, and it is what lets an operator compare the two.
 
+Each converted profile is also marked ``derived_from_analysts``. Without the
+mark the team would freeze whatever those two global keys said on the day this
+ran: an operator who migrates on a hosted API and later moves back to the
+single-slot local model would keep running analysts in parallel, having never
+chosen to write stages at all. Marked, the settings model keeps re-deriving
+them until the operator edits the team, and a migrated database and a fresh
+install agree.
+
 ``is_secret`` rows are never touched — no profile was ever stored as one, and a
 credential must not pass through a JSON rewrite.
 
@@ -172,6 +180,7 @@ def upgrade() -> None:
             max_rounds=int(max_rounds) if max_rounds is not None else DEFAULT_MAX_ROUNDS,
             consensus=float(consensus) if consensus is not None else DEFAULT_CONSENSUS,
         )
+        entry["derived_from_analysts"] = True
         converted.append(str(name))
 
     if not converted:
@@ -201,6 +210,7 @@ def downgrade() -> None:
                     members.extend(str(a) for a in stage.get("agents") or [])
             entry["analysts"] = members
         entry.pop("stages", None)
+        entry.pop("derived_from_analysts", None)
         reverted = True
 
     if reverted:

@@ -1076,9 +1076,15 @@ class ProfileDefinition(BaseModel):
     # ``Settings`` re-derives those stages once the whole document is loaded,
     # because the conversion needs ``llm.parallel_analysts`` and the
     # negotiation settings and a profile cannot see either from in here.
-    # Excluded from every dump: it is bookkeeping, not a setting, and a
-    # built-in identity check that saw it would compare it.
-    derived_from_analysts: bool = Field(default=False, exclude=True)
+    #
+    # Stored rather than dropped, because the alembic revision that writes
+    # stages into an operator's database sets it: without it, a team the
+    # operator never opened would freeze whatever those two global keys said
+    # on migration day, and an operator who later moved from a hosted API back
+    # to the single-slot local model would keep running analysts in parallel.
+    # The console clears it on any stage edit — from that point the stages are
+    # the operator's, not a derivation of the analyst list.
+    derived_from_analysts: bool = False
 
     @model_validator(mode="before")
     @classmethod
@@ -1159,6 +1165,13 @@ class ProfileDefinition(BaseModel):
                         "upstream of it"
                     )
 
+        for stage in self.stages:
+            if stage.kind != "debate":
+                continue
+            problem = self.debate_handover_error(stage)
+            if problem:
+                raise ValueError(problem)
+
         verdicts = [s.key for s in self.stages if s.kind == "verdict"]
         if len(verdicts) != 1:
             found = ", ".join(verdicts) or "none"
@@ -1169,6 +1182,45 @@ class ProfileDefinition(BaseModel):
         if reports and self.stages[-1].kind != "report":
             raise ValueError("the report stage is the last stage of a profile")
         return self
+
+    def entry_node_count(self, stage: "StageDefinition") -> int:
+        """How many graph nodes a dependency of ``stage`` has to point at.
+
+        One for every stage but a parallel analysis stage, which starts at all
+        of its agents at once. ``pipeline.topology`` derives the same number
+        from the same rule; it is restated here because the check below has to
+        run before a graph is ever built.
+        """
+        if stage.kind == "analysis" and stage.mode == "parallel":
+            return len(stage.agents)
+        return 1
+
+    def debate_handover_error(self, stage: "StageDefinition") -> str:
+        """Why ``stage`` cannot hand over, or an empty string when it can.
+
+        A debate leaves through a conditional edge, and a conditional edge has
+        exactly one destination per branch. A debate that feeds two stages — or
+        one parallel analysis stage with two agents, which is two nodes — has
+        no single destination for the branch that stops arguing.
+
+        This is checked when the team is saved rather than only when the graph
+        is built. The builder still refuses it, but by then the sample has been
+        uploaded and detonated and every job under that team fails; an operator
+        has to be told while they are still editing.
+        """
+        heads = 0
+        fed: list[str] = []
+        for candidate in self.stages:
+            if stage.key in candidate.depends_on:
+                heads += self.entry_node_count(candidate)
+                fed.append(candidate.key)
+        if heads <= 1:
+            return ""
+        return (
+            f"stage {stage.key!r} is a debate that hands over to {heads} nodes "
+            f"({', '.join(fed)}); a debate hands over to exactly one stage, and not "
+            "to a parallel analysis stage with more than one agent"
+        )
 
     def _reachable(self, key: str) -> set[str]:
         """Every stage ``key`` transitively depends on."""
@@ -1399,6 +1451,11 @@ class AgentsConfig(BaseModel):
             # the deprecated copy is the same built-in profile.
             current_profile.pop("analysts", None)
             expected_profile.pop("analysts", None)
+            # Bookkeeping, not a setting: a built-in whose stages were written
+            # out by the migration and one that was derived on load are the
+            # same built-in team.
+            current_profile.pop("derived_from_analysts", None)
+            expected_profile.pop("derived_from_analysts", None)
             # The stages of a built-in are the paper's architecture and stay
             # fixed, with two exceptions an operator legitimately needs: how
             # hard the debate argues, and whether a stage gets the built-in
