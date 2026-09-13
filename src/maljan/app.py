@@ -43,6 +43,7 @@ class MaljanApp:
         mock: bool = False,
         samples_dir: str = "data/samples",
         event_sink: EventSink | None = None,
+        job_id: str = "",
     ) -> None:
         self.config = config or Settings()
         self.container = ServiceContainer(
@@ -50,6 +51,7 @@ class MaljanApp:
             mock=mock,
             samples_dir=samples_dir,
             event_sink=event_sink,
+            job_id=job_id,
         )
         self.graph = build_graph(self.container)
 

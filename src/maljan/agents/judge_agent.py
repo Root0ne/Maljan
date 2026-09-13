@@ -160,6 +160,9 @@ class JudgeAgent:
         # node before it works — the debate stage when it mediates, the verdict
         # stage when it rules — and read by the evidence recorder.
         self.pipeline_stage: str = "analysis"
+        # The job this agent serves, set by the container that built it. Every
+        # attach asks for it, so two agents in one job share their handles.
+        self._job_id: str = ""
         # Per-run truncation ledger (pitfall P6); same lifecycle. The judge is
         # where ``judge_max_tokens`` binds and where the STIX integrity pass
         # runs, so this is the most load-bearing attachment point of the three.
@@ -193,7 +196,7 @@ class JudgeAgent:
 
     def _job_key(self) -> str:
         """A per-job identity for the handles' same-job short circuit."""
-        return str(getattr(self, "_job_id", "") or "job")
+        return self._job_id or "job"
 
     def _definition_tool_refs(self) -> list[Any]:
         """The judge definition's ``ToolRef``s, under the active profile.

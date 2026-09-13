@@ -1132,6 +1132,9 @@ class BaseAnalyst(ABC):
         # node before it works. Read by the evidence recorder, so a ledger
         # entry says which step of the team made the call.
         self.pipeline_stage: str = "analysis"
+        # The job this agent serves, set by the container that built it. Every
+        # attach asks for it, so two agents in one job share their handles.
+        self._job_id: str = ""
         # Per-run truncation ledger (pitfall P6, findings-log §2.0). Same
         # lifecycle as token_ledger; None disables counting.
         self.truncation_ledger: Any | None = None
@@ -1324,7 +1327,7 @@ class BaseAnalyst(ABC):
 
     def _job_key(self) -> str:
         """A per-job identity for the handles' same-job short circuit."""
-        return str(getattr(self, "_job_id", "") or "job")
+        return self._job_id or "job"
 
     def _definition_tool_refs(self) -> list[Any]:
         """This agent definition's ``ToolRef``s, under the active profile.

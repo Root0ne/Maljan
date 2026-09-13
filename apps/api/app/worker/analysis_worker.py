@@ -580,6 +580,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             app = MaljanApp(
                 config=core_settings,
                 mock=_mock_active,
+                job_id=job_id,
                 event_sink=_make_event_sink(
                     redis_conn,
                     job_id,

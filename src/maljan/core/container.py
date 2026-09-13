@@ -123,9 +123,14 @@ class ServiceContainer:
         mock: bool = False,
         samples_dir: str = "data/samples",
         event_sink: EventSink | None = None,
+        job_id: str = "",
     ) -> None:
         self.config = config
         self.mock = mock
+        # The identity of the job this container serves, as the caller that
+        # queued it knows it. Empty for the CLI and for tests, which run one
+        # analysis per process and have no such id to give.
+        self.job_id = str(job_id or "")
         # Progress feed for the live transcript UI. ``None`` outside the API
         # worker (CLI, tests), which makes every emit a no-op — see
         # maljan.pipeline.events.
@@ -517,6 +522,15 @@ class ServiceContainer:
             raise KeyError(f"No agent definition named {key!r}. Available: {available}")
         return str(definition.role)
 
+    def job_key(self) -> str:
+        """The job identity handed to every resolver and every handle.
+
+        One key per job: the handles' same-job short circuit compares it, so a
+        container that answered differently for two of its agents would close
+        and reopen every server between them.
+        """
+        return self.job_id or "job"
+
     def get_agent(self, name: str) -> BaseAnalyst:
         """The agent definition ``name`` names, instantiated and wired.
 
@@ -536,7 +550,7 @@ class ServiceContainer:
             from maljan.agents.configurable_analyst import ConfigurableAnalyst
 
             role = self.agent_role(name)
-            resolved = resolve_agent(name, self)
+            resolved = resolve_agent(name, self, self.job_key())
             llm = cast(BaseChatModel, resolved.llm)
             if role == "generic":
                 agent: BaseAnalyst = ConfigurableAnalyst(name, resolved, llm)
@@ -554,6 +568,9 @@ class ServiceContainer:
                 # as ``...static.static`` instead of ``...static``.
                 if name != role:
                     agent.logger = agent.logger.getChild(name.lower())
+            # Every attach in this job asks for the same key, so a handle
+            # already open for it is reused rather than torn down and reopened.
+            agent._job_id = self.job_key()
             agent.token_ledger = getattr(self, "_token_ledger", None)
             agent.truncation_ledger = getattr(self, "_truncation_ledger", None)
             agent.evidence_counter = getattr(self, "_evidence_counter", None)
@@ -579,6 +596,7 @@ class ServiceContainer:
                     # every provider — see _supports_structured_output.
                     config=self.config,
                 )
+                cached._job_id = self.job_key()
                 cached.token_ledger = getattr(self, "_token_ledger", None)
                 cached.truncation_ledger = getattr(self, "_truncation_ledger", None)
                 cached.evidence_counter = getattr(self, "_evidence_counter", None)
