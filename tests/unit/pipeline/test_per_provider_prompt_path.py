@@ -15,6 +15,7 @@ from unittest.mock import MagicMock
 
 from maljan.loaders.binary_chunker import TextChunk
 from maljan.pipeline.nodes import _augment_static_chunks_with_path
+from tests.stages import ANALYSIS_STAGE, paper_profile
 
 
 def _chunk(content: str) -> TextChunk:
@@ -63,7 +64,7 @@ def test_a_provider_with_no_mirror_of_its_own_falls_back_to_the_global_path():
 
 def test_the_node_shows_a_clone_on_r2_the_r2_mirror():
     """Through the real node factory, the way a two-provider profile runs."""
-    from maljan.pipeline.nodes import make_analyst_node
+    from maljan.pipeline.nodes import make_stage_agent_node
 
     agent = MagicMock()
     agent._resolved.static_provider_id = "r2"
@@ -77,9 +78,13 @@ def test_the_node_shows_a_clone_on_r2_the_r2_mirror():
     container.get_agent.return_value = agent
     container.agent_role.return_value = "static"
     container.load_chunked.return_value = [_chunk(json.dumps({"file": {"sha256": "abc123"}}))]
+    container.active_profile.return_value = paper_profile(["static_r2"])
+    container.load_data_for_agent.side_effect = lambda n, *, file_hash, **_: container.load_chunked(
+        file_hash, n
+    )
     container.config.llm.view_decomposition_views = 0
 
-    node = make_analyst_node("static_r2", container)
+    node = make_stage_agent_node(ANALYSIS_STAGE, "static_r2", container)
     node(dict(_STATE, sample_path="/tmp/abc123.exe"))  # type: ignore[arg-type]
 
     shown = agent.safe_analyze_isr.call_args[0][0]

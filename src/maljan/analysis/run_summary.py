@@ -217,6 +217,12 @@ class RunSummary:
     failed_analysts: list[str] = field(default_factory=list)
     techniques_by_layer: dict[str, int] = field(default_factory=dict)
     profile: dict[str, Any] | None = None
+    # What each stage of the profile did: ``{key, kind, ran, reason, agents,
+    # duration_ms}`` in the order the profile declares them. A stage that
+    # declined to run is here too, with the reason it gave — an absent row and
+    # a skipped row mean different things and a reader has to be able to tell
+    # them apart.
+    stages: list[dict[str, Any]] = field(default_factory=list)
 
     # ------------------------------------------------------------------
     # Rendering
@@ -444,6 +450,7 @@ class RunSummary:
             "failed_analysts": list(self.failed_analysts),
             "techniques_by_layer": dict(self.techniques_by_layer),
             "profile": dict(self.profile) if self.profile else None,
+            "stages": [dict(row) for row in self.stages],
         }
 
         if self.validation:
@@ -522,6 +529,7 @@ class RunSummaryBuilder:
         self._tokens: TokenUsageMetrics | None = None
         self._truncation: TruncationMetrics | None = None
         self._profile: dict[str, Any] | None = None
+        self._stages: list[dict[str, Any]] = []
 
     def set_degraded_mode(
         self, degraded: bool, reasons: list[str] | None = None
@@ -587,6 +595,11 @@ class RunSummaryBuilder:
     def set_failed_analysts(self, names: list[str]) -> RunSummaryBuilder:
         """Record analysts whose reports failed with an [ERROR] prefix."""
         self._failed_analysts = list(names)
+        return self
+
+    def set_stages(self, stages: list[dict[str, Any]]) -> RunSummaryBuilder:
+        """Record what each stage of the profile did."""
+        self._stages = [dict(row) for row in stages]
         return self
 
     def set_profile(self, name: str, analysts: list[str], custom: list[str]) -> RunSummaryBuilder:
@@ -742,6 +755,7 @@ class RunSummaryBuilder:
             failed_analysts=self._failed_analysts,
             techniques_by_layer=self._techniques_by_layer,
             profile=self._profile,
+            stages=self._stages,
         )
 
 

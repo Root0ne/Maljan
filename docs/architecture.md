@@ -145,25 +145,82 @@ A degraded run is not capped. The judge is told in the prompt why the run is
 thin — no sandbox report, an analyst that failed, a container nothing could
 open — and sets its own confidence; the report header states the same reasons.
 
-## Agents and profiles
+## Agents and teams
 
-Four agent definitions ship built in: `static`, `dynamic` and `network`
-analysts, and the `judge`. Each definition carries its role, whether it is
-enabled, the tools it may call and — for an analyst — the static provider it
-reads through. A profile names which analysts run and in which order; the
-built-in `default` profile is `static, dynamic, network`, which is the
-architecture this project measured itself on.
+Five agent definitions ship built in: the `static`, `dynamic` and `network`
+analysts, the `judge`, and the `reporter`. Each definition carries its role,
+whether it is enabled, the tools it may call, the data it reads and — for an
+analyst — the static provider it reads through. The judge and the reporter are
+not analysts: a team names them from its verdict and report stages, and no
+analysis stage may hold either.
 
-Both are editable from Settings → Agents and pipeline. A custom agent runs as a
-`ConfigurableAnalyst` with the tools its definition names; a profile may not
-list an analyst twice, may not include the judge, and may not name a disabled
-analyst while it is the active profile.
+A team (`agents.profiles.<key>`) is an ordered list of **stages**, which is how
+a human analysis team works: triage, then static, then dynamic if the sample is
+worth detonating, then reversing, then the network and threat-intel pass, then
+correlation, then the report. A stage says what it is (`kind`), who is in it
+(`agents`), what it runs after (`depends_on`), whether it runs at all (`when`),
+whether its members run at once or in turn (`mode`), what it is told about the
+stages before it (`inject_upstream`), how hard it argues if it is a debate
+(`debate`) and whether its agents keep the built-in tool servers
+(`builtin_tools`).
 
-A second profile ships built in: `measurement`. It runs the same three analysts
-with every tool server withheld and the static provider forced to `none` — the
-baseline for what the ensemble contributes on its own. It is a profile rather
-than three tool-free clones of the definitions, so the agents it measures
-cannot drift from the ones `default` runs.
+The four kinds are the pipeline itself. An `analysis` stage runs the agents it
+names. A `debate` stage runs the mediation loop over the analysis stages
+upstream of it. The one `verdict` stage runs the judge. The optional `report`
+stage, always last, builds the report.
+
+`default` is that pipeline as four stages — `analysis` (static, dynamic,
+network) → `debate` → `verdict` → `report` — which is the architecture this
+project measured itself on. `measurement` is the same four with every tool
+server withheld and the static provider forced to `none`, the baseline for what
+the ensemble contributes on its own. It is a team rather than three tool-free
+clones of the definitions, so the agents it measures cannot drift from the ones
+`default` runs. Both are editable from Settings → Agents and pipeline, but only
+in their debate options, their built-in tool switches and `exclude_servers`;
+every other part of a built-in team is the architecture, and changing it means
+cloning the team.
+
+### The stage graph
+
+`pipeline/builder.py` turns a team into a LangGraph workflow and
+`pipeline/topology.py` names the nodes. An analysis stage contributes one node
+per agent, `<agent>_analyst`; a parallel one also contributes a barrier
+`<stage>__join` when its dependents start at more than one node. A debate stage
+contributes `negotiation` and `revision`, prefixed `<stage>__` only when a team
+holds more than one debate. The verdict stage is `judge` and the report stage
+is `report`. Edges follow `depends_on`; a stage with no dependency starts at
+`START`, a stage nothing depends on ends at `END`, and a debate's way out is
+the router's conditional edge.
+
+The default team therefore builds exactly the graph the project has always
+built, node for node and edge for edge — `tests/fixtures/golden/graph_default.json`
+pins it in both analyst modes.
+
+**A stage's condition never changes the graph.** `when` is evaluated inside the
+stage's nodes at run time, so a stage that declines to run is still a node and
+still writes a `StageResult` saying it did not run and why. A topology that
+depended on the sample could not be drawn, compared or reasoned about before
+the sample arrived. What each stage did lands in `state["stage_results"]` and
+reaches the reader as `run_summary.stages`.
+
+Each stage also announces itself live, once: `stage_started` from its first
+node, `stage_skipped` from that node instead when the condition is false, and
+`stage_finished` from the one node that runs after everything in it is done.
+That last node is usually the stage's own — a sequential chain's tail, a
+barrier, the judge, the report — and for the two shapes with no single terminal
+node of their own, a fan-out without a barrier and a debate that loops, it is
+the single node of the next stage. Nothing replays the events at the end, so a
+run with reporting disabled still terminates every stage it ran.
+
+An agent whose stage was skipped reaches neither the debate nor the judge: both
+read the roster from `stage_results` rather than from the profile, so a stage
+the condition turned off does not arrive as three empty reports. A debate whose
+upstream analysis stages all skipped skips itself and says so.
+
+A custom agent runs as a `ConfigurableAnalyst` with the tools its definition
+names. A team may not put one agent in two analysis stages — the node name is
+the agent's — may not name the judge or the reporter as an analyst, and may not
+name a disabled agent while it is the active team.
 
 ## Built-in tool servers
 

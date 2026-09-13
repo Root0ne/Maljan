@@ -14,6 +14,7 @@ from maljan.core.config import (
     AGENT_KEY_PATTERN,
     BUILTIN_AGENTS,
     BUILTIN_PROFILES,
+    REPORTER_AGENT_KEY,
     SERVER_KEY_PATTERN,
     Settings,
     ToolRef,
@@ -24,12 +25,71 @@ def _mcp(server: str) -> dict:
     return {"kind": "mcp", "server": server, "name": None}
 
 
+def _paper_stages() -> list[dict]:
+    """The four stages a plain analyst list has always meant, as they dump.
+
+    Spelled out rather than imported from ``stages_from_analysts``: the point
+    of the pin is that the default team's shape is what it is, and a pin that
+    called the code it pins would agree with anything.
+    """
+    common = {
+        "when": "",
+        "mode": "sequential",
+        "inject_upstream": "none",
+        "debate": None,
+        "builtin_tools": True,
+    }
+    return [
+        {
+            **common,
+            "key": "analysis",
+            "label": "Analysis",
+            "kind": "analysis",
+            "agents": ["static", "dynamic", "network"],
+            "depends_on": [],
+        },
+        {
+            **common,
+            "key": "debate",
+            "label": "Debate",
+            "kind": "debate",
+            "agents": [],
+            "depends_on": ["analysis"],
+            "debate": {
+                "max_rounds": 5,
+                "consensus_threshold": 0.85,
+                "sycophancy_check": True,
+            },
+        },
+        {
+            **common,
+            "key": "verdict",
+            "label": "Verdict",
+            "kind": "verdict",
+            "agents": ["judge"],
+            "depends_on": ["debate"],
+        },
+        {
+            **common,
+            "key": "report",
+            "label": "Report",
+            "kind": "report",
+            "agents": ["reporter"],
+            "depends_on": ["verdict"],
+        },
+    ]
+
+
 DEFAULT_AGENTS = {
     "profile": "default",
     "profiles": {
         "default": {
             "label": "Default",
+            "stages": _paper_stages(),
             "analysts": ["static", "dynamic", "network"],
+            # Written as an analyst list, so the model keeps the stages in step
+            # with ``llm.parallel_analysts`` and the negotiation settings.
+            "derived_from_analysts": True,
             "exclude_servers": [],
             "exclude_sandbox_tools": False,
             "static_provider": None,
@@ -38,7 +98,9 @@ DEFAULT_AGENTS = {
         # the static provider forced off, so a run measures the ensemble alone.
         "measurement": {
             "label": "Measurement baseline",
+            "stages": _paper_stages(),
             "analysts": ["static", "dynamic", "network"],
+            "derived_from_analysts": True,
             "exclude_servers": ["*"],
             "exclude_sandbox_tools": True,
             "static_provider": "none",
@@ -52,6 +114,7 @@ DEFAULT_AGENTS = {
             "tools": [_mcp("analysis"), _mcp("knowledge")],
             "static_provider": None,
             "enabled": True,
+            "data_sources": [],
         },
         "dynamic": {
             "role": "dynamic",
@@ -60,6 +123,7 @@ DEFAULT_AGENTS = {
             "tools": [{"kind": "sandbox", "server": None, "name": None}, _mcp("knowledge")],
             "static_provider": None,
             "enabled": True,
+            "data_sources": [],
         },
         "network": {
             "role": "network",
@@ -68,6 +132,7 @@ DEFAULT_AGENTS = {
             "tools": [_mcp("network"), _mcp("knowledge")],
             "static_provider": None,
             "enabled": True,
+            "data_sources": [],
         },
         "judge": {
             "role": "judge",
@@ -76,6 +141,19 @@ DEFAULT_AGENTS = {
             "tools": [_mcp("knowledge")],
             "static_provider": None,
             "enabled": True,
+            "data_sources": [],
+        },
+        # The narrative/composer step as a definition: an LLM entry and a
+        # prompt of its own instead of borrowing the judge's, and no tools —
+        # the report is built from what the run already produced.
+        "reporter": {
+            "role": "report",
+            "label": "Reporter",
+            "prompt": None,
+            "tools": [],
+            "static_provider": None,
+            "enabled": True,
+            "data_sources": [],
         },
     },
 }
@@ -180,16 +258,16 @@ def test_a_clone_of_a_built_in_may_carry_its_own_prompt():
 
 def test_a_profile_of_enabled_non_judge_analysts_is_accepted():
     cfg = _settings(profiles={"two": {"analysts": ["static", "network"]}}, profile="two")
-    assert cfg.agents.profiles["two"].analysts == ["static", "network"]
+    assert cfg.agents.profiles["two"].analysis_agents == ["static", "network"]
 
 
 def test_a_profile_naming_an_unknown_definition_is_refused():
-    with pytest.raises(ValidationError, match="'two' lists unknown analyst 'ghost'"):
+    with pytest.raises(ValidationError, match="stage 'analysis': unknown agent 'ghost'"):
         _settings(profiles={"two": {"analysts": ["static", "ghost"]}})
 
 
 def test_disabling_a_member_of_the_active_default_profile_is_refused():
-    with pytest.raises(ValidationError, match="'default' lists disabled analyst 'network'"):
+    with pytest.raises(ValidationError, match="stage 'analysis': 'network' is disabled"):
         _settings(definitions={"network": {"role": "network", "enabled": False}})
 
 
@@ -203,25 +281,47 @@ def test_disabling_a_member_of_the_inactive_default_profile_is_accepted():
 
 
 def test_a_profile_naming_a_disabled_definition_is_refused():
-    with pytest.raises(ValidationError, match="'two' lists disabled analyst 'dynamic'"):
+    with pytest.raises(ValidationError, match="stage 'analysis': 'dynamic' is disabled"):
         _settings(
             definitions={"dynamic": {"role": "dynamic", "enabled": False}},
             profiles={"two": {"analysts": ["static", "dynamic"]}},
         )
 
 
-def test_a_profile_naming_the_judge_is_refused():
-    with pytest.raises(ValidationError, match="the judge cannot be an analyst"):
+def test_a_profile_naming_the_judge_as_an_analyst_is_refused():
+    with pytest.raises(ValidationError, match="'judge' has role 'judge' and cannot be an analyst"):
         _settings(profiles={"two": {"analysts": ["static", "judge"]}})
 
 
+def test_a_profile_naming_the_reporter_as_an_analyst_is_refused():
+    """The report stage is optional, so this is where the role check speaks."""
+    with pytest.raises(
+        ValidationError, match="'reporter' has role 'report' and cannot be an analyst"
+    ):
+        _settings(
+            profiles={
+                "two": {
+                    "stages": [
+                        {"key": "analysis", "kind": "analysis", "agents": ["static", "reporter"]},
+                        {
+                            "key": "verdict",
+                            "kind": "verdict",
+                            "agents": ["judge"],
+                            "depends_on": ["analysis"],
+                        },
+                    ]
+                }
+            }
+        )
+
+
 def test_a_profile_repeating_an_analyst_is_refused():
-    with pytest.raises(ValidationError, match="lists 'static' twice"):
+    with pytest.raises(ValidationError, match="an agent belongs to one stage"):
         _settings(profiles={"two": {"analysts": ["static", "static"]}})
 
 
 def test_an_empty_profile_is_refused():
-    with pytest.raises(ValidationError, match="needs at least one analyst"):
+    with pytest.raises(ValidationError, match="needs at least one stage"):
         _settings(profiles={"empty": {"analysts": []}})
 
 
@@ -402,7 +502,7 @@ def test_every_new_leaf_is_annotated_and_grouped():
         assert key in ANNOTATIONS, key
     assert ANNOTATIONS["agents.profile"]["choices_from"] == "profiles"
     assert ANNOTATIONS["agents.profile"]["order"] == -1
-    assert ANNOTATIONS["agents.profiles"]["editor"] == "profiles"
+    assert ANNOTATIONS["agents.profiles"]["editor"] == "stages"
     assert ANNOTATIONS["agents.definitions"]["editor"] == "agent_definitions"
     assert dict(GROUP_ORDER)["agents"] == "Agents"
 
@@ -461,7 +561,11 @@ class TestALegacyDatabaseGetsTheNewToolDefaults:
 
         cfg = _settings(definitions=stored)
 
-        assert all(cfg.agents.definitions[k].tools for k in BUILTIN_AGENTS)
+        # Every built-in but the reporter, which has no tools by design: the
+        # report is built from what the run already produced.
+        assert all(
+            cfg.agents.definitions[k].tools for k in BUILTIN_AGENTS if k != REPORTER_AGENT_KEY
+        )
 
     def test_the_operators_own_edits_to_that_definition_survive(self):
         # A custom active profile that does not name the disabled analyst:

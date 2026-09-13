@@ -4,6 +4,7 @@ import { useReport } from "@/app/(app)/analysis/[id]/layout";
 import { useState } from "react";
 import { confidenceBarColor, confidenceClass } from "@/lib/report-utils";
 import { verdictLabel } from "@/lib/verdict";
+import { analystIdsOf, pipelineSteps, stepStatus as statusOfStep } from "./pipelineSteps";
 
 /* ── Types for pipeline data ─────────────────────────── */
 
@@ -49,66 +50,6 @@ interface NegotiationLog {
 }
 
 /* ── Step config ─────────────────────────────────────── */
-
-const INGESTION_STEP = {
-  id: "ingestion",
-  title: "Sample Ingestion",
-  description: "File loaded and prepared for analysis.",
-  custom: false,
-};
-const TAIL_STEPS = [
-  {
-    id: "negotiation",
-    title: "Multi-Agent Negotiation",
-    description: "Agents debate findings, resolve dissents, converge on consensus.",
-    custom: false,
-  },
-  {
-    id: "judge",
-    title: "Judge Verdict",
-    description: "Final classification with STIX 2.1 threat intelligence bundle.",
-    custom: false,
-  },
-];
-/** What each built-in analyst step said before the profile decided the list. */
-const BUILTIN_ANALYST_STEPS: Record<string, { title: string; description: string }> = {
-  static: {
-    title: "Static Analysis",
-    description: "PE/ELF structure, strings, imports, entropy, YARA rules.",
-  },
-  dynamic: {
-    title: "Dynamic Analysis",
-    description: "Sandbox execution, behavioral indicators, API calls.",
-  },
-  network: {
-    title: "Network Analysis",
-    description: "DNS, HTTP, C2 communication patterns, IOC extraction.",
-  },
-};
-
-/**
- * The analyst steps this run actually had.
- *
- * `run_summary.profile` says which analysts ran and which of them are not
- * built in. A report written before profiles existed has no such key, so the
- * three built-in ids are the fallback and every old report renders exactly as
- * it did.
- */
-function analystSteps(
-  runSummary: unknown
-): { id: string; title: string; description: string; custom: boolean }[] {
-  const profile = (runSummary as { profile?: { analysts?: string[]; custom?: string[] } } | null)
-    ?.profile;
-  const analysts = profile?.analysts ?? ["static", "dynamic", "network"];
-  const custom = new Set(profile?.custom ?? []);
-  return analysts.map((id) => ({
-    id,
-    title: BUILTIN_ANALYST_STEPS[id]?.title ?? `${id} analysis`,
-    description:
-      BUILTIN_ANALYST_STEPS[id]?.description ?? "A custom analyst declared in the settings.",
-    custom: custom.has(id),
-  }));
-}
 
 /* ── Helpers ─────────────────────────────────────────── */
 
@@ -235,9 +176,8 @@ export default function PipelineTab() {
   );
   const runSummary = report?.run_summary ?? null;
 
-  const analysts = analystSteps(runSummary);
-  const steps = [INGESTION_STEP, ...analysts, ...TAIL_STEPS];
-  const analystIds = new Set(analysts.map((a) => a.id));
+  const steps = pipelineSteps(runSummary);
+  const analystIds = analystIdsOf(steps);
   const findingFor = (id: string) =>
     findings.find((f) => f.agent_name.toLowerCase() === id.toLowerCase()) ??
     findings.find((f) => f.agent_name.toLowerCase().includes(id.toLowerCase()));
@@ -267,23 +207,15 @@ export default function PipelineTab() {
     return f.status === "failed" || f.status === "timeout" ? "failed" : "done";
   };
 
-  const stepStatus = (stepId: string): "done" | "current" | "pending" | "failed" => {
-    if (!report) return "pending";
-    switch (stepId) {
-      case "ingestion":
-        return "done";
-      case "negotiation":
-        if (negotiationFailed) return "failed";
-        return hasNegotiation ? "done" : "pending";
-      case "judge":
-        return report.verdict ? "done" : "pending";
-      // An analyst that crashed still leaves a findings row, so "a row exists"
-      // was never the same question as "the step succeeded". Dynamic has failed
-      // on every run in this deployment and this panel drew it green each time.
-      default:
-        return findingStatus(findingFor(stepId));
-    }
-  };
+  const stepStatus = (stepId: string) =>
+    statusOfStep(stepId, {
+      hasReport: Boolean(report),
+      hasVerdict: Boolean(report?.verdict),
+      hasNegotiation: Boolean(hasNegotiation),
+      negotiationFailed,
+      hasMalwareReport: Boolean(report?.malware_report),
+      findingStatus: (id) => findingStatus(findingFor(id)),
+    });
 
   return (
     <div className="space-y-4">
@@ -299,7 +231,10 @@ export default function PipelineTab() {
             const status = stepStatus(step.id);
             const isActive = activeStep === step.id;
             return (
-              <div key={step.id}>
+              // Keyed on the stage as well as the step id: two stages can
+              // contribute a step with the same id only if a team holds two of
+              // one kind, and React must still tell those rows apart.
+              <div key={`${step.stage}/${step.id}`}>
                 <button
                   onClick={() => setActiveStep(isActive ? null : step.id)}
                   className={`w-full flex items-center gap-3 px-3 py-2.5 rounded border transition-colors text-left ${
@@ -333,6 +268,19 @@ export default function PipelineTab() {
                       {step.custom && (
                         <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-accent/20 text-accent-strong">
                           custom
+                        </span>
+                      )}
+                      {step.stage !== step.id && step.stage !== "ingestion" && (
+                        <span
+                          className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-bg-active text-text-muted"
+                          title={`stage kind: ${step.stageKind}`}
+                        >
+                          {step.stage}
+                        </span>
+                      )}
+                      {step.skipped && (
+                        <span className="text-[11px] px-1.5 py-0.5 rounded bg-bg-active text-text-muted">
+                          skipped — {step.skipped}
                         </span>
                       )}
                       {status === "done" && (

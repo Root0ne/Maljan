@@ -70,13 +70,27 @@ def active_profile(settings: Settings) -> ProfileDefinition:
 
 
 def analyst_keys(settings: Settings) -> list[str]:
-    """The ordered analyst keys of the active profile.
+    """Every analysis-stage agent of the active profile, in stage order.
 
-    The single topology source: the builder, the negotiation and revision
-    nodes, the judge node and the run summary all read this list, so a profile
-    change moves all of them together or none of them.
+    The single topology source: the negotiation and revision nodes, the judge
+    node and the run summary all read this list, so a profile change moves all
+    of them together or none of them. The builder reads the stages themselves —
+    it is the one caller that needs to know which stage an agent belongs to.
     """
-    return list(active_profile(settings).analysts)
+    return list(active_profile(settings).analysis_agents)
+
+
+def stages(settings: Settings) -> list[Any]:
+    """The active profile's stages, in the order it declares them."""
+    return list(active_profile(settings).stages)
+
+
+def stage_for_agent(settings: Settings, key: str) -> Any | None:
+    """The stage agent ``key`` belongs to, or ``None`` if no stage names it."""
+    for stage in active_profile(settings).stages:
+        if key in stage.agents:
+            return stage
+    return None
 
 
 def current_analyst_keys() -> list[str]:
@@ -252,11 +266,30 @@ def _claim_in_process_tools(
         tools.append(tool)
 
 
-def _mcp_refs(settings: Settings, definition: AgentDefinition) -> list[ToolRef]:
+def _withheld_servers(settings: Settings, key: str) -> set[str]:
+    """Every server agent ``key`` may not reach, under the active profile.
+
+    Two sources, and they stack. The profile's own ``exclude_servers`` is the
+    tool-free baseline's lever and applies to every member. A stage's
+    ``builtin_tools=False`` is the narrower one: it withholds the four built-in
+    sidecars from that stage's agents only, so a triage stage can be made to
+    read what it was handed instead of going looking, without cloning the
+    definitions it runs.
+    """
+    from maljan.core.config import BUILTIN_SERVER_KEYS
+
+    excluded = set(active_profile(settings).exclude_servers)
+    stage = stage_for_agent(settings, key)
+    if stage is not None and not stage.builtin_tools:
+        excluded.update(BUILTIN_SERVER_KEYS)
+    return excluded
+
+
+def _mcp_refs(settings: Settings, definition: AgentDefinition, key: str) -> list[ToolRef]:
     """The definition's server references, minus the ones the profile excludes."""
     from maljan.core.config import ALL_SERVERS
 
-    excluded = set(active_profile(settings).exclude_servers)
+    excluded = _withheld_servers(settings, key)
     if ALL_SERVERS in excluded:
         return []
     return [
@@ -275,18 +308,18 @@ def mcp_refs_for(settings: Settings, key: str) -> list[ToolRef]:
     definition = settings.agents.definitions.get(key)
     if definition is None:
         return []
-    return _mcp_refs(settings, definition)
+    return _mcp_refs(settings, definition, key)
 
 
-def _excluded_servers(settings: Settings) -> str:
-    """``ServerRegistry``'s ``exclude`` argument for the active profile.
+def _excluded_servers(settings: Settings, key: str = "") -> str:
+    """``ServerRegistry``'s ``exclude`` argument for one agent under this profile.
 
     The registry takes one name, not a list — it grew for the one case of an
     analyst that must not see its own provider's server. A profile excluding
     several is expressed as a comma-joined value that ``handles_for`` splits,
     and ``*`` among them means every server; see ``ServerRegistry.for_agent``.
     """
-    return ",".join(active_profile(settings).exclude_servers)
+    return ",".join(sorted(_withheld_servers(settings, key)))
 
 
 def _agent_llm(container: Any, key: str) -> Any:
@@ -386,11 +419,11 @@ def resolve_agent(key: str, container: Any, job_key: str = "job") -> ResolvedAge
     _claim_in_process_tools(_sandbox_tools(container, definition), "sandbox", tools, seen)
     registry = container.get_server_registry()
     bound, bound_reasons = registry.tools_for(
-        key, job_key, exclude=_excluded_servers(settings), seen=seen
+        key, job_key, exclude=_excluded_servers(settings, key), seen=seen
     )
     tools.extend(bound)
     reasons.extend(bound_reasons)
-    for ref in _mcp_refs(settings, definition):
+    for ref in _mcp_refs(settings, definition, key):
         referenced, ref_reasons = registry.tools_for_ref(ref, job_key, seen=seen)
         tools.extend(referenced)
         reasons.extend(ref_reasons)
@@ -441,11 +474,11 @@ async def aresolve_agent(key: str, container: Any, job_key: str = "job") -> Reso
     _claim_in_process_tools(_sandbox_tools(container, definition), "sandbox", tools, seen)
     registry = container.get_server_registry()
     bound, bound_reasons = await registry.atools_for(
-        key, job_key, exclude=_excluded_servers(settings), seen=seen
+        key, job_key, exclude=_excluded_servers(settings, key), seen=seen
     )
     tools.extend(bound)
     reasons.extend(bound_reasons)
-    for ref in _mcp_refs(settings, definition):
+    for ref in _mcp_refs(settings, definition, key):
         referenced, ref_reasons = await registry.atools_for_ref(ref, job_key, seen=seen)
         tools.extend(referenced)
         reasons.extend(ref_reasons)

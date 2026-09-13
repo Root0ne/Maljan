@@ -247,11 +247,11 @@ with `uv sync --extra tools` (the backend image already does); without them
 `{"error": "<module> is not installed"}`. Nothing else changes, and the server
 starts either way.
 
-Two profiles ship built in. `default` is the three analysts with their tools.
+Two teams ship built in. `default` is the three analysts with their tools.
 `measurement` is the same three analysts with `exclude_servers: ["*"]`,
 `exclude_sandbox_tools` on and `static_provider` forced to `none` — the
 baseline for measuring what the ensemble contributes without any tool. Select
-it from Settings → Agents and pipeline like any other profile; a run under it
+it from Settings → Agents and pipeline like any other team; a run under it
 resolves each analyst to a prompt, a model and no tools at all.
 
 The wildcard is deliberate. A fixed list of the four built-in keys would still
@@ -261,11 +261,145 @@ is also the one field an operator may edit on a built-in profile, so a
 deployment that needs a variant of the baseline can write one without cloning
 it; every other field stays locked.
 
-A profile's three fields are honoured in `agents/composition.resolve_agent` and
-in the analysts' own attach path, so they apply to a custom profile too:
+A team's three fields are honoured in `agents/composition.resolve_agent` and
+in the analysts' own attach path, so they apply to a custom team too:
 `exclude_servers` withholds servers by key or `"*"` for all,
 `exclude_sandbox_tools` withholds the in-process sandbox tool set, and
-`static_provider` overrides every member's provider at once.
+`static_provider` overrides every member's provider at once. A single stage can
+withhold the four built-in sidecars from its own agents with
+`builtin_tools: false`, which stacks on top of whatever the team excludes.
+
+## Teams and stages
+
+A team (`core.agents.profiles.<key>`, edited under Settings → Agents and
+pipeline → Teams) is an ordered list of stages. Each stage is:
+
+| Field | Meaning |
+|---|---|
+| `key` | Slug, unique in the team. Names the stage everywhere it is reported. |
+| `label` | Display name; empty means the key. |
+| `kind` | `analysis`, `debate`, `verdict` or `report`. |
+| `agents` | Definition keys this stage runs. Empty on a debate stage. |
+| `depends_on` | Earlier stage keys this one runs after. |
+| `when` | Condition deciding whether it runs. Empty means always. |
+| `mode` | `sequential` (default) or `parallel`, for an analysis stage. |
+| `inject_upstream` | `none`, `findings` (default) or `full`. |
+| `debate` | Round limit, consensus threshold and sycophancy check, for a debate stage. |
+| `builtin_tools` | `false` withholds `analysis`, `knowledge`, `network` and `threatintel` from this stage's agents. |
+
+A team needs exactly one `verdict` stage and at most one `report` stage, which
+is always last. A stage may only depend on a stage declared **above** it, which
+makes the card order the run order and a cycle impossible to write down rather
+than merely detected. A debate stage needs an analysis stage upstream of it,
+and an analysis stage needs at least one agent. An agent belongs to one
+analysis stage.
+
+A debate stage hands over to exactly one **node**. It leaves through a
+conditional edge, and a conditional edge has one destination per branch, so a
+debate may not feed two stages — and may not feed a parallel analysis stage
+with more than one agent, which is two nodes even though it is one stage. A
+sequential stage of any size is one node and is fine. This is refused when the
+team is saved, not when the first job builds its graph.
+
+A team stored as a plain list of analysts — every team written before stages
+existed — is read as the four stages that list has always meant: `analysis`
+(those analysts, in `llm.parallel_analysts`' mode) → `debate` (with the round
+limit and threshold from `negotiation.*`) → `verdict` (the judge) → `report`
+(the reporter). The stored `analysts` list is kept alongside the stages it
+produced; the model reads the stages.
+
+Such a team is marked `derived_from_analysts`, and while the mark is set *and*
+its stages are still the plain conversion of its analyst list, they are rebuilt
+from that list and those two global keys on every load. The mark is checked
+rather than believed: it travels in the stored document, so it also arrives
+from an import, a script's PATCH or a hand-edited export, and a team whose
+stages someone has written is left as written and the mark cleared. That is what keeps a team nobody has opened following
+`llm.parallel_analysts`: an operator who moves from a hosted API back to the
+single-slot local model changes one setting and the team follows, instead of
+running analysts in parallel forever because it happened to be migrated on a
+day when parallel was on. The console clears the mark on the first stage edit
+— from then the stages are the operator's, and nothing rewrites them.
+
+### Conditions
+
+`when` is an expression in a small language evaluated on the worker. It is
+Python's own grammar with an allow-list on top: comparisons (`==`, `!=`, `in`,
+`not in`, `<`, `<=`, `>`, `>=`), `and`, `or`, `not`, literals, and tuples or
+lists of literals. There are no function calls, no arithmetic, no
+comprehensions and no attribute access except into `stages`. A condition that
+does not parse is refused when the team is saved; one that fails at run time
+skips its stage with the reason recorded rather than failing the job.
+
+The names it may use:
+
+| Name | Meaning |
+|---|---|
+| `file_type` | The detected type, e.g. `PE32 executable`. |
+| `platform` | The canonical platform, e.g. `windows`, `linux`, `android`. |
+| `mime` | The sandbox report's media type, when there is one. |
+| `size` | Size in bytes, when the sandbox report carries it. |
+| `extension` | The submitted file name's extension, lowercased, without the dot. |
+| `sandbox_available` | Whether a sandbox report reached this run. |
+| `has_sandbox_report` | The same fact, named for readability. |
+| `has_pcap` | Whether the report carries a non-empty network block. |
+| `stages.<key>.<field>` | A stage result: `ran`, `reason`, `claim_count`, `technique_ids`, `finding_count`, `agents`. |
+
+`stages["triage"].ran` is the same lookup as `stages.triage.ran`. A stage the
+run never reached reads as one that did not run, so naming a stage that was
+itself skipped is not an error.
+
+Examples:
+
+```
+platform == "windows"
+extension in ("apk", "dex")
+has_pcap and stages.triage.claim_count > 0
+"T1055" in stages.static.technique_ids
+not stages.detonate.ran
+size > 10485760
+```
+
+### What a stage reads
+
+`inject_upstream` decides what a stage is told about the stages it depends on.
+`none` tells it nothing, which is what the default team uses — its analysts
+have never seen each other's work before the debate. `findings` gives it each
+upstream agent's claims with their technique, confidence and evidence id.
+`full` adds each upstream agent's prose report. Both are capped by
+`core.reporting.upstream_findings_max_chars` (6000 by default), and a block
+that is cut says so.
+
+The block arrives as an `upstream_findings` field inside the stage's first
+chunk when that chunk is a JSON document, and in front of it when it is not. A
+static or generic agent's first chunk is JSON with a contract on it — the
+container-visible `analysis_file_path` is read back out of it, and putting
+prose in front would leave the agent inventing a path again.
+
+Injection never changes whether a stage has data. An agent whose loaders
+produced nothing but a "no data available" placeholder is still skipped, with
+or without a block to read.
+
+Which slice of the job an agent reads is its own setting,
+`agents.definitions.<key>.data_sources`. Empty means the slice the agent's
+*role* has always read: the parsed sample for a static analyst without a
+sandbox report and the report's `target` block with one, the behaviour log for
+a dynamic analyst, the network block for a network analyst, and the sample plus
+the whole report for a generic one. A non-empty list is taken literally and in
+order, which is the point — a clone of the static analyst can be pointed at the
+network block without becoming a network analyst:
+
+| Source | What it contributes |
+|---|---|
+| `sample.path` | The container-visible path the agent's tools open the sample at. |
+| `sample.chunks` | The parsed sample profile. |
+| `sandbox.target` | The sandbox report's `target` block. |
+| `sandbox.behavior` | The behaviour log, through the dynamic parser. |
+| `sandbox.network` | The network block, through the network parser. |
+| `sandbox.full` | The whole sandbox report. |
+
+A source with nothing behind it contributes nothing — an agent that asked for
+the network block on a sample nobody detonated has no network block, and the
+analyst node reports that once as a no-data stage rather than once per source.
 
 ## Tool servers on another host
 

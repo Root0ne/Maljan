@@ -38,7 +38,7 @@ const definitionsEntry = entry({
   editor: "agent_definitions",
   title: "Agent definitions",
 });
-const profilesEntry = entry({ key: "core.agents.profiles", type: "json", editor: "profiles", title: "Profiles" });
+const profilesEntry = entry({ key: "core.agents.profiles", type: "json", editor: "stages", title: "Profiles" });
 const activeProfileEntry = entry({ key: "core.agents.profile", type: "enum", title: "Active profile" });
 const llmAgentsEntry = entry({ key: "core.llm.agents", type: "json", title: "Per-agent overrides" });
 const mappingEntry = entry({
@@ -288,62 +288,136 @@ describe("describeChange: core.agents.definitions", () => {
 });
 
 describe("describeChange: core.agents.profiles", () => {
-  it("reports added and removed profiles", () => {
-    const before = { p1: { label: "P1", analysts: ["network"] } };
-    const after = {
-      p1: { label: "P1", analysts: ["network"] },
-      p2: { label: "P2", analysts: ["static"] },
-    };
-    const line = describeChange(profilesEntry, before, after);
-    expect(line.detail).toEqual(["p2: added"]);
+  const stage = (over: Record<string, unknown>) => ({
+    key: "analysis",
+    label: "",
+    kind: "analysis",
+    agents: [] as string[],
+    depends_on: [] as string[],
+    when: "",
+    mode: "sequential",
+    inject_upstream: "none",
+    debate: null,
+    builtin_tools: true,
+    ...over,
+  });
+  const team = (label: string, ...stages: unknown[]) => ({ label, stages, analysts: [] });
+
+  it("reports an added team", () => {
+    const line = describeChange(profilesEntry, {}, { p1: team("P1", stage({})) });
+    expect(line.detail).toEqual(["p1: added"]);
+    expect(line.summary).toBe("1 team(s) changed");
   });
 
-  it("reports a reorder without a set change", () => {
-    const before = { p1: { label: "P1", analysts: ["a", "b", "c"] } };
-    const after = { p1: { label: "P1", analysts: ["c", "a", "b"] } };
-    const line = describeChange(profilesEntry, before, after);
-    expect(line.detail).toEqual(["p1: analysts reordered (c, a, b)"]);
-  });
-
-  it("reports an analyst set change with +/- counts", () => {
-    const before = { p1: { label: "P1", analysts: ["a", "b"] } };
-    const after = { p1: { label: "P1", analysts: ["a", "c", "d"] } };
-    const line = describeChange(profilesEntry, before, after);
-    expect(line.detail).toEqual(["p1: analysts changed (+2 −1)"]);
-  });
-
-  it("reports a label-only change", () => {
-    const before = { p1: { label: "P1", analysts: ["a"] } };
-    const after = { p1: { label: "Renamed", analysts: ["a"] } };
-    const line = describeChange(profilesEntry, before, after);
-    expect(line.detail).toEqual(["p1: label changed"]);
-    expect(line.summary).toBe("1 profile(s) changed");
-  });
-
-  it("reports a removed profile", () => {
-    const before = { p1: { label: "P1", analysts: ["a"] } };
-    const after = {};
-    const line = describeChange(profilesEntry, before, after);
+  it("reports a removed team", () => {
+    const line = describeChange(profilesEntry, { p1: team("P1", stage({})) }, {});
     expect(line.detail).toEqual(["p1: removed"]);
   });
 
-  /* A rename that arrived with an analyst edit used to be swallowed
-   * by the analysts line, so the review never mentioned the new name. */
-  it("reports a rename alongside an analyst set change", () => {
-    const before = { p1: { label: "P1", analysts: ["a", "b"] } };
-    const after = { p1: { label: "Renamed", analysts: ["a", "c"] } };
-    const line = describeChange(profilesEntry, before, after);
-    expect(line.detail).toEqual(["p1: analysts changed (+1 −1)", "p1: label changed"]);
-    expect(line.summary).toBe("1 profile(s) changed");
+  it("reports an added stage with what it is", () => {
+    const before = { p1: team("P1", stage({ agents: ["a"] })) };
+    const after = {
+      p1: team(
+        "P1",
+        stage({ agents: ["a"] }),
+        stage({ key: "deep", agents: ["b"], depends_on: ["analysis"], when: "has_pcap" })
+      ),
+    };
+    expect(describeChange(profilesEntry, before, after).detail).toEqual([
+      "p1/deep: added (analysis, b, after analysis, when has_pcap)",
+    ]);
   });
 
-  it("reports a rename alongside a reorder", () => {
-    const before = { p1: { label: "P1", analysts: ["a", "b"] } };
-    const after = { p1: { label: "Renamed", analysts: ["b", "a"] } };
+  it("reports a removed stage", () => {
+    const before = { p1: team("P1", stage({ agents: ["a"] }), stage({ key: "deep" })) };
+    const after = { p1: team("P1", stage({ agents: ["a"] })) };
+    expect(describeChange(profilesEntry, before, after).detail).toEqual(["p1/deep: removed"]);
+  });
+
+  it("reports a reordered stage list once, not field by field", () => {
+    const first = stage({ key: "triage", agents: ["a"] });
+    const second = stage({ key: "deep", agents: ["b"] });
+    const before = { p1: team("P1", first, second) };
+    const after = { p1: team("P1", second, first) };
     expect(describeChange(profilesEntry, before, after).detail).toEqual([
-      "p1: analysts reordered (b, a)",
-      "p1: label changed",
+      "p1: stages reordered (deep → triage)",
     ]);
+  });
+
+  it("reports an agent set change with +/- counts", () => {
+    const before = { p1: team("P1", stage({ agents: ["a", "b"] })) };
+    const after = { p1: team("P1", stage({ agents: ["a", "c", "d"] })) };
+    expect(describeChange(profilesEntry, before, after).detail).toEqual([
+      "p1/analysis: agents changed (+2 −1)",
+    ]);
+  });
+
+  it("reports an agent reorder inside one stage", () => {
+    const before = { p1: team("P1", stage({ agents: ["a", "b"] })) };
+    const after = { p1: team("P1", stage({ agents: ["b", "a"] })) };
+    expect(describeChange(profilesEntry, before, after).detail).toEqual([
+      "p1/analysis: agents reordered (b, a)",
+    ]);
+  });
+
+  it("reports a condition change in both directions", () => {
+    const before = { p1: team("P1", stage({ agents: ["a"], when: "" })) };
+    const after = { p1: team("P1", stage({ agents: ["a"], when: 'platform == "windows"' })) };
+    expect(describeChange(profilesEntry, before, after).detail).toEqual([
+      'p1/analysis: condition always → platform == "windows"',
+    ]);
+    expect(describeChange(profilesEntry, after, before).detail).toEqual([
+      'p1/analysis: condition platform == "windows" → always',
+    ]);
+  });
+
+  it("reports a dependency change, a mode change and an upstream change", () => {
+    const before = {
+      p1: team("P1", stage({ agents: ["a"] }), stage({ key: "deep", agents: ["b"] })),
+    };
+    const after = {
+      p1: team(
+        "P1",
+        stage({ agents: ["a"], mode: "parallel" }),
+        stage({
+          key: "deep",
+          agents: ["b"],
+          depends_on: ["analysis"],
+          inject_upstream: "full",
+        })
+      ),
+    };
+    expect(describeChange(profilesEntry, before, after).detail).toEqual([
+      "p1/analysis: runs parallel",
+      "p1/deep: depends on analysis",
+      "p1/deep: upstream findings full",
+    ]);
+  });
+
+  it("reports the debate options and the built-in tool switch", () => {
+    const before = { p1: team("P1", stage({ agents: ["a"] })) };
+    const after = {
+      p1: team(
+        "P1",
+        stage({
+          agents: ["a"],
+          builtin_tools: false,
+          debate: { max_rounds: 2, consensus_threshold: 0.9, sycophancy_check: true },
+        })
+      ),
+    };
+    expect(describeChange(profilesEntry, before, after).detail).toEqual([
+      "p1/analysis: built-in tools off",
+      "p1/analysis: debate 2 round(s), threshold 0.9",
+    ]);
+  });
+
+  it("reports a team rename alongside a stage edit", () => {
+    const before = { p1: team("P1", stage({ agents: ["a", "b"] })) };
+    const after = { p1: team("Renamed", stage({ agents: ["a", "c"] })) };
+    const line = describeChange(profilesEntry, before, after);
+    expect(line.detail).toEqual(["p1/analysis: agents changed (+1 −1)", "p1: label changed"]);
+    expect(line.summary).toBe("1 team(s) changed");
   });
 });
 

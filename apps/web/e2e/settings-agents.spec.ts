@@ -10,15 +10,16 @@ import { MOCK_USER } from "./mocks";
  * group carries the four built-in definitions, the `default` profile and the
  * agent probe route.
  *
- * `AgentDefinitionsEditor` is a master–detail editor (task 12), on its own
- * route from `ProfilesEditor` (task 13) — `Agents` and `Profiles` are
- * separate groups under `/settings/configuration/agents/*`, both inside one
- * `SettingsProvider` (`configuration/layout.tsx`), so staged edits on one
- * survive a rail-link navigation to the other but not a full `page.goto`.
+ * `AgentDefinitionsEditor` is a master–detail editor, on its own route from
+ * `StagesEditor` — `Agents` and `Teams` are separate groups under
+ * `/settings/configuration/agents/*`, both inside one `SettingsProvider`
+ * (`configuration/layout.tsx`), so staged edits on one survive a rail-link
+ * navigation to the other but not a full `page.goto`.
  * `[data-agent="<key>"]` is the list row; every field lives inside the
  * selected agent's `[data-agent-detail="<key>"]`, so a test clicks the row
- * before reaching into its detail. `ProfilesEditor` stayed a plain list of
- * cards — `[data-profile="<key>"]` still carries its own controls directly.
+ * before reaching into its detail. `StagesEditor` is a plain list of team
+ * cards — `[data-profile="<key>"]` — each holding a list of stage cards,
+ * `[data-stage="<key>"]`, which carry their own controls directly.
  * The apply flow has no "Apply" button: staging shows the pending count on
  * `data-testid="changes-count"`, "Review" opens the confirmation panel, and
  * "Confirm and apply" sends the one PATCH.
@@ -102,7 +103,7 @@ test.describe("agent definitions and profiles", () => {
     });
   });
 
-  test("a profile is built from enabled analysts, ordered, set active and applied", async ({
+  test("a team is built stage by stage, set active and applied", async ({
     authenticatedPage: page,
   }) => {
     await page.goto(PROFILES_PATH);
@@ -112,20 +113,24 @@ test.describe("agent definitions and profiles", () => {
       page.locator('[data-profile="default"]').getByLabel("default label")
     ).toBeDisabled();
 
-    await page.getByLabel("new profile name").fill("lean");
-    await page.getByRole("button", { name: "Add profile" }).click();
+    await page.getByLabel("new team name").fill("lean");
+    await page.getByRole("button", { name: "Add team" }).click();
 
     const lean = page.locator('[data-profile="lean"]');
-    await lean.getByLabel("lean add analyst").selectOption("network");
-    await lean.getByLabel("lean add analyst").selectOption("static");
-    await expect(lean.getByText("1. network")).toBeVisible();
+    await lean.getByRole("button", { name: "Add stage" }).click();
 
-    // "Move up"/"Move down" share one accessible name across every analyst
-    // row and every profile, so the button is scoped to the `<li>` naming the
-    // analyst rather than picked up by a bare role-and-name locator.
-    const staticRow = lean.locator("li").filter({ hasText: "static" });
-    await staticRow.getByRole("button", { name: "Move up" }).click();
-    await expect(lean.getByText("1. static")).toBeVisible();
+    const triage = lean.locator('[data-stage="stage_1"]');
+    await triage.getByLabel("lean stage_1 key").fill("triage");
+    const renamed = lean.locator('[data-stage="triage"]');
+    await renamed.getByLabel("lean triage add agent").selectOption("static");
+    await expect(renamed.getByText("static")).toBeVisible();
+
+    // A second stage that depends on the first and only runs on Windows.
+    await lean.getByRole("button", { name: "Add stage" }).click();
+    const deep = lean.locator('[data-stage="stage_2"]');
+    await deep.getByLabel("lean stage_2 add agent").selectOption("dynamic");
+    await deep.getByLabel("lean stage_2 condition").fill('platform == "windows"');
+    await expect(deep.getByLabel("lean stage_2 depends on triage")).toBeChecked();
 
     const setActive = lean.getByRole("button", { name: "Set active" });
     await setActive.click();
@@ -149,15 +154,57 @@ test.describe("agent definitions and profiles", () => {
 
     const body = patches[0] as {
       changes: {
-        "core.agents.profiles": Record<string, { analysts: string[] }>;
+        "core.agents.profiles": Record<
+          string,
+          { stages: { key: string; agents: string[]; depends_on: string[]; when: string }[] }
+        >;
         "core.agents.profile": string;
       };
     };
-    expect(body.changes["core.agents.profiles"].lean.analysts).toEqual(["static", "network"]);
+    const staged = body.changes["core.agents.profiles"].lean.stages;
+    expect(staged.map((s) => s.key)).toEqual(["triage", "stage_2"]);
+    expect(staged[0].agents).toEqual(["static"]);
+    expect(staged[1].agents).toEqual(["dynamic"]);
+    expect(staged[1].depends_on).toEqual(["triage"]);
+    expect(staged[1].when).toBe('platform == "windows"');
     expect(body.changes["core.agents.profile"]).toBe("lean");
-    expect(body.changes["core.agents.profiles"].default.analysts).toEqual([
-      "static", "dynamic", "network",
-    ]);
+    // The built-in team goes out exactly as it came in.
+    expect(
+      body.changes["core.agents.profiles"].default.stages.map((s) => s.key)
+    ).toEqual(["analysis", "debate", "verdict", "report"]);
+  });
+
+  test("a condition the API refuses is reported under the box it was typed into", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto(PROFILES_PATH);
+
+    await page.getByLabel("new team name").fill("lean");
+    await page.getByRole("button", { name: "Add team" }).click();
+    const lean = page.locator('[data-profile="lean"]');
+    await lean.getByRole("button", { name: "Add stage" }).click();
+    const stage = lean.locator('[data-stage="stage_1"]');
+    await stage.getByLabel("lean stage_1 add agent").selectOption("static");
+    await stage.getByLabel("lean stage_1 condition").fill("bogus == 1");
+
+    await page.route("**/api/v1/settings", (r) => {
+      if (r.request().method() === "PATCH") {
+        return r.fulfill({
+          status: 422,
+          json: {
+            errors: {
+              "core.agents.profiles.lean.stages.stage_1.when":
+                "unknown name 'bogus'; the condition may use: platform, size",
+            },
+          },
+        });
+      }
+      return r.fallback();
+    });
+    await page.getByRole("button", { name: "Review" }).click();
+    await page.getByRole("button", { name: "Confirm and apply" }).click();
+
+    await expect(stage.getByRole("alert")).toContainText("unknown name 'bogus'");
   });
 
   test("a generic analyst is created with a prompt and one server tool", async ({
@@ -441,9 +488,9 @@ test.describe("agent definitions and profiles", () => {
     // A rail-link switch keeps both editors' staged edits in the one
     // `SettingsProvider` the whole /settings/configuration tree shares — a
     // `page.goto` would remount the layout and drop the "nameless" agent.
-    await page.getByRole("link", { name: /^Profiles/ }).click();
-    await page.getByLabel("new profile name").fill("lean");
-    await page.getByRole("button", { name: "Add profile" }).click();
+    await page.getByRole("link", { name: /^Teams/ }).click();
+    await page.getByLabel("new team name").fill("lean");
+    await page.getByRole("button", { name: "Add team" }).click();
 
     await page.route("**/api/v1/settings", (r) => {
       if (r.request().method() === "PATCH") {

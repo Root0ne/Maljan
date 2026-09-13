@@ -333,6 +333,7 @@ class MaljanApp:
             "sample_path": sample_path,
             "static_sample_path": static_sample_path,
             "static_sample_paths": dict(static_sample_paths or {}),
+            "stage_results": {},
             "remote_sample_paths": {},
             "sandbox_report": sandbox_report,
             "file_type": file_type,

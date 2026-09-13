@@ -53,7 +53,7 @@ function countEnabled(value: unknown, skip: (key: string) => boolean = () => fal
  *  custom analyst. Duplicated from `AgentDefinitionsEditor.BUILTIN_AGENT_KEYS`
  *  rather than imported so this module stays free of React imports (it is
  *  unit-tested on its own). */
-const BUILTIN_AGENTS = new Set(["static", "dynamic", "network", "judge"]);
+const BUILTIN_AGENTS = new Set(["static", "dynamic", "network", "judge", "reporter"]);
 
 /**
  * Whether the language-model settings could plausibly run an analysis: a

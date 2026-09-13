@@ -2,7 +2,7 @@
 
 Live-verification defect L1 (2026-09-06): a ``generic`` agent definition
 (``strings``, bound to an r2 MCP server) ran in a live job and ended with
-status ``no_data`` and zero claims. ``make_analyst_node`` chose a generic
+status ``no_data`` and zero claims. ``make_stage_agent_node`` chose a generic
 role's input the same way it chooses ``dynamic``/``network``'s — a sandbox
 slice from ``load_sandbox_data_for_agent`` — and with the mock sandbox
 carrying no report for the sample, the loader fell through to its own
@@ -27,11 +27,14 @@ guard against a regression in a later refactor.
 from __future__ import annotations
 
 import json
+from types import MethodType
 from typing import Any
 from unittest.mock import MagicMock
 
+from maljan.core.container import ServiceContainer
 from maljan.loaders.binary_chunker import TextChunk
-from maljan.pipeline.nodes import _is_placeholder_only, make_analyst_node, make_revision_node
+from maljan.pipeline.nodes import _is_placeholder_only, make_revision_node, make_stage_agent_node
+from tests.stages import ANALYSIS_STAGE, paper_profile
 
 
 def _chunk(content: str) -> TextChunk:
@@ -72,6 +75,22 @@ def _container(agent: MagicMock, *, role: str, load_chunked_return: list[TextChu
     container.agent_role.return_value = role
     container.load_chunked.return_value = load_chunked_return
     container.config.llm.view_decomposition_views = 0
+    # Which slice an agent gets is the container's answer now, not the node's
+    # branch, so the real methods are bound onto the double: a stub here would
+    # be a second implementation of the thing under test. Nothing in the
+    # definition map means every agent takes its role's historical default,
+    # which is what these tests are about.
+    container.config.agents.definitions = {}
+    container.loader.chunk_text.side_effect = lambda _name, text: [_chunk(text)]
+    container.parser_registry.create.side_effect = KeyError("no parser in this double")
+    for name in (
+        "load_data_for_agent",
+        "_data_source_chunks",
+        "_sandbox_slice",
+        "_legacy_role_data",
+    ):
+        setattr(container, name, MethodType(getattr(ServiceContainer, name), container))
+    container.active_profile.return_value = paper_profile([role])
     container._events = events  # test handle
     return container
 
@@ -92,7 +111,7 @@ class TestGenericFirstPassGetsStaticContext:
         agent = _agent()
         container = _container(agent, role="generic", load_chunked_return=_placeholder("strings"))
 
-        node = make_analyst_node("strings", container)
+        node = make_stage_agent_node(ANALYSIS_STAGE, "strings", container)
         result = node(_base_state())
 
         agent.safe_analyze_isr.assert_called_once()
@@ -106,15 +125,11 @@ class TestGenericFirstPassGetsStaticContext:
         both the static sample context and the sandbox slice."""
         agent = _agent()
         container = _container(agent, role="generic", load_chunked_return=_placeholder("strings"))
-        sandbox_report = {"target": {"sha256": "abc123"}, "network": {}}
-        container.load_sandbox_data_for_agent.return_value = [
-            _chunk(json.dumps({"marker": "sandbox-slice-here"}))
-        ]
+        sandbox_report = {"target": {"sha256": "abc123"}, "marker": "sandbox-slice-here"}
 
-        node = make_analyst_node("strings", container)
+        node = make_stage_agent_node(ANALYSIS_STAGE, "strings", container)
         node(_base_state(sandbox_report=sandbox_report))
 
-        container.load_sandbox_data_for_agent.assert_called_once_with("strings", sandbox_report)
         agent.safe_analyze_isr_chunked.assert_called_once()
         chunks_arg = agent.safe_analyze_isr_chunked.call_args[0][0]
         contents = [c.content for c in chunks_arg]
@@ -132,7 +147,7 @@ class TestGenericFirstPassGetsStaticContext:
         agent = _agent()
         container = _container(agent, role="generic", load_chunked_return=_placeholder("strings"))
 
-        node = make_analyst_node("strings", container)
+        node = make_stage_agent_node(ANALYSIS_STAGE, "strings", container)
         result = node({"file_hash": "abc123"})
 
         agent.safe_analyze_isr.assert_called_once()
@@ -152,6 +167,10 @@ class TestGenericRevisionIsNotSkipped:
         container.is_mock = False
         container.config.llm.parallel_analysts = False
         container.load_chunked.side_effect = lambda _h, _n: _placeholder("strings")
+        container.config.agents.definitions = {}
+        container.loader.chunk_text.side_effect = lambda _name, text: [_chunk(text)]
+        container.load_data_for_agent = MethodType(ServiceContainer.load_data_for_agent, container)
+        container._legacy_role_data = MethodType(ServiceContainer._legacy_role_data, container)
 
         agent = _agent()
         agent.safe_revise_isr.return_value = ("strings revised", _isr())
@@ -191,7 +210,7 @@ class TestBuiltinRolesAreUnaffected:
         agent = _agent()
         container = _container(agent, role="dynamic", load_chunked_return=_placeholder("dynamic"))
 
-        node = make_analyst_node("dynamic", container)
+        node = make_stage_agent_node(ANALYSIS_STAGE, "dynamic", container)
         result = node(_base_state())
 
         agent.safe_analyze_isr.assert_not_called()
@@ -200,16 +219,15 @@ class TestBuiltinRolesAreUnaffected:
     def test_network_with_a_sandbox_report_takes_only_the_sandbox_slice(self) -> None:
         agent = _agent()
         container = _container(agent, role="network", load_chunked_return=_placeholder("network"))
-        container.load_sandbox_data_for_agent.return_value = [_chunk("parsed network trace")]
-        sandbox_report = {"network": {"http": []}}
+        sandbox_report = {"network": {"http": ["parsed network trace"]}, "target": {"x": 1}}
 
-        node = make_analyst_node("network", container)
+        node = make_stage_agent_node(ANALYSIS_STAGE, "network", container)
         node(_base_state(sandbox_report=sandbox_report))
 
-        container.load_sandbox_data_for_agent.assert_called_once_with("network", sandbox_report)
         container.load_chunked.assert_not_called()
         shown = agent.safe_analyze_isr.call_args[0][0]
-        assert shown == "parsed network trace"
+        assert "parsed network trace" in shown
+        assert '"target"' not in shown
 
     def test_static_augmentation_and_path_pinning_are_unchanged(self) -> None:
         agent = _agent(provider_id="r2")
@@ -222,7 +240,7 @@ class TestBuiltinRolesAreUnaffected:
             static_sample_paths={"r2": "/host/work/abc123.exe"},
         )
 
-        node = make_analyst_node("static_r2", container)
+        node = make_stage_agent_node(ANALYSIS_STAGE, "static_r2", container)
         node(dict(state, sample_path="/tmp/abc123.exe"))
 
         shown = agent.safe_analyze_isr.call_args[0][0]
@@ -248,7 +266,7 @@ class TestTheGenericContextAlwaysCarriesAnAbsolutePath:
     def _shown(self, state: dict[str, Any], *, provider_id: str) -> str:
         agent = _agent(provider_id)
         container = _container(agent, role="generic", load_chunked_return=_placeholder("qs"))
-        node = make_analyst_node("qs", container)
+        node = make_stage_agent_node(ANALYSIS_STAGE, "qs", container)
         node(state)
         agent.safe_analyze_isr.assert_called_once()
         return str(agent.safe_analyze_isr.call_args[0][0])
@@ -299,7 +317,7 @@ class TestTheGenericContextAlwaysCarriesAnAbsolutePath:
         placeholder passes through, and the agent is still not skipped."""
         agent = _agent("none")
         container = _container(agent, role="generic", load_chunked_return=_placeholder("qs"))
-        node = make_analyst_node("qs", container)
+        node = make_stage_agent_node(ANALYSIS_STAGE, "qs", container)
         result = node({"file_hash": "abc123"})
         agent.safe_analyze_isr.assert_called_once()
         assert "analyst skipped" not in result["reports"]["qs"]
@@ -323,7 +341,7 @@ class TestAGenericAgentIsPinnedToTheSamplePathToo:
         agent = _agent(provider_id)
         agent._analysis_file_path = "/stale/from/a/previous/sample.exe"
         container = _container(agent, role="generic", load_chunked_return=_placeholder("qs"))
-        node = make_analyst_node("static_qu1cksc0pe", container)
+        node = make_stage_agent_node(ANALYSIS_STAGE, "static_qu1cksc0pe", container)
         node(state)
         return agent._analysis_file_path
 
