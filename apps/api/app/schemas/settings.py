@@ -70,6 +70,11 @@ class PatchRequest(BaseModel):
 class PatchResponse(BaseModel):
     applied: list[str]
     applies: dict[str, int]
+    # Advisory, keyed by the same dotted path the 422 errors use. A warning
+    # never refuses the write — it is what the console draws on the card the
+    # operator was editing, for a configuration that is legal and will not do
+    # what they expect.
+    warnings: dict[str, str] = Field(default_factory=dict)
 
 
 class ResetResponse(BaseModel):

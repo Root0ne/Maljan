@@ -39,6 +39,12 @@ change landed on `main`.
   stage that ran them. The live page shows the same strip, and the agents table
   groups by stage and counts each agent's tool calls from the ledger. A run
   stored before the team was stages keeps the flat chain it always had.
+- **A team that cannot use the tools it names says so.** A stage whose agents
+  read the static provider's tools on a deployment where `static.provider` is
+  `none` gets a non-blocking warning on its card, keyed by the same dotted path
+  a validation error uses and carried on the settings PATCH response.
+  `deep_static`'s reverser is the case it was written for: the stage runs, and
+  the prompt it runs is written around a decompiler it will not have.
 - **A stage condition is checked as it is typed.** `POST
   /api/v1/settings/validate-condition` runs the same `pipeline.conditions`
   parser against one expression and stores nothing; the stage editor calls it
@@ -208,6 +214,29 @@ change landed on `main`.
 
 ### Fixed
 
+- **A name the product later seeds no longer breaks the configuration.** An
+  operator's own agent or team stored under `triage`, `android_static`,
+  `reverser`, `mobile` or `deep_static` was refused as tampering with a
+  built-in — on every read, which is to say at boot, by an API and a worker
+  that then could not be repaired from a console needing the configuration to
+  load. Such an entry is renamed to `<key>_custom` on load and by
+  `20260917000000_rename_colliding_agent_keys`, with every reference moved with
+  it: the teams that named it, `llm.agents`, each server's `agents` binding and
+  both `react_*_overrides` maps. Names reserved since there was a settings
+  store, and names typed after a seed exists, are still refused.
+- **Sections routed to the identity tab were drawn nowhere.** `identity` and
+  every `<format>_header` table — the header of every binary-info tool — were
+  routed to a tab that had no renderer, and were therefore also excluded from
+  the evidence tab's catch-all, so they were built, persisted, counted in the
+  evidence metrics and shown on no page. The identity tab draws them now, and
+  the catch-all is keyed on whether a tab actually renders sections rather than
+  on a hand-kept list, so the next tab added without a renderer costs a section
+  its page and never loses it.
+- **The heatmap counted the judge differently from the backend.** The console
+  matched the layer name case-insensitively and trimmed; `capability_matrix.py`
+  compares exactly, and a layer name is a validated agent key. The two could
+  therefore disagree about the same run — the one thing a shared rule exists to
+  prevent. The console compares exactly.
 - **A stage announced its end once per node.** Two shapes had no node of their
   own that runs after everything in them is done — a parallel analysis stage
   nothing depends on, whose agents all end at once, and a terminal debate,

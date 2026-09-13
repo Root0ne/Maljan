@@ -104,6 +104,32 @@ async def get_values(
     return ValuesResponse(values={k: ValueDTO(**vars(v)) for k, v in vals.items()})
 
 
+async def _agent_warnings(db: AsyncSession) -> dict[str, str]:
+    """What is worth saying about the teams as they now stand.
+
+    Read after the write rather than from the patch, because a warning is
+    about the configuration that resulted: a PATCH that only changed the
+    static provider is exactly the one that can turn a team's reversing stage
+    tool-free, and it names no team at all.
+
+    Never raises. The write has already succeeded and been audited by the time
+    this runs, so a failure here must cost the operator an advisory note, not
+    turn a saved change into a 500 that says it was not saved.
+    """
+    from app.services.agent_map import effective_definitions, effective_profiles, profile_warnings
+
+    try:
+        stored = await SettingsService(db).load_overrides()
+        return profile_warnings(
+            effective_profiles(stored),
+            definitions=effective_definitions(stored),
+            overrides=stored,
+        )
+    except Exception as exc:  # noqa: BLE001 — advisory, and the write is done
+        logger.debug("Could not compute settings warnings (%s); continuing.", log_safe(str(exc)))
+        return {}
+
+
 @router.patch("", response_model=PatchResponse)
 async def patch_values(
     body: PatchRequest,
@@ -119,7 +145,9 @@ async def patch_values(
         )
     runtime_config.invalidate()
     core_settings_cache.invalidate()
-    return PatchResponse(applied=res.applied, applies=res.applies)
+    return PatchResponse(
+        applied=res.applied, applies=res.applies, warnings=await _agent_warnings(db)
+    )
 
 
 @router.delete("", response_model=ResetResponse)
@@ -323,7 +351,11 @@ async def import_values(
         )
     runtime_config.invalidate()
     core_settings_cache.invalidate()
-    return PatchResponse(applied=res.applied, applies=res.applies)
+    # An import can bring in a whole team just as a patch can, so it answers
+    # with the same advisory notes.
+    return PatchResponse(
+        applied=res.applied, applies=res.applies, warnings=await _agent_warnings(db)
+    )
 
 
 async def _probe_response(coro: Awaitable[Any]) -> ProbeResponse:

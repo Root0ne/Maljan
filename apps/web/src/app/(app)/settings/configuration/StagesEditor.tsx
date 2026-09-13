@@ -72,6 +72,7 @@ export default function StagesEditor({
   definitions,
   activeProfile,
   errors,
+  warnings,
   onChange,
   onSetActive,
 }: {
@@ -85,6 +86,10 @@ export default function StagesEditor({
    *  `core.agents.profiles.<team>.stages.<stage>.<field>`), so a rejected
    *  stage is named on its own card rather than in a leaf-wide banner. */
   errors: Record<string, string>;
+  /** Advisory notes from the last apply, keyed by the same dotted path. A
+   *  warning is a legal configuration that will not do what it looks like it
+   *  does, so it sits on the stage card rather than blocking the save. */
+  warnings: Record<string, string>;
   onChange: (value: Record<string, ProfileEntry>) => void;
   onSetActive: (name: string) => void;
 }) {
@@ -203,6 +208,12 @@ export default function StagesEditor({
   const errorFor = (path: string, exact = false) =>
     Object.entries(errors).find(([k]) => (exact ? k === path : k === path || k.startsWith(`${path}.`)))?.[1];
 
+  // The API keys a warning by the same dotted path it keys an error by —
+  // `core.agents.profiles.<team>.stages.<stage>` — so the same lookup serves
+  // both and a warning lands on the card the operator was editing.
+  const warningFor = (path: string) =>
+    Object.entries(warnings).find(([k]) => k === path || k.startsWith(`${path}.`))?.[1];
+
   return (
     <div className="space-y-3" data-testid="stages-editor">
       {Object.entries(value).map(([key, profile]) => {
@@ -275,6 +286,7 @@ export default function StagesEditor({
                   analysts={analysts}
                   locked={locked}
                   error={errorFor(`${entry.key}.${key}.stages.${stage.key}`)}
+                  warning={warningFor(`${entry.key}.${key}.stages.${stage.key}`)}
                   onPatch={(next) => putStage(key, index, next)}
                   onMove={(by) => moveStage(key, index, by)}
                   onRemove={() => removeStage(key, index)}
@@ -342,6 +354,7 @@ function StageCard({
   analysts,
   locked,
   error,
+  warning,
   onPatch,
   onMove,
   onRemove,
@@ -354,6 +367,7 @@ function StageCard({
   analysts: string[];
   locked: boolean;
   error: string | undefined;
+  warning: string | undefined;
   onPatch: (next: Partial<StageEntry>) => void;
   onMove: (by: number) => void;
   onRemove: () => void;
@@ -667,6 +681,13 @@ function StageCard({
       {error && (
         <p className="text-[11px] text-status-red mt-2" role="alert">
           {error}
+        </p>
+      )}
+      {/* A warning is not a refusal: the team saved, and this says what it
+        * will do that the card does not show. */}
+      {warning && (
+        <p className="text-[11px] text-status-orange mt-2" role="status">
+          {warning}
         </p>
       )}
     </li>

@@ -67,7 +67,11 @@ def test_patch_returns_applies_summary(client):
     ):
         r = client.patch("/api/v1/settings", json={"changes": {"core.llm.provider": "openai"}})
     assert r.status_code == 200
-    assert r.json() == {"applied": ["core.llm.provider"], "applies": {"next_job": 1}}
+    assert r.json() == {
+        "applied": ["core.llm.provider"],
+        "applies": {"next_job": 1},
+        "warnings": {},
+    }
 
 
 def test_patch_validation_error_is_422_with_field_map(client):

@@ -315,12 +315,45 @@ and asked to confirm or refute it at function level.
 
 `reverser` takes `ToolRef(kind="provider")` rather than a named server, which
 means the tools of whichever static provider this deployment configured. On a
-deployment with `static.provider = none` the stage still runs and has nothing
-to decompile with, which is worth knowing before selecting the team.
+deployment with `static.provider = none` that reference resolves to nothing:
+the stage still runs, and its prompt still asks it to open a decompiler, so
+what comes out is a confident ungrounded answer rather than a visible failure.
+
+Saving such a team is allowed and says so. A team validated against a runtime
+provider setting could not be saved before the provider was configured, and the
+order those two happen in is the operator's — so the settings API answers a
+successful write with a **warning** on that stage instead of refusing it, and
+the console draws it on the stage card: *"reverser reads the static provider's
+tools, and this deployment's static provider is 'none'."* A stage whose agents
+have no other tools at all is named as running with nothing to call; one that
+also holds a tool server, as `deep_static`'s reverser does, is named as running
+without the decompiler.
 
 Like every built-in team, all four are editable only in their debate options,
 their `builtin_tools` switches and `exclude_servers`. Everything else means
 cloning the team, which the console does in one click.
+
+### A name a later release takes
+
+Seeding a built-in takes a name. `triage`, `android_static`, `reverser`,
+`mobile` and `deep_static` were all legal names for an operator's own agent or
+team before they were seeded, and a stored entry under one of them would
+otherwise be refused as tampering with a built-in — on every read, which is to
+say at boot.
+
+So a stored entry under one of those five names that is not the seed is renamed
+out of the way on load: `reverser` becomes `reverser_custom`, and every
+reference to it moves with it — the teams that named it, the per-agent model
+entry under `llm.agents`, each server's `agents` binding and both
+`react_*_overrides` maps. The rename is logged once at warning level, and
+`alembic upgrade head` writes it into the stored document so the console shows
+the new name rather than renaming the same document on every read.
+
+This applies only to names a release newly reserved. `static`, `dynamic`,
+`network`, `judge`, `reporter`, `default` and `measurement` have been reserved
+for as long as there has been a settings store, so a stored document that edits
+one of those is still refused, and a name typed into the console after the seed
+exists is still refused per field while it is being typed.
 
 A team needs exactly one `verdict` stage and at most one `report` stage, which
 is always last. A stage may only depend on a stage declared **above** it, which

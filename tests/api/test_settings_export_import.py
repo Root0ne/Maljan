@@ -257,7 +257,11 @@ def test_import_round_trip_saves_through_settings_service_and_audits(client):
             json={"format": "maljan-settings/1", "values": {"core.llm.provider": "openai"}},
         )
     assert r.status_code == 200
-    assert r.json() == {"applied": ["core.llm.provider"], "applies": {"next_job": 1}}
+    assert r.json() == {
+        "applied": ["core.llm.provider"],
+        "applies": {"next_job": 1},
+        "warnings": {},
+    }
     save.assert_awaited_once()
     assert save.call_args.args[0] == {"core.llm.provider": "openai"}
     audit_record.assert_awaited_once()
@@ -314,7 +318,7 @@ def test_import_audits_nothing_when_no_key_was_applied(client):
             json={"format": "maljan-settings/1", "values": {}},
         )
     assert r.status_code == 200
-    assert r.json() == {"applied": [], "applies": {}}
+    assert r.json() == {"applied": [], "applies": {}, "warnings": {}}
     save.assert_awaited_once()
     audit_record.assert_not_called()
 

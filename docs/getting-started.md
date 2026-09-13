@@ -154,8 +154,6 @@ finishes, the report appears under the analysis detail page, and the same
 content is available as Markdown, HTML, PDF, STIX 2.1 and a MITRE view under
 `/api/v1/reports/{report_id}/...` — see [api.md](api.md).
 
-![The analysis summary](assets/analysis-summary.png)
-
 Read the report from the evidence up rather than from the verdict down. Every
 section of it carries the ledger ids it was built from, rendered as chips; a
 chip opens that call on the EVIDENCE tab with its arguments, its result and how
