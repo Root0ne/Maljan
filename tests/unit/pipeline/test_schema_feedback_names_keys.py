@@ -74,3 +74,28 @@ class TestTheFeedbackNamesTheKeys:
         assert violations
         assert "accepts only these keys" not in violations[0].message
         assert "this object's keys are" not in violations[0].message
+
+
+class TestANestedObjectNamesItsOwnKeys:
+    """A bad key inside a list of sub-objects was answered with the outer
+    answer's keys, none of which belong there."""
+
+    def test_the_keys_belong_to_the_object_that_rejected_the_field(self) -> None:
+        from maljan.reporting.narrative_agent import NarrativeOutput
+
+        violations = schema_violations(
+            NarrativeOutput,
+            {
+                "executive_summary": "x" * 130,
+                "capabilities_narrative": ["a", "b", "c"],
+                "defensive_recommendations": [{"title": "t"}],
+            },
+            code="narrative.schema",
+        )
+
+        nested = [v for v in violations if v.path.startswith("defensive_recommendations.0")]
+        assert nested
+        for violation in nested:
+            assert "action" in violation.message
+            assert "rationale" in violation.message
+            assert "executive_summary" not in violation.message

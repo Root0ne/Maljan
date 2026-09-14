@@ -666,7 +666,7 @@ def _amended_validation(run_summary: Any, tally: ValidationTally) -> dict[str, A
     ``None`` when there is nothing to amend — no summary (mock mode, where the
     judge never built one) or no corrections in the report stage.
     """
-    if not tally.retries and not tally.by_code:
+    if not tally.retries and not tally.by_code and not tally.unresolved:
         return None
     block = dict((run_summary or {}).get("validation") or {}) if run_summary else {}
     if not block:
@@ -676,6 +676,10 @@ def _amended_validation(run_summary: Any, tally: ValidationTally) -> dict[str, A
         by_code[code] = int(by_code.get(code, 0)) + int(count)
     block["by_code"] = dict(sorted(by_code.items()))
     block["retries"] = int(block.get("retries") or 0) + tally.retries
+    # A capability claim the run does not establish survives into the report,
+    # because deleting the sentence would leave neither the claim nor a record
+    # of it. The row is how a reader learns the summary outran the evidence.
+    block["unresolved"] = [*(block.get("unresolved") or []), *tally.unresolved]
     return block
 
 

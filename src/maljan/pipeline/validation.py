@@ -77,16 +77,28 @@ class ValidationTally:
 
     retries: int = 0
     by_code: dict[str, int] = field(default_factory=dict)
+    # What this producer was told and did not fix, with the producer's name, in
+    # the shape ``run_summary.validation.unresolved`` carries. The report
+    # stage's two rounds run after the summary is built and have nowhere else
+    # to put theirs.
+    unresolved: list[dict[str, str]] = field(default_factory=list)
 
     def count(self, violations: Sequence[Violation]) -> None:
         """Count a set of violations. The shape ``on_feedback`` is called with."""
         for violation in violations:
             self.by_code[violation.code] = self.by_code.get(violation.code, 0) + 1
 
+    def record_unresolved(self, producer: str, violations: Sequence[Violation]) -> None:
+        """Keep what survived the retry, as a row naming who was told."""
+        self.unresolved.extend(
+            {"agent": producer, "code": v.code, "message": v.message} for v in violations
+        )
+
     def merge(self, other: ValidationTally) -> None:
         self.retries += other.retries
         for code, count in other.by_code.items():
             self.by_code[code] = self.by_code.get(code, 0) + count
+        self.unresolved.extend(other.unresolved)
 
     def to_dict(self) -> dict[str, Any]:
         return {"retries": int(self.retries), "by_code": dict(sorted(self.by_code.items()))}
@@ -315,6 +327,275 @@ def schema_violations(model: Any, payload: Any, *, code: str) -> list[Violation]
 
 
 # ---------------------------------------------------------------------------
+# The report's prose
+# ---------------------------------------------------------------------------
+
+UNGROUNDED_CAPABILITY_CODE = "narrative.ungrounded_capability"
+
+# The capability each term claims, and what in a run would establish it: an
+# ATT&CK technique (matched on the base id, so a sub-technique counts), or an
+# evidence section / typed block whose presence means the run looked at that
+# behaviour and found something.
+#
+# The list is fixed rather than derived, and short rather than exhaustive.
+# These are the words that turn a thin run into a confident-sounding report:
+# run 3's executive summary asserted "active command-and-control
+# communication", "data exfiltration" and "persistent backdoor access" for a
+# sample whose whole analysis was one technique (T1027) and no network or
+# sandbox data at all. A term nobody over-claims does not need to be here.
+CAPABILITY_TERMS: tuple[tuple[str, str, tuple[str, ...], tuple[str, ...]], ...] = (
+    (
+        "command and control",
+        r"command[\s-]and[\s-]control|\bc2\b|\bc&c\b|\bcnc\b",
+        ("T1071", "T1090", "T1095", "T1102", "T1104", "T1105", "T1132", "T1571", "T1573"),
+        ("network", "c2", "connections", "http", "dns"),
+    ),
+    (
+        "exfiltration",
+        r"exfiltrat\w*",
+        ("T1020", "T1029", "T1041", "T1048", "T1030", "T1567"),
+        ("network", "exfiltration", "connections"),
+    ),
+    (
+        "backdoor",
+        r"backdoor\w*",
+        ("T1071", "T1219", "T1505", "T1546", "T1543", "T1547"),
+        ("network", "persistence", "services"),
+    ),
+    (
+        "keylogging",
+        r"keylog\w*|keystroke\w*",
+        ("T1056",),
+        ("dynamic", "hooks", "input"),
+    ),
+    (
+        "ransomware",
+        r"ransom\w*",
+        ("T1486", "T1490", "T1491", "T1485"),
+        ("ransom_note", "encryption_scheme"),
+    ),
+    (
+        "encryption",
+        r"encrypt\w*|cryptograph\w*",
+        ("T1027", "T1022", "T1486", "T1573", "T1140"),
+        ("encryption_scheme", "crypto", "strings"),
+    ),
+    (
+        "persistence",
+        r"persist\w*",
+        ("T1053", "T1136", "T1197", "T1505", "T1543", "T1546", "T1547", "T1574"),
+        ("persistence", "registry", "services", "scheduled_tasks"),
+    ),
+    (
+        "process injection",
+        r"inject\w*",
+        ("T1055", "T1620", "T1106"),
+        ("dynamic", "processes", "imports"),
+    ),
+    (
+        "lateral movement",
+        r"lateral[\s-]movement",
+        ("T1021", "T1080", "T1210", "T1534", "T1570"),
+        ("network", "smb", "connections"),
+    ),
+    (
+        "credential theft",
+        r"credential\w*|password[\s-]steal\w*|\bstealer\b",
+        ("T1003", "T1552", "T1555", "T1056", "T1539"),
+        ("credentials", "browser", "files_read"),
+    ),
+    (
+        "downloader or dropper",
+        r"\bdownloader\b|\bdropper\b|\bloader\b",
+        ("T1105", "T1204", "T1608", "T1027"),
+        ("network", "dropped_files", "files_written"),
+    ),
+    (
+        "rootkit",
+        r"rootkit\w*",
+        ("T1014", "T1215", "T1542", "T1564"),
+        ("drivers", "kernel"),
+    ),
+    (
+        "spyware",
+        r"spyware|surveillance",
+        ("T1056", "T1113", "T1123", "T1125"),
+        ("dynamic", "screenshots"),
+    ),
+)
+
+_COMPILED_CAPABILITY_TERMS = tuple(
+    (label, re.compile(pattern, re.IGNORECASE), techniques, keys)
+    for label, pattern, techniques, keys in CAPABILITY_TERMS
+)
+
+
+@dataclass(frozen=True)
+class CapabilityGrounding:
+    """What a run established, in the three shapes the terms are checked against.
+
+    Built once per report and handed to the validator, so the narrative round
+    and each of the composer's sections ask the same question of the same run.
+    """
+
+    technique_ids: frozenset[str] = frozenset()
+    evidence_keys: frozenset[str] = frozenset()
+    evidence_text: str = ""
+
+    def grounds(
+        self, techniques: Sequence[str], keys: Sequence[str], pattern: re.Pattern[str]
+    ) -> bool:
+        """Whether the run supports a term by technique, by section, or by word.
+
+        The third is not a loophole. An analyst that wrote "the sample resolves
+        a hard-coded C2 host from its strings" has grounded the phrase whether
+        or not anybody mapped it to T1071, and a report is allowed to repeat
+        what its own evidence says. What is forbidden is the report being the
+        first place the word appears.
+        """
+        if any(base in self.technique_ids for base in techniques):
+            return True
+        if any(key in self.evidence_keys for key in keys):
+            return True
+        return bool(self.evidence_text and pattern.search(self.evidence_text))
+
+    def summary(self) -> str:
+        """What the run does have, for the feedback turn to offer instead."""
+        techniques = ", ".join(sorted(self.technique_ids)) or "no ATT&CK techniques"
+        keys = ", ".join(sorted(self.evidence_keys)) or "no evidence sections"
+        return f"This run established {techniques}, and has {keys}."
+
+    @classmethod
+    def from_report(cls, report: Any, isr_reports: Any = None) -> CapabilityGrounding:
+        """Read a ``MalwareReport`` (and optionally the analysts' ISRs).
+
+        Never raises: a grounding that cannot be read is an empty one, and an
+        empty one grounds nothing — which would fail every term — so a read
+        that finds nothing at all returns a grounding that checks nothing. A
+        report the validator cannot understand must not become a report full of
+        violations.
+        """
+        techniques: set[str] = set()
+        keys: set[str] = set()
+        words: list[str] = []
+        try:
+            for row in list(getattr(report, "ttp_mappings", None) or []) + list(
+                getattr(report, "capability_matrix", None) or []
+            ):
+                base = _base_technique(getattr(row, "technique_id", ""))
+                if base:
+                    techniques.add(base)
+                words.append(str(getattr(row, "technique_name", "") or ""))
+            for block in ("static", "dynamic", "network"):
+                if getattr(report, block, None) is not None:
+                    keys.add(block)
+            if list(getattr(report, "persistence", None) or []):
+                keys.add("persistence")
+            for section in getattr(report, "sections", None) or []:
+                key = str(getattr(section, "key", "") or "").strip().lower()
+                if key:
+                    keys.add(key)
+                words.append(str(getattr(section, "title", "") or ""))
+                for row in getattr(section, "rows", None) or []:
+                    words.extend(str(cell) for cell in row)
+                words.append(str(getattr(section, "text", "") or ""))
+            values = isr_reports.values() if hasattr(isr_reports, "values") else ()
+            for isr in values:
+                for claim in getattr(isr, "claims", None) or []:
+                    words.append(str(getattr(claim, "claim", "") or ""))
+                    base = _base_technique(str(getattr(claim, "technique_id", "") or ""))
+                    if base:
+                        techniques.add(base)
+                for finding in getattr(isr, "findings", None) or []:
+                    words.append(str(getattr(finding, "title", "") or ""))
+        except Exception as exc:  # noqa: BLE001 — an unreadable run grounds nothing
+            logger.debug("validation: the capability grounding could not be read (%s).", exc)
+        return cls(
+            technique_ids=frozenset(techniques),
+            evidence_keys=frozenset(keys),
+            evidence_text=" ".join(w for w in words if w).lower(),
+        )
+
+
+def _base_technique(technique_id: Any) -> str:
+    """``T1055.012`` as ``T1055``; anything else as ""."""
+    value = str(technique_id or "").strip().upper()
+    return value.split(".")[0] if _TID_RE.match(value) else ""
+
+
+def ungrounded_capabilities(
+    text: str, grounding: CapabilityGrounding, *, code: str = UNGROUNDED_CAPABILITY_CODE
+) -> list[Violation]:
+    """Capability claims in ``text`` that this run's evidence does not support.
+
+    One violation per term, so the feedback turn names each one and the run
+    summary counts them. The prose itself is never edited: what an unresolved
+    term buys is a reader who can see that the sentence outran the evidence,
+    which is worth more than a summary quietly rewritten by a regular
+    expression into something no model wrote.
+    """
+    if not text or not text.strip():
+        return []
+    if not grounding.technique_ids and not grounding.evidence_keys and not grounding.evidence_text:
+        # Nothing was read, so nothing can be judged ungrounded. See
+        # ``CapabilityGrounding.from_report``.
+        return []
+    violations: list[Violation] = []
+    for label, pattern, techniques, keys in _COMPILED_CAPABILITY_TERMS:
+        if not pattern.search(text):
+            continue
+        if grounding.grounds(techniques, keys, pattern):
+            continue
+        violations.append(
+            Violation(
+                code=code,
+                message=(
+                    f"the text claims {label}, which nothing in this run establishes — "
+                    f"no {', '.join(techniques[:3])} technique, no matching evidence "
+                    f"section, and no analyst said it. {grounding.summary()} "
+                    "Describe what was found, or drop the claim."
+                ),
+                path=label.replace(" ", "_"),
+            )
+        )
+    return violations
+
+
+def narrative_capability_violations(
+    payload: Any, grounding: CapabilityGrounding
+) -> list[Violation]:
+    """:func:`ungrounded_capabilities` over a narrative answer's prose fields."""
+    if payload is None:
+        return []
+    data = payload if isinstance(payload, dict) else getattr(payload, "__dict__", {}) or {}
+    parts: list[str] = [str(data.get("executive_summary") or "")]
+    parts.extend(str(item) for item in (data.get("capabilities_narrative") or []))
+    return ungrounded_capabilities("\n".join(parts), grounding)
+
+
+def section_capability_violations(payload: Any, grounding: CapabilityGrounding) -> list[Violation]:
+    """:func:`ungrounded_capabilities` over every string a section answer carries."""
+    if payload is None:
+        return []
+    parts: list[str] = []
+
+    def _walk(value: Any, depth: int = 0) -> None:
+        if depth > 4:
+            return
+        if isinstance(value, str):
+            parts.append(value)
+        elif isinstance(value, dict):
+            for item in value.values():
+                _walk(item, depth + 1)
+        elif isinstance(value, list | tuple):
+            for item in value:
+                _walk(item, depth + 1)
+
+    _walk(payload)
+    return ungrounded_capabilities("\n".join(parts), grounding, code=UNGROUNDED_CAPABILITY_CODE)
+
+
+# ---------------------------------------------------------------------------
 # The judge's bundle
 # ---------------------------------------------------------------------------
 
@@ -411,6 +692,36 @@ def validate_verdict_bundle(
     return violations
 
 
+def _model_at(model: Any, loc: Sequence[Any]) -> Any:
+    """The model that owns the field ``loc`` points at, or ``model`` itself.
+
+    Walks the named steps of a pydantic error location, stepping through list
+    and optional annotations on the way. Anything it cannot follow — a union
+    with two model members, a dict of models — ends the walk at the last model
+    it was sure about, which is a less specific answer rather than a wrong one.
+    """
+    import typing
+
+    current = model
+    for step in loc[:-1] if loc else ():
+        if not isinstance(step, str):
+            continue
+        field = (getattr(current, "model_fields", {}) or {}).get(step)
+        if field is None:
+            return current
+        annotation = field.annotation
+        for _ in range(3):
+            args = [a for a in typing.get_args(annotation) if a is not type(None)]
+            if len(args) != 1:
+                break
+            annotation = args[0]
+        if isinstance(annotation, type) and hasattr(annotation, "model_fields"):
+            current = annotation
+        else:
+            return current
+    return current
+
+
 def _schema_message(model: Any, error: Mapping[str, Any]) -> str:
     """Pydantic's complaint, with the schema's keys added when it is about a key.
 
@@ -426,7 +737,12 @@ def _schema_message(model: Any, error: Mapping[str, Any]) -> str:
     kind = str(error.get("type") or "")
     if kind not in ("extra_forbidden", "missing"):
         return message
-    keys = ", ".join(sorted(getattr(model, "model_fields", {}) or {}))
+    # The keys of the object that rejected the field, which for a nested error
+    # is not the answer's own: a bad key inside
+    # ``defensive_recommendations[0]`` was answered with the narrative's three
+    # top-level keys, none of which belong there.
+    owner = _model_at(model, error.get("loc") or ())
+    keys = ", ".join(sorted(getattr(owner, "model_fields", {}) or {}))
     if not keys:
         return message
     if kind == "extra_forbidden":

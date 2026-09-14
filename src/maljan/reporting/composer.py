@@ -28,10 +28,13 @@ from maljan.agents.base_agent import retry_on_connection_error
 from maljan.core.logger import logger
 from maljan.llm.registry import structured_output_supported_for_llm
 from maljan.pipeline.validation import (
+    UNGROUNDED_CAPABILITY_CODE,
+    CapabilityGrounding,
     ValidationTally,
     Violation,
     retry_with_feedback,
     schema_violations,
+    section_capability_violations,
 )
 from maljan.reporting.evidence_bundles import bundle_for, is_empty
 from maljan.reporting.models import (
@@ -171,6 +174,9 @@ class ReportComposer:
         # every section. The composer runs after the run summary is built, so
         # the report node reads this and folds it in.
         self.validation_tally = ValidationTally()
+        # Set per ``compose`` call; empty until then, which grounds nothing and
+        # therefore judges nothing (see ``ungrounded_capabilities``).
+        self._grounding = CapabilityGrounding()
 
     async def compose(
         self, report: MalwareReport, isr_reports: dict[str, Any] | None = None
@@ -179,6 +185,9 @@ class ReportComposer:
         conclusion. Mutates ``report`` in place; each section is best-effort."""
         ta = report.technical_analysis or TechnicalAnalysis()
         authored = 0
+        # What this run established, read once and asked of every section, so
+        # a conclusion cannot be the first place "command-and-control" appears.
+        self._grounding = CapabilityGrounding.from_report(report, isr_reports)
 
         # 1. Introduction / background.
         intro = await self._author(
@@ -292,10 +301,17 @@ class ReportComposer:
             result = await retry_on_connection_error(
                 lambda: structured.ainvoke(messages), what="ReportComposer structured"
             )
-            if isinstance(result, schema):
-                return result
             if isinstance(result, dict):
-                return schema.model_validate(result)
+                result = schema.model_validate(result)
+            if isinstance(result, schema):
+                # No retry on this path — ``with_structured_output`` owns the
+                # conversation and there is no turn to add one to — but the
+                # answer is still checked: a section that over-claims is no
+                # better for having come from the path that usually works.
+                found = section_capability_violations(result.model_dump(), self._grounding)
+                self.validation_tally.count(found)
+                self._record_ungrounded(section or schema.__name__, found)
+                return result
         except Exception as exc:  # noqa: BLE001
             logger.debug("ReportComposer: structured path failed (%s); manual parse.", exc)
         # Manual JSON fallback for local servers returning fenced JSON, through
@@ -332,7 +348,10 @@ class ReportComposer:
             # again would be arguing with a correct answer.
             if declined:
                 return []
-            return schema_violations(schema, payload, code="composer.schema")
+            return [
+                *schema_violations(schema, payload, code="composer.schema"),
+                *section_capability_violations(payload, self._grounding),
+            ]
 
         payload, violations, retries = await retry_with_feedback(
             _run,
@@ -351,17 +370,41 @@ class ReportComposer:
                 section or schema.__name__,
             )
             return None
-        if violations:
+        # A section whose shape is wrong cannot be published; a section that
+        # over-claims can, and dropping it would leave the report with neither
+        # the claim nor the record of it. The terms are kept on the record and
+        # the prose is left exactly as the model wrote it.
+        broken = [v for v in violations if v.code != UNGROUNDED_CAPABILITY_CODE]
+        ungrounded = [v for v in violations if v.code == UNGROUNDED_CAPABILITY_CODE]
+        if broken:
             logger.error(
                 "ReportComposer: section '%s' still breaks its schema after %d retr%s (%s); "
                 "SKIPPED.",
                 section or schema.__name__,
                 retries,
                 "y" if retries == 1 else "ies",
-                "; ".join(f"{v.path}: {v.message}" for v in violations),
+                "; ".join(f"{v.path}: {v.message}" for v in broken),
             )
             return None
+        self._record_ungrounded(section or schema.__name__, ungrounded)
         return schema.model_validate(payload)
+
+    def _record_ungrounded(self, section: str, violations: list[Violation]) -> None:
+        """Keep a section's over-claims on the record, without editing its prose.
+
+        Records only. The manual path has already counted these as leftovers of
+        its retry loop, and counting them twice would say the model was told
+        twice.
+        """
+        if not violations:
+            return
+        logger.warning(
+            "ReportComposer: section '%s' claims %s, which this run does not establish; "
+            "kept and recorded unresolved.",
+            section,
+            ", ".join(v.path for v in violations),
+        )
+        self.validation_tally.record_unresolved(f"composer:{section}", violations)
 
 
 def _section_declined(payload: Any, schema: type[BaseModel]) -> bool:
