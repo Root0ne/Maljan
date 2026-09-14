@@ -197,9 +197,23 @@ def _pe_warnings(pe: Any) -> list[str]:
         return []
 
 
+# The sentences pefile emits when the import *directory* or the import table
+# itself cannot be walked. Anything narrower — one symbol whose data pefile
+# could not read ("Invalid Import data at RVA"), a delay-load descriptor it
+# skipped ("Error parsing the Delay import directory") — is a warning about one
+# entry, and a healthy binary produces those routinely. Matching the bare word
+# "import" called every one of them a damaged table.
+_IMPORT_DIRECTORY_DAMAGE = (
+    "error parsing the import directory at rva",
+    "error parsing the import table",
+    "damaged import table",
+)
+
+
 def _import_table_damaged(warnings: list[str]) -> bool:
-    """Whether any warning is about the import directory itself."""
-    return any("import" in w.lower() for w in warnings)
+    """Whether pefile could not walk the import directory itself."""
+    lowered = [w.lower() for w in warnings]
+    return any(phrase in w for w in lowered for phrase in _IMPORT_DIRECTORY_DAMAGE)
 
 
 def _flag_names(pefile: Any, table: str, prefix: str, value: Any) -> list[str]:

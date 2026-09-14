@@ -30,7 +30,7 @@ def _elf(machine: int = 0x3E) -> bytes:
     return ident + struct.pack("<HHI", 2, machine, 1) + b"\x00" * 512
 
 
-def _pe(import_rva: int = 0x1000, delay: bool = True) -> bytes:
+def _pe(import_rva: int = 0x1000, delay: bool = True, delay_rva: int = 0x2000) -> bytes:
     """A 32-bit PE with one real import and, optionally, one delay-load import.
 
     Hand-built rather than checked in as a fixture: the point of the damaged
@@ -69,7 +69,7 @@ def _pe(import_rva: int = 0x1000, delay: bool = True) -> bytes:
     directories = [(0, 0)] * 16
     directories[1] = (import_rva, 40)
     if delay:
-        directories[13] = (0x2000, 64)
+        directories[13] = (delay_rva, 64)
     for rva, size in directories:
         opt += struct.pack("<II", rva, size)
 
@@ -137,6 +137,20 @@ class TestPeInfo:
         assert result["imports"] == []
         assert result["import_table_damaged"] is True
         assert any("import directory" in w for w in result["warnings"])
+
+    def test_a_benign_import_warning_is_not_a_damaged_table(self, tmp_path: Path) -> None:
+        """A healthy binary whose delay-load descriptor pefile cannot walk still
+        has a perfectly good import table. Matching the bare word "import" in
+        the warning list called that a damaged one."""
+        pytest.importorskip("pefile")
+        target = tmp_path / "delay-broken.exe"
+        target.write_bytes(_pe(delay_rva=0x9000))
+
+        result = tool.pe_info(str(target))
+
+        assert [row["function"] for row in result["imports"]] == ["CreateFileA"]
+        assert any("import" in w.lower() for w in result["warnings"]), result["warnings"]
+        assert result["import_table_damaged"] is False
 
     def test_delay_load_imports_are_reported_too(self, tmp_path: Path) -> None:
         pytest.importorskip("pefile")
