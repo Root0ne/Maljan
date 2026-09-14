@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from maljan.core.logger import logger
@@ -111,6 +112,13 @@ class RepeatGuard:
     ordinary, and refusing the second call would break a legitimate retry after
     a transient failure. From the third on the tool is not run and the model is
     told where the answer already is.
+
+    Telling it is not the same as steering it. A live static analyst called
+    ``strings`` seventeen times with identical arguments — ten of them
+    short-circuited here — because "the result is in [ev_0007]" answers where
+    the answer is and not what to do instead. The second call, the one that is
+    still served, is where the model is told, and both messages name the
+    arguments of that tool it has not used.
     """
 
     SERVED = 2
@@ -135,6 +143,19 @@ class RepeatGuard:
             return None
         return self._first.get(key)
 
+    def repeat_of(self, tool: str, kwargs: dict[str, Any]) -> str | None:
+        """The first entry for a call that is being served again, or ``None``.
+
+        Asked before the call runs, so a second identical call sees the count
+        of one the first left behind. This is the turn worth spending a
+        sentence on: the answer still arrives, and the model is told not to ask
+        a third time while it can still do something else with the step.
+        """
+        key = self._key(tool, kwargs)
+        if not 0 < self._count.get(key, 0) < self.SERVED:
+            return None
+        return self._first.get(key)
+
     def note(self, tool: str, kwargs: dict[str, Any], entry_id: str) -> None:
         """Record that the call ran, and which entry first answered it."""
         key = self._key(tool, kwargs)
@@ -142,11 +163,41 @@ class RepeatGuard:
         self._first.setdefault(key, entry_id)
 
 
-def repeat_notice(tool: str, entry_id: str) -> str:
+def _do_something_else(tool: str, unused_args: Sequence[str]) -> str:
+    """The half of both notices that says what to do instead.
+
+    The arguments come from the tool's own schema, so the sentence names what
+    this tool can actually be asked differently — ``pattern``, ``start`` and
+    ``end`` for ``strings`` — rather than a hint written for one tool and
+    repeated at every other.
+    """
+    if unused_args:
+        named = ", ".join(f"`{name}`" for name in unused_args)
+        return f"narrow it with {named}, or call another tool."
+    return "call it with different arguments, or call another tool."
+
+
+def repeat_notice(tool: str, entry_id: str, unused_args: Sequence[str] = ()) -> str:
     """What the model is told instead of the same answer a third time."""
     return (
         f"You already called {tool} with these arguments; the result is in "
-        f"[{entry_id}]. Use it or call something else."
+        f"[{entry_id}]. Do not call it again with these arguments; "
+        f"{_do_something_else(tool, unused_args)}"
+    )
+
+
+def served_repeat_notice(tool: str, entry_id: str, unused_args: Sequence[str] = ()) -> str:
+    """The steering appended to the second identical call, which is still served.
+
+    The answer is above it: this is a note, not a refusal. Said here because a
+    model that is going to ask a third time has already decided to by the time
+    the third call is refused, and one turn earlier it still has a step to
+    spend on something else.
+    """
+    return (
+        f"This is the second call to {tool} with these arguments and the answer above is "
+        f"also in [{entry_id}]. A third will not be run: "
+        f"{_do_something_else(tool, unused_args)}"
     )
 
 
@@ -177,6 +228,17 @@ def _record_tool(tool: Any, recorder: EvidenceRecorder, repeats: RepeatGuard | N
 
     name = str(getattr(tool, "name", "") or "unknown")
     server = server_of(tool) or None
+    accepted = tuple(getattr(args_schema, "model_fields", {}) or {})
+
+    def _unused(kwargs: dict[str, Any]) -> tuple[str, ...]:
+        """The arguments this tool takes that the call did not really set.
+
+        Truthiness rather than presence: langchain fills a tool's defaults
+        before calling it, so a caller that asked nothing of ``start`` still
+        arrives here with ``start=0``, and a hint that omitted it would omit
+        every optional argument the model has not thought to use.
+        """
+        return tuple(arg for arg in accepted if not kwargs.get(arg))
 
     def _already_answered(kwargs: dict[str, Any]) -> str | None:
         """The note for a call that has been made twice already, if it has."""
@@ -185,7 +247,7 @@ def _record_tool(tool: Any, recorder: EvidenceRecorder, repeats: RepeatGuard | N
         first = repeats.answered_by(name, kwargs)
         if first is None:
             return None
-        message = repeat_notice(name, first)
+        message = repeat_notice(name, first, _unused(kwargs))
         entry = recorder.record(
             tool=name,
             args=kwargs,
@@ -209,6 +271,9 @@ def _record_tool(tool: Any, recorder: EvidenceRecorder, repeats: RepeatGuard | N
 
     def _stamp(kwargs: dict[str, Any], started: float, wall_clock: float, value: Any) -> str:
         text = result_text(value)
+        # Asked before the call is noted, so it sees the count the previous
+        # identical call left behind.
+        repeated = repeats.repeat_of(name, kwargs) if repeats is not None else None
         entry = recorder.record(
             tool=name,
             args=kwargs,
@@ -224,6 +289,12 @@ def _record_tool(tool: Any, recorder: EvidenceRecorder, repeats: RepeatGuard | N
         # ``llm.max_tool_output_chars`` and the summariser guardrail the MCP
         # toolkit applies before the tool ever returns — and a second, silent
         # cut here would make raising that setting do nothing.
+        if repeated is not None:
+            # Appended to what the model reads, not to the ledger: the entry
+            # records what the tool said, and the tool did not say this.
+            return (
+                f"[{entry.id}]\n{text}\n\n{served_repeat_notice(name, repeated, _unused(kwargs))}"
+            )
         return f"[{entry.id}]\n{text}"
 
     def _stamp_error(

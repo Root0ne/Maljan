@@ -372,3 +372,97 @@ class TestPublishing:
         agent._finish_evidence(EvidenceRecorder("static"))
         assert agent.drain_evidence_entries() == []
         assert agent.get_last_tool_evidence() == []
+
+
+class TestTheRepeatMessageSteers:
+    """The guard bounded the waste; it did not reduce it. A live static analyst
+    called ``strings`` seventeen times with identical arguments — ten of them
+    short-circuited — because "the result is in [ev_0007]" answers where the
+    answer is and not what to do instead."""
+
+    @staticmethod
+    def _strings_tool(calls: list[dict[str, Any]]) -> Any:
+        def strings(path: str, pattern: str = "", start: int = 0, end: int = 0) -> dict[str, Any]:
+            """Extract strings."""
+            calls.append({"path": path, "pattern": pattern, "start": start, "end": end})
+            return {"total": 400, "runs": ["MZ"]}
+
+        return strings
+
+    def _wrapped(self, calls: list[dict[str, Any]]) -> tuple[Any, EvidenceRecorder]:
+        recorder = EvidenceRecorder("static")
+        wrapped = record_tools(
+            [_tool(self._strings_tool(calls), "strings")], recorder, RepeatGuard()
+        )[0]
+        return wrapped, recorder
+
+    def test_the_second_call_is_served_and_carries_the_steering(self) -> None:
+        calls: list[dict[str, Any]] = []
+        wrapped, _recorder = self._wrapped(calls)
+
+        first = wrapped.invoke({"path": "/s.exe"})
+        second = wrapped.invoke({"path": "/s.exe"})
+
+        assert len(calls) == 2, "the second call still runs"
+        assert "total" in second, "and its answer still comes back"
+        assert "steering" not in first
+        assert "This is the second call to strings with these arguments" in second
+        assert "A third will not be run" in second
+
+    def test_the_steering_names_the_arguments_this_tool_takes(self) -> None:
+        calls: list[dict[str, Any]] = []
+        wrapped, _recorder = self._wrapped(calls)
+
+        wrapped.invoke({"path": "/s.exe"})
+        second = wrapped.invoke({"path": "/s.exe"})
+
+        for argument in ("`pattern`", "`start`", "`end`"):
+            assert argument in second
+        assert "`path`" not in second, "the argument it did set is not offered back to it"
+
+    def test_the_third_call_says_the_same_thing_and_runs_nothing(self) -> None:
+        calls: list[dict[str, Any]] = []
+        wrapped, recorder = self._wrapped(calls)
+
+        for _ in range(3):
+            answer = wrapped.invoke({"path": "/s.exe"})
+
+        assert len(calls) == 2
+        assert "Do not call it again with these arguments" in answer
+        assert "narrow it with `pattern`, `start`, `end`" in answer
+        assert "[ev_0001]" in answer
+
+    def test_the_ledger_records_what_the_tool_said_and_not_the_steering(self) -> None:
+        calls: list[dict[str, Any]] = []
+        wrapped, recorder = self._wrapped(calls)
+
+        wrapped.invoke({"path": "/s.exe"})
+        wrapped.invoke({"path": "/s.exe"})
+
+        assert "second call" not in recorder.entries[1].output
+        assert "total" in recorder.entries[1].output
+
+    def test_a_tool_with_nothing_else_to_offer_says_so_plainly(self) -> None:
+        calls: list[str] = []
+
+        def identify_file(path: str) -> dict[str, str]:
+            """Identify a file."""
+            calls.append(path)
+            return {"file_type": "PE"}
+
+        recorder = EvidenceRecorder("static")
+        wrapped = record_tools([_tool(identify_file, "identify_file")], recorder, RepeatGuard())[0]
+
+        wrapped.invoke({"path": "/s.exe"})
+        second = wrapped.invoke({"path": "/s.exe"})
+
+        assert "call it with different arguments, or call another tool." in second
+
+    def test_a_different_call_carries_no_steering(self) -> None:
+        calls: list[dict[str, Any]] = []
+        wrapped, _recorder = self._wrapped(calls)
+
+        wrapped.invoke({"path": "/s.exe"})
+        other = wrapped.invoke({"path": "/s.exe", "pattern": "AsyncRAT"})
+
+        assert "second call" not in other
