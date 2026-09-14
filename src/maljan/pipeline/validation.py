@@ -411,6 +411,44 @@ def validate_verdict_bundle(
     return violations
 
 
+ASSESSMENT_MISSING_CODE = "verdict.assessment_missing"
+
+# What the judge is told to add, in the shape the bundle reads it in.
+ASSESSMENT_MISSING_MESSAGE = (
+    "Add x_maljan_assessment to the bundle, beside the malware object, with "
+    "severity {rating, rationale}, malware_category, "
+    "family {name, confidence, evidence_ids} and confidence. "
+    "Omit only a field the evidence cannot support."
+)
+
+
+def assessment_violations(bundle: Any) -> list[Violation]:
+    """Whether the judge said what it thinks, beyond the STIX objects.
+
+    Severity, category, family and the judge's own confidence are the judge's
+    to decide and nothing downstream computes them, so a bundle without them
+    produces a report that reads "not assessed" from top to bottom. That used
+    to happen in silence. It is one feedback turn now, and an unresolved
+    finding when the retry omits the block as well.
+
+    A judge that abstains on one field has answered; a block with nothing in it
+    has not, and counts as absent.
+    """
+    assessment = getattr(bundle, "x_maljan_assessment", None)
+    if assessment is not None and any(
+        getattr(assessment, field, None) is not None
+        for field in ("severity", "malware_category", "family", "confidence")
+    ):
+        return []
+    return [
+        Violation(
+            code=ASSESSMENT_MISSING_CODE,
+            message=ASSESSMENT_MISSING_MESSAGE,
+            path="x_maljan_assessment",
+        )
+    ]
+
+
 def _runtime_paths(evidence_corpus: set[str] | None) -> set[str]:
     """The corpus entries that look like a path something really touched."""
     from maljan.agents._indicator_denylists import IOC_OS_RESOURCE_PREFIXES

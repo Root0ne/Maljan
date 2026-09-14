@@ -44,6 +44,7 @@ from maljan.pipeline.state import AgentArgument
 from maljan.pipeline.validation import (
     ValidationTally,
     Violation,
+    assessment_violations,
     drop_ungrounded_indicators,
     retry_with_feedback,
     validate_verdict_bundle,
@@ -169,7 +170,8 @@ JUDGE_VERDICT_SYSTEM = (
     '                   "rationale": "why the evidence supports that rating"},\n'
     '      "malware_category": "free text, e.g. ransomware / loader / infostealer",\n'
     '      "family": {"name": "...", "confidence": 0.0-1.0,\n'
-    '                 "evidence_ids": ["ev_0012"]}\n'
+    '                 "evidence_ids": ["ev_0012"]},\n'
+    '      "confidence": 0.0-1.0\n'
     "    }\n"
     "  Omit any of the three you cannot support. A family name MUST cite the "
     "evidence ids it was read from; a family with no evidence ids is a guess, "
@@ -770,7 +772,10 @@ class JudgeAgent:
                 return []
             if not_json:
                 return [Violation(code="verdict.not_json", message=_NOT_JSON_FEEDBACK)]
-            return validate_verdict_bundle(bundle, evidence_corpus, attck=_knowledge)
+            return [
+                *validate_verdict_bundle(bundle, evidence_corpus, attck=_knowledge),
+                *assessment_violations(bundle),
+            ]
 
         tally = ValidationTally()
         bundle, violations, retries = await retry_with_feedback(
