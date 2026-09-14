@@ -39,6 +39,11 @@ logger = get_logger("worker")
 
 _SECRET_PATHS = [e.path for e in core_catalog() if e.secret]
 
+# What ``AgentFinding.status`` may hold. The column feeds a TypeScript union
+# and a status badge, so a value an ISR invented would reach both and render
+# as whatever the UI's fallback happens to be.
+_AGENT_FINDING_STATUSES = frozenset({"complete", "no_data", "no_claims", "failed", "timeout"})
+
 
 def attached_report_stmt(report_id: uuid.UUID, sample_id: uuid.UUID) -> Select[Any]:
     """The one attached sandbox report a job may read: its own sample's.
@@ -1070,13 +1075,22 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     else:
                         status = "failed"
                     status_reason = _reason
-                elif isr_data.get("status"):
+                elif isr_data.get("status") in _AGENT_FINDING_STATUSES:
                     # The analyst said something about its own answer that the
                     # claim list cannot: it ended without a structured report,
-                    # so this is not "no data" but "no report".
+                    # so this is not "no data" but "no report". Only a value
+                    # from the known vocabulary is persisted — the column feeds
+                    # a TypeScript union and a badge, and an unknown string
+                    # would reach both.
                     status = str(isr_data["status"])
                     status_reason = str(isr_data.get("status_reason") or "") or None
                 elif not claims:
+                    if isr_data.get("status"):
+                        logger.warning(
+                            "Agent %s reported the unknown status %r; recording no_data.",
+                            agent_name,
+                            isr_data["status"],
+                        )
                     status = "no_data"
                     status_reason = "Agent produced no claims"
                 else:

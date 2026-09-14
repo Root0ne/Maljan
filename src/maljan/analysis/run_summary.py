@@ -80,6 +80,13 @@ class ISRAgentStats:
     # the starved analysts out of a static-only run. A new reason string would
     # have made every such run record an unexplained incidental degradation.
     no_data: bool = False
+    # What the analyst says about its own answer, when the claim count cannot
+    # say it: ``no_claims`` for one that read its data and whose model ended
+    # without a structured report. Without it this row showed such an analyst
+    # as ``no_data: false`` with zero claims — the one view an operator and the
+    # judge's degradation note read, and the one that could not tell "nothing
+    # to read" from "never answered". Empty for an analyst that just answered.
+    status: str = ""
 
 
 @dataclass
@@ -439,6 +446,7 @@ class RunSummary:
                     "technique_ids": s.technique_ids,
                     "has_dissent": s.has_dissent,
                     "no_data": s.no_data,
+                    "status": s.status,
                 }
                 for s in self.agent_stats
             ],
@@ -685,6 +693,10 @@ class RunSummaryBuilder:
         can tell them from the ones that analysed their data and claimed
         nothing. Optional, and empty by default: every caller that does not know
         the difference reports what it always did.
+
+        The third case is the analyst's own: an ISR that carries a ``status``
+        had data, read it, and its model ended without a report. That is
+        neither of the other two and the row now says so.
         """
         starved = no_data or set()
         stats: list[ISRAgentStats] = []
@@ -700,6 +712,7 @@ class RunSummaryBuilder:
                     technique_ids=list(dict.fromkeys(technique_ids)),  # deduplicate, preserve order
                     has_dissent=bool(isr.dissent_items),
                     no_data=isr.agent_id in starved,
+                    status=str(getattr(isr, "status", "") or ""),
                 )
             )
         self._agent_stats = stats
