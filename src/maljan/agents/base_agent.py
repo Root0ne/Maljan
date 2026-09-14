@@ -131,6 +131,34 @@ _TECHNIQUE_MAX: int = 1700
 # Explicit placeholders that LLMs sometimes emit when uncertain.
 _INVALID_TIDS: frozenset[str] = frozenset({"T0000", "T0000.000", "T9999", "T1234"})
 
+# The one human turn a tool loop gets when its last message is neither a
+# structured report nor a findings block. Exactly one: a model that will not
+# answer after being told it did not answer will not answer on the third ask
+# either, and each ask is another full model turn.
+FINAL_ANSWER_NUDGE = (
+    "Your last message was not a final report. Either call a tool or return your final ISR now."
+)
+
+# What the analyst reports for itself when even the nudge produced no report.
+# Not ``no_data``: the analyst had data, read it, and stopped mid-thought.
+NO_STRUCTURED_REPORT_STATUS = "no_claims"
+NO_STRUCTURED_REPORT_REASON = "the model ended without a structured report"
+
+
+def answer_is_isr(text: str) -> bool:
+    """Whether an answer carries a report at all.
+
+    The two shapes an analyst may answer in: the ``CLAIM:`` block every ISR
+    prompt asks for, and the optional fenced ``maljan-findings`` channel. Prose
+    that is neither is not a report — it may be a fine paragraph, but nothing
+    downstream can read a finding out of it without inventing one.
+    """
+    from maljan.agents.findings_block import has_findings_block
+
+    if not text or not text.strip():
+        return False
+    return "CLAIM:" in text or has_findings_block(text)
+
 
 async def retry_on_connection_error(
     make_awaitable: Callable[[], Awaitable[Any]],
@@ -1196,6 +1224,10 @@ class BaseAnalyst(ABC):
         # by the analyst node onto the state's validation channels.
         self.validation_findings: list[Violation] = []
         self.validation_retries: int = 0
+        # Whether the last tool loop ended on something that was not a report,
+        # after its one nudge. Read by ``_text_to_isr`` so the ISR says why it
+        # is empty instead of leaving the reader to infer it from a claim list.
+        self._answer_unstructured: bool = False
 
     def _system_prompt(self, fallback: str | Callable[[], str]) -> str:
         """This analyst's system turn for the job it is actually running.
@@ -1464,7 +1496,7 @@ class BaseAnalyst(ABC):
         analyst is killed at the configured ``react_agent_timeout`` budget
         regardless of which path it takes.
         """
-        from langchain_core.messages import HumanMessage, SystemMessage
+        from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
         # Build BaseMessages directly so literal `{...}` substrings in the
         # report content (e.g. JSON like {"programs": [...]}) are not parsed
@@ -1702,8 +1734,78 @@ class BaseAnalyst(ABC):
             # 1,530 s cap, and zero techniques out the other side.
             synthesized = self._force_final_synthesis(msgs, timeout, elapsed)
             if synthesized.strip() and not _RECURSION_STOP_RE.search(synthesized):
-                return self._capture_findings(synthesized)
+                content = synthesized
+                msgs = [*msgs, AIMessage(content=synthesized)]
+
+        # A final message that is neither a structured report nor a findings
+        # block is not an answer. The loop's own stop condition cannot see that
+        # — LangGraph stops as soon as the model emits no tool call — so a model
+        # that narrated its next step and then fell silent used to reach
+        # ``_text_to_isr`` as prose, and the sentence splitter made a claim out
+        # of "Let me search for more specific strings related to malware
+        # indicators:" at 0.5. Say so once, in the same conversation, and give
+        # it the step to answer in.
+        self._answer_unstructured = False
+        if not answer_is_isr(content):
+            nudged = self._nudge_for_final_answer(msgs, timeout, elapsed, max_steps)
+            if nudged is not None:
+                content = nudged
+            if not answer_is_isr(content):
+                self.logger.warning(
+                    "%s: the loop ended without a structured report even after the nudge; "
+                    "reporting %s.",
+                    self.name,
+                    NO_STRUCTURED_REPORT_STATUS,
+                )
+                self._answer_unstructured = True
         return self._capture_findings(content)
+
+    def _nudge_for_final_answer(
+        self, msgs: list, timeout: int, elapsed: float, max_steps: int
+    ) -> str | None:
+        """Ask once for the report the loop did not produce; ``None`` on failure.
+
+        Bounded in both dimensions, like ``_force_final_synthesis``: the extra
+        turn counts against ``max_steps`` (the conversation already spent
+        ``len(msgs)`` of them, and a loop with nothing left gets no nudge) and
+        against the time the loop has already used. Never raises — a nudge that
+        cannot run leaves the answer exactly as the loop left it.
+        """
+        from langchain_core.messages import HumanMessage
+
+        remaining_steps = max_steps - len(msgs)
+        if remaining_steps < 1:
+            self.logger.info(
+                "%s: no step budget left for the final-answer nudge.",
+                self.name,
+            )
+            return None
+        remaining_time = float(timeout) - elapsed
+        if remaining_time <= 1.0:
+            self.logger.info("%s: no time budget left for the final-answer nudge.", self.name)
+            return None
+
+        self.logger.warning(
+            "%s: the loop's last message was not a final report; asking once for one.",
+            self.name,
+        )
+        turns = [*msgs, HumanMessage(content=FINAL_ANSWER_NUDGE)]
+
+        async def _ask() -> Any:
+            return await asyncio.wait_for(
+                self.llm.ainvoke(turns), timeout=min(remaining_time, float(timeout))
+            )
+
+        try:
+            answer = _run_coro_blocking(
+                _ask(), min(remaining_time, float(timeout)) + 5, label=f"nudge:{self.name}"
+            )
+        except Exception as exc:  # noqa: BLE001 — a nudge that fails changes nothing
+            self.logger.warning("%s: the final-answer nudge failed (%s).", self.name, exc)
+            return None
+        record_response_usage(self.token_ledger, answer)
+        text = str(getattr(answer, "content", "") or "")
+        return text or None
 
     def _record_react_loop(self, *, hit_step_cap: bool) -> None:
         """Count one ReAct loop and whether it exhausted its step budget.
@@ -2486,19 +2588,43 @@ class BaseAnalyst(ABC):
         flags=re.IGNORECASE,
     )
 
+    # What a model writes on its way to a tool call rather than in a report:
+    # "Let me search for more specific strings related to malware indicators:".
+    # A live static analyst ended its loop on exactly that sentence and the
+    # free-text splitter turned it into the run's only claim, at 0.5. An
+    # intention is not a finding, whatever the loop did with it afterwards.
+    _INTENTION_CLAIM_RE = re.compile(
+        r"^\s*(?:let\s+me\b|let's\b|let\s+us\b|i\s+will\b|i'll\b|i\s+need\s+to\b"
+        r"|i\s+am\s+going\s+to\b|i'm\s+going\s+to\b|next,|now\s+i\b"
+        r"|first,\s+(?:let|i)\b)",
+        flags=re.IGNORECASE,
+    )
+
     def _is_meta_claim_text(self, text: str) -> bool:
-        """True when ``text`` is a fallback placeholder, not real analysis."""
+        """True when ``text`` is a placeholder or an intention, not real analysis."""
         if not text:
             return True
         # Match the placeholder anywhere near the start of the text — analysts
         # sometimes prepend a one-line header (e.g. "CLAIM:") before parroting
         # the fallback, so probe both the raw first line and the same line with
         # a leading ``CLAIM:``/``EVIDENCE:`` label stripped.
-        first = text.strip().splitlines()[0] if text.strip() else ""
-        if self._META_CLAIM_RE.match(first):
-            return True
+        stripped = text.strip()
+        first = stripped.splitlines()[0] if stripped else ""
         unlabelled = re.sub(r"^\s*(?:claim|evidence)\s*:\s*", "", first, flags=re.IGNORECASE)
-        return bool(self._META_CLAIM_RE.match(unlabelled))
+        if self._META_CLAIM_RE.match(first) or self._META_CLAIM_RE.match(unlabelled):
+            return True
+        announces = bool(
+            self._INTENTION_CLAIM_RE.match(first)
+            or self._INTENTION_CLAIM_RE.match(unlabelled)
+            # A sentence that ends in a colon announces what comes next; it
+            # states nothing itself.
+            or stripped.endswith(":")
+        )
+        # Only when that is the whole of it. A report may open by narrating its
+        # next step and then say something real, and the sentence splitter drops
+        # the opening sentence on its own — zeroing the whole answer for its
+        # first line would throw away the findings that followed.
+        return announces and len(self._SENTENCE_SPLIT_RE.split(stripped)) == 1
 
     def _drop_meta_claims(self, claims: list[ClaimEvidence]) -> list[ClaimEvidence]:
         """Strip parsed claims that are really "I could not analyse" meta-claims.
@@ -2536,12 +2662,14 @@ class BaseAnalyst(ABC):
                 "%s: meta-claim text detected; emitting zero-claim ISR.",
                 self.name,
             )
-            return AgentISR(
-                agent_id=self.name,
-                domain=domain,
-                claims=[],
-                dissent_items=[],
-                revision_round=revision_round,
+            return self._with_answer_status(
+                AgentISR(
+                    agent_id=self.name,
+                    domain=domain,
+                    claims=[],
+                    dissent_items=[],
+                    revision_round=revision_round,
+                )
             )
 
         # Structured output first. Several prompts —
@@ -2561,8 +2689,14 @@ class BaseAnalyst(ABC):
                     revision_round=revision_round,
                 )
 
+        # A sentence the model wrote on its way somewhere — "Let me search for
+        # more specific strings related to malware indicators:" — is scaffolding
+        # in exactly the way a raw tool call is, and the splitter cannot tell
+        # prose from intention any more than it could tell prose from a call.
         raw_sentences = [
-            s.strip() for s in self._SENTENCE_SPLIT_RE.split(text) if len(s.strip()) > 20
+            s.strip()
+            for s in self._SENTENCE_SPLIT_RE.split(text)
+            if len(s.strip()) > 20 and not self._is_meta_claim_text(s.strip())
         ]
         claims: list[ClaimEvidence] = []
         for sentence in raw_sentences[:10]:
@@ -2582,13 +2716,30 @@ class BaseAnalyst(ABC):
                 )
             )
 
-        return AgentISR(
-            agent_id=self.name,
-            domain=domain,
-            claims=claims,
-            dissent_items=[],
-            revision_round=revision_round,
+        return self._with_answer_status(
+            AgentISR(
+                agent_id=self.name,
+                domain=domain,
+                claims=claims,
+                dissent_items=[],
+                revision_round=revision_round,
+            )
         )
+
+    # Class-level default so an analyst built without ``__init__`` — a test
+    # stand-in, a script — still answers the question the parser asks it.
+    _answer_unstructured: bool = False
+
+    def _with_answer_status(self, isr: AgentISR) -> AgentISR:
+        """Say on the ISR that the loop never produced a report, when it did not.
+
+        Only when there is nothing else to say: an answer that was not a report
+        but still yielded claims has already said more than the status would.
+        """
+        if self._answer_unstructured and not isr.claims:
+            isr.status = NO_STRUCTURED_REPORT_STATUS
+            isr.status_reason = NO_STRUCTURED_REPORT_REASON
+        return isr
 
     _DOMAIN_KEYWORDS: dict[str, Literal["static", "dynamic", "network"]] = {
         "static": "static",

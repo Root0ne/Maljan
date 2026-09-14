@@ -85,7 +85,7 @@ export interface AgentFindingDTO {
   // Lifecycle status the worker derives
   // from the ISR shape. Defaults server-side to ``"complete"`` for legacy
   // rows so this is non-optional on the wire.
-  status: "complete" | "no_data" | "failed" | "timeout";
+  status: "complete" | "no_data" | "no_claims" | "failed" | "timeout";
   status_reason?: string | null;
 }
 

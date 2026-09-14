@@ -57,6 +57,15 @@ class FindingsBlock:
         return bool(self.findings or self.artifacts)
 
 
+def has_findings_block(text: str) -> bool:
+    """Whether ``text`` carries a fenced ``maljan-findings`` block at all.
+
+    The cheap half of :func:`parse_findings_block`, for the tool loop's
+    question "is this answer a final report or is the model still thinking".
+    """
+    return bool(text) and bool(_BLOCK_RE.search(text))
+
+
 def parse_findings_block(text: str) -> FindingsBlock:
     """Split an answer into its prose and the structured channel it appended.
 

@@ -89,6 +89,8 @@ class AgentFinding(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     #   "no_data"  - analyst ran but produced 0 claims (e.g. nothing to
     #                report, or LLM refused to contradict an obvious
     #                empty sandbox report)
+    #   "no_claims"- analyst read its data and its model ended without a
+    #                structured report, even after being asked for one
     #   "failed"   - analyst raised / returned ``[ERROR]`` text
     #   "timeout"  - analyst ReAct loop hit its asyncio.wait_for limit
     #
@@ -154,7 +156,7 @@ class AgentMessage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     role: Mapped[str] = mapped_column(String(20), nullable=False)
     # Negotiation round; 0 for the initial pass.
     round: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    # complete | no_data | failed | timeout — same vocabulary as AgentFinding.
+    # complete | no_data | no_claims | failed | timeout — the AgentFinding vocabulary.
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="complete")
 
     # The skimmable one-line body.

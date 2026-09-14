@@ -170,6 +170,19 @@ def _validation_update(agent: Any, agent_name: str) -> dict[str, Any]:
     return update
 
 
+def isr_status(isr: Any) -> str:
+    """The lifecycle status one analyst's answer reports for itself.
+
+    The ISR's own ``status`` wins when it set one — an analyst that ended
+    without a report knows something ``claims == []`` cannot say — and the
+    claim list decides otherwise.
+    """
+    declared = str(getattr(isr, "status", "") or "").strip()
+    if declared:
+        return declared
+    return "complete" if list(getattr(isr, "claims", None) or []) else "no_data"
+
+
 def _assessment(bundle: Any) -> Any | None:
     """The judge's own severity / category / family, when it produced one."""
     return getattr(bundle, "x_maljan_assessment", None)
@@ -953,7 +966,7 @@ def make_stage_agent_node(
                 role="analyst",
                 text=summarize_claims(isr.claims, speaker=agent_name),
                 round_index=0,
-                status="complete" if isr.claims else "no_data",
+                status=isr_status(isr),
                 claims=claims_to_payload(isr.claims),
                 dissent=list(isr.dissent_items or []),
                 # The analyst's own prose, so the transcript can offer it behind
@@ -1641,7 +1654,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     role="reviser",
                     text=summarize_claims(isr.claims, speaker=name),
                     round_index=iteration,
-                    status="complete" if isr.claims else "no_data",
+                    status=isr_status(isr),
                     claims=claims_to_payload(isr.claims),
                     dissent=list(isr.dissent_items or []),
                     # The rewritten report. This text was previously dropped

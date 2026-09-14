@@ -147,6 +147,19 @@ class AgentISR(BaseModel):
         default_factory=list,
         description="Concrete artifacts this agent established, for the report's sections.",
     )
+    # Why this ISR looks the way it does, when the analyst knows something the
+    # claim list cannot say. An analyst that ended its loop on an intention
+    # sentence produced no claims *and* no report, and the two are different
+    # findings: the first is an analyst with nothing to say, the second is a
+    # model that never answered. Left unset on the ordinary path, where the
+    # claim list speaks for itself.
+    status: str | None = Field(
+        default=None,
+        description="Lifecycle status the analyst reports for itself, e.g. 'no_claims'.",
+    )
+    status_reason: str | None = Field(
+        default=None, description="Why the analyst reports that status, in one sentence."
+    )
 
     @property
     def mean_confidence(self) -> float:

@@ -43,6 +43,13 @@ const STATUS_STYLES: Record<
     bg: "bg-text-muted/10",
     text: "text-text-muted",
   },
+  /* The analyst had data and read it, and its model stopped before writing a
+     report \u2014 a different fact from having nothing to read. */
+  no_claims: {
+    label: "no report",
+    bg: "bg-status-orange/10",
+    text: "text-status-orange",
+  },
   failed: {
     label: "failed",
     bg: "bg-status-red/10",
