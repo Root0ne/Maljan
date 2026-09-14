@@ -65,6 +65,17 @@ class OpenAIConfig(BaseModel):
     # leaving an empty answer + frequent timeouts). Off by default; only applied
     # when base_url is set, so vanilla OpenAI stays untouched.
     disable_thinking: bool = False
+    # Which dialect the endpoint behind ``base_url`` speaks. The three extras
+    # above (the sampler penalty, the ``n_predict`` echo of the output cap and
+    # ``chat_template_kwargs``) are llama.cpp's, not OpenAI's, and sending them
+    # to a hosted OpenAI-compatible API is a 400 on the first request — a live
+    # run against integrate.api.nvidia.com died on
+    # ``Unsupported parameter(s): n_predict`` before a single analyst ran.
+    # A custom base URL is not the same fact as a llama.cpp server, so it is
+    # asked here instead of inferred from one. ``auto`` reads the host: a
+    # loopback, link-local or private address is a local server, anything else
+    # is a hosted API that gets standard fields only.
+    compat: Literal["auto", "llama_cpp", "standard"] = "auto"
 
 
 class AnthropicConfig(BaseModel):

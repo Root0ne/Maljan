@@ -128,6 +128,27 @@ treatment a global one does — the llama.cpp sampler keys and the structured
 output the local servers handle badly are decided from the endpoint the agent
 will actually call.
 
+### Which dialect an OpenAI-compatible endpoint speaks
+
+`llm.openai.compat` says whether the endpoint behind `base_url` is llama.cpp or
+a hosted OpenAI-compatible API, because the two disagree about what a request
+body may contain. Three llama.cpp-only fields exist for good reasons — the
+repetition penalty that stops a small local model looping on ATT&CK id recall,
+the `n_predict` echo of the output cap that llama.cpp reads where it ignores
+`max_completion_tokens`, and `chat_template_kwargs.enable_thinking` — and a
+hosted API answers all three with `400 Unsupported parameter`.
+
+| Value | What is sent |
+| --- | --- |
+| `auto` (default) | `llama_cpp` when the base URL host is loopback, link-local, `.local` or a private address; `standard` otherwise |
+| `llama_cpp` | the three extras, whatever the host — for a local server reached through a public name |
+| `standard` | OpenAI-standard fields only — for a hosted API, or a local vLLM that validates its body |
+
+An endpoint that rejects one of the extras anyway is retried once without them,
+recorded for the rest of the process, and named in a warning that says to set
+this value explicitly. `base_url` unset means api.openai.com, which never
+receives them in any mode.
+
 ### Setup guides
 
 **Settings → Setup** offers seven guided flows

@@ -446,6 +446,21 @@ ANNOTATIONS: dict[str, Annotation] = {
         "probe": "llm",
         "subgroup": "OpenAI",
     },
+    "llm.openai.compat": {
+        "title": "OpenAI endpoint dialect",
+        "description": (
+            "Which dialect the endpoint behind base_url speaks. llama_cpp sends the "
+            "llama.cpp-only request extras (repetition penalty, the n_predict echo of "
+            "the output cap, chat_template_kwargs); standard sends OpenAI-standard "
+            "fields only, which is what a hosted OpenAI-compatible API accepts — it "
+            "returns 400 Unsupported parameter otherwise. auto reads the base URL "
+            "host: loopback, link-local and private addresses are treated as a local "
+            "llama.cpp server, everything else as a hosted API."
+        ),
+        "probe": "llm",
+        "subgroup": "OpenAI",
+        "advanced": True,
+    },
     "llm.openai.disable_thinking": {
         "title": "OpenAI disable thinking",
         "description": (

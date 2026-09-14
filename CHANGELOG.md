@@ -214,6 +214,18 @@ change landed on `main`.
 
 ### Fixed
 
+- **A hosted OpenAI-compatible endpoint is no longer sent llama.cpp's request
+  fields.** The provider added a repetition penalty, an `n_predict` echo of the
+  output cap and `chat_template_kwargs` whenever `base_url` was set, conflating
+  "custom endpoint" with "llama.cpp server": the first run against
+  `https://integrate.api.nvidia.com/v1` failed on
+  `400 Unsupported parameter(s): n_predict` before an analyst ran. The new
+  `llm.openai.compat` setting says which dialect the endpoint speaks —
+  `llama_cpp`, `standard`, or `auto`, which reads the host and treats loopback,
+  link-local and private addresses as local. An endpoint that rejects one of
+  the extras anyway is retried once without them and remembered for the rest of
+  the process.
+
 - **A name the product later seeds no longer breaks the configuration.** An
   operator's own agent or team stored under `triage`, `android_static`,
   `reverser`, `mobile` or `deep_static` was refused as tampering with a
