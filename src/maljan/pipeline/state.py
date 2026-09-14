@@ -67,6 +67,12 @@ def _merge_stage_results(
             merged[key] = dict(entry)
             continue
         agents = list(dict.fromkeys([*existing.get("agents", []), *entry.get("agents", [])]))
+        # Per-agent skip reasons: each member of a parallel stage writes its
+        # own, so they merge rather than the last writer winning.
+        agent_reasons = {
+            **(existing.get("agent_reasons") or {}),
+            **(entry.get("agent_reasons") or {}),
+        }
         techniques = list(
             dict.fromkeys([*existing.get("technique_ids", []), *entry.get("technique_ids", [])])
         )
@@ -89,6 +95,7 @@ def _merge_stage_results(
                 else int(existing.get("duration_ms") or 0) + int(entry.get("duration_ms") or 0)
             ),
             "agents": agents,
+            **({"agent_reasons": agent_reasons} if agent_reasons else {}),
             "technique_ids": techniques,
         }
     return merged

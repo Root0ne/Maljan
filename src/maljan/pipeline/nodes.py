@@ -11,6 +11,7 @@ import asyncio
 import json
 import re
 import time
+from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, cast
@@ -523,12 +524,24 @@ def stage_record(
     ran: bool,
     reason: str = "",
     agents: tuple[str, ...] = (),
+    agent_reasons: Mapping[str, str] | None = None,
     claim_count: int = 0,
     technique_ids: tuple[str, ...] = (),
     finding_count: int = 0,
     duration_ms: int = 0,
 ) -> dict[str, Any]:
-    """One stage's contribution to ``state["stage_results"]``."""
+    """One stage's contribution to ``state["stage_results"]``.
+
+    ``reason`` answers "why did this stage not run" and nothing else. A stage
+    of three analysts, one of which had no data, *ran*: writing that analyst's
+    skip reason as the stage's put "no sandbox fixture for this sample" beside
+    ``ran: true`` in the run summary, which reads as the stage having been
+    skipped and is contradicted by the same row's duration. A reason given for
+    a stage that ran is recorded per agent instead, under ``agent_reasons``.
+    """
+    if ran and reason:
+        agent_reasons = {**(agent_reasons or {}), **({a: reason for a in agents} if agents else {})}
+        reason = ""
     entry = StageResult(
         ran=ran,
         reason=reason,
@@ -537,6 +550,8 @@ def stage_record(
         finding_count=finding_count,
         agents=agents,
     ).to_dict()
+    if agent_reasons:
+        entry["agent_reasons"] = dict(agent_reasons)
     entry["kind"] = str(getattr(stage, "kind", "analysis"))
     # The reducer adds durations up across a stage's nodes, which is right for
     # a chain and wrong for a fan-out; it needs the mode to tell them apart.
@@ -682,6 +697,13 @@ def stage_rollup(
                 "reason": str(entry.get("reason") or ("" if entry else "stage did not report")),
                 "agents": list(entry.get("agents") or stage.agents),
                 "duration_ms": int(entry.get("duration_ms") or 0),
+                # Why an individual member of a stage that ran did not work.
+                # Absent when every member worked, which is the common row.
+                **(
+                    {"agent_reasons": dict(entry["agent_reasons"])}
+                    if entry.get("agent_reasons")
+                    else {}
+                ),
             }
         )
     return rows
@@ -940,10 +962,17 @@ def make_stage_agent_node(
                         **stage_record(
                             stage,
                             ran=True,
-                            reason=(
-                                SYNTHETIC_SANDBOX_REASON if synthetic else "no data for this agent"
-                            ),
                             agents=(agent_name,),
+                            # The reason belongs to this agent, not to a stage
+                            # that ran. The analyst's own findings row carries
+                            # it too, as its ``status_reason``.
+                            agent_reasons={
+                                agent_name: (
+                                    SYNTHETIC_SANDBOX_REASON
+                                    if synthetic
+                                    else "no data for this agent"
+                                )
+                            },
                             duration_ms=_elapsed_ms(),
                         ),
                     }
