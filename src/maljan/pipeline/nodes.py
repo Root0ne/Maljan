@@ -16,7 +16,12 @@ from contextlib import suppress
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, cast
 
-from maljan.agents.judge_agent import VERDICT_FALLBACK_CODE, VERDICT_FALLBACK_REASON
+from maljan.agents.judge_agent import (
+    VERDICT_FALLBACK_CODE,
+    VERDICT_FALLBACK_REASON,
+    VERDICT_TIMEOUT_CODE,
+    VERDICT_TIMEOUT_REASON,
+)
 from maljan.analysis.run_summary import RunSummaryBuilder
 from maljan.core.config import BUILTIN_AGENTS
 from maljan.core.container import ServiceContainer
@@ -2061,6 +2066,9 @@ def make_judge_node(
             # ordinary verdict with a slightly emptier STIX object.
             if any(v.code == VERDICT_FALLBACK_CODE for v in verdict.violations):
                 _degradation_reasons.append(VERDICT_FALLBACK_REASON)
+                _degraded_mode = True
+            if any(v.code == VERDICT_TIMEOUT_CODE for v in verdict.violations):
+                _degradation_reasons.append(VERDICT_TIMEOUT_REASON)
                 _degraded_mode = True
 
             bundle = verdict.bundle

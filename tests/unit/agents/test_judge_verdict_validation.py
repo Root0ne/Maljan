@@ -20,6 +20,8 @@ import pytest
 from maljan.agents.judge_agent import (
     VERDICT_FALLBACK_CODE,
     VERDICT_FALLBACK_REASON,
+    VERDICT_TIMEOUT_CODE,
+    VERDICT_TIMEOUT_REASON,
     JudgeAgent,
 )
 from maljan.pipeline.validation import FEEDBACK_PREAMBLE
@@ -392,3 +394,50 @@ class TestAnAnswerThatIsNotABundle:
 
         assert metrics["retries"] == 1
         assert [row["code"] for row in metrics["unresolved"]] == [VERDICT_FALLBACK_CODE]
+
+
+class TestAJudgeThatNeverAnswered:
+    """A timeout produces the same fallback bundle as garbage does, and asking
+    again would cost a second full judge timeout for the same answer. So it is
+    not asked again — but the verdict in the report is the analysts' text, not
+    the judge's, and the run summary used to show a clean validation block
+    beside it."""
+
+    @pytest.mark.asyncio
+    async def test_the_timeout_is_recorded_unresolved(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from maljan.agents import judge_agent as module
+
+        async def _timeout(coro: Any, *args: Any, **kwargs: Any) -> Any:
+            coro.close()
+            raise TimeoutError("the judge did not answer")
+
+        monkeypatch.setattr(module, "run_on_agent_loop", _timeout)
+
+        judge, llm = _judge()
+        verdict = await judge.give_verdict(reports=REPORTS, history=[])
+
+        assert [v.code for v in verdict.violations] == [VERDICT_TIMEOUT_CODE]
+        assert verdict.violations[0].message == VERDICT_TIMEOUT_REASON
+        assert verdict.retries == 0, "a second full judge timeout buys nothing"
+
+    @pytest.mark.asyncio
+    async def test_it_reaches_the_run_summary(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from maljan.agents import judge_agent as module
+        from maljan.pipeline.validation import validation_metrics
+
+        async def _timeout(coro: Any, *args: Any, **kwargs: Any) -> Any:
+            coro.close()
+            raise TimeoutError("the judge did not answer")
+
+        monkeypatch.setattr(module, "run_on_agent_loop", _timeout)
+
+        judge, _llm = _judge()
+        verdict = await judge.give_verdict(reports=REPORTS, history=[])
+
+        metrics = validation_metrics(
+            verdict.retries, [("judge", v) for v in verdict.violations], verdict.fed_back
+        )
+
+        assert [row["code"] for row in metrics["unresolved"]] == [VERDICT_TIMEOUT_CODE]

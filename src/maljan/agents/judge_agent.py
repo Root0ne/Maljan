@@ -74,6 +74,14 @@ _NOT_JSON_FEEDBACK = (
 VERDICT_FALLBACK_CODE = "verdict.fallback"
 VERDICT_FALLBACK_REASON = "judge verdict fell back to text extraction"
 
+# What is recorded when the judge never answered at all. A retry would cost a
+# second full judge timeout and could only produce the same fallback bundle, so
+# nothing is asked again — but a verdict extracted from the analysts' text
+# because the judge timed out is not a verdict the judge gave, and the run
+# summary says so rather than showing a clean validation block.
+VERDICT_TIMEOUT_CODE = "verdict.timeout"
+VERDICT_TIMEOUT_REASON = "the judge did not answer within its budget"
+
 
 def _answer_text(answer: Any) -> str:
     """The text of a model answer, whatever shape it arrived in."""
@@ -786,6 +794,14 @@ class JudgeAgent:
             parse=_parse,
             on_feedback=tally.count,
         )
+        if timed_out:
+            # No answer at all, so there is nothing to feed back and nothing
+            # was: the bundle is whatever the text extraction could make of the
+            # analysts' reports. Cheap to record and invisible without it.
+            violations = [
+                *violations,
+                Violation(code=VERDICT_TIMEOUT_CODE, message=VERDICT_TIMEOUT_REASON),
+            ]
         if not_json:
             # The retry answered with prose or a tool call as well, so the
             # bundle is whatever the text extraction could make of it. That is
