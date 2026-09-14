@@ -160,6 +160,27 @@ def answer_is_isr(text: str) -> bool:
     return "CLAIM:" in text or has_findings_block(text)
 
 
+def cause_chain(exc: BaseException, limit: int = 4) -> str:
+    """``exc``'s causes, innermost last, as one line.
+
+    ``str(APIConnectionError)`` is the words "Connection error." whatever
+    produced it: a refused socket, a TLS failure, and an httpx pool being used
+    from an event loop other than the one it was opened on all read the same.
+    The last of those is a bug in this process rather than a blip on the wire
+    — it cost a full retry on the judge's first verdict request of every run
+    and nothing in the log could tell it from a flaky server. The chain is
+    where the difference is, so the chain is what gets logged.
+    """
+    parts: list[str] = []
+    seen: set[int] = {id(exc)}
+    cause: BaseException | None = exc.__cause__ or exc.__context__
+    while cause is not None and len(parts) < limit and id(cause) not in seen:
+        parts.append(repr(cause))
+        seen.add(id(cause))
+        cause = cause.__cause__ or cause.__context__
+    return " <- ".join(parts) if parts else "no cause recorded"
+
+
 async def retry_on_connection_error(
     make_awaitable: Callable[[], Awaitable[Any]],
     *,
@@ -197,15 +218,22 @@ async def retry_on_connection_error(
             return await make_awaitable()
         except APIConnectionError as exc:
             if attempt >= attempts - 1:
-                emit.error("%s: connection error after %d attempts: %s", what, attempts, exc)
+                emit.error(
+                    "%s: connection error after %d attempts: %r (caused by %s)",
+                    what,
+                    attempts,
+                    exc,
+                    cause_chain(exc),
+                )
                 raise
             wait = 2**attempt
             emit.warning(
-                "%s: connection error (attempt %d/%d): %s — retrying in %ds.",
+                "%s: connection error (attempt %d/%d): %r (caused by %s) — retrying in %ds.",
                 what,
                 attempt + 1,
                 attempts,
                 exc,
+                cause_chain(exc),
                 wait,
             )
             await asyncio.sleep(wait)

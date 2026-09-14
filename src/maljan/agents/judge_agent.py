@@ -34,7 +34,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 
-from maljan.agents.base_agent import retry_on_connection_error
+from maljan.agents.base_agent import retry_on_connection_error, run_on_agent_loop
 from maljan.core.config import get_settings
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger, record_response_usage
@@ -694,18 +694,29 @@ class JudgeAgent:
         # timeout and throw the answer away.
         timed_out = False
 
+        async def _ask(turns: list[Any]) -> Any:
+            return await retry_on_connection_error(
+                lambda: self.llm.ainvoke(turns),
+                what="Judge verdict",
+                log=self.logger,
+            )
+
         async def _run(turns: list[Any]) -> Any:
             nonlocal timed_out
             timed_out = False
             try:
-                return await asyncio.wait_for(
-                    retry_on_connection_error(
-                        lambda: self.llm.ainvoke(turns),
-                        what="Judge verdict",
-                        log=self.logger,
-                    ),
-                    timeout=timeout,
-                )
+                # On the shared agent loop, not on the graph's. The judge's
+                # model is one cached client and the mediator has already used
+                # it — from ``run_on_agent_loop`` — by the time the verdict is
+                # asked for, so its httpx pool holds connections bound to that
+                # loop. Awaiting the same client here on the worker's loop made
+                # the *first* verdict request of every run die instantly with
+                # ``APIConnectionError("Connection error.")`` before a byte
+                # reached llama-server; the SDK then dropped the dead
+                # connection and the retry, opening a fresh one, always
+                # succeeded. See ``run_on_agent_loop`` for the same fault in
+                # the mediator, and for why one loop owns every LLM call.
+                return await run_on_agent_loop(_ask(turns), timeout, label="judge:verdict")
             except TimeoutError:
                 self.logger.error("JudgeAgent verdict timed out after %ds.", timeout)
                 timed_out = True
