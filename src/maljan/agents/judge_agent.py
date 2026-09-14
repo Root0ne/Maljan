@@ -42,6 +42,7 @@ from maljan.core.truncation_ledger import TruncationLedger, record_judge_respons
 from maljan.pipeline.mediation_models import MediatorVerdict
 from maljan.pipeline.state import AgentArgument
 from maljan.pipeline.validation import (
+    ValidationTally,
     Violation,
     drop_ungrounded_indicators,
     retry_with_feedback,
@@ -134,6 +135,9 @@ class JudgeVerdict(NamedTuple):
     bundle: Bundle
     violations: list[Violation]
     retries: int
+    # Every violation the judge was shown, by code — including the ones the
+    # retry fixed, which nothing else in the run records.
+    fed_back: dict[str, int] = {}
 
 
 # The judge's system prompt. A module constant so that
@@ -768,8 +772,14 @@ class JudgeAgent:
                 return [Violation(code="verdict.not_json", message=_NOT_JSON_FEEDBACK)]
             return validate_verdict_bundle(bundle, evidence_corpus, attck=_knowledge)
 
+        tally = ValidationTally()
         bundle, violations, retries = await retry_with_feedback(
-            _run, messages, [_validate], max_retries=_VERDICT_RETRIES, parse=_parse
+            _run,
+            messages,
+            [_validate],
+            max_retries=_VERDICT_RETRIES,
+            parse=_parse,
+            on_feedback=tally.count,
         )
         if not_json:
             # The retry answered with prose or a tool call as well, so the
@@ -789,7 +799,9 @@ class JudgeAgent:
                 "dropped; they are recorded in the run summary.",
                 dropped,
             )
-        return JudgeVerdict(bundle=bundle, violations=violations, retries=retries)
+        return JudgeVerdict(
+            bundle=bundle, violations=violations, retries=retries, fed_back=dict(tally.by_code)
+        )
 
     def _bundle_from_response(
         self,

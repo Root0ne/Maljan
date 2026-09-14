@@ -27,7 +27,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from maljan.agents.base_agent import retry_on_connection_error
 from maljan.core.logger import logger
 from maljan.llm.registry import structured_output_supported_for_llm
-from maljan.pipeline.validation import Violation, retry_with_feedback, schema_violations
+from maljan.pipeline.validation import (
+    ValidationTally,
+    Violation,
+    retry_with_feedback,
+    schema_violations,
+)
 from maljan.reporting.evidence_bundles import bundle_for, is_empty
 from maljan.reporting.models import (
     C2Channel,
@@ -162,6 +167,10 @@ class ReportComposer:
         self.section_max_tokens = section_max_tokens
         self.per_section_timeout = per_section_timeout
         self.token_ledger = token_ledger
+        # What each section was told was wrong with its answer, by code, across
+        # every section. The composer runs after the run summary is built, so
+        # the report node reads this and folds it in.
+        self.validation_tally = ValidationTally()
 
     async def compose(
         self, report: MalwareReport, isr_reports: dict[str, Any] | None = None
@@ -326,8 +335,14 @@ class ReportComposer:
             return schema_violations(schema, payload, code="composer.schema")
 
         payload, violations, retries = await retry_with_feedback(
-            _run, list(messages), [_validate], parse=_parse
+            _run,
+            list(messages),
+            [_validate],
+            parse=_parse,
+            on_feedback=self.validation_tally.count,
         )
+        self.validation_tally.retries += retries
+        self.validation_tally.count(violations)
         if declined:
             # Logged at info so the skip is still traceable, and never as an
             # error a reader would go chasing.

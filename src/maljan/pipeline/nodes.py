@@ -37,7 +37,12 @@ from maljan.pipeline.events import (
 from maljan.pipeline.evidence_summary import summarise
 from maljan.pipeline.state import AgentArgument, AnalysisState, _merge_stage_results
 from maljan.pipeline.sycophancy_detector import build_revision_directive, detect_sycophancy
-from maljan.pipeline.validation import Violation, corroboration, validation_metrics
+from maljan.pipeline.validation import (
+    ValidationTally,
+    Violation,
+    corroboration,
+    validation_metrics,
+)
 from maljan.reporting.ledger_report import section_is_grounded
 from maljan.schemas.evidence import LedgerEntry
 from maljan.schemas.isr_models import AgentISR
@@ -158,7 +163,7 @@ def _validation_update(agent: Any, agent_name: str) -> dict[str, Any]:
     if drain is None:
         return {}
     try:
-        rows, retries = drain()
+        rows, retries, fed_back = drain()
     except Exception as exc:  # noqa: BLE001 — a metric is never worth a lost run
         logger.debug("validation findings read skipped for %s: %s", agent_name, exc)
         return {}
@@ -167,6 +172,8 @@ def _validation_update(agent: Any, agent_name: str) -> dict[str, Any]:
         update["validation_findings"] = {agent_name: rows}
     if retries:
         update["validation_retries"] = retries
+    if fed_back:
+        update["validation_fed_back"] = dict(fed_back)
     return update
 
 
@@ -597,6 +604,25 @@ def _with_upstream(chunks: list, block: str) -> list:
     if content is None:
         content = f"{block}\n\n{head.content}"
     return [replace(head, content=content, char_count=len(content)), *chunks[1:]]
+
+
+def _amended_validation(run_summary: Any, tally: ValidationTally) -> dict[str, Any] | None:
+    """The run summary's ``validation`` block plus what the report round cost.
+
+    ``None`` when there is nothing to amend — no summary (mock mode, where the
+    judge never built one) or no corrections in the report stage.
+    """
+    if not tally.retries and not tally.by_code:
+        return None
+    block = dict((run_summary or {}).get("validation") or {}) if run_summary else {}
+    if not block:
+        return None
+    by_code = dict(block.get("by_code") or {})
+    for code, count in tally.by_code.items():
+        by_code[code] = int(by_code.get(code, 0)) + int(count)
+    block["by_code"] = dict(sorted(by_code.items()))
+    block["retries"] = int(block.get("retries") or 0) + tally.retries
+    return block
 
 
 def stage_rollup(
@@ -1987,6 +2013,12 @@ def make_judge_node(
             ]
             _retries = int(state.get("validation_retries") or 0) + verdict.retries
             _unresolved.extend(("judge", violation) for violation in verdict.violations)
+            # And what every producer was *shown*. A code the retry fixed is
+            # invisible in the leftovers, which is how ``by_code`` came to read
+            # ``{}`` beside a run that had spent a retry on ``verdict.not_json``.
+            _fed_back: dict[str, int] = dict(state.get("validation_fed_back") or {})
+            for _code, _count in (verdict.fed_back or {}).items():
+                _fed_back[_code] = _fed_back.get(_code, 0) + int(_count)
 
             run_summary_dict = None
             try:
@@ -2004,7 +2036,7 @@ def make_judge_node(
                     .set_verdict(decision, len(bundle.objects) if isinstance(bundle, Bundle) else 0)
                     .set_negotiation(negotiation_state, max_iterations=max_iters)
                     .set_isr_stats(isr_reports, no_data=_no_data_analysts)
-                    .set_validation(validation_metrics(_retries, _unresolved))
+                    .set_validation(validation_metrics(_retries, _unresolved, _fed_back))
                     .set_corroboration(_corroboration)
                     .set_degraded_mode(_degraded_mode, _degradation_reasons)
                     .set_failed_analysts(_failed_analysts)
@@ -2575,6 +2607,11 @@ def make_report_node(
         # also returns None when the structured-output and manual-parse
         # fallbacks both fail. In every "no narrative" branch we apply the
         # deterministic template so the report never ships with empty prose.
+        # What the report's own two LLM rounds were told was wrong with their
+        # answers. They run after the judge built the run summary, so the
+        # summary's ``validation`` block is amended here rather than there.
+        _report_tally = ValidationTally()
+
         narrative_dict: dict[str, Any] | None = None
         try:
             narrative_agent = container.get_narrative_agent()
@@ -2608,6 +2645,7 @@ def make_report_node(
                 narrative_output = None
             if narrative_output is not None:
                 narrative_dict = narrative_output.model_dump(mode="json")
+            _report_tally.merge(getattr(narrative_agent, "validation_tally", ValidationTally()))
 
         if narrative_dict is not None:
             report = MalwareReportBuilder.apply_narrative(report, narrative_dict)
@@ -2637,6 +2675,7 @@ def make_report_node(
                 logger.warning(
                     "report_node: ReportComposer.compose raised (%s); spine skipped.", exc
                 )
+            _report_tally.merge(getattr(composer, "validation_tally", ValidationTally()))
 
         # Deterministic figures (inline SVG + Ghidra
         # code listings) generated from the report's own data — real charts, no
@@ -2771,6 +2810,12 @@ def make_report_node(
         # untouched value keeps the mock-mode contract, where the judge node
         # skipped the RunSummaryBuilder and the column is legitimately null.
         _state_summary: dict[str, Any] = {}
+        _validation_block = _amended_validation(state.get("run_summary"), _report_tally)
+        if _validation_block is not None:
+            _state_summary["validation"] = _validation_block
+            _summary = dict(report.run_summary or {})
+            _summary["validation"] = _validation_block
+            report.run_summary = _summary
         if fp_warnings:
             _state_summary["fp_warnings"] = fp_warnings
         if _ledger:

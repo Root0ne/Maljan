@@ -368,6 +368,7 @@ class MaljanApp:
             "attck_case_candidates": [],
             "validation_findings": {},
             "validation_retries": 0,
+            "validation_fed_back": {},
         }
 
         result = await self.graph.ainvoke(initial_state)

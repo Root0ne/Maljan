@@ -29,7 +29,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from maljan.agents.base_agent import retry_on_connection_error
 from maljan.core.logger import logger
 from maljan.llm.registry import structured_output_supported_for_llm
-from maljan.pipeline.validation import retry_with_feedback, schema_violations
+from maljan.pipeline.validation import (
+    ValidationTally,
+    retry_with_feedback,
+    schema_violations,
+)
 from maljan.reporting.models import DefensiveRecommendation, MalwareReport
 from maljan.utils.json_cleaner import safe_parse_json
 
@@ -315,6 +319,10 @@ class NarrativeAgent:
         # and must count toward run_summary token metrics. Recorded on the raw
         # path below (the structured path hides usage behind the parser).
         self.token_ledger = token_ledger
+        # What this round was told was wrong with its answer, by code. The
+        # narrative runs after the run summary is built, so the report node
+        # reads this and folds it in rather than the builder collecting it.
+        self.validation_tally = ValidationTally()
 
     async def generate(self, report: MalwareReport) -> NarrativeOutput | None:
         """Return a ``NarrativeOutput`` or ``None`` if both paths fail.
@@ -382,10 +390,14 @@ class NarrativeAgent:
                 list(messages),
                 [lambda p: schema_violations(NarrativeOutput, p, code="narrative.schema")],
                 parse=_narrative_payload,
+                on_feedback=self.validation_tally.count,
             )
         except Exception as exc:  # noqa: BLE001
             logger.error("NarrativeAgent: manual-parse fallback failed (%s); NO NARRATIVE.", exc)
             return None
+
+        self.validation_tally.retries += retries
+        self.validation_tally.count(violations)
 
         if violations:
             # ``error``: reaching here means the report ships with no narrative

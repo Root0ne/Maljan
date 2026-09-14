@@ -33,6 +33,7 @@ from maljan.core.exceptions import AgentLoopCancelled, AnalystError
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger, record_response_usage
 from maljan.pipeline.validation import (
+    ValidationTally,
     Violation,
     mark_invalid_technique_ids,
     retry_with_feedback_sync,
@@ -1252,6 +1253,10 @@ class BaseAnalyst(ABC):
         # by the analyst node onto the state's validation channels.
         self.validation_findings: list[Violation] = []
         self.validation_retries: int = 0
+        # Every violation this analyst was *shown*, by code. A violation the
+        # retry fixed leaves no other trace, and a run summary that counts only
+        # the leftovers cannot say what the retry was for.
+        self.validation_fed_back: dict[str, int] = {}
         # Whether the last tool loop ended on something that was not a report,
         # after its one nudge. Read by ``_text_to_isr`` so the ISR says why it
         # is empty instead of leaving the reader to infer it from a claim list.
@@ -2466,14 +2471,17 @@ class BaseAnalyst(ABC):
             return self._text_to_isr(self._capture_findings(text), isr.revision_round)
 
         try:
+            tally = ValidationTally()
             revised, violations, retries = retry_with_feedback_sync(
-                _run, messages, [_validator], parse=_parse
+                _run, messages, [_validator], parse=_parse, on_feedback=tally.count
             )
         except Exception as exc:  # noqa: BLE001 — a retry that fails keeps the first answer
             self.logger.warning("Validation retry failed (%s); keeping the first answer.", exc)
             return isr
 
         self.validation_retries += retries
+        for code, count in tally.by_code.items():
+            self.validation_fed_back[code] = self.validation_fed_back.get(code, 0) + count
 
         # A retry that came back with fewer claims than it started with lost
         # work. ``_text_to_isr`` over a garbled second answer parses to an empty
@@ -2513,13 +2521,20 @@ class BaseAnalyst(ABC):
             self.logger.warning("Validation: re-check skipped (%s).", exc)
             return []
 
-    def drain_validation_findings(self) -> tuple[list[dict[str, str]], int]:
-        """What this analyst was told and did not fix, and how many retries it cost."""
+    def drain_validation_findings(self) -> tuple[list[dict[str, str]], int, dict[str, int]]:
+        """What this analyst was told, what it did not fix, and what that cost.
+
+        Three values, not two: the leftovers, the retry count, and every code
+        the analyst was fed back — including the ones it went on to fix, which
+        are exactly the ones nothing else in the run records.
+        """
         rows = [v.to_dict() for v in self.validation_findings]
         retries = self.validation_retries
+        fed_back = dict(self.validation_fed_back)
         self.validation_findings = []
         self.validation_retries = 0
-        return rows, retries
+        self.validation_fed_back = {}
+        return rows, retries, fed_back
 
     def _apply_consistency_gate(self, isr: AgentISR, evidence: str) -> AgentISR:
         """LAMD foundational-tier consistency gate (findings-log §4 Item 4).

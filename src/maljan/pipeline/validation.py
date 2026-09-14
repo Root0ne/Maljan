@@ -21,8 +21,8 @@ and the drop of an indicator that named a value no tool ever saw.
 from __future__ import annotations
 
 import re
-from collections.abc import Awaitable, Callable, Iterable, Sequence
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import Any
 
 from pydantic import ValidationError
@@ -61,6 +61,35 @@ class Violation:
 
     def to_dict(self) -> dict[str, str]:
         return {"code": self.code, "message": self.message, "path": self.path}
+
+
+@dataclass
+class ValidationTally:
+    """How much correction one producer needed, by code.
+
+    ``run_summary.validation.by_code`` used to be built from the unresolved
+    list alone, so a run whose judge was corrected once and answered properly
+    the second time reported ``retries: 1`` beside an empty ``by_code`` and
+    nothing said what the retry had been about. Every violation a producer is
+    *shown* is counted here, and so is every one it never fixed, which is the
+    only reading under which the two numbers agree.
+    """
+
+    retries: int = 0
+    by_code: dict[str, int] = field(default_factory=dict)
+
+    def count(self, violations: Sequence[Violation]) -> None:
+        """Count a set of violations. The shape ``on_feedback`` is called with."""
+        for violation in violations:
+            self.by_code[violation.code] = self.by_code.get(violation.code, 0) + 1
+
+    def merge(self, other: ValidationTally) -> None:
+        self.retries += other.retries
+        for code, count in other.by_code.items():
+            self.by_code[code] = self.by_code.get(code, 0) + count
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"retries": int(self.retries), "by_code": dict(sorted(self.by_code.items()))}
 
 
 # A validator reads a produced object and says what is wrong with it. It never
@@ -548,6 +577,24 @@ def _with_feedback(messages: list[Any], answer: Any, violations: Sequence[Violat
     return turns
 
 
+def _announce_feedback(
+    violations: Sequence[Violation],
+    on_feedback: Callable[[Sequence[Violation]], None] | None,
+) -> None:
+    """Log the correction turn and hand its violations to the run's tally."""
+    logger.info(
+        "validation: retrying after %d violation(s): %s.",
+        len(violations),
+        ", ".join(sorted({v.code for v in violations})),
+    )
+    if on_feedback is None:
+        return
+    try:
+        on_feedback(violations)
+    except Exception as exc:  # noqa: BLE001 — a metric is never worth a lost run
+        logger.debug("validation: the feedback tally was not updated (%s).", exc)
+
+
 async def retry_with_feedback[T](
     run: Callable[[list[Any]], Awaitable[Any]],
     messages: list[Any],
@@ -555,6 +602,7 @@ async def retry_with_feedback[T](
     *,
     max_retries: int = 1,
     parse: Callable[[Any], T],
+    on_feedback: Callable[[Sequence[Violation]], None] | None = None,
 ) -> tuple[T, list[Violation], int]:
     """Run, validate, and give the model one chance to fix what it got wrong.
 
@@ -562,6 +610,11 @@ async def retry_with_feedback[T](
     retries were spent. Remaining violations are returned rather than raised:
     the caller decides whether an unresolved finding is a label on a claim or a
     dropped object, and neither of those is this function's call to make.
+
+    ``on_feedback`` is handed every violation the producer is shown, before it
+    is shown. A violation the retry fixes leaves no other trace, and a run
+    summary that counts only the leftovers cannot say what the retry was for
+    — :class:`ValidationTally` is what the callers pass.
     """
     turns = list(messages)
     answer = await run(turns)
@@ -569,11 +622,7 @@ async def retry_with_feedback[T](
     violations = _collect(parsed, validators)
     retries = 0
     while violations and retries < max_retries:
-        logger.info(
-            "validation: retrying after %d violation(s): %s.",
-            len(violations),
-            ", ".join(sorted({v.code for v in violations})),
-        )
+        _announce_feedback(violations, on_feedback)
         turns = _with_feedback(turns, answer, violations)
         retries += 1
         answer = await run(turns)
@@ -589,6 +638,7 @@ def retry_with_feedback_sync[T](
     *,
     max_retries: int = 1,
     parse: Callable[[Any], T],
+    on_feedback: Callable[[Sequence[Violation]], None] | None = None,
 ) -> tuple[T, list[Violation], int]:
     """:func:`retry_with_feedback` for the analysts, whose loop is synchronous.
 
@@ -603,11 +653,7 @@ def retry_with_feedback_sync[T](
     violations = _collect(parsed, validators)
     retries = 0
     while violations and retries < max_retries:
-        logger.info(
-            "validation: retrying after %d violation(s): %s.",
-            len(violations),
-            ", ".join(sorted({v.code for v in violations})),
-        )
+        _announce_feedback(violations, on_feedback)
         turns = _with_feedback(turns, answer, violations)
         retries += 1
         answer = run(turns)
@@ -621,9 +667,19 @@ def retry_with_feedback_sync[T](
 # ---------------------------------------------------------------------------
 
 
-def validation_metrics(retries: int, unresolved: Sequence[tuple[str, Violation]]) -> dict[str, Any]:
-    """``run_summary.validation`` from the run's retries and leftovers."""
-    by_code: dict[str, int] = {}
+def validation_metrics(
+    retries: int,
+    unresolved: Sequence[tuple[str, Violation]],
+    fed_back: Mapping[str, int] | None = None,
+) -> dict[str, Any]:
+    """``run_summary.validation`` from the run's retries, corrections and leftovers.
+
+    ``fed_back`` is what the producers were told, by code (see
+    :class:`ValidationTally`). It is added to the leftovers rather than
+    replacing them: a code that was fed back once and never fixed is two
+    facts about the run, and ``by_code`` is the count of both.
+    """
+    by_code: dict[str, int] = {code: int(count) for code, count in (fed_back or {}).items()}
     rows: list[dict[str, str]] = []
     for agent, violation in unresolved:
         by_code[violation.code] = by_code.get(violation.code, 0) + 1
