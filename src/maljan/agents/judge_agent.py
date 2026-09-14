@@ -181,7 +181,7 @@ JUDGE_VERDICT_SYSTEM = (
     '                 "evidence_ids": ["ev_0012"]},\n'
     '      "confidence": 0.0-1.0\n'
     "    }\n"
-    "  Omit any of the three you cannot support. A family name MUST cite the "
+    "  Omit any of the four you cannot support. A family name MUST cite the "
     "evidence ids it was read from; a family with no evidence ids is a guess, "
     "and the report will say so.\n"
     "- Return ONLY a valid JSON STIX 2.1 Bundle. No markdown wrappers."

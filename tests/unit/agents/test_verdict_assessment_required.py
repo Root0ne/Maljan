@@ -36,6 +36,11 @@ class TestTheAssessmentIsRequired:
     def test_the_message_says_what_to_add_and_where(self) -> None:
         message = assessment_violations(Bundle(objects=[]))[0].message
         assert message.startswith("Add x_maljan_assessment")
+        # Where the parser reads it: a top-level property of the bundle. A
+        # block nested inside ``objects`` is discarded by the schema, which is
+        # the failure this violation exists to fix.
+        assert "top level of the bundle" in message
+        assert 'sibling of "objects" and not inside it' in message
         for field in (
             "severity",
             "rating",
@@ -120,3 +125,19 @@ class TestTheJudgeAsksOnce:
         assert verdict.retries == 1
         assert [v.code for v in verdict.violations] == [ASSESSMENT_MISSING_CODE]
         assert verdict.bundle.x_maljan_assessment is None
+
+
+class TestThePromptAndTheFeedbackAgree:
+    def test_both_put_the_block_at_the_top_level(self) -> None:
+        from maljan.agents.judge_agent import JUDGE_VERDICT_SYSTEM
+        from maljan.pipeline.validation import ASSESSMENT_MISSING_MESSAGE
+
+        assert "top-level" in JUDGE_VERDICT_SYSTEM
+        assert "top level of the bundle" in ASSESSMENT_MISSING_MESSAGE
+
+    def test_the_prompt_counts_the_fields_it_lists(self) -> None:
+        """``confidence`` joined severity, malware_category and family."""
+        from maljan.agents.judge_agent import JUDGE_VERDICT_SYSTEM
+
+        assert "Omit any of the four you cannot support" in JUDGE_VERDICT_SYSTEM
+        assert "Omit any of the three" not in JUDGE_VERDICT_SYSTEM

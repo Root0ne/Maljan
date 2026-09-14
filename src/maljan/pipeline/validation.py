@@ -756,8 +756,8 @@ ASSESSMENT_MISSING_CODE = "verdict.assessment_missing"
 
 # What the judge is told to add, in the shape the bundle reads it in.
 ASSESSMENT_MISSING_MESSAGE = (
-    "Add x_maljan_assessment to the bundle, beside the malware object, with "
-    "severity {rating, rationale}, malware_category, "
+    'Add x_maljan_assessment at the top level of the bundle, as a sibling of "objects" '
+    "and not inside it, with severity {rating, rationale}, malware_category, "
     "family {name, confidence, evidence_ids} and confidence. "
     "Omit only a field the evidence cannot support."
 )
@@ -765,6 +765,11 @@ ASSESSMENT_MISSING_MESSAGE = (
 
 def assessment_violations(bundle: Any) -> list[Violation]:
     """Whether the judge said what it thinks, beyond the STIX objects.
+
+    The message names the top level of the bundle because that is where
+    ``Bundle.x_maljan_assessment`` is read from. A block placed inside
+    ``objects`` instead is discarded by ``Bundle.model_validate`` and the
+    report says "not assessed" — the very failure the retry exists to fix.
 
     Severity, category, family and the judge's own confidence are the judge's
     to decide and nothing downstream computes them, so a bundle without them
