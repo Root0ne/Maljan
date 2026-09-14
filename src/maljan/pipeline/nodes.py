@@ -177,6 +177,40 @@ def _validation_update(agent: Any, agent_name: str) -> dict[str, Any]:
     return update
 
 
+def mean_claim_confidence(isrs: Any) -> float | None:
+    """The mean confidence of the analysts that produced claims, or ``None``.
+
+    An analyst that was skipped, or that read its data and found nothing to
+    say, is excluded rather than counted as a zero. Averaging it in was how a
+    run with one analyst at 0.50 and two skipped ones reported 0.167 — a
+    number about how many analysts ran, presented as how sure the run was.
+    """
+    values = [
+        float(getattr(isr, "mean_confidence", 0.0) or 0.0)
+        for isr in (isrs.values() if isinstance(isrs, dict) else (isrs or []))
+        if list(getattr(isr, "claims", None) or [])
+    ]
+    return sum(values) / len(values) if values else None
+
+
+def _overall_confidence(assessment: Any, isrs: Any) -> float:
+    """The judge's confidence when it gave one, else the analysts' own mean.
+
+    Three answers in order, and the order is the point: the judge decides the
+    verdict, so the judge's number is the verdict's number; failing that, the
+    analysts that actually produced claims; failing that, zero, which says the
+    run reached no confidence rather than naming one.
+    """
+    declared = getattr(assessment, "confidence", None)
+    if declared is not None:
+        try:
+            return float(declared)
+        except (TypeError, ValueError):
+            logger.warning("report_node: the judge's confidence %r is not a number.", declared)
+    mean = mean_claim_confidence(isrs)
+    return float(mean) if mean is not None else 0.0
+
+
 def isr_status(isr: Any) -> str:
     """The lifecycle status one analyst's answer reports for itself.
 
@@ -1440,11 +1474,12 @@ def make_negotiation_node(
                 label="mediation",
             )
 
-            mean_conf = (
-                sum(isr.mean_confidence for isr in current_isrs) / len(current_isrs)
-                if current_isrs
-                else argument.confidence_score
-            )
+            # Only the analysts that produced claims. A skipped analyst
+            # averaged in as a zero dragged the whole negotiation's confidence
+            # down for having had nothing to read, and that number is what the
+            # report carried.
+            _claimed = mean_claim_confidence(current_isrs)
+            mean_conf = _claimed if _claimed is not None else argument.confidence_score
 
             emit_agent_message(
                 container.event_sink,
@@ -2406,29 +2441,7 @@ def make_report_node(
 
         report_sample_platform = state.get("platform") or "unknown"
 
-        # Derive overall confidence — last entry of the confidence history if
-        # available, otherwise the negotiation block of run_summary, otherwise
-        # 0.0 (safe default for the severity heuristic).
-        confidence_history = state.get("confidence_history") or []
-        overall_confidence: float = 0.0
-        if confidence_history:
-            try:
-                overall_confidence = float(confidence_history[-1])
-            except (TypeError, ValueError):
-                overall_confidence = 0.0
         run_summary_state = state.get("run_summary") or {}
-        if not overall_confidence:
-            try:
-                overall_confidence = float(
-                    (run_summary_state.get("negotiation") or {}).get("final_confidence") or 0.0
-                )
-            except (TypeError, ValueError):
-                overall_confidence = 0.0
-
-        # A degraded run is not capped here. It is said to the judge in the
-        # verdict prompt and printed in the report header, and the confidence
-        # is whatever the run actually reached — a number silently pulled down
-        # to 0.60 told the reader the same thing for every kind of thinness.
 
         # Severity, category and family come off the judge's bundle. Nothing
         # here computes them: a report that cannot say what the judge decided
@@ -2445,6 +2458,20 @@ def make_report_node(
         except Exception as exc:  # noqa: BLE001 — an unreadable assessment is "not assessed"
             logger.warning("report_node: the judge's assessment could not be read (%s).", exc)
         malware_category = getattr(_bundle_assessment, "malware_category", None)
+
+        # And so does the confidence. It used to be the negotiation's mean over
+        # *every* analyst, with a skipped one counted as a zero: one analyst at
+        # 0.50 beside two that never ran produced 0.167 on the front page of a
+        # "Malware" verdict. An analyst that had nothing to read is not a vote
+        # of no confidence, and the mean of the analysts that did produce
+        # claims is the fallback — the judge's own number is the answer when
+        # the judge gave one.
+        overall_confidence = _overall_confidence(_bundle_assessment, isr_reports)
+
+        # A degraded run is not capped here. It is said to the judge in the
+        # verdict prompt and printed in the report header, and the confidence
+        # is whatever the run actually reached — a number silently pulled down
+        # to 0.60 told the reader the same thing for every kind of thinness.
 
         discussion_history = [
             arg.model_dump() if hasattr(arg, "model_dump") else dict(arg)
