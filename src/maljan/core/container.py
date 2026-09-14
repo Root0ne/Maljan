@@ -169,7 +169,14 @@ class PerLoopModels:
             self._by_loop[loop] = slot
         return slot
 
-    def get(self, loop: Any | None, name: str = "") -> Any | None:
+    def lookup(self, loop: Any | None, name: str = "") -> Any | None:
+        """The model cached for this loop under this name, or ``None``.
+
+        Not called ``get``: a plain ``dict`` answers ``get(loop, name)`` with
+        ``name`` itself, so a stand-in that was a dict returned the agent's
+        name as its model and the failure read as nonsense rather than as a
+        missing partition.
+        """
         return self._slot(loop).get(name)
 
     def put(self, loop: Any | None, name: str, value: Any) -> None:
@@ -349,7 +356,7 @@ class ServiceContainer:
             raise ConfigurationError("Cannot build LLM in mock mode.")
         loop = _current_loop()
         with self._lock:
-            cached = self._expert_llm_cache.get(loop)
+            cached = self._expert_llm_cache.lookup(loop)
             if cached is None:
                 cached = self._llm_registry.build_model(role="expert", **self._expert_token_cap())
                 self._expert_llm_cache.put(loop, "", cached)
@@ -360,7 +367,7 @@ class ServiceContainer:
             raise ConfigurationError("Cannot build LLM in mock mode.")
         loop = _current_loop()
         with self._lock:
-            cached = self._judge_llm_cache.get(loop)
+            cached = self._judge_llm_cache.lookup(loop)
             if cached is None:
                 # Bound the verdict generation so a degenerate decode can't
                 # consume the full wall-clock timeout (see LLMConfig.judge_max_tokens).
@@ -394,7 +401,7 @@ class ServiceContainer:
             raise ConfigurationError("Cannot build LLM in mock mode.")
         loop = _current_loop()
         with self._lock:
-            cached = self._reporter_llm_cache.get(loop)
+            cached = self._reporter_llm_cache.lookup(loop)
             if cached is None:
                 extra: dict[str, Any] = {}
                 cap = self.config.llm.judge_max_tokens
@@ -417,7 +424,7 @@ class ServiceContainer:
             raise ConfigurationError("Cannot build FunctionSummarizer LLM in mock mode.")
         loop = _current_loop()
         with self._lock:
-            cached = self._summarizer_llm_cache.get(loop)
+            cached = self._summarizer_llm_cache.lookup(loop)
             if cached is None:
                 cached = self._llm_registry.build_model(
                     role="expert",
@@ -432,7 +439,7 @@ class ServiceContainer:
             raise ConfigurationError("Cannot build LLM in mock mode.")
         loop = _current_loop()
         with self._lock:
-            cached = self._agent_llm_cache.get(loop, agent_name)
+            cached = self._agent_llm_cache.lookup(loop, agent_name)
             if cached is None:
                 # Analysts share the expert budget cap — this is the path the
                 # static/dynamic/network ReAct loops and their forced-synthesis
