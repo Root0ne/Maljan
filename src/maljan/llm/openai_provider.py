@@ -111,6 +111,66 @@ def forget_standard_only(base_url: str | None = None) -> None:
         _STANDARD_ONLY_ENDPOINTS.discard(base_url)
 
 
+def unshared_async_client(base_url: str | None, timeout: Any) -> Any | None:
+    """An httpx async pool this model alone owns, or ``None`` if it cannot be built.
+
+    ``langchain_openai`` caches its async client with ``@lru_cache`` keyed on
+    ``(base_url, timeout, socket_options)``, so every model this provider builds
+    for one endpoint — the analysts', the judge's, the reporter's — shares a
+    single pool. An httpx pool belongs to the event loop that first awaited it,
+    and this process has two that make LLM calls: the shared agent loop and the
+    worker's own. The first call from the second loop dies inside httpx with
+    "bound to a different event loop", which the openai SDK reports as a bare
+    ``APIConnectionError("Connection error.")`` — the fault diagnosed for the
+    judge and then seen again on the narrative round.
+
+    Owning the pool is what makes the container's per-loop model cache mean
+    anything: two models for two loops must not share one set of connections.
+    The keepalive socket options langchain applies are kept by reusing its own
+    builder; a version that no longer exposes it falls back to a plain client
+    rather than to the shared one.
+    """
+    try:
+        from langchain_openai.chat_models._client_utils import (  # noqa: PLC0415
+            _build_async_httpx_client,
+            _default_socket_options,
+        )
+
+        return _build_async_httpx_client(base_url, timeout, _default_socket_options())
+    except Exception as exc:  # noqa: BLE001 — a private helper is allowed to move
+        logger.debug("openai provider: langchain's client builder is unavailable (%s).", exc)
+    try:
+        import httpx  # noqa: PLC0415
+
+        return httpx.AsyncClient(timeout=timeout)
+    except Exception as exc:  # noqa: BLE001 — no client at all means the shared one
+        logger.warning(
+            "openai provider: could not build a private httpx pool (%s); this model "
+            "shares langchain's cached one and must only be used from one event loop.",
+            exc,
+        )
+        return None
+
+
+def clear_shared_httpx_clients() -> None:
+    """Empty ``langchain_openai``'s cached httpx clients. Never raises.
+
+    The belt to :func:`unshared_async_client`'s braces: a model built somewhere
+    that did not pass its own pool still holds a reference to the cached one,
+    and after an agent loop is retired that pool is bound to a loop nothing will
+    run again. Called from the container's retirement hook.
+    """
+    try:
+        from langchain_openai.chat_models import _client_utils  # noqa: PLC0415
+
+        for name in ("_cached_async_httpx_client", "_cached_sync_httpx_client"):
+            cached = getattr(_client_utils, name, None)
+            if cached is not None and hasattr(cached, "cache_clear"):
+                cached.cache_clear()
+    except Exception as exc:  # noqa: BLE001 — a cache that cannot be cleared is not a run
+        logger.debug("openai provider: the shared httpx client cache was not cleared (%s).", exc)
+
+
 @register_provider("openai")
 class OpenAIProvider:
     """Builds LangChain ChatOpenAI instances."""
@@ -183,6 +243,13 @@ class OpenAIProvider:
         # ``execute_tool_loop`` is the only retry policy we want.
         build_kwargs.setdefault("request_timeout", 1800)
         build_kwargs.setdefault("max_retries", 0)
+
+        # This model's own connection pool, so two models for two event loops
+        # do not share one. See ``unshared_async_client``.
+        if "http_async_client" not in build_kwargs:
+            private = unshared_async_client(base_url, build_kwargs["request_timeout"])
+            if private is not None:
+                build_kwargs["http_async_client"] = private
 
         built = ChatOpenAI(**build_kwargs)
         if not local:
