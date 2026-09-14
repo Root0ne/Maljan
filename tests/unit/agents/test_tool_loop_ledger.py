@@ -206,6 +206,49 @@ class TestARepeatedCall:
 
         assert len(seen) == 2
 
+    def test_a_call_that_raises_counts_against_the_budget_too(self) -> None:
+        """A tool that throws on the same arguments was re-run without bound:
+        the guard was only told about calls that returned, so an unreachable
+        server or a path the sidecar will never read could spend a whole step
+        budget failing identically."""
+        calls: list[str] = []
+
+        def identify_file(path: str) -> dict[str, str]:
+            """Identify a file."""
+            calls.append(path)
+            raise RuntimeError("no such file")
+
+        recorder = EvidenceRecorder("static")
+        wrapped = record_tools([_tool(identify_file, "identify_file")], recorder, RepeatGuard())[0]
+
+        for _ in range(4):
+            answer = wrapped.invoke({"path": "/samples/gone.exe"})
+
+        assert calls == ["/samples/gone.exe"] * 2, "one repeat is served, the rest are not"
+        assert "You already called identify_file with these arguments" in answer
+        assert [entry.ok for entry in recorder.entries] == [False, False, True, True]
+        assert recorder.entries[2].repeated_of == "ev_0001"
+
+    def test_a_call_that_starts_failing_still_counts_from_the_first(self) -> None:
+        outcomes = iter([RuntimeError("transient"), None])
+
+        def identify_file(path: str) -> dict[str, str]:
+            """Identify a file."""
+            outcome = next(outcomes, None)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return {"file_type": "PE"}
+
+        recorder = EvidenceRecorder("static")
+        wrapped = record_tools([_tool(identify_file, "identify_file")], recorder, RepeatGuard())[0]
+
+        for _ in range(3):
+            wrapped.invoke({"path": "/samples/evil.exe"})
+
+        # The retry after the transient failure is the repeat the guard serves.
+        assert [entry.ok for entry in recorder.entries] == [False, True, True]
+        assert recorder.entries[2].repeated_of == "ev_0001"
+
     def test_without_a_guard_every_call_still_runs(self) -> None:
         calls: list[str] = []
         recorder = EvidenceRecorder("static")

@@ -196,6 +196,17 @@ def _record_tool(tool: Any, recorder: EvidenceRecorder, repeats: RepeatGuard | N
         )
         return f"[{entry.id}]\n{message}"
 
+    def _note(kwargs: dict[str, Any], entry_id: str) -> None:
+        """Count the call against the repeat budget, however it turned out.
+
+        A call that raised is a call. Counting only the ones that returned left
+        a tool that throws on the same arguments — an unreachable server, a
+        path the sidecar will never read — free to be re-run for the whole step
+        budget, which is the one case the guard exists for.
+        """
+        if repeats is not None:
+            repeats.note(name, kwargs, entry_id)
+
     def _stamp(kwargs: dict[str, Any], started: float, wall_clock: float, value: Any) -> str:
         text = result_text(value)
         entry = recorder.record(
@@ -206,8 +217,7 @@ def _record_tool(tool: Any, recorder: EvidenceRecorder, repeats: RepeatGuard | N
             started_at=wall_clock,
             duration_ms=int((time.monotonic() - started) * 1000),
         )
-        if repeats is not None:
-            repeats.note(name, kwargs, entry.id)
+        _note(kwargs, entry.id)
         # ``text``, not ``entry.output``: the ledger trims what it stores, and
         # what the model reads is not the ledger's business. The size of a tool
         # result in a prompt is decided where it has always been decided —
@@ -230,6 +240,7 @@ def _record_tool(tool: Any, recorder: EvidenceRecorder, repeats: RepeatGuard | N
             started_at=wall_clock,
             duration_ms=int((time.monotonic() - started) * 1000),
         )
+        _note(kwargs, entry.id)
         return f"[{entry.id}] tool call failed: {message}"
 
     wrapped_func = None
