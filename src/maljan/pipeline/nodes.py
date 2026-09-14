@@ -169,10 +169,27 @@ def _validation_update(agent: Any, agent_name: str) -> dict[str, Any]:
     if drain is None:
         return {}
     try:
-        rows, retries, fed_back = drain()
+        drained = drain()
     except Exception as exc:  # noqa: BLE001 — a metric is never worth a lost run
         logger.debug("validation findings read skipped for %s: %s", agent_name, exc)
         return {}
+    # Unpacked outside the guard above, and the two ways it can be wrong are
+    # not the same. An agent that drained the wrong number of values is on an
+    # older contract — a mistake in this repository that used to cost that
+    # analyst its findings, retries and feedback counts in silence — and is
+    # said out loud. Anything that is not a drain result at all is a stub or a
+    # double, which is not news.
+    if not isinstance(drained, tuple | list):
+        logger.debug("validation findings for %s are not a drain result.", agent_name)
+        return {}
+    if len(drained) != 3:
+        logger.error(
+            "validation findings for %s drained %d value(s), not three; they are dropped.",
+            agent_name,
+            len(drained),
+        )
+        return {}
+    rows, retries, fed_back = drained
     update: dict[str, Any] = {}
     if rows:
         update["validation_findings"] = {agent_name: rows}
@@ -2902,9 +2919,12 @@ def make_report_node(
         _validation_block = _amended_validation(state.get("run_summary"), _report_tally)
         if _validation_block is not None:
             _state_summary["validation"] = _validation_block
-            _summary = dict(report.run_summary or {})
-            _summary["validation"] = _validation_block
-            report.run_summary = _summary
+            # A name of its own: ``_summary`` above is still read below this
+            # point, and rebinding it here was correct only for as long as
+            # nothing moved.
+            _amended_report_summary = dict(report.run_summary or {})
+            _amended_report_summary["validation"] = _validation_block
+            report.run_summary = _amended_report_summary
         if fp_warnings:
             _state_summary["fp_warnings"] = fp_warnings
         if _ledger:

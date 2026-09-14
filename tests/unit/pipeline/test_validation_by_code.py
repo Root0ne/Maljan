@@ -216,3 +216,53 @@ class TestTheProducersHandItOver:
             fed_back={"verdict.not_json": 1},
         )
         assert counted.fed_back == {"verdict.not_json": 1}
+
+
+class TestADrainOnTheWrongContract:
+    """The three values were unpacked inside a broad except that returned an
+    empty update, so an agent still on the old two-value drain lost its
+    findings, its retries and its feedback counts without a word."""
+
+    class _Agent:
+        def __init__(self, drained: Any) -> None:
+            self._drained = drained
+
+        def drain_validation_findings(self) -> Any:
+            return self._drained
+
+    def test_the_right_shape_is_read(self) -> None:
+        from maljan.pipeline.nodes import _validation_update
+
+        update = _validation_update(
+            self._Agent(([{"code": "attck.unknown_id", "message": "m", "path": ""}], 1, {"a": 2})),
+            "static",
+        )
+
+        assert update["validation_retries"] == 1
+        assert update["validation_fed_back"] == {"a": 2}
+        assert update["validation_findings"]["static"]
+
+    def test_the_old_two_value_shape_is_said_out_loud(self, caplog: Any) -> None:
+        import logging
+
+        from maljan.pipeline.nodes import _validation_update
+
+        with caplog.at_level(logging.ERROR, logger="maljan"):
+            assert _validation_update(self._Agent(([], 1)), "static") == {}
+
+        assert "drained 2 value(s), not three" in caplog.text
+
+    def test_a_stub_that_drains_nothing_real_is_not_an_error(self, caplog: Any) -> None:
+        import logging
+
+        from maljan.pipeline.nodes import _validation_update
+
+        with caplog.at_level(logging.ERROR, logger="maljan"):
+            assert _validation_update(self._Agent(object()), "static") == {}
+
+        assert caplog.text == ""
+
+    def test_an_agent_with_no_drain_at_all_is_skipped(self) -> None:
+        from maljan.pipeline.nodes import _validation_update
+
+        assert _validation_update(object(), "static") == {}
