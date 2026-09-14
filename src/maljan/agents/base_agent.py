@@ -136,9 +136,10 @@ _INVALID_TIDS: frozenset[str] = frozenset({"T0000", "T0000.000", "T9999", "T1234
 # structured report nor a findings block. Exactly one: a model that will not
 # answer after being told it did not answer will not answer on the third ask
 # either, and each ask is another full model turn.
-FINAL_ANSWER_NUDGE = (
-    "Your last message was not a final report. Either call a tool or return your final ISR now."
-)
+# No tool half to the sentence: the nudge invokes the bare model, with no tools
+# bound to that turn, so a model that took that branch answered with an empty
+# message and the run's one extra step bought nothing.
+FINAL_ANSWER_NUDGE = "Your last message was not a final report. Return your final ISR now."
 
 # What the analyst reports for itself when even the nudge produced no report.
 # Not ``no_data``: the analyst had data, read it, and stopped mid-thought.
@@ -1778,20 +1779,35 @@ class BaseAnalyst(ABC):
         # of "Let me search for more specific strings related to malware
         # indicators:" at 0.5. Say so once, in the same conversation, and give
         # it the step to answer in.
+        return self._capture_findings(
+            self._settle_final_answer(content, msgs, timeout, elapsed, max_steps)
+        )
+
+    def _settle_final_answer(
+        self, content: str, msgs: list, timeout: int, elapsed: float, max_steps: int
+    ) -> str:
+        """The loop's answer, nudged once if it was not a report, and judged.
+
+        Sets ``_answer_unstructured``, which is what makes the analyst report
+        ``no_claims`` rather than an empty ISR that reads like an analyst with
+        nothing to say.
+        """
         self._answer_unstructured = False
-        if not answer_is_isr(content):
-            nudged = self._nudge_for_final_answer(msgs, timeout, elapsed, max_steps)
-            if nudged is not None:
-                content = nudged
-            if not answer_is_isr(content):
-                self.logger.warning(
-                    "%s: the loop ended without a structured report even after the nudge; "
-                    "reporting %s.",
-                    self.name,
-                    NO_STRUCTURED_REPORT_STATUS,
-                )
-                self._answer_unstructured = True
-        return self._capture_findings(content)
+        if answer_is_isr(content):
+            return content
+        nudged = self._nudge_for_final_answer(msgs, timeout, elapsed, max_steps)
+        # Only when the nudge answered the question. Taking any non-empty text
+        # would let a second non-report — often shorter than the first —
+        # replace what the loop actually produced.
+        if nudged is not None and answer_is_isr(nudged):
+            return nudged
+        self.logger.warning(
+            "%s: the loop ended without a structured report even after the nudge; reporting %s.",
+            self.name,
+            NO_STRUCTURED_REPORT_STATUS,
+        )
+        self._answer_unstructured = True
+        return content
 
     def _nudge_for_final_answer(
         self, msgs: list, timeout: int, elapsed: float, max_steps: int

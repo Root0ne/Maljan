@@ -108,6 +108,11 @@ class TestTheNudge:
         assert isinstance(sent[-1], HumanMessage)
         assert sent[-1].content == FINAL_ANSWER_NUDGE
 
+    def test_it_does_not_offer_a_tool_call_it_cannot_serve(self) -> None:
+        """The nudge invokes the bare model; no tools are bound to that turn."""
+        assert "call a tool" not in FINAL_ANSWER_NUDGE
+        assert FINAL_ANSWER_NUDGE.endswith("Return your final ISR now.")
+
     def test_it_is_skipped_when_the_step_budget_is_spent(self) -> None:
         llm = _FakeLLM([_REPORT])
         analyst = _Analyst(llm)
@@ -215,3 +220,53 @@ class TestTheStatusTheNodeReads:
         from maljan.schemas.isr_models import AgentISR
 
         assert isr_status(AgentISR(agent_id="static", domain="static")) == "no_data"
+
+
+class TestTheLoopKeepsWhatItHad:
+    """A nudge that answers with something that is not a report either must not
+    replace the loop's own final message with it — often a shorter non-answer."""
+
+    def _settled(self, analyst: _Analyst, content: str, nudge: str | None) -> str:
+        analyst._nudge_for_final_answer = lambda *a, **k: nudge  # type: ignore[method-assign]
+        return analyst._settle_final_answer(content, _conversation(), 60, 1.0, 40)
+
+    def test_a_second_non_report_is_not_taken(self) -> None:
+        analyst = _Analyst(_FakeLLM([]))
+
+        kept = self._settled(analyst, _INTENTION, "Sorry, let me try that again.")
+
+        assert kept == _INTENTION
+        assert analyst._answer_unstructured is True
+
+    def test_a_report_from_the_nudge_is_taken(self) -> None:
+        analyst = _Analyst(_FakeLLM([]))
+
+        kept = self._settled(analyst, _INTENTION, _REPORT)
+
+        assert kept == _REPORT
+        assert analyst._answer_unstructured is False
+
+    def test_a_nudge_that_could_not_run_leaves_the_answer(self) -> None:
+        analyst = _Analyst(_FakeLLM([]))
+
+        assert self._settled(analyst, _INTENTION, None) == _INTENTION
+        assert analyst._answer_unstructured is True
+
+    def test_an_answer_that_is_already_a_report_is_never_nudged(self) -> None:
+        analyst = _Analyst(_FakeLLM([]))
+        asked: list[bool] = []
+        analyst._nudge_for_final_answer = lambda *a, **k: asked.append(True)  # type: ignore[method-assign,return-value]
+
+        assert analyst._settle_final_answer(_REPORT, _conversation(), 60, 1.0, 40) == _REPORT
+        assert asked == []
+        assert analyst._answer_unstructured is False
+
+    def test_a_findings_block_alone_is_a_report_and_is_not_nudged(self) -> None:
+        """The other shape an answer may take; only ``answer_is_isr`` knew it."""
+        analyst = _Analyst(_FakeLLM([]))
+        asked: list[bool] = []
+        analyst._nudge_for_final_answer = lambda *a, **k: asked.append(True)  # type: ignore[method-assign,return-value]
+        block = 'Here is what I found.\n\n```maljan-findings\n{"findings": []}\n```'
+
+        assert analyst._settle_final_answer(block, _conversation(), 60, 1.0, 40) == block
+        assert asked == []
