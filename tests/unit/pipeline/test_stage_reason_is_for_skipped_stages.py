@@ -11,7 +11,9 @@ nothing to read, on its own findings row as ``status_reason``.
 
 from __future__ import annotations
 
+import time
 from types import SimpleNamespace
+from typing import Any
 
 from maljan.pipeline.nodes import stage_record
 from maljan.pipeline.state import _merge_stage_results
@@ -123,3 +125,61 @@ class TestTheRollupRow:
         (row,) = stage_rollup(_Container(), state)  # type: ignore[arg-type]
 
         assert "agent_reasons" not in row
+
+
+class TestAStageThatRanAndFailed:
+    """The other reason a stage gives: it ran and went wrong. A mediation that
+    times out is the debate's own failure, not one of its members'. The first
+    version of this rule redirected it onto an empty agent list and blanked it,
+    so the only reason the debate stage ever writes stopped appearing at all."""
+
+    def test_a_failure_reason_stays_the_stage_s(self) -> None:
+        entry = _entry(stage_record(_STAGE, ran=True, reason="mediation timed out", failure=True))
+        assert entry["reason"] == "mediation timed out"
+        assert "agent_reasons" not in entry
+
+    def test_the_debate_round_records_its_own_failure(self) -> None:
+        from maljan.pipeline.nodes import _debate_record
+
+        debate = SimpleNamespace(key="debate", kind="debate", mode="sequential", agents=("judge",))
+        record = _debate_record(debate, time.monotonic(), reason="mediation timed out")
+
+        assert record["stage_results"]["debate"]["ran"] is True
+        assert record["stage_results"]["debate"]["reason"] == "mediation timed out"
+
+    def test_a_round_that_went_fine_gives_no_reason(self) -> None:
+        from maljan.pipeline.nodes import _debate_record
+
+        debate = SimpleNamespace(key="debate", kind="debate", mode="sequential", agents=("judge",))
+        record = _debate_record(debate, time.monotonic())
+
+        assert record["stage_results"]["debate"]["reason"] == ""
+
+    def test_the_rollup_carries_it(self) -> None:
+        from maljan.pipeline.nodes import _debate_record, stage_rollup
+
+        debate = SimpleNamespace(key="debate", kind="debate", mode="sequential", agents=("judge",))
+
+        class _Container:
+            def active_profile(self) -> object:
+                return SimpleNamespace(stages=[debate])
+
+        state = {
+            "stage_results": _debate_record(debate, time.monotonic(), reason="mediation failed")[
+                "stage_results"
+            ]
+        }
+
+        (row,) = stage_rollup(_Container(), state)  # type: ignore[arg-type]
+
+        assert row["reason"] == "mediation failed"
+
+    def test_an_unattributable_reason_is_dropped_with_a_word(self, caplog: Any) -> None:
+        """The silence is what hid the regression; a debug line would have shown it."""
+        import logging
+
+        with caplog.at_level(logging.DEBUG, logger="maljan"):
+            entry = _entry(stage_record(_STAGE, ran=True, reason="no sandbox fixture"))
+
+        assert entry["reason"] == ""
+        assert "no agent to attribute it to" in caplog.text

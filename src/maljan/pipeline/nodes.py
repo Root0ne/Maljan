@@ -528,6 +528,7 @@ def stage_record(
     *,
     ran: bool,
     reason: str = "",
+    failure: bool = False,
     agents: tuple[str, ...] = (),
     agent_reasons: Mapping[str, str] | None = None,
     claim_count: int = 0,
@@ -537,15 +538,29 @@ def stage_record(
 ) -> dict[str, Any]:
     """One stage's contribution to ``state["stage_results"]``.
 
-    ``reason`` answers "why did this stage not run" and nothing else. A stage
-    of three analysts, one of which had no data, *ran*: writing that analyst's
-    skip reason as the stage's put "no sandbox fixture for this sample" beside
+    ``reason`` answers "why did this stage not run", and one other thing: why a
+    stage that did run went wrong, which ``failure`` says. A stage of three
+    analysts, one of which had no data, *ran*: writing that analyst's skip
+    reason as the stage's put "no sandbox fixture for this sample" beside
     ``ran: true`` in the run summary, which reads as the stage having been
-    skipped and is contradicted by the same row's duration. A reason given for
-    a stage that ran is recorded per agent instead, under ``agent_reasons``.
+    skipped and is contradicted by the same row's duration. Such a reason is
+    recorded per agent instead, under ``agent_reasons``.
+
+    A mediation that timed out is the other case and is not that one: the stage
+    ran, the reason belongs to the stage rather than to any of its members, and
+    the first version of this rule blanked it — the debate's only reason, and
+    the run summary stopped carrying it at all.
     """
-    if ran and reason:
-        agent_reasons = {**(agent_reasons or {}), **({a: reason for a in agents} if agents else {})}
+    if ran and reason and not failure:
+        if agents:
+            agent_reasons = {**(agent_reasons or {}), **{agent: reason for agent in agents}}
+        else:
+            logger.debug(
+                "stage %s ran and gave the reason %r with no agent to attribute it to; "
+                "it is dropped. Pass agents, agent_reasons, or failure=True.",
+                getattr(stage, "key", ""),
+                reason,
+            )
         reason = ""
     entry = StageResult(
         ran=ran,
@@ -1307,6 +1322,11 @@ def _debate_record(stage: Any, started: float, *, reason: str = "") -> dict[str,
 
     The reducer adds the durations up, so a debate of four rounds records the
     time all four of them took rather than the time the last one did.
+
+    The only reason this stage ever gives is a mediation that failed or timed
+    out, and that is the stage's own — it belongs to the round, not to a member
+    of it — so it is passed as a failure and survives ``stage_record``'s rule
+    about a stage that ran.
     """
     if stage is None:
         return {}
@@ -1314,6 +1334,7 @@ def _debate_record(stage: Any, started: float, *, reason: str = "") -> dict[str,
         stage,
         ran=True,
         reason=reason,
+        failure=bool(reason),
         duration_ms=int((time.monotonic() - started) * 1000),
     )
 
