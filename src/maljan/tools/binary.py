@@ -197,23 +197,43 @@ def _pe_warnings(pe: Any) -> list[str]:
         return []
 
 
-# The sentences pefile emits when the import *directory* or the import table
-# itself cannot be walked. Anything narrower — one symbol whose data pefile
-# could not read ("Invalid Import data at RVA"), a delay-load descriptor it
-# skipped ("Error parsing the Delay import directory") — is a warning about one
-# entry, and a healthy binary produces those routinely. Matching the bare word
-# "import" called every one of them a damaged table.
-_IMPORT_DIRECTORY_DAMAGE = (
+# What pefile says when the import table cannot be walked, as opposed to when
+# one entry in it could not be read. The difference is whether the parser
+# stopped: each of these either fails the directory outright or breaks out of a
+# walk, so what came back is a truncated import list presented as a complete
+# one — the claim worth flagging.
+_IMPORT_TABLE_DAMAGE = (
+    # The directory's own RVA points nowhere.
     "error parsing the import directory at rva",
-    "error parsing the import table",
+    # Six bad descriptors and pefile gives up on the rest of the directory.
+    "too many errors parsing the import directory",
+    # A descriptor whose ILT and IAT are both unreadable.
     "damaged import table",
+    # Both of these break the thunk walk, truncating that library's imports.
+    "error parsing the import table. entries go beyond bounds",
+    "error parsing the import table. addressofdata overlaps",
 )
+
+# One thunk pefile could not read. The walk goes on and the rest of the table
+# is fine, so a single occurrence is not a damaged table — a healthy binary
+# produces one. Enough of them and nothing useful came back either way.
+_IMPORT_ENTRY_DAMAGE = "error parsing the import table. invalid data at rva"
+_REPEATED_ENTRY_DAMAGE = 3
 
 
 def _import_table_damaged(warnings: list[str]) -> bool:
-    """Whether pefile could not walk the import directory itself."""
+    """Whether pefile could not walk the import table, rather than one entry.
+
+    Matching the bare word "import" called every per-symbol and delay-load
+    complaint a damaged table; matching "directory" against "table" got the
+    rule backwards, because pefile writes "Error parsing the import table" for
+    a broken walk *and* for a single unreadable thunk. The sentences are
+    therefore listed one by one, against what each of them does to the parse.
+    """
     lowered = [w.lower() for w in warnings]
-    return any(phrase in w for w in lowered for phrase in _IMPORT_DIRECTORY_DAMAGE)
+    if any(phrase in w for w in lowered for phrase in _IMPORT_TABLE_DAMAGE):
+        return True
+    return sum(_IMPORT_ENTRY_DAMAGE in w for w in lowered) >= _REPEATED_ENTRY_DAMAGE
 
 
 def _flag_names(pefile: Any, table: str, prefix: str, value: Any) -> list[str]:

@@ -396,3 +396,49 @@ class TestCarvePayloads:
 
     def test_a_missing_file_is_an_error_and_not_an_exception(self, tmp_path: Path) -> None:
         assert tool.carve_payloads("/nonexistent/s.bin", str(tmp_path))["tool"] == "carve_payloads"
+
+
+class TestWhichImportWarningMeansDamage:
+    """pefile writes "Error parsing the import table" both for a walk it had to
+    abandon and for one thunk it could not read, so the words "directory" and
+    "table" do not separate them. Each sentence is classified by what it does
+    to the parse: a truncated import list presented as a complete one is the
+    claim worth flagging."""
+
+    @pytest.mark.parametrize(
+        "warning",
+        [
+            "Error parsing the import directory at RVA: 0x9000",
+            "Too many errors parsing the import directory. Invalid import data at RVA: 0x1000",
+            "Damaged Import Table information. ILT and/or IAT appear to be broken. "
+            "OriginalFirstThunk: 0x0 FirstThunk: 0x0",
+            "Error parsing the import table. Entries go beyond bounds.",
+            "Error parsing the import table. AddressOfData overlaps with THUNK_DATA "
+            "for THUNK at RVA 0x2040",
+        ],
+    )
+    def test_a_walk_that_stopped_is_damage(self, warning: str) -> None:
+        assert tool._import_table_damaged([warning]) is True
+
+    @pytest.mark.parametrize(
+        "warning",
+        [
+            "Error parsing the import directory. Invalid Import data at RVA: 0x1000 (bad)",
+            "Error parsing the import table. Invalid data at RVA: 0x1040",
+            "Error parsing the Delay import directory at RVA: 0x9000",
+            "Error parsing the Delay import directory. Invalid import data at RVA: 0x2000",
+        ],
+    )
+    def test_one_bad_entry_is_not(self, warning: str) -> None:
+        assert tool._import_table_damaged([warning]) is False
+
+    def test_a_bad_entry_repeated_across_the_table_is(self) -> None:
+        repeated = [
+            f"Error parsing the import table. Invalid data at RVA: 0x{rva:x}"
+            for rva in (0x1040, 0x1048, 0x1050)
+        ]
+        assert tool._import_table_damaged(repeated) is True
+        assert tool._import_table_damaged(repeated[:2]) is False
+
+    def test_no_warnings_at_all(self) -> None:
+        assert tool._import_table_damaged([]) is False
