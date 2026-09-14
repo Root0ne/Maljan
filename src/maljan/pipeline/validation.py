@@ -304,7 +304,7 @@ def schema_violations(model: Any, payload: Any, *, code: str) -> list[Violation]
         return [
             Violation(
                 code=code,
-                message=str(error.get("msg") or "is not valid"),
+                message=_schema_message(model, error),
                 path=".".join(str(part) for part in error.get("loc") or ()),
             )
             for error in exc.errors()
@@ -409,6 +409,31 @@ def validate_verdict_bundle(
             )
 
     return violations
+
+
+def _schema_message(model: Any, error: Mapping[str, Any]) -> str:
+    """Pydantic's complaint, with the schema's keys added when it is about a key.
+
+    ``extra="forbid"`` answers "Extra inputs are not permitted", which names
+    neither the key that was rejected nor the ones that would have been
+    accepted; "Field required" names the one that is absent and nothing else.
+    A live report composer spent both of its turns on the first sentence and
+    the ``conclusion`` section was dropped from the delivered report. The field
+    list is short, it is exactly what the model needs to answer again, and it
+    costs one line of the feedback turn.
+    """
+    message = str(error.get("msg") or "is not valid")
+    kind = str(error.get("type") or "")
+    if kind not in ("extra_forbidden", "missing"):
+        return message
+    keys = ", ".join(sorted(getattr(model, "model_fields", {}) or {}))
+    if not keys:
+        return message
+    if kind == "extra_forbidden":
+        return (
+            f"{message}: this object accepts only these keys and rejects every other one — {keys}."
+        )
+    return f"{message}: this object's keys are {keys}."
 
 
 ASSESSMENT_MISSING_CODE = "verdict.assessment_missing"
