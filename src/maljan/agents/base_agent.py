@@ -183,6 +183,45 @@ def cause_chain(exc: BaseException, limit: int = 4) -> str:
     return " <- ".join(parts) if parts else "no cause recorded"
 
 
+# The statuses that mean "not now" rather than "no". A provider answering any
+# of these is describing its own state, and a second attempt a couple of
+# seconds later is the difference between a thin run and a lost one. Every
+# other 4xx is a refusal about the request itself and is answered once.
+RETRYABLE_STATUSES: frozenset[int] = frozenset({408, 409, 429, 500, 502, 503, 504})
+
+# The longest delay a provider's ``Retry-After`` may impose on us. Beyond this
+# the caller's own budget is the shorter answer, so the backoff below is used
+# instead and the run degrades rather than parking on one request.
+_MAX_RETRY_AFTER_SECONDS = 30
+
+
+def _provider_fault(exc: BaseException) -> str:
+    """One bounded line about a provider failure, safe to put in a log.
+
+    The class and, for a status error, the status. Deliberately not the body:
+    a provider that quotes the offending request back has quoted a credential
+    back, and this line is written to a log file that outlives the run.
+    """
+    status = getattr(exc, "status_code", None)
+    return f"{type(exc).__name__}" + (f" {status}" if status else "")
+
+
+def _retry_after(exc: BaseException, default: int) -> int:
+    """The provider's own ``Retry-After``, when it sent a usable one."""
+    headers = getattr(getattr(exc, "response", None), "headers", None)
+    raw = ""
+    if headers is not None:
+        with contextlib.suppress(Exception):
+            raw = str(headers.get("retry-after") or "")
+    try:
+        seconds = int(float(raw.strip()))
+    except (TypeError, ValueError):
+        return default
+    if 0 < seconds <= _MAX_RETRY_AFTER_SECONDS:
+        return seconds
+    return default
+
+
 async def retry_on_connection_error(
     make_awaitable: Callable[[], Awaitable[Any]],
     *,
@@ -205,36 +244,50 @@ async def retry_on_connection_error(
     routine event here. One blip degraded a whole run to "Suspicious", or
     silently dropped a report section.
 
-    Narrow on purpose, preserving the original anti-storm intent:
-    ``APIConnectionError`` only. A stall surfaces as ``TimeoutError`` from the
-    caller's ``wait_for`` and is never retried. Backoff is 1 s then 2 s.
+    Narrow on purpose, preserving the original anti-storm intent: a transport
+    failure, and the handful of statuses a provider uses to say "not now".
+    Hosted endpoints answer 500 "Internal server error" and 503 "Service
+    temporarily overloaded" for a second at a time, and a single attempt
+    against them cost a live run its static analyst, its negotiation, its
+    verdict and every composer section within twelve seconds. A refusal —
+    401, 402, 403, 404, 422 and the rest of the 400 family — is answered once,
+    because asking again cannot change it. A stall surfaces as ``TimeoutError``
+    from the caller's ``wait_for`` and is never retried. Backoff is 1 s then
+    2 s, or the provider's own ``Retry-After`` when it sends one that fits
+    inside the budget.
 
     Takes a *factory* rather than an awaitable because a coroutine cannot be
     awaited twice.
     """
-    from openai import APIConnectionError
+    from openai import APIConnectionError, APIStatusError
 
     emit = log or logger
     for attempt in range(attempts):
         try:
             return await make_awaitable()
-        except APIConnectionError as exc:
+        except (APIConnectionError, APIStatusError) as exc:
+            status = getattr(exc, "status_code", None)
+            if isinstance(exc, APIStatusError) and status not in RETRYABLE_STATUSES:
+                raise
+            kind = f"HTTP {status}" if isinstance(exc, APIStatusError) else "connection error"
             if attempt >= attempts - 1:
                 emit.error(
-                    "%s: connection error after %d attempts: %r (caused by %s)",
+                    "%s: %s after %d attempts: %r (caused by %s)",
                     what,
+                    kind,
                     attempts,
-                    exc,
+                    _provider_fault(exc),
                     cause_chain(exc),
                 )
                 raise
-            wait = 2**attempt
+            wait = _retry_after(exc, 2**attempt)
             emit.warning(
-                "%s: connection error (attempt %d/%d): %r (caused by %s) — retrying in %ds.",
+                "%s: %s (attempt %d/%d): %r (caused by %s) — retrying in %ds.",
                 what,
+                kind,
                 attempt + 1,
                 attempts,
-                exc,
+                _provider_fault(exc),
                 cause_chain(exc),
                 wait,
             )
