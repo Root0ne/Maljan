@@ -12,13 +12,20 @@ const input =
   "w-full bg-bg-deep border border-border rounded px-2 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent";
 
 /** Built-ins are re-seeded by the settings model, so they disable rather than delete. */
-const BUILTIN = new Set(["network", "threatintel"]);
+const BUILTIN = new Set(["network", "threatintel", "virustotal"]);
 const ROLES = ["static", "dynamic", "network", "judge"] as const;
-/** Mirrors `RESERVED_SERVER_KEYS` in `src/maljan/core/config.py`. Two of these
- *  (`network`, `threatintel`) are also pre-populated built-ins and never reach
- *  `add()`; `ghidra` and `cape` are reserved but not pre-populated, so without
- *  this check they would pass client validation and fail only on apply. */
-export const RESERVED_SERVER_KEYS = new Set(["network", "threatintel", "ghidra", "cape"]);
+/** Mirrors `RESERVED_SERVER_KEYS` in `src/maljan/core/config.py`. Three of
+ *  these (`network`, `threatintel`, `virustotal`) are also pre-populated
+ *  built-ins and never reach `add()`; `ghidra` and `cape` are reserved but not
+ *  pre-populated, so without this check they would pass client validation and
+ *  fail only on apply. */
+export const RESERVED_SERVER_KEYS = new Set([
+  "network",
+  "threatintel",
+  "virustotal",
+  "ghidra",
+  "cape",
+]);
 /** What a set token looks like from outside; identical to the API's mask. */
 const TOKEN_MASK = "**********";
 

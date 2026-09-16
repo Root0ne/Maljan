@@ -260,6 +260,21 @@ export interface ProbeResult {
   details: AgentProbeDetails | Record<string, unknown> | null;
 }
 
+/** What `POST /settings/virustotal/register` answers with. The token never
+ *  appears: `auth_token` is the same mask a stored server credential shows,
+ *  and the agent id and public handle are VirusTotal's own names for this
+ *  deployment. */
+export interface VirustotalRegistration {
+  server: string;
+  enabled: boolean;
+  transport: string;
+  url: string;
+  auth_token: string;
+  agent_id: string;
+  public_handle: string;
+  tools: string[] | null;
+}
+
 export interface ChannelPreview {
   matched: number;
   kept: number;
