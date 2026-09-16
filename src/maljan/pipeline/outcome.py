@@ -190,6 +190,11 @@ def absent_analysis_message(state: Any) -> str:
     """
     if _judge_answered(state) or _analyst_answered(state):
         return ""
+    if str((state or {}).get("report_error") or "").strip():
+        # The report stage raised and said what raised. That run fails too,
+        # through the check that owns the message: naming the absence here
+        # would replace a diagnosis with a summary of it.
+        return ""
     failure = _judge_failure(state)
     if not failure:
         return _one_line(

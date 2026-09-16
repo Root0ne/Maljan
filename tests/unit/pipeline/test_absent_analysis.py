@@ -136,6 +136,12 @@ class TestARunWithNoAnalysisAtAll:
 
         assert absent_analysis_message(state) == ""
 
+    def test_a_report_stage_that_raised_keeps_its_own_message(self) -> None:
+        """That run fails too, through the check that knows what raised."""
+        state = self._state(report_error="ValueError: boom")
+
+        assert absent_analysis_message(state) == ""
+
     def test_a_revised_report_counts_as_an_answer(self) -> None:
         state = self._state(revised_reports={"static": "Revised: the sample is packed."})
 
