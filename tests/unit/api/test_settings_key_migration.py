@@ -271,7 +271,13 @@ _STAGES_REV = _API / "alembic" / "versions" / "20260916000000_migrate_profiles_t
 
 
 def _load_stages_rev():
-    spec = importlib.util.spec_from_file_location("migrate_profiles_to_stages", _STAGES_REV)
+    return _load_revision(_STAGES_REV.name, "migrate_profiles_to_stages")
+
+
+def _load_revision(file_name: str, module_name: str):
+    spec = importlib.util.spec_from_file_location(
+        module_name, _API / "alembic" / "versions" / file_name
+    )
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -294,10 +300,16 @@ def test_the_migration_s_stage_form_is_the_one_the_settings_model_produces():
     from maljan.core.config import stages_from_analysts
 
     mod = _load_stages_rev()
+    # Without the triage pack: that stage is the later revision's
+    # (``20260919000000_seed_triage_stage``), which inserts it in front.
     assert mod.stage_form(["static", "dynamic"], parallel=False, max_rounds=5, consensus=0.85) == [
         stage.model_dump()
         for stage in stages_from_analysts(
-            ["static", "dynamic"], parallel=False, max_rounds=5, consensus_threshold=0.85
+            ["static", "dynamic"],
+            parallel=False,
+            max_rounds=5,
+            consensus_threshold=0.85,
+            triage=False,
         )
     ]
 
@@ -430,6 +442,7 @@ def test_a_migrated_team_keeps_following_the_two_global_keys():
     from maljan.core.config import Settings
 
     mod = _load_stages_rev()
+    triage_rev = _load_revision("20260919000000_seed_triage_stage.py", "seed_triage_stage")
     conn = _judgement_engine(
         {
             mod.PROFILES_KEY: json.dumps({"lean": {"label": "Lean", "analysts": ["static"]}}),
@@ -439,8 +452,13 @@ def test_a_migrated_team_keeps_following_the_two_global_keys():
     )
     with conn:
         ctx = MigrationContext.configure(conn)
+        # The upgrade runs every revision after this one too, and the one
+        # that puts the triage pack in front is what makes a migrated team
+        # and a fresh install the same shape.
         with Operations.context(ctx):
             mod.upgrade()
+        with Operations.context(ctx):
+            triage_rev.upgrade()
         stored = json.loads(
             dict(conn.execute(sa.text("SELECT key, value FROM runtime_settings")).fetchall())[
                 mod.PROFILES_KEY
