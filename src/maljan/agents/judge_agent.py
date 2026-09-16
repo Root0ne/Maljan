@@ -196,20 +196,27 @@ JUDGE_VERDICT_SYSTEM = (
 
 
 # What the judge is told about the sample itself, before any analysis of it.
-# These are the router's facts — the hash the job was queued under, the name it
-# arrived with, its size and the format detection — and they are in the prompt
-# always, not only when a lookup is due.
+# The hash the job was queued under, the name it arrived with and the format
+# detection are the router's; the md5 and size are read from the sandbox's own
+# file block. They are in the prompt always, not only when a lookup is due.
+#
+# The file name is whatever the submitter typed, so it is labelled as
+# submitted, and every value is written on its own line with its line breaks
+# removed: a name that carried a newline could otherwise close the block and
+# open one of its own.
 #
 # A live run made the case: the mediator told the judge to look the sample's
 # hash up, and no message in the conversation carried a hash. The static
 # analyst had produced no claims, so there was nothing in the prose either, and
 # the judge opened a seventeen-tool loop with nothing to ask about.
-SAMPLE_IDENTITY_HEADER = "SAMPLE IDENTITY (established by the router, not by analysis)"
+SAMPLE_IDENTITY_HEADER = (
+    "SAMPLE IDENTITY (established by the router and the sandbox's own file block, not by analysis)"
+)
 
 _IDENTITY_FIELDS: tuple[tuple[str, str], ...] = (
     ("sha256", "sha256"),
     ("md5", "md5"),
-    ("file_name", "file name"),
+    ("file_name", "file name (as submitted)"),
     ("size_bytes", "size (bytes)"),
     ("file_type", "file type"),
     ("platform", "platform"),
@@ -220,7 +227,7 @@ def sample_identity_block(sample: Any) -> str:
     """The sample's own facts as one block, or ``""`` when there are none."""
     data = sample if isinstance(sample, dict) else {}
     rows = [
-        f"{label}: {data[key]}"
+        f"{label}: {' '.join(str(data[key]).split())}"
         for key, label in _IDENTITY_FIELDS
         if str(data.get(key) or "").strip()
     ]

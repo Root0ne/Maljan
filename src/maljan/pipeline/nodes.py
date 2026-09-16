@@ -459,10 +459,12 @@ def _augment_static_chunks_with_path(
 def _sample_identity(state: AnalysisState) -> dict[str, Any]:
     """What the run knows about the sample before anyone analysed it.
 
-    The hash the job was queued under, the name it arrived with, the format
-    detection, and the size and md5 where something already read them. Facts
-    from the router, which is why they are safe to put in front of the judge
-    without a caveat: none of them is a conclusion about the sample.
+    The hash the job was queued under, the name it arrived with and the format
+    detection are the router's; the md5 and size come from the sandbox report's
+    own file block when there is one, and the size otherwise from the file on
+    disk. None of them is a conclusion about the sample, which is why they are
+    put in front of the judge without a caveat. The name is the one the
+    submitter gave and is labelled so.
 
     Never raises. An identity block that cannot be built is one the prompt goes
     without, and a judge with no hash is what this exists to stop, not one this
