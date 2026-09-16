@@ -228,6 +228,23 @@ change landed on `main`.
 
 ### Fixed
 
+- **A repeating ReAct loop is actually ended.** The guard counted only the
+  repeats it served, which is reachable once per call, so an analyst that asked
+  one tool sixteen times counted one repeat and ran to its step budget. Every
+  repeated call counts now, served or refused, and the guard resets when a
+  connection error replays the conversation.
+
+- **The judge is given the sample it is told to look up.** Both the mediator
+  and the verdict prompts carry an identity block from the router — sha256, md5
+  and size where known, file name, type and platform — and the lookup sentence
+  names the sha256. A run whose analysts produced no prose left the judge with
+  no hash anywhere in its conversation.
+
+- **A Benign verdict over a run nobody analysed is challenged.**
+  `verdict.unsupported_benign` asks the judge to cite the entry that
+  establishes it — a valid signature is the usual one — or to return Suspicious
+  with an inconclusive rationale. The verdict is recorded, never rewritten.
+
 - **A technique claim that cites nothing is challenged.** A signed PuTTY
   produced eighteen technique ids, sixteen of which said in their own evidence
   field that they were speculative, and the judge read them as eighteen
