@@ -86,9 +86,14 @@ _CHARS_PER_TOKEN = 4
 def _model_context_tokens(cfg: Any, agent_name: str) -> int:
     """The context window of the model this agent runs on, or ``0``.
 
-    Per-agent first: an agent pointed at its own endpoint is pointed at its own
-    server, and the global setting describes a different one. Zero means
-    nothing declared it, and the caller falls back to the floor.
+    The per-agent entry decides which *provider* is asked, so an agent on
+    Ollama reads the Ollama window even when the run is otherwise OpenAI. It
+    does not carry a window of its own: an agent pointed at its own
+    OpenAI-compatible endpoint therefore reads ``llm.openai.context_size``,
+    which describes the global one. That is a known limit of this lookup and
+    not a claim about that agent's server; the floor below is what protects it.
+
+    Zero means nothing declared it, and the caller falls back to the floor.
     """
     try:
         entry = (getattr(cfg.llm, "agents", None) or {}).get(agent_name)
@@ -109,16 +114,18 @@ def synthesis_budget_chars(cfg: Any, agent_name: str) -> int:
     return max(_SYNTHESIS_MIN_CHARS, int(tokens * _CHARS_PER_TOKEN * _SYNTHESIS_CONTEXT_SHARE))
 
 
-# A ledger id as the recorder stamps it onto a tool result: the first thing in
-# the message, in brackets.
-_LEDGER_ID_RE = re.compile(r"\bev_\d{3,}\b")
-
-
 def ledger_ids_in(msgs: Sequence[Any]) -> list[str]:
-    """Every ledger id still readable in this window, in the order they appear."""
+    """Every ledger id still readable in this window, in the order they appear.
+
+    Wherever it appears in a message, not only where the recorder stamped it:
+    what the caller needs is the set of ids the model can still read, and one
+    written into prose is one it can read.
+    """
+    from maljan.schemas.evidence import ENTRY_ID_RE
+
     seen: list[str] = []
     for message in msgs:
-        for found in _LEDGER_ID_RE.findall(str(getattr(message, "content", "") or "")):
+        for found in ENTRY_ID_RE.findall(str(getattr(message, "content", "") or "")):
             if found not in seen:
                 seen.append(found)
     return seen
@@ -1797,6 +1804,12 @@ class BaseAnalyst(ABC):
             # retried — the anti-storm intent is preserved.
             from openai import APIConnectionError
 
+            # The conversation as the stream last left it, held where the
+            # caller can still read it: ``wait_for`` cancels the coroutine, and
+            # a transcript that only exists inside it dies with it. A timeout
+            # is the other case that has evidence and no answer.
+            partial: dict = {"messages": list(messages)}
+
             async def _until_it_answers_or_repeats() -> dict:
                 """The ReAct loop, ended early once it is only repeating itself.
 
@@ -1806,26 +1819,37 @@ class BaseAnalyst(ABC):
                 the conversation as it stands. ``stream_mode="values"`` yields
                 the state after each step, so the last one is what ``ainvoke``
                 would have returned.
+
+                Closed explicitly on the way out. Breaking out of an ``async
+                for`` leaves the generator suspended and the graph behind it
+                alive until the loop's finalizer gets to it, and on a box with
+                one llama-server slot a run that is still alive is not free.
                 """
-                latest: dict = {"messages": list(messages)}
-                async for snapshot in agent_executor.astream(
+                stream: Any = agent_executor.astream(
                     {"messages": messages},
                     {"recursion_limit": max_steps},
                     stream_mode="values",
-                ):
-                    latest = snapshot
-                    if repeats.ending_the_loop():
-                        self.logger.warning(
-                            "%s ReAct loop ended after %d repeated tool call(s); "
-                            "synthesising from what it gathered.",
-                            self.name,
-                            repeats.served_repeats,
-                        )
-                        break
-                return latest
+                )
+                async with contextlib.aclosing(stream) as snapshots:
+                    async for snapshot in snapshots:
+                        partial.update(snapshot)
+                        if repeats.ending_the_loop():
+                            self.logger.warning(
+                                "%s ReAct loop ended after %d repeated tool call(s); "
+                                "synthesising from what it gathered.",
+                                self.name,
+                                repeats.served_repeats,
+                            )
+                            break
+                return dict(partial)
 
             last_conn_exc: Exception | None = None
             for _attempt in range(3):
+                # A replayed conversation is a fresh loop as far as the model
+                # is concerned: it is about to re-make the calls it made before
+                # the connection dropped, and counting those as repeats ends an
+                # analyst for a blip the retry exists to absorb.
+                repeats.reset()
                 try:
                     result = await asyncio.wait_for(
                         _until_it_answers_or_repeats(),

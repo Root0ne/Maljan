@@ -152,7 +152,14 @@ class RepeatGuard:
         return f"{tool}({arguments})"
 
     def answered_by(self, tool: str, kwargs: dict[str, Any]) -> str | None:
-        """The entry that already answers this call, when it must not run again."""
+        """The entry that already answers this call, when it must not run again.
+
+        A query and nothing else. What counts a repeat is ``note_repeat``, from
+        the wrapper, so the served branch and the refused branch are counted in
+        one place — counting here, where only the refused branch passes,
+        produced a guard that could reach 1 per call and never its own
+        threshold.
+        """
         key = self._key(tool, kwargs)
         if self._count.get(key, 0) < self.SERVED:
             return None
@@ -169,8 +176,30 @@ class RepeatGuard:
         key = self._key(tool, kwargs)
         if not 0 < self._count.get(key, 0) < self.SERVED:
             return None
-        self.served_repeats += 1
         return self._first.get(key)
+
+    def note_repeat(self) -> None:
+        """Count one repeated call, whether it was served or refused.
+
+        Both are the same fact about the loop: the model asked for an answer it
+        already has. The first version counted only the served one, so a
+        sixteen-call ``pe_info`` run — the failure this guard was written from
+        — counted exactly one repeat and was never ended, because every call
+        after the second was refused without passing the counter.
+        """
+        self.served_repeats += 1
+
+    def reset(self) -> None:
+        """Forget this loop's calls, for a conversation that is starting again.
+
+        A connection error replays the whole conversation from the first
+        message, and the model then re-makes the calls it already made. Those
+        are not repeats: from the model's point of view it is asking for the
+        first time, and counting them ended an analyst for a dropped socket.
+        """
+        self._first = {}
+        self._count = {}
+        self.served_repeats = 0
 
     def ending_the_loop(self) -> bool:
         """Whether this loop has repeated itself often enough to be ended."""
@@ -187,6 +216,14 @@ class RepeatGuard:
         self._first.setdefault(key, entry_id)
 
 
+# What both notices say on the call before the loop ends. One sentence, in one
+# place, because the model reads it from whichever branch it lands in.
+_ENDING_SENTENCE = (
+    " One more repeated call ends this analysis and what you have gathered "
+    "is written up as it stands."
+)
+
+
 def _do_something_else(tool: str, unused_args: Sequence[str]) -> str:
     """The half of both notices that says what to do instead.
 
@@ -201,12 +238,20 @@ def _do_something_else(tool: str, unused_args: Sequence[str]) -> str:
     return "call it with different arguments, or call another tool."
 
 
-def repeat_notice(tool: str, entry_id: str, unused_args: Sequence[str] = ()) -> str:
-    """What the model is told instead of the same answer a third time."""
+def repeat_notice(
+    tool: str, entry_id: str, unused_args: Sequence[str] = (), *, last_warning: bool = False
+) -> str:
+    """What the model is told instead of the same answer a third time.
+
+    ``last_warning`` carries the same sentence the served notice carries, for
+    the same reason: the call before the last one is where saying it can still
+    change what the model does. A loop that repeats one call reaches the end
+    through this branch rather than through the served one.
+    """
     return (
         f"You already called {tool} with these arguments; the result is in "
         f"[{entry_id}]. Do not call it again with these arguments; "
-        f"{_do_something_else(tool, unused_args)}"
+        f"{_do_something_else(tool, unused_args)}{_ENDING_SENTENCE if last_warning else ''}"
     )
 
 
@@ -224,16 +269,10 @@ def served_repeat_notice(
     stops being advice: the next repeated call ends the loop and the analyst
     writes its answer from what it has.
     """
-    ending = (
-        " One more repeated call ends this analysis and what you have gathered "
-        "is written up as it stands."
-        if last_warning
-        else ""
-    )
     return (
         f"This is the second call to {tool} with these arguments and the answer above is "
         f"also in [{entry_id}]. A third will not be run: "
-        f"{_do_something_else(tool, unused_args)}{ending}"
+        f"{_do_something_else(tool, unused_args)}{_ENDING_SENTENCE if last_warning else ''}"
     )
 
 
@@ -293,7 +332,10 @@ def _record_tool(tool: Any, recorder: EvidenceRecorder, repeats: RepeatGuard | N
         first = repeats.answered_by(name, kwargs)
         if first is None:
             return None
-        message = repeat_notice(name, first, _unused(kwargs))
+        repeats.note_repeat()
+        message = repeat_notice(
+            name, first, _unused(kwargs), last_warning=repeats.warning_of_the_end()
+        )
         entry = recorder.record(
             tool=name,
             args=kwargs,
@@ -320,6 +362,8 @@ def _record_tool(tool: Any, recorder: EvidenceRecorder, repeats: RepeatGuard | N
         # Asked before the call is noted, so it sees the count the previous
         # identical call left behind.
         repeated = repeats.repeat_of(name, kwargs) if repeats is not None else None
+        if repeated is not None and repeats is not None:
+            repeats.note_repeat()
         entry = recorder.record(
             tool=name,
             args=kwargs,

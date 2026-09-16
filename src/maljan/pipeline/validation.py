@@ -145,20 +145,44 @@ def feedback_text(violations: Sequence[Violation]) -> str:
 
 UNGROUNDED_TECHNIQUE_CODE = "isr.ungrounded_technique"
 
-# A ledger id as it is written wherever one is cited: in a claim's evidence
-# text, in its own ``evidence_ids`` list, or in the claim prose itself.
-_LEDGER_ID_RE = re.compile(r"\bev_\d{3,}\b", re.IGNORECASE)
+
+def _techniques_cited_by_findings(isr: Any) -> set[str]:
+    """The techniques the findings block already cites a ledger entry for.
+
+    The structured channel is where the analyst is asked for ids by machine,
+    and an analyst that used it has answered the question the claim line asks
+    in prose. Asking it twice for one technique is a feedback turn spent on
+    bookkeeping.
+    """
+    from maljan.schemas.evidence import ENTRY_ID_RE
+
+    cited: set[str] = set()
+    for finding in getattr(isr, "findings", None) or []:
+        ids = [str(value) for value in (getattr(finding, "evidence_ids", None) or [])]
+        if not any(ENTRY_ID_RE.search(value) for value in ids):
+            continue
+        for technique in getattr(finding, "technique_ids", None) or []:
+            text = str(technique).strip().upper()
+            if text:
+                cited.add(text)
+    return cited
 
 
-def _cites_a_ledger_entry(claim: Any) -> bool:
-    """Whether a claim points at something the run actually recorded."""
-    for value in getattr(claim, "evidence_ids", None) or []:
-        if _LEDGER_ID_RE.search(str(value)):
-            return True
-    text = " ".join(
-        str(getattr(claim, field, "") or "") for field in ("evidence_ref", "claim", "detail")
-    )
-    return bool(_LEDGER_ID_RE.search(text))
+def _cites_a_ledger_entry(claim: Any, cited_by_findings: set[str]) -> bool:
+    """Whether a claim points at something the run actually recorded.
+
+    Two ways, and only two. The evidence line is where the claim format asks
+    for the id, and the findings block is where the same analyst may already
+    have cited one for this technique. The claim's own prose is deliberately
+    not searched: "as ev_0001 does not show, this may be injection" is not a
+    citation, and reading it as one is how a validator stops validating.
+    """
+    from maljan.schemas.evidence import ENTRY_ID_RE
+
+    if ENTRY_ID_RE.search(str(getattr(claim, "evidence_ref", "") or "")):
+        return True
+    technique = str(getattr(claim, "technique_id", "") or "").strip().upper()
+    return bool(technique and technique in cited_by_findings)
 
 
 def validate_isr(
@@ -178,6 +202,7 @@ def validate_isr(
     with no tools at all — is exempt, because it has nothing it could cite.
     """
     citable = [str(i) for i in (ledger_ids or []) if str(i).strip()]
+    cited_by_findings = _techniques_cited_by_findings(isr)
     violations: list[Violation] = []
     claims = list(getattr(isr, "claims", None) or [])
     agent = str(getattr(isr, "agent_id", "") or "")
@@ -221,7 +246,7 @@ def validate_isr(
         # speculative" — and the judge read them as sixteen techniques and said
         # Malware. The analyst is asked to cite the entry it read the technique
         # from or to drop it; nothing here removes the claim or the id.
-        if tid and citable and not _cites_a_ledger_entry(claim):
+        if tid and citable and not _cites_a_ledger_entry(claim, cited_by_findings):
             shown = ", ".join(citable[:3])
             violations.append(
                 Violation(
@@ -255,6 +280,11 @@ def validate_isr(
     return violations
 
 
+# The id inside an ``isr.ungrounded_technique`` message, which is where the
+# technique the analyst kept is written down.
+_TID_IN_MESSAGE_RE = re.compile(r"\bT\d{4}(?:\.\d{3})?\b")
+
+
 def ungrounded_technique_note(findings: Any) -> str:
     """What the judge is told about technique claims that cite nothing.
 
@@ -280,11 +310,6 @@ def ungrounded_technique_note(findings: Any) -> str:
     if not named:
         return ""
     return "technique claims citing no evidence from this run: " + ", ".join(named)
-
-
-# The id inside an ``isr.ungrounded_technique`` message, which is where the
-# technique the analyst kept is written down.
-_TID_IN_MESSAGE_RE = re.compile(r"\bT\d{4}(?:\.\d{3})?\b")
 
 
 def unknown_technique_ids(ids: Sequence[str], attck: Any) -> set[str]:

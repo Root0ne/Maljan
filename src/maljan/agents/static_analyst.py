@@ -18,7 +18,11 @@ from maljan.agents.base_agent import (
     prompt_to_messages,
     strip_tool_call_scaffolding,
 )
-from maljan.agents.prompt_fragments import FINDINGS_BLOCK_FRAGMENT, REPUTATION_LOOKUP_FRAGMENT
+from maljan.agents.prompt_fragments import (
+    CLAIM_FORMAT_FRAGMENT,
+    FINDINGS_BLOCK_FRAGMENT,
+    REPUTATION_LOOKUP_FRAGMENT,
+)
 from maljan.agents.registry import register_agent
 from maljan.providers.base import StaticJobContext
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
@@ -687,12 +691,7 @@ class StaticAnalyst(BaseAnalyst):
                 "For each finding state: the claim, the exact artifact "
                 "reference (e.g. 'API import: VirtualAllocEx', 'string at .data+0x20: /bin/sh'), "
                 "your confidence (0.0-1.0), and the MITRE ATT&CK technique ID if applicable.\n\n"
-                "Format each finding as:\n"
-                "CLAIM: <claim text>\n"
-                "EVIDENCE: <artifact reference>\n"
-                "CONFIDENCE: <float>\n"
-                "TECHNIQUE: <T-ID or NONE>\n"
-                "---\n\n"
+                f"{CLAIM_FORMAT_FRAGMENT}\n"
                 f"{rag_hint}{attck_hint}{attr_hint}{sink_hint}{load_hint}{target_info}",
             ),
         ]

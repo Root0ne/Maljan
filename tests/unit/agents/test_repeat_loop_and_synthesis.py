@@ -22,7 +22,7 @@ from maljan.agents.base_agent import (
     ledger_ids_in,
     synthesis_budget_chars,
 )
-from maljan.agents.evidence_recorder import RepeatGuard, served_repeat_notice
+from maljan.agents.evidence_recorder import RepeatGuard
 from maljan.core.config import Settings
 
 
@@ -57,59 +57,118 @@ def _human(text: str) -> Any:
 
 
 class TestTheGuardEndsTheLoop:
-    def _served(self, guard: RepeatGuard, tool: str = "pe_info") -> str | None:
-        """One call that has been made before, as the wrapper asks it."""
-        args = {"path": "/tmp/sample.bin"}
-        guard.note(tool, args, "ev_0002")
-        return guard.repeat_of(tool, args)
+    """Driven through the wrapper the loop actually builds, not the guard alone.
 
-    def test_a_served_repeat_is_counted_across_the_whole_loop(self) -> None:
-        guard = RepeatGuard()
+    Every earlier test asked the guard directly and used three distinct tools,
+    which is why a counter that could only ever reach one per call passed them.
+    A model that likes an answer asks for that answer again, and the run this
+    came from called one tool sixteen times.
+    """
 
-        self._served(guard, "pe_info")
-        self._served(guard, "strings")
+    def _tool(self, calls: list[str], name: str = "pe_info") -> Any:
+        from langchain_core.tools import StructuredTool
+        from pydantic import BaseModel
 
-        assert guard.served_repeats == 2
+        class _Args(BaseModel):
+            path: str = ""
 
-    def test_the_second_notice_says_the_loop_is_about_to_end(self) -> None:
-        guard = RepeatGuard()
-        self._served(guard, "pe_info")
-        self._served(guard, "strings")
+        def _run(**kwargs: Any) -> str:
+            calls.append(name)
+            return "PE32 executable, 3 sections"
 
-        notice = served_repeat_notice(
-            "strings", "ev_0002", ("pattern",), last_warning=guard.warning_of_the_end()
+        return StructuredTool.from_function(
+            func=_run, name=name, description=name, args_schema=_Args, infer_schema=False
         )
 
-        assert "One more repeated call ends this analysis" in notice
+    def _wrapped(self, guard: RepeatGuard, calls: list[str], *names: str) -> list[Any]:
+        from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
+        from maljan.schemas.evidence import EvidenceCounter
 
-    def test_the_first_notice_does_not(self) -> None:
-        guard = RepeatGuard()
-        self._served(guard, "pe_info")
-
-        notice = served_repeat_notice(
-            "pe_info", "ev_0002", (), last_warning=guard.warning_of_the_end()
+        recorder = EvidenceRecorder("static", counter=EvidenceCounter())
+        return record_tools(
+            [self._tool(calls, name) for name in (names or ("pe_info",))], recorder, guard
         )
 
-        assert "ends this analysis" not in notice
-        assert "A third will not be run" in notice
-
-    def test_the_third_ends_the_loop(self) -> None:
+    def test_one_tool_asked_for_sixteen_times_ends_the_loop(self) -> None:
         guard = RepeatGuard()
+        calls: list[str] = []
+        tool = self._wrapped(guard, calls)[0]
 
-        self._served(guard, "pe_info")
-        assert guard.ending_the_loop() is False
-        self._served(guard, "strings")
-        assert guard.ending_the_loop() is False
-        self._served(guard, "hashes")
+        answers = [tool.invoke({"path": "/tmp/s.bin"}) for _ in range(16)]
+
+        assert guard.ending_the_loop() is True
+        assert len(calls) == 2, "the tool itself ran twice; the rest were refused"
+        assert "[ev_0001]" in answers[0]
+
+    def test_the_loop_ends_on_the_third_repeated_call(self) -> None:
+        guard = RepeatGuard()
+        tool = self._wrapped(guard, [])[0]
+        args = {"path": "/tmp/s.bin"}
+
+        tool.invoke(args)
+        assert guard.served_repeats == 0
+        tool.invoke(args)
+        assert (guard.served_repeats, guard.ending_the_loop()) == (1, False)
+        tool.invoke(args)
+        assert (guard.served_repeats, guard.ending_the_loop()) == (2, False)
+        tool.invoke(args)
+
+        assert (guard.served_repeats, guard.ending_the_loop()) == (3, True)
+
+    def test_three_tools_asked_twice_each_end_it_too(self) -> None:
+        """The count is the loop's, not one call's."""
+        guard = RepeatGuard()
+        tools = self._wrapped(guard, [], "pe_info", "strings", "hashes")
+
+        for tool in tools:
+            tool.invoke({"path": "/tmp/s.bin"})
+        for tool in tools:
+            tool.invoke({"path": "/tmp/s.bin"})
 
         assert guard.ending_the_loop() is True
 
     def test_a_loop_that_asks_different_things_is_left_alone(self) -> None:
         guard = RepeatGuard()
-        for index in range(5):
-            guard.note("strings", {"pattern": f"marker{index}"}, f"ev_000{index}")
+        tool = self._wrapped(guard, [])[0]
+
+        for index in range(6):
+            tool.invoke({"path": f"/tmp/sample{index}.bin"})
 
         assert guard.served_repeats == 0
+        assert guard.ending_the_loop() is False
+
+    def test_the_call_before_the_last_warns_however_it_is_answered(self) -> None:
+        guard = RepeatGuard()
+        tool = self._wrapped(guard, [])[0]
+        args = {"path": "/tmp/s.bin"}
+
+        first = tool.invoke(args)
+        served = tool.invoke(args)
+        refused = tool.invoke(args)
+
+        assert "ends this analysis" not in first
+        assert "A third will not be run" in served
+        assert "ends this analysis" not in served, "one repeat is not the last one"
+        assert "ends this analysis" in refused
+
+    def test_a_replayed_conversation_starts_the_count_again(self) -> None:
+        """A connection error re-sends the conversation from the first message.
+
+        The model then re-makes the calls it already made, and counting those
+        ended an analyst for a dropped socket — the retry exists to stop
+        exactly that.
+        """
+        guard = RepeatGuard()
+        tool = self._wrapped(guard, [])[0]
+        args = {"path": "/tmp/s.bin"}
+        tool.invoke(args)
+        tool.invoke(args)
+        assert guard.served_repeats == 1
+
+        guard.reset()
+
+        tool.invoke(args)
+        assert guard.served_repeats == 0, "the replayed call is the first one again"
         assert guard.ending_the_loop() is False
 
     def test_the_analyst_loop_ends_and_synthesises_on_it(self) -> None:
@@ -244,3 +303,136 @@ class TestWhatTheModelIsToldItCanCite:
 
         assert "visible = ledger_ids_in(trimmed)" in source
         assert "Cite only these ids." in source
+
+
+class TestTheLoopStopsMidStream:
+    """The end-to-end shape: a stream that grows, a tool that repeats, a break.
+
+    Every stub written for the streaming change yielded one snapshot holding
+    the finished message list, which is ``ainvoke``'s answer wearing a
+    generator. Nothing exercised a state that grows step by step, and that is
+    how a counter which could never reach its own threshold shipped green.
+    """
+
+    def _agent(self, llm: Any) -> Any:
+        from maljan.agents.base_agent import BaseAnalyst
+
+        class _ToolAgent(BaseAnalyst):
+            def analyze(self, data: str) -> str:  # pragma: no cover - not exercised
+                return ""
+
+            def revise(self, *args: Any, **kwargs: Any) -> str:  # pragma: no cover
+                return ""
+
+        from unittest.mock import MagicMock
+
+        return _ToolAgent(llm=llm, name="static", tools=[MagicMock()])
+
+    def _executor(self, agent_tools: list[Any]) -> Any:
+        """An executor that calls one wrapped tool again on every step.
+
+        It answers the way ``stream_mode="values"`` does: each snapshot is the
+        whole conversation so far, one step longer than the last.
+        """
+        from langchain_core.messages import AIMessage, ToolMessage
+
+        class _Executor:
+            def __init__(self) -> None:
+                self.steps = 0
+
+            async def astream(self, inputs: Any, config: Any, stream_mode: str = "values") -> Any:
+                messages = list(inputs["messages"])
+                for step in range(8):
+                    self.steps += 1
+                    answer = agent_tools[0].invoke({"path": "/tmp/s.bin"})
+                    messages = [
+                        *messages,
+                        AIMessage(
+                            content="",
+                            tool_calls=[{"name": "pe_info", "args": {}, "id": f"call_{step}"}],
+                        ),
+                        ToolMessage(content=answer, tool_call_id=f"call_{step}"),
+                    ]
+                    yield {"messages": messages}
+
+        return _Executor()
+
+    def test_a_repeating_stream_is_broken_and_what_it_gathered_is_synthesised(self) -> None:
+        from unittest.mock import MagicMock, patch
+
+        from langchain_core.tools import StructuredTool
+        from pydantic import BaseModel
+
+        class _Args(BaseModel):
+            path: str = ""
+
+        ran: list[str] = []
+
+        def _run(**kwargs: Any) -> str:
+            ran.append("pe_info")
+            return "PE32 executable, 3 sections"
+
+        tool = StructuredTool.from_function(
+            func=_run, name="pe_info", description="pe", args_schema=_Args, infer_schema=False
+        )
+
+        llm = MagicMock()
+        llm.invoke.return_value = MagicMock(
+            content=(
+                "CLAIM: the binary is a PE32 executable\n"
+                "EVIDENCE: ev_0001\nCONFIDENCE: 0.6\nTECHNIQUE: NONE"
+            )
+        )
+        agent = self._agent(llm)
+        agent.tools = [tool]
+
+        executor = None
+
+        def _build(model: Any, tools: list[Any]) -> Any:
+            nonlocal executor
+            executor = self._executor(tools)
+            return executor
+
+        with patch("maljan.agents.base_agent.get_settings") as settings:
+            cfg = settings.return_value
+            cfg.react_agent_timeout = 180
+            cfg.react_agent_timeout_overrides = {}
+            cfg.react_agent_max_steps = 40
+            cfg.react_agent_max_steps_overrides = {}
+            cfg.react_agent_tool_call_budget = 20
+            cfg.llm.provider = "openai"
+            cfg.llm.agents = {}
+            cfg.llm.openai.context_size = 0
+            with patch("langgraph.prebuilt.create_react_agent", _build):
+                answer = agent.execute_tool_loop([("system", "s"), ("human", "h")])
+
+        assert executor is not None
+        assert executor.steps == 4, "the fourth repeated call ends the loop"
+        assert len(ran) == 2, "the tool itself ran twice; the rest were refused"
+        assert "PE32" in answer, "the salvage answered from what was gathered"
+        llm.invoke.assert_called_once()
+
+    def test_the_last_snapshot_is_what_the_caller_gets(self) -> None:
+        """Values mode grows the state, and the loop reads the last one."""
+        from unittest.mock import MagicMock, patch
+
+        from langchain_core.messages import AIMessage
+
+        class _Executor:
+            async def astream(self, inputs: Any, config: Any, stream_mode: str = "values") -> Any:
+                yield {"messages": [AIMessage(content="thinking")]}
+                yield {"messages": [AIMessage(content="thinking"), AIMessage(content="done")]}
+
+        agent = self._agent(MagicMock())
+        agent.tools = [MagicMock()]
+        with patch("maljan.agents.base_agent.get_settings") as settings:
+            cfg = settings.return_value
+            cfg.react_agent_timeout = 180
+            cfg.react_agent_timeout_overrides = {}
+            cfg.react_agent_max_steps = 40
+            cfg.react_agent_max_steps_overrides = {}
+            cfg.react_agent_tool_call_budget = 20
+            with patch("langgraph.prebuilt.create_react_agent", return_value=_Executor()):
+                answer = agent.execute_tool_loop([("system", "s"), ("human", "h")])
+
+        assert answer == "done"

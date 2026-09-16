@@ -75,10 +75,77 @@ class TestWhatIsNot:
 
         assert UNGROUNDED_TECHNIQUE_CODE not in _codes(validate_isr(isr, ledger_ids=LEDGER))
 
-    def test_an_id_in_the_claim_prose_counts_too(self) -> None:
+    def test_an_id_in_the_claim_prose_is_not_a_citation(self) -> None:
+        """ "As ev_0001 does not show, this may be injection" is not a citation.
+
+        The claim format asks for the id on the evidence line, and reading the
+        prose for one is how a validator stops validating.
+        """
         isr = _isr(_claim("imports read from the PE header", text="ev_0001 shows VirtualAllocEx"))
 
+        assert UNGROUNDED_TECHNIQUE_CODE in _codes(validate_isr(isr, ledger_ids=LEDGER))
+
+    def test_a_findings_block_citing_the_same_technique_settles_it(self) -> None:
+        """The analyst already answered by machine; asking again is a wasted turn.
+
+        This is the honest claim the prescribed format produces: an artifact
+        reference in prose, and the ledger id in the structured channel
+        against the same technique.
+        """
+        from maljan.schemas.isr_models import Finding
+
+        isr = _isr(_claim("API call: VirtualAllocEx @ 0x401234 (import table)"))
+        isr.findings = [
+            Finding(
+                title="Allocates memory in a remote process",
+                technique_ids=["T1055"],
+                confidence=0.8,
+                evidence_ids=["ev_0002"],
+            )
+        ]
+
         assert UNGROUNDED_TECHNIQUE_CODE not in _codes(validate_isr(isr, ledger_ids=LEDGER))
+
+    def test_a_findings_block_about_another_technique_does_not(self) -> None:
+        from maljan.schemas.isr_models import Finding
+
+        isr = _isr(_claim("API call: VirtualAllocEx @ 0x401234"))
+        isr.findings = [
+            Finding(title="Obfuscated strings", technique_ids=["T1027"], evidence_ids=["ev_0002"])
+        ]
+
+        assert UNGROUNDED_TECHNIQUE_CODE in _codes(validate_isr(isr, ledger_ids=LEDGER))
+
+    def test_a_findings_block_that_cites_no_id_does_not_either(self) -> None:
+        from maljan.schemas.isr_models import Finding
+
+        isr = _isr(_claim("API call: VirtualAllocEx @ 0x401234"))
+        isr.findings = [Finding(title="Injection", technique_ids=["T1055"], evidence_ids=[])]
+
+        assert UNGROUNDED_TECHNIQUE_CODE in _codes(validate_isr(isr, ledger_ids=LEDGER))
+
+    def test_the_claim_format_asks_for_the_id_the_checker_wants(self) -> None:
+        """The requirement and the instruction have to be the same sentence."""
+        from maljan.agents.prompt_fragments import CLAIM_FORMAT_FRAGMENT
+
+        assert "EVIDENCE:" in CLAIM_FORMAT_FRAGMENT
+        assert "ev_0002" in CLAIM_FORMAT_FRAGMENT
+        assert "naming the tool result you read it from" in CLAIM_FORMAT_FRAGMENT
+
+    def test_every_analyst_prompt_uses_that_one_fragment(self) -> None:
+        import inspect
+
+        from maljan.agents import (
+            configurable_analyst,
+            dynamic_analyst,
+            network_analyst,
+            static_analyst,
+        )
+
+        for module in (static_analyst, dynamic_analyst, network_analyst, configurable_analyst):
+            source = inspect.getsource(module)
+            assert "CLAIM_FORMAT_FRAGMENT" in source, module.__name__
+            assert "EVIDENCE: <artifact reference>" not in source, module.__name__
 
     def test_a_claim_with_no_technique_is_not_this_validator_s_business(self) -> None:
         """An uncited observation is what ``isr.empty_evidence`` is for."""

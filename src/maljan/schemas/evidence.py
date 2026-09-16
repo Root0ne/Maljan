@@ -26,6 +26,7 @@ showing fewer.
 from __future__ import annotations
 
 import json
+import re
 import threading
 from typing import Any
 
@@ -43,6 +44,13 @@ from maljan.schemas.tool_evidence import (
 # observed, and fixed width means the ids sort lexically in the order they
 # were issued.
 _ID_DIGITS = 4
+
+
+# An entry id wherever one is written: in a claim's evidence line, in a
+# findings block, in a tool result the recorder stamped. Spelled once, beside
+# the function that issues them, because two copies of it disagreed on case
+# for ids that one counter produces.
+ENTRY_ID_RE = re.compile(r"\bev_\d{3,}\b")
 
 
 def format_entry_id(seq: int) -> str:
