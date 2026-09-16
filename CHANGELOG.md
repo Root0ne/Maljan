@@ -228,6 +228,35 @@ change landed on `main`.
 
 ### Fixed
 
+- **A run nobody performed is no longer reported as a result.** A hosted
+  endpoint refusing every call with 402 produced a job that said "completed"
+  with verdict Suspicious, confidence 0.0, no evidence and an empty error
+  message; a run whose analysts all failed produced an empty STIX bundle, which
+  the verdict heuristic read as Benign at 0.10. A run with no evidence and no
+  analyst claim is now Suspicious with the reason "inconclusive: no analysis
+  was performed" in the degraded banner, and a run in which no analyst answered
+  *and* the judge never answered fails, carrying the provider's error class and
+  status, with no report persisted.
+
+- **A provider answering "not now" costs a retry, not the run.** The retry
+  helper covered a dropped socket only, so one 500 or 503 from a hosted
+  endpoint took the analyst, the negotiation, the verdict and every report
+  section with it. The transient statuses (408, 409, 429, 500, 502, 503, 504)
+  share the connection error's attempt budget and backoff and honour a
+  `Retry-After` within it; every other status is answered once.
+
+- **The 400 self-heal heals the model the job is holding.** The healed model is
+  remembered by the wrapper that healed it and swapped into the container's
+  cache, so an endpoint that refuses the llama.cpp extras is asked with them
+  exactly once instead of on every call — which had been building a new client,
+  and leaking its connection pool, each time.
+
+- **A report of absence is not a capability claim.** "No persistence mechanism
+  was observed" and "there is no evidence of command-and-control communication"
+  were recorded as over-claims and fed back for correction. A negation cue in
+  the term's own clause clears it; a claim after the clause ends is still
+  reported.
+
 - **A hosted OpenAI-compatible endpoint is no longer sent llama.cpp's request
   fields.** The provider added a repetition penalty, an `n_predict` echo of the
   output cap and `chat_template_kwargs` whenever `base_url` was set, conflating
