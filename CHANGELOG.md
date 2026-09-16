@@ -228,6 +228,20 @@ change landed on `main`.
 
 ### Fixed
 
+- **An API-call row carries what the sandbox recorded.** `sandbox_api_calls`
+  copied the import table's category and a suspicious flag onto every row and
+  filtered by that category. Rows now carry the API, the module the sandbox
+  resolved it from when known, the processes that made it, the count, and the
+  first call's arguments and time; a `name` substring filter replaces the
+  `category` one. The report's section bundles no longer list imports by
+  capability category either; the capability counts stay.
+
+- **The sample's identity grounds an indicator only by exact match.** The
+  identity values had been unioned into the substring haystack, so a value
+  written inside the submitted file name, or a slice of the sha256, grounded
+  an indicator the run never saw. A literal equal to one of the sample's own
+  hashes or its name, case-insensitively, is grounded; nothing less is.
+
 - **An import row states what the import table states.** `pe_info` and
   `elf_info` copied the old capability table's category onto every import row
   (`BitBlt` came back as `keylogging`), and on a signed PuTTY the static
