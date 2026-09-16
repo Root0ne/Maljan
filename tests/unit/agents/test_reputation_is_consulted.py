@@ -21,7 +21,7 @@ from unittest.mock import MagicMock
 from maljan.agents.judge_agent import JudgeAgent
 from maljan.core.config import Settings, ToolRef
 from maljan.core.virustotal import SERVER_KEY
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence, Finding
+from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
 
 def _isr(claim: str = "the binary is packed", dissent: bool = False) -> AgentISR:
@@ -65,36 +65,56 @@ class TestTheJudgeAsksTheIdentityQuestion:
         judge._definition_tool_refs = lambda: refs  # type: ignore[method-assign]
         return judge
 
-    def test_it_opens_the_loop_when_nobody_consulted_a_reputation_source(self) -> None:
-        judge = self._judge([ToolRef(kind="mcp", server=SERVER_KEY)])
+    def _with_lookup(self) -> JudgeAgent:
+        return self._judge([ToolRef(kind="mcp", server=SERVER_KEY)])
 
-        assert judge._can_ask_an_identity_question({"static": _isr()}) is True
+    def test_it_opens_the_loop_when_no_reputation_server_was_called(self) -> None:
+        judge = self._with_lookup()
 
-    def test_an_analyst_that_already_asked_settles_it(self) -> None:
-        judge = self._judge([ToolRef(kind="mcp", server=SERVER_KEY)])
-        isr = _isr(claim="VirusTotal reports 41 of 70 engines detecting this hash")
+        assert judge._can_ask_an_identity_question({"analysis", "knowledge"}) is True
 
-        assert judge._can_ask_an_identity_question({"static": isr}) is False
+    def test_a_ledger_entry_against_the_reputation_server_closes_it(self) -> None:
+        judge = self._with_lookup()
 
-    def test_a_judge_with_no_tools_at_all_stays_on_the_fast_path(self) -> None:
-        """The loop costs a full judge timeout, and a judge holding nothing
-        cannot answer the question with it."""
+        assert judge._can_ask_an_identity_question({"analysis", SERVER_KEY}) is False
+
+    def test_the_rest_sidecar_counts_as_a_reputation_server_too(self) -> None:
+        judge = self._with_lookup()
+
+        assert judge._can_ask_an_identity_question({"threatintel"}) is False
+
+    def test_an_analyst_saying_no_family_was_found_still_opens_the_loop(self) -> None:
+        """The sentence an analyst writes when it consulted nothing.
+
+        Reading the prose for words like "malware family" turned the trigger
+        off for exactly this case — the one it exists for. Nothing but the
+        ledger decides it now.
+        """
+        judge = self._with_lookup()
+
+        assert judge._can_ask_an_identity_question(set()) is True
+
+    def test_an_empty_ledger_opens_it(self) -> None:
+        judge = self._with_lookup()
+
+        assert judge._can_ask_an_identity_question(None) is True
+
+    def test_a_judge_with_no_lookup_tool_stays_on_the_fast_path(self) -> None:
+        """The loop costs a full judge timeout, and a judge holding only the
+        knowledge sidecar cannot answer an identity question with it."""
+        judge = self._judge([ToolRef(kind="mcp", server="knowledge")])
+
+        assert judge._can_ask_an_identity_question(set()) is False
+
+    def test_an_attached_tool_counts_as_holding_the_server(self) -> None:
+        """After the client is initialised the refs are spent and the tools
+        are what the judge holds."""
         judge = self._judge([])
+        judge.tools = [
+            type("_T", (), {"name": "get_file_report", "metadata": {"maljan_server": SERVER_KEY}})()
+        ]
 
-        assert judge._can_ask_an_identity_question({"static": _isr()}) is False
-
-    def test_a_family_word_counts_as_an_answer_too(self) -> None:
-        judge = self._judge([ToolRef(kind="mcp", server=SERVER_KEY)])
-        isr = _isr(claim="the sample matches the AsyncRAT malware family")
-
-        assert judge._can_ask_an_identity_question({"static": isr}) is False
-
-    def test_the_finding_titles_are_read_as_well_as_the_claims(self) -> None:
-        judge = self._judge([ToolRef(kind="mcp", server=SERVER_KEY)])
-        isr = _isr()
-        isr.findings = [Finding(title="AbuseIPDB reports the C2 host as abusive")]
-
-        assert judge._can_ask_an_identity_question({"static": isr}) is False
+        assert judge._can_ask_an_identity_question(set()) is True
 
 
 class TestTheMediatorTrigger:
@@ -112,7 +132,9 @@ class TestTheMediatorTrigger:
         judge._loop_answer = answer
         return judge
 
-    def _run_mediate(self, judge: JudgeAgent, isrs: dict[str, AgentISR]) -> list[str]:
+    def _run_mediate(
+        self, judge: JudgeAgent, isrs: dict[str, AgentISR], servers: set[str]
+    ) -> list[str]:
         """Mediate with both paths stubbed, reporting which one ran."""
         import asyncio
 
@@ -134,21 +156,77 @@ class TestTheMediatorTrigger:
                 return MagicMock(content="Contradictions: none\nagreement_confidence: 0.9")
 
         judge.llm = _LLM()
-        asyncio.run(judge.mediate(reports={"static": "text"}, history=[], isr_reports=isrs))
+        asyncio.run(
+            judge.mediate(
+                reports={"static": "text"},
+                history=[],
+                isr_reports=isrs,
+                ledger_servers=servers,
+            )
+        )
         return taken
 
-    def test_the_loop_runs_when_no_reputation_source_was_consulted(self) -> None:
+    def test_the_loop_runs_when_no_reputation_server_was_called(self) -> None:
         judge = self._mediator([ToolRef(kind="mcp", server=SERVER_KEY)], "")
 
-        assert self._run_mediate(judge, {"static": _isr()}) == ["tools"]
+        assert self._run_mediate(judge, {"static": _isr()}, {"analysis"}) == ["tools"]
 
-    def test_the_fast_path_is_kept_once_one_was(self) -> None:
+    def test_the_fast_path_is_kept_once_one_was_called(self) -> None:
         judge = self._mediator([ToolRef(kind="mcp", server=SERVER_KEY)], "")
-        isr = _isr(claim="VirusTotal reports this hash as unknown")
 
-        assert self._run_mediate(judge, {"static": isr}) == ["fast"]
+        assert self._run_mediate(judge, {"static": _isr()}, {SERVER_KEY}) == ["fast"]
+
+    def test_prose_about_a_family_does_not_close_it(self) -> None:
+        judge = self._mediator([ToolRef(kind="mcp", server=SERVER_KEY)], "")
+        isr = _isr(claim="no malware family could be determined from static features")
+
+        assert self._run_mediate(judge, {"static": isr}, {"analysis"}) == ["tools"]
 
     def test_dissent_still_opens_the_loop_on_its_own(self) -> None:
         judge = self._mediator([], "")
 
-        assert self._run_mediate(judge, {"static": _isr(dissent=True)}) == ["tools"]
+        assert self._run_mediate(judge, {"static": _isr(dissent=True)}, {SERVER_KEY}) == ["tools"]
+
+
+class TestWhatTheDebateStageHandsOver:
+    def test_the_reputation_servers_are_named_beside_the_built_ins(self) -> None:
+        from maljan.core.config import BUILTIN_SERVER_KEYS, REPUTATION_SERVER_KEYS
+
+        assert set(REPUTATION_SERVER_KEYS) == {SERVER_KEY, "threatintel"}
+        assert set(REPUTATION_SERVER_KEYS) <= set(BUILTIN_SERVER_KEYS)
+
+    def test_the_ledger_rows_are_read_for_the_servers_they_name(self) -> None:
+        from maljan.pipeline.nodes import _ledger_servers
+
+        state = {
+            "evidence_ledger": [
+                {"id": "ev_0001", "server": "analysis", "tool": "hashes"},
+                {"id": "ev_0002", "server": SERVER_KEY, "tool": "get_file_report"},
+                {"id": "ev_0003", "tool": "sandbox_processes"},
+            ]
+        }
+
+        assert _ledger_servers(state) == {"analysis", SERVER_KEY}
+
+    def test_a_row_that_is_not_a_mapping_costs_no_answer(self) -> None:
+        """One malformed row must not decide whether the question is asked."""
+        from maljan.pipeline.nodes import _ledger_servers
+
+        row = type("_R", (), {"server": "threatintel"})()
+
+        assert _ledger_servers({"evidence_ledger": [row, "nonsense"]}) == {"threatintel"}
+
+    def test_a_run_with_no_ledger_yet_names_nothing(self) -> None:
+        from maljan.pipeline.nodes import _ledger_servers
+
+        assert _ledger_servers({}) == set()
+
+    def test_the_debate_stage_passes_them_to_the_mediator(self) -> None:
+        """The trigger is only as good as the call site that feeds it."""
+        import inspect
+
+        from maljan.pipeline import nodes
+
+        source = inspect.getsource(nodes)
+
+        assert "ledger_servers=_ledger_servers(state)" in source

@@ -681,6 +681,12 @@ BUILTIN_SERVER_KEYS: tuple[str, ...] = (
     "threatintel",
     virustotal.SERVER_KEY,
 )
+# The built-in servers that answer "who is this sample": VirusTotal's own
+# server and the REST sidecar that reads VirusTotal and AbuseIPDB. Named as a
+# set rather than found by scanning prose, because what decides whether the
+# question has been asked is which server a ledger entry came from, and a
+# sentence that happens to contain the word "reputation" is not an answer.
+REPUTATION_SERVER_KEYS: tuple[str, ...] = (virustotal.SERVER_KEY, "threatintel")
 RESERVED_SERVER_KEYS: tuple[str, ...] = (
     "analysis",
     "knowledge",

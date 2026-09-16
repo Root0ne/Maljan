@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import re
 import uuid
+from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -451,46 +452,42 @@ class JudgeAgent:
             bool(isr.dissent_items) for isr in isr_reports.values() if isinstance(isr, AgentISR)
         )
 
-    # What an analyst writes once it has actually asked a reputation or family
-    # source. Deliberately the words rather than a tool name: an analyst may
-    # reach the same fact through any bound server, and what matters is whether
-    # the question has been put at all.
-    _REPUTATION_SOURCE_WORDS: tuple[str, ...] = (
-        "virustotal",
-        "abuseipdb",
-        "reputation",
-        "detection ratio",
-        "malware family",
-        "family attribution",
-        "threat intel",
-    )
+    def _holds_a_lookup_tool(self) -> bool:
+        """Whether a reputation server is among this judge's own tools.
 
-    @classmethod
-    def _reputation_already_consulted(cls, isr_reports: dict[str, AgentISR] | None) -> bool:
-        """Whether any analyst's own words show a reputation source was asked."""
-        parts: list[str] = []
-        for isr in (isr_reports or {}).values():
-            if not isinstance(isr, AgentISR):
-                continue
-            parts.extend(str(getattr(claim, "claim", "") or "") for claim in isr.claims or [])
-            parts.extend(
-                str(getattr(finding, "title", "") or "") for finding in (isr.findings or [])
-            )
-        text = " ".join(parts).lower()
-        return any(word in text for word in cls._REPUTATION_SOURCE_WORDS)
+        Asked of the servers rather than of the tool names: the loop can only
+        answer an identity question if something in it can look a hash up, and
+        a judge holding only the knowledge sidecar would spend a full timeout
+        to learn nothing.
+        """
+        from maljan.agents.tool_pinning import server_of
+        from maljan.core.config import REPUTATION_SERVER_KEYS
 
-    def _can_ask_an_identity_question(self, isr_reports: dict[str, AgentISR] | None) -> bool:
+        attached = {server_of(tool) for tool in (getattr(self, "tools", None) or [])}
+        referenced = {str(ref.server) for ref in self._definition_tool_refs()}
+        return bool((attached | referenced) & set(REPUTATION_SERVER_KEYS))
+
+    def _can_ask_an_identity_question(self, ledger_servers: Iterable[str] | None) -> bool:
         """Whether the judge should open its tool loop to ask who this sample is.
 
         The loop used to run on dissent alone, so a run where every analyst
         agreed — and none of them had a reputation tool to agree *about* —
         ended with a judge holding a bound VirusTotal server it never called
-        and a family of None. A judge that holds tools and has read nothing
-        from a reputation or family source gets one pass to ask.
+        and a family of None.
+
+        What settles it is the run's own record: the servers the evidence
+        ledger names. An earlier version read the analysts' prose for words
+        like "malware family", which turned the trigger *off* for the sentence
+        an analyst writes when it consulted nothing at all ("no malware family
+        could be determined") — the very case the trigger exists for. A tool
+        call is a fact, and a sentence is not one.
         """
-        if not (getattr(self, "tools", None) or self._definition_tool_refs()):
+        if not self._holds_a_lookup_tool():
             return False
-        return not self._reputation_already_consulted(isr_reports)
+        from maljan.core.config import REPUTATION_SERVER_KEYS
+
+        asked = {str(name) for name in (ledger_servers or ())}
+        return not (asked & set(REPUTATION_SERVER_KEYS))
 
     async def mediate(
         self,
@@ -498,6 +495,7 @@ class JudgeAgent:
         history: list[AgentArgument],
         isr_reports: dict[str, AgentISR] | None = None,
         consensus_threshold: float | None = None,
+        ledger_servers: Iterable[str] | None = None,
     ) -> tuple[AgentArgument, bool]:
         """Find contradictions between expert reports and determine consensus.
 
@@ -521,7 +519,7 @@ class JudgeAgent:
         """
         self.logger.info("Mediating %d expert reports for contradictions...", len(reports))
         needs_tools = self._has_explicit_dissent(isr_reports)
-        identity_unanswered = not needs_tools and self._can_ask_an_identity_question(isr_reports)
+        identity_unanswered = not needs_tools and self._can_ask_an_identity_question(ledger_servers)
         needs_tools = needs_tools or identity_unanswered
 
         # Build a human-readable summary of all reports

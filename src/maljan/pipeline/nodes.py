@@ -455,6 +455,21 @@ def _augment_static_chunks_with_path(
 # ---------------------------------------------------------------------------
 
 
+def _ledger_servers(state: AnalysisState) -> set[str]:
+    """Every server the run has recorded a tool call against, by key.
+
+    Read off the raw rows rather than through ``LedgerEntry``: the question is
+    which servers were asked, one malformed row must not cost the answer, and
+    a row written by an in-process tool carries no server at all.
+    """
+    servers: set[str] = set()
+    for row in state.get("evidence_ledger") or []:
+        name = row.get("server") if isinstance(row, dict) else getattr(row, "server", None)
+        if name:
+            servers.add(str(name))
+    return servers
+
+
 # ---------------------------------------------------------------------------
 # Stage plumbing
 # ---------------------------------------------------------------------------
@@ -1519,6 +1534,12 @@ def make_negotiation_node(
                     reports=active_reports,
                     history=state.get("discussion_history") or [],
                     isr_reports=state.get("isr_reports") or {},
+                    # Which servers the run has actually called. The mediator
+                    # opens its tool loop to ask who this sample is only when
+                    # nothing has asked a reputation server yet, and that is a
+                    # question about the ledger rather than about the
+                    # analysts' prose.
+                    ledger_servers=_ledger_servers(state),
                     # The stage's own bar for calling it agreement. ``None``
                     # leaves the mediator on the global setting, which is what
                     # the stage's options were seeded from.
