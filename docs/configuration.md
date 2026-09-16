@@ -359,8 +359,8 @@ pipeline → Teams) is an ordered list of stages. Each stage is:
 |---|---|
 | `key` | Slug, unique in the team. Names the stage everywhere it is reported. |
 | `label` | Display name; empty means the key. |
-| `kind` | `analysis`, `debate`, `verdict` or `report`. |
-| `agents` | Definition keys this stage runs. Empty on a debate stage. |
+| `kind` | `triage`, `analysis`, `debate`, `verdict` or `report`. |
+| `agents` | Definition keys this stage runs. Empty on a triage or debate stage. |
 | `depends_on` | Earlier stage keys this one runs after. |
 | `when` | Condition deciding whether it runs. Empty means always. |
 | `mode` | `sequential` (default) or `parallel`, for an analysis stage. |
@@ -372,10 +372,22 @@ pipeline → Teams) is an ordered list of stages. Each stage is:
 
 | Team | Stages | What it is for |
 | :-- | :-- | :-- |
-| `default` | `analysis` (static, dynamic, network) → `debate` → `verdict` → `report` | The general case. |
-| `measurement` | The same four, with every tool server withheld | What the ensemble contributes with nothing to call. |
-| `mobile` | `triage` → `android_static` → `dynamic` → `debate` → `verdict` → `report` | An APK or a DEX. |
-| `deep_static` | `triage` → `static` → `reversing` → `network` → `debate` → `verdict` → `report` | Reading the code. |
+| `default` | `triage_pack` → `analysis` (static, dynamic, network) → `debate` → `verdict` → `report` | The general case. |
+| `measurement` | The four after the pack, with every tool server withheld and no pack | What the ensemble contributes with nothing to call and nothing established. |
+| `mobile` | `triage_pack` → `triage` → `android_static` → `dynamic` → `debate` → `verdict` → `report` | An APK or a DEX. |
+| `deep_static` | `triage_pack` → `triage` → `static` → `reversing` → `network` → `debate` → `verdict` → `report` | Reading the code. |
+
+`triage_pack` is a stage of kind `triage`: the pipeline itself running the
+deterministic tools over the sample and writing each result to the evidence
+ledger before any analyst starts (see *The triage pack* in
+[architecture.md](architecture.md)). Every team but `measurement` ships with
+it first, a team written by hand may leave it out, and a stored team gains it
+on upgrade (`make migrate`). Its three settings sit in the Analysis layers
+group: `triage.enabled` (off leaves the stage in place and makes it decline
+with that reason), `triage.strings_head` (how many printable runs the strings
+entry keeps; 300) and `triage.reputation` (`auto` asks the enabled reputation
+server once for the sample hash — VirusTotal's own server when enabled, else
+the threat-intel sidecar — and `off` records a skipped entry instead).
 
 `mobile` and `deep_static` are built from three seeded generic agent
 definitions — `triage`, `android_static` and `reverser` — whose prompts live in
@@ -474,7 +486,7 @@ day when parallel was on. The console clears the mark on the first stage edit
 Python's own grammar with an allow-list on top: comparisons (`==`, `!=`, `in`,
 `not in`, `<`, `<=`, `>`, `>=`), `and`, `or`, `not`, literals, and tuples or
 lists of literals. There are no function calls, no arithmetic, no
-comprehensions and no attribute access except into `stages`. A condition that
+comprehensions and no attribute access except into `stages` and `triage`. A condition that
 does not parse is refused when the team is saved; one that fails at run time
 skips its stage with the reason recorded rather than failing the job. The
 console checks each condition box against the same parser as it loses focus
@@ -494,10 +506,12 @@ The names it may use:
 | `has_sandbox_report` | The same fact, named for readability. |
 | `has_pcap` | Whether the report carries a non-empty network block. |
 | `stages.<key>.<field>` | A stage result: `ran`, `reason`, `claim_count`, `technique_ids`, `finding_count`, `agents`. |
+| `triage.<field>` | What the triage pack established: `has_signature`, `reputation_malicious` (a count, or `None` when no lookup answered with one), `yara_hits`, `capa_hits`. |
 
 `stages["triage"].ran` is the same lookup as `stages.triage.ran`. A stage the
 run never reached reads as one that did not run, so naming a stage that was
-itself skipped is not an error.
+itself skipped is not an error. A team without a triage pack reads `triage`
+as nothing established: `false`, `None`, `0`, `0`.
 
 Examples:
 
@@ -508,6 +522,8 @@ has_pcap and stages.triage.claim_count > 0
 "T1055" in stages.static.technique_ids
 not stages.detonate.ran
 size > 10485760
+triage.yara_hits > 0 or triage.capa_hits > 0
+not triage.has_signature and triage.reputation_malicious != 0
 ```
 
 ### What a stage reads

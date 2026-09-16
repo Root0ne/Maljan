@@ -62,10 +62,13 @@ work over whichever tools the operator connected for that format.
 ## The pipeline
 
 A LangGraph `StateGraph` over one shared state (`src/maljan/pipeline/`). The
-analyst stage has two shapes and `parallel_analysts` chooses between them:
+triage pack runs first; the analyst stage after it has two shapes and
+`parallel_analysts` chooses between them:
 
 ```
 START
+  │
+triage_pack   the deterministic tools, run by the pipeline, one ledger entry each
   │
   ├─ parallel_analysts = False  (the default)
   │     static_analyst -> dynamic_analyst -> network_analyst
@@ -87,6 +90,44 @@ report  ->  END
 Sequential is the default because a single local model server has one slot, and
 fanning out three analysts onto it produces queue thrash rather than speed. Set
 `parallel_analysts` when each request gets its own slot, as with a hosted API.
+
+### The triage pack
+
+Before any analyst starts, the pipeline runs the deterministic tools itself
+(`src/maljan/pipeline/triage_pack.py`) and writes each result to the evidence
+ledger as an ordinary entry under `agent="pipeline"`, `server="pipeline"`. A
+human analyst runs the same dozen commands on every sample before opening a
+disassembler, and the live runs showed the local model rarely asks for any of
+them; a fact a model may or may not ask for is not a fact a run can rely on.
+
+The pack is the same code the `analysis` sidecar serves, called in-process, in
+a fixed order so the ids a sample produces are the same from one run to the
+next: `identify_file` and `hashes`; `signing_info`; the format tool the routed
+type selects (`pe_info`, `elf_info`, `macho_info`, `apk_info`, `document_info`
+or `archive_list`, which carry the section entropies, the packer signature
+hits and the import rows); a `strings` head capped by `triage.strings_head`
+and `iocs_from_file`; `yara_scan`, `capa` under the static provider's budget
+and, when a sandbox report exists, `sigma_match_sandbox`; `api_capability`
+over the import set and `lolbin_lookup` over the sandbox's command lines; the
+sandbox projections at summary level (processes, network, signatures, dropped
+files, channels) and `pcap_summary` when a capture was fetched; one reputation
+lookup on the sha256 (`get_file_report` on `virustotal` when it is enabled,
+else `check_hash` on `threatintel`), made through the tool server exactly as
+an agent's call is and recorded under that server; and `function_matches` when
+a Qdrant function-hash store and a provider that hashes functions are both
+present.
+
+The pack states facts and draws no conclusion, and it never fails a job: a
+tool that raises or answers with an error is an entry with `ok=False` and a
+degradation reason `triage.<tool>_failed`, the next tool runs, and a
+reputation lookup that has no enabled server is an entry saying so rather than
+a silence. Four of its facts — `has_signature`, `reputation_malicious`,
+`yara_hits`, `capa_hits` — are readable by every later stage's `when`
+condition as `triage.<field>`, and `run_summary.triage` records how many
+entries it wrote, how many failed and how long it took. It declines, with the
+reason recorded, when `triage.enabled` is off, when the stage withholds the
+built-in tools, or when there is no sample on disk to read. The `measurement`
+baseline has no triage stage at all.
 
 Agents exchange structured `AgentISR` objects — claims with an `evidence_ref`
 and a confidence — rather than raw text. Objects are built and cached in one
@@ -167,10 +208,12 @@ stages before it (`inject_upstream`), how hard it argues if it is a debate
 (`debate`) and whether its agents keep the built-in tool servers
 (`builtin_tools`).
 
-The four kinds are the pipeline itself. An `analysis` stage runs the agents it
-names. A `debate` stage runs the mediation loop over the analysis stages
-upstream of it. The one `verdict` stage runs the judge. The optional `report`
-stage, always last, builds the report.
+The five kinds are the pipeline itself. A `triage` stage names no agent: it is
+the pipeline running the deterministic tools over the sample and writing the
+results to the ledger (see *The triage pack* above). An `analysis` stage runs
+the agents it names. A `debate` stage runs the mediation loop over the analysis
+stages upstream of it. The one `verdict` stage runs the judge. The optional
+`report` stage, always last, builds the report.
 
 ### The teams that ship
 
@@ -179,20 +222,20 @@ options, its built-in tool switches and `exclude_servers`. The rest of a
 seeded team is a claim the product makes about how the analysis is arranged,
 so changing it means cloning the team.
 
-**`default`** is the pipeline as four stages — `analysis` (static, dynamic,
-network) → `debate` → `verdict` → `report` — which is the architecture this
-project measured itself on.
+**`default`** is the triage pack in front of the pipeline as four stages —
+`triage_pack` → `analysis` (static, dynamic, network) → `debate` → `verdict` →
+`report` — the four being the architecture this project measured itself on.
 
 ![The default team](assets/team-default.svg)
 
-**`measurement`** is the same four with every tool server withheld and the
-static provider forced to `none`: the baseline for what the ensemble
-contributes on its own. It is a team rather than three tool-free clones of the
-definitions, so the agents it measures cannot drift from the ones `default`
-runs.
+**`measurement`** is the same four without the pack, with every tool server
+withheld and the static provider forced to `none`: the baseline for what the
+ensemble contributes on its own, with nothing established for it. It is a team
+rather than three tool-free clones of the definitions, so the agents it
+measures cannot drift from the ones `default` runs.
 
-**`mobile`** is a team for a mobile sample. `triage` identifies the sample and
-says which artefacts matter; `android_static` reads the manifest, the
+**`mobile`** is a team for a mobile sample. After the pack, `triage` reads the
+facts it wrote and says which artefacts matter; `android_static` reads the manifest, the
 permissions, the components, the DEX strings and the native libraries, and runs
 only when the sample really is one — `when: file_type in ("apk", "dex")`;
 `dynamic` detonates when a sandbox report reached the run. On a PE the Android
@@ -201,8 +244,8 @@ shows what the team chose not to do rather than nothing at all.
 
 ![The mobile team](assets/team-mobile.svg)
 
-**`deep_static`** is a team that reads the code. `triage`, then the built-in
-`static` stage, then `reversing` — a generic `reverser` agent that is handed
+**`deep_static`** is a team that reads the code. The pack, `triage`, then the
+built-in `static` stage, then `reversing` — a generic `reverser` agent that is handed
 the static stage's findings and asked to confirm or refute each of them at
 function level, with the tools of whichever static provider is configured — and
 then `network`, conditional on there being a capture or a sandbox report to
@@ -229,9 +272,13 @@ per agent, `<agent>_analyst`; a parallel one also contributes a barrier
 `<stage>__join` when its dependents start at more than one node. A debate stage
 contributes `negotiation` and `revision`, prefixed `<stage>__` only when a team
 holds more than one debate. The verdict stage is `judge` and the report stage
-is `report`. Edges follow `depends_on`; a stage with no dependency starts at
-`START`, a stage nothing depends on ends at `END`, and a debate's way out is
-the router's conditional edge.
+is `report`. A triage stage is one node named after the stage itself. Edges
+follow `depends_on`; a stage with no dependency starts at `START`, a stage
+nothing depends on ends at `END`, and a debate's way out is the router's
+conditional edge — with one rule on top: a triage stage that has no dependency
+is where the graph starts, and every other stage without a dependency follows
+it instead of `START`, so a team gains the pack by having the stage inserted
+and nothing else rewritten.
 
 The default team therefore builds exactly the graph the project has always
 built, node for node and edge for edge — `tests/fixtures/golden/graph_default.json`
@@ -347,9 +394,11 @@ model with the entry's id stamped on the front:
 {"machine": 332, "sections": [...], "imports": [...]}
 ```
 
-Ids (`ev_0007`) are monotonic across the whole job, and the judge's own calls —
-threat intel on a disputed indicator, a knowledge lookup — go through the same
-recorder under `agent="judge"`, so a verdict that leans on one can cite it.
+Ids (`ev_0007`) are monotonic across the whole job. The triage pack's calls
+are the first entries of every run that has one, under `agent="pipeline"`, and
+the judge's own calls — threat intel on a disputed indicator, a knowledge
+lookup — go through the same recorder under `agent="judge"`, so a verdict that
+leans on one can cite it.
 That stamp is what makes a report checkable: the model can cite the call it read
 a fact from, a report section lists the entries it was built from, and `GET
 /api/v1/jobs/{id}/evidence` serves those entries back.

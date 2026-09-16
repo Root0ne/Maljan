@@ -8,6 +8,29 @@ change landed on `main`.
 
 ### Added
 
+- **The triage pack: the deterministic facts exist before any analyst starts.**
+  A new stage kind `triage` runs the tools in `src/maljan/tools` in-process
+  over the sample and writes each result to the evidence ledger as an ordinary
+  entry under `agent="pipeline"`, `server="pipeline"`, in a fixed order:
+  `identify_file`, `hashes`, `signing_info`, the format tool the routed type
+  selects, a capped `strings` head and `iocs_from_file`, `yara_scan`, `capa`,
+  `sigma_match_sandbox` when a report exists, `api_capability` over the import
+  set, `lolbin_lookup` over the sandbox's command lines, the sandbox
+  projections at summary level and `pcap_summary` when a capture exists, one
+  reputation lookup on the sha256 through whichever reputation server is
+  enabled (recorded under that server), and `function_matches` when a
+  function-hash store is present. A tool that fails is an entry with
+  `ok=False` and a degradation reason `triage.<tool>_failed`, never a failed
+  job; the pack rewrites nothing a model says. The stage (`triage_pack`) is
+  seeded first in `default`, `mobile` and `deep_static`, not in
+  `measurement`; a stored team gains it through alembic revision
+  `20260919000000`, which `downgrade` removes again. The builder starts the
+  graph at a dependency-free triage stage and hangs every other root off it.
+  Conditions may read `triage.has_signature`, `triage.reputation_malicious`,
+  `triage.yara_hits` and `triage.capa_hits`; `run_summary.triage` carries
+  `{entries, failed, duration_ms}`. Settings: `triage.enabled`,
+  `triage.strings_head` (300) and `triage.reputation` (`auto` | `off`); the
+  console's stage editor offers the kind.
 - **VirusTotal's own MCP server ships as a built-in tool server.**
   `virustotal` is seeded in `_builtin_servers()` on the streamable-HTTP
   endpoint `https://ai.virustotal.com/mcp`, disabled until an operator
