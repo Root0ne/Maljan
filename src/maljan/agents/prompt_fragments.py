@@ -167,3 +167,19 @@ FINDINGS_BLOCK_FRAGMENT = (
     '"evidence_ids": ["ev_0002"]}]}\n'
     "```"
 )
+
+
+# The one sentence an analyst holding a reputation tool needs. A live run bound
+# VirusTotal to the judge, the judge only opened its tool loop on dissent, and
+# the whole analysis ran without anyone asking who the sample was: 19 ledger
+# entries, none of them a reputation lookup, and a family of None.
+#
+# The second half is the load-bearing half. A detection ratio is one source
+# among the run's own, and an analyst that reads it as the answer has stopped
+# analysing -- which is the failure mode a reputation tool invites.
+REPUTATION_LOOKUP_FRAGMENT = (
+    "\n\nWhen a reputation tool is among your tools, look the sample's hash up once, "
+    "cite what comes back with its evidence id like any other tool result, and weigh "
+    "it as one source: a reputation label is not the verdict, and an unknown hash is "
+    "not a clean sample."
+)

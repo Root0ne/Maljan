@@ -166,7 +166,11 @@ class TestBuiltinToolsOnAStage:
                 },
             ]
         )
-        assert [r.server for r in mcp_refs_for(settings, "static")] == ["analysis", "knowledge"]
+        assert [r.server for r in mcp_refs_for(settings, "static")] == [
+            "analysis",
+            "knowledge",
+            "virustotal",
+        ]
 
     def test_a_stage_that_withholds_them_takes_the_four_sidecars_away(self) -> None:
         settings = _settings(

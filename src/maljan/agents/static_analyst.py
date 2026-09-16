@@ -18,7 +18,7 @@ from maljan.agents.base_agent import (
     prompt_to_messages,
     strip_tool_call_scaffolding,
 )
-from maljan.agents.prompt_fragments import FINDINGS_BLOCK_FRAGMENT
+from maljan.agents.prompt_fragments import FINDINGS_BLOCK_FRAGMENT, REPUTATION_LOOKUP_FRAGMENT
 from maljan.agents.registry import register_agent
 from maljan.providers.base import StaticJobContext
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
@@ -43,7 +43,7 @@ _CLAIMS_BEAR_ON_THE_VERDICT = (
 # The optional structured channel, appended after the provider fragment so it
 # is the last thing the analyst reads before it answers. The assembly order is
 # the contract the tool-server and agent-composition layers build prompts from.
-_ISR_TAIL = FINDINGS_BLOCK_FRAGMENT + _CLAIMS_BEAR_ON_THE_VERDICT
+_ISR_TAIL = FINDINGS_BLOCK_FRAGMENT + _CLAIMS_BEAR_ON_THE_VERDICT + REPUTATION_LOOKUP_FRAGMENT
 
 
 def _static_prompt(provider: Any | None = None) -> str:

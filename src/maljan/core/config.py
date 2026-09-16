@@ -1388,6 +1388,7 @@ def _builtin_definitions() -> dict[str, AgentDefinition]:
             tools=[
                 ToolRef(kind="mcp", server="analysis"),
                 ToolRef(kind="mcp", server="knowledge"),
+                ToolRef(kind="mcp", server=virustotal.SERVER_KEY),
             ],
         ),
         "dynamic": AgentDefinition(
@@ -1440,6 +1441,7 @@ def _builtin_definitions() -> dict[str, AgentDefinition]:
             tools=[
                 ToolRef(kind="mcp", server="analysis"),
                 ToolRef(kind="mcp", server="knowledge"),
+                ToolRef(kind="mcp", server=virustotal.SERVER_KEY),
             ],
         ),
         "reverser": AgentDefinition(
@@ -1449,6 +1451,7 @@ def _builtin_definitions() -> dict[str, AgentDefinition]:
             tools=[
                 ToolRef(kind="provider"),
                 ToolRef(kind="mcp", server="knowledge"),
+                ToolRef(kind="mcp", server=virustotal.SERVER_KEY),
             ],
         ),
     }

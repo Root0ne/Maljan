@@ -112,7 +112,7 @@ DEFAULT_AGENTS = {
             "role": "static",
             "label": "Static analyst",
             "prompt": None,
-            "tools": [_mcp("analysis"), _mcp("knowledge")],
+            "tools": [_mcp("analysis"), _mcp("knowledge"), _mcp("virustotal")],
             "static_provider": None,
             "enabled": True,
             "data_sources": [],
@@ -563,7 +563,7 @@ class TestALegacyDatabaseGetsTheNewToolDefaults:
 
         refs = cfg.agents.definitions["static"].tools
 
-        assert [r.server for r in refs] == ["analysis", "knowledge"]
+        assert [r.server for r in refs] == ["analysis", "knowledge", "virustotal"]
 
     def test_loading_such_a_database_does_not_read_as_tampering(self):
         """The failure mode this guards: settings that refuse to load at all,

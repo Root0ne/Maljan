@@ -451,6 +451,47 @@ class JudgeAgent:
             bool(isr.dissent_items) for isr in isr_reports.values() if isinstance(isr, AgentISR)
         )
 
+    # What an analyst writes once it has actually asked a reputation or family
+    # source. Deliberately the words rather than a tool name: an analyst may
+    # reach the same fact through any bound server, and what matters is whether
+    # the question has been put at all.
+    _REPUTATION_SOURCE_WORDS: tuple[str, ...] = (
+        "virustotal",
+        "abuseipdb",
+        "reputation",
+        "detection ratio",
+        "malware family",
+        "family attribution",
+        "threat intel",
+    )
+
+    @classmethod
+    def _reputation_already_consulted(cls, isr_reports: dict[str, AgentISR] | None) -> bool:
+        """Whether any analyst's own words show a reputation source was asked."""
+        parts: list[str] = []
+        for isr in (isr_reports or {}).values():
+            if not isinstance(isr, AgentISR):
+                continue
+            parts.extend(str(getattr(claim, "claim", "") or "") for claim in isr.claims or [])
+            parts.extend(
+                str(getattr(finding, "title", "") or "") for finding in (isr.findings or [])
+            )
+        text = " ".join(parts).lower()
+        return any(word in text for word in cls._REPUTATION_SOURCE_WORDS)
+
+    def _can_ask_an_identity_question(self, isr_reports: dict[str, AgentISR] | None) -> bool:
+        """Whether the judge should open its tool loop to ask who this sample is.
+
+        The loop used to run on dissent alone, so a run where every analyst
+        agreed — and none of them had a reputation tool to agree *about* —
+        ended with a judge holding a bound VirusTotal server it never called
+        and a family of None. A judge that holds tools and has read nothing
+        from a reputation or family source gets one pass to ask.
+        """
+        if not (getattr(self, "tools", None) or self._definition_tool_refs()):
+            return False
+        return not self._reputation_already_consulted(isr_reports)
+
     async def mediate(
         self,
         reports: dict[str, str],
@@ -480,6 +521,8 @@ class JudgeAgent:
         """
         self.logger.info("Mediating %d expert reports for contradictions...", len(reports))
         needs_tools = self._has_explicit_dissent(isr_reports)
+        identity_unanswered = not needs_tools and self._can_ask_an_identity_question(isr_reports)
+        needs_tools = needs_tools or identity_unanswered
 
         # Build a human-readable summary of all reports
         reports_text = "\n\n".join(
@@ -531,7 +574,12 @@ class JudgeAgent:
                 "is made to revise again, so it is not optional.\n"
                 "- The downstream Judge alone decides Malware/Benign/Suspicious. "
                 + (
-                    "You have Threat Intelligence tools to verify disputed "
+                    "You have reputation tools and no analyst has consulted one. "
+                    "Look the sample's hash up once to settle its identity, cite what "
+                    "comes back as evidence, and treat a reputation label as one "
+                    "source rather than as the verdict.\n"
+                    if identity_unanswered
+                    else "You have Threat Intelligence tools to verify disputed "
                     "IPs/domains/hashes — use them only to resolve contradictions.\n"
                     if needs_tools
                     else "No Threat Intelligence tools are needed for this run.\n"
@@ -546,7 +594,12 @@ class JudgeAgent:
         ]
 
         if needs_tools:
-            self.logger.info("Mediator: explicit dissent detected — running ReAct tool loop.")
+            self.logger.info(
+                "Mediator: %s — running ReAct tool loop.",
+                "no analyst consulted a reputation source"
+                if identity_unanswered
+                else "explicit dissent detected",
+            )
             await self._initialize_mcp_client()
             reasoning_text = await self.execute_tool_loop(prompt_messages)
         else:

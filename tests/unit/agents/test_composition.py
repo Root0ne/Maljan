@@ -450,7 +450,7 @@ def test_the_built_in_definitions_name_the_servers_their_role_reads():
     def _servers(key: str) -> list[str]:
         return [str(r.server) for r in definitions[key].tools if r.kind == "mcp"]
 
-    assert _servers("static") == ["analysis", "knowledge"]
+    assert _servers("static") == ["analysis", "knowledge", "virustotal"]
     assert _servers("network") == ["network", "knowledge", "virustotal"]
     # The judge reaches for reputation on dissent; VirusTotal's own server is
     # seeded disabled, so the reference costs nothing until it is registered.

@@ -44,14 +44,26 @@ def _wired(container, name: str):
     return agent
 
 
-def _serve_refs(registry, monkeypatch, by_server: dict[str, str]) -> None:
-    """Answer ``tools_for_ref`` with one named tool per referenced server."""
+def _serve_refs(
+    registry, monkeypatch, by_server: dict[str, str], unavailable: tuple[str, ...] = ()
+) -> None:
+    """Answer ``tools_for_ref`` with one named tool per referenced server.
+
+    A server named in ``unavailable`` answers the way the registry answers a
+    reference it could not serve. Every other unnamed server contributes
+    nothing and says nothing, which is what a disabled server does: the
+    ``virustotal`` built-in ships off, and a reference to it costs an agent no
+    tools and no degradation reason until an operator registers.
+    """
 
     def _ref(ref, job_id, **kw):
-        name = by_server.get(str(ref.server))
-        if name is None:
-            return [], [f"agent tool '{ref.server}.{ref.name}' unavailable"]
-        return [_T(name)], []
+        server = str(ref.server)
+        name = by_server.get(server)
+        if name is not None:
+            return [_T(name)], []
+        if server in unavailable:
+            return [], [f"agent tool '{server}.{ref.name}' unavailable"]
+        return [], []
 
     monkeypatch.setattr(registry, "tools_for_ref", _ref)
 
@@ -151,7 +163,7 @@ def test_a_reference_that_cannot_be_served_degrades_the_same_way(monkeypatch):
     container = _container(monkeypatch)
     registry = container.get_server_registry()
     monkeypatch.setattr(registry, "tools_for", lambda role, job_id, **kw: ([], []))
-    _serve_refs(registry, monkeypatch, {"analysis": "pe_info"})
+    _serve_refs(registry, monkeypatch, {"analysis": "pe_info"}, unavailable=("knowledge",))
     agent = _wired(container, "static")
     monkeypatch.setattr(type(agent), "_provider", lambda self: _StubProvider())
     agent._initialize_mcp_client()
