@@ -416,7 +416,7 @@ class MarkdownRenderer:
                 if not isinstance(api, dict):
                     continue
                 lines.append(
-                    f"| `{api.get('api', '-')}` | `{api.get('process', '-')}` | "
+                    f"| `{api.get('api', '-')}` | `{api.get('process') or '-'}` | "
                     f"{api.get('count', 0)} |"
                 )
             lines.append("")

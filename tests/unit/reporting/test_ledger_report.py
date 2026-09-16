@@ -60,9 +60,7 @@ class TestBinaryBuilders:
         assert dict(sections["pe_header"].rows)["machine"] == "332"
         assert sections["pe_sections"].columns[0] == "Name"
         assert [row[0] for row in sections["pe_sections"].rows] == [".text", ".rsrc"]
-        assert ["KERNEL32.dll", "VirtualAllocEx", "process_injection"] in sections[
-            "pe_imports"
-        ].rows
+        assert ["KERNEL32.dll", "VirtualAllocEx"] in sections["pe_imports"].rows
         assert sections["pe_exports"].items == ["StartService"]
         assert sections["packer_signatures"].rows == [["UPX", ".text"]]
 

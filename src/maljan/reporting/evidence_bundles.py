@@ -345,9 +345,10 @@ def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
             facts["packer_detected"] = False
         return facts
 
-    # The counts below are the capability profile's; the import lists that used
-    # to sit beside them were the same table's category copied onto each import
-    # and read back, which is the report deciding what an API is for.
+    # The counts below are the capability profile: capa's namespaces on the
+    # ledger path, and on the extractor path the parked import-category table,
+    # aggregated. The per-import lists that sat beside them were that table
+    # read back one import at a time, and they are gone.
     if section == "encryption_scheme":
         return {"crypto_api_count": caps.get("crypto", 0)}
     if section == "discovery":

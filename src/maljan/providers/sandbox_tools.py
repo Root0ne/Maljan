@@ -288,6 +288,10 @@ def sandbox_registry_ops(report: dict[str, Any] | None, limit: int = _ROW_LIMIT)
     return {"registry": ordered[:bound], "total": len(ordered)}
 
 
+# How many of an API's calling processes one row names, in name order.
+_CALLERS_PER_API = 8
+
+
 def _calls_by_process(report: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
     """Every API call with the pid that made it, ``""`` when the report lost it.
 
@@ -317,10 +321,11 @@ def sandbox_api_calls(
 
     The call stream itself is where a behaviour report's bulk is, so what comes
     back is one row per API rather than one per call: the name, the module the
-    sandbox resolved it from when it recorded one, the processes that made it,
-    how often, and the arguments and time of the first call, which is usually
-    the one that says what the sample was after. ``process`` narrows by pid or
-    process name, ``name`` by a substring of the API name.
+    sandbox resolved it from when it recorded one, the first eight processes
+    that made it by name, how often, and the arguments and time of the first
+    call, which is usually the one that says what the sample was after.
+    ``process`` narrows by pid or process name, ``name`` by a substring of the
+    API name.
 
     What the sandbox recorded and nothing else. The rows used to carry a
     behaviour category and a suspicious flag copied from the import table,
@@ -386,7 +391,7 @@ def sandbox_api_calls(
             {
                 "api": api,
                 "dll": str(module) if module else None,
-                "processes": sorted(callers.get(api, set()))[:8],
+                "processes": sorted(callers.get(api, set()))[:_CALLERS_PER_API],
                 "count": count,
                 "first_args": str(arguments)[:400] if arguments else "",
                 "first_seen": str(seen) if seen not in (None, "") else None,

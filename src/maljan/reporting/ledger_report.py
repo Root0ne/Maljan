@@ -220,15 +220,12 @@ def _binary_info(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> No
             f"{prefix}_imports",
             f"{prefix.upper()} imports",
             "table",
-            columns=["Library", "Function", "Category"],
+            columns=["Library", "Function"],
         )
         for row in imports[:MAX_ROWS]:
             if not isinstance(row, dict):
                 continue
-            acc.add_row(
-                table,
-                [_text(row.get("dll")), _text(row.get("function")), _text(row.get("category"))],
-            )
+            acc.add_row(table, [_text(row.get("dll")), _text(row.get("function"))])
         acc.credit(table, entry)
 
     exports = data.get("exports")
@@ -512,7 +509,7 @@ def _sandbox_apis(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> N
             [
                 _text(row.get("api")),
                 _text(row.get("count")),
-                ", ".join(str(p) for p in row.get("processes") or []),
+                _text(row.get("processes")),
                 _text(row.get("first_args")),
             ],
         )
