@@ -143,7 +143,27 @@ def feedback_text(violations: Sequence[Violation]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def validate_isr(isr: Any, *, attck: Any = None) -> list[Violation]:
+UNGROUNDED_TECHNIQUE_CODE = "isr.ungrounded_technique"
+
+# A ledger id as it is written wherever one is cited: in a claim's evidence
+# text, in its own ``evidence_ids`` list, or in the claim prose itself.
+_LEDGER_ID_RE = re.compile(r"\bev_\d{3,}\b", re.IGNORECASE)
+
+
+def _cites_a_ledger_entry(claim: Any) -> bool:
+    """Whether a claim points at something the run actually recorded."""
+    for value in getattr(claim, "evidence_ids", None) or []:
+        if _LEDGER_ID_RE.search(str(value)):
+            return True
+    text = " ".join(
+        str(getattr(claim, field, "") or "") for field in ("evidence_ref", "claim", "detail")
+    )
+    return bool(_LEDGER_ID_RE.search(text))
+
+
+def validate_isr(
+    isr: Any, *, attck: Any = None, ledger_ids: Sequence[str] | None = None
+) -> list[Violation]:
     """What is wrong with one analyst's structured answer.
 
     ``attck`` is the knowledge module the technique ids are checked against —
@@ -151,7 +171,13 @@ def validate_isr(isr: Any, *, attck: Any = None) -> list[Violation]:
     load a fifty-megabyte bundle. Passing ``None`` skips the catalogue check
     rather than failing it: a box that cannot read ATT&CK has a thinner report,
     not a run full of invented violations.
+
+    ``ledger_ids`` are the entries this analyst's own tool calls produced in
+    this run. They decide one thing: a technique claim that cites none of them
+    is asked for one. An analyst with an empty ledger — a measurement profile
+    with no tools at all — is exempt, because it has nothing it could cite.
     """
+    citable = [str(i) for i in (ledger_ids or []) if str(i).strip()]
     violations: list[Violation] = []
     claims = list(getattr(isr, "claims", None) or [])
     agent = str(getattr(isr, "agent_id", "") or "")
@@ -189,6 +215,26 @@ def validate_isr(isr: Any, *, attck: Any = None) -> list[Violation]:
             )
 
         tid = str(getattr(claim, "technique_id", "") or "").strip().upper()
+        # A technique with nothing behind it. A live run on a signed PuTTY
+        # produced sixteen of these in one ISR — "may exhibit process injection
+        # (T1055) | Evidence: no specific imports were provided; this claim is
+        # speculative" — and the judge read them as sixteen techniques and said
+        # Malware. The analyst is asked to cite the entry it read the technique
+        # from or to drop it; nothing here removes the claim or the id.
+        if tid and citable and not _cites_a_ledger_entry(claim):
+            shown = ", ".join(citable[:3])
+            violations.append(
+                Violation(
+                    code=UNGROUNDED_TECHNIQUE_CODE,
+                    message=(
+                        f"TECHNIQUE {tid} cites no evidence id from this run. Name the "
+                        f"ledger entry it was read from, for example {shown}, or drop the "
+                        "technique: a technique nothing in the run establishes is read "
+                        "downstream as a finding."
+                    ),
+                    path=path,
+                )
+            )
         if not tid or attck is None:
             continue
         if _technique_is_known(tid, attck):
@@ -207,6 +253,38 @@ def validate_isr(isr: Any, *, attck: Any = None) -> list[Violation]:
         )
 
     return violations
+
+
+def ungrounded_technique_note(findings: Any) -> str:
+    """What the judge is told about technique claims that cite nothing.
+
+    Read off the unresolved rows rather than recomputed: these are the claims
+    an analyst was already asked about and kept, and the judge weighing them
+    is entitled to know which of the techniques in front of it nothing in the
+    run establishes. Empty when there are none, which is the usual case.
+    """
+    rows: list[Any] = []
+    if isinstance(findings, dict):
+        for entries in findings.values():
+            rows.extend(entries or [])
+    else:
+        rows.extend(findings or [])
+    named: list[str] = []
+    for row in rows:
+        data = row if isinstance(row, dict) else getattr(row, "__dict__", {}) or {}
+        if str(data.get("code") or "") != UNGROUNDED_TECHNIQUE_CODE:
+            continue
+        match = _TID_IN_MESSAGE_RE.search(str(data.get("message") or ""))
+        if match and match.group(0) not in named:
+            named.append(match.group(0))
+    if not named:
+        return ""
+    return "technique claims citing no evidence from this run: " + ", ".join(named)
+
+
+# The id inside an ``isr.ungrounded_technique`` message, which is where the
+# technique the analyst kept is written down.
+_TID_IN_MESSAGE_RE = re.compile(r"\bT\d{4}(?:\.\d{3})?\b")
 
 
 def unknown_technique_ids(ids: Sequence[str], attck: Any) -> set[str]:

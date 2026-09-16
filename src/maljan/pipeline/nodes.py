@@ -48,6 +48,7 @@ from maljan.pipeline.validation import (
     ValidationTally,
     Violation,
     corroboration,
+    ungrounded_technique_note,
     validation_metrics,
 )
 from maljan.reporting.ledger_report import section_is_grounded
@@ -2068,6 +2069,12 @@ def make_judge_node(
                 _degradation_reasons.append(
                     f"analysts produced no claims: {', '.join(_empty_analysts)}"
                 )
+            # Technique claims the analyst kept after being asked to cite the
+            # entry it read them from. A live run put sixteen of these in front
+            # of the judge, which read them as sixteen techniques.
+            _ungrounded_note = ungrounded_technique_note(state.get("validation_findings"))
+            if _ungrounded_note:
+                _degradation_reasons.append(_ungrounded_note)
             if _anti_emu_hits:
                 _short = _anti_emu_hits[0]
                 _suffix = f" (+{len(_anti_emu_hits) - 1} more)" if len(_anti_emu_hits) > 1 else ""

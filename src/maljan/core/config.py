@@ -77,6 +77,13 @@ class OpenAIConfig(BaseModel):
     # loopback, link-local or private address is a local server, anything else
     # is a hosted API that gets standard fields only.
     compat: Literal["auto", "llama_cpp", "standard"] = "auto"
+    # The context window the server behind ``base_url`` was started with, in
+    # tokens. Zero means it is not known, which is the honest default: an
+    # OpenAI-compatible endpoint does not report it and guessing one is worse
+    # than saying so. What reads it is the forced-synthesis budget, which fits
+    # the salvage conversation to a fraction of the window rather than to a
+    # fixed number of characters chosen for one deployment.
+    context_size: Annotated[int, Field(ge=0)] = 0
 
 
 class AnthropicConfig(BaseModel):

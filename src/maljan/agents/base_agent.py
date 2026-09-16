@@ -16,7 +16,7 @@ import re
 import threading
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from concurrent.futures import CancelledError as _FuturesCancelled
 from concurrent.futures import Future as _ConcurrentFuture
 from concurrent.futures import TimeoutError as _FuturesTimeout
@@ -62,11 +62,66 @@ _RECURSION_STOP_RE = re.compile(r"need more steps to process", re.IGNORECASE)
 # nothing left is precisely how the hard cap came to fire on 2026-08-11.
 _SYNTHESIS_MIN_SECONDS = 60
 
-# Character budget for the conversation re-sent to the model. The measured
-# failure re-sent 19 tool outputs — the guardrail caps each at 6,000 chars, so
-# ~114,000 characters before the system prompt. Prefilling that and generating a
-# full structured answer did not finish in 25 minutes on the local 35B.
-_SYNTHESIS_MAX_CHARS = 16_000
+# The floor under the character budget for the conversation re-sent to the
+# model. The measured failure re-sent 19 tool outputs — the guardrail caps each
+# at 6,000 chars, so ~114,000 characters before the system prompt. Prefilling
+# that and generating a full structured answer did not finish in 25 minutes on
+# the local 35B.
+#
+# A floor rather than the budget, because 16,000 characters is a number chosen
+# against one deployment's model: it cut 21 of 41 messages on a run whose
+# analyst then wrote "no malicious strings were visible in ev_0007 (referenced
+# but not displayed)". Where the server's context window is known the budget is
+# derived from it instead; where it is not, this is what holds.
+_SYNTHESIS_MIN_CHARS = 16_000
+
+# How much of the window the salvage conversation may fill, and how many
+# characters a token is worth. Four characters per token is the usual English
+# ratio, and two fifths of the window leaves room for the system prompt this
+# does not measure and for the answer the model still has to generate.
+_SYNTHESIS_CONTEXT_SHARE = 0.4
+_CHARS_PER_TOKEN = 4
+
+
+def _model_context_tokens(cfg: Any, agent_name: str) -> int:
+    """The context window of the model this agent runs on, or ``0``.
+
+    Per-agent first: an agent pointed at its own endpoint is pointed at its own
+    server, and the global setting describes a different one. Zero means
+    nothing declared it, and the caller falls back to the floor.
+    """
+    try:
+        entry = (getattr(cfg.llm, "agents", None) or {}).get(agent_name)
+        provider = str(getattr(entry, "provider", "") or cfg.llm.provider)
+        if provider == "ollama":
+            return int(cfg.llm.ollama.num_ctx)
+        return int(getattr(cfg.llm.openai, "context_size", 0) or 0)
+    except Exception as exc:  # noqa: BLE001 — a budget is never worth a lost salvage
+        logger.debug("synthesis budget: the context size could not be read (%s).", exc)
+        return 0
+
+
+def synthesis_budget_chars(cfg: Any, agent_name: str) -> int:
+    """How many characters of conversation the salvage may re-send."""
+    tokens = _model_context_tokens(cfg, agent_name)
+    if tokens <= 0:
+        return _SYNTHESIS_MIN_CHARS
+    return max(_SYNTHESIS_MIN_CHARS, int(tokens * _CHARS_PER_TOKEN * _SYNTHESIS_CONTEXT_SHARE))
+
+
+# A ledger id as the recorder stamps it onto a tool result: the first thing in
+# the message, in brackets.
+_LEDGER_ID_RE = re.compile(r"\bev_\d{3,}\b")
+
+
+def ledger_ids_in(msgs: Sequence[Any]) -> list[str]:
+    """Every ledger id still readable in this window, in the order they appear."""
+    seen: list[str] = []
+    for message in msgs:
+        for found in _LEDGER_ID_RE.findall(str(getattr(message, "content", "") or "")):
+            if found not in seen:
+                seen.append(found)
+    return seen
 
 
 def _message_chars(m: object) -> int:
@@ -85,14 +140,40 @@ def _message_chars(m: object) -> int:
     return total
 
 
+def _conversation_units(msgs: list) -> list[list]:
+    """The conversation as the things that can be dropped whole.
+
+    A tool call and the results it produced are one unit: dropping a result
+    while keeping the call that referenced it is what left an analyst writing
+    "no malicious strings were visible in ev_0007 (referenced but not
+    displayed)" — a sentence about evidence it had been shown the name of and
+    not the content. Everything else is a unit of one.
+    """
+    units: list[list] = []
+    for message in msgs:
+        is_result = type(message).__name__ == "ToolMessage"
+        if is_result and units and getattr(units[-1][0], "tool_calls", None):
+            units[-1].append(message)
+            continue
+        units.append([message])
+    return units
+
+
+def _is_a_tool_pair(unit: list) -> bool:
+    """Whether this unit is a tool call with its results."""
+    return bool(getattr(unit[0], "tool_calls", None))
+
+
 def _trim_for_synthesis(msgs: list, budget: int) -> list:
     """Fit a ReAct conversation into ``budget`` characters, framing first.
 
     Keeps the leading framing — the system prompt and the first human turn,
-    which carry the task and the output format — then fills the remainder with
-    the **most recent** messages. Late tool calls are the ones the model chose
-    after reading the early ones, so when something has to go, the oldest
-    evidence goes first.
+    which carry the task and the output format — and then drops whole units
+    until the rest fits: assistant prose that called no tool goes before any
+    tool call does, and after that the oldest tool call goes with its results.
+    Late tool calls are the ones the model chose after reading the early ones,
+    so when evidence has to go, the oldest goes first — and a call never
+    outlives its result or the other way round.
 
     The budget exists because of what long context costs *this* server, not for
     tidiness: on the hybrid recurrent model a ~39k-token conversation drove
@@ -112,16 +193,30 @@ def _trim_for_synthesis(msgs: list, budget: int) -> list:
     while rest and len(head) < 2 and type(rest[0]).__name__ != "ToolMessage":
         head.append(rest.pop(0))
 
-    used = sum(_message_chars(m) for m in head)
-    tail: list = []
-    for m in reversed(rest):
-        size = _message_chars(m)
-        if used + size > budget:
+    units = _conversation_units(rest)
+    used = sum(_message_chars(m) for m in head) + sum(
+        _message_chars(m) for unit in units for m in unit
+    )
+
+    # Prose first, oldest first: an assistant turn that called no tool is the
+    # model's own commentary, and the evidence is what the salvage is for.
+    for index, unit in enumerate(units):
+        if used <= budget:
+            break
+        if _is_a_tool_pair(unit):
             continue
-        tail.append(m)
-        used += size
-    tail.reverse()
-    return [*head, *tail]
+        used -= sum(_message_chars(m) for m in unit)
+        units[index] = []
+
+    for index, unit in enumerate(units):
+        if used <= budget:
+            break
+        if not unit:
+            continue
+        used -= sum(_message_chars(m) for m in unit)
+        units[index] = []
+
+    return [*head, *[m for unit in units for m in unit]]
 
 
 # Range constraints derived from the public MITRE ATT&CK Enterprise dataset.
@@ -1660,8 +1755,9 @@ class BaseAnalyst(ABC):
         )
         # The repeat guard is per loop, like the recorder: a second chunk is a
         # new conversation and the model has not seen the first one's answers.
+        repeats = RepeatGuard()
         agent_executor = create_react_agent(
-            self.llm, record_tools(self.pinned_tools(), recorder, RepeatGuard())
+            self.llm, record_tools(self.pinned_tools(), recorder, repeats)
         )
 
         messages = prebuilt
@@ -1701,14 +1797,38 @@ class BaseAnalyst(ABC):
             # retried — the anti-storm intent is preserved.
             from openai import APIConnectionError
 
+            async def _until_it_answers_or_repeats() -> dict:
+                """The ReAct loop, ended early once it is only repeating itself.
+
+                Streamed rather than awaited whole for one reason: a loop that
+                has spent three turns re-asking for answers it already has is
+                not going to spend the fourth differently, and ending it needs
+                the conversation as it stands. ``stream_mode="values"`` yields
+                the state after each step, so the last one is what ``ainvoke``
+                would have returned.
+                """
+                latest: dict = {"messages": list(messages)}
+                async for snapshot in agent_executor.astream(
+                    {"messages": messages},
+                    {"recursion_limit": max_steps},
+                    stream_mode="values",
+                ):
+                    latest = snapshot
+                    if repeats.ending_the_loop():
+                        self.logger.warning(
+                            "%s ReAct loop ended after %d repeated tool call(s); "
+                            "synthesising from what it gathered.",
+                            self.name,
+                            repeats.served_repeats,
+                        )
+                        break
+                return latest
+
             last_conn_exc: Exception | None = None
             for _attempt in range(3):
                 try:
                     result = await asyncio.wait_for(
-                        agent_executor.ainvoke(
-                            {"messages": messages},
-                            {"recursion_limit": max_steps},
-                        ),
+                        _until_it_answers_or_repeats(),
                         timeout=float(timeout),
                     )
                     msg_count = len(result.get("messages", []))
@@ -1837,8 +1957,12 @@ class BaseAnalyst(ABC):
         # tool-calling and synthesise now, so the gathered evidence becomes real
         # claims instead of a useless "need more steps" non-answer.
         hit_step_cap = bool(_RECURSION_STOP_RE.search(content))
+        # A loop ended for repeating itself is in the same place as one that
+        # spent its steps: it has evidence and no answer, and the salvage is
+        # what turns the first into the second.
+        ended_on_repeats = repeats.ending_the_loop()
         self._record_react_loop(hit_step_cap=hit_step_cap)
-        if tool_call_count > 0 and (not content.strip() or hit_step_cap):
+        if tool_call_count > 0 and (not content.strip() or hit_step_cap or ended_on_repeats):
             self.logger.warning(
                 "%s ReAct loop ended without a final answer after %d tool calls "
                 "(messages=%d); forcing synthesis from gathered tool output.",
@@ -2085,6 +2209,26 @@ class BaseAnalyst(ABC):
             )
             return ""
 
+        budget = synthesis_budget_chars(get_settings(), self.name)
+        trimmed = _trim_for_synthesis(msgs, budget)
+        if len(trimmed) < len(msgs):
+            self.logger.warning(
+                "%s forced synthesis: trimmed %d of %d messages to fit %d chars.",
+                self.name,
+                len(msgs) - len(trimmed),
+                len(msgs),
+                budget,
+            )
+        # What the model can still see, named for it. Trimming drops whole
+        # tool calls, so an id that was in the conversation a moment ago may
+        # not be any more, and an analyst citing one it can no longer read is
+        # how "referenced but not displayed" got into a report.
+        visible = ledger_ids_in(trimmed)
+        citable = (
+            "The evidence still in front of you is " + ", ".join(visible) + ". Cite only these ids."
+            if visible
+            else "Cite only evidence ids that appear above."
+        )
         directive = HumanMessage(
             content=(
                 "You have gathered enough tool output above. Do NOT request or "
@@ -2092,18 +2236,9 @@ class BaseAnalyst(ABC):
                 "in this conversation, write your FINAL answer now in the exact "
                 "format the system prompt requested. Where the evidence is "
                 "genuinely insufficient for a point, state that briefly instead "
-                "of asking for more steps."
+                "of asking for more steps. " + citable
             )
         )
-        trimmed = _trim_for_synthesis(msgs, _SYNTHESIS_MAX_CHARS)
-        if len(trimmed) < len(msgs):
-            self.logger.warning(
-                "%s forced synthesis: trimmed %d of %d messages to fit %d chars.",
-                self.name,
-                len(msgs) - len(trimmed),
-                len(msgs),
-                _SYNTHESIS_MAX_CHARS,
-            )
         try:
             return self._invoke_llm_with_timeout([*trimmed, directive], remaining)
         except Exception as exc:  # noqa: BLE001 - best-effort salvage
@@ -2534,8 +2669,13 @@ class BaseAnalyst(ABC):
             self.logger.debug("Validation skipped, the knowledge tools are unavailable: %s", exc)
             return isr
 
+        # This analyst's own ledger, as it stands when the answer is checked.
+        # It decides whether a technique claim that cites nothing is a
+        # violation: an analyst that called no tool has nothing to cite.
+        ledger_ids = [str(entry.id) for entry in self._evidence_entries if getattr(entry, "id", "")]
+
         def _validator(candidate: AgentISR) -> list[Violation]:
-            return validate_isr(candidate, attck=knowledge)
+            return validate_isr(candidate, attck=knowledge, ledger_ids=ledger_ids)
 
         try:
             if not _validator(isr):

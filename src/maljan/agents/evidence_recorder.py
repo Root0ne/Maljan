@@ -121,11 +121,26 @@ class RepeatGuard:
     arguments of that tool it has not used.
     """
 
+    # Identical calls answered before the third is refused.
     SERVED = 2
+    # The served repeat whose notice says the loop is about to end, and the
+    # number of served repeats that ends it. Two live runs made the case: a
+    # static analyst spent 16 of its 19 steps on ``pe_info`` with identical
+    # arguments, and another spent 11 on one ``strings`` regex. Being told
+    # where the answer is does not stop a model that has decided to ask again,
+    # so after three of them the loop is ended and what was gathered is
+    # synthesised — which is what the step budget running out already does,
+    # only sooner and with the steps still unspent.
+    WARNS_AT = 2
+    ENDS_AT = 3
 
     def __init__(self) -> None:
         self._first: dict[str, str] = {}
         self._count: dict[str, int] = {}
+        # Across the whole loop, not per call: a model that asks for three
+        # different answers twice each is in the same place as one that asks
+        # for one answer three times.
+        self.served_repeats = 0
 
     @staticmethod
     def _key(tool: str, kwargs: dict[str, Any]) -> str:
@@ -154,7 +169,16 @@ class RepeatGuard:
         key = self._key(tool, kwargs)
         if not 0 < self._count.get(key, 0) < self.SERVED:
             return None
+        self.served_repeats += 1
         return self._first.get(key)
+
+    def ending_the_loop(self) -> bool:
+        """Whether this loop has repeated itself often enough to be ended."""
+        return self.served_repeats >= self.ENDS_AT
+
+    def warning_of_the_end(self) -> bool:
+        """Whether the notice being written is the one before the last."""
+        return self.served_repeats >= self.WARNS_AT
 
     def note(self, tool: str, kwargs: dict[str, Any], entry_id: str) -> None:
         """Record that the call ran, and which entry first answered it."""
@@ -186,18 +210,30 @@ def repeat_notice(tool: str, entry_id: str, unused_args: Sequence[str] = ()) -> 
     )
 
 
-def served_repeat_notice(tool: str, entry_id: str, unused_args: Sequence[str] = ()) -> str:
+def served_repeat_notice(
+    tool: str, entry_id: str, unused_args: Sequence[str] = (), *, last_warning: bool = False
+) -> str:
     """The steering appended to the second identical call, which is still served.
 
     The answer is above it: this is a note, not a refusal. Said here because a
     model that is going to ask a third time has already decided to by the time
     the third call is refused, and one turn earlier it still has a step to
     spend on something else.
+
+    ``last_warning`` is the second such notice in one loop, where the sentence
+    stops being advice: the next repeated call ends the loop and the analyst
+    writes its answer from what it has.
     """
+    ending = (
+        " One more repeated call ends this analysis and what you have gathered "
+        "is written up as it stands."
+        if last_warning
+        else ""
+    )
     return (
         f"This is the second call to {tool} with these arguments and the answer above is "
         f"also in [{entry_id}]. A third will not be run: "
-        f"{_do_something_else(tool, unused_args)}"
+        f"{_do_something_else(tool, unused_args)}{ending}"
     )
 
 
@@ -302,9 +338,13 @@ def _record_tool(tool: Any, recorder: EvidenceRecorder, repeats: RepeatGuard | N
         if repeated is not None:
             # Appended to what the model reads, not to the ledger: the entry
             # records what the tool said, and the tool did not say this.
-            return (
-                f"[{entry.id}]\n{text}\n\n{served_repeat_notice(name, repeated, _unused(kwargs))}"
+            notice = served_repeat_notice(
+                name,
+                repeated,
+                _unused(kwargs),
+                last_warning=repeats is not None and repeats.warning_of_the_end(),
             )
+            return f"[{entry.id}]\n{text}\n\n{notice}"
         return f"[{entry.id}]\n{text}"
 
     def _stamp_error(

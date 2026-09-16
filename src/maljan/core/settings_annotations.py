@@ -425,6 +425,16 @@ ANNOTATIONS: dict[str, Annotation] = {
         ),
         "subgroup": "Ollama",
     },
+    "llm.openai.context_size": {
+        "title": "Context window (tokens)",
+        "description": (
+            "Context window the server behind the base URL was started with, in tokens. "
+            "0 leaves it unknown. It sizes the salvage conversation a ReAct loop is "
+            "asked to synthesise from when it runs out of steps."
+        ),
+        "subgroup": "OpenAI",
+        "advanced": True,
+    },
     "llm.openai.api_key": {
         "title": "OpenAI API key",
         "description": (
