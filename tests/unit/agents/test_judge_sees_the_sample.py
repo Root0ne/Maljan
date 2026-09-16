@@ -286,6 +286,72 @@ class TestTheSampleSOwnIdentityIsGrounded:
 
         assert [v.code for v in violations] == ["stix.ungrounded_indicator"]
 
+    def test_a_value_written_inside_the_submitted_name_grounds_nothing(self) -> None:
+        """The file name is whatever the submitter typed. Matched by substring
+        it would be a channel for getting any value past the check and into a
+        STIX bundle that detection tooling consumes."""
+        from maljan.schemas.stix_models import Indicator
+
+        sample = {"sha256": "e" * 64, "file_name": "invoice_from_evil-c2.com_8.8.8.8.exe"}
+        bundle = Bundle(
+            objects=[
+                Indicator(
+                    id=f"indicator--{'a' * 8}-0000-4000-8000-{'1' * 12}",
+                    pattern="[ipv4-addr:value = '8.8.8.8']",
+                ),
+                Indicator(
+                    id=f"indicator--{'a' * 8}-0000-4000-8000-{'2' * 12}",
+                    pattern="[domain-name:value = 'evil-c2.com']",
+                ),
+                Indicator(
+                    id=f"indicator--{'a' * 8}-0000-4000-8000-{'3' * 12}",
+                    pattern="[ipv4-addr:value = 'a']",
+                ),
+            ]
+        )
+
+        violations = validate_verdict_bundle(bundle, set(), sample={**sample, "md5": "a"})
+
+        assert [v.code for v in violations] == ["stix.ungrounded_indicator"] * 2
+        assert [v.path for v in violations] == ["objects[0]", "objects[1]"]
+
+    def test_a_slice_of_the_sha256_is_not_an_md5(self) -> None:
+        from maljan.schemas.stix_models import Indicator
+
+        bundle = Bundle(
+            objects=[
+                Indicator(
+                    id=f"indicator--{'a' * 8}-0000-4000-8000-{'b' * 12}",
+                    pattern=f"[file:hashes.'MD5' = '{'e' * 32}']",
+                )
+            ]
+        )
+
+        violations = validate_verdict_bundle(bundle, set(), sample=SAMPLE)
+
+        assert [v.code for v in violations] == ["stix.ungrounded_indicator"]
+
+    def test_the_identity_is_matched_whatever_its_case(self) -> None:
+        bundle = self._hash_indicator("E" * 64)
+
+        assert validate_verdict_bundle(bundle, set(), sample=SAMPLE) == []
+
+    def test_an_extension_less_sample_name_is_grounded_as_a_file_name(self) -> None:
+        """The one value the ruling names reaches the file-name branch too."""
+        from maljan.schemas.stix_models import Indicator
+
+        bundle = Bundle(
+            objects=[
+                Indicator(
+                    id=f"indicator--{'a' * 8}-0000-4000-8000-{'b' * 12}",
+                    pattern="[file:name = 'sample']",
+                )
+            ]
+        )
+
+        assert validate_verdict_bundle(bundle, set(), sample={"file_name": "sample"}) == []
+        assert validate_verdict_bundle(bundle, set(), sample={"file_name": "other"})
+
     def test_the_md5_and_the_file_name_count_too(self) -> None:
         assert {"e" * 64, "f" * 32, "putty.exe"} <= sample_identity_values(SAMPLE)
         assert "1633792" not in sample_identity_values(SAMPLE), "a size is not an indicator"

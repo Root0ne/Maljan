@@ -833,20 +833,23 @@ def validate_verdict_bundle(
     catalogue question rather than answering it wrongly.
 
     ``sample`` is the identity block's dict; its hashes and file name ground
-    an indicator the way a ledger entry does. Every other indicator value
-    still needs one.
+    an indicator the way a ledger entry does, and only when the indicator's
+    value is one of them exactly. They are kept out of the corpus haystack,
+    which is searched by substring: the file name is whatever the submitter
+    typed, and a name carrying an address would otherwise ground an indicator
+    for it. Every other indicator value still needs a ledger entry.
     """
     violations: list[Violation] = []
     objects = list(getattr(bundle, "objects", None) or [])
 
-    grounded = set(evidence_corpus or ()) | sample_identity_values(sample)
-    haystack = " ".join(sorted(grounded)).lower() if grounded else ""
+    haystack = " ".join(sorted(evidence_corpus)).lower() if evidence_corpus else ""
+    identity = {value.lower() for value in sample_identity_values(sample)}
     runtime_paths = _runtime_paths(evidence_corpus)
     for index, obj in enumerate(objects):
         kind = str(getattr(obj, "type", "") or "")
         if kind == "indicator" and evidence_corpus is not None:
             pattern = str(getattr(obj, "pattern", "") or "")
-            problem = _indicator_problem(pattern, haystack, runtime_paths)
+            problem = _indicator_problem(pattern, haystack, runtime_paths, identity)
             if problem:
                 violations.append(
                     Violation(
@@ -1138,7 +1141,9 @@ def _runtime_paths(evidence_corpus: set[str] | None) -> set[str]:
     return found
 
 
-def _indicator_problem(pattern: str, haystack: str, runtime_paths: set[str]) -> str:
+def _indicator_problem(
+    pattern: str, haystack: str, runtime_paths: set[str], identity: Iterable[str] = ()
+) -> str:
     """Why this indicator is not grounded, in words the judge can act on, or "".
 
     The rules are the ones the post-processor used to apply silently, said out
@@ -1146,6 +1151,11 @@ def _indicator_problem(pattern: str, haystack: str, runtime_paths: set[str]) -> 
     URL host, a compile artefact and a foreign class reference are checked
     against, and here they become the sentence the judge reads rather than a
     log line nobody sees.
+
+    ``identity`` is the sample's own lowercased hashes and file name. A literal
+    equal to one of them is grounded whatever the pattern's type; a literal
+    merely contained in one is not, so neither a slice of the sha256 nor a
+    value written inside the submitted name passes.
     """
     from maljan.agents._indicator_denylists import (
         COMPILE_ARTIFACT_RE,
@@ -1160,6 +1170,9 @@ def _indicator_problem(pattern: str, haystack: str, runtime_paths: set[str]) -> 
     literals = [str(v).strip() for v in _PATTERN_LITERAL_RE.findall(pattern) if str(v).strip()]
     if not literals:
         return "the indicator pattern quotes no value."
+    own = set(identity)
+    if any(literal.lower() in own for literal in literals):
+        return ""
     stripped = pattern.lstrip()
 
     if stripped.startswith("[url:value"):
