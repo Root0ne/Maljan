@@ -245,12 +245,7 @@ def static_from_ledger(
             if not isinstance(row, dict):
                 continue
             static.imports.append(
-                ImportRow(
-                    dll=str(row.get("dll") or ""),
-                    function=str(row.get("function") or ""),
-                    category=_opt(row.get("category")),
-                    is_suspicious=bool(row.get("category")),
-                )
+                ImportRow(dll=str(row.get("dll") or ""), function=str(row.get("function") or ""))
             )
         static.exports.extend(str(name) for name in data.get("exports") or [])
         # An APK's declared permissions are its import table: the same
@@ -323,8 +318,6 @@ def static_from_ledger(
 
     if not seen:
         return None
-    for category, count in _capability_histogram(static.imports).items():
-        static.api_capabilities[category] = static.api_capabilities.get(category, 0) + count
     return static
 
 
@@ -352,15 +345,6 @@ def _technique_id(value: Any) -> str:
     text = str(value or "")
     match = _TECHNIQUE_RE.search(text)
     return match.group(0) if match else ""
-
-
-def _capability_histogram(imports: list[ImportRow]) -> dict[str, int]:
-    """``{category: count}`` over the imports the tools categorised."""
-    counts: dict[str, int] = {}
-    for row in imports:
-        if row.category:
-            counts[row.category] = counts.get(row.category, 0) + 1
-    return counts
 
 
 # ---------------------------------------------------------------------------

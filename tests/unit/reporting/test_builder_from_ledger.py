@@ -95,7 +95,9 @@ class TestTypedBlocks:
                         {
                             "dll": "KERNEL32.dll",
                             "function": "VirtualAllocEx",
-                            "category": "process_injection",
+                            "ordinal": None,
+                            "hint": 1200,
+                            "address": 4198400,
                         }
                     ],
                     "exports": ["StartService"],
@@ -111,7 +113,10 @@ class TestTypedBlocks:
         assert report.static.imports[0].function == "VirtualAllocEx"
         assert report.static.exports == ["StartService"]
         assert report.static.packer_hint == "UPX"
-        assert report.static.api_capabilities == {"process_injection": 1}
+        # The tool lists imports without a capability label, so the
+        # projection has no profile to build from them.
+        assert report.static.api_capabilities == {}
+        assert report.static.imports[0].is_suspicious is False
 
     def test_dynamic_and_network_are_projected_from_the_sandbox_tools(self) -> None:
         ledger = ledger_from_sandbox(
