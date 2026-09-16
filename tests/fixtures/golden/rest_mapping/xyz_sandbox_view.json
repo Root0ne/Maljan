@@ -3,17 +3,23 @@
     "apis": [
       {
         "api": "NtCreateFile",
-        "category": "filesystem",
         "count": 1,
+        "dll": null,
         "first_args": "",
-        "suspicious": false
+        "first_seen": "1",
+        "processes": [
+          "loader.exe"
+        ]
       },
       {
         "api": "NtWriteFile",
-        "category": "filesystem",
         "count": 1,
+        "dll": null,
         "first_args": "",
-        "suspicious": false
+        "first_seen": "2",
+        "processes": [
+          "loader.exe"
+        ]
       }
     ],
     "total": 2
