@@ -41,7 +41,7 @@ from maljan.pipeline.events import (
     summarize_claims,
 )
 from maljan.pipeline.evidence_summary import summarise
-from maljan.pipeline.outcome import verdict_for_run
+from maljan.pipeline.outcome import corrected_reasons, decide_from_bundle, verdict_for_run
 from maljan.pipeline.state import AgentArgument, AnalysisState, _merge_stage_results
 from maljan.pipeline.sycophancy_detector import build_revision_directive, detect_sycophancy
 from maljan.pipeline.validation import (
@@ -448,33 +448,6 @@ def _augment_static_chunks_with_path(
         # rather than crashing the analyst node over a presentation detail.
         return chunks
     return [rebuilt, *chunks[1:]]
-
-
-def _decide_from_bundle(bundle: Bundle) -> str:
-    """Map a final STIX bundle to a high-level verdict.
-
-    Heuristic:
-      * a ``malware`` object marks the sample malicious.
-      * an ``indicator``/``attack-pattern``/``relationship`` set with no
-        ``malware`` object but suspicious confidence is "Suspicious".
-      * an explicitly empty findings set (no indicators, no attack patterns,
-        no malware) maps to "Benign".
-    """
-    has_malware = False
-    has_suspicious_indicator = False
-    for obj in bundle.objects:
-        obj_type = getattr(obj, "type", "")
-        if obj_type == "malware":
-            has_malware = True
-            break
-        if obj_type in {"indicator", "attack-pattern", "relationship"}:
-            has_suspicious_indicator = True
-
-    if has_malware:
-        return "Malware"
-    if has_suspicious_indicator:
-        return "Suspicious"
-    return "Benign"
 
 
 # ---------------------------------------------------------------------------
@@ -2120,7 +2093,7 @@ def make_judge_node(
 
             bundle = verdict.bundle
             stix_output: dict[str, Any] = bundle.model_dump() if isinstance(bundle, Bundle) else {}
-            decision = _decide_from_bundle(bundle) if isinstance(bundle, Bundle) else "Suspicious"
+            decision = decide_from_bundle(bundle) if isinstance(bundle, Bundle) else "Suspicious"
             # An empty bundle over an empty run is not a clean sample. The
             # judge emitted no malware object because there was nothing to
             # emit one from -- no tool call was recorded and no analyst
@@ -2643,7 +2616,11 @@ def make_report_node(
                 # Degraded-run signalling: surfaced as a banner so a numerically
                 # high verdict/severity on a low-data run is not read as authoritative.
                 degraded_mode=bool(state.get("degraded_mode")),
-                degradation_reasons=cast("list[str]", state.get("degradation_reasons") or []),
+                # Corrected against the whole ledger: the evidence-only static
+                # provider's entries are collected above, after the verdict
+                # stage read the ledger, so a run that carries them must not
+                # ship a report saying no analysis was performed.
+                degradation_reasons=corrected_reasons(state.get("degradation_reasons"), _ledger),
                 # The routing minimum, which stands in for the identity block
                 # when no agent called an identification tool.
                 sample_platform=state.get("platform"),

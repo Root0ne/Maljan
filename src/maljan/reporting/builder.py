@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any
 from maljan.core.logger import logger
 from maljan.extractors.attribution import build_family_attribution
 from maljan.extractors.capability_matrix import build_capability_matrix
-from maljan.pipeline.outcome import INCONCLUSIVE_REASON
+from maljan.pipeline.outcome import INCONCLUSIVE_REASONS
 from maljan.reporting.ledger_projection import (
     dynamic_from_ledger,
     identity_from_ledger,
@@ -314,7 +314,7 @@ class MalwareReportBuilder:
         family = report.attribution.family or report.malware_category or "unclassified malware"
         ttp_lines = [f"{m.technique_id} ({m.technique_name})" for m in report.ttp_mappings[:5]]
         ttp_summary = ", ".join(ttp_lines) if ttp_lines else "no MITRE techniques mapped"
-        if INCONCLUSIVE_REASON in (report.degradation_reasons or []):
+        if any(reason in INCONCLUSIVE_REASONS for reason in report.degradation_reasons or []):
             # A run that examined nothing has no classification to report, and
             # "classified as suspicious" would read as a finding drawn from
             # evidence that does not exist.

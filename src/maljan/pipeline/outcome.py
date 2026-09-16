@@ -28,6 +28,32 @@ INCONCLUSIVE_REASON = "inconclusive: no analysis was performed"
 # benign at 0.10 confidence.
 INCONCLUSIVE_VERDICT = "Suspicious"
 
+# The same verdict over a run that did record evidence after the judge read the
+# ledger. The evidence-only static provider's passes are collected in the
+# report stage, so a run whose only evidence is capa's reached the verdict with
+# an empty ledger and was told nothing had been analysed — which the report it
+# ships plainly contradicts. The verdict stays where the judge's own answer put
+# it; only the sentence is corrected to what actually happened.
+NO_CLAIMS_REASON = "inconclusive: no analyst claim was made"
+
+# Both readings of an inconclusive run, for the readers that treat them alike.
+INCONCLUSIVE_REASONS: tuple[str, ...] = (INCONCLUSIVE_REASON, NO_CLAIMS_REASON)
+
+
+def corrected_reasons(reasons: Any, evidence_entries: Any) -> list[str]:
+    """The run's degradation reasons, with the empty-run sentence made true.
+
+    Called once the whole ledger is known. A reason claiming no analysis was
+    performed, on a run that turns out to carry evidence entries, becomes the
+    narrower claim that no analyst claimed anything -- which is what was
+    actually observed and what the verdict was drawn from.
+    """
+    rows = [str(reason) for reason in (reasons or [])]
+    if not list(evidence_entries or []):
+        return rows
+    return [NO_CLAIMS_REASON if reason == INCONCLUSIVE_REASON else reason for reason in rows]
+
+
 # How ``judge_node`` records a judge that raised rather than answered.
 JUDGE_FAILED_PREFIX = "[ERROR] Judge failed"
 
@@ -48,6 +74,38 @@ def _one_line(text: str, limit: int = _MESSAGE_LIMIT) -> str:
     """A provider's sentence, made safe to put in a log line or a job row."""
     flattened = " ".join(str(text or "").split())
     return flattened[:limit]
+
+
+def decide_from_bundle(bundle: Any) -> str:
+    """Map a final STIX bundle to a high-level verdict.
+
+    Heuristic:
+      * a ``malware`` object marks the sample malicious.
+      * an ``indicator``/``attack-pattern``/``relationship`` set with no
+        ``malware`` object but suspicious confidence is "Suspicious".
+      * an explicitly empty findings set (no indicators, no attack patterns,
+        no malware) maps to "Benign", which :func:`verdict_for_run` then reads
+        against what the run actually examined.
+
+    Here rather than in the node that used to hold it, because the validator
+    that asks whether the judge's own severity agrees with its verdict has to
+    read the verdict the same way the pipeline does.
+    """
+    has_malware = False
+    has_suspicious_indicator = False
+    for obj in getattr(bundle, "objects", None) or []:
+        obj_type = getattr(obj, "type", "")
+        if obj_type == "malware":
+            has_malware = True
+            break
+        if obj_type in {"indicator", "attack-pattern", "relationship"}:
+            has_suspicious_indicator = True
+
+    if has_malware:
+        return "Malware"
+    if has_suspicious_indicator:
+        return "Suspicious"
+    return "Benign"
 
 
 def nothing_was_analysed(evidence_entries: Any, isr_reports: Any) -> bool:
@@ -101,19 +159,42 @@ def _judge_failure(state: Any) -> str:
     return report if report.startswith(JUDGE_FAILED_PREFIX) else ""
 
 
+def _judge_answered(state: Any) -> bool:
+    """Whether a verdict stage ran and produced something.
+
+    The question is whether there is a verdict, not whether a failure was
+    recorded. A verdict stage carrying a ``when`` that declines never enters
+    ``judge_node``, so nothing writes the failure string and nothing writes a
+    decision either -- and a run with no analyst behind it would then take the
+    ordinary completion path and publish a report for an analysis nobody
+    performed.
+    """
+    state = state or {}
+    if _judge_failure(state):
+        return False
+    return bool(str(state.get("judge_report") or "").strip()) or bool(
+        str(state.get("final_decision") or "").strip()
+    )
+
+
 def absent_analysis_message(state: Any) -> str:
     """Why this run has nothing to report, or ``""`` when it has something.
 
     A run in which no analyst answered *and* the judge never answered has not
-    produced a degraded analysis; it has produced none. The message names the
-    provider's own error class and status so the operator reads "402" rather
-    than a verdict, and carries nothing else from the provider's body — a key
-    quoted back in an error message is the one way a credential reaches a job
-    row.
+    produced a degraded analysis; it has produced none. A judge that raised and
+    a judge that never ran are the same fact here, and only the first has a
+    provider to name: the message then carries that provider's own error class
+    and status so the operator reads "402" rather than a verdict, and nothing
+    else from the provider's body — a key quoted back in an error message is
+    the one way a credential reaches a job row.
     """
-    failure = _judge_failure(state)
-    if not failure or _analyst_answered(state):
+    if _judge_answered(state) or _analyst_answered(state):
         return ""
+    failure = _judge_failure(state)
+    if not failure:
+        return _one_line(
+            "no analysis was produced: every analyst failed and no verdict was produced"
+        )
     name = _FAILURE_CLASS_RE.search(failure)
     status = _STATUS_RE.search(failure)
     detail = name.group("name") if name else "unknown error"

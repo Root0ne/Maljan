@@ -110,16 +110,112 @@ class TestARunWithNoAnalysisAtAll:
 
         assert absent_analysis_message(state) == ""
 
+    def test_a_verdict_stage_that_never_ran_is_also_a_non_answer(self) -> None:
+        """The question is whether there is a verdict, not whether one failed.
+
+        A verdict stage carrying a ``when`` that declines never enters the
+        judge node, so nothing writes the failure string and nothing writes a
+        decision — and such a run used to take the ordinary completion path
+        and publish a report for an analysis nobody performed.
+        """
+        state = {"reports": {"static": "[ERROR] static analyst failed"}, "isr_reports": {}}
+
+        message = absent_analysis_message(state)
+
+        assert message.startswith("no analysis was produced")
+        assert "no verdict was produced" in message
+
+    def test_a_blank_judge_report_is_a_non_answer_too(self) -> None:
+        state = self._state(judge_report="   ")
+
+        assert absent_analysis_message(state).startswith("no analysis was produced")
+
+    def test_a_decision_without_a_judge_report_still_counts_as_an_answer(self) -> None:
+        """A verdict is a verdict whichever field of the state carries it."""
+        state = self._state(judge_report="", final_decision="Suspicious")
+
+        assert absent_analysis_message(state) == ""
+
     def test_a_revised_report_counts_as_an_answer(self) -> None:
         state = self._state(revised_reports={"static": "Revised: the sample is packed."})
 
         assert absent_analysis_message(state) == ""
 
 
+class TestTheEvidenceTheVerdictStageCouldNotSee:
+    """The evidence-only static provider's passes land after the verdict.
+
+    capa and YARA have no tool loop, so ``report_node`` collects their bundle
+    and writes their ledger entries there — after ``verdict_for_run`` has
+    already read an empty ledger. The verdict stays where the judge's answer
+    put it; the sentence stops claiming nothing was analysed.
+    """
+
+    def test_a_run_that_did_record_evidence_gets_the_narrower_sentence(self) -> None:
+        from maljan.pipeline.outcome import NO_CLAIMS_REASON, corrected_reasons
+
+        corrected = corrected_reasons([INCONCLUSIVE_REASON, "analyst failures: static"], [object()])
+
+        assert corrected == [NO_CLAIMS_REASON, "analyst failures: static"]
+
+    def test_a_run_with_no_evidence_keeps_the_sentence_it_had(self) -> None:
+        from maljan.pipeline.outcome import corrected_reasons
+
+        assert corrected_reasons([INCONCLUSIVE_REASON], []) == [INCONCLUSIVE_REASON]
+
+    def test_the_report_reads_either_sentence_as_inconclusive(self) -> None:
+        from maljan.pipeline.outcome import NO_CLAIMS_REASON
+        from maljan.reporting.builder import MalwareReportBuilder
+        from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
+
+        report = MalwareReportBuilder.apply_fallback_narrative(
+            MalwareReport(
+                identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64), file_type="pe"),
+                verdict="Suspicious",
+                degraded_mode=True,
+                degradation_reasons=[NO_CLAIMS_REASON],
+            )
+        )
+
+        assert "inconclusive" in report.executive_summary.lower()
+
+
 class TestTheWorkerFailsSuchAJob:
+    def test_the_raise_sits_above_everything_that_persists_a_report(self) -> None:
+        """The claim worth pinning is the order.
+
+        A report written before the check would be a published result for a
+        run nobody performed, which is the whole finding. Read off the module
+        source because exercising ``run_analysis`` needs a database, Redis and
+        a sample.
+        """
+        import inspect
+
+        from app.worker import analysis_worker
+
+        source = inspect.getsource(analysis_worker.run_analysis)
+        raised = source.index("raise AbsentAnalysisError")
+
+        assert raised < source.index("from app.models.report import"), (
+            "no report model is even imported first"
+        )
+        assert raised < source.index('"phase_change", {"phase": "reporting"}')
+        assert raised < source.index('job.status = "completed"')
+
+    def test_the_failure_path_writes_the_message_to_the_job_row(self) -> None:
+        import inspect
+
+        from app.worker import analysis_worker
+
+        source = inspect.getsource(analysis_worker.run_analysis)
+        handler = source[source.index("except Exception as exc:") :]
+
+        assert 'job.status = "failed"' in handler
+        assert "job.error_message = error_msg[:2000]" in handler
+        assert 'error_msg = f"{type(exc).__name__}: {exc}"' in source
+
     def test_the_absent_run_is_its_own_error_class(self) -> None:
-        """The worker raises rather than branching, so the one failure path
-        marks the job, records the message and persists no report."""
+        """Its own class so the handler above cannot be reached by accident."""
         from app.worker.analysis_worker import AbsentAnalysisError
 
         assert issubclass(AbsentAnalysisError, Exception)
