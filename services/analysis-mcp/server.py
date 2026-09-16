@@ -64,8 +64,12 @@ _DEFAULT_STAGING_TTL_HOURS = 24.0
 #
 # Case-sensitive, and only these two: ``NULL`` is an ordinary token to search a
 # binary for, and a search for it has to keep working. A string of nothing but
-# spaces is the third form of the same intention and is read the same way.
+# spaces is the third form of the same intention and is read the same way, and
+# so is a string of nothing but quote characters: a live run passed the
+# two-character string "" as a directory name, and a directory literally
+# named "" was created for it.
 _ABSENT_WORDS = frozenset({"null", "None"})
+_ABSENT_CHARACTERS = " \t\r\n\"'"
 
 
 def _optional_string_params(call: Any) -> frozenset[str]:
@@ -86,7 +90,9 @@ def _optional_string_params(call: Any) -> frozenset[str]:
 
 def _means_absent(value: Any) -> bool:
     """Whether a string argument is one of the ways of writing "not passing this"."""
-    return isinstance(value, str) and (value in _ABSENT_WORDS or not value.strip())
+    return isinstance(value, str) and (
+        value in _ABSENT_WORDS or not value.strip(_ABSENT_CHARACTERS)
+    )
 
 
 def _read_absent_words(call: Any, kwargs: dict[str, Any]) -> dict[str, Any]:

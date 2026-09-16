@@ -45,7 +45,7 @@ def _sample(tmp_path: Path) -> str:
 
 
 class TestTheWordsThatMeanAbsence:
-    @pytest.mark.parametrize("word", ["null", "None", "", "  "])
+    @pytest.mark.parametrize("word", ["null", "None", "", "  ", '""', "''", ' "" ', "'\"'"])
     def test_an_optional_argument_carrying_one_is_read_as_absent(
         self, server: Any, tmp_path: Path, word: str
     ) -> None:
@@ -73,6 +73,12 @@ class TestTheWordsThatMeanAbsence:
 
         assert answer["pattern"] == "NULL"
         assert answer["strings"] == [], "the filter was applied, not discarded"
+
+    def test_a_quoted_value_keeps_its_value(self, server: Any, tmp_path: Path) -> None:
+        """Only a string made of nothing but quotes is absent; a quoted word is
+        a word, and the quotes stay because the model wrote them."""
+        assert server._means_absent('"marker"') is False
+        assert server._means_absent('"') is True
 
     def test_a_real_pattern_is_untouched(self, server: Any, tmp_path: Path) -> None:
         answer = server.strings(_sample(tmp_path), pattern="marker00")
