@@ -1828,11 +1828,8 @@ class BaseAnalyst(ABC):
             # retried — the anti-storm intent is preserved.
             from openai import APIConnectionError
 
-            # The conversation as the stream last left it, held where the
-            # caller can still read it: ``wait_for`` cancels the coroutine, and
-            # a transcript that only exists inside it dies with it. A timeout
-            # is the other case that has evidence and no answer.
-            partial: dict = {"messages": list(messages)}
+            # The conversation as the stream last left it.
+            latest: dict = {"messages": list(messages)}
 
             async def _until_it_answers_or_repeats() -> dict:
                 """The ReAct loop, ended early once it is only repeating itself.
@@ -1856,7 +1853,7 @@ class BaseAnalyst(ABC):
                 )
                 async with contextlib.aclosing(stream) as snapshots:
                     async for snapshot in snapshots:
-                        partial.update(snapshot)
+                        latest.update(snapshot)
                         if repeats.ending_the_loop():
                             self.logger.warning(
                                 "%s ReAct loop ended after %d repeated tool call(s); "
@@ -1865,7 +1862,7 @@ class BaseAnalyst(ABC):
                                 repeats.served_repeats,
                             )
                             break
-                return dict(partial)
+                return dict(latest)
 
             last_conn_exc: Exception | None = None
             for _attempt in range(3):
