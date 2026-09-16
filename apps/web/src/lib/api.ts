@@ -14,6 +14,7 @@ import type {
   ProbeResult,
   SettingsSchema,
   SettingsValues,
+  VirustotalRegistration,
 } from "@/types/settings";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
@@ -85,7 +86,7 @@ export interface AgentFindingDTO {
   // Lifecycle status the worker derives
   // from the ISR shape. Defaults server-side to ``"complete"`` for legacy
   // rows so this is non-optional on the wire.
-  status: "complete" | "no_data" | "failed" | "timeout";
+  status: "complete" | "no_data" | "no_claims" | "failed" | "timeout";
   status_reason?: string | null;
 }
 
@@ -538,6 +539,19 @@ class ApiClient {
       `/api/v1/settings/test/mcp?server=${encodeURIComponent(server)}`,
       { method: "POST", body: JSON.stringify({ values }) }
     );
+  }
+
+  /**
+   * Register this deployment with VirusTotal and store the agent token.
+   *
+   * Takes nothing: the agent family and version are constants of the build,
+   * and the token the call returns is stored server-side, encrypted, and
+   * never sent to the browser. What comes back is the server's new state.
+   */
+  registerVirustotal() {
+    return this.request<VirustotalRegistration>("/api/v1/settings/virustotal/register", {
+      method: "POST",
+    });
   }
 
   /** Resolve one agent definition, staged values included. Spends no tokens. */

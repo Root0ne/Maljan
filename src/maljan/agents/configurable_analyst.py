@@ -25,6 +25,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 
 from maljan.agents.base_agent import BaseAnalyst, describe_exception, revision_messages
 from maljan.agents.composition import ResolvedAgent
+from maljan.agents.prompt_fragments import CLAIM_FORMAT_FRAGMENT
 from maljan.schemas.isr_models import AgentISR
 
 # Appended to the agent's own prompt on the ISR paths. The operator writes what
@@ -34,12 +35,7 @@ _ISR_FORMAT_INSTRUCTION = (
     "Return a structured list of findings. For each finding state: the claim, "
     "the exact artifact reference, your confidence (0.0-1.0), and the MITRE "
     "ATT&CK technique ID.\n\n"
-    "Format each finding as:\n"
-    "CLAIM: <claim text>\n"
-    "EVIDENCE: <artifact reference>\n"
-    "CONFIDENCE: <float>\n"
-    "TECHNIQUE: <T-ID or NONE>\n"
-    "---\n\n"
+    f"{CLAIM_FORMAT_FRAGMENT}\n"
 )
 
 # Prefix on the *report text* shown when a run degraded — cosmetic only. Never

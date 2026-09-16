@@ -20,7 +20,7 @@ from pydantic import ValidationError
 
 from maljan.pipeline.validation import FEEDBACK_PREAMBLE
 from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.models import DefensiveRecommendation, MalwareReport
+from maljan.reporting.models import DefensiveRecommendation, MalwareReport, TTPMapping
 from maljan.reporting.narrative_agent import (
     NarrativeAgent,
     NarrativeOutput,
@@ -60,7 +60,7 @@ def _make_report(**overrides: Any) -> MalwareReport:
             "signatures": [{"name": "Persistence", "severity": 8, "ttp_tags": ["T1547"]}],
         },
     )
-    return MalwareReportBuilder(
+    report = MalwareReportBuilder(
         file_hash=overrides.pop("file_hash", "d" * 64),
         file_name=overrides.pop("file_name", "test.exe"),
         sample_path=overrides.pop("sample_path", None),
@@ -75,6 +75,19 @@ def _make_report(**overrides: Any) -> MalwareReport:
         judge_assessment=overrides.pop("judge_assessment", None),
         malware_category=overrides.pop("malware_category", "ransomware"),
     ).build_deterministic()
+    # The narrative fixture below describes persistence, a C2 channel and a
+    # ransomware variant. A report that established none of those is a report
+    # the capability guard is right to object to, so this one establishes them
+    # — which is what the sandbox report above was always describing.
+    report.ttp_mappings = overrides.pop(
+        "ttp_mappings",
+        [
+            TTPMapping(technique_id="T1547.001", technique_name="Registry Run Keys"),
+            TTPMapping(technique_id="T1071.001", technique_name="Web Protocols"),
+            TTPMapping(technique_id="T1486", technique_name="Data Encrypted for Impact"),
+        ],
+    )
+    return report
 
 
 def _valid_narrative() -> NarrativeOutput:
@@ -183,8 +196,6 @@ class TestPromptBuilder:
         assert "Top ATT&CK techniques" in text
 
     def test_prompt_truncates_evidence_quotes(self) -> None:
-        from maljan.reporting.models import TTPMapping
-
         report = _make_report()
         long_quote = "x" * 500
         report.ttp_mappings = [

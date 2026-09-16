@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from maljan.core.logger import logger
@@ -76,6 +77,7 @@ class EvidenceRecorder:
         error: str | None = None,
         started_at: float = 0.0,
         duration_ms: int = 0,
+        repeated_of: str | None = None,
     ) -> LedgerEntry:
         """Append one entry and return it, so the caller can quote its id."""
         entry_id, seq = self.counter.next_id()
@@ -92,17 +94,210 @@ class EvidenceRecorder:
             started_at=started_at,
             duration_ms=duration_ms,
             stage=self.stage,
+            repeated_of=repeated_of,
         )
         self.entries.append(entry)
         return entry
 
 
-def record_tools(tools: list[Any], recorder: EvidenceRecorder) -> list[BaseTool]:
+class RepeatGuard:
+    """How often each ``(tool, arguments)`` pair has been asked for in one loop.
+
+    A local model that likes an answer will ask for it again, and the live run
+    has a static analyst calling ``identify_file`` with identical arguments ten
+    times in a row -- ten steps of its budget, ten identical ledger entries,
+    and the same bytes back through the context every time.
+
+    One repeat is served: a model re-reading a result it half-remembers is
+    ordinary, and refusing the second call would break a legitimate retry after
+    a transient failure. From the third on the tool is not run and the model is
+    told where the answer already is.
+
+    Telling it is not the same as steering it. A live static analyst called
+    ``strings`` seventeen times with identical arguments — ten of them
+    short-circuited here — because "the result is in [ev_0007]" answers where
+    the answer is and not what to do instead. The second call, the one that is
+    still served, is where the model is told, and both messages name the
+    arguments of that tool it has not used.
+    """
+
+    # Identical calls answered before the third is refused.
+    SERVED = 2
+    # The served repeat whose notice says the loop is about to end, and the
+    # number of served repeats that ends it. Two live runs made the case: a
+    # static analyst spent 16 of its 19 steps on ``pe_info`` with identical
+    # arguments, and another spent 11 on one ``strings`` regex. Being told
+    # where the answer is does not stop a model that has decided to ask again,
+    # so after three of them the loop is ended and what was gathered is
+    # synthesised — which is what the step budget running out already does,
+    # only sooner and with the steps still unspent.
+    WARNS_AT = 2
+    ENDS_AT = 3
+
+    def __init__(self) -> None:
+        self._first: dict[str, str] = {}
+        self._count: dict[str, int] = {}
+        # Across the whole loop, not per call: a model that asks for three
+        # different answers twice each is in the same place as one that asks
+        # for one answer three times.
+        self.served_repeats = 0
+
+    @staticmethod
+    def _key(tool: str, kwargs: dict[str, Any]) -> str:
+        """The call, canonically: same arguments in any order are the same call."""
+        try:
+            arguments = json.dumps(kwargs, sort_keys=True, default=str)
+        except (TypeError, ValueError):
+            arguments = repr(sorted(kwargs.items()))
+        return f"{tool}({arguments})"
+
+    def answered_by(self, tool: str, kwargs: dict[str, Any]) -> str | None:
+        """The entry that already answers this call, when it must not run again.
+
+        A query and nothing else. What counts a repeat is ``note_repeat``, from
+        the wrapper, so the served branch and the refused branch are counted in
+        one place — counting here, where only the refused branch passes,
+        produced a guard that could reach 1 per call and never its own
+        threshold.
+        """
+        key = self._key(tool, kwargs)
+        if self._count.get(key, 0) < self.SERVED:
+            return None
+        return self._first.get(key)
+
+    def repeat_of(self, tool: str, kwargs: dict[str, Any]) -> str | None:
+        """The first entry for a call that is being served again, or ``None``.
+
+        Asked before the call runs, so a second identical call sees the count
+        of one the first left behind. This is the turn worth spending a
+        sentence on: the answer still arrives, and the model is told not to ask
+        a third time while it can still do something else with the step.
+        """
+        key = self._key(tool, kwargs)
+        if not 0 < self._count.get(key, 0) < self.SERVED:
+            return None
+        return self._first.get(key)
+
+    def note_repeat(self) -> None:
+        """Count one repeated call, whether it was served or refused.
+
+        Both are the same fact about the loop: the model asked for an answer it
+        already has. The first version counted only the served one, so a
+        sixteen-call ``pe_info`` run — the failure this guard was written from
+        — counted exactly one repeat and was never ended, because every call
+        after the second was refused without passing the counter.
+        """
+        self.served_repeats += 1
+
+    def reset(self) -> None:
+        """Forget this loop's calls, for a conversation that is starting again.
+
+        A connection error replays the whole conversation from the first
+        message, and the model then re-makes the calls it already made. Those
+        are not repeats: from the model's point of view it is asking for the
+        first time, and counting them ended an analyst for a dropped socket.
+        """
+        self._first = {}
+        self._count = {}
+        self.served_repeats = 0
+
+    def ending_the_loop(self) -> bool:
+        """Whether this loop has repeated itself often enough to be ended."""
+        return self.served_repeats >= self.ENDS_AT
+
+    def warning_of_the_end(self) -> bool:
+        """Whether the notice being written is the one before the last."""
+        return self.served_repeats >= self.WARNS_AT
+
+    def note(self, tool: str, kwargs: dict[str, Any], entry_id: str) -> None:
+        """Record that the call ran, and which entry first answered it."""
+        key = self._key(tool, kwargs)
+        self._count[key] = self._count.get(key, 0) + 1
+        self._first.setdefault(key, entry_id)
+
+
+# What both notices say on the call before the loop ends. One sentence, in one
+# place, because the model reads it from whichever branch it lands in.
+_ENDING_SENTENCE = (
+    " One more repeated call ends this analysis and what you have gathered "
+    "is written up as it stands."
+)
+
+
+def _do_something_else(tool: str, unused_args: Sequence[str]) -> str:
+    """The half of both notices that says what to do instead.
+
+    The arguments come from the tool's own schema, so the sentence names what
+    this tool can actually be asked differently — ``pattern``, ``start`` and
+    ``end`` for ``strings`` — rather than a hint written for one tool and
+    repeated at every other.
+    """
+    if unused_args:
+        named = ", ".join(f"`{name}`" for name in unused_args)
+        return f"narrow it with {named}, or call another tool."
+    return "call it with different arguments, or call another tool."
+
+
+def repeat_notice(
+    tool: str, entry_id: str, unused_args: Sequence[str] = (), *, last_warning: bool = False
+) -> str:
+    """What the model is told instead of the same answer a third time.
+
+    ``last_warning`` carries the same sentence the served notice carries, for
+    the same reason: the call before the last one is where saying it can still
+    change what the model does. A loop that repeats one call reaches the end
+    through this branch rather than through the served one.
+    """
+    return (
+        f"You already called {tool} with these arguments; the result is in "
+        f"[{entry_id}]. Do not call it again with these arguments; "
+        f"{_do_something_else(tool, unused_args)}{_ENDING_SENTENCE if last_warning else ''}"
+    )
+
+
+def served_repeat_notice(
+    tool: str,
+    entry_id: str,
+    unused_args: Sequence[str] = (),
+    *,
+    last_warning: bool = False,
+    failed: bool = False,
+) -> str:
+    """The steering appended to the second identical call, which is still served.
+
+    The answer is above it: this is a note, not a refusal. Said here because a
+    model that is going to ask a third time has already decided to by the time
+    the third call is refused, and one turn earlier it still has a step to
+    spend on something else.
+
+    ``last_warning`` is the second such notice in one loop, where the sentence
+    stops being advice: the next repeated call ends the loop and the analyst
+    writes its answer from what it has. ``failed`` is the second call raising
+    as the first did, where what is above is a failure and so is the entry it
+    points at, and the sentence says so instead of calling it an answer.
+    """
+    what_happened = (
+        f"This call to {tool} failed the same way before, in [{entry_id}]"
+        if failed
+        else (
+            f"This is the second call to {tool} with these arguments and the answer above is "
+            f"also in [{entry_id}]"
+        )
+    )
+    return (
+        f"{what_happened}. A third will not be run: "
+        f"{_do_something_else(tool, unused_args)}{_ENDING_SENTENCE if last_warning else ''}"
+    )
+
+
+def record_tools(
+    tools: list[Any], recorder: EvidenceRecorder, repeats: RepeatGuard | None = None
+) -> list[BaseTool]:
     """Every tool, each writing its call to ``recorder`` and stamping the id."""
-    return [_record_tool(tool, recorder) for tool in tools]
+    return [_record_tool(tool, recorder, repeats) for tool in tools]
 
 
-def _record_tool(tool: Any, recorder: EvidenceRecorder) -> Any:
+def _record_tool(tool: Any, recorder: EvidenceRecorder, repeats: RepeatGuard | None = None) -> Any:
     """One tool, rebuilt so its result is recorded and stamped.
 
     Fail-safe in both directions: a tool this cannot rebuild faithfully is
@@ -122,8 +317,95 @@ def _record_tool(tool: Any, recorder: EvidenceRecorder) -> Any:
 
     name = str(getattr(tool, "name", "") or "unknown")
     server = server_of(tool) or None
+    accepted = tuple(getattr(args_schema, "model_fields", {}) or {})
 
-    def _stamp(kwargs: dict[str, Any], started: float, wall_clock: float, value: Any) -> str:
+    required = tuple(
+        name
+        for name, field in (getattr(args_schema, "model_fields", {}) or {}).items()
+        if getattr(field, "is_required", lambda: False)()
+    )
+
+    def _unused(kwargs: dict[str, Any]) -> tuple[str, ...]:
+        """The arguments this tool takes that the call did not really set.
+
+        Truthiness rather than presence: langchain fills a tool's defaults
+        before calling it, so a caller that asked nothing of ``start`` still
+        arrives here with ``start=0``, and a hint that omitted it would omit
+        every optional argument the model has not thought to use.
+
+        The schema's required fields are excluded, because for those the same
+        reading is wrong: a call that correctly passed ``offset=0`` set it, and
+        offering it back as a way to narrow the search is noise.
+        """
+        return tuple(arg for arg in accepted if arg not in required and not kwargs.get(arg))
+
+    def _already_answered(kwargs: dict[str, Any]) -> str | None:
+        """The note for a call that has been made twice already, if it has."""
+        if repeats is None:
+            return None
+        first = repeats.answered_by(name, kwargs)
+        if first is None:
+            return None
+        repeats.note_repeat()
+        message = repeat_notice(
+            name, first, _unused(kwargs), last_warning=repeats.warning_of_the_end()
+        )
+        entry = recorder.record(
+            tool=name,
+            args=kwargs,
+            server=server,
+            output=message,
+            started_at=time.time(),
+            repeated_of=first,
+        )
+        return f"[{entry.id}]\n{message}"
+
+    def _note(kwargs: dict[str, Any], entry_id: str) -> None:
+        """Count the call against the repeat budget, however it turned out.
+
+        A call that raised is a call. Counting only the ones that returned left
+        a tool that throws on the same arguments — an unreachable server, a
+        path the sidecar will never read — free to be re-run for the whole step
+        budget, which is the one case the guard exists for.
+        """
+        if repeats is not None:
+            repeats.note(name, kwargs, entry_id)
+
+    def _served_again(kwargs: dict[str, Any]) -> str | None:
+        """The first entry for a call being served a second time, counted as a repeat.
+
+        Asked before the call runs, so it sees the count the previous identical
+        call left behind, and before the outcome is known, so a repeat that
+        raises counts the same as one that returns: a tool that throws on the
+        same arguments is the one case the guard exists for.
+        """
+        if repeats is None:
+            return None
+        repeated = repeats.repeat_of(name, kwargs)
+        if repeated is not None:
+            repeats.note_repeat()
+        return repeated
+
+    def _steering(kwargs: dict[str, Any], repeated: str | None, *, failed: bool = False) -> str:
+        """What is appended to a served repeat, and nothing for a first call.
+
+        Appended to what the model reads, not to the ledger: the entry records
+        what the tool said, and the tool did not say this.
+        """
+        if repeated is None or repeats is None:
+            return ""
+        notice = served_repeat_notice(
+            name,
+            repeated,
+            _unused(kwargs),
+            last_warning=repeats.warning_of_the_end(),
+            failed=failed,
+        )
+        return f"\n\n{notice}"
+
+    def _stamp(
+        kwargs: dict[str, Any], started: float, wall_clock: float, value: Any, repeated: str | None
+    ) -> str:
         text = result_text(value)
         entry = recorder.record(
             tool=name,
@@ -133,16 +415,21 @@ def _record_tool(tool: Any, recorder: EvidenceRecorder) -> Any:
             started_at=wall_clock,
             duration_ms=int((time.monotonic() - started) * 1000),
         )
+        _note(kwargs, entry.id)
         # ``text``, not ``entry.output``: the ledger trims what it stores, and
         # what the model reads is not the ledger's business. The size of a tool
         # result in a prompt is decided where it has always been decided —
         # ``llm.max_tool_output_chars`` and the summariser guardrail the MCP
         # toolkit applies before the tool ever returns — and a second, silent
         # cut here would make raising that setting do nothing.
-        return f"[{entry.id}]\n{text}"
+        return f"[{entry.id}]\n{text}{_steering(kwargs, repeated)}"
 
     def _stamp_error(
-        kwargs: dict[str, Any], started: float, wall_clock: float, exc: Exception
+        kwargs: dict[str, Any],
+        started: float,
+        wall_clock: float,
+        exc: Exception,
+        repeated: str | None,
     ) -> str:
         message = f"{type(exc).__name__}: {exc}"
         entry = recorder.record(
@@ -155,30 +442,39 @@ def _record_tool(tool: Any, recorder: EvidenceRecorder) -> Any:
             started_at=wall_clock,
             duration_ms=int((time.monotonic() - started) * 1000),
         )
-        return f"[{entry.id}] tool call failed: {message}"
+        _note(kwargs, entry.id)
+        return f"[{entry.id}] tool call failed: {message}{_steering(kwargs, repeated, failed=True)}"
 
     wrapped_func = None
     wrapped_coroutine = None
     if func is not None:
 
         def wrapped_func(**kwargs: Any) -> str:  # noqa: F811
+            answered = _already_answered(kwargs)
+            if answered is not None:
+                return answered
             # Two clocks: the wall clock says when the call happened and
             # correlates with a log line, the monotonic one measures how long
             # it took and cannot go backwards.
             started, wall_clock = time.monotonic(), time.time()
+            repeated = _served_again(kwargs)
             try:
-                return _stamp(kwargs, started, wall_clock, func(**kwargs))
+                return _stamp(kwargs, started, wall_clock, func(**kwargs), repeated)
             except Exception as exc:  # noqa: BLE001 — a failed call is evidence
-                return _stamp_error(kwargs, started, wall_clock, exc)
+                return _stamp_error(kwargs, started, wall_clock, exc, repeated)
 
     if coroutine is not None:
 
         async def wrapped_coroutine(**kwargs: Any) -> str:  # noqa: F811
+            answered = _already_answered(kwargs)
+            if answered is not None:
+                return answered
             started, wall_clock = time.monotonic(), time.time()
+            repeated = _served_again(kwargs)
             try:
-                return _stamp(kwargs, started, wall_clock, await coroutine(**kwargs))
+                return _stamp(kwargs, started, wall_clock, await coroutine(**kwargs), repeated)
             except Exception as exc:  # noqa: BLE001 — a failed call is evidence
-                return _stamp_error(kwargs, started, wall_clock, exc)
+                return _stamp_error(kwargs, started, wall_clock, exc, repeated)
 
     try:
         return StructuredTool.from_function(

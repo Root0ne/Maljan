@@ -7,7 +7,12 @@
  * file stops looking like a second, stale source of truth.
  */
 
-export type AgentFindingStatus = "complete" | "no_data" | "failed" | "timeout";
+export type AgentFindingStatus =
+  | "complete"
+  | "no_data"
+  | "no_claims"
+  | "failed"
+  | "timeout";
 
 export interface AgentFinding {
   agent_name: string;

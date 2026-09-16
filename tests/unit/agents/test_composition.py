@@ -450,9 +450,11 @@ def test_the_built_in_definitions_name_the_servers_their_role_reads():
     def _servers(key: str) -> list[str]:
         return [str(r.server) for r in definitions[key].tools if r.kind == "mcp"]
 
-    assert _servers("static") == ["analysis", "knowledge"]
-    assert _servers("network") == ["network", "knowledge"]
-    assert _servers("judge") == ["knowledge"]
+    assert _servers("static") == ["analysis", "knowledge", "virustotal"]
+    assert _servers("network") == ["network", "knowledge", "virustotal"]
+    # The judge reaches for reputation on dissent; VirusTotal's own server is
+    # seeded disabled, so the reference costs nothing until it is registered.
+    assert _servers("judge") == ["knowledge", "virustotal"]
     # The dynamic analyst's report is already in this process, so its first
     # reference is the in-process kind rather than a server.
     assert [r.kind for r in definitions["dynamic"].tools] == ["sandbox", "mcp"]

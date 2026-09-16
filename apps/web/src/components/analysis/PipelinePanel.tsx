@@ -34,7 +34,7 @@ interface AgentFinding {
   /** The lifecycle status the worker derives from the ISR shape. A crashed
    *  analyst still writes a row, so this is the only thing that says whether
    *  the step actually succeeded. */
-  status?: "complete" | "no_data" | "failed" | "timeout";
+  status?: "complete" | "no_data" | "no_claims" | "failed" | "timeout";
 }
 
 interface NegotiationRound {

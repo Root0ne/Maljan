@@ -3,59 +3,83 @@
     "apis": [
       {
         "api": "HttpSendRequestW",
-        "category": "network",
         "count": 12,
+        "dll": null,
         "first_args": "",
-        "suspicious": true
+        "first_seen": null,
+        "processes": [
+          "2572"
+        ]
       },
       {
         "api": "RegSetValueExW",
-        "category": "registry",
         "count": 3,
+        "dll": null,
         "first_args": "",
-        "suspicious": false
+        "first_seen": null,
+        "processes": [
+          "2572"
+        ]
       },
       {
         "api": "CreateProcessInternalW",
-        "category": "execution",
         "count": 2,
+        "dll": null,
         "first_args": "",
-        "suspicious": true
+        "first_seen": null,
+        "processes": [
+          "2572"
+        ]
       },
       {
         "api": "CryptAcquireContextW",
-        "category": "crypto",
         "count": 2,
+        "dll": null,
         "first_args": "",
-        "suspicious": true
+        "first_seen": null,
+        "processes": [
+          "2572"
+        ]
       },
       {
         "api": "CreateRemoteThread",
-        "category": "process_injection",
         "count": 1,
+        "dll": null,
         "first_args": "",
-        "suspicious": true
+        "first_seen": null,
+        "processes": [
+          "2572"
+        ]
       },
       {
         "api": "ShellExecuteExW",
-        "category": "execution",
         "count": 1,
+        "dll": null,
         "first_args": "",
-        "suspicious": true
+        "first_seen": null,
+        "processes": [
+          "2572"
+        ]
       },
       {
         "api": "VirtualAllocEx",
-        "category": "process_injection",
         "count": 1,
+        "dll": null,
         "first_args": "",
-        "suspicious": true
+        "first_seen": null,
+        "processes": [
+          "2572"
+        ]
       },
       {
         "api": "WriteProcessMemory",
-        "category": "process_injection",
         "count": 1,
+        "dll": null,
         "first_args": "",
-        "suspicious": true
+        "first_seen": null,
+        "processes": [
+          "2572"
+        ]
       }
     ],
     "total": 8

@@ -71,7 +71,11 @@ async def test_a_built_in_agent_resolves_to_its_prompt_and_its_tools():
     # The role-bound half first, then the definition's own references: the
     # network analyst is bound to ``network`` by role and names ``knowledge``
     # by reference.
-    assert [s["key"] for s in result.details["servers"]] == ["network", "knowledge"]
+    assert [s["key"] for s in result.details["servers"]] == [
+        "network",
+        "knowledge",
+        "virustotal",
+    ]
     assert {s["status"] for s in result.details["servers"]} == {"ok"}
 
 

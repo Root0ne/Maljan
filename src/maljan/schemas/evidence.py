@@ -26,6 +26,7 @@ showing fewer.
 from __future__ import annotations
 
 import json
+import re
 import threading
 from typing import Any
 
@@ -43,6 +44,20 @@ from maljan.schemas.tool_evidence import (
 # observed, and fixed width means the ids sort lexically in the order they
 # were issued.
 _ID_DIGITS = 4
+
+
+# An entry id wherever one is written: in a claim's evidence line, in a
+# findings block, in a tool result the recorder stamped. Spelled once, beside
+# the function that issues them, because two copies of it disagreed on case
+# for ids that one counter produces. The counter issues lowercase; a model
+# that writes ``EV_0002`` back is citing the same entry, and a false flag
+# here costs a full analyst feedback turn.
+ENTRY_ID_RE = re.compile(r"\bev_\d{3,}\b", re.IGNORECASE)
+
+
+def entry_ids_in(text: str) -> set[str]:
+    """The entry ids written in ``text``, in the spelling the counter issues."""
+    return {found.lower() for found in ENTRY_ID_RE.findall(text)}
 
 
 def format_entry_id(seq: int) -> str:
@@ -125,6 +140,10 @@ class LedgerEntry(BaseModel):
     truncated: bool = Field(
         default=False, description="Output dropped because the agent's byte budget was spent."
     )
+    repeated_of: str | None = Field(
+        default=None,
+        description="Id of the earlier identical call this one was answered from.",
+    )
     started_at: float = Field(default=0.0, description="Unix timestamp the call started at.")
     duration_ms: int = Field(default=0, description="Wall-clock duration of the call.")
     seq: int = Field(default=0, description="Call order within the job, 1-based.")
@@ -176,8 +195,15 @@ def build_entry(
     duration_ms: int = 0,
     stage: str = "analysis",
     max_chars: int = MAX_OUTPUT_CHARS,
+    repeated_of: str | None = None,
 ) -> LedgerEntry:
-    """One entry, with the output trimmed and parsed the same way every time."""
+    """One entry, with the output trimmed and parsed the same way every time.
+
+    ``repeated_of`` names the earlier call this one repeats. Such an entry
+    carries the note the model was given rather than a tool result, so it is
+    never parsed into ``structured``: nothing downstream should read a
+    reference to another entry as data.
+    """
     safe_args = dict(args) if isinstance(args, dict) else {}
     text = trim_output(str(output or ""), max_chars)
     return LedgerEntry(
@@ -191,7 +217,8 @@ def build_entry(
         ok=ok,
         error=error,
         output=text,
-        structured=parse_structured(text),
+        structured=None if repeated_of else parse_structured(text),
+        repeated_of=repeated_of,
         started_at=started_at,
         duration_ms=max(0, int(duration_ms)),
         seq=seq,

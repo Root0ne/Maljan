@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 from maljan.core.logger import logger
 from maljan.extractors.attribution import build_family_attribution
 from maljan.extractors.capability_matrix import build_capability_matrix
+from maljan.pipeline.outcome import INCONCLUSIVE_REASONS
 from maljan.reporting.ledger_projection import (
     dynamic_from_ledger,
     identity_from_ledger,
@@ -313,13 +314,24 @@ class MalwareReportBuilder:
         family = report.attribution.family or report.malware_category or "unclassified malware"
         ttp_lines = [f"{m.technique_id} ({m.technique_name})" for m in report.ttp_mappings[:5]]
         ttp_summary = ", ".join(ttp_lines) if ttp_lines else "no MITRE techniques mapped"
-        report.executive_summary = (
-            f"Sample classified as {verdict.lower()}. Best-guess family: {family}. "
-            f"Pipeline reported {len(report.ttp_mappings)} ATT&CK techniques: "
-            f"{ttp_summary}. Confidence {report.overall_confidence:.2f}. "
-            "This is an auto-generated summary (no LLM available); review the "
-            "detailed sections for evidence."
-        )
+        if any(reason in INCONCLUSIVE_REASONS for reason in report.degradation_reasons or []):
+            # A run that examined nothing has no classification to report, and
+            # "classified as suspicious" would read as a finding drawn from
+            # evidence that does not exist.
+            report.executive_summary = (
+                "This analysis is inconclusive: no analysis was performed, so nothing "
+                "about the sample was established. The verdict is not a finding about "
+                "the sample and must not be read as one. Re-run the analysis once the "
+                "cause named in the degradation reasons is resolved."
+            )
+        else:
+            report.executive_summary = (
+                f"Sample classified as {verdict.lower()}. Best-guess family: {family}. "
+                f"Pipeline reported {len(report.ttp_mappings)} ATT&CK techniques: "
+                f"{ttp_summary}. Confidence {report.overall_confidence:.2f}. "
+                "This is an auto-generated summary (no LLM available); review the "
+                "detailed sections for evidence."
+            )
         report.capabilities_narrative = [
             "Detailed narrative was not generated because the analysis ran in "
             "mock/offline mode or the narrative LLM call failed. The deterministic "

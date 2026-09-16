@@ -207,6 +207,20 @@ describe("describeChange: core.mcp.servers", () => {
     const after = { srv: { enabled: true, transport: "http", url: "http://x" } };
     expect(describeChange(serversEntry, before, after).detail).toEqual(["srv: enabled"]);
   });
+
+  /* A VirusTotal registration writes the server map for the operator: the
+   * server goes on and a token appears. The review list has to say both, so
+   * that what a button did reads the same as what a hand-typed token would. */
+  it("says both halves of what a VirusTotal registration changed", () => {
+    const before = {
+      virustotal: { enabled: false, transport: "streamable-http", url: "https://ai.virustotal.com/mcp", auth_token: "" },
+    };
+    const after = {
+      virustotal: { enabled: true, transport: "streamable-http", url: "https://ai.virustotal.com/mcp", auth_token: "**********" },
+    };
+    const line = describeChange(serversEntry, before, after);
+    expect(line.detail).toEqual(["virustotal: changed: enabled, token set"]);
+  });
 });
 
 describe("describeChange: core.agents.definitions", () => {

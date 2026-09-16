@@ -8,6 +8,20 @@ change landed on `main`.
 
 ### Added
 
+- **VirusTotal's own MCP server ships as a built-in tool server.**
+  `virustotal` is seeded in `_builtin_servers()` on the streamable-HTTP
+  endpoint `https://ai.virustotal.com/mcp`, disabled until an operator
+  registers. **Connect VirusTotal** in the tool-server setup guide calls
+  `POST /api/v1/settings/virustotal/register`, which obtains an agent token
+  without a browser and without a VirusTotal API key, stores it encrypted like
+  any other tool-server credential and enables the server. The six read-only
+  lookups are ticked by default; `submit_file` is advertised and left unticked,
+  because uploading a sample to VirusTotal is a disclosure the operator opts
+  into. The `network` analyst, the judge and the seeded `triage` agent
+  reference the server, and a disabled server costs them nothing.
+  `services/threatintel-mcp` is unchanged and still serves deployments with a
+  VirusTotal API key; `submit_local_file` remains available by running the same
+  server over stdio, which `docs/deployment.md` documents.
 - **Two more teams ship: `mobile` and `deep_static`.** `mobile` is triage, an
   Android static pass conditional on `file_type in ("apk", "dex")`, detonation
   conditional on a sandbox report, then the debate, the verdict and the report.
@@ -213,6 +227,164 @@ change landed on `main`.
   `MALJAN_STAGING_TTL_HOURS` pruning.
 
 ### Fixed
+
+- **Carved payloads land under the sidecar's staging directory, never where the
+  model says.** `carve_payloads` took a model-chosen `out_dir`, so a tool could
+  write live malware anywhere the analysis sidecar could write; a live run
+  passed the two-character string `""` and a directory literally named `""`
+  with a carved PE body in it appeared in the sidecar's own cwd. The argument
+  is gone: files land in `<staging>/carved/<sha256 of the sample>/`, created
+  private like the staging directory. A string of nothing but quote characters
+  now counts as an absent value for every optional string argument on that
+  server, as a blank one already did.
+
+- **An API-call row carries what the sandbox recorded.** `sandbox_api_calls`
+  copied the import table's category and a suspicious flag onto every row and
+  filtered by that category. Rows now carry the API, the module the sandbox
+  resolved it from when known, the processes that made it, the count, and the
+  first call's arguments and time; a `name` substring filter replaces the
+  `category` one. The report's section bundles no longer list imports by
+  capability category either; the capability counts stay.
+
+- **The sample's identity grounds an indicator only by exact match.** The
+  identity values had been unioned into the substring haystack, so a value
+  written inside the submitted file name, or a slice of the sha256, grounded
+  an indicator the run never saw. A literal equal to one of the sample's own
+  hashes or its name, case-insensitively, is grounded; nothing less is.
+
+- **An import row states what the import table states.** `pe_info` and
+  `elf_info` copied the old capability table's category onto every import row
+  (`BitBlt` came back as `keylogging`), and on a signed PuTTY the static
+  analyst wrote the label up as its first claim and the judge said Malware. A
+  tool that labels an import has done the analysis. Rows now carry library,
+  name or ordinal, hint and address; what an API is used for is the knowledge
+  server's `api_capability` question, asked when the model decides it matters.
+
+- **The sample's own identity values are grounded indicators.** The identity
+  block gave the judge the sha256, the judge emitted it as an indicator, and
+  the grounding check rejected it on a run that never called `hashes`. The
+  sha256, sha1, md5 and file name the router established ground an indicator
+  the way a ledger entry does; every other value still needs one.
+
+- **The citation checks read the run's own ids.** `EV_0002` is the same entry
+  as `ev_0002`; an `ev_9999` the run never issued is a citation of nothing; an
+  evidence line longer than the field keeps the id the cut used to drop; and a
+  Benign verdict over a run that recorded no entries at all is not asked to
+  name one, since the pipeline already calls that run inconclusive.
+
+- **A repeated tool call that raises counts as a repeat.** The guard counted a
+  repeat after the call returned, so a tool that throws on the same arguments
+  every time ended the loop one call late.
+
+- **A repeating ReAct loop is actually ended.** The guard counted only the
+  repeats it served, which is reachable once per call, so an analyst that asked
+  one tool sixteen times counted one repeat and ran to its step budget. Every
+  repeated call counts now, served or refused, and the guard resets when a
+  connection error replays the conversation.
+
+- **The judge is given the sample it is told to look up.** Both the mediator
+  and the verdict prompts carry an identity block from the router — sha256, md5
+  and size where known, file name, type and platform — and the lookup sentence
+  names the sha256. A run whose analysts produced no prose left the judge with
+  no hash anywhere in its conversation.
+
+- **A Benign verdict over a run nobody analysed is challenged.**
+  `verdict.unsupported_benign` asks the judge to cite the entry that
+  establishes it — a valid signature is the usual one — or to return Suspicious
+  with an inconclusive rationale. The verdict is recorded, never rewritten.
+
+- **A technique claim that cites nothing is challenged.** A signed PuTTY
+  produced eighteen technique ids, sixteen of which said in their own evidence
+  field that they were speculative, and the judge read them as eighteen
+  techniques. `isr.ungrounded_technique` asks the analyst once to name the
+  ledger entry it read the technique from or to drop it, records what survives,
+  and tells the judge which techniques the run does not establish. Nothing is
+  rewritten, and an analyst with no tools is exempt.
+
+- **A ReAct loop that only repeats itself is ended.** An analyst spent 16 of
+  its 19 steps calling one tool with identical arguments. The second served
+  repeat now says the loop is about to end, the third ends it, and what was
+  gathered goes to the same forced synthesis a spent step budget takes.
+
+- **Forced synthesis keeps the evidence it is asked to synthesise.** The
+  budget comes from the model's context window where `llm.openai.context_size`
+  (or the Ollama window) declares one, with the old fixed 16,000 characters as
+  a floor; trimming drops whole tool call and result pairs oldest first, and
+  assistant prose before any pair, so a result is never dropped while the call
+  that referenced it stays; and the instruction names the ledger ids still in
+  the window.
+
+- **A bound reputation server is actually consulted.** VirusTotal connected for
+  the judge, offered six tools and was never called: the judge opens its tool
+  loop on explicit dissent alone and the static analyst held no reference to
+  the server, so the run closed with a family of None and nineteen ledger
+  entries that were all local analysis calls. Every agent that reads the file
+  carries the reference now, their prompts say to look the hash up once and to
+  treat the answer as one source, and the judge asks the identity question when
+  nothing in the run has asked it.
+
+- **The `strings` page fits the answer the model is shown.** The default page
+  was 2000 runs, which came back as hundreds of kilobytes and was cut to 8000
+  characters before the model saw it; the page is 150 runs, the answer carries
+  `total_matched` and a `next_offset` that is `null` at the end of the set, and
+  the description says where the next page starts. Optional arguments arriving
+  as the literal "null", "None" or "" are read as absent by the analysis
+  server's guard, so a model that fills in a filter it does not want is
+  answered rather than argued with.
+
+- **A verdict may not contradict its own severity.** A live run returned
+  Malware at 0.6 with a severity of Informational whose rationale read "no
+  evidence of malicious functionality". `verdict.assessment_conflict` puts both
+  fields to the judge once and asks which it meant; a contradiction that
+  survives is recorded, and neither field is ever rewritten.
+
+- **One Qdrant credential instead of two.** The enrichment worker and the
+  health probe read `api.qdrant_*` while the analysis path read
+  `core.memory.qdrant_*`, so filling in either left the other empty — the 401
+  in every enrich run. Both read the `core.memory` keys now, the `api.*` keys
+  are gone, and `20260918000000_unify_qdrant_settings` carries a stored value
+  across before removing the duplicate row.
+
+- **A run nobody performed is no longer reported as a result.** A hosted
+  endpoint refusing every call with 402 produced a job that said "completed"
+  with verdict Suspicious, confidence 0.0, no evidence and an empty error
+  message; a run whose analysts all failed produced an empty STIX bundle, which
+  the verdict heuristic read as Benign at 0.10. A run with no evidence and no
+  analyst claim is now Suspicious with the reason "inconclusive: no analysis
+  was performed" in the degraded banner, and a run in which no analyst answered
+  *and* the judge never answered fails, carrying the provider's error class and
+  status, with no report persisted.
+
+- **A provider answering "not now" costs a retry, not the run.** The retry
+  helper covered a dropped socket only, so one 500 or 503 from a hosted
+  endpoint took the analyst, the negotiation, the verdict and every report
+  section with it. The transient statuses (408, 409, 429, 500, 502, 503, 504)
+  share the connection error's attempt budget and backoff and honour a
+  `Retry-After` within it; every other status is answered once.
+
+- **The 400 self-heal heals the model the job is holding.** The healed model is
+  remembered by the wrapper that healed it and swapped into the container's
+  cache, so an endpoint that refuses the llama.cpp extras is asked with them
+  exactly once instead of on every call — which had been building a new client,
+  and leaking its connection pool, each time.
+
+- **A report of absence is not a capability claim.** "No persistence mechanism
+  was observed" and "there is no evidence of command-and-control communication"
+  were recorded as over-claims and fed back for correction. A negation cue in
+  the term's own clause clears it; a claim after the clause ends is still
+  reported.
+
+- **A hosted OpenAI-compatible endpoint is no longer sent llama.cpp's request
+  fields.** The provider added a repetition penalty, an `n_predict` echo of the
+  output cap and `chat_template_kwargs` whenever `base_url` was set, conflating
+  "custom endpoint" with "llama.cpp server": the first run against
+  `https://integrate.api.nvidia.com/v1` failed on
+  `400 Unsupported parameter(s): n_predict` before an analyst ran. The new
+  `llm.openai.compat` setting says which dialect the endpoint speaks —
+  `llama_cpp`, `standard`, or `auto`, which reads the host and treats loopback,
+  link-local and private addresses as local. An endpoint that rejects one of
+  the extras anyway is retried once without them and remembered for the rest of
+  the process.
 
 - **A name the product later seeds no longer breaks the configuration.** An
   operator's own agent or team stored under `triage`, `android_static`,

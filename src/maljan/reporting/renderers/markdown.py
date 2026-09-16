@@ -410,14 +410,14 @@ class MarkdownRenderer:
         if dyn.notable_apis:
             lines.append("### Notable APIs")
             lines.append("")
-            lines.append("| API | Category | Process | Count |")
-            lines.append("|---|---|---|---|")
+            lines.append("| API | Process | Count |")
+            lines.append("|---|---|---|")
             for api in dyn.notable_apis[:20]:
                 if not isinstance(api, dict):
                     continue
                 lines.append(
-                    f"| `{api.get('api', '-')}` | {api.get('category', '-')} | "
-                    f"`{api.get('process', '-')}` | {api.get('count', 0)} |"
+                    f"| `{api.get('api', '-')}` | `{api.get('process') or '-'}` | "
+                    f"{api.get('count', 0)} |"
                 )
             lines.append("")
 

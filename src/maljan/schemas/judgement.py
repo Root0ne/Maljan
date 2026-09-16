@@ -65,4 +65,15 @@ class JudgeAssessment(BaseModel):
     malware_category: str | None = Field(
         None, description="Free-text behavioural category, e.g. 'ransomware'."
     )
-    family: FamilyVerdict | None = Field(None, description="Family attribution with its evidence.")
+    family: FamilyVerdict | None = Field(
+        default=None, description="Family attribution with its evidence."
+    )
+    confidence: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "How sure the judge is of this verdict overall. The report's "
+            "overall confidence, when the judge gives one."
+        ),
+    )

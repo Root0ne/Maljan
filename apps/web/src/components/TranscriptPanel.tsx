@@ -117,6 +117,10 @@ const STATUS_BADGE: Record<TranscriptStatus, { label: string; cls: string } | nu
     label: "no data",
     cls: "bg-status-orange/10 text-status-orange border-status-orange/30",
   },
+  no_claims: {
+    label: "no report",
+    cls: "bg-status-orange/10 text-status-orange border-status-orange/30",
+  },
   failed: {
     label: "failed",
     cls: "bg-status-red/10 text-status-red border-status-red/30",

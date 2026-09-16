@@ -119,6 +119,26 @@ class ProbeResponse(BaseModel):
     details: dict[str, Any] | None = None
 
 
+class VirustotalRegisterResponse(BaseModel):
+    """The VirusTotal server as it stands after a registration.
+
+    The token is never part of it: ``auth_token`` carries the same mask the
+    server map shows for a stored credential, so the console can render "set
+    from the UI" without the value ever reaching a browser. The agent id and
+    the public handle are VirusTotal's own names for this deployment, which is
+    what an operator matches against their VirusTotal account.
+    """
+
+    server: str
+    enabled: bool
+    transport: str
+    url: str
+    auth_token: str
+    agent_id: str
+    public_handle: str
+    tools: list[str] | None = None
+
+
 class MappingPreviewRequest(BaseModel):
     sample: dict[str, Any]
     mapping: dict[str, Any]

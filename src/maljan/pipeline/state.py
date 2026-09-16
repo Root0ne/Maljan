@@ -40,6 +40,14 @@ def _merge_dicts[V](left: dict[str, V], right: dict[str, V]) -> dict[str, V]:
     return merged
 
 
+def _merge_counts(left: dict[str, int], right: dict[str, int]) -> dict[str, int]:
+    """LangGraph reducer for a per-code counter: add, never replace."""
+    merged = dict(left)
+    for key, value in right.items():
+        merged[key] = merged.get(key, 0) + int(value)
+    return merged
+
+
 def _merge_stage_results(
     left: dict[str, dict[str, Any]], right: dict[str, dict[str, Any]]
 ) -> dict[str, dict[str, Any]]:
@@ -59,6 +67,12 @@ def _merge_stage_results(
             merged[key] = dict(entry)
             continue
         agents = list(dict.fromkeys([*existing.get("agents", []), *entry.get("agents", [])]))
+        # Per-agent skip reasons: each member of a parallel stage writes its
+        # own, so they merge rather than the last writer winning.
+        agent_reasons = {
+            **(existing.get("agent_reasons") or {}),
+            **(entry.get("agent_reasons") or {}),
+        }
         techniques = list(
             dict.fromkeys([*existing.get("technique_ids", []), *entry.get("technique_ids", [])])
         )
@@ -81,6 +95,7 @@ def _merge_stage_results(
                 else int(existing.get("duration_ms") or 0) + int(entry.get("duration_ms") or 0)
             ),
             "agents": agents,
+            **({"agent_reasons": agent_reasons} if agent_reasons else {}),
             "technique_ids": techniques,
         }
     return merged
@@ -224,3 +239,9 @@ class AnalysisState(TypedDict):
     # How many feedback retries the run spent, across every producer.
     # Append-only: two analysts running in parallel each add their own.
     validation_retries: Annotated[int, operator.add]
+
+    # Every violation a producer was *shown*, by code. A violation the retry
+    # fixed leaves no other trace on the run, and ``by_code`` built from the
+    # leftovers alone reported ``{}`` beside a non-zero retry count. Counts
+    # add across the analysts that ran in parallel.
+    validation_fed_back: Annotated[dict[str, int], _merge_counts]

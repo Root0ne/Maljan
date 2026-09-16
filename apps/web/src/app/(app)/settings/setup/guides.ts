@@ -53,6 +53,7 @@ export interface GuideStep {
     | "profile-picker"
     | "rest-mapping"
     | "provider-choice"
+    | "virustotal"
     | "review";
   /** Which part of a `server-form` / `agent-form` the step draws. The step
    *  components normalise an unknown value to their first section, so a
@@ -280,7 +281,7 @@ const STATIC_PROBE: Record<string, string> = {
 /** Server keys the backend pre-populates. The generic static provider needs
  *  one the operator added, so these do not count towards "there is a server
  *  to point at". */
-const BUILTIN_SERVER_KEYS = new Set(["network", "threatintel"]);
+const BUILTIN_SERVER_KEYS = new Set(["network", "threatintel", "virustotal"]);
 
 function hasCustomServer(ctx: GuideContext): boolean {
   const servers = ctx.effective("core.mcp.servers");
@@ -486,6 +487,18 @@ const TOOL_SERVER_GUIDE: GuideDef = {
   blurb: "Register an MCP server, load its tools and decide which analysts may call them.",
   groupHref: "/settings/configuration/tools/mcp",
   steps: () => [
+    {
+      // VirusTotal's server is the one tool server nobody has to stand up, so
+      // it comes before the form that registers one by hand: an operator who
+      // only wanted file and IP reputation is finished after this step.
+      id: "virustotal",
+      title: "Connect VirusTotal",
+      intro:
+        "VirusTotal runs its own MCP server. Register this deployment to get an agent token; " +
+        "the token is stored encrypted here and the server is turned on with its lookups ticked.",
+      component: "virustotal",
+      reviewKeys: ["core.mcp.servers"],
+    },
     {
       id: "which",
       title: "Which server",

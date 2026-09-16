@@ -377,14 +377,14 @@ class TestContainerGetAgentLLM:
     def _make_container(self, agents: dict | None = None) -> object:
         import threading
 
-        from maljan.core.container import ServiceContainer
+        from maljan.core.container import PerLoopModels, ServiceContainer
 
         container = ServiceContainer.__new__(ServiceContainer)
         container.config = Settings(llm=LLMConfig(agents=agents or {}))
         container.mock = False
-        container._expert_llm_cache = None
-        container._judge_llm_cache = None
-        container._agent_llm_cache = {}
+        container._expert_llm_cache = PerLoopModels()
+        container._judge_llm_cache = PerLoopModels()
+        container._agent_llm_cache = PerLoopModels()
         container._agent_cache = {}
         container._data_cache = {}
         container._llm_registry = MagicMock()

@@ -245,8 +245,9 @@ describe("the sandbox guide", () => {
 });
 
 describe("the tool-server guide", () => {
-  it("asks which server before it shows any field", () => {
+  it("offers VirusTotal first, then asks which server before it shows any field", () => {
     expect(stepIds("tool-server", context())).toEqual([
+      "virustotal",
       "which",
       "connection",
       "tools",
@@ -262,6 +263,20 @@ describe("the tool-server guide", () => {
   it("lets the tools step continue without a loaded manifest", () => {
     const state = { serverKey: "mine" };
     expect(blockedReason("tool-server", "tools", context({}, { state }))).toBeNull();
+  });
+
+  it("never blocks on the VirusTotal step, which is optional", () => {
+    // Registering is one way to get a tool server, not a prerequisite for
+    // adding one by hand, so Continue must pass straight through it.
+    expect(blockedReason("tool-server", "virustotal", context())).toBeNull();
+  });
+
+  it("stages the server map through the VirusTotal step's review keys", () => {
+    const step = guideById("tool-server")!
+      .steps(context())
+      .find((s) => s.id === "virustotal");
+    expect(step?.component).toBe("virustotal");
+    expect(step?.reviewKeys).toContain("core.mcp.servers");
   });
 });
 

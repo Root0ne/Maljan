@@ -11,6 +11,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
 from maljan.core.settings_annotations import GROUP_DESCRIPTIONS, GROUP_ORDER
+from maljan.core.virustotal import SERVER_KEY as VIRUSTOTAL_SERVER_KEY
 from maljan.pipeline.conditions import validate_condition
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,6 +38,7 @@ from app.schemas.settings import (
     SchemaResponse,
     ValueDTO,
     ValuesResponse,
+    VirustotalRegisterResponse,
 )
 from app.services.audit import record as audit_record
 from app.services.mapping_preview import PREVIEW_MAX_BYTES, preview_mapping
@@ -47,6 +49,12 @@ from app.services.settings_service import (
     SettingsService,
     SettingsValidationError,
     core_settings_cache,
+)
+from app.services.virustotal_register import (
+    RegistrationError,
+    masked_state,
+    register_agent,
+    server_map_with_token,
 )
 
 EXPORT_FORMAT = "maljan-settings/1"
@@ -393,6 +401,61 @@ async def test_mcp_server(
     """
     stored = await SettingsService(db).load_overrides()
     return await _probe_response(run_mcp_probe(server, body.values, stored))
+
+
+@router.post("/virustotal/register", response_model=VirustotalRegisterResponse)
+async def register_virustotal_agent(
+    request: Request,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> VirustotalRegisterResponse | JSONResponse:
+    """Obtain a VirusTotal agent token, store it encrypted and enable the server.
+
+    The one call in this module that reaches a third party in order to *write*
+    settings. It takes no body: everything the registration says about this
+    deployment is a constant of the build, and the only variable part -- the
+    token -- is what comes back. A failure against VirusTotal is reported as a
+    502 with their own sentence in it, because the fix is on their side or in
+    the operator's network, not in the stored settings.
+    """
+    try:
+        facts = await register_agent()
+    except RegistrationError as exc:
+        logger.warning("VirusTotal registration failed: %s", log_safe(str(exc)))
+        return JSONResponse(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            content={"errors": {"virustotal": str(exc)}},
+        )
+
+    service = SettingsService(db)
+    stored = await service.load_overrides()
+    current = stored.get(SERVER_MAP_KEY)
+    servers = server_map_with_token(
+        current if isinstance(current, dict) else {}, facts["agent_token"]
+    )
+    try:
+        await service.save({SERVER_MAP_KEY: servers}, user_id=user.id, ip=_client_ip(request))
+    except SettingsValidationError as exc:
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"errors": exc.errors}
+        )
+    await audit_record(
+        "settings.virustotal.register",
+        resource_type="settings",
+        user_id=user.id,
+        details={
+            "agent_id": log_safe(facts["agent_id"]),
+            "public_handle": log_safe(facts["public_handle"]),
+        },
+        ip=_client_ip(request),
+    )
+    runtime_config.invalidate()
+    core_settings_cache.invalidate()
+    logger.info("VirusTotal agent registered: %s", log_safe(facts["public_handle"]))
+    entry = servers[VIRUSTOTAL_SERVER_KEY]
+    return VirustotalRegisterResponse(
+        **masked_state(entry if isinstance(entry, dict) else {}, facts)
+    )
 
 
 @router.post("/test/agent", response_model=ProbeResponse)

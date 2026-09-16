@@ -118,9 +118,17 @@ class TestPrompts:
         from maljan.agents.static_analyst import _ISR_TAIL
 
         for tail in (_ISR_TAIL, _DYN_TAIL, _NET_TAIL):
-            assert tail == FINDINGS_BLOCK_FRAGMENT
+            assert tail.startswith(FINDINGS_BLOCK_FRAGMENT)
             assert "maljan-findings" in tail
             assert "ev_0007" in tail
+
+    def test_the_static_analyst_is_told_what_a_claim_is_for(self) -> None:
+        """A live run produced 39 claims, most of them the sample's own
+        metadata at confidence 1.00, which the judge then weighed."""
+        from maljan.agents.static_analyst import _ISR_SYSTEM
+
+        assert "Claims state findings that bear on the verdict." in _ISR_SYSTEM
+        assert "goes in the artifacts block, not in claims" in _ISR_SYSTEM
 
 
 _REVISION_ANSWER = """CLAIM: The sample injects into a remote process

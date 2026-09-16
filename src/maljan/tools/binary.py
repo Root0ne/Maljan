@@ -84,6 +84,10 @@ def pe_info(
     The flags matter for a real sample: a PE with tens of thousands of imports
     produces a payload no context window wants, and an agent that only needs
     the section table should be able to ask for the section table.
+
+    Imports are listed without interpretation: each row is ``dll``, ``function``
+    (the name, or ``Ordinal_N``), ``ordinal``, ``hint`` and ``address``, and no
+    capability label. See :func:`_import_rows`.
     """
     target = Path(path)
     if not target.is_file():
@@ -104,6 +108,7 @@ def pe_info(
                 pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_EXPORT"],
                 pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_RESOURCE"],
                 pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_DEBUG"],
+                pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT"],
             ]
         )
     except Exception as exc:  # noqa: BLE001 — a malformed PE is an answer
@@ -112,7 +117,6 @@ def pe_info(
     from maljan.extractors.pe_extractor import (
         _overlay_offset,
         _pe_exports,
-        _pe_imports,
         _pe_pdb_path,
         _pe_resources,
         _pe_sections,
@@ -140,11 +144,35 @@ def pe_info(
             }
             for s in parsed_sections
         ]
+    warnings = _pe_warnings(pe)
+    out["warnings"] = warnings
+    # A sample whose import directory is deliberately corrupt reads as a
+    # binary that imports nothing, which is a very different claim. pefile
+    # says so in its warnings and said it only there until now.
+    out["import_table_damaged"] = _import_table_damaged(warnings)
+    out["characteristics"] = _flag_names(
+        pefile,
+        "IMAGE_CHARACTERISTICS",
+        "IMAGE_FILE_",
+        getattr(pe.FILE_HEADER, "Characteristics", 0),
+    )
+    out["dll_characteristics"] = _flag_names(
+        pefile,
+        "DLL_CHARACTERISTICS",
+        "IMAGE_DLLCHARACTERISTICS_",
+        getattr(pe.OPTIONAL_HEADER, "DllCharacteristics", 0),
+    )
+    out["linker_version"] = (
+        f"{int(getattr(pe.OPTIONAL_HEADER, 'MajorLinkerVersion', 0) or 0)}."
+        f"{int(getattr(pe.OPTIONAL_HEADER, 'MinorLinkerVersion', 0) or 0)}"
+    )
+    out["rich_header_present"] = _has_rich_header(pe)
     if imports:
-        out["imports"] = [
-            {"dll": row.dll, "function": row.function, "category": row.category}
-            for row in _pe_imports(pe)
-        ]
+        out["imports"] = _import_rows(getattr(pe, "DIRECTORY_ENTRY_IMPORT", None))
+        # A binary that resolves its interesting APIs through ``.didat`` looked
+        # import-free here, which is the same false picture a damaged import
+        # table gives.
+        out["delay_imports"] = _import_rows(getattr(pe, "DIRECTORY_ENTRY_DELAY_IMPORT", None))
     if exports:
         out["exports"] = list(_pe_exports(pe))
     if resources:
@@ -162,6 +190,105 @@ def pe_info(
         [s.name for s in parsed_sections], packer_catalog
     )
     return out
+
+
+def _pe_warnings(pe: Any) -> list[str]:
+    """Everything pefile complained about while parsing, as plain strings."""
+    try:
+        return [str(w) for w in (pe.get_warnings() or [])]
+    except Exception:  # noqa: BLE001 — a warning list is never worth an error
+        return []
+
+
+# What pefile says when the import table cannot be walked, as opposed to when
+# one entry in it could not be read. The difference is whether the parser
+# stopped: each of these either fails the directory outright or breaks out of a
+# walk, so what came back is a truncated import list presented as a complete
+# one — the claim worth flagging.
+_IMPORT_TABLE_DAMAGE = (
+    # The directory's own RVA points nowhere.
+    "error parsing the import directory at rva",
+    # Six bad descriptors and pefile gives up on the rest of the directory.
+    "too many errors parsing the import directory",
+    # A descriptor whose ILT and IAT are both unreadable.
+    "damaged import table",
+    # Both of these break the thunk walk, truncating that library's imports.
+    "error parsing the import table. entries go beyond bounds",
+    "error parsing the import table. addressofdata overlaps",
+)
+
+# One thunk pefile could not read. The walk goes on and the rest of the table
+# is fine, so a single occurrence is not a damaged table — a healthy binary
+# produces one. Enough of them and nothing useful came back either way.
+_IMPORT_ENTRY_DAMAGE = "error parsing the import table. invalid data at rva"
+_REPEATED_ENTRY_DAMAGE = 3
+
+
+def _import_table_damaged(warnings: list[str]) -> bool:
+    """Whether pefile could not walk the import table, rather than one entry.
+
+    Matching the bare word "import" called every per-symbol and delay-load
+    complaint a damaged table; matching "directory" against "table" got the
+    rule backwards, because pefile writes "Error parsing the import table" for
+    a broken walk *and* for a single unreadable thunk. The sentences are
+    therefore listed one by one, against what each of them does to the parse.
+    """
+    lowered = [w.lower() for w in warnings]
+    if any(phrase in w for w in lowered for phrase in _IMPORT_TABLE_DAMAGE):
+        return True
+    return sum(_IMPORT_ENTRY_DAMAGE in w for w in lowered) >= _REPEATED_ENTRY_DAMAGE
+
+
+def _flag_names(pefile: Any, table: str, prefix: str, value: Any) -> list[str]:
+    """The names of the flags set in ``value``, from one of pefile's tables."""
+    try:
+        bits = int(value or 0)
+        flags = pefile.retrieve_flags(getattr(pefile, table), prefix)
+        return [name for name, bit in flags if bits & bit]
+    except Exception:  # noqa: BLE001 — an unreadable header field names no flags
+        return []
+
+
+def _has_rich_header(pe: Any) -> bool:
+    """Whether the sample carries a Rich header (a Microsoft toolchain left it)."""
+    try:
+        return bool(pe.parse_rich_header())
+    except Exception:  # noqa: BLE001 — an absent or malformed Rich header is "no"
+        return False
+
+
+def _import_rows(entries: Any) -> list[dict[str, Any]]:
+    """One row per imported symbol, as the import directory states it.
+
+    The table's own facts and nothing else: which library, which name or
+    ordinal, the hint and the thunk address. What an API is used for is a
+    question for the knowledge server's ``api_capability`` tool, asked by the
+    model when it decides the answer matters. A row that labelled ``BitBlt``
+    "keylogging" was this tool doing the analysis, and an analyst read the
+    label as a finding on a signed binary.
+    """
+    rows: list[dict[str, Any]] = []
+    for entry in entries or []:
+        try:
+            dll = (entry.dll or b"").decode("utf-8", errors="replace")
+        except Exception:  # noqa: BLE001
+            dll = "(unknown)"
+        for imp in getattr(entry, "imports", None) or []:
+            name = getattr(imp, "name", None)
+            function = name.decode("utf-8", errors="replace") if name else ""
+            ordinal = getattr(imp, "ordinal", None)
+            if not function:
+                function = f"Ordinal_{ordinal if ordinal is not None else '?'}"
+            rows.append(
+                {
+                    "dll": dll,
+                    "function": function,
+                    "ordinal": ordinal,
+                    "hint": getattr(imp, "hint", None),
+                    "address": getattr(imp, "address", None),
+                }
+            )
+    return rows
 
 
 def packer_section_matches(
@@ -217,6 +344,9 @@ def elf_info(path: str) -> dict[str, Any]:
     often decide what a Linux sample is: a static binary with no interpreter
     and a binary linked against ``libcurl`` are different animals, and neither
     shows up in a section table.
+
+    Imports are listed without interpretation: each row is ``dll`` and
+    ``function``, and no capability label, as in :func:`pe_info`.
     """
     target = Path(path)
     if not target.is_file():
@@ -246,10 +376,7 @@ def elf_info(path: str) -> dict[str, Any]:
             }
             for s in _parse_elf_sections(blob)
         ],
-        "imports": [
-            {"dll": row.dll, "function": row.function, "category": row.category}
-            for row in _parse_elf_imports(blob)
-        ],
+        "imports": [{"dll": row.dll, "function": row.function} for row in _parse_elf_imports(blob)],
         "exports": list(_parse_elf_exports(blob)),
     }
     out.update(_elf_dynamic_view(blob))
@@ -501,23 +628,29 @@ def _apk_dex_strings(apk: Any, limit: int) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def carve_payloads(path: str, out_dir: str) -> dict[str, Any]:
-    """Write each embedded payload found in the file to ``out_dir``.
+def _carve_into(path: str, destination: str | Path) -> dict[str, Any]:
+    """Write each embedded payload found in the file under ``destination``.
 
     A packed dropper's real payload is invisible to every rule in the corpus
     until it is carved out — the rules only ever see the outer shell, which by
     construction matches nothing. The carved children are written with 0o600
-    so a staging directory shared with a tool server does not widen who can
-    read the sample.
+    and the directory with 0o700, so a staging directory shared with a tool
+    server does not widen who can read the sample.
+
+    Private: the destination is the caller's to decide, and the one caller
+    that faces a model, the analysis sidecar's ``carve_payloads``, decides it
+    from the sample's hash under its own staging directory. A live run passed
+    a model-chosen directory through here and live malware was written to the
+    sidecar's cwd; nothing a model writes reaches this argument any more.
     """
     target = Path(path)
     if not target.is_file():
         return _no_file(path, "carve_payloads")
-    destination = Path(out_dir)
+    where = Path(destination)
     try:
-        destination.mkdir(parents=True, exist_ok=True)
+        where.mkdir(mode=0o700, parents=True, exist_ok=True)
     except OSError as exc:
-        return {"error": f"cannot create {out_dir}: {exc}", "tool": "carve_payloads"}
+        return {"error": f"cannot create {where}: {exc}", "tool": "carve_payloads"}
 
     from maljan.extractors.pe_extractor import carve_payloads as _carve
 
@@ -525,7 +658,7 @@ def carve_payloads(path: str, out_dir: str) -> dict[str, Any]:
     for label, blob in _carve(target.read_bytes()):
         digest = hashlib.sha256(blob).hexdigest()
         name = f"{label.replace('+', '_').replace(':', '_')}_{digest[:12]}"
-        child = destination / name
+        child = where / name
         child.write_bytes(blob)
         child.chmod(0o600)
         offset = 0

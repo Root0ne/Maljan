@@ -26,7 +26,12 @@ export type TranscriptRole =
   | "judge"
   | "system";
 
-export type TranscriptStatus = "complete" | "no_data" | "failed" | "timeout";
+export type TranscriptStatus =
+  | "complete"
+  | "no_data"
+  | "no_claims"
+  | "failed"
+  | "timeout";
 
 export interface TranscriptClaim {
   claim: string;
@@ -70,7 +75,13 @@ const ROLES: TranscriptRole[] = [
   "judge",
   "system",
 ];
-const STATUSES: TranscriptStatus[] = ["complete", "no_data", "failed", "timeout"];
+const STATUSES: TranscriptStatus[] = [
+  "complete",
+  "no_data",
+  "no_claims",
+  "failed",
+  "timeout",
+];
 
 function asRole(value: unknown): TranscriptRole {
   return ROLES.includes(value as TranscriptRole)

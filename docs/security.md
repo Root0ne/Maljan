@@ -102,6 +102,30 @@ directories excluded from on-access scanners, off shared storage and off
 developer machines that are not meant to hold samples. Detonation happens in
 whichever sandbox is configured, never on the Maljan host.
 
+## What the VirusTotal server sends
+
+The `virustotal` tool server is off until an operator registers an agent token,
+and what it sends once on depends entirely on which of its tools are ticked.
+
+With the default tick list — `get_file_report`, `get_url_report`,
+`get_domain_report`, `get_ip_report`, `get_analysis`, `get_submission` — only
+**indicators** leave the host: a hash, a URL, a domain, an IP, an analysis or
+submission id. The sample itself never does. A hash lookup still tells
+VirusTotal that this deployment is interested in that file, which is itself
+worth thinking about for a targeted investigation.
+
+Ticking `submit_file` changes the kind of disclosure, not the degree. The
+sample's bytes are uploaded to VirusTotal, where they are shared with
+VirusTotal's customers and partners under their own terms, and cannot be
+recalled. For a sample belonging to a client, a sample carrying customer data,
+or anything under an NDA, that is a decision to make deliberately and usually
+with the owner. This is why no default ticks it and why the setup guide says so
+next to the button.
+
+The agent token itself is stored like every other tool-server credential: its
+own encrypted row under `core.mcp.servers.virustotal.auth_token`, never in the
+server map's JSON row, never echoed to the browser, and masked in an export.
+
 ## Reporting a vulnerability
 
 Use GitHub's private vulnerability reporting at

@@ -32,6 +32,7 @@ from maljan.tools import binary as binary_tools
 from maljan.tools import identify as identify_tools
 from maljan.tools import rules as rule_tools
 from maljan.tools import strings as string_tools
+from maljan.tools.strings import DEFAULT_STRINGS_LIMIT
 
 mcp = FastMCP("AnalysisMCP")
 
@@ -55,6 +56,54 @@ _MAX_SAMPLE_BYTES = 2 * 1024 * 1024 * 1024
 _DEFAULT_STAGING_TTL_HOURS = 24.0
 
 
+# What a model writes when it means "I am not passing this one". A local model
+# asked for an optional filter it does not want fills the field in rather than
+# omitting it, and these are the two words it writes. Read as the absence they
+# mean, once, here — every tool on this server goes through ``_guard``, so no
+# tool has to know about it and none of them can disagree.
+#
+# Case-sensitive, and only these two: ``NULL`` is an ordinary token to search a
+# binary for, and a search for it has to keep working. A string of nothing but
+# spaces is the third form of the same intention and is read the same way, and
+# so is a string of nothing but quote characters: a live run passed the
+# two-character string "" as a directory name, and a directory literally
+# named "" was created for it.
+_ABSENT_WORDS = frozenset({"null", "None"})
+_ABSENT_CHARACTERS = " \t\r\n\"'"
+
+
+def _optional_string_params(call: Any) -> frozenset[str]:
+    """The parameters of ``call`` whose absence is spelled ``None``.
+
+    Only those: a required argument that arrived as the word "null" is a call
+    that is wrong in a way the tool itself should answer, and turning it into
+    ``None`` would trade a readable error for a confusing one.
+    """
+    import inspect
+
+    try:
+        parameters = inspect.signature(call).parameters
+    except (TypeError, ValueError):  # pragma: no cover - builtins have no signature
+        return frozenset()
+    return frozenset(name for name, parameter in parameters.items() if parameter.default is None)
+
+
+def _means_absent(value: Any) -> bool:
+    """Whether a string argument is one of the ways of writing "not passing this"."""
+    return isinstance(value, str) and (
+        value in _ABSENT_WORDS or not value.strip(_ABSENT_CHARACTERS)
+    )
+
+
+def _read_absent_words(call: Any, kwargs: dict[str, Any]) -> dict[str, Any]:
+    """``kwargs`` with each optional argument's "null" read as ``None``."""
+    optional = _optional_string_params(call)
+    return {
+        name: None if name in optional and _means_absent(value) else value
+        for name, value in kwargs.items()
+    }
+
+
 def _guard(tool: str, call: Any, **kwargs: Any) -> dict[str, Any]:
     """Run one tool call, turning any exception into a returned error.
 
@@ -64,7 +113,7 @@ def _guard(tool: str, call: Any, **kwargs: Any) -> dict[str, Any]:
     and one that retries the same broken call until its step budget is gone.
     """
     try:
-        return dict(call(**kwargs))
+        return dict(call(**_read_absent_words(call, kwargs)))
     except Exception as exc:  # noqa: BLE001 — a tool server answers, it does not raise
         return {"error": f"{type(exc).__name__}: {exc}", "tool": tool}
 
@@ -102,10 +151,25 @@ def strings(
     path: str,
     min_len: int = 6,
     encodings: list[str] | None = None,
-    limit: int = 2000,
+    limit: int = DEFAULT_STRINGS_LIMIT,
     offset: int = 0,
+    pattern: str | None = None,
+    start: int | None = None,
+    end: int | None = None,
 ) -> dict[str, Any]:
-    """List printable ASCII and UTF-16LE runs with their byte offsets."""
+    """List printable ASCII and UTF-16LE runs with their byte offsets.
+
+    The page is small on purpose: 150 runs by default, because a larger answer
+    is cut before you see it. Read ``next_offset`` in the answer and pass it as
+    ``offset`` to get the following page — it is ``null`` when this page was
+    the last one — and read ``total_matched`` to see how many runs the filters
+    kept in all. Paging counts runs, not bytes.
+
+    Use ``start``/``end`` for a byte range and ``pattern`` to keep only the runs
+    containing a marker (case-insensitive substring, or ``re:<expression>`` for
+    a regular expression); searching with ``pattern`` finds more in one call
+    than paging through everything.
+    """
     return _guard(
         "strings",
         string_tools.strings,
@@ -114,6 +178,9 @@ def strings(
         encodings=tuple(encodings or ("ascii", "utf16le")),
         limit=limit,
         offset=offset,
+        pattern=pattern,
+        start=start,
+        end=end,
     )
 
 
@@ -144,7 +211,12 @@ def pe_info(
     overlay: bool = True,
     pdb: bool = True,
 ) -> dict[str, Any]:
-    """Parse a PE: sections with entropy, imports, exports, resources, overlay, PDB path."""
+    """Parse a PE: sections with entropy, imports, exports, resources, overlay, PDB path.
+
+    Imports are listed without interpretation: each row is dll, function (the name
+    or Ordinal_N), ordinal, hint and address. Ask api_capability what an API is
+    used for.
+    """
     return _guard(
         "pe_info",
         binary_tools.pe_info,
@@ -160,7 +232,8 @@ def pe_info(
 
 @mcp.tool()
 def elf_info(path: str) -> dict[str, Any]:
-    """Parse an ELF: sections, imports, exports, segments, interpreter, DT_NEEDED."""
+    """Parse an ELF: sections, imports (listed without interpretation), exports, segments,
+    interpreter, DT_NEEDED."""
     return _guard("elf_info", binary_tools.elf_info, path=path)
 
 
@@ -197,10 +270,32 @@ def apk_info(
 
 
 @mcp.tool()
-def carve_payloads(path: str, out_dir: str = "") -> dict[str, Any]:
-    """Extract embedded payloads from a file and write them to a directory."""
-    destination = out_dir or str(_staging_dir() / "carved")
-    return _guard("carve_payloads", binary_tools.carve_payloads, path=path, out_dir=destination)
+def carve_payloads(path: str) -> dict[str, Any]:
+    """Write each embedded payload found in the file out as its own file.
+
+    The carved files land under the sidecar's private staging directory, in
+    carved/<sha256 of the sample>/, and the returned paths point there; the
+    destination is not an argument.
+    """
+    return _guard("carve_payloads", _carve_under_staging, path=path)
+
+
+def _carve_under_staging(path: str) -> dict[str, Any]:
+    """Carve into ``<staging>/carved/<sha256>/``, created private like the staging dir.
+
+    A model-chosen destination let a tool write live malware anywhere the
+    sidecar could write, and one live run wrote a carved PE body into the
+    sidecar's own cwd. The sample's hash names the directory, so two samples
+    never share one and a re-run lands in the same place.
+    """
+    target = Path(path)
+    if not target.is_file():
+        return {"error": f"no such file: {path}", "tool": "carve_payloads"}
+    digest = hashlib.sha256(target.read_bytes()).hexdigest()
+    destination = _staging_dir() / "carved"
+    for directory in (destination, destination / digest):
+        directory.mkdir(mode=0o700, exist_ok=True)
+    return binary_tools._carve_into(path, destination / digest)
 
 
 @mcp.tool()

@@ -183,3 +183,35 @@ async def test_the_r2_probe_speaks_the_same_handshake(monkeypatch):
     assert result.ok is True and result.tools == ["open_file", "analyze", "list_imports"]
     assert _Handle.made[-1].config.command == "r2mcp"
     assert handshake_tools is not None
+
+
+class TestTheVirustotalServer:
+    """The probe names the one state a fresh VirusTotal built-in is in.
+
+    An unauthenticated handshake against VirusTotal's endpoint fails as a
+    transport error whose text says nothing about credentials, so the probe
+    answers the question the operator is actually asking before it dials.
+    """
+
+    @pytest.mark.asyncio
+    async def test_without_a_token_it_reports_that_no_agent_is_registered(self):
+        from maljan.core.config import Settings
+
+        entry = Settings(_env_file=None).mcp.servers["virustotal"].model_dump(mode="json")
+        result = await probe_mcp({"name": "virustotal", "entry": entry})
+
+        assert result.ok is False
+        assert "no agent token" in result.detail
+        assert not _Handle.made, "nothing is dialled without a credential"
+
+    @pytest.mark.asyncio
+    async def test_with_a_token_it_dials_the_endpoint_like_any_other_server(self):
+        from maljan.core.config import Settings
+
+        entry = Settings(_env_file=None).mcp.servers["virustotal"].model_dump(mode="json")
+        entry["auth_token"] = "vtai_" + "c" * 43
+
+        result = await probe_mcp({"name": "virustotal", "entry": entry})
+
+        assert result.ok is True
+        assert _Handle.made[-1].config.url == "https://ai.virustotal.com/mcp"

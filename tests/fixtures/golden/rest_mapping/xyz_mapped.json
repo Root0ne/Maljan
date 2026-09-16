@@ -178,6 +178,7 @@
   ],
   "source_format": "generic",
   "summary": {},
+  "synthetic": false,
   "target": {
     "file_type": "",
     "md5": "",

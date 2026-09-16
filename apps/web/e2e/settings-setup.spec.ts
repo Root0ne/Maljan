@@ -184,6 +184,11 @@ test.describe("Settings → Setup guides (admin)", () => {
   }) => {
     await page.goto(guidePath("tool-server"));
 
+    // The guide opens on the VirusTotal offer, which registers nothing unless
+    // the button is pressed; adding a server by hand walks straight past it.
+    await expect(page.getByRole("heading", { name: "Connect VirusTotal" })).toBeVisible();
+    await page.getByRole("button", { name: "Continue" }).click();
+
     await expect(page.getByRole("heading", { name: "Which server" })).toBeVisible();
     await page.getByLabel("new server name").fill("r2custom");
     await page.getByRole("button", { name: "Use this server" }).click();

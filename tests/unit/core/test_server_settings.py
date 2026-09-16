@@ -47,6 +47,7 @@ def test_builtin_keys_are_reserved_and_the_key_pattern_is_a_slug():
         "knowledge",
         "network",
         "threatintel",
+        "virustotal",
         "ghidra",
         "cape",
     }

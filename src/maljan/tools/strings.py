@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -664,6 +664,21 @@ _ENCODINGS: tuple[str, ...] = ("ascii", "utf16le")
 # One tool call must not try to return a whole binary's worth of text.
 _MAX_STRINGS_LIMIT = 20_000
 
+# What one page holds when the caller does not say. A live run asked for the
+# default 2000 runs and was answered with 250-530 KB per call; the agent's
+# output guardrail then cut each answer to 8000 characters, so the model was
+# shown a twentieth of a page it had no way to know it was missing and paged
+# blindly through offsets 0, 5000, 10000 and up. A page that fits inside the
+# budget the answer is read under is a page the model can actually reason
+# about, and ``next_offset`` says where the following one starts.
+#
+# The number is chosen against the model's budget and not against this
+# process's: every call scans the whole file, because ``total_matched`` and
+# ``next_offset`` are only true if the counting runs to the end, so a smaller
+# page means proportionally more full scans for a caller that pages through a
+# large binary. ``pattern`` is the way out and the tool's description says so.
+DEFAULT_STRINGS_LIMIT = 150
+
 # The shortest run the caller may ask for. Below three characters the scan
 # returns essentially every byte of a binary as a "string".
 _MIN_REQUESTABLE_LENGTH = 3
@@ -687,15 +702,27 @@ def strings(
     path: str,
     min_len: int = _MIN_STRING_LENGTH,
     encodings: tuple[str, ...] = ("ascii", "utf16le"),
-    limit: int = 2000,
+    limit: int = DEFAULT_STRINGS_LIMIT,
     offset: int = 0,
+    pattern: str | None = None,
+    start: int | None = None,
+    end: int | None = None,
 ) -> dict[str, Any]:
     """Printable runs in a file, with the byte offset each was found at.
 
-    ``offset``/``limit`` page through the runs in scan order (every ASCII run,
-    then every UTF-16LE one), so a caller can walk a large binary without ever
-    asking for more than one page. ``total`` is how many runs the scan found
-    before paging, and ``truncated`` says whether the page is the tail.
+    ``offset`` counts runs, not bytes: ``offset=2000, limit=1000`` returns the
+    2001st to 3000th run in scan order (every ASCII run, then every UTF-16LE
+    one). To look at a region of the file instead, pass ``start``/``end``,
+    which are byte offsets; to look for a marker, pass ``pattern`` — a
+    case-insensitive substring, or a regular expression when it is written
+    ``re:<expression>``.
+
+    ``total`` is how many runs the scan found, ``total_matched`` how many of
+    them the filters kept, and ``page_offset``/``page_limit`` echo the paging
+    this answer was cut with, so a caller can see at once whether an empty page
+    means "nothing matched" or "you asked past the end". ``next_offset`` is the
+    offset of the following page, or ``None`` when this one ended the set — a
+    caller that reads it never has to guess at a stride.
     """
     target = Path(path)
     if not target.is_file():
@@ -707,26 +734,67 @@ def strings(
     if not wanted:
         known = ", ".join(_ENCODINGS)
         return {"error": f"unknown encodings {list(encodings)}; known: {known}", "tool": "strings"}
+    try:
+        matches = _matcher(pattern)
+    except re.error as exc:
+        return {"error": f"bad pattern {pattern!r}: {exc}", "tool": "strings"}
+    lower = 0 if start is None else max(0, int(start))
+    upper = None if end is None else int(end)
 
     blob = target.read_bytes()
     rows: list[dict[str, Any]] = []
     total = 0
+    matched = 0
     for enc in wanted:
         for match in _run_pattern(enc, minimum).finditer(blob):
             raw = match.group()
             text = raw[::2] if enc == "utf16le" else raw
             decoded = text.decode("ascii", errors="ignore")
             total += 1
-            if total <= offset or len(rows) >= limit:
+            at = match.start()
+            if at < lower or (upper is not None and at >= upper):
                 continue
-            rows.append({"offset": match.start(), "enc": enc, "text": decoded})
+            if not matches(decoded):
+                continue
+            matched += 1
+            if matched <= offset or len(rows) >= limit:
+                continue
+            rows.append({"offset": at, "enc": enc, "text": decoded})
             if total >= _MAX_STRINGS_SCANNED:
                 break
+    # ``more and rows``, not ``more`` alone: ``limit=0`` keeps every match out
+    # of the page while leaving matches behind it, and an offset that does not
+    # advance is a caller paging on ``next_offset`` forever.
+    more = matched > offset + len(rows) and bool(rows)
     return {
         "strings": rows,
         "total": total,
-        "truncated": total > offset + len(rows),
+        "total_matched": matched,
+        "page_offset": offset,
+        "page_limit": limit,
+        # Echoed as it was understood, not as it arrived: a caller that sent
+        # the word "null" for "no filter" sees that it was read as no filter.
+        "pattern": pattern,
+        "next_offset": offset + len(rows) if more else None,
+        "truncated": more,
     }
+
+
+def _matcher(pattern: str | None) -> Callable[[str], bool]:
+    """The filter one ``pattern`` argument means, as a predicate over a run.
+
+    A bare string is a case-insensitive substring, which is what a model
+    looking for a family marker actually wants; the ``re:`` prefix is the
+    escape hatch for the caller who means a regular expression, and its errors
+    are the caller's to see rather than something to swallow.
+    """
+    if not pattern:
+        return lambda _text: True
+    if pattern.startswith("re:"):
+        compiled = re.compile(pattern[3:], re.IGNORECASE)
+        return lambda text: compiled.search(text) is not None
+    needle = pattern.lower()
+    return lambda text: needle in text.lower()
 
 
 def iocs_from_text(text: str, kinds: list[str] | None = None) -> dict[str, Any]:

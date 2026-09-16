@@ -79,7 +79,8 @@ def emit_agent_message(
             Drives grouping and styling in the UI.
         text: Human-readable summary. This is what a reader skims.
         round_index: Negotiation round; 0 for the initial pass.
-        status: ``complete`` | ``no_data`` | ``failed`` | ``timeout``. Mirrors
+        status: ``complete`` | ``no_data`` | ``no_claims`` | ``failed`` |
+            ``timeout``. Mirrors
             ``AgentFinding.status`` so a live message and the persisted row that
             replaces it after the run read identically.
         confidence: 0-1 self-reported confidence, when the speaker has one.

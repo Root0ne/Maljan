@@ -14,13 +14,16 @@ import logging
 import time
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session_factory
 from app.services.settings_catalog_api import API_DEFAULTS
-from app.services.settings_service import SettingsService
+from app.services.settings_service import SettingsService, core_settings_cache
+
+if TYPE_CHECKING:
+    from maljan.core.config import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +67,26 @@ class RuntimeConfig:
             value = API_DEFAULTS[name]
         self._resolved[name] = value
         return value
+
+    async def core(self) -> Settings:
+        """The core settings a running job would see, on the same short TTL.
+
+        The API reads a handful of core values as well as its own knobs — the
+        Qdrant endpoint and its credential are one store of settings, not two,
+        and the enrichment worker reading a second copy of them is how an
+        operator who filled in the one the analysis path uses still got 401s
+        out of every enrich run. Failures fall back to the defaults for the
+        reason every read here does: a settings read must not take a request
+        down.
+        """
+        from maljan.core.settings_overrides import build_settings
+
+        try:
+            async with self._factory() as db:
+                return await core_settings_cache.get(db)
+        except Exception as exc:  # noqa: BLE001 - fall back to static settings
+            logger.warning("core settings unavailable, using defaults: %s", exc)
+            return build_settings({})
 
     def get_cached(self, name: str) -> Any:
         """Synchronous read of the last value ``get()`` resolved for ``name``.

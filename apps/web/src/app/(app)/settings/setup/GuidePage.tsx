@@ -15,6 +15,7 @@ import AgentFormStep, { agentStepSection } from "./steps/AgentFormStep";
 import ProfilePickerStep from "./steps/ProfilePickerStep";
 import RestMappingStep from "./steps/RestMappingStep";
 import ServerFormStep, { serverStepSection } from "./steps/ServerFormStep";
+import VirustotalStep from "./steps/VirustotalStep";
 import {
   PROVIDER_CHOICE_KEY,
   providerChoiceCopy,
@@ -335,6 +336,10 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
       )}
 
       {step.component === "rest-mapping" && <RestMappingStep />}
+
+      {step.component === "virustotal" && (
+        <VirustotalStep state={state} setState={setGuideState} />
+      )}
 
       {probeId && (
         <div className="flex items-center gap-3 flex-wrap mt-2">

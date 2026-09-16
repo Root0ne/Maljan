@@ -345,26 +345,21 @@ def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
             facts["packer_detected"] = False
         return facts
 
+    # The counts below are the capability profile: capa's namespaces on the
+    # ledger path, and on the extractor path the parked import-category table,
+    # aggregated. The per-import lists that sat beside them were that table
+    # read back one import at a time, and they are gone.
     if section == "encryption_scheme":
-        return {
-            "crypto_api_count": caps.get("crypto", 0),
-            "crypto_imports": [i.function for i in static.imports if i.category == "crypto"][:15],
-        }
+        return {"crypto_api_count": caps.get("crypto", 0)}
     if section == "discovery":
         return {
             "discovery_api_count": caps.get("discovery", 0),
-            "discovery_imports": [i.function for i in static.imports if i.category == "discovery"][
-                :15
-            ],
             "discovery_techniques": [t for t in techniques if t in _DISCOVERY_TECHNIQUES],
         }
     if section == "evasion_antiforensics":
         return {
             "anti_debug_api_count": caps.get("anti_debug", 0),
             "evasion_api_count": caps.get("evasion", 0),
-            "evasion_imports": [
-                i.function for i in static.imports if i.category in {"anti_debug", "evasion"}
-            ][:15],
             "evasion_techniques": [t for t in techniques if t in _EVASION_TECHNIQUES],
         }
     if section == "persistence_detail":

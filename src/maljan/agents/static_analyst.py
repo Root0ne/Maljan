@@ -15,10 +15,15 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from maljan.agents.base_agent import (
     BaseAnalyst,
+    evidence_ref_text,
     prompt_to_messages,
     strip_tool_call_scaffolding,
 )
-from maljan.agents.prompt_fragments import FINDINGS_BLOCK_FRAGMENT
+from maljan.agents.prompt_fragments import (
+    CLAIM_FORMAT_FRAGMENT,
+    FINDINGS_BLOCK_FRAGMENT,
+    REPUTATION_LOOKUP_FRAGMENT,
+)
 from maljan.agents.registry import register_agent
 from maljan.providers.base import StaticJobContext
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
@@ -31,10 +36,19 @@ _ISR_HEAD = (
     "You are an expert Static Malware Analyst with 15 years of reverse engineering experience. "
 )
 
+# What a claim is for. A live run produced 39 claims of which most were the
+# sample's own metadata at confidence 1.00 -- "the binary has a sha256 hash of
+# ...", "mime type consistent" -- which the judge then weighed as evidence of
+# something. Those facts belong in the artifacts block, which exists for them.
+_CLAIMS_BEAR_ON_THE_VERDICT = (
+    "\n\nClaims state findings that bear on the verdict. File metadata — hashes, size, "
+    "mime type, machine type, timestamps — goes in the artifacts block, not in claims."
+)
+
 # The optional structured channel, appended after the provider fragment so it
 # is the last thing the analyst reads before it answers. The assembly order is
 # the contract the tool-server and agent-composition layers build prompts from.
-_ISR_TAIL = FINDINGS_BLOCK_FRAGMENT
+_ISR_TAIL = FINDINGS_BLOCK_FRAGMENT + _CLAIMS_BEAR_ON_THE_VERDICT + REPUTATION_LOOKUP_FRAGMENT
 
 
 def _static_prompt(provider: Any | None = None) -> str:
@@ -678,12 +692,7 @@ class StaticAnalyst(BaseAnalyst):
                 "For each finding state: the claim, the exact artifact "
                 "reference (e.g. 'API import: VirtualAllocEx', 'string at .data+0x20: /bin/sh'), "
                 "your confidence (0.0-1.0), and the MITRE ATT&CK technique ID if applicable.\n\n"
-                "Format each finding as:\n"
-                "CLAIM: <claim text>\n"
-                "EVIDENCE: <artifact reference>\n"
-                "CONFIDENCE: <float>\n"
-                "TECHNIQUE: <T-ID or NONE>\n"
-                "---\n\n"
+                f"{CLAIM_FORMAT_FRAGMENT}\n"
                 f"{rag_hint}{attck_hint}{attr_hint}{sink_hint}{load_hint}{target_info}",
             ),
         ]
@@ -981,7 +990,7 @@ def _parse_claim_blocks(text: str) -> list[ClaimEvidence]:
         claims.append(
             ClaimEvidence(
                 claim=claim_text[:300],
-                evidence_ref=evidence_text[:200],
+                evidence_ref=evidence_ref_text(evidence_text),
                 confidence=confidence,
                 technique_id=technique_id,
             )

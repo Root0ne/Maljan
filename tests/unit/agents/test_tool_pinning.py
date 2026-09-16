@@ -71,15 +71,37 @@ class TestPinPaths:
 
         assert seen == [{"file_path": LOCAL, "query": ""}]
 
-    def test_a_directory_the_model_supplied_is_left_exactly_as_it_is(self) -> None:
-        """The model that gave a directory meant that directory; only the bare
-        name is a mistake the guard can be sure of."""
+    def test_a_wrong_directory_with_the_right_file_name_is_corrected(self) -> None:
+        """A live run sent the sample's own name under a directory whose name
+        the model had mistyped, and every call after it read "no such file"."""
         seen: list[dict[str, Any]] = []
         pinned = pin_paths([_tool("identify_file", seen)], default_path=LOCAL)
 
-        pinned[0].invoke({"file_path": "/elsewhere/abc123.exe"})
+        pinned[0].invoke({"file_path": "/home/user/Belleges/kingston/abc123.exe"})
 
-        assert seen[0]["file_path"] == "/elsewhere/abc123.exe"
+        assert seen[0]["file_path"] == LOCAL
+
+    def test_a_directory_that_holds_such_a_file_is_left_exactly_as_it_is(
+        self, tmp_path: Any
+    ) -> None:
+        """The correction is for a path that leads nowhere. A model that named
+        a file which is really there named that file."""
+        elsewhere = tmp_path / "abc123.exe"
+        elsewhere.write_bytes(b"MZ")
+        seen: list[dict[str, Any]] = []
+        pinned = pin_paths([_tool("identify_file", seen)], default_path=LOCAL)
+
+        pinned[0].invoke({"file_path": str(elsewhere)})
+
+        assert seen[0]["file_path"] == str(elsewhere)
+
+    def test_another_file_name_under_a_missing_directory_is_left_alone(self) -> None:
+        seen: list[dict[str, Any]] = []
+        pinned = pin_paths([_tool("identify_file", seen)], default_path=LOCAL)
+
+        pinned[0].invoke({"file_path": "/elsewhere/other.exe"})
+
+        assert seen[0]["file_path"] == "/elsewhere/other.exe"
 
     def test_a_free_text_argument_holding_the_name_is_not_rewritten(self) -> None:
         seen: list[dict[str, Any]] = []
@@ -257,3 +279,53 @@ class TestTheRegistryStampsTheServer:
 
         assert [t.name for t in tools] == ["identify_file", "other__identify_file"]
         assert [server_of(t) for t in tools] == ["analysis", "other"]
+
+
+class _PathArgs(BaseModel):
+    """``vt-mcp``'s ``submit_local_file`` signature: one plain ``path``."""
+
+    path: str = ""
+
+
+class TestTheVirustotalStdioUpload:
+    """``submit_local_file`` takes ``path``, and the guard has to cover it.
+
+    The stdio form of VirusTotal's server is the only way to upload a sample
+    by path, and a model that calls it with the bare file name uploads
+    nothing. The argument is named ``path`` and nothing else, which is the
+    narrowest name the guard recognises, so it is worth pinning that it does.
+    """
+
+    def _tool(self, seen: list[dict[str, Any]]) -> StructuredTool:
+        def _run(**kwargs: Any) -> str:
+            seen.append(dict(kwargs))
+            return "ok"
+
+        return StructuredTool.from_function(
+            func=_run,
+            name="submit_local_file",
+            description="upload a local file to VirusTotal",
+            args_schema=_PathArgs,
+            infer_schema=False,
+            metadata={"maljan_server": "virustotal"},
+        )
+
+    def test_a_bare_file_name_becomes_the_path_the_server_can_open(self) -> None:
+        seen: list[dict[str, Any]] = []
+        pinned = pin_paths([self._tool(seen)], default_path=HOST)
+
+        pinned[0].invoke({"path": "evil.exe"})
+
+        assert seen[0]["path"] == HOST
+
+    def test_a_staged_server_gets_the_path_the_sample_was_uploaded_to(self) -> None:
+        seen: list[dict[str, Any]] = []
+        pinned = pin_paths(
+            [self._tool(seen)],
+            default_path=HOST,
+            path_by_server={"virustotal": STAGED},
+        )
+
+        pinned[0].invoke({"path": HOST})
+
+        assert seen[0]["path"] == STAGED

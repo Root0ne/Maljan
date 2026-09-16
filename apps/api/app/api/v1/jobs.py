@@ -44,17 +44,30 @@ async def _disabled_analyst_in(db: AsyncSession, profile: str) -> str | None:
     ``AgentsConfig._seed_and_check``). Naming it here is what makes it active,
     so that exemption no longer applies: this refuses the job rather than
     letting the worker discover the conflict when the run actually starts.
+
+    The members are read off the stages. ``analysts`` is the retired flat list
+    that a stage-form profile leaves empty, so reading it made every refusal
+    vacuous: the run started and the disabled member was discovered by the
+    worker after all.
     """
     from app.services.agent_map import effective_definitions, effective_profiles
 
     overrides = await SettingsService(db).load_overrides()
     definitions = effective_definitions(overrides)
-    analysts = effective_profiles(overrides).get(profile, {}).get("analysts", [])
-    for analyst in analysts:
-        member = definitions.get(analyst, {})
+    for agent in _profile_agents(effective_profiles(overrides).get(profile, {})):
+        member = definitions.get(agent, {})
         if not member.get("enabled", True):
-            return str(analyst)
+            return str(agent)
     return None
+
+
+def _profile_agents(profile: dict[str, Any]) -> list[str]:
+    """Every agent a profile names, in order and without duplicates."""
+    named: list[str] = [str(a) for a in (profile.get("analysts") or [])]
+    for stage in profile.get("stages") or []:
+        if isinstance(stage, dict):
+            named.extend(str(a) for a in (stage.get("agents") or []))
+    return list(dict.fromkeys(named))
 
 
 # The config keys an audit row may carry. A job config is operator-supplied and

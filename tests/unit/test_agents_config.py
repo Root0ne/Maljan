@@ -112,7 +112,7 @@ DEFAULT_AGENTS = {
             "role": "static",
             "label": "Static analyst",
             "prompt": None,
-            "tools": [_mcp("analysis"), _mcp("knowledge")],
+            "tools": [_mcp("analysis"), _mcp("knowledge"), _mcp("virustotal")],
             "static_provider": None,
             "enabled": True,
             "data_sources": [],
@@ -130,7 +130,7 @@ DEFAULT_AGENTS = {
             "role": "network",
             "label": "Network analyst",
             "prompt": None,
-            "tools": [_mcp("network"), _mcp("knowledge")],
+            "tools": [_mcp("network"), _mcp("knowledge"), _mcp("virustotal")],
             "static_provider": None,
             "enabled": True,
             "data_sources": [],
@@ -139,7 +139,7 @@ DEFAULT_AGENTS = {
             "role": "judge",
             "label": "Judge",
             "prompt": None,
-            "tools": [_mcp("knowledge")],
+            "tools": [_mcp("knowledge"), _mcp("virustotal")],
             "static_provider": None,
             "enabled": True,
             "data_sources": [],
@@ -563,7 +563,7 @@ class TestALegacyDatabaseGetsTheNewToolDefaults:
 
         refs = cfg.agents.definitions["static"].tools
 
-        assert [r.server for r in refs] == ["analysis", "knowledge"]
+        assert [r.server for r in refs] == ["analysis", "knowledge", "virustotal"]
 
     def test_loading_such_a_database_does_not_read_as_tampering(self):
         """The failure mode this guards: settings that refuse to load at all,
@@ -597,7 +597,7 @@ class TestALegacyDatabaseGetsTheNewToolDefaults:
         definition = cfg.agents.definitions["network"]
 
         assert definition.enabled is False
-        assert [r.server for r in definition.tools] == ["network", "knowledge"]
+        assert [r.server for r in definition.tools] == ["network", "knowledge", "virustotal"]
 
     def test_a_custom_definition_keeps_its_empty_tool_list(self):
         """The re-seed reads an empty list as "not set", which is only true for

@@ -96,6 +96,25 @@ Behind a reverse proxy, set `CORS_ORIGINS` to the console's real origin, keep
 `COOKIE_SECURE` true, and populate the `trusted_proxy_ips` setting so the rate
 limiter honours `X-Forwarded-For` only from your proxy.
 
+## VirusTotal over stdio (optional)
+
+The `virustotal` built-in needs nothing installed: it is VirusTotal's own
+server over HTTP, and registering an agent token from Settings → Setup guides
+is the whole setup. Install the package only for `submit_local_file`, the
+upload-by-path tool that exists solely when the server runs on the host that
+holds the sample:
+
+```bash
+uv tool install --python 3.12 vt-mcp==0.8.4
+```
+
+`uvx --python 3.12 vt-mcp==0.8.4` runs the same release without installing it.
+The command is stdio-only and takes no flags; it reads the agent token from
+`VTAI_TOKEN` (or `VTAI_TOKEN_FILE`) in its own environment. Add it as a second
+tool server with transport `stdio` and put the variable name in `env_allow`, so
+the token reaches the child from the worker's environment rather than being
+written into a setting the console echoes back.
+
 ## Upgrades and migrations
 
 The API does not migrate on startup unless `RUN_MIGRATIONS_ON_STARTUP` is set,

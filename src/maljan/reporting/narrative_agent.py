@@ -29,7 +29,15 @@ from pydantic import BaseModel, ConfigDict, Field
 from maljan.agents.base_agent import retry_on_connection_error
 from maljan.core.logger import logger
 from maljan.llm.registry import structured_output_supported_for_llm
-from maljan.pipeline.validation import retry_with_feedback, schema_violations
+from maljan.pipeline.validation import (
+    UNGROUNDED_CAPABILITY_CODE,
+    CapabilityGrounding,
+    ValidationTally,
+    Violation,
+    narrative_capability_violations,
+    retry_with_feedback,
+    schema_violations,
+)
 from maljan.reporting.models import DefensiveRecommendation, MalwareReport
 from maljan.utils.json_cleaner import safe_parse_json
 
@@ -315,8 +323,14 @@ class NarrativeAgent:
         # and must count toward run_summary token metrics. Recorded on the raw
         # path below (the structured path hides usage behind the parser).
         self.token_ledger = token_ledger
+        # What this round was told was wrong with its answer, by code. The
+        # narrative runs after the run summary is built, so the report node
+        # reads this and folds it in rather than the builder collecting it.
+        self.validation_tally = ValidationTally()
 
-    async def generate(self, report: MalwareReport) -> NarrativeOutput | None:
+    async def generate(
+        self, report: MalwareReport, isr_reports: Any = None
+    ) -> NarrativeOutput | None:
         """Return a ``NarrativeOutput`` or ``None`` if both paths fail.
 
         Path 1 — ``with_structured_output(NarrativeOutput).ainvoke(messages)``
@@ -325,6 +339,16 @@ class NarrativeAgent:
         always rely on the fallback narrative.
         """
         messages = self._build_prompt(report)
+
+        # What this run actually established, so a summary cannot be the first
+        # place "command-and-control" or "data exfiltration" appears. Run 3's
+        # did exactly that, over one technique and no network data at all.
+        #
+        # The analysts' own words are one of the three grounding sources, and
+        # this round is graded on the same grounding the composer is: without
+        # the ISRs, a capability an analyst stated in a claim would be a
+        # violation here and a pass there, on one run.
+        grounding = CapabilityGrounding.from_report(report, isr_reports)
 
         # Skip the structured path entirely on endpoints where it does not
         # work. Measured live 2026-08-07: against llama-server this call hung
@@ -339,10 +363,12 @@ class NarrativeAgent:
                     lambda: structured.ainvoke(messages), what="NarrativeAgent structured"
                 )
                 if isinstance(result, NarrativeOutput):
-                    return result
+                    return self._kept_with_ungrounded_recorded(result, grounding)
                 # Some providers return a dict — coerce defensively.
                 if isinstance(result, dict):
-                    return NarrativeOutput.model_validate(result)
+                    return self._kept_with_ungrounded_recorded(
+                        NarrativeOutput.model_validate(result), grounding
+                    )
                 logger.warning(
                     "NarrativeAgent: unexpected structured-output type %s; "
                     "falling back to manual parse.",
@@ -380,14 +406,29 @@ class NarrativeAgent:
             payload, violations, retries = await retry_with_feedback(
                 _run,
                 list(messages),
-                [lambda p: schema_violations(NarrativeOutput, p, code="narrative.schema")],
+                [
+                    lambda p: schema_violations(NarrativeOutput, p, code="narrative.schema"),
+                    lambda p: narrative_capability_violations(p, grounding),
+                ],
                 parse=_narrative_payload,
+                on_feedback=self.validation_tally.count,
             )
         except Exception as exc:  # noqa: BLE001
             logger.error("NarrativeAgent: manual-parse fallback failed (%s); NO NARRATIVE.", exc)
             return None
 
-        if violations:
+        self.validation_tally.retries += retries
+        self.validation_tally.count(violations)
+
+        # A broken shape and an over-claim are not the same failure. The first
+        # leaves nothing usable, so the report falls back to the deterministic
+        # template. The second leaves a summary that says more than the run
+        # found, and dropping it would replace one wrong summary with none —
+        # so it is kept and the terms are recorded, which is what a reader can
+        # act on. Nothing rewrites the prose.
+        broken = [v for v in violations if v.code != UNGROUNDED_CAPABILITY_CODE]
+        ungrounded = [v for v in violations if v.code == UNGROUNDED_CAPABILITY_CODE]
+        if broken:
             # ``error``: reaching here means the report ships with no narrative
             # at all, which is a visible hole rather than a degraded detail.
             logger.error(
@@ -395,14 +436,42 @@ class NarrativeAgent:
                 "NO NARRATIVE.",
                 retries,
                 "y" if retries == 1 else "ies",
-                "; ".join(f"{v.path}: {v.message}" for v in violations),
+                "; ".join(f"{v.path}: {v.message}" for v in broken),
             )
             return None
+        self._record_ungrounded(ungrounded)
         try:
             return NarrativeOutput.model_validate(payload)
         except Exception as exc:  # noqa: BLE001
             logger.error("NarrativeAgent: the validated payload would not build (%s).", exc)
             return None
+
+    def _record_ungrounded(self, violations: list[Violation]) -> None:
+        """Keep the over-claims on the record, without touching the prose."""
+        if not violations:
+            return
+        logger.warning(
+            "NarrativeAgent: %d capability claim(s) the run does not establish survived the "
+            "retry and are recorded unresolved (%s).",
+            len(violations),
+            ", ".join(v.path for v in violations),
+        )
+        self.validation_tally.record_unresolved("narrative", violations)
+
+    def _kept_with_ungrounded_recorded(
+        self, output: NarrativeOutput, grounding: CapabilityGrounding
+    ) -> NarrativeOutput:
+        """The structured path's answer, with its over-claims recorded.
+
+        No retry here: ``with_structured_output`` owns the conversation and
+        there is no turn to add one to. The answer is still checked, because a
+        report that over-claims is no better for having been produced by the
+        path that usually works.
+        """
+        found = narrative_capability_violations(output.model_dump(), grounding)
+        self.validation_tally.count(found)
+        self._record_ungrounded(found)
+        return output
 
     def _build_prompt(self, report: MalwareReport) -> list[BaseMessage]:
         return [

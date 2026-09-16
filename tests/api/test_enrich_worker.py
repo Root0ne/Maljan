@@ -244,3 +244,61 @@ class TestEnqueueEnrichment:
         svc._get_arq_redis = AsyncMock(side_effect=ConnectionError("no redis"))  # type: ignore[method-assign]
         with pytest.raises(EnrichmentEnqueueError):
             await svc.enqueue_enrichment(uuid.uuid4(), _fake_user())
+
+
+class TestTheMemoryStoreReadsOneSetOfSettings:
+    """``api.qdrant_*`` and ``core.memory.qdrant_*`` addressed one server.
+
+    The enrichment worker read the first and the analysis path the second, so
+    an operator who filled in one of them got a 401 out of every enrich run.
+    There is one set now, and it is the one a run's long-term memory uses.
+    """
+
+    def _store(self, url: str, collection: str, api_key: str | None) -> Any:
+        import asyncio
+
+        from app.worker import enrich_worker
+        from maljan.core.config import Settings
+
+        settings = Settings(
+            _env_file=None,
+            memory={
+                "qdrant_url": url,
+                "qdrant_collection": collection,
+                "qdrant_api_key": api_key,
+            },
+        )
+        built: dict[str, Any] = {}
+
+        class _Store:
+            def __init__(self, **kwargs: Any) -> None:
+                built.update(kwargs)
+
+        enrich_worker._memory_store_built = False
+        enrich_worker._memory_store = None
+        with (
+            patch(
+                "app.worker.enrich_worker.runtime_config.core",
+                AsyncMock(return_value=settings),
+            ),
+            patch("maljan.memory.qdrant_store.QdrantStore", _Store),
+        ):
+            asyncio.run(enrich_worker._get_memory_store())
+        enrich_worker._memory_store_built = False
+        enrich_worker._memory_store = None
+        return built
+
+    def test_the_client_is_built_from_the_core_memory_values(self) -> None:
+        built = self._store("http://qdrant:6333", "maljan_cases_v2", "s3cr3t")
+
+        assert built == {
+            "url": "http://qdrant:6333",
+            "collection": "maljan_cases_v2",
+            "api_key": "s3cr3t",
+        }
+
+    def test_an_unset_key_reaches_the_client_as_no_key(self) -> None:
+        """An empty credential is "no authentication", not the empty string."""
+        built = self._store("http://qdrant:6333", "maljan_cases_v2", None)
+
+        assert built["api_key"] is None

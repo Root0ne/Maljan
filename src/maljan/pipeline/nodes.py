@@ -11,10 +11,17 @@ import asyncio
 import json
 import re
 import time
+from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, cast
 
+from maljan.agents.judge_agent import (
+    VERDICT_FALLBACK_CODE,
+    VERDICT_FALLBACK_REASON,
+    VERDICT_TIMEOUT_CODE,
+    VERDICT_TIMEOUT_REASON,
+)
 from maljan.analysis.run_summary import RunSummaryBuilder
 from maljan.core.config import BUILTIN_AGENTS
 from maljan.core.container import ServiceContainer
@@ -34,9 +41,16 @@ from maljan.pipeline.events import (
     summarize_claims,
 )
 from maljan.pipeline.evidence_summary import summarise
+from maljan.pipeline.outcome import corrected_reasons, decide_from_bundle, verdict_for_run
 from maljan.pipeline.state import AgentArgument, AnalysisState, _merge_stage_results
 from maljan.pipeline.sycophancy_detector import build_revision_directive, detect_sycophancy
-from maljan.pipeline.validation import Violation, corroboration, validation_metrics
+from maljan.pipeline.validation import (
+    ValidationTally,
+    Violation,
+    corroboration,
+    ungrounded_technique_note,
+    validation_metrics,
+)
 from maljan.reporting.ledger_report import section_is_grounded
 from maljan.schemas.evidence import LedgerEntry
 from maljan.schemas.isr_models import AgentISR
@@ -114,6 +128,28 @@ def _is_placeholder_only(chunks: list, role: str = "") -> bool:
     return bool(_STATIC_PLACEHOLDER_RE.match(content.strip()))
 
 
+# The reason a sandbox-fed analyst is skipped when nothing was detonated.
+SYNTHETIC_SANDBOX_REASON = "no sandbox fixture for this sample"
+
+
+def _sandbox_report_is_synthetic(state: AnalysisState) -> bool:
+    """True when the sandbox report stands in for a run that never happened.
+
+    The mock provider answers with a structurally valid, entirely empty report
+    when it has no fixture for the sample. Read as data that is exactly a
+    detonation that did nothing, and the dynamic and network analysts each
+    wrote half a dozen claims at confidence 1.00 about it. A real run with no
+    behaviour is not synthetic and is analysed as before.
+    """
+    report = state.get("sandbox_report")
+    return isinstance(report, dict) and bool(report.get("synthetic"))
+
+
+def _sandbox_fed(role: str) -> bool:
+    """Whether this role's input is the sandbox report rather than the sample."""
+    return role not in ("static", "generic")
+
+
 def _violations_from_rows(rows: Any) -> list[Violation]:
     """Rebuild the violations an analyst node put on the state channel."""
     out: list[Violation] = []
@@ -135,16 +171,82 @@ def _validation_update(agent: Any, agent_name: str) -> dict[str, Any]:
     if drain is None:
         return {}
     try:
-        rows, retries = drain()
+        drained = drain()
     except Exception as exc:  # noqa: BLE001 — a metric is never worth a lost run
         logger.debug("validation findings read skipped for %s: %s", agent_name, exc)
         return {}
+    # Unpacked outside the guard above, and the two ways it can be wrong are
+    # not the same. An agent that drained the wrong number of values is on an
+    # older contract — a mistake in this repository that used to cost that
+    # analyst its findings, retries and feedback counts in silence — and is
+    # said out loud. Anything that is not a drain result at all is a stub or a
+    # double, which is not news.
+    if not isinstance(drained, tuple | list):
+        logger.debug("validation findings for %s are not a drain result.", agent_name)
+        return {}
+    if len(drained) != 3:
+        logger.error(
+            "validation findings for %s drained %d value(s), not three; they are dropped.",
+            agent_name,
+            len(drained),
+        )
+        return {}
+    rows, retries, fed_back = drained
     update: dict[str, Any] = {}
     if rows:
         update["validation_findings"] = {agent_name: rows}
     if retries:
         update["validation_retries"] = retries
+    if fed_back:
+        update["validation_fed_back"] = dict(fed_back)
     return update
+
+
+def mean_claim_confidence(isrs: Any) -> float | None:
+    """The mean confidence of the analysts that produced claims, or ``None``.
+
+    An analyst that was skipped, or that read its data and found nothing to
+    say, is excluded rather than counted as a zero. Averaging it in was how a
+    run with one analyst at 0.50 and two skipped ones reported 0.167 — a
+    number about how many analysts ran, presented as how sure the run was.
+    """
+    values = [
+        float(getattr(isr, "mean_confidence", 0.0) or 0.0)
+        for isr in (isrs.values() if isinstance(isrs, dict) else (isrs or []))
+        if list(getattr(isr, "claims", None) or [])
+    ]
+    return sum(values) / len(values) if values else None
+
+
+def _overall_confidence(assessment: Any, isrs: Any) -> float:
+    """The judge's confidence when it gave one, else the analysts' own mean.
+
+    Three answers in order, and the order is the point: the judge decides the
+    verdict, so the judge's number is the verdict's number; failing that, the
+    analysts that actually produced claims; failing that, zero, which says the
+    run reached no confidence rather than naming one.
+    """
+    declared = getattr(assessment, "confidence", None)
+    if declared is not None:
+        try:
+            return float(declared)
+        except (TypeError, ValueError):
+            logger.warning("report_node: the judge's confidence %r is not a number.", declared)
+    mean = mean_claim_confidence(isrs)
+    return float(mean) if mean is not None else 0.0
+
+
+def isr_status(isr: Any) -> str:
+    """The lifecycle status one analyst's answer reports for itself.
+
+    The ISR's own ``status`` wins when it set one — an analyst that ended
+    without a report knows something ``claims == []`` cannot say — and the
+    claim list decides otherwise.
+    """
+    declared = str(getattr(isr, "status", "") or "").strip()
+    if declared:
+        return declared
+    return "complete" if list(getattr(isr, "claims", None) or []) else "no_data"
 
 
 def _assessment(bundle: Any) -> Any | None:
@@ -349,36 +451,60 @@ def _augment_static_chunks_with_path(
     return [rebuilt, *chunks[1:]]
 
 
-def _decide_from_bundle(bundle: Bundle) -> str:
-    """Map a final STIX bundle to a high-level verdict.
-
-    Heuristic:
-      * a ``malware`` object marks the sample malicious.
-      * an ``indicator``/``attack-pattern``/``relationship`` set with no
-        ``malware`` object but suspicious confidence is "Suspicious".
-      * an explicitly empty findings set (no indicators, no attack patterns,
-        no malware) maps to "Benign".
-    """
-    has_malware = False
-    has_suspicious_indicator = False
-    for obj in bundle.objects:
-        obj_type = getattr(obj, "type", "")
-        if obj_type == "malware":
-            has_malware = True
-            break
-        if obj_type in {"indicator", "attack-pattern", "relationship"}:
-            has_suspicious_indicator = True
-
-    if has_malware:
-        return "Malware"
-    if has_suspicious_indicator:
-        return "Suspicious"
-    return "Benign"
-
-
 # ---------------------------------------------------------------------------
 # Analyst node
 # ---------------------------------------------------------------------------
+
+
+def _sample_identity(state: AnalysisState) -> dict[str, Any]:
+    """What the run knows about the sample before anyone analysed it.
+
+    The hash the job was queued under, the name it arrived with and the format
+    detection are the router's; the md5, sha1 and size come from the sandbox
+    report's own file block when there is one, and the size otherwise from the
+    file on disk. None of them is a conclusion about the sample, which is why they are
+    put in front of the judge without a caveat. The name is the one the
+    submitter gave and is labelled so.
+
+    Never raises. An identity block that cannot be built is one the prompt goes
+    without, and a judge with no hash is what this exists to stop, not one this
+    should fail a run for.
+    """
+    identity: dict[str, Any] = {
+        "sha256": str(state.get("file_hash") or ""),
+        "file_name": str(state.get("file_name") or ""),
+        "file_type": str(state.get("file_type") or ""),
+        "platform": str(state.get("platform") or ""),
+    }
+    report = state.get("sandbox_report")
+    target = (report or {}).get("target") if isinstance(report, dict) else None
+    sandbox_file = target.get("file") if isinstance(target, dict) else None
+    if isinstance(sandbox_file, dict):
+        identity["md5"] = str(sandbox_file.get("md5") or "")
+        identity["sha1"] = str(sandbox_file.get("sha1") or "")
+        identity["size_bytes"] = sandbox_file.get("size") or ""
+    if not identity.get("size_bytes"):
+        from pathlib import Path
+
+        path = state.get("sample_path")
+        with suppress(OSError, TypeError, ValueError):
+            identity["size_bytes"] = Path(str(path)).stat().st_size if path else ""
+    return {key: value for key, value in identity.items() if str(value or "").strip()}
+
+
+def _ledger_servers(state: AnalysisState) -> set[str]:
+    """Every server the run has recorded a tool call against, by key.
+
+    Read off the raw rows rather than through ``LedgerEntry``: the question is
+    which servers were asked, one malformed row must not cost the answer, and
+    a row written by an in-process tool carries no server at all.
+    """
+    servers: set[str] = set()
+    for row in state.get("evidence_ledger") or []:
+        name = row.get("server") if isinstance(row, dict) else getattr(row, "server", None)
+        if name:
+            servers.add(str(name))
+    return servers
 
 
 # ---------------------------------------------------------------------------
@@ -445,13 +571,40 @@ def stage_record(
     *,
     ran: bool,
     reason: str = "",
+    failure: bool = False,
     agents: tuple[str, ...] = (),
+    agent_reasons: Mapping[str, str] | None = None,
     claim_count: int = 0,
     technique_ids: tuple[str, ...] = (),
     finding_count: int = 0,
     duration_ms: int = 0,
 ) -> dict[str, Any]:
-    """One stage's contribution to ``state["stage_results"]``."""
+    """One stage's contribution to ``state["stage_results"]``.
+
+    ``reason`` answers "why did this stage not run", and one other thing: why a
+    stage that did run went wrong, which ``failure`` says. A stage of three
+    analysts, one of which had no data, *ran*: writing that analyst's skip
+    reason as the stage's put "no sandbox fixture for this sample" beside
+    ``ran: true`` in the run summary, which reads as the stage having been
+    skipped and is contradicted by the same row's duration. Such a reason is
+    recorded per agent instead, under ``agent_reasons``.
+
+    A mediation that timed out is the other case and is not that one: the stage
+    ran, the reason belongs to the stage rather than to any of its members, and
+    the first version of this rule blanked it — the debate's only reason, and
+    the run summary stopped carrying it at all.
+    """
+    if ran and reason and not failure:
+        if agents:
+            agent_reasons = {**(agent_reasons or {}), **{agent: reason for agent in agents}}
+        else:
+            logger.debug(
+                "stage %s ran and gave the reason %r with no agent to attribute it to; "
+                "it is dropped. Pass agents, agent_reasons, or failure=True.",
+                getattr(stage, "key", ""),
+                reason,
+            )
+        reason = ""
     entry = StageResult(
         ran=ran,
         reason=reason,
@@ -460,6 +613,8 @@ def stage_record(
         finding_count=finding_count,
         agents=agents,
     ).to_dict()
+    if agent_reasons:
+        entry["agent_reasons"] = dict(agent_reasons)
     entry["kind"] = str(getattr(stage, "kind", "analysis"))
     # The reducer adds durations up across a stage's nodes, which is right for
     # a chain and wrong for a fan-out; it needs the mode to tell them apart.
@@ -563,6 +718,33 @@ def _with_upstream(chunks: list, block: str) -> list:
     return [replace(head, content=content, char_count=len(content)), *chunks[1:]]
 
 
+def _amended_validation(run_summary: Any, tally: ValidationTally) -> dict[str, Any] | None:
+    """The run summary's ``validation`` block plus what the report round cost.
+
+    ``None`` when there is nothing to amend — no summary (mock mode, where the
+    judge never built one) or no corrections in the report stage.
+    """
+    if not tally.retries and not tally.by_code and not tally.unresolved:
+        return None
+    block = dict((run_summary or {}).get("validation") or {}) if run_summary else {}
+    if not block:
+        return None
+    by_code = dict(block.get("by_code") or {})
+    for code, count in tally.by_code.items():
+        by_code[code] = int(by_code.get(code, 0)) + int(count)
+    block["by_code"] = dict(sorted(by_code.items()))
+    block["retries"] = int(block.get("retries") or 0) + tally.retries
+    # A capability claim the run does not establish survives into the report,
+    # because deleting the sentence would leave neither the claim nor a record
+    # of it. The row is how a reader learns the summary outran the evidence.
+    # Written only when there is one: a run that over-claimed nothing should
+    # not carry an empty key implying the question was asked and answered.
+    merged_unresolved = [*(block.get("unresolved") or []), *tally.unresolved]
+    if merged_unresolved:
+        block["unresolved"] = merged_unresolved
+    return block
+
+
 def stage_rollup(
     container: ServiceContainer, state: AnalysisState, extra: dict[str, Any] | None = None
 ) -> list[dict[str, Any]]:
@@ -586,6 +768,13 @@ def stage_rollup(
                 "reason": str(entry.get("reason") or ("" if entry else "stage did not report")),
                 "agents": list(entry.get("agents") or stage.agents),
                 "duration_ms": int(entry.get("duration_ms") or 0),
+                # Why an individual member of a stage that ran did not work.
+                # Absent when every member worked, which is the common row.
+                **(
+                    {"agent_reasons": dict(entry["agent_reasons"])}
+                    if entry.get("agent_reasons")
+                    else {}
+                ),
             }
         )
     return rows
@@ -803,7 +992,11 @@ def make_stage_agent_node(
             # analyst with nothing to read would spend a whole ReAct loop
             # analysing "No network data available for sample <sha>" and report
             # it back as its one evidence-backed claim.
-            if not chunks or _is_placeholder_only(chunks, role):
+            # A synthetic report is an absence, not an observation, and the
+            # loaders cannot tell: they are handed a well-formed report with
+            # empty sections and produce chunks describing exactly that.
+            synthetic = _sandbox_fed(role) and _sandbox_report_is_synthetic(state)
+            if not chunks or synthetic or _is_placeholder_only(chunks, role):
                 # A Linux ELF audit found that an ELF sample with no PCAP / sandbox network
                 # trace caused the network analyst to fail-hard with an
                 # AnalystError ([ERROR] prefix), which then routed into
@@ -819,8 +1012,12 @@ def make_stage_agent_node(
                     agent_name,
                 )
                 no_data_text = (
-                    f"[WARN] {agent_name}: no {agent_name} data available "
-                    "for this sample — analyst skipped."
+                    f"[WARN] {agent_name}: {SYNTHETIC_SANDBOX_REASON} — analyst skipped."
+                    if synthetic
+                    else (
+                        f"[WARN] {agent_name}: no {agent_name} data available "
+                        "for this sample — analyst skipped."
+                    )
                 )
                 emit_agent_message(
                     container.event_sink,
@@ -836,8 +1033,17 @@ def make_stage_agent_node(
                         **stage_record(
                             stage,
                             ran=True,
-                            reason="no data for this agent",
                             agents=(agent_name,),
+                            # The reason belongs to this agent, not to a stage
+                            # that ran. The analyst's own findings row carries
+                            # it too, as its ``status_reason``.
+                            agent_reasons={
+                                agent_name: (
+                                    SYNTHETIC_SANDBOX_REASON
+                                    if synthetic
+                                    else "no data for this agent"
+                                )
+                            },
                             duration_ms=_elapsed_ms(),
                         ),
                     }
@@ -920,7 +1126,7 @@ def make_stage_agent_node(
                 role="analyst",
                 text=summarize_claims(isr.claims, speaker=agent_name),
                 round_index=0,
-                status="complete" if isr.claims else "no_data",
+                status=isr_status(isr),
                 claims=claims_to_payload(isr.claims),
                 dissent=list(isr.dissent_items or []),
                 # The analyst's own prose, so the transcript can offer it behind
@@ -1062,6 +1268,8 @@ def _revision_input_is_absent(
     exists, and silently deleting an analyst on a transient Qdrant blip is a
     far worse failure than one wasted revise call.
     """
+    if _sandbox_fed(container.agent_role(agent_name)) and _sandbox_report_is_synthetic(state):
+        return True
     sandbox_report = state.get("sandbox_report")
     if isinstance(sandbox_report, dict) and sandbox_report:
         try:
@@ -1161,6 +1369,11 @@ def _debate_record(stage: Any, started: float, *, reason: str = "") -> dict[str,
 
     The reducer adds the durations up, so a debate of four rounds records the
     time all four of them took rather than the time the last one did.
+
+    The only reason this stage ever gives is a mediation that failed or timed
+    out, and that is the stage's own — it belongs to the round, not to a member
+    of it — so it is passed as a failure and survives ``stage_record``'s rule
+    about a stage that ran.
     """
     if stage is None:
         return {}
@@ -1168,6 +1381,7 @@ def _debate_record(stage: Any, started: float, *, reason: str = "") -> dict[str,
         stage,
         ran=True,
         reason=reason,
+        failure=bool(reason),
         duration_ms=int((time.monotonic() - started) * 1000),
     )
 
@@ -1357,6 +1571,16 @@ def make_negotiation_node(
                     reports=active_reports,
                     history=state.get("discussion_history") or [],
                     isr_reports=state.get("isr_reports") or {},
+                    # Which servers the run has actually called. The mediator
+                    # opens its tool loop to ask who this sample is only when
+                    # nothing has asked a reputation server yet, and that is a
+                    # question about the ledger rather than about the
+                    # analysts' prose.
+                    ledger_servers=_ledger_servers(state),
+                    # The sample's own facts. The mediator tells the judge to
+                    # look a hash up, and until now no message in the
+                    # conversation carried one.
+                    sample=_sample_identity(state),
                     # The stage's own bar for calling it agreement. ``None``
                     # leaves the mediator on the global setting, which is what
                     # the stage's options were seeded from.
@@ -1366,11 +1590,12 @@ def make_negotiation_node(
                 label="mediation",
             )
 
-            mean_conf = (
-                sum(isr.mean_confidence for isr in current_isrs) / len(current_isrs)
-                if current_isrs
-                else argument.confidence_score
-            )
+            # Only the analysts that produced claims. A skipped analyst
+            # averaged in as a zero dragged the whole negotiation's confidence
+            # down for having had nothing to read, and that number is what the
+            # report carried.
+            _claimed = mean_claim_confidence(current_isrs)
+            mean_conf = _claimed if _claimed is not None else argument.confidence_score
 
             emit_agent_message(
                 container.event_sink,
@@ -1606,7 +1831,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     role="reviser",
                     text=summarize_claims(isr.claims, speaker=name),
                     round_index=iteration,
-                    status="complete" if isr.claims else "no_data",
+                    status=isr_status(isr),
                     claims=claims_to_payload(isr.claims),
                     dissent=list(isr.dissent_items or []),
                     # The rewritten report. This text was previously dropped
@@ -1884,6 +2109,12 @@ def make_judge_node(
                 _degradation_reasons.append(
                     f"analysts produced no claims: {', '.join(_empty_analysts)}"
                 )
+            # Technique claims the analyst kept after being asked to cite the
+            # entry it read them from. A live run put sixteen of these in front
+            # of the judge, which read them as sixteen techniques.
+            _ungrounded_note = ungrounded_technique_note(state.get("validation_findings"))
+            if _ungrounded_note:
+                _degradation_reasons.append(_ungrounded_note)
             if _anti_emu_hits:
                 _short = _anti_emu_hits[0]
                 _suffix = f" (+{len(_anti_emu_hits) - 1} more)" if len(_anti_emu_hits) > 1 else ""
@@ -1916,10 +2147,36 @@ def make_judge_node(
                 memory_store=memory_store,
                 evidence_corpus=evidence_corpus or None,
                 current_sample_id=state.get("file_hash"),
+                sample=_sample_identity(state),
+                # What the run recorded, so a verdict that says the sample is
+                # clean can be asked which entry says so.
+                ledger_ids=[entry.id for entry in _ledger],
             )
+            # A verdict the judge never expressed as a bundle is the thinnest
+            # answer this pipeline can produce — no severity, no reasoning the
+            # model stands behind — and before this it reached the reader as an
+            # ordinary verdict with a slightly emptier STIX object.
+            if any(v.code == VERDICT_FALLBACK_CODE for v in verdict.violations):
+                _degradation_reasons.append(VERDICT_FALLBACK_REASON)
+                _degraded_mode = True
+            if any(v.code == VERDICT_TIMEOUT_CODE for v in verdict.violations):
+                _degradation_reasons.append(VERDICT_TIMEOUT_REASON)
+                _degraded_mode = True
+
             bundle = verdict.bundle
             stix_output: dict[str, Any] = bundle.model_dump() if isinstance(bundle, Bundle) else {}
-            decision = _decide_from_bundle(bundle) if isinstance(bundle, Bundle) else "Suspicious"
+            decision = decide_from_bundle(bundle) if isinstance(bundle, Bundle) else "Suspicious"
+            # An empty bundle over an empty run is not a clean sample. The
+            # judge emitted no malware object because there was nothing to
+            # emit one from -- no tool call was recorded and no analyst
+            # claimed anything -- and reporting that as Benign is a false
+            # negative with a confidence number attached.
+            decision, _inconclusive = verdict_for_run(
+                decision, evidence_entries=_ledger, isr_reports=isr_reports
+            )
+            if _inconclusive:
+                _degradation_reasons.append(_inconclusive)
+                _degraded_mode = True
 
             # What the analysts and the judge were told and did not fix. Both
             # are recorded rather than resolved, and both are what
@@ -1931,6 +2188,12 @@ def make_judge_node(
             ]
             _retries = int(state.get("validation_retries") or 0) + verdict.retries
             _unresolved.extend(("judge", violation) for violation in verdict.violations)
+            # And what every producer was *shown*. A code the retry fixed is
+            # invisible in the leftovers, which is how ``by_code`` came to read
+            # ``{}`` beside a run that had spent a retry on ``verdict.not_json``.
+            _fed_back: dict[str, int] = dict(state.get("validation_fed_back") or {})
+            for _code, _count in (verdict.fed_back or {}).items():
+                _fed_back[_code] = _fed_back.get(_code, 0) + int(_count)
 
             run_summary_dict = None
             try:
@@ -1948,7 +2211,7 @@ def make_judge_node(
                     .set_verdict(decision, len(bundle.objects) if isinstance(bundle, Bundle) else 0)
                     .set_negotiation(negotiation_state, max_iterations=max_iters)
                     .set_isr_stats(isr_reports, no_data=_no_data_analysts)
-                    .set_validation(validation_metrics(_retries, _unresolved))
+                    .set_validation(validation_metrics(_retries, _unresolved, _fed_back))
                     .set_corroboration(_corroboration)
                     .set_degraded_mode(_degraded_mode, _degradation_reasons)
                     .set_failed_analysts(_failed_analysts)
@@ -2318,29 +2581,7 @@ def make_report_node(
 
         report_sample_platform = state.get("platform") or "unknown"
 
-        # Derive overall confidence — last entry of the confidence history if
-        # available, otherwise the negotiation block of run_summary, otherwise
-        # 0.0 (safe default for the severity heuristic).
-        confidence_history = state.get("confidence_history") or []
-        overall_confidence: float = 0.0
-        if confidence_history:
-            try:
-                overall_confidence = float(confidence_history[-1])
-            except (TypeError, ValueError):
-                overall_confidence = 0.0
         run_summary_state = state.get("run_summary") or {}
-        if not overall_confidence:
-            try:
-                overall_confidence = float(
-                    (run_summary_state.get("negotiation") or {}).get("final_confidence") or 0.0
-                )
-            except (TypeError, ValueError):
-                overall_confidence = 0.0
-
-        # A degraded run is not capped here. It is said to the judge in the
-        # verdict prompt and printed in the report header, and the confidence
-        # is whatever the run actually reached — a number silently pulled down
-        # to 0.60 told the reader the same thing for every kind of thinness.
 
         # Severity, category and family come off the judge's bundle. Nothing
         # here computes them: a report that cannot say what the judge decided
@@ -2357,6 +2598,20 @@ def make_report_node(
         except Exception as exc:  # noqa: BLE001 — an unreadable assessment is "not assessed"
             logger.warning("report_node: the judge's assessment could not be read (%s).", exc)
         malware_category = getattr(_bundle_assessment, "malware_category", None)
+
+        # And so does the confidence. It used to be the negotiation's mean over
+        # *every* analyst, with a skipped one counted as a zero: one analyst at
+        # 0.50 beside two that never ran produced 0.167 on the front page of a
+        # "Malware" verdict. An analyst that had nothing to read is not a vote
+        # of no confidence, and the mean of the analysts that did produce
+        # claims is the fallback — the judge's own number is the answer when
+        # the judge gave one.
+        overall_confidence = _overall_confidence(_bundle_assessment, isr_reports)
+
+        # A degraded run is not capped here. It is said to the judge in the
+        # verdict prompt and printed in the report header, and the confidence
+        # is whatever the run actually reached — a number silently pulled down
+        # to 0.60 told the reader the same thing for every kind of thinness.
 
         discussion_history = [
             arg.model_dump() if hasattr(arg, "model_dump") else dict(arg)
@@ -2433,7 +2688,11 @@ def make_report_node(
                 # Degraded-run signalling: surfaced as a banner so a numerically
                 # high verdict/severity on a low-data run is not read as authoritative.
                 degraded_mode=bool(state.get("degraded_mode")),
-                degradation_reasons=cast("list[str]", state.get("degradation_reasons") or []),
+                # Corrected against the whole ledger: the evidence-only static
+                # provider's entries are collected above, after the verdict
+                # stage read the ledger, so a run that carries them must not
+                # ship a report saying no analysis was performed.
+                degradation_reasons=corrected_reasons(state.get("degradation_reasons"), _ledger),
                 # The routing minimum, which stands in for the identity block
                 # when no agent called an identification tool.
                 sample_platform=state.get("platform"),
@@ -2519,6 +2778,11 @@ def make_report_node(
         # also returns None when the structured-output and manual-parse
         # fallbacks both fail. In every "no narrative" branch we apply the
         # deterministic template so the report never ships with empty prose.
+        # What the report's own two LLM rounds were told was wrong with their
+        # answers. They run after the judge built the run summary, so the
+        # summary's ``validation`` block is amended here rather than there.
+        _report_tally = ValidationTally()
+
         narrative_dict: dict[str, Any] | None = None
         try:
             narrative_agent = container.get_narrative_agent()
@@ -2536,7 +2800,8 @@ def make_report_node(
                 # not speak again until 17:55:54, on attempt 1 of 3 — a job
                 # that looked alive purely because of the worker heartbeat.
                 narrative_output = await asyncio.wait_for(
-                    narrative_agent.generate(report), timeout=_NARRATIVE_TIMEOUT_SECONDS
+                    narrative_agent.generate(report, state.get("isr_reports")),
+                    timeout=_NARRATIVE_TIMEOUT_SECONDS,
                 )
             except TimeoutError:
                 logger.error(
@@ -2552,6 +2817,7 @@ def make_report_node(
                 narrative_output = None
             if narrative_output is not None:
                 narrative_dict = narrative_output.model_dump(mode="json")
+            _report_tally.merge(getattr(narrative_agent, "validation_tally", ValidationTally()))
 
         if narrative_dict is not None:
             report = MalwareReportBuilder.apply_narrative(report, narrative_dict)
@@ -2581,6 +2847,7 @@ def make_report_node(
                 logger.warning(
                     "report_node: ReportComposer.compose raised (%s); spine skipped.", exc
                 )
+            _report_tally.merge(getattr(composer, "validation_tally", ValidationTally()))
 
         # Deterministic figures (inline SVG + Ghidra
         # code listings) generated from the report's own data — real charts, no
@@ -2715,6 +2982,15 @@ def make_report_node(
         # untouched value keeps the mock-mode contract, where the judge node
         # skipped the RunSummaryBuilder and the column is legitimately null.
         _state_summary: dict[str, Any] = {}
+        _validation_block = _amended_validation(state.get("run_summary"), _report_tally)
+        if _validation_block is not None:
+            _state_summary["validation"] = _validation_block
+            # A name of its own: ``_summary`` above is still read below this
+            # point, and rebinding it here was correct only for as long as
+            # nothing moved.
+            _amended_report_summary = dict(report.run_summary or {})
+            _amended_report_summary["validation"] = _validation_block
+            report.run_summary = _amended_report_summary
         if fp_warnings:
             _state_summary["fp_warnings"] = fp_warnings
         if _ledger:

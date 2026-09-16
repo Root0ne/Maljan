@@ -33,8 +33,10 @@ class ClaimEvidence(BaseModel):
     evidence_ref: str = Field(
         ...,
         description=(
-            "Concrete artifact reference, e.g. 'API call: VirtualAllocEx @ 0x401234', "
-            "'PCAP frame 42: dst=185.220.101.5:443', 'string at .data+0x10: /api/c2'."
+            "Concrete artifact reference naming the ledger entry it was read from, e.g. "
+            "'API call: VirtualAllocEx @ 0x401234 (import table) [ev_0002]', "
+            "'PCAP frame 42: dst=185.220.101.5:443 [ev_0007]', "
+            "'string at .data+0x10: /api/c2 [ev_0003]'."
         ),
     )
     confidence: float = Field(
@@ -146,6 +148,19 @@ class AgentISR(BaseModel):
     artifacts: list[Artifact] = Field(
         default_factory=list,
         description="Concrete artifacts this agent established, for the report's sections.",
+    )
+    # Why this ISR looks the way it does, when the analyst knows something the
+    # claim list cannot say. An analyst that ended its loop on an intention
+    # sentence produced no claims *and* no report, and the two are different
+    # findings: the first is an analyst with nothing to say, the second is a
+    # model that never answered. Left unset on the ordinary path, where the
+    # claim list speaks for itself.
+    status: str | None = Field(
+        default=None,
+        description="Lifecycle status the analyst reports for itself, e.g. 'no_claims'.",
+    )
+    status_reason: str | None = Field(
+        default=None, description="Why the analyst reports that status, in one sentence."
     )
 
     @property

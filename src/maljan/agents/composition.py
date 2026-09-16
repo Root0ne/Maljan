@@ -271,8 +271,8 @@ def _withheld_servers(settings: Settings, key: str) -> set[str]:
 
     Two sources, and they stack. The profile's own ``exclude_servers`` is the
     tool-free baseline's lever and applies to every member. A stage's
-    ``builtin_tools=False`` is the narrower one: it withholds the four built-in
-    sidecars from that stage's agents only, so a triage stage can be made to
+    ``builtin_tools=False`` is the narrower one: it withholds every built-in
+    server from that stage's agents only, so a triage stage can be made to
     read what it was handed instead of going looking, without cloning the
     definitions it runs.
     """
@@ -348,9 +348,14 @@ def _staging_inputs(container: Any) -> tuple[str | None, str]:
 
 
 async def _astage(
-    container: Any, tools: list[Any], job_key: str
+    registry: Any, container: Any, tools: list[Any], job_key: str
 ) -> tuple[dict[str, str], list[str]]:
     """Upload the sample to every bound server that wants it. Never raises.
+
+    The registry is handed in rather than asked of the container: the
+    synchronous caller below holds the container's cache lock while it waits
+    for this coroutine, so a guarded getter reached from here would wait for a
+    lock that only the blocked caller can release.
 
     Staging records its own failures on the registry, which is the union
     across every agent in the job; this agent's own reasons are the ones that
@@ -362,7 +367,6 @@ async def _astage(
         return {}, []
     from maljan.agents.sample_staging import stage_for_agent
 
-    registry = container.get_server_registry()
     before = len(registry.degradation_reasons)
     try:
         staged = await stage_for_agent(registry, tools, sample_path, sha256=digest, job_id=job_key)
@@ -372,21 +376,55 @@ async def _astage(
     return dict(staged), list(registry.degradation_reasons[before:])
 
 
+def _has_remote_server(registry: Any, tools: list[Any]) -> bool:
+    """Whether any server behind ``tools`` is reached over a network.
+
+    Only such a server is ever staged to, and the answer is a property of the
+    configuration alone — no transport is touched, nothing is awaited. Asking
+    it here, on the caller's own thread, is what keeps a deployment whose
+    servers are all local subprocesses from handing the agent loop a
+    coroutine, and waiting on it, for an answer that is always ``{}``.
+    """
+    from maljan.agents.sample_staging import REMOTE_TRANSPORTS
+    from maljan.agents.tool_pinning import server_of
+
+    for key in dict.fromkeys(server_of(tool) for tool in tools):
+        if not key:
+            continue
+        try:
+            handle = registry.get(key)
+        except Exception:  # noqa: BLE001 — a tool from a server that is gone
+            continue
+        transport = str(getattr(handle.config, "transport", "stdio") or "stdio").lower()
+        if transport in REMOTE_TRANSPORTS:
+            return True
+    return False
+
+
 def _stage(container: Any, tools: list[Any], job_key: str) -> tuple[dict[str, str], list[str]]:
     """``_astage`` for the synchronous resolver, on the shared agent loop.
 
     The same loop the handles were opened on, which is the loop their
     transports are bound to: uploading on any other one is the cross-loop
     failure ``ServerHandle`` exists to avoid.
+
+    Both questions that can be answered without a transport are answered
+    first, on this thread: a job with no sample stages nothing, and neither
+    does a deployment whose servers are all local.
     """
     sample_path, _ = _staging_inputs(container)
     if not sample_path:
+        return {}, []
+    registry = container.get_server_registry()
+    if not _has_remote_server(registry, tools):
         return {}, []
     from maljan.agents.base_agent import run_coro_blocking
 
     try:
         staged, reasons = run_coro_blocking(
-            _astage(container, tools, job_key), hard_timeout=120.0, label="sample-staging"
+            _astage(registry, container, tools, job_key),
+            hard_timeout=120.0,
+            label="sample-staging",
         )
     except Exception as exc:  # noqa: BLE001 — staging never fails a run
         logger.warning("sample staging skipped for job %s: %s", job_key, exc)
@@ -484,7 +522,9 @@ async def aresolve_agent(key: str, container: Any, job_key: str = "job") -> Reso
         reasons.extend(ref_reasons)
 
     deduped = _dedupe(tools)
-    staged, staging_reasons = await _astage(container, deduped, job_key)
+    staged, staging_reasons = await _astage(
+        container.get_server_registry(), container, deduped, job_key
+    )
     reasons.extend(staging_reasons)
     return ResolvedAgent(
         key=key,
