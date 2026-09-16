@@ -268,14 +268,17 @@ name a disabled agent while it is the active team.
 Every analysis capability the pipeline used to run in-process is also a tool an
 agent may call. Four stdio sidecars ship built in, each a single-file `FastMCP`
 server under `services/`, launched with the same interpreter the worker runs on
-and registered in `_builtin_servers()`:
+and registered in `_builtin_servers()`. A fifth entry is registered there
+without being a process of this deployment at all: VirusTotal's own server,
+reached over HTTP and off until an operator registers an agent token.
 
 | Server | Bound to | How | Offers |
 | :-- | :-- | :-- | :-- |
 | `analysis` | `static` | definition `tools` | Identity and hashes, strings and typed IOCs, PE/ELF/Mach-O/APK structure, archive and document inspection, payload carving, YARA, Sigma and capa. |
 | `knowledge` | every analyst and the judge | definition `tools` | ATT&CK lookup, validation and ranking, the API-behaviour catalog, the LOLBin table, family and prior-case retrieval. |
 | `network` | `network` | role binding | DNS, HTTP and packet views of a capture, plus the whole-capture summary. |
-| `threatintel` | `judge` | role binding | VirusTotal and AbuseIPDB reputation lookups. |
+| `threatintel` | `judge` | role binding | VirusTotal and AbuseIPDB reputation lookups over their REST APIs. |
+| `virustotal` | `network`, `judge`, `triage` | definition `tools` | VirusTotal's own MCP server over streamable-HTTP: file, URL, domain, IP, analysis and submission reports. Disabled until an agent token is registered. |
 
 The two tool sidecars carry `agents: []` and are bound only by the `ToolRef`s
 in the agent definitions, so the definition's tool list is the single binding

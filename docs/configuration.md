@@ -247,7 +247,8 @@ redeploying with a different environment.
 
 ## Tools, and the measurement baseline
 
-Four tool servers are enabled out of the box. What each offers is in
+Four tool servers are enabled out of the box, and a fifth (`virustotal`)
+ships ready to enable. What each offers is in
 [architecture.md](architecture.md); what an operator changes here is the
 binding, the exposure (`tools`) and whether the server runs at all (`enabled`).
 
@@ -288,8 +289,56 @@ in the analysts' own attach path, so they apply to a custom team too:
 `exclude_servers` withholds servers by key or `"*"` for all,
 `exclude_sandbox_tools` withholds the in-process sandbox tool set, and
 `static_provider` overrides every member's provider at once. A single stage can
-withhold the four built-in sidecars from its own agents with
+withhold every built-in server from its own agents with
 `builtin_tools: false`, which stacks on top of whatever the team excludes.
+
+### VirusTotal's own MCP server
+
+`virustotal` is a fifth built-in and the only one that is not a process of
+this deployment: it is VirusTotal's server, reached over streamable-HTTP at
+`https://ai.virustotal.com/mcp`. Nothing is installed for it and no VirusTotal
+API key is involved. It ships **disabled**, because it needs a credential that
+only a registration produces.
+
+Register from Settings → Setup guides → Add a tool server → **Connect
+VirusTotal**. The button calls
+`POST /api/v1/settings/virustotal/register`, which asks VirusTotal for an
+agent token, stores it as this server's `auth_token` (its own encrypted row,
+like every other tool-server credential), turns the server on and answers with
+the masked state and the public handle VirusTotal now knows this deployment
+by. Registering again replaces the token. Until a token is stored, the Test
+button answers "no agent token" rather than dialling out.
+
+The lookups are ticked by default and are read-only:
+`get_file_report`, `get_url_report`, `get_domain_report`, `get_ip_report`,
+`get_analysis` and `get_submission`. `submit_file` is advertised and stays
+**unticked**: uploading a sample publishes it to VirusTotal, which is a
+disclosure an operator opts into, so it takes a deliberate tick in the Tools
+step. See [security.md](security.md) for what that changes.
+
+The token is subject to VirusTotal's published quotas. Over quota, the server
+answers the tool call with a 429 carrying `Retry-After`; the analyst records
+that answer and carries on without it, exactly as it does for any tool that
+declines.
+
+`virustotal` is referenced by the `network` analyst, the `judge` and the
+seeded `triage` agent. A disabled server contributes no tools and no
+degradation reason, so those references cost nothing until it is registered.
+
+`services/threatintel-mcp` is unchanged: it still offers VirusTotal and
+AbuseIPDB lookups over their REST APIs with `VIRUSTOTAL_API_KEY` and
+`ABUSEIPDB_API_KEY`. Where both are on, `virustotal` supersedes its VirusTotal
+half — it is VirusTotal's own server, richer and maintained by them — while
+the AbuseIPDB half stays the only source for IP abuse reports. A deployment
+with an API key and no agent token keeps working exactly as before.
+
+**The stdio alternative.** The same server runs locally as `vt-mcp`, reading
+the same agent token from `VTAI_TOKEN`, and that form offers one tool the
+remote one cannot: `submit_local_file`, which uploads by path. The remote
+server has no view of this host's filesystem, so it offers `submit_file`
+(the bytes, base64) instead. Operators who want the local-path upload install
+it as described in [deployment.md](deployment.md) and add a second server
+entry with transport `stdio`.
 
 ## Teams and stages
 
@@ -307,7 +356,7 @@ pipeline → Teams) is an ordered list of stages. Each stage is:
 | `mode` | `sequential` (default) or `parallel`, for an analysis stage. |
 | `inject_upstream` | `none`, `findings` (default) or `full`. |
 | `debate` | Round limit, consensus threshold and sycophancy check, for a debate stage. |
-| `builtin_tools` | `false` withholds `analysis`, `knowledge`, `network` and `threatintel` from this stage's agents. |
+| `builtin_tools` | `false` withholds every built-in server (`analysis`, `knowledge`, `network`, `threatintel`, `virustotal`) from this stage's agents. |
 
 ### The teams that ship
 

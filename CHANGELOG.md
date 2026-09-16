@@ -8,6 +8,20 @@ change landed on `main`.
 
 ### Added
 
+- **VirusTotal's own MCP server ships as a built-in tool server.**
+  `virustotal` is seeded in `_builtin_servers()` on the streamable-HTTP
+  endpoint `https://ai.virustotal.com/mcp`, disabled until an operator
+  registers. **Connect VirusTotal** in the tool-server setup guide calls
+  `POST /api/v1/settings/virustotal/register`, which obtains an agent token
+  without a browser and without a VirusTotal API key, stores it encrypted like
+  any other tool-server credential and enables the server. The six read-only
+  lookups are ticked by default; `submit_file` is advertised and left unticked,
+  because uploading a sample to VirusTotal is a disclosure the operator opts
+  into. The `network` analyst, the judge and the seeded `triage` agent
+  reference the server, and a disabled server costs them nothing.
+  `services/threatintel-mcp` is unchanged and still serves deployments with a
+  VirusTotal API key; `submit_local_file` remains available by running the same
+  server over stdio, which `docs/deployment.md` documents.
 - **Two more teams ship: `mobile` and `deep_static`.** `mobile` is triage, an
   Android static pass conditional on `file_type in ("apk", "dex")`, detonation
   conditional on a sandbox report, then the debate, the verdict and the report.
