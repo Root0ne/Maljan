@@ -27,6 +27,7 @@ from arq.connections import RedisSettings
 from maljan.core.config import Settings as _CoreSettings
 from maljan.core.settings_catalog import core_catalog
 from maljan.core.settings_overrides import build_settings, public_snapshot
+from maljan.pipeline.outcome import absent_analysis_message
 from pydantic import ValidationError
 from sqlalchemy import Select, delete, func, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -38,6 +39,17 @@ from app.runtime_config import runtime_config
 logger = get_logger("worker")
 
 _SECRET_PATHS = [e.path for e in core_catalog() if e.secret]
+
+
+class AbsentAnalysisError(Exception):
+    """The pipeline ran and produced no analysis at all.
+
+    Its own class rather than a flag, so the one failure path already in this
+    module marks the job failed, records the message and persists no report —
+    a job that says "completed" over a run nobody performed is worse than one
+    that says it failed, because only the first is read as a result.
+    """
+
 
 # What ``AgentFinding.status`` may hold. The column feeds a TypeScript union
 # and a status badge, so a value an ISR invented would reach both and render
@@ -878,6 +890,18 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 f"Pipeline completed in {elapsed:.1f}s: job={job_id}",
                 extra={"job_id": job_id, "duration_ms": round(elapsed * 1000)},
             )
+
+            # A run in which no analyst answered and the judge never answered
+            # is not a degraded analysis, it is an absent one. Saving a report
+            # for it would publish a verdict and a confidence drawn from
+            # nothing, which is what a provider that refused every request
+            # produced: "completed", Suspicious, 0.0, no evidence and no error
+            # for the operator to act on. Raised rather than handled here so
+            # the one failure path below marks the job, records the message and
+            # persists nothing.
+            absent = absent_analysis_message(pipeline_result)
+            if absent:
+                raise AbsentAnalysisError(absent)
 
             # Persistence phase begins — the worker is about to insert
             # the report and findings into Postgres. Live consumers use
