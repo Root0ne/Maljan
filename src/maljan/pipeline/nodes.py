@@ -14,8 +14,10 @@ import time
 from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import replace
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from maljan.agents.evidence_recorder import EvidenceRecorder
 from maljan.agents.judge_agent import (
     VERDICT_FALLBACK_CODE,
     VERDICT_FALLBACK_REASON,
@@ -32,6 +34,7 @@ from maljan.pipeline.conditions import (
     ConditionError,
     StageContext,
     StageResult,
+    TriageFacts,
     evaluate,
 )
 from maljan.pipeline.events import (
@@ -44,6 +47,13 @@ from maljan.pipeline.evidence_summary import summarise
 from maljan.pipeline.outcome import corrected_reasons, decide_from_bundle, verdict_for_run
 from maljan.pipeline.state import AgentArgument, AnalysisState, _merge_stage_results
 from maljan.pipeline.sycophancy_detector import build_revision_directive, detect_sycophancy
+from maljan.pipeline.triage_pack import (
+    PIPELINE,
+    CapaSettings,
+    PackInputs,
+    failure_reason,
+    run_pack,
+)
 from maljan.pipeline.validation import (
     ValidationTally,
     Violation,
@@ -452,6 +462,300 @@ def _augment_static_chunks_with_path(
 
 
 # ---------------------------------------------------------------------------
+# Triage node
+# ---------------------------------------------------------------------------
+
+
+# How long the pack waits for the one reputation call. A lookup by hash is a
+# single round trip; a server that has not answered in this long is one the
+# run goes on without, and the entry says so.
+REPUTATION_TIMEOUT_S = 60.0
+
+
+def _reputation_lookup(container: ServiceContainer, stage: Any) -> Any:
+    """The pack's reputation step, bound to this job's servers and settings.
+
+    Returns a callable the pack invokes with its recorder. The callable makes
+    at most one call: ``get_file_report`` on VirusTotal's own server when it
+    is enabled, else ``check_hash`` on the threat-intel sidecar when it is, and
+    otherwise writes the entry that says no reputation server is enabled. The
+    call goes through the tool server registry exactly as an agent's does and
+    is recorded under that server, so a run's ledger says which service was
+    asked, not only that something was.
+    """
+    from maljan.core import virustotal
+    from maljan.core.config import ToolRef
+
+    def _skip(recorder: Any, why: str) -> Any:
+        return recorder.record(
+            tool="reputation",
+            args={"sha256": container.sample_sha256},
+            server=PIPELINE,
+            output=why,
+            ok=False,
+            error=why,
+            started_at=time.time(),
+        )
+
+    def lookup(recorder: Any) -> Any:
+        if str(container.config.triage.reputation) == "off":
+            return _skip(recorder, "core.triage.reputation is off; no lookup was made")
+        servers = container.config.mcp.servers
+        chosen: tuple[str, str, dict[str, Any]] | None = None
+        sha256 = container.sample_sha256
+        if getattr(servers.get(virustotal.SERVER_KEY), "enabled", False):
+            chosen = (virustotal.SERVER_KEY, "get_file_report", {"hash": sha256})
+        elif getattr(servers.get("threatintel"), "enabled", False):
+            chosen = ("threatintel", "check_hash", {"file_hash": sha256})
+        if chosen is None:
+            return _skip(
+                recorder,
+                f"no reputation server is enabled ({virustotal.SERVER_KEY}, threatintel); "
+                "no lookup was made",
+            )
+        server, tool_name, args = chosen
+        from maljan.agents.base_agent import run_coro_blocking
+
+        started, wall_clock = time.monotonic(), time.time()
+        registry = container.get_server_registry()
+        tools, reasons = registry.tools_for_ref(
+            ToolRef(kind="mcp", server=server, name=tool_name),
+            container.job_key(),
+            truncation_ledger=container.get_truncation_ledger(),
+        )
+        if not tools:
+            why = "; ".join(reasons) or f"{server} offered no tool named {tool_name}"
+            return recorder.record(
+                tool=tool_name,
+                args=args,
+                server=server,
+                output=why,
+                ok=False,
+                error=why,
+                started_at=wall_clock,
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
+        try:
+            output = str(
+                run_coro_blocking(
+                    tools[0].ainvoke(args), REPUTATION_TIMEOUT_S, label=f"triage:{tool_name}"
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 — a failed lookup is an entry
+            message = f"{type(exc).__name__}: {exc}"
+            return recorder.record(
+                tool=tool_name,
+                args=args,
+                server=server,
+                output=message,
+                ok=False,
+                error=message,
+                started_at=wall_clock,
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
+        # The MCP client answers a server-side failure as text rather than
+        # raising, so the wrapper an agent runs under records it as a result.
+        # The pack reads that text for what it is: a call that did not answer.
+        error = _tool_error_text(output)
+        return recorder.record(
+            tool=tool_name,
+            args=args,
+            server=server,
+            output=output,
+            ok=error is None,
+            error=error,
+            started_at=wall_clock,
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+
+    return lookup
+
+
+def _tool_error_text(output: str) -> str | None:
+    """The failure an MCP tool result carries, or ``None`` for an answer."""
+    text = (output or "").strip()
+    if not text.startswith("{"):
+        return None
+    try:
+        parsed = json.loads(text)
+    except (ValueError, TypeError):
+        return None
+    if isinstance(parsed, dict) and parsed.get("tool_error"):
+        detail = parsed.get("detail") or parsed.get("type") or ""
+        return f"{parsed['tool_error']}: {detail}" if detail else str(parsed["tool_error"])
+    return None
+
+
+def _function_matches_step(container: ServiceContainer, state: AnalysisState) -> Any:
+    """The pack's exact-match attribution step, or ``None`` when it cannot run.
+
+    Three things have to be there: a Qdrant memory backend, a static provider
+    that can hash functions, and a mirror path for it to read. Without any
+    one of them there is no entry, because there is nothing that could have
+    been asked; with all three the step is the judge's function-hash read,
+    made before the analysts instead of after them.
+    """
+    cfg = container.config
+    static_path = state.get("static_sample_path")
+    if str(getattr(cfg.memory, "backend", "")) != "qdrant" or not static_path:
+        return None
+    try:
+        provider = container.get_static_provider()
+    except Exception as exc:  # noqa: BLE001 — no provider, no step
+        logger.debug("triage pack: no static provider for function hashes (%s)", exc)
+        return None
+    if not provider.capabilities.provides_function_hashes:
+        return None
+    sha256 = str(state.get("file_hash") or "")
+
+    def step() -> tuple[dict[str, Any], dict[str, Any]]:
+        from maljan.providers.base import StaticJobContext
+        from maljan.tools import knowledge
+
+        job = StaticJobContext(mirror_sample_path=str(static_path), sha256=sha256)
+        hashes = [h for _name, h in provider.function_hashes(job)]
+        args = {
+            "func_hashes": hashes,
+            "qdrant_url": cfg.memory.qdrant_url,
+            "collection": cfg.memory.qdrant_function_hash_collection,
+            "exclude_sample_id": sha256,
+        }
+        api_key = (
+            cfg.memory.qdrant_api_key.get_secret_value() if cfg.memory.qdrant_api_key else None
+        )
+        return args, knowledge.function_matches(
+            hashes,
+            cfg.memory.qdrant_url,
+            collection=cfg.memory.qdrant_function_hash_collection,
+            api_key=api_key,
+            exclude_sample_id=sha256,
+        )
+
+    return step
+
+
+def make_triage_node(
+    container: ServiceContainer,
+    *,
+    stage: Any,
+    announces: bool = True,
+    finishes: tuple[str, ...] = (),
+) -> Any:
+    """Factory: the node a triage stage runs as.
+
+    It runs the pack (``pipeline.triage_pack``) over the sample on a worker
+    thread, writes every entry to the evidence ledger and the four facts a
+    later stage's condition may read to ``triage_facts``. It declines, with
+    the reason recorded, when the stage's condition is false, when
+    ``core.triage.enabled`` is off, when the stage withholds the built-in
+    tools, and when there is no sample on disk to read; and it never fails
+    the job — a pack that raised is a stage that ran and says it failed.
+    """
+
+    async def node_fn(state: AnalysisState) -> dict[str, Any]:
+        started = time.monotonic()
+        announce_finished(container, state, tuple(k for k in finishes if k != stage.key))
+
+        runs, reason = stage_runs(stage, state)
+        path = _absolute_host_sample_path(state)
+        if runs and not bool(container.config.triage.enabled):
+            runs, reason = False, "core.triage.enabled is off"
+        if runs and not getattr(stage, "builtin_tools", True):
+            runs, reason = False, "the stage withholds the built-in tools"
+        if runs and not (path and Path(path).is_file()):
+            runs, reason = False, "no sample on disk to read"
+        if not runs:
+            logger.info("stage %s skipped: %s", stage.key, reason)
+            if announces:
+                announce_skipped(container, stage, reason)
+            return stage_record(stage, ran=False, reason=reason)
+
+        if announces:
+            announce_started(container, stage)
+
+        recorder = EvidenceRecorder(
+            PIPELINE, counter=container.get_evidence_counter(), stage=stage.key
+        )
+        cfg = container.config
+        capa_cfg = cfg.static.capa
+        inputs = PackInputs(
+            sample_path=path,
+            sha256=str(state.get("file_hash") or ""),
+            file_type=str(state.get("file_type") or ""),
+            strings_head=int(cfg.triage.strings_head),
+            capa=CapaSettings(
+                rules_dir=str(capa_cfg.rules_dir),
+                signatures_dir=str(capa_cfg.signatures_dir),
+                timeout_s=int(capa_cfg.timeout_seconds),
+                backend=str(capa_cfg.backend),
+            ),
+            sandbox_report=state.get("sandbox_report"),
+            evidence_budget_bytes=int(getattr(cfg.reporting, "evidence_budget_bytes", 0) or 0),
+        )
+
+        def _elapsed_ms() -> int:
+            return int((time.monotonic() - started) * 1000)
+
+        try:
+            result = await asyncio.to_thread(
+                run_pack,
+                recorder,
+                inputs,
+                reputation=_reputation_lookup(container, stage),
+                function_matches=_function_matches_step(container, state),
+            )
+        except Exception as exc:  # noqa: BLE001 — the pack never fails the job
+            logger.warning(
+                "triage pack failed (%s: %s); the run goes on without it.", type(exc).__name__, exc
+            )
+            entries = list(recorder.entries)
+            update: dict[str, Any] = {
+                "triage_facts": {
+                    **TriageFacts().to_dict(),
+                    "entries": len(entries),
+                    "failed": len(entries),
+                    "duration_ms": _elapsed_ms(),
+                    "degradation_reasons": [failure_reason("pack")],
+                },
+                **stage_record(
+                    stage,
+                    ran=True,
+                    reason=f"triage pack failed: {type(exc).__name__}: {exc}",
+                    failure=True,
+                    duration_ms=_elapsed_ms(),
+                ),
+            }
+            if entries:
+                update["evidence_ledger"] = [e.model_dump(mode="json") for e in entries]
+            if stage.key in finishes:
+                announce_finished(container, state, (stage.key,), extra=update.get("stage_results"))
+            return update
+
+        logger.info(
+            "triage pack: %d entries, %d failed, %d ms.",
+            len(result.entries),
+            len(result.failed),
+            result.duration_ms,
+        )
+        update = {
+            "triage_facts": result.to_state(),
+            **stage_record(stage, ran=True, duration_ms=_elapsed_ms()),
+        }
+        if result.entries:
+            update["evidence_ledger"] = [e.model_dump(mode="json") for e in result.entries]
+            update["tool_evidence"] = {
+                PIPELINE: [e.to_captured().model_dump() for e in result.entries]
+            }
+        if stage.key in finishes:
+            announce_finished(container, state, (stage.key,), extra=update.get("stage_results"))
+        return update
+
+    node_fn.__name__ = f"{stage.key}_triage_node"
+    node_fn.__doc__ = f"The triage pack, run as stage '{stage.key}'."
+    return node_fn
+
+
+# ---------------------------------------------------------------------------
 # Analyst node
 # ---------------------------------------------------------------------------
 
@@ -544,6 +848,7 @@ def stage_context(state: AnalysisState) -> StageContext:
         has_pcap=bool(isinstance(network, dict) and network),
         has_sandbox_report=bool(report),
         stages=results,
+        triage=TriageFacts.from_dict(state.get("triage_facts") or {}),
     )
 
 
@@ -2054,7 +2359,13 @@ def make_judge_node(
                     _hit_name = str(sig.get("name") or "").strip()
                     if _hit_name and _hit_name not in _anti_emu_hits:
                         _anti_emu_hits.append(_hit_name)
-            _degradation_reasons: list[str] = []
+            # What the triage pack could not establish comes first: those
+            # reasons were recorded before any analyst ran, and the judge is
+            # the one node that assembles the run's list.
+            _triage_facts = dict(state.get("triage_facts") or {})
+            _degradation_reasons: list[str] = [
+                str(reason) for reason in (_triage_facts.get("degradation_reasons") or [])
+            ]
             # The previous guard required
             # ``_technique_count > 0`` and so silently *missed* the most
             # degraded outcome of all — a run with zero corroboration AND
@@ -2229,6 +2540,7 @@ def make_judge_node(
                     )
                     .set_token_usage(container.get_token_ledger().snapshot())
                     .set_truncation(container.get_truncation_ledger().snapshot())
+                    .set_triage(_triage_facts)
                     .build()
                 )
                 run_summary_dict = summary.to_dict()

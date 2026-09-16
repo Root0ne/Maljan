@@ -29,6 +29,8 @@ nodes import the builder that imports them.
   * The verdict stage is ``judge`` and the report stage is ``report``. A
     profile has exactly one of the first and at most one of the second, so
     neither can collide.
+  * A triage stage is one node named after the stage itself. It has no agent
+    to be named after, and a stage key is unique in its profile.
 """
 
 from __future__ import annotations
@@ -153,7 +155,14 @@ def _finisher(
     return tuple(planned.exit) or tuple(planned.nodes)
 
 
+def triage_node(stage: StageDefinition) -> str:
+    """The node a triage stage runs as."""
+    return stage.key
+
+
 def _entry_nodes(profile: ProfileDefinition, stage: StageDefinition) -> tuple[str, ...]:
+    if stage.kind == "triage":
+        return (triage_node(stage),)
     if stage.kind == "analysis":
         if stage.mode == "parallel":
             return tuple(analyst_node(a) for a in stage.agents)
@@ -172,6 +181,9 @@ def _stage_nodes(
     live_keys: set[str],
 ) -> StageNodes:
     entry = entries[stage.key]
+    if stage.kind == "triage":
+        node = triage_node(stage)
+        return StageNodes(stage, (node,), entry, (node,))
     if stage.kind == "analysis":
         agents = tuple(analyst_node(a) for a in stage.agents)
         if stage.mode != "parallel":

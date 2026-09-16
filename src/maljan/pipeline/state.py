@@ -236,6 +236,13 @@ class AnalysisState(TypedDict):
     # rather than per key because a parallel stage has several of them.
     stage_results: Annotated[dict[str, dict[str, Any]], _merge_stage_results]
 
+    # What the triage pack established and how it went: the four facts a
+    # stage condition reads (``conditions.TriageFacts``), the entry and
+    # failure counts and the wall clock the run summary reports, and the
+    # degradation reasons the judge carries forward. Written once by the
+    # triage node; empty on a run whose team has no triage stage.
+    triage_facts: dict[str, Any]
+
     # How many feedback retries the run spent, across every producer.
     # Append-only: two analysts running in parallel each add their own.
     validation_retries: Annotated[int, operator.add]

@@ -230,6 +230,10 @@ class RunSummary:
     # a skipped row mean different things and a reader has to be able to tell
     # them apart.
     stages: list[dict[str, Any]] = field(default_factory=list)
+    # What the triage pack did: ``{entries, failed, duration_ms}``. ``None``
+    # on a run whose team has no triage stage or whose pack declined to run,
+    # which a reader has to be able to tell from a pack that wrote nothing.
+    triage: dict[str, Any] | None = None
 
     # ------------------------------------------------------------------
     # Rendering
@@ -459,6 +463,7 @@ class RunSummary:
             "techniques_by_layer": dict(self.techniques_by_layer),
             "profile": dict(self.profile) if self.profile else None,
             "stages": [dict(row) for row in self.stages],
+            "triage": dict(self.triage) if self.triage else None,
         }
 
         if self.validation:
@@ -538,6 +543,21 @@ class RunSummaryBuilder:
         self._truncation: TruncationMetrics | None = None
         self._profile: dict[str, Any] | None = None
         self._stages: list[dict[str, Any]] = []
+        self._triage: dict[str, Any] | None = None
+
+    def set_triage(self, facts: dict[str, Any] | None) -> RunSummaryBuilder:
+        """The pack's three counts, out of the state channel the triage node wrote.
+
+        Only the counts: the four facts are for the stage conditions and the
+        prompts, and the ledger holds the entries themselves.
+        """
+        if facts and "entries" in facts:
+            self._triage = {
+                "entries": int(facts.get("entries") or 0),
+                "failed": int(facts.get("failed") or 0),
+                "duration_ms": int(facts.get("duration_ms") or 0),
+            }
+        return self
 
     def set_degraded_mode(
         self, degraded: bool, reasons: list[str] | None = None
@@ -769,6 +789,7 @@ class RunSummaryBuilder:
             techniques_by_layer=self._techniques_by_layer,
             profile=self._profile,
             stages=self._stages,
+            triage=self._triage,
         )
 
 

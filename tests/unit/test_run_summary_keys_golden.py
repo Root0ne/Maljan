@@ -97,6 +97,7 @@ def _default_profile_summary() -> RunSummary:
             },
         ]
     )
+    builder.set_triage({"entries": 11, "failed": 1, "duration_ms": 900, "yara_hits": 2})
     builder.set_degraded_mode(False, [])
     builder.set_failed_analysts([])
     builder.set_token_usage(
