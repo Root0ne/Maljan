@@ -85,8 +85,9 @@ def pe_info(
     produces a payload no context window wants, and an agent that only needs
     the section table should be able to ask for the section table.
 
-    Imports are listed without interpretation: library, name or ordinal, hint
-    and address, and no capability label. See :func:`_import_rows`.
+    Imports are listed without interpretation: each row is ``dll``, ``function``
+    (the name, or ``Ordinal_N``), ``ordinal``, ``hint`` and ``address``, and no
+    capability label. See :func:`_import_rows`.
     """
     target = Path(path)
     if not target.is_file():
@@ -343,6 +344,9 @@ def elf_info(path: str) -> dict[str, Any]:
     often decide what a Linux sample is: a static binary with no interpreter
     and a binary linked against ``libcurl`` are different animals, and neither
     shows up in a section table.
+
+    Imports are listed without interpretation: each row is ``dll`` and
+    ``function``, and no capability label, as in :func:`pe_info`.
     """
     target = Path(path)
     if not target.is_file():

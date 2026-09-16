@@ -207,8 +207,9 @@ def pe_info(
 ) -> dict[str, Any]:
     """Parse a PE: sections with entropy, imports, exports, resources, overlay, PDB path.
 
-    Imports are listed without interpretation: library, name or ordinal, hint and
-    address. Ask api_capability what an API is used for.
+    Imports are listed without interpretation: each row is dll, function (the name
+    or Ordinal_N), ordinal, hint and address. Ask api_capability what an API is
+    used for.
     """
     return _guard(
         "pe_info",
