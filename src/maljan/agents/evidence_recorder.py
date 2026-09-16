@@ -357,13 +357,38 @@ def _record_tool(tool: Any, recorder: EvidenceRecorder, repeats: RepeatGuard | N
         if repeats is not None:
             repeats.note(name, kwargs, entry_id)
 
-    def _stamp(kwargs: dict[str, Any], started: float, wall_clock: float, value: Any) -> str:
-        text = result_text(value)
-        # Asked before the call is noted, so it sees the count the previous
-        # identical call left behind.
-        repeated = repeats.repeat_of(name, kwargs) if repeats is not None else None
-        if repeated is not None and repeats is not None:
+    def _served_again(kwargs: dict[str, Any]) -> str | None:
+        """The first entry for a call being served a second time, counted as a repeat.
+
+        Asked before the call runs, so it sees the count the previous identical
+        call left behind, and before the outcome is known, so a repeat that
+        raises counts the same as one that returns: a tool that throws on the
+        same arguments is the one case the guard exists for.
+        """
+        if repeats is None:
+            return None
+        repeated = repeats.repeat_of(name, kwargs)
+        if repeated is not None:
             repeats.note_repeat()
+        return repeated
+
+    def _steering(kwargs: dict[str, Any], repeated: str | None) -> str:
+        """What is appended to a served repeat, and nothing for a first call.
+
+        Appended to what the model reads, not to the ledger: the entry records
+        what the tool said, and the tool did not say this.
+        """
+        if repeated is None or repeats is None:
+            return ""
+        notice = served_repeat_notice(
+            name, repeated, _unused(kwargs), last_warning=repeats.warning_of_the_end()
+        )
+        return f"\n\n{notice}"
+
+    def _stamp(
+        kwargs: dict[str, Any], started: float, wall_clock: float, value: Any, repeated: str | None
+    ) -> str:
+        text = result_text(value)
         entry = recorder.record(
             tool=name,
             args=kwargs,
@@ -379,20 +404,14 @@ def _record_tool(tool: Any, recorder: EvidenceRecorder, repeats: RepeatGuard | N
         # ``llm.max_tool_output_chars`` and the summariser guardrail the MCP
         # toolkit applies before the tool ever returns — and a second, silent
         # cut here would make raising that setting do nothing.
-        if repeated is not None:
-            # Appended to what the model reads, not to the ledger: the entry
-            # records what the tool said, and the tool did not say this.
-            notice = served_repeat_notice(
-                name,
-                repeated,
-                _unused(kwargs),
-                last_warning=repeats is not None and repeats.warning_of_the_end(),
-            )
-            return f"[{entry.id}]\n{text}\n\n{notice}"
-        return f"[{entry.id}]\n{text}"
+        return f"[{entry.id}]\n{text}{_steering(kwargs, repeated)}"
 
     def _stamp_error(
-        kwargs: dict[str, Any], started: float, wall_clock: float, exc: Exception
+        kwargs: dict[str, Any],
+        started: float,
+        wall_clock: float,
+        exc: Exception,
+        repeated: str | None,
     ) -> str:
         message = f"{type(exc).__name__}: {exc}"
         entry = recorder.record(
@@ -406,7 +425,7 @@ def _record_tool(tool: Any, recorder: EvidenceRecorder, repeats: RepeatGuard | N
             duration_ms=int((time.monotonic() - started) * 1000),
         )
         _note(kwargs, entry.id)
-        return f"[{entry.id}] tool call failed: {message}"
+        return f"[{entry.id}] tool call failed: {message}{_steering(kwargs, repeated)}"
 
     wrapped_func = None
     wrapped_coroutine = None
@@ -420,10 +439,11 @@ def _record_tool(tool: Any, recorder: EvidenceRecorder, repeats: RepeatGuard | N
             # correlates with a log line, the monotonic one measures how long
             # it took and cannot go backwards.
             started, wall_clock = time.monotonic(), time.time()
+            repeated = _served_again(kwargs)
             try:
-                return _stamp(kwargs, started, wall_clock, func(**kwargs))
+                return _stamp(kwargs, started, wall_clock, func(**kwargs), repeated)
             except Exception as exc:  # noqa: BLE001 — a failed call is evidence
-                return _stamp_error(kwargs, started, wall_clock, exc)
+                return _stamp_error(kwargs, started, wall_clock, exc, repeated)
 
     if coroutine is not None:
 
@@ -432,10 +452,11 @@ def _record_tool(tool: Any, recorder: EvidenceRecorder, repeats: RepeatGuard | N
             if answered is not None:
                 return answered
             started, wall_clock = time.monotonic(), time.time()
+            repeated = _served_again(kwargs)
             try:
-                return _stamp(kwargs, started, wall_clock, await coroutine(**kwargs))
+                return _stamp(kwargs, started, wall_clock, await coroutine(**kwargs), repeated)
             except Exception as exc:  # noqa: BLE001 — a failed call is evidence
-                return _stamp_error(kwargs, started, wall_clock, exc)
+                return _stamp_error(kwargs, started, wall_clock, exc, repeated)
 
     try:
         return StructuredTool.from_function(

@@ -151,6 +151,36 @@ class TestTheGuardEndsTheLoop:
         assert "ends this analysis" not in served, "one repeat is not the last one"
         assert "ends this analysis" in refused
 
+    def test_a_repeated_call_that_raises_counts_the_same(self) -> None:
+        """An unreachable server or a path the sidecar will never read throws
+        on the same arguments every time, which is the case the guard is for."""
+        from langchain_core.tools import StructuredTool
+        from pydantic import BaseModel
+
+        from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
+        from maljan.schemas.evidence import EvidenceCounter
+
+        class _Args(BaseModel):
+            path: str = ""
+
+        def _run(**kwargs: Any) -> str:
+            raise ConnectionError("sidecar is not listening")
+
+        broken = StructuredTool.from_function(
+            func=_run, name="pe_info", description="pe_info", args_schema=_Args, infer_schema=False
+        )
+        guard = RepeatGuard()
+        tool = record_tools([broken], EvidenceRecorder("static", counter=EvidenceCounter()), guard)[
+            0
+        ]
+        args = {"path": "/tmp/s.bin"}
+
+        answers = [tool.invoke(args) for _ in range(4)]
+
+        assert "tool call failed" in answers[0]
+        assert "A third will not be run" in answers[1]
+        assert (guard.served_repeats, guard.ending_the_loop()) == (3, True)
+
     def test_a_replayed_conversation_starts_the_count_again(self) -> None:
         """A connection error re-sends the conversation from the first message.
 
