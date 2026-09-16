@@ -800,8 +800,29 @@ def section_capability_violations(payload: Any, grounding: CapabilityGrounding) 
 # ---------------------------------------------------------------------------
 
 
+# The identity fields whose values count as grounded without a ledger entry.
+_IDENTITY_INDICATOR_KEYS = ("sha256", "sha1", "md5", "file_name")
+
+
+def sample_identity_values(sample: Any) -> set[str]:
+    """The sample's own identity values, as grounded as anything a tool saw.
+
+    They come from the router rather than from a tool the model chose, and the
+    judge is shown them in its identity block. A run that never called
+    ``hashes`` has no ledger entry carrying the sha256 the job was queued
+    under, and an indicator naming that hash was flagged as invented.
+    """
+    data = sample if isinstance(sample, dict) else {}
+    values = {str(data.get(key) or "").strip() for key in _IDENTITY_INDICATOR_KEYS}
+    return {value for value in values if value}
+
+
 def validate_verdict_bundle(
-    bundle: Any, evidence_corpus: set[str] | None = None, *, attck: Any = None
+    bundle: Any,
+    evidence_corpus: set[str] | None = None,
+    *,
+    attck: Any = None,
+    sample: Any = None,
 ) -> list[Violation]:
     """What is wrong with the judge's answer, in the judge's own terms.
 
@@ -810,11 +831,16 @@ def validate_verdict_bundle(
     not when it fails a regex. ``T7777`` is well-formed and imaginary, which is
     exactly the case this violation exists for. Passing ``None`` skips the
     catalogue question rather than answering it wrongly.
+
+    ``sample`` is the identity block's dict; its hashes and file name ground
+    an indicator the way a ledger entry does. Every other indicator value
+    still needs one.
     """
     violations: list[Violation] = []
     objects = list(getattr(bundle, "objects", None) or [])
 
-    haystack = " ".join(sorted(evidence_corpus)).lower() if evidence_corpus else ""
+    grounded = set(evidence_corpus or ()) | sample_identity_values(sample)
+    haystack = " ".join(sorted(grounded)).lower() if grounded else ""
     runtime_paths = _runtime_paths(evidence_corpus)
     for index, obj in enumerate(objects):
         kind = str(getattr(obj, "type", "") or "")

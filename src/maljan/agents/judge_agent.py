@@ -215,6 +215,7 @@ SAMPLE_IDENTITY_HEADER = (
 
 _IDENTITY_FIELDS: tuple[tuple[str, str], ...] = (
     ("sha256", "sha256"),
+    ("sha1", "sha1"),
     ("md5", "md5"),
     ("file_name", "file name (as submitted)"),
     ("size_bytes", "size (bytes)"),
@@ -902,7 +903,7 @@ class JudgeAgent:
             if not_json:
                 return [Violation(code="verdict.not_json", message=_NOT_JSON_FEEDBACK)]
             return [
-                *validate_verdict_bundle(bundle, evidence_corpus, attck=_knowledge),
+                *validate_verdict_bundle(bundle, evidence_corpus, attck=_knowledge, sample=sample),
                 *assessment_violations(bundle),
                 *assessment_conflict_violations(bundle),
                 *unsupported_benign_violations(

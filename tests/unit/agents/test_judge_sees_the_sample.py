@@ -20,7 +20,12 @@ from maljan.agents.judge_agent import (
     JudgeAgent,
     sample_identity_block,
 )
-from maljan.pipeline.validation import UNSUPPORTED_BENIGN_CODE, unsupported_benign_violations
+from maljan.pipeline.validation import (
+    UNSUPPORTED_BENIGN_CODE,
+    sample_identity_values,
+    unsupported_benign_violations,
+    validate_verdict_bundle,
+)
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 from maljan.schemas.judgement import JudgeAssessment, SeverityVerdict
 from maljan.schemas.stix_models import Bundle, Malware, Note
@@ -219,7 +224,9 @@ class TestBothPromptsCarryIt:
                 "file_name": "sample.exe",
                 "file_type": "pe",
                 "platform": "windows",
-                "sandbox_report": {"target": {"file": {"md5": "b" * 32, "size": 4096}}},
+                "sandbox_report": {
+                    "target": {"file": {"md5": "b" * 32, "sha1": "c" * 40, "size": 4096}}
+                },
             }
         )
 
@@ -229,6 +236,7 @@ class TestBothPromptsCarryIt:
             "file_type": "pe",
             "platform": "windows",
             "md5": "b" * 32,
+            "sha1": "c" * 40,
             "size_bytes": 4096,
         }
 
@@ -236,6 +244,83 @@ class TestBothPromptsCarryIt:
         from maljan.pipeline.nodes import _sample_identity
 
         assert _sample_identity({}) == {}
+
+
+class TestTheSampleSOwnIdentityIsGrounded:
+    """The judge is given the sha256 and then flagged for repeating it.
+
+    A run that never called ``hashes`` has no ledger entry carrying the hash
+    the job was queued under, and the indicator naming it stayed unresolved.
+    The identity values come from the router, not from a tool the model chose,
+    and they ground an indicator the way an entry does; nothing else does.
+    """
+
+    def _hash_indicator(self, digest: str) -> Bundle:
+        from maljan.schemas.stix_models import Indicator
+
+        return Bundle(
+            objects=[
+                Indicator(
+                    id=f"indicator--{'a' * 8}-0000-4000-8000-{'b' * 12}",
+                    pattern=f"[file:hashes.'SHA-256' = '{digest}']",
+                )
+            ]
+        )
+
+    def test_the_sample_s_sha256_is_grounded_without_a_ledger_entry(self) -> None:
+        bundle = self._hash_indicator("e" * 64)
+
+        assert validate_verdict_bundle(bundle, {"nothing about a hash"}, sample=SAMPLE) == []
+
+    def test_without_the_identity_it_is_still_questioned(self) -> None:
+        bundle = self._hash_indicator("e" * 64)
+
+        violations = validate_verdict_bundle(bundle, {"nothing about a hash"})
+
+        assert [v.code for v in violations] == ["stix.ungrounded_indicator"]
+
+    def test_another_hash_still_needs_an_entry(self) -> None:
+        bundle = self._hash_indicator("9" * 64)
+
+        violations = validate_verdict_bundle(bundle, {"nothing about a hash"}, sample=SAMPLE)
+
+        assert [v.code for v in violations] == ["stix.ungrounded_indicator"]
+
+    def test_the_md5_and_the_file_name_count_too(self) -> None:
+        assert {"e" * 64, "f" * 32, "putty.exe"} <= sample_identity_values(SAMPLE)
+        assert "1633792" not in sample_identity_values(SAMPLE), "a size is not an indicator"
+
+    def test_the_judge_passes_its_identity_block_to_the_check(self) -> None:
+        answer = (
+            '{"type": "bundle", "objects": [{"type": "indicator", '
+            '"id": "indicator--0f1e2d3c-4b5a-4968-8776-655443332201", '
+            f"\"pattern\": \"[file:hashes.'SHA-256' = '{'e' * 64}']\", "
+            '"pattern_type": "stix"}], "x_maljan_assessment": {"severity": '
+            '{"rating": "Low", "rationale": "signed"}, "malware_category": "none"}}'
+        )
+        judge = JudgeAgent.__new__(JudgeAgent)
+        judge.logger = MagicMock()
+        judge.token_ledger = None
+        judge.truncation_ledger = None
+
+        class _LLM:
+            async def ainvoke(self, turns: Any) -> Any:
+                return MagicMock(content=answer)
+
+        judge.llm = _LLM()
+
+        verdict = asyncio.run(
+            judge.give_verdict(
+                reports={"static": "it is signed"},
+                history=[],
+                isr_reports=_isr(claims=1),
+                evidence_corpus={"signing_info: valid"},
+                sample=SAMPLE,
+            )
+        )
+
+        assert (verdict.retries, verdict.violations) == (0, [])
+        assert len(verdict.bundle.objects) == 1, "the indicator was kept"
 
 
 class TestABenignVerdictWithNoAnalysisBehindIt:
