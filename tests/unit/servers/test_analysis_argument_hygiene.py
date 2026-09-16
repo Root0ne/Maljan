@@ -44,6 +44,70 @@ def _sample(tmp_path: Path) -> str:
     return str(target)
 
 
+class TestCarvedPayloadsLandUnderStaging:
+    """The destination is the sidecar's, never the model's.
+
+    A live run passed the two-character string "" as ``out_dir``, the wrapper
+    defaulted only the empty string, and a directory literally named "" with a
+    931 KB carved PE body in it appeared under the sidecar's own cwd. A
+    model-chosen directory lets a tool write live malware anywhere the sidecar
+    can write, so the argument is gone: carved files land in
+    ``<staging>/carved/<sha256>/``, created private like the staging dir.
+    """
+
+    def _sample(self, tmp_path: Path) -> tuple[str, str]:
+        import hashlib
+
+        blob = b"\x7fELF" + b"\x02\x01\x01" + b"\x00" * 57
+        target = tmp_path / "dropper.bin"
+        target.write_bytes(blob)
+        return str(target), hashlib.sha256(blob).hexdigest()
+
+    def test_the_directory_is_the_staging_dir_keyed_by_the_sample_s_hash(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import os
+
+        staging = tmp_path / "staging"
+        monkeypatch.setenv("MALJAN_STAGING_DIR", str(staging))
+        path, digest = self._sample(tmp_path)
+        before = set(os.listdir(os.getcwd()))
+
+        answer = server.carve_payloads(path)
+
+        assert answer == {"payloads": [], "count": 0}
+        carved = staging / "carved" / digest
+        assert carved.is_dir()
+        assert (staging / "carved").stat().st_mode & 0o777 == 0o700
+        assert carved.stat().st_mode & 0o777 == 0o700
+        assert set(os.listdir(os.getcwd())) == before, "nothing is written where the sidecar runs"
+
+    def test_the_tool_takes_no_destination(self, server: Any, tmp_path: Path) -> None:
+        import inspect
+
+        path, _digest = self._sample(tmp_path)
+
+        assert list(inspect.signature(server.carve_payloads).parameters) == ["path"]
+        with pytest.raises(TypeError):
+            server.carve_payloads(path, out_dir=str(tmp_path))
+        with pytest.raises(TypeError):
+            server.carve_payloads(path, '""')
+
+    def test_the_description_says_where_the_files_land(self, server: Any) -> None:
+        assert "carved/<sha256 of the sample>/" in str(server.carve_payloads.__doc__)
+
+    def test_a_missing_sample_is_an_error_and_creates_nothing(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        staging = tmp_path / "staging"
+        monkeypatch.setenv("MALJAN_STAGING_DIR", str(staging))
+
+        answer = server.carve_payloads(str(tmp_path / "absent.bin"))
+
+        assert answer["tool"] == "carve_payloads" and "no such file" in answer["error"]
+        assert not (staging / "carved").exists()
+
+
 class TestTheWordsThatMeanAbsence:
     @pytest.mark.parametrize("word", ["null", "None", "", "  ", '""', "''", ' "" ', "'\"'"])
     def test_an_optional_argument_carrying_one_is_read_as_absent(

@@ -270,10 +270,32 @@ def apk_info(
 
 
 @mcp.tool()
-def carve_payloads(path: str, out_dir: str = "") -> dict[str, Any]:
-    """Extract embedded payloads from a file and write them to a directory."""
-    destination = out_dir or str(_staging_dir() / "carved")
-    return _guard("carve_payloads", binary_tools.carve_payloads, path=path, out_dir=destination)
+def carve_payloads(path: str) -> dict[str, Any]:
+    """Write each embedded payload found in the file out as its own file.
+
+    The carved files land under the sidecar's private staging directory, in
+    carved/<sha256 of the sample>/, and the returned paths point there; the
+    destination is not an argument.
+    """
+    return _guard("carve_payloads", _carve_under_staging, path=path)
+
+
+def _carve_under_staging(path: str) -> dict[str, Any]:
+    """Carve into ``<staging>/carved/<sha256>/``, created private like the staging dir.
+
+    A model-chosen destination let a tool write live malware anywhere the
+    sidecar could write, and one live run wrote a carved PE body into the
+    sidecar's own cwd. The sample's hash names the directory, so two samples
+    never share one and a re-run lands in the same place.
+    """
+    target = Path(path)
+    if not target.is_file():
+        return {"error": f"no such file: {path}", "tool": "carve_payloads"}
+    digest = hashlib.sha256(target.read_bytes()).hexdigest()
+    destination = _staging_dir() / "carved"
+    for directory in (destination, destination / digest):
+        directory.mkdir(mode=0o700, exist_ok=True)
+    return binary_tools._carve_into(path, destination / digest)
 
 
 @mcp.tool()

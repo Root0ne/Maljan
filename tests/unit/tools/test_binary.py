@@ -399,18 +399,26 @@ class TestDocumentInfo:
 
 
 class TestCarvePayloads:
+    """The private carver: the destination is the caller's, and it is made private."""
+
     def test_a_file_with_nothing_embedded_carves_nothing(self, tmp_path: Path) -> None:
         target = tmp_path / "s.bin"
         target.write_bytes(_elf())
         out = tmp_path / "carved"
 
-        result = tool.carve_payloads(str(target), str(out))
+        result = tool._carve_into(str(target), out)
 
         assert result == {"payloads": [], "count": 0}
         assert out.is_dir(), "the output directory is created even when nothing lands in it"
+        assert out.stat().st_mode & 0o777 == 0o700
 
     def test_a_missing_file_is_an_error_and_not_an_exception(self, tmp_path: Path) -> None:
-        assert tool.carve_payloads("/nonexistent/s.bin", str(tmp_path))["tool"] == "carve_payloads"
+        assert tool._carve_into("/nonexistent/s.bin", tmp_path)["tool"] == "carve_payloads"
+
+    def test_the_module_offers_no_model_facing_carver(self) -> None:
+        """The sidecar decides where carved files land; nothing here takes a
+        directory from a caller that could be a model."""
+        assert not hasattr(tool, "carve_payloads")
 
 
 class TestWhichImportWarningMeansDamage:

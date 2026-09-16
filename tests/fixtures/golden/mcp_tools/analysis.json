@@ -20,7 +20,6 @@
       "timeout_s"
     ],
     "carve_payloads": [
-      "out_dir",
       "path"
     ],
     "document_info": [

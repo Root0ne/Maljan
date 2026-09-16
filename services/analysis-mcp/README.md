@@ -37,7 +37,7 @@ drops the reference really runs without these tools.
 | `elf_info` | `path` |
 | `macho_info` | `path` |
 | `apk_info` | `path`, `manifest`, `permissions`, `certs`, `components`, `native_libs`, `dex_strings=false`, `limit=500` |
-| `carve_payloads` | `path`, `out_dir=""` (defaults to the staging directory) |
+| `carve_payloads` | `path` (carved files land in `<staging>/carved/<sha256>/`, never where the model says) |
 | `archive_list` | `path`, `limit=500` |
 | `document_info` | `path` |
 

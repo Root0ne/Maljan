@@ -628,23 +628,29 @@ def _apk_dex_strings(apk: Any, limit: int) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def carve_payloads(path: str, out_dir: str) -> dict[str, Any]:
-    """Write each embedded payload found in the file to ``out_dir``.
+def _carve_into(path: str, destination: str | Path) -> dict[str, Any]:
+    """Write each embedded payload found in the file under ``destination``.
 
     A packed dropper's real payload is invisible to every rule in the corpus
     until it is carved out — the rules only ever see the outer shell, which by
     construction matches nothing. The carved children are written with 0o600
-    so a staging directory shared with a tool server does not widen who can
-    read the sample.
+    and the directory with 0o700, so a staging directory shared with a tool
+    server does not widen who can read the sample.
+
+    Private: the destination is the caller's to decide, and the one caller
+    that faces a model, the analysis sidecar's ``carve_payloads``, decides it
+    from the sample's hash under its own staging directory. A live run passed
+    a model-chosen directory through here and live malware was written to the
+    sidecar's cwd; nothing a model writes reaches this argument any more.
     """
     target = Path(path)
     if not target.is_file():
         return _no_file(path, "carve_payloads")
-    destination = Path(out_dir)
+    where = Path(destination)
     try:
-        destination.mkdir(parents=True, exist_ok=True)
+        where.mkdir(mode=0o700, parents=True, exist_ok=True)
     except OSError as exc:
-        return {"error": f"cannot create {out_dir}: {exc}", "tool": "carve_payloads"}
+        return {"error": f"cannot create {where}: {exc}", "tool": "carve_payloads"}
 
     from maljan.extractors.pe_extractor import carve_payloads as _carve
 
@@ -652,7 +658,7 @@ def carve_payloads(path: str, out_dir: str) -> dict[str, Any]:
     for label, blob in _carve(target.read_bytes()):
         digest = hashlib.sha256(blob).hexdigest()
         name = f"{label.replace('+', '_').replace(':', '_')}_{digest[:12]}"
-        child = destination / name
+        child = where / name
         child.write_bytes(blob)
         child.chmod(0o600)
         offset = 0
