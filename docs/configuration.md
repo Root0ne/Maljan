@@ -326,9 +326,12 @@ run: the `static` and `network` analysts, the judge, and the seeded `triage`,
 `android_static` and `reverser` agents. Their prompts say what to do with an
 answer — look the hash up once, cite it like any other tool result, and treat
 a reputation label as one source rather than as the verdict. The judge opens
-its own tool loop when it holds tools and no analyst has consulted a
-reputation or family source, so the identity question is asked once even on a
-run nobody disagreed about. A disabled server contributes no tools and no
+its own tool loop when it holds a reputation server (`virustotal` or
+`threatintel`) and no entry in the run's evidence ledger came from one, so the
+identity question is asked once even on a run nobody disagreed about. What
+decides it is the ledger rather than the analysts' prose: a sentence saying no
+family could be determined is what an analyst writes when it consulted
+nothing. A disabled server contributes no tools and no
 degradation reason, so every one of those references costs nothing until the
 server is registered.
 
