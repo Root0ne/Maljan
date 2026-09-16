@@ -1040,11 +1040,16 @@ class StageDefinition(BaseModel):
     a stage whose condition is false is still part of the graph and still
     records a result, so the topology is a property of the configuration alone
     and never of the sample.
+
+    A ``triage`` stage names no agent. It is the pipeline itself running the
+    deterministic tools over the sample and writing each result to the
+    evidence ledger before any analyst starts (``pipeline.triage_pack``), so
+    the facts a model may or may not ask for exist either way.
     """
 
     key: Annotated[str, Field(pattern=SERVER_KEY_PATTERN)]
     label: str = ""
-    kind: Literal["analysis", "debate", "verdict", "report"] = "analysis"
+    kind: Literal["triage", "analysis", "debate", "verdict", "report"] = "analysis"
     agents: list[str] = Field(default_factory=list)
     depends_on: list[str] = Field(default_factory=list)
     when: str = ""
@@ -1063,22 +1068,51 @@ class StageDefinition(BaseModel):
         return self
 
 
+# The stage that runs the deterministic tools before any analyst. One key
+# everywhere, because the migration that gives stored profiles the stage and
+# the seeds that ship with it have to agree on what to skip when it is there.
+TRIAGE_STAGE_KEY = "triage_pack"
+
+
+def triage_stage() -> StageDefinition:
+    """The deterministic first step of a team, written once.
+
+    No agents and no upstream: it runs the tools in ``src/maljan/tools`` over
+    the sample and records what they said, and everything after it reads the
+    ledger it wrote. It carries no condition of its own because the facts it
+    establishes are the ones a condition further down is written against.
+    """
+    return StageDefinition(
+        key=TRIAGE_STAGE_KEY,
+        label="Triage pack",
+        kind="triage",
+        inject_upstream="none",
+    )
+
+
 def stages_from_analysts(
     analysts: list[str],
     *,
     parallel: bool = False,
     max_rounds: int = 3,
     consensus_threshold: float = 0.8,
+    triage: bool = True,
 ) -> list[StageDefinition]:
-    """The four-stage form of a profile that was written as a list of analysts.
+    """The stage form of a profile that was written as a list of analysts.
 
     This is the whole of the compatibility story: every profile in every
     operator database predates stages, and the pipeline they describe is one
     analysis stage, one debate, one verdict and one report. Written once here
     so the settings model, the alembic migration and the tests cannot each
     invent a slightly different translation.
+
+    ``triage`` puts the deterministic triage pack in front of the four. It is
+    on for every team but the measurement baseline, whose whole purpose is to
+    show what the models do with nothing established for them.
     """
+    head = [triage_stage()] if triage else []
     return [
+        *head,
         StageDefinition(
             key="analysis",
             label="Analysis",
@@ -1125,8 +1159,18 @@ def stages_from_analysts(
 _DERIVED_FIELDS: tuple[str, ...] = ("mode", "debate")
 
 
+def has_triage_stage(stages: list["StageDefinition"]) -> bool:
+    """Whether a team runs the triage pack. Read off the kind, never the key."""
+    return any(stage.kind == "triage" for stage in stages)
+
+
 def stages_are_derived(analysts: list[str], stages: list["StageDefinition"]) -> bool:
     """Whether ``stages`` is still the plain conversion of ``analysts``.
+
+    With or without the triage pack in front: whether a team runs the pack is
+    the one thing about a derived team that is not read from the two global
+    keys, so the check accepts both forms and re-derivation keeps whichever
+    the document had.
 
     The ``derived_from_analysts`` marker travels in the stored document, so it
     arrives over the wire from an import, a script's PATCH, or a hand-edited
@@ -1143,7 +1187,7 @@ def stages_are_derived(analysts: list[str], stages: list["StageDefinition"]) -> 
     """
     if not analysts:
         return False
-    expected = stages_from_analysts(list(analysts))
+    expected = stages_from_analysts(list(analysts), triage=has_triage_stage(stages))
     if len(expected) != len(stages):
         return False
     for want, have in zip(expected, stages, strict=True):
@@ -1276,6 +1320,11 @@ class ProfileDefinition(BaseModel):
         for stage in self.stages:
             if stage.kind == "analysis" and not stage.agents:
                 raise ValueError(f"stage {stage.key!r} is an analysis stage with no agent")
+            if stage.kind == "triage" and stage.agents:
+                raise ValueError(
+                    f"stage {stage.key!r} is a triage stage and names an agent; the "
+                    "pipeline runs it"
+                )
             if stage.kind == "debate":
                 upstream = self._reachable(stage.key)
                 if not any(s.kind == "analysis" for s in self.stages if s.key in upstream):
@@ -1482,8 +1531,9 @@ def _builtin_profiles() -> dict[str, ProfileDefinition]:
     limit still raises it for the default profile.
 
     ``measurement`` is the same three analysts with every tool server taken
-    away and every static provider forced to ``none``: the honest baseline for
-    "what does the ensemble contribute on its own". It is a profile rather than
+    away, every static provider forced to ``none`` and no triage pack in front
+    of them: the honest baseline for "what does the ensemble contribute on its
+    own". It is a profile rather than
     three cloned definitions because a clone would have to be kept in step with
     its original by hand, and the first time someone edited one and not the
     other the baseline would silently stop being the same agents.
@@ -1497,9 +1547,15 @@ def _builtin_profiles() -> dict[str, ProfileDefinition]:
     paper_analysts = ["static", "dynamic", "network"]
     return {
         "default": ProfileDefinition(label="Default", analysts=list(paper_analysts)),
+        # Written out without the triage pack, and still marked derived so the
+        # two global keys keep applying to it: the baseline measures what the
+        # ensemble does with nothing established for it, and a pack of facts
+        # in every prompt would be the opposite of that.
         "measurement": ProfileDefinition(
             label="Measurement baseline",
             analysts=list(paper_analysts),
+            stages=stages_from_analysts(list(paper_analysts), triage=False),
+            derived_from_analysts=True,
             exclude_servers=[ALL_SERVERS],
             exclude_sandbox_tools=True,
             static_provider="none",
@@ -1510,11 +1566,12 @@ def _builtin_profiles() -> dict[str, ProfileDefinition]:
 
 
 def _triage_stage() -> StageDefinition:
-    """The first stage of every team that has one, written once.
+    """The first analyst of every seeded team that has one, written once.
 
-    Triage reads nothing upstream because there is nothing upstream: it is the
-    step that decides what the rest of the team should look at, and a stage
-    that was handed conclusions would be deciding under their influence.
+    Triage reads nothing upstream because nothing upstream has concluded
+    anything: the pack before it is facts, not findings, and this is the step
+    that decides what the rest of the team should look at. A stage that was
+    handed conclusions would be deciding under their influence.
     """
     return StageDefinition(
         key="triage",
@@ -1538,6 +1595,7 @@ def _mobile_stages() -> list[StageDefinition]:
     about detonating an APK belongs in the team definition.
     """
     return [
+        triage_stage(),
         _triage_stage(),
         StageDefinition(
             key="android_static",
@@ -1594,6 +1652,7 @@ def _deep_static_stages() -> list[StageDefinition]:
     should not have to name the decompiler an operator happens to run.
     """
     return [
+        triage_stage(),
         _triage_stage(),
         StageDefinition(
             key="static",
@@ -1644,6 +1703,32 @@ def _deep_static_stages() -> list[StageDefinition]:
             inject_upstream="none",
         ),
     ]
+
+
+def convert_builtin_profile_document(name: str, entry: Any) -> Any:
+    """A built-in profile stored as a list of analysts, read as its seed's stages.
+
+    ``ProfileDefinition`` converts a bare analyst list with the triage pack
+    in front, because every team gets the pack unless it says otherwise. The
+    one seeded team that says otherwise is the measurement baseline, and it
+    cannot say so from inside a document that carries no stages. So a stored
+    built-in without stages is converted here, by name, with the choice its
+    seed made — and the identity check then compares like with like.
+    """
+    if not isinstance(entry, dict) or entry.get("stages"):
+        return entry
+    analysts = entry.get("analysts")
+    seed = _builtin_profiles().get(name)
+    if seed is None or not isinstance(analysts, list) or not analysts:
+        return entry
+    return {
+        **entry,
+        "stages": [
+            stage.model_dump()
+            for stage in stages_from_analysts(list(analysts), triage=has_triage_stage(seed.stages))
+        ],
+        "derived_from_analysts": True,
+    }
 
 
 def _profile_stage_identity(stages: Any) -> Any:
@@ -1700,6 +1785,27 @@ class AgentsConfig(BaseModel):
             else:
                 merged[key] = entry
         return {**data, "definitions": merged}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _convert_builtin_profile_lists(cls, data: Any) -> Any:
+        """Read a stored built-in profile's analyst list with its seed's shape.
+
+        See ``convert_builtin_profile_document``: the measurement baseline is
+        the seeded team without the triage pack, and a document that still
+        holds only its analyst list has to be converted the way its seed was
+        or the identity check below refuses a team nobody edited.
+        """
+        if not isinstance(data, dict):
+            return data
+        profiles = data.get("profiles")
+        if not isinstance(profiles, dict):
+            return data
+        converted = {
+            name: convert_builtin_profile_document(str(name), entry)
+            for name, entry in profiles.items()
+        }
+        return {**data, "profiles": converted}
 
     @model_validator(mode="before")
     @classmethod
@@ -2193,6 +2299,22 @@ class ReportingConfig(BaseModel):
     evidence_budget_bytes: Annotated[int, Field(ge=0)] = 524288
 
 
+class TriageConfig(BaseModel):
+    """The triage pack: the deterministic tools the pipeline runs before any analyst.
+
+    ``enabled`` off leaves the stage in every team and makes it decline with
+    that reason, so a run without the pack still says it had none.
+    ``strings_head`` bounds the one open-ended tool in the pack; the rest read
+    fixed structures or scan with their own budgets. ``reputation`` is the one
+    network call the pack makes: ``auto`` asks whichever reputation server is
+    enabled, once, for the sample hash, and ``off`` records that it did not.
+    """
+
+    enabled: bool = True
+    strings_head: Annotated[int, Field(ge=1)] = 300
+    reputation: Literal["auto", "off"] = "auto"
+
+
 # ---------------------------------------------------------------------------
 # Root Settings
 # ---------------------------------------------------------------------------
@@ -2262,6 +2384,7 @@ class Settings(BaseSettings):
     # readers is gone.
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     reporting: ReportingConfig = Field(default_factory=ReportingConfig)
+    triage: TriageConfig = Field(default_factory=TriageConfig)
     # Which analysts exist, in what order, and what each one gets. The
     # ``default`` profile is the architecture this project measured itself on.
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
@@ -2504,6 +2627,7 @@ class Settings(BaseSettings):
                 parallel=bool(self.llm.parallel_analysts),
                 max_rounds=self.negotiation.max_iterations,
                 consensus_threshold=self.negotiation.consensus_threshold,
+                triage=has_triage_stage(profile.stages),
             )
 
 

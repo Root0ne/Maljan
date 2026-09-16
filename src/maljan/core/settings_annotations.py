@@ -98,6 +98,7 @@ _PREFIX_GROUPS: list[tuple[str, str]] = [
     ("sandbox", "sandbox"),
     ("analysis", "analysis"),
     ("preprocessing", "analysis"),
+    ("triage", "analysis"),
     ("static", "static"),
     ("mcp", "mcp"),
     ("reporting", "reporting"),
@@ -915,6 +916,38 @@ ANNOTATIONS: dict[str, Annotation] = {
             "malicious core. Fails safe to no hint on error or a stripped binary."
         ),
         "subgroup": "Feature switches",
+    },
+    "triage.enabled": {
+        "title": "Run the triage pack",
+        "description": (
+            "Before any analyst starts, the pipeline runs the deterministic tools "
+            "over the sample (identification, hashes, signature, format facts, "
+            "strings, IoCs, YARA, capa, Sigma, catalogue lookups, the sandbox "
+            "summary, one reputation lookup) and writes each result to the "
+            "evidence ledger as facts of the run. Off leaves the stage in every "
+            "team and makes it decline with that reason."
+        ),
+        "subgroup": "Triage pack",
+    },
+    "triage.strings_head": {
+        "title": "Triage strings head",
+        "description": (
+            "How many printable runs of at least six characters the triage pack "
+            "records from the sample. The full string table stays reachable by "
+            "tool call; this bounds the one open-ended entry in the pack."
+        ),
+        "subgroup": "Triage pack",
+    },
+    "triage.reputation": {
+        "title": "Triage reputation lookup",
+        "description": (
+            "'auto' asks the enabled reputation server once for the sample hash: "
+            "VirusTotal's own server when it is enabled, else the threat-intel "
+            "sidecar. 'off' records a skipped entry instead. The call goes through "
+            "the tool server like any agent's call and is recorded under that "
+            "server."
+        ),
+        "subgroup": "Triage pack",
     },
     "react_agent_max_steps": {
         "title": "ReAct agent default max steps",

@@ -81,12 +81,28 @@ def _paper_stages() -> list[dict]:
     ]
 
 
+def _triage_pack_stage() -> dict:
+    """The deterministic first stage every team but the baseline ships with."""
+    return {
+        "key": "triage_pack",
+        "label": "Triage pack",
+        "kind": "triage",
+        "agents": [],
+        "depends_on": [],
+        "when": "",
+        "mode": "sequential",
+        "inject_upstream": "none",
+        "debate": None,
+        "builtin_tools": True,
+    }
+
+
 DEFAULT_AGENTS = {
     "profile": "default",
     "profiles": {
         "default": {
             "label": "Default",
-            "stages": _paper_stages(),
+            "stages": [_triage_pack_stage(), *_paper_stages()],
             "analysts": ["static", "dynamic", "network"],
             # Written as an analyst list, so the model keeps the stages in step
             # with ``llm.parallel_analysts`` and the negotiation settings.
@@ -95,8 +111,9 @@ DEFAULT_AGENTS = {
             "exclude_sandbox_tools": False,
             "static_provider": None,
         },
-        # The tool-free baseline: the same analysts, every server withheld and
-        # the static provider forced off, so a run measures the ensemble alone.
+        # The tool-free baseline: the same analysts, every server withheld,
+        # the static provider forced off and no triage pack in front, so a run
+        # measures the ensemble alone.
         "measurement": {
             "label": "Measurement baseline",
             "stages": _paper_stages(),

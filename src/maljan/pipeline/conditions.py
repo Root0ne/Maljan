@@ -10,7 +10,8 @@ So this is Python's own parser with an allow-list on top. ``ast.parse`` in
 ``eval`` mode gives the grammar; ``_check`` refuses every node type that is not
 in the list below; the evaluator walks the checked tree by hand. No calls, no
 comprehensions, no lambdas, no f-strings, no attribute access except one level
-into ``stages``, and no names except the fields of ``StageContext``.
+into ``stages`` and the fields of ``triage``, and no names except the fields
+of ``StageContext``.
 
 The same allow-list serves twice. ``validate_condition`` runs it at save time
 against a dummy context, so a typo is a settings error the operator sees while
@@ -29,6 +30,7 @@ __all__ = [
     "ConditionError",
     "StageContext",
     "StageResult",
+    "TriageFacts",
     "evaluate",
     "validate_condition",
 ]
@@ -79,6 +81,42 @@ class StageResult:
 
 
 @dataclass(frozen=True)
+class TriageFacts:
+    """What the triage pack established, as the four scalars a condition asks about.
+
+    The pack writes tens of ledger entries; a condition wants to know whether
+    the sample carries a signature, what a reputation service counted, and
+    whether any rule fired. ``reputation_malicious`` is ``None`` when no
+    lookup was made or the answer carried no count, and a condition comparing
+    it to a number is told so at run time rather than reading zero.
+    """
+
+    has_signature: bool = False
+    reputation_malicious: int | None = None
+    yara_hits: int = 0
+    capa_hits: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "has_signature": self.has_signature,
+            "reputation_malicious": self.reputation_malicious,
+            "yara_hits": self.yara_hits,
+            "capa_hits": self.capa_hits,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any] | None) -> TriageFacts:
+        data = data or {}
+        malicious = data.get("reputation_malicious")
+        return cls(
+            has_signature=bool(data.get("has_signature")),
+            reputation_malicious=int(malicious) if isinstance(malicious, int) else None,
+            yara_hits=int(data.get("yara_hits") or 0),
+            capa_hits=int(data.get("capa_hits") or 0),
+        )
+
+
+@dataclass(frozen=True)
 class StageContext:
     """The sample and the run so far, as names a condition may use."""
 
@@ -91,6 +129,7 @@ class StageContext:
     has_pcap: bool = False
     has_sandbox_report: bool = False
     stages: Mapping[str, StageResult] = field(default_factory=dict)
+    triage: TriageFacts = field(default_factory=TriageFacts)
 
 
 # The context fields a condition may name. Derived from the dataclass so a new
@@ -100,6 +139,9 @@ CONTEXT_NAMES: frozenset[str] = frozenset(StageContext.__dataclass_fields__)
 
 # The fields of a ``StageResult`` a condition may read off ``stages.<key>``.
 STAGE_RESULT_FIELDS: frozenset[str] = frozenset(StageResult.__dataclass_fields__)
+
+# The fields of ``TriageFacts`` a condition may read off ``triage``.
+TRIAGE_FIELDS: frozenset[str] = frozenset(TriageFacts.__dataclass_fields__)
 
 _ALLOWED_COMPARISONS = (ast.Eq, ast.NotEq, ast.In, ast.NotIn, ast.Lt, ast.LtE, ast.Gt, ast.GtE)
 _ALLOWED_CONSTANTS = (str, int, float, bool, type(None))
@@ -167,12 +209,22 @@ def _check(node: ast.AST) -> None:
             _check(element)
         return
     if isinstance(node, ast.Attribute):
+        if _is_triage_lookup(node):
+            if node.attr not in TRIAGE_FIELDS:
+                fields = ", ".join(sorted(TRIAGE_FIELDS))
+                raise ConditionError(f"triage has no field {node.attr!r}; it has: {fields}")
+            return
         _check_stage_lookup(node)
         return
     if isinstance(node, ast.Subscript):
         _check_stage_lookup(node)
         return
     raise ConditionError(f"{_describe(node)} is not allowed in a condition")
+
+
+def _is_triage_lookup(node: ast.Attribute) -> bool:
+    """``triage.<field>``: one level into the pack's facts, and nothing deeper."""
+    return isinstance(node.value, ast.Name) and node.value.id == "triage"
 
 
 def _check_stage_lookup(node: ast.Attribute | ast.Subscript) -> None:
@@ -247,6 +299,8 @@ def _resolve(node: ast.AST, ctx: StageContext) -> Any:
     if isinstance(node, ast.List):
         return [_resolve(e, ctx) for e in node.elts]
     if isinstance(node, ast.Attribute):
+        if _is_triage_lookup(node):
+            return getattr(ctx.triage, node.attr)
         holder = node.value
         assert isinstance(holder, (ast.Attribute, ast.Subscript))  # noqa: S101 — see _check
         key = _stage_key(holder)

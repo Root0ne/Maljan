@@ -34,9 +34,10 @@ def _verdict(depends_on: list[str]) -> dict:
 
 
 class TestTheConversion:
-    def test_a_stored_analyst_list_becomes_the_four_stages(self) -> None:
+    def test_a_stored_analyst_list_becomes_the_pack_and_the_four_stages(self) -> None:
         profile = ProfileDefinition.model_validate({"analysts": ["static", "network"]})
         assert [(s.key, s.kind) for s in profile.stages] == [
+            ("triage_pack", "triage"),
             ("analysis", "analysis"),
             ("debate", "debate"),
             ("verdict", "verdict"),
@@ -56,17 +57,45 @@ class TestTheConversion:
         assert converted.model_dump()["stages"] == written.model_dump()["stages"]
 
     def test_the_seeded_teams_are_the_hand_written_stage_form(self) -> None:
-        """``default`` and ``measurement`` are the paper's pipeline, both of them."""
+        """``default`` and ``measurement`` are the paper's pipeline, both of them.
+
+        With one difference: the baseline runs without the triage pack in
+        front, because it measures what the models do with nothing
+        established for them.
+        """
         settings = Settings(_env_file=None)
-        expected = stages_from_analysts(
-            ["static", "dynamic", "network"],
-            parallel=False,
-            max_rounds=settings.negotiation.max_iterations,
-            consensus_threshold=settings.negotiation.consensus_threshold,
-        )
         for name in ("default", "measurement"):
+            expected = stages_from_analysts(
+                ["static", "dynamic", "network"],
+                parallel=False,
+                max_rounds=settings.negotiation.max_iterations,
+                consensus_threshold=settings.negotiation.consensus_threshold,
+                triage=name != "measurement",
+            )
             dumped = settings.agents.profiles[name].model_dump()["stages"]
             assert dumped == [s.model_dump() for s in expected], name
+        assert settings.agents.profiles["default"].stages[0].kind == "triage"
+        assert not any(s.kind == "triage" for s in settings.agents.profiles["measurement"].stages)
+
+    def test_a_stored_measurement_analyst_list_is_read_without_the_pack(self) -> None:
+        """A document written before the pack existed loads against its seed."""
+        settings = Settings(
+            _env_file=None,
+            agents={
+                "profiles": {
+                    "measurement": {
+                        "label": "Measurement baseline",
+                        "analysts": ["static", "dynamic", "network"],
+                        "exclude_servers": ["*"],
+                        "exclude_sandbox_tools": True,
+                        "static_provider": "none",
+                    },
+                    "default": {"label": "Default", "analysts": ["static", "dynamic", "network"]},
+                }
+            },
+        )
+        assert [s.kind for s in settings.agents.profiles["measurement"].stages][0] == "analysis"
+        assert [s.kind for s in settings.agents.profiles["default"].stages][0] == "triage"
 
     def test_a_converted_team_inherits_the_two_global_keys(self) -> None:
         settings = Settings(
@@ -281,12 +310,19 @@ class TestTheRulesThatNeedTheDefinitionMap:
             )
 
 
+def _default_stages() -> list[dict]:
+    return [s.model_dump() for s in Settings(_env_file=None).agents.profiles["default"].stages]
+
+
+def _at(stages: list[dict], key: str) -> dict:
+    """The stage document with ``key``; the pack sits in front, so no index is fixed."""
+    return next(stage for stage in stages if stage["key"] == key)
+
+
 class TestTheBuiltInTeamsStayTheArchitecture:
     def test_the_debate_options_of_a_built_in_may_be_tuned(self) -> None:
-        stages = [
-            s.model_dump() for s in Settings(_env_file=None).agents.profiles["default"].stages
-        ]
-        stages[1]["debate"] = {
+        stages = _default_stages()
+        _at(stages, "debate")["debate"] = {
             "max_rounds": 2,
             "consensus_threshold": 0.6,
             "sycophancy_check": False,
@@ -295,18 +331,19 @@ class TestTheBuiltInTeamsStayTheArchitecture:
         assert settings.agents.profiles["default"].stage("debate").debate.max_rounds == 2
 
     def test_the_built_in_tool_switch_of_a_built_in_may_be_flipped(self) -> None:
-        stages = [
-            s.model_dump() for s in Settings(_env_file=None).agents.profiles["default"].stages
-        ]
-        stages[0]["builtin_tools"] = False
+        stages = _default_stages()
+        _at(stages, "analysis")["builtin_tools"] = False
         settings = _settings(profiles={"default": {"label": "Default", "stages": stages}})
         assert settings.agents.profiles["default"].stage("analysis").builtin_tools is False
 
     def test_anything_else_about_a_built_in_s_stages_is_refused(self) -> None:
-        stages = [
-            s.model_dump() for s in Settings(_env_file=None).agents.profiles["default"].stages
-        ]
-        stages[0]["agents"] = ["static"]
+        stages = _default_stages()
+        _at(stages, "analysis")["agents"] = ["static"]
+        with pytest.raises(ValidationError, match="'default' is built in; clone it to change it"):
+            _settings(profiles={"default": {"label": "Default", "stages": stages}})
+
+    def test_the_pack_cannot_be_taken_out_of_a_built_in(self) -> None:
+        stages = [stage for stage in _default_stages() if stage["kind"] != "triage"]
         with pytest.raises(ValidationError, match="'default' is built in; clone it to change it"):
             _settings(profiles={"default": {"label": "Default", "stages": stages}})
 
@@ -564,7 +601,7 @@ class TestTheDerivedMarkerIsCheckedNotTrusted:
             ("label", "Renamed"),
         ):
             stages = [s.model_dump() for s in stages_from_analysts(["static"])]
-            stages[0][field] = value
+            _at(stages, "analysis")[field] = value
             profile = _settings(
                 profiles={
                     "lean": {
@@ -592,7 +629,29 @@ class TestTheDerivedMarkerIsCheckedNotTrusted:
             profile="lean",
         ).agents.profiles["lean"]
         assert profile.derived_from_analysts is False
-        assert [s.key for s in profile.stages] == ["analysis", "debate", "verdict"]
+        assert [s.key for s in profile.stages] == ["triage_pack", "analysis", "debate", "verdict"]
+
+    def test_a_derived_team_without_the_pack_stays_derived_and_without_it(self) -> None:
+        """Whether a team runs the pack is the one thing re-derivation keeps as found."""
+        profile = Settings(
+            _env_file=None,
+            llm={"parallel_analysts": True},
+            agents={
+                "profiles": {
+                    "lean": {
+                        "analysts": ["static"],
+                        "derived_from_analysts": True,
+                        "stages": [
+                            s.model_dump() for s in stages_from_analysts(["static"], triage=False)
+                        ],
+                    }
+                },
+                "profile": "lean",
+            },
+        ).agents.profiles["lean"]
+        assert profile.derived_from_analysts is True
+        assert [s.kind for s in profile.stages][0] == "analysis"
+        assert profile.stage("analysis").mode == "parallel"
 
     def test_the_marker_means_nothing_without_an_analyst_list_to_derive_from(self) -> None:
         profile = _settings(

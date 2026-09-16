@@ -109,7 +109,10 @@ class TestAStoredTeamUnderASeededName:
 
     def test_the_seeded_team_is_there_beside_it(self) -> None:
         cfg = _settings(agents={"profiles": {"mobile": {"label": "Mine", "analysts": ["static"]}}})
-        assert [s.key for s in cfg.agents.profiles["mobile"].stages][0] == "triage"
+        assert [s.key for s in cfg.agents.profiles["mobile"].stages][:2] == [
+            "triage_pack",
+            "triage",
+        ]
 
 
 class TestEveryReferenceMovesWithTheRename:
@@ -126,8 +129,8 @@ class TestEveryReferenceMovesWithTheRename:
         )
 
     def test_the_team_that_named_it_names_the_new_key(self) -> None:
-        stages = self._cfg().agents.profiles["team"].stages
-        assert stages[0].agents == ["reverser_custom"]
+        profile = self._cfg().agents.profiles["team"]
+        assert profile.stage("analysis").agents == ["reverser_custom"]
 
     def test_the_per_agent_model_entry_follows(self) -> None:
         assert "reverser_custom" in self._cfg().llm.agents
