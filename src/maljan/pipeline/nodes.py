@@ -456,6 +456,39 @@ def _augment_static_chunks_with_path(
 # ---------------------------------------------------------------------------
 
 
+def _sample_identity(state: AnalysisState) -> dict[str, Any]:
+    """What the run knows about the sample before anyone analysed it.
+
+    The hash the job was queued under, the name it arrived with, the format
+    detection, and the size and md5 where something already read them. Facts
+    from the router, which is why they are safe to put in front of the judge
+    without a caveat: none of them is a conclusion about the sample.
+
+    Never raises. An identity block that cannot be built is one the prompt goes
+    without, and a judge with no hash is what this exists to stop, not one this
+    should fail a run for.
+    """
+    identity: dict[str, Any] = {
+        "sha256": str(state.get("file_hash") or ""),
+        "file_name": str(state.get("file_name") or ""),
+        "file_type": str(state.get("file_type") or ""),
+        "platform": str(state.get("platform") or ""),
+    }
+    report = state.get("sandbox_report")
+    target = (report or {}).get("target") if isinstance(report, dict) else None
+    sandbox_file = target.get("file") if isinstance(target, dict) else None
+    if isinstance(sandbox_file, dict):
+        identity["md5"] = str(sandbox_file.get("md5") or "")
+        identity["size_bytes"] = sandbox_file.get("size") or ""
+    if not identity.get("size_bytes"):
+        from pathlib import Path
+
+        path = state.get("sample_path")
+        with suppress(OSError, TypeError, ValueError):
+            identity["size_bytes"] = Path(str(path)).stat().st_size if path else ""
+    return {key: value for key, value in identity.items() if str(value or "").strip()}
+
+
 def _ledger_servers(state: AnalysisState) -> set[str]:
     """Every server the run has recorded a tool call against, by key.
 
@@ -1541,6 +1574,10 @@ def make_negotiation_node(
                     # question about the ledger rather than about the
                     # analysts' prose.
                     ledger_servers=_ledger_servers(state),
+                    # The sample's own facts. The mediator tells the judge to
+                    # look a hash up, and until now no message in the
+                    # conversation carried one.
+                    sample=_sample_identity(state),
                     # The stage's own bar for calling it agreement. ``None``
                     # leaves the mediator on the global setting, which is what
                     # the stage's options were seeded from.
@@ -2107,6 +2144,10 @@ def make_judge_node(
                 memory_store=memory_store,
                 evidence_corpus=evidence_corpus or None,
                 current_sample_id=state.get("file_hash"),
+                sample=_sample_identity(state),
+                # What the run recorded, so a verdict that says the sample is
+                # clean can be asked which entry says so.
+                ledger_ids=[entry.id for entry in _ledger],
             )
             # A verdict the judge never expressed as a bundle is the thinnest
             # answer this pipeline can produce — no severity, no reasoning the

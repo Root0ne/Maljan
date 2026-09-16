@@ -28,7 +28,7 @@ from __future__ import annotations
 import asyncio
 import re
 import uuid
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -49,6 +49,7 @@ from maljan.pipeline.validation import (
     assessment_violations,
     drop_ungrounded_indicators,
     retry_with_feedback,
+    unsupported_benign_violations,
     validate_verdict_bundle,
 )
 from maljan.schemas.evidence import EvidenceCounter, LedgerEntry
@@ -192,6 +193,52 @@ JUDGE_VERDICT_SYSTEM = (
     "clean sample.\n"
     "- Return ONLY a valid JSON STIX 2.1 Bundle. No markdown wrappers."
 )
+
+
+# What the judge is told about the sample itself, before any analysis of it.
+# These are the router's facts — the hash the job was queued under, the name it
+# arrived with, its size and the format detection — and they are in the prompt
+# always, not only when a lookup is due.
+#
+# A live run made the case: the mediator told the judge to look the sample's
+# hash up, and no message in the conversation carried a hash. The static
+# analyst had produced no claims, so there was nothing in the prose either, and
+# the judge opened a seventeen-tool loop with nothing to ask about.
+SAMPLE_IDENTITY_HEADER = "SAMPLE IDENTITY (established by the router, not by analysis)"
+
+_IDENTITY_FIELDS: tuple[tuple[str, str], ...] = (
+    ("sha256", "sha256"),
+    ("md5", "md5"),
+    ("file_name", "file name"),
+    ("size_bytes", "size (bytes)"),
+    ("file_type", "file type"),
+    ("platform", "platform"),
+)
+
+
+def sample_identity_block(sample: Any) -> str:
+    """The sample's own facts as one block, or ``""`` when there are none."""
+    data = sample if isinstance(sample, dict) else {}
+    rows = [
+        f"{label}: {data[key]}"
+        for key, label in _IDENTITY_FIELDS
+        if str(data.get(key) or "").strip()
+    ]
+    if not rows:
+        return ""
+    return f"=== {SAMPLE_IDENTITY_HEADER} ===\n" + "\n".join(rows)
+
+
+def _identity_prefix(sample: Any) -> str:
+    """The identity block as a prompt prefix, with its blank line."""
+    block = sample_identity_block(sample)
+    return f"{block}\n\n" if block else ""
+
+
+def _sha256_of(sample: Any) -> str:
+    """The sha256 the identity block carries, for a sentence that names it."""
+    data = sample if isinstance(sample, dict) else {}
+    return str(data.get("sha256") or "").strip()
 
 
 class JudgeAgent:
@@ -496,6 +543,7 @@ class JudgeAgent:
         isr_reports: dict[str, AgentISR] | None = None,
         consensus_threshold: float | None = None,
         ledger_servers: Iterable[str] | None = None,
+        sample: Any = None,
     ) -> tuple[AgentArgument, bool]:
         """Find contradictions between expert reports and determine consensus.
 
@@ -573,9 +621,15 @@ class JudgeAgent:
                 "- The downstream Judge alone decides Malware/Benign/Suspicious. "
                 + (
                     "You have reputation tools and no analyst has consulted one. "
-                    "Look the sample's hash up once to settle its identity, cite what "
-                    "comes back as evidence, and treat a reputation label as one "
-                    "source rather than as the verdict.\n"
+                    f"Look the sample's hash up once — its sha256 is {_sha256_of(sample)} "
+                    "and it is in the sample identity block below — cite what comes back "
+                    "as evidence, and treat a reputation label as one source rather than "
+                    "as the verdict.\n"
+                    if identity_unanswered and _sha256_of(sample)
+                    else "You have reputation tools and no analyst has consulted one. "
+                    "Look the sample up once to settle its identity, cite what comes "
+                    "back as evidence, and treat a reputation label as one source "
+                    "rather than as the verdict.\n"
                     if identity_unanswered
                     else "You have Threat Intelligence tools to verify disputed "
                     "IPs/domains/hashes — use them only to resolve contradictions.\n"
@@ -585,6 +639,7 @@ class JudgeAgent:
             ),
             (
                 "human",
+                f"{_identity_prefix(sample)}"
                 f"Expert Reports:\n{reports_text}\n\nPrevious Discussion:\n{history}\n\n"
                 "List the contradictions and give a single agreement_confidence "
                 "score. Do not state a verdict.",
@@ -680,6 +735,8 @@ class JudgeAgent:
         memory_store: MemoryStore | None = None,
         evidence_corpus: set[str] | None = None,
         current_sample_id: str | None = None,
+        sample: Any = None,
+        ledger_ids: Sequence[str] | None = None,
     ) -> JudgeVerdict:
         """The final decision: a STIX bundle plus the judge's own assessment.
 
@@ -740,6 +797,7 @@ class JudgeAgent:
             SystemMessage(content=JUDGE_VERDICT_SYSTEM),
             HumanMessage(
                 content=(
+                    f"{_identity_prefix(sample)}"
                     f"Expert Reports:\n{reports_text}\n\n"
                     f"Negotiation History:\n{str(history)[:800]}\n\n"
                     "Return a JSON STIX 2.1 Bundle."
@@ -840,6 +898,14 @@ class JudgeAgent:
                 *validate_verdict_bundle(bundle, evidence_corpus, attck=_knowledge),
                 *assessment_violations(bundle),
                 *assessment_conflict_violations(bundle),
+                *unsupported_benign_violations(
+                    bundle,
+                    analyst_claims=sum(
+                        len(getattr(isr, "claims", None) or [])
+                        for isr in (isr_reports or {}).values()
+                    ),
+                    ledger_ids=ledger_ids,
+                ),
             ]
 
         tally = ValidationTally()

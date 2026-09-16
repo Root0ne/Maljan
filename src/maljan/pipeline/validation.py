@@ -20,6 +20,7 @@ and the drop of an indicator that named a value no tool ever saw.
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -1034,6 +1035,61 @@ def assessment_conflict_violations(bundle: Any) -> list[Violation]:
                 "the rationale should support whichever it is."
             ),
             path="x_maljan_assessment.severity.rating",
+        )
+    ]
+
+
+UNSUPPORTED_BENIGN_CODE = "verdict.unsupported_benign"
+
+
+def unsupported_benign_violations(
+    bundle: Any, *, analyst_claims: int, ledger_ids: Sequence[str] | None = None
+) -> list[Violation]:
+    """Whether a Benign verdict on a run with no analysis cites anything.
+
+    A live sample that 31 of 75 engines called malicious ended Benign at 0.1
+    after every analyst reported no claims: the judge had seven tool results in
+    front of it and no analysis of them, and "nothing was said about this
+    sample" became "this sample is clean".
+
+    Benign is a finding, so it needs something behind it. Either the bundle
+    cites an entry from this run — a valid Authenticode signature out of
+    ``signing_info`` is the usual one, which is how a signed PuTTY still ends
+    Benign — or the verdict gives way to Suspicious with a rationale that says
+    the run was inconclusive. Which of the two it is stays the judge's
+    decision: this asks once and records what survives.
+
+    Any cited entry clears it, not only a signature. The validator's business
+    is whether the verdict points at the run's own evidence; grading that
+    evidence is the judge's, and a validator that ranked it would be making the
+    call it is here to ask for.
+    """
+    from maljan.pipeline.outcome import decide_from_bundle
+    from maljan.schemas.evidence import ENTRY_ID_RE
+
+    if analyst_claims > 0 or decide_from_bundle(bundle) != "Benign":
+        return []
+    known = {str(entry).strip() for entry in (ledger_ids or []) if str(entry).strip()}
+    try:
+        text = json.dumps(bundle.model_dump(mode="json"), default=str)
+    except Exception as exc:  # noqa: BLE001 — an unreadable bundle cites nothing
+        logger.debug("validation: the bundle could not be read for citations (%s).", exc)
+        text = ""
+    if known and set(ENTRY_ID_RE.findall(text)) & known:
+        return []
+    listed = ", ".join(sorted(known)[:3])
+    where = f" The entries this run recorded include {listed}." if listed else ""
+    return [
+        Violation(
+            code=UNSUPPORTED_BENIGN_CODE,
+            message=(
+                "This verdict is Benign and no analyst made a single claim about the "
+                "sample, so nothing examined it. Benign is a finding and needs evidence: "
+                "cite the ledger entry that establishes it — a valid signature from "
+                "signing_info is the usual one — or return Suspicious and say in the "
+                f"rationale that the run was inconclusive.{where}"
+            ),
+            path="objects",
         )
     ]
 

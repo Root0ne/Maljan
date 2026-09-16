@@ -17,6 +17,26 @@ from maljan.schemas.judgement import FamilyVerdict, JudgeAssessment, SeverityVer
 from maljan.schemas.stix_models import Bundle
 
 
+def _examined() -> dict:
+    """One analyst with one claim, so the run is not one nobody examined.
+
+    A verdict over an empty bundle and no claims is its own violation
+    (``verdict.unsupported_benign``), and this file is about the assessment
+    block rather than about that.
+    """
+    from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+
+    return {
+        "static": AgentISR(
+            agent_id="static",
+            domain="static",
+            claims=[
+                ClaimEvidence(claim="the binary is packed", evidence_ref="ev_0001", confidence=0.5)
+            ],
+        )
+    }
+
+
 def _assessment(**overrides: object) -> JudgeAssessment:
     fields: dict[str, object] = {
         "severity": SeverityVerdict(rating="High", rationale="it injects into a remote process"),
@@ -102,7 +122,9 @@ class TestTheJudgeAsksOnce:
         judge.token_ledger = None
         judge.truncation_ledger = None
 
-        verdict = asyncio.run(judge.give_verdict(reports={"static": "nothing"}, history=[]))
+        verdict = asyncio.run(
+            judge.give_verdict(reports={"static": "nothing"}, history=[], isr_reports=_examined())
+        )
 
         assert verdict.retries == 1
         assert verdict.fed_back == {ASSESSMENT_MISSING_CODE: 1}
@@ -126,7 +148,9 @@ class TestTheJudgeAsksOnce:
         judge.token_ledger = None
         judge.truncation_ledger = None
 
-        verdict = asyncio.run(judge.give_verdict(reports={"static": "nothing"}, history=[]))
+        verdict = asyncio.run(
+            judge.give_verdict(reports={"static": "nothing"}, history=[], isr_reports=_examined())
+        )
 
         assert verdict.retries == 1
         assert [v.code for v in verdict.violations] == [ASSESSMENT_MISSING_CODE]
