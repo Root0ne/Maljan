@@ -84,6 +84,9 @@ def pe_info(
     The flags matter for a real sample: a PE with tens of thousands of imports
     produces a payload no context window wants, and an agent that only needs
     the section table should be able to ask for the section table.
+
+    Imports are listed without interpretation: library, name or ordinal, hint
+    and address, and no capability label. See :func:`_import_rows`.
     """
     target = Path(path)
     if not target.is_file():
@@ -113,7 +116,6 @@ def pe_info(
     from maljan.extractors.pe_extractor import (
         _overlay_offset,
         _pe_exports,
-        _pe_imports,
         _pe_pdb_path,
         _pe_resources,
         _pe_sections,
@@ -165,11 +167,11 @@ def pe_info(
     )
     out["rich_header_present"] = _has_rich_header(pe)
     if imports:
-        out["imports"] = [
-            {"dll": row.dll, "function": row.function, "category": row.category}
-            for row in _pe_imports(pe)
-        ]
-        out["delay_imports"] = _delay_imports(pe)
+        out["imports"] = _import_rows(getattr(pe, "DIRECTORY_ENTRY_IMPORT", None))
+        # A binary that resolves its interesting APIs through ``.didat`` looked
+        # import-free here, which is the same false picture a damaged import
+        # table gives.
+        out["delay_imports"] = _import_rows(getattr(pe, "DIRECTORY_ENTRY_DELAY_IMPORT", None))
     if exports:
         out["exports"] = list(_pe_exports(pe))
     if resources:
@@ -254,17 +256,18 @@ def _has_rich_header(pe: Any) -> bool:
         return False
 
 
-def _delay_imports(pe: Any) -> list[dict[str, Any]]:
-    """The delay-load imports, in the same shape as the ordinary ones.
+def _import_rows(entries: Any) -> list[dict[str, Any]]:
+    """One row per imported symbol, as the import directory states it.
 
-    A binary that resolves its interesting APIs through ``.didat`` looked
-    import-free here, which is the same false picture a damaged import table
-    gives.
+    The table's own facts and nothing else: which library, which name or
+    ordinal, the hint and the thunk address. What an API is used for is a
+    question for the knowledge server's ``api_capability`` tool, asked by the
+    model when it decides the answer matters. A row that labelled ``BitBlt``
+    "keylogging" was this tool doing the analysis, and an analyst read the
+    label as a finding on a signed binary.
     """
-    from maljan.extractors.pe_extractor import classify_import
-
     rows: list[dict[str, Any]] = []
-    for entry in getattr(pe, "DIRECTORY_ENTRY_DELAY_IMPORT", []) or []:
+    for entry in entries or []:
         try:
             dll = (entry.dll or b"").decode("utf-8", errors="replace")
         except Exception:  # noqa: BLE001
@@ -272,10 +275,18 @@ def _delay_imports(pe: Any) -> list[dict[str, Any]]:
         for imp in getattr(entry, "imports", None) or []:
             name = getattr(imp, "name", None)
             function = name.decode("utf-8", errors="replace") if name else ""
+            ordinal = getattr(imp, "ordinal", None)
             if not function:
-                function = f"Ordinal_{getattr(imp, 'ordinal', '?')}"
-            category, _suspicious = classify_import(function)
-            rows.append({"dll": dll, "function": function, "category": category})
+                function = f"Ordinal_{ordinal if ordinal is not None else '?'}"
+            rows.append(
+                {
+                    "dll": dll,
+                    "function": function,
+                    "ordinal": ordinal,
+                    "hint": getattr(imp, "hint", None),
+                    "address": getattr(imp, "address", None),
+                }
+            )
     return rows
 
 
@@ -361,10 +372,7 @@ def elf_info(path: str) -> dict[str, Any]:
             }
             for s in _parse_elf_sections(blob)
         ],
-        "imports": [
-            {"dll": row.dll, "function": row.function, "category": row.category}
-            for row in _parse_elf_imports(blob)
-        ],
+        "imports": [{"dll": row.dll, "function": row.function} for row in _parse_elf_imports(blob)],
         "exports": list(_parse_elf_exports(blob)),
     }
     out.update(_elf_dynamic_view(blob))

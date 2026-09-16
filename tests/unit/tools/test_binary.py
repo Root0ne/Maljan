@@ -159,9 +159,24 @@ class TestPeInfo:
 
         result = tool.pe_info(str(target))
 
-        assert result["delay_imports"] == [
-            {"dll": "WININET.dll", "function": "HttpSendRequestA", "category": "network"}
-        ]
+        (row,) = result["delay_imports"]
+        assert (row["dll"], row["function"]) == ("WININET.dll", "HttpSendRequestA")
+
+    def test_an_import_row_carries_the_table_s_facts_and_no_label(self, tmp_path: Path) -> None:
+        """A row that called BitBlt "keylogging" was the tool doing the analysis,
+        and an analyst wrote the label up as its first claim on a signed binary.
+        What an API is used for is the knowledge server's question."""
+        pytest.importorskip("pefile")
+        target = tmp_path / "sample.exe"
+        target.write_bytes(_pe())
+
+        result = tool.pe_info(str(target))
+
+        for row in [*result["imports"], *result["delay_imports"]]:
+            assert set(row) == {"dll", "function", "ordinal", "hint", "address"}
+        (row,) = result["imports"]
+        assert (row["function"], row["hint"]) == ("CreateFileA", 0)
+        assert isinstance(row["address"], int)
 
     def test_the_import_blocks_are_omitted_when_imports_are_not_asked_for(
         self, tmp_path: Path

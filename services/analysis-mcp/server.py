@@ -205,7 +205,11 @@ def pe_info(
     overlay: bool = True,
     pdb: bool = True,
 ) -> dict[str, Any]:
-    """Parse a PE: sections with entropy, imports, exports, resources, overlay, PDB path."""
+    """Parse a PE: sections with entropy, imports, exports, resources, overlay, PDB path.
+
+    Imports are listed without interpretation: library, name or ordinal, hint and
+    address. Ask api_capability what an API is used for.
+    """
     return _guard(
         "pe_info",
         binary_tools.pe_info,
@@ -221,7 +225,8 @@ def pe_info(
 
 @mcp.tool()
 def elf_info(path: str) -> dict[str, Any]:
-    """Parse an ELF: sections, imports, exports, segments, interpreter, DT_NEEDED."""
+    """Parse an ELF: sections, imports (listed without interpretation), exports, segments,
+    interpreter, DT_NEEDED."""
     return _guard("elf_info", binary_tools.elf_info, path=path)
 
 
