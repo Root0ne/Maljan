@@ -265,9 +265,9 @@ class TestPerAgentMaxStepsOverride:
         captured: dict[str, int] = {}
 
         class _FakeExecutor:
-            async def ainvoke(self, inputs, config):  # type: ignore[no-untyped-def]
+            async def astream(self, inputs, config, stream_mode="values"):  # type: ignore[no-untyped-def]
                 captured["recursion_limit"] = int(config.get("recursion_limit"))
-                return {"messages": [MagicMock(content="done", tool_calls=[])]}
+                yield {"messages": [MagicMock(content="done", tool_calls=[])]}
 
         agent = self._make_tool_agent(name)
         with patch("maljan.agents.base_agent.get_settings") as mock_settings:
@@ -334,8 +334,8 @@ class TestForcedFinalSynthesis:
         ]
 
         class _FakeExecutor:
-            async def ainvoke(self, inputs, config):  # type: ignore[no-untyped-def]
-                return {"messages": react_messages}
+            async def astream(self, inputs, config, stream_mode="values"):  # type: ignore[no-untyped-def]
+                yield {"messages": react_messages}
 
         synth_llm = MagicMock()
         synth_llm.invoke.return_value = MagicMock(
@@ -365,8 +365,8 @@ class TestForcedFinalSynthesis:
         ]
 
         class _FakeExecutor:
-            async def ainvoke(self, inputs, config):  # type: ignore[no-untyped-def]
-                return {"messages": react_messages}
+            async def astream(self, inputs, config, stream_mode="values"):  # type: ignore[no-untyped-def]
+                yield {"messages": react_messages}
 
         llm = MagicMock()
         agent = self._make_tool_agent(llm)

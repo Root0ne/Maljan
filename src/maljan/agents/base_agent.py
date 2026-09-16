@@ -2672,7 +2672,11 @@ class BaseAnalyst(ABC):
         # This analyst's own ledger, as it stands when the answer is checked.
         # It decides whether a technique claim that cites nothing is a
         # violation: an analyst that called no tool has nothing to cite.
-        ledger_ids = [str(entry.id) for entry in self._evidence_entries if getattr(entry, "id", "")]
+        ledger_ids = [
+            str(getattr(entry, "id", ""))
+            for entry in (getattr(self, "_evidence_entries", None) or [])
+            if getattr(entry, "id", "")
+        ]
 
         def _validator(candidate: AgentISR) -> list[Violation]:
             return validate_isr(candidate, attck=knowledge, ledger_ids=ledger_ids)
