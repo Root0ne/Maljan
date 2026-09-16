@@ -521,6 +521,32 @@ def strip_tool_call_scaffolding(text: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
 
 
+# The width of the evidence field as the ISR stores it.
+_EVIDENCE_REF_CHARS = 200
+
+
+def evidence_ref_text(evidence_text: str) -> str:
+    """The evidence line as the ISR stores it, with its ledger ids kept.
+
+    The field is cut to a fixed width, and the claim format asks for the id at
+    the end of a line whose front is prose, so on a long line the cut lands on
+    the one part the run can check. Any id the cut dropped is written back
+    after it, in the order the model wrote it.
+    """
+    kept = evidence_text[:_EVIDENCE_REF_CHARS]
+    if len(kept) == len(evidence_text):
+        return kept
+    still_there = {found.lower() for found in ENTRY_ID_RE.findall(kept)}
+    dropped = [
+        found
+        for found in dict.fromkeys(f.lower() for f in ENTRY_ID_RE.findall(evidence_text))
+        if found not in still_there
+    ]
+    if not dropped:
+        return kept
+    return f"{kept} {' '.join(f'[{found}]' for found in dropped)}"
+
+
 def parse_structured_claims(text: str) -> list[ClaimEvidence]:
     """Parse ``CLAIM:``-delimited blocks, tolerating missing optional fields.
 
@@ -583,7 +609,7 @@ def parse_structured_claims(text: str) -> list[ClaimEvidence]:
         claims.append(
             ClaimEvidence(
                 claim=claim_text[:300],
-                evidence_ref=evidence_text[:200],
+                evidence_ref=evidence_ref_text(evidence_text),
                 confidence=confidence,
                 technique_id=technique_id,
             )

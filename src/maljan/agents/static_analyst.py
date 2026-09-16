@@ -15,6 +15,7 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from maljan.agents.base_agent import (
     BaseAnalyst,
+    evidence_ref_text,
     prompt_to_messages,
     strip_tool_call_scaffolding,
 )
@@ -989,7 +990,7 @@ def _parse_claim_blocks(text: str) -> list[ClaimEvidence]:
         claims.append(
             ClaimEvidence(
                 claim=claim_text[:300],
-                evidence_ref=evidence_text[:200],
+                evidence_ref=evidence_ref_text(evidence_text),
                 confidence=confidence,
                 technique_id=technique_id,
             )

@@ -184,6 +184,44 @@ class TestWhatIsNot:
         assert UNGROUNDED_TECHNIQUE_CODE not in _codes(validate_isr(isr))
 
 
+class TestTheEvidenceLineKeepsItsId:
+    """The format puts the id at the end of a line whose front is prose, and
+    the ISR field is cut at a fixed width: the one shape the format asks for
+    is the one the cut used to break."""
+
+    def _parsers(self) -> list[Any]:
+        from maljan.agents.base_agent import parse_structured_claims
+        from maljan.agents.static_analyst import _parse_claim_blocks
+
+        return [parse_structured_claims, _parse_claim_blocks]
+
+    def _report(self, evidence: str) -> str:
+        return f"CLAIM: it injects\nEVIDENCE: {evidence}\nCONFIDENCE: 0.8\nTECHNIQUE: T1055\n---"
+
+    def test_an_id_past_the_cut_still_reaches_the_checker(self) -> None:
+        evidence = "the import table lists VirtualAllocEx " * 6 + "[ev_0002]"
+        assert len(evidence) > 200
+
+        for parse in self._parsers():
+            (claim,) = parse(self._report(evidence))
+            assert "ev_0002" in claim.evidence_ref, parse.__name__
+            assert UNGROUNDED_TECHNIQUE_CODE not in _codes(
+                validate_isr(_isr(claim), ledger_ids=LEDGER)
+            )
+
+    def test_a_line_that_fits_is_stored_as_written(self) -> None:
+        for parse in self._parsers():
+            (claim,) = parse(self._report("import table [ev_0002]"))
+            assert claim.evidence_ref == "import table [ev_0002]"
+
+    def test_an_id_before_the_cut_is_not_written_twice(self) -> None:
+        evidence = "[ev_0002] " + "the import table lists VirtualAllocEx " * 6
+
+        for parse in self._parsers():
+            (claim,) = parse(self._report(evidence))
+            assert claim.evidence_ref.count("ev_0002") == 1
+
+
 class TestTheAnalystIsAskedOnce:
     """The loop that asks: one feedback turn, and the survivor is recorded."""
 
