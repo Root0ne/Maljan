@@ -223,6 +223,26 @@ class TestTheEvidenceLineKeepsItsId:
             (claim,) = parse(self._report("import table [ev_0002]"))
             assert claim.evidence_ref == "import table [ev_0002]"
 
+    def test_an_id_the_cut_sliced_through_is_not_left_half_written(self) -> None:
+        """The field is what the report prints and what memory embeds."""
+        from maljan.agents.base_agent import evidence_ref_text
+
+        stored = evidence_ref_text("y" * 196 + "[ev_0007]")
+
+        assert "[ev_ " not in stored
+        assert stored.endswith("[ev_0007]")
+        assert stored.count("ev_0007") == 1
+
+    def test_the_ids_written_back_are_bounded(self) -> None:
+        from maljan.agents.base_agent import _EVIDENCE_REF_CHARS, evidence_ref_text
+
+        line = "x" * 200 + " ".join(f"[ev_{n:04d}]" for n in range(1, 60))
+
+        stored = evidence_ref_text(line)
+
+        assert len(stored) <= _EVIDENCE_REF_CHARS + 40
+        assert "ev_0001" in stored
+
     def test_an_id_before_the_cut_is_not_written_twice(self) -> None:
         evidence = "[ev_0002] " + "the import table lists VirtualAllocEx " * 6
 

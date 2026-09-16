@@ -522,8 +522,13 @@ def strip_tool_call_scaffolding(text: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
 
 
-# The width of the evidence field as the ISR stores it.
+# The width of the evidence field as the ISR stores it, and how many dropped
+# ids are written back after the cut.
 _EVIDENCE_REF_CHARS = 200
+_EVIDENCE_REF_IDS = 3
+
+# The start of an id the cut sliced through, at the end of the kept text.
+_PARTIAL_ID_AT_END_RE = re.compile(r"\s*\[?ev_\d{0,3}$", re.IGNORECASE)
 
 
 def evidence_ref_text(evidence_text: str) -> str:
@@ -532,17 +537,21 @@ def evidence_ref_text(evidence_text: str) -> str:
     The field is cut to a fixed width, and the claim format asks for the id at
     the end of a line whose front is prose, so on a long line the cut lands on
     the one part the run can check. Any id the cut dropped is written back
-    after it, in the order the model wrote it.
+    after it, in the order the model wrote it, up to a few: the field is what
+    the report prints and what long-term memory embeds, and a constant named
+    for a width should bound it. An id the cut sliced through is removed from
+    the kept text, since the whole id follows.
     """
     kept = evidence_text[:_EVIDENCE_REF_CHARS]
     if len(kept) == len(evidence_text):
         return kept
+    kept = _PARTIAL_ID_AT_END_RE.sub("", kept)
     still_there = {found.lower() for found in ENTRY_ID_RE.findall(kept)}
     dropped = [
         found
         for found in dict.fromkeys(f.lower() for f in ENTRY_ID_RE.findall(evidence_text))
         if found not in still_there
-    ]
+    ][:_EVIDENCE_REF_IDS]
     if not dropped:
         return kept
     return f"{kept} {' '.join(f'[{found}]' for found in dropped)}"
