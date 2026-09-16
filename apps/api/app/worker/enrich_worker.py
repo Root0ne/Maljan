@@ -43,8 +43,11 @@ async def _get_memory_store() -> MemoryStore | None:
 
     Returns ``None`` when Qdrant is not installed / not reachable so the
     enrichment task degrades to reputation-only behaviour without aborting.
-    ``qdrant_url`` / ``qdrant_collection`` / ``qdrant_api_key`` are the API's
-    own store-backed knobs, separate from ``core.memory.qdrant_*``.
+
+    The settings are ``core.memory.qdrant_*`` — the same ones the analysis path
+    reads. There used to be a second set under ``api.qdrant_*``, and an
+    operator who filled in one of the two got a 401 out of every enrich run
+    because the worker was reading the other.
     """
     global _memory_store_built, _memory_store
     if _memory_store_built:
@@ -53,13 +56,14 @@ async def _get_memory_store() -> MemoryStore | None:
     try:
         from maljan.memory.qdrant_store import QdrantStore
 
-        qdrant_url = await runtime_config.get("qdrant_url")
-        qdrant_collection = await runtime_config.get("qdrant_collection")
-        qdrant_api_key = await runtime_config.get_secret("qdrant_api_key") or None
+        memory = (await runtime_config.core()).memory
+        qdrant_url = memory.qdrant_url
+        qdrant_collection = memory.qdrant_collection
+        secret = memory.qdrant_api_key
         _memory_store = QdrantStore(
             url=qdrant_url,
             collection=qdrant_collection,
-            api_key=qdrant_api_key,
+            api_key=(secret.get_secret_value() if secret else "") or None,
         )
         logger.info(
             "enrich: Qdrant LTM available (url=%s, collection=%s).",

@@ -28,9 +28,6 @@ _MOVED_TO_STORE = {
     "upload_max_bytes",
     "upload_allowed_mime_types",
     "trusted_proxy_ips",
-    "qdrant_url",
-    "qdrant_collection",
-    "qdrant_api_key",
     "jwt_access_token_expire_minutes",
     "jwt_refresh_token_expire_days",
 }
@@ -83,10 +80,20 @@ def test_every_api_catalog_entry_has_a_known_widget_type():
         assert entry.type in _KNOWN_WIDGET_TYPES, (entry.path, entry.type)
 
 
-def test_qdrant_api_key_types_as_secret():
-    by_path = {e.path: e for e in api_catalog()}
-    assert by_path["qdrant_api_key"].type == "secret"
-    assert by_path["qdrant_api_key"].secret
+def test_the_api_catalog_holds_no_second_copy_of_the_qdrant_settings():
+    """One server, one set of keys.
+
+    ``api.qdrant_*`` and ``core.memory.qdrant_*`` addressed the same Qdrant,
+    and an operator filling in either one left the other empty — which is the
+    401 every enrich run answered with. The ``core.memory`` half is the one
+    that stayed, and it carries the secret.
+    """
+    from maljan.core.config import Settings
+
+    paths = {e.path for e in api_catalog()}
+
+    assert not {path for path in paths if path.startswith("qdrant")}
+    assert Settings(_env_file=None).memory.qdrant_api_key is None
 
 
 def test_api_entries_carry_the_two_new_fields_with_neutral_defaults():

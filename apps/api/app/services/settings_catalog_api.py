@@ -165,9 +165,6 @@ API_DEFAULTS: dict[str, Any] = {
         "application/x-msdos-program",
     ],
     "trusted_proxy_ips": [],
-    "qdrant_url": "http://127.0.0.1:6333",
-    "qdrant_collection": "maljan_ltm",
-    "qdrant_api_key": "",
     "jwt_access_token_expire_minutes": 30,
     "jwt_refresh_token_expire_days": 7,
 }
@@ -289,24 +286,6 @@ API_EDITABLE: dict[str, dict[str, Any]] = {
             "Peers whose X-Forwarded-For header is believed for rate "
             "limiting. CIDR networks (or single IPs), one per entry."
         ),
-    },
-    "qdrant_url": {
-        "type": "str",
-        "group": "api",
-        "title": "Qdrant (API health probe)",
-        "description": "Address the API pings on /health?deep=true and enrichment reads for LTM.",
-    },
-    "qdrant_collection": {
-        "type": "str",
-        "group": "api",
-        "title": "Qdrant collection (API-side)",
-        "description": "Collection the enrichment worker's own Qdrant client reads.",
-    },
-    "qdrant_api_key": {
-        "type": "secret",
-        "group": "api",
-        "title": "Qdrant API key (API-side)",
-        "description": "Sent with the API's own Qdrant health probe and enrichment reads.",
     },
     "jwt_access_token_expire_minutes": {
         "type": "int",
