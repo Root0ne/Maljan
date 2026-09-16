@@ -228,6 +228,27 @@ change landed on `main`.
 
 ### Fixed
 
+- **A technique claim that cites nothing is challenged.** A signed PuTTY
+  produced eighteen technique ids, sixteen of which said in their own evidence
+  field that they were speculative, and the judge read them as eighteen
+  techniques. `isr.ungrounded_technique` asks the analyst once to name the
+  ledger entry it read the technique from or to drop it, records what survives,
+  and tells the judge which techniques the run does not establish. Nothing is
+  rewritten, and an analyst with no tools is exempt.
+
+- **A ReAct loop that only repeats itself is ended.** An analyst spent 16 of
+  its 19 steps calling one tool with identical arguments. The second served
+  repeat now says the loop is about to end, the third ends it, and what was
+  gathered goes to the same forced synthesis a spent step budget takes.
+
+- **Forced synthesis keeps the evidence it is asked to synthesise.** The
+  budget comes from the model's context window where `llm.openai.context_size`
+  (or the Ollama window) declares one, with the old fixed 16,000 characters as
+  a floor; trimming drops whole tool call and result pairs oldest first, and
+  assistant prose before any pair, so a result is never dropped while the call
+  that referenced it stays; and the instruction names the ledger ids still in
+  the window.
+
 - **A bound reputation server is actually consulted.** VirusTotal connected for
   the judge, offered six tools and was never called: the judge opens its tool
   loop on explicit dissent alone and the static analyst held no reference to
