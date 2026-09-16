@@ -79,7 +79,7 @@ The backend exposes sixteen groups, in this order:
 | Static analysis provider | The static analyst's provider and its connection details. |
 | Sandbox provider | Where samples are detonated, or which uploaded report stands in. |
 | Tool servers (MCP) | The servers agents may call and the tools each may expose. |
-| Memory / LTM (Qdrant) | Backend, collections and how many neighbours are recalled. |
+| Memory / LTM (Qdrant) | Backend, collections and how many neighbours are recalled. The enrichment worker and the API's health probe read these same keys; there is no second, API-side copy of them. |
 | Analysis layers | Deterministic pre-analysis layers, reference data and thresholds. |
 | Negotiation | Rounds and the consensus condition. |
 | Chunking | How large inputs are split before they reach a model. |
@@ -321,9 +321,16 @@ answers the tool call with a 429 carrying `Retry-After`; the analyst records
 that answer and carries on without it, exactly as it does for any tool that
 declines.
 
-`virustotal` is referenced by the `network` analyst, the `judge` and the
-seeded `triage` agent. A disabled server contributes no tools and no
-degradation reason, so those references cost nothing until it is registered.
+`virustotal` is referenced by every agent that reads the file or weighs the
+run: the `static` and `network` analysts, the judge, and the seeded `triage`,
+`android_static` and `reverser` agents. Their prompts say what to do with an
+answer — look the hash up once, cite it like any other tool result, and treat
+a reputation label as one source rather than as the verdict. The judge opens
+its own tool loop when it holds tools and no analyst has consulted a
+reputation or family source, so the identity question is asked once even on a
+run nobody disagreed about. A disabled server contributes no tools and no
+degradation reason, so every one of those references costs nothing until the
+server is registered.
 
 `services/threatintel-mcp` is unchanged: it still offers VirusTotal and
 AbuseIPDB lookups over their REST APIs with `VIRUSTOTAL_API_KEY` and

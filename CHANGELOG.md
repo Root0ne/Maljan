@@ -228,6 +228,37 @@ change landed on `main`.
 
 ### Fixed
 
+- **A bound reputation server is actually consulted.** VirusTotal connected for
+  the judge, offered six tools and was never called: the judge opens its tool
+  loop on explicit dissent alone and the static analyst held no reference to
+  the server, so the run closed with a family of None and nineteen ledger
+  entries that were all local analysis calls. Every agent that reads the file
+  carries the reference now, their prompts say to look the hash up once and to
+  treat the answer as one source, and the judge asks the identity question when
+  nothing in the run has asked it.
+
+- **The `strings` page fits the answer the model is shown.** The default page
+  was 2000 runs, which came back as hundreds of kilobytes and was cut to 8000
+  characters before the model saw it; the page is 150 runs, the answer carries
+  `total_matched` and a `next_offset` that is `null` at the end of the set, and
+  the description says where the next page starts. Optional arguments arriving
+  as the literal "null", "None" or "" are read as absent by the analysis
+  server's guard, so a model that fills in a filter it does not want is
+  answered rather than argued with.
+
+- **A verdict may not contradict its own severity.** A live run returned
+  Malware at 0.6 with a severity of Informational whose rationale read "no
+  evidence of malicious functionality". `verdict.assessment_conflict` puts both
+  fields to the judge once and asks which it meant; a contradiction that
+  survives is recorded, and neither field is ever rewritten.
+
+- **One Qdrant credential instead of two.** The enrichment worker and the
+  health probe read `api.qdrant_*` while the analysis path read
+  `core.memory.qdrant_*`, so filling in either left the other empty — the 401
+  in every enrich run. Both read the `core.memory` keys now, the `api.*` keys
+  are gone, and `20260918000000_unify_qdrant_settings` carries a stored value
+  across before removing the duplicate row.
+
 - **A run nobody performed is no longer reported as a result.** A hosted
   endpoint refusing every call with 402 produced a job that said "completed"
   with verdict Suspicious, confidence 0.0, no evidence and an empty error
