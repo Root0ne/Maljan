@@ -239,6 +239,59 @@ class TestATransientProviderAnswerIsRetried:
         assert await retry_on_connection_error(_rate_limited, what="x") == "ok"
         assert waits == [1], "the helper's own backoff, not the provider's hour"
 
+    @pytest.mark.asyncio
+    async def test_a_retry_after_date_is_honoured_as_a_delay(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """RFC 9110 allows a date, and hosted providers send one."""
+        import asyncio as _asyncio
+        from datetime import UTC, datetime, timedelta
+        from email.utils import format_datetime
+
+        waits: list[float] = []
+
+        async def _record(seconds: float) -> None:
+            waits.append(seconds)
+
+        monkeypatch.setattr(_asyncio, "sleep", _record)
+        when = format_datetime(datetime.now(UTC) + timedelta(seconds=6))
+        calls = {"n": 0}
+
+        async def _rate_limited() -> str:
+            calls["n"] += 1
+            if calls["n"] < 2:
+                raise _status_error(429, {"retry-after": when})
+            return "ok"
+
+        assert await retry_on_connection_error(_rate_limited, what="x") == "ok"
+        assert waits and 4 <= waits[0] <= 6, waits
+
+    @pytest.mark.asyncio
+    async def test_a_date_in_the_past_falls_back_to_the_backoff(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import asyncio as _asyncio
+        from datetime import UTC, datetime, timedelta
+        from email.utils import format_datetime
+
+        waits: list[float] = []
+
+        async def _record(seconds: float) -> None:
+            waits.append(seconds)
+
+        monkeypatch.setattr(_asyncio, "sleep", _record)
+        when = format_datetime(datetime.now(UTC) - timedelta(hours=1))
+        calls = {"n": 0}
+
+        async def _rate_limited() -> str:
+            calls["n"] += 1
+            if calls["n"] < 2:
+                raise _status_error(429, {"retry-after": when})
+            return "ok"
+
+        assert await retry_on_connection_error(_rate_limited, what="x") == "ok"
+        assert waits == [1]
+
     def test_the_log_line_carries_no_provider_body(self) -> None:
         """A provider that quotes the request back has quoted the key back."""
         from maljan.agents.base_agent import _provider_fault
@@ -247,6 +300,25 @@ class TestATransientProviderAnswerIsRetried:
         error.body = {"error": {"message": "invalid api key sk-live-abcdef"}}
 
         assert _provider_fault(error) == "APIStatusError 401"
+
+    @pytest.mark.asyncio
+    async def test_the_status_branch_logs_no_cause_chain(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The chain ``repr()``s the exceptions behind this one, and behind a
+        status error that is the provider's own answer."""
+        from maljan.agents import base_agent
+
+        def _explode(_exc: BaseException) -> str:  # pragma: no cover - must not run
+            raise AssertionError("the status branch must not read the cause chain")
+
+        monkeypatch.setattr(base_agent, "cause_chain", _explode)
+
+        async def _overloaded() -> str:
+            raise _status_error(503)
+
+        with pytest.raises(APIStatusError):
+            await retry_on_connection_error(_overloaded, what="x")
 
 
 class TestTheCallSitesActuallyUseIt:

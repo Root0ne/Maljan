@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
+import threading
 from typing import Any
 from urllib.parse import urlparse
 
@@ -74,14 +75,9 @@ def sends_llama_cpp_extras(base_url: str | None, compat: str) -> bool:
     if base_url in _STANDARD_ONLY_ENDPOINTS:
         # What the self-heal learned beats what ``auto`` would guess, and it
         # beats an explicit ``llama_cpp`` too: the endpoint itself said no.
-        # An operator who declared the setting is told that, once, rather than
-        # having their declaration quietly reversed.
-        if compat == "llama_cpp":
-            logger.warning(
-                "openai provider: llm.openai.compat is 'llama_cpp', but %s rejected the "
-                "llama.cpp extras, so standard fields are sent to it.",
-                base_url,
-            )
+        # The operator is told so by the heal that learned it, once — this is
+        # a predicate every model build calls, and a warning here is the same
+        # sentence per model for the life of the process.
         return False
     if compat == "llama_cpp":
         return True
@@ -392,35 +388,52 @@ def _with_standard_retry(
     from openai import BadRequestError
 
     healed: list[BaseChatModel] = []
+    # The sync path can be entered from more than one thread — an analyst tool
+    # loop runs ``invoke`` in a worker thread — and check-build-append is not
+    # atomic across threads. Without the lock two callers can each build a
+    # replacement, which is two pools and two swaps: the leak this cell
+    # removes, at a smaller scale.
+    heal_lock = threading.Lock()
 
     def _heal(exc: BadRequestError) -> BaseChatModel | None:
-        if healed:
-            return healed[0]
+        # Asked before the memo, so a 400 about something else — a rejected
+        # ``temperature`` — is re-raised rather than answered with a model
+        # that was healed for an unrelated reason.
         parameter = unsupported_parameter(str(exc))
         if parameter is None:
             return None
-        first = note_standard_only(base_url)
-        if first:
-            logger.warning(
-                "openai provider: %s rejected %r, which only llama.cpp reads; retrying "
-                "without the llama.cpp extras and sending standard fields to it from "
-                "now on. Set llm.openai.compat to 'standard' to skip this.",
-                base_url,
-                parameter,
+        with heal_lock:
+            if healed:
+                return healed[0]
+            first = note_standard_only(base_url)
+            if first:
+                compat = str(getattr(provider._config.llm.openai, "compat", "auto") or "auto")
+                declared = (
+                    " The endpoint's answer overrides llm.openai.compat, which is 'llama_cpp'."
+                    if compat == "llama_cpp"
+                    else " Set llm.openai.compat to 'standard' to skip this."
+                )
+                logger.warning(
+                    "openai provider: %s rejected %r, which only llama.cpp reads; retrying "
+                    "without the llama.cpp extras and sending standard fields to it from "
+                    "now on.%s",
+                    base_url,
+                    parameter,
+                    declared,
+                )
+            # The rebuilt model inherits this one's connection pool rather than
+            # opening a second: the pool is not what the endpoint objected to,
+            # and a pool per heal is the leak this whole cell exists to stop.
+            # What the original keeps to itself is its *sync* client, which the
+            # rebuild does replace and which is closed below.
+            rebuild_kwargs = dict(kwargs)
+            pool = getattr(model_obj, "http_async_client", None)
+            if pool is not None:
+                rebuild_kwargs.setdefault("http_async_client", pool)
+            replacement = provider._build(
+                model, temperature, base_url, rebuild_kwargs, force_standard=True
             )
-        # The rebuilt model inherits this one's connection pool rather than
-        # opening a second: the pool is not what the endpoint objected to, and
-        # a pool per heal is the leak this whole cell exists to stop. What the
-        # original keeps to itself is its *sync* client, which the rebuild does
-        # replace and which is closed below.
-        rebuild_kwargs = dict(kwargs)
-        pool = getattr(model_obj, "http_async_client", None)
-        if pool is not None:
-            rebuild_kwargs.setdefault("http_async_client", pool)
-        replacement = provider._build(
-            model, temperature, base_url, rebuild_kwargs, force_standard=True
-        )
-        healed.append(replacement)
+            healed.append(replacement)
         _close_sync_client(model_obj)
         _announce_healed(model_obj, replacement)
         return replacement

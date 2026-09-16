@@ -18,6 +18,12 @@ and no local-path tool at all.
 The lookups are read-only and are ticked by default. The submit tools are not:
 sending a sample to VirusTotal publishes it to everyone VirusTotal shares
 samples with, which is a disclosure an operator makes deliberately.
+
+The stdio constants below have no production caller and are not meant to: the
+built-in seeds the HTTP transport, and the stdio form is a second server entry
+an operator types. They are the executable half of what ``docs/deployment.md``
+tells that operator to run, pinned by a test so the documentation and the
+resolution rule cannot drift apart.
 """
 
 from __future__ import annotations
@@ -33,7 +39,6 @@ SERVER_LABEL = "VirusTotal MCP"
 MCP_ENDPOINT = "https://ai.virustotal.com/mcp"
 REST_BASE_URL = "https://ai.virustotal.com/api/v3"
 REGISTER_URL = f"{REST_BASE_URL}/agents/register"
-ACCESS_CHECK_URL = f"{REST_BASE_URL}/agents/me/access"
 
 # What this deployment calls itself when it registers. The family is a label
 # VirusTotal attributes the agent's calls to; the version tracks the ``vt-mcp``

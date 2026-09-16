@@ -394,6 +394,90 @@ class TestTheSelfHeal:
         assert cache.lookup(None, "judge") is not model
         assert cache.lookup(None, "judge").invoke("hi") == "ok"
 
+    def test_an_unrelated_400_is_still_raised_after_a_heal(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The memo answers the 400 it was built for, and no other.
+
+        A rejected ``temperature`` is the endpoint saying something else
+        entirely, and dropping the llama.cpp extras cannot fix it.
+        """
+
+        class _Chat:
+            def __init__(self, **kwargs: Any) -> None:
+                self.extra_body = kwargs.get("extra_body")
+                self.calls = 0
+
+            def invoke(self, *args: Any, **kwargs: Any) -> Any:
+                self.calls += 1
+                if self.extra_body:
+                    raise TestTheSelfHeal._bad_request("Unsupported parameter(s): n_predict")
+                raise TestTheSelfHeal._bad_request("Unsupported value: 'temperature'")
+
+            async def ainvoke(self, *args: Any, **kwargs: Any) -> Any:  # pragma: no cover
+                return self.invoke(*args, **kwargs)
+
+        import langchain_openai
+
+        monkeypatch.setattr(langchain_openai, "ChatOpenAI", _Chat)
+
+        provider = OpenAIProvider(_settings("https://hosted6.example.com/v1", "llama_cpp"))
+        model = provider.build_model("m", 0.0, max_tokens=512)
+
+        with pytest.raises(BadRequestError, match="temperature"):
+            model.invoke("hi")
+
+    def test_the_predicate_does_not_log(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """It is asked on every model build, so a warning here repeats forever."""
+        from maljan.llm import openai_provider
+
+        lines: list[str] = []
+        monkeypatch.setattr(openai_provider.logger, "warning", lambda *a, **k: lines.append(str(a)))
+        openai_provider.note_standard_only("https://hosted7.example.com/v1")
+
+        for _ in range(3):
+            assert (
+                openai_provider.sends_llama_cpp_extras(
+                    "https://hosted7.example.com/v1", "llama_cpp"
+                )
+                is False
+            )
+        assert lines == []
+
+    def test_the_heal_says_when_it_overrides_an_explicit_setting(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from maljan.llm import openai_provider
+
+        lines: list[str] = []
+        monkeypatch.setattr(
+            openai_provider.logger,
+            "warning",
+            lambda template, *args: lines.append(template % args),
+        )
+
+        class _Chat:
+            def __init__(self, **kwargs: Any) -> None:
+                self.extra_body = kwargs.get("extra_body")
+
+            def invoke(self, *args: Any, **kwargs: Any) -> Any:
+                if self.extra_body:
+                    raise TestTheSelfHeal._bad_request("Unsupported parameter(s): n_predict")
+                return "ok"
+
+            async def ainvoke(self, *args: Any, **kwargs: Any) -> Any:  # pragma: no cover
+                return self.invoke(*args, **kwargs)
+
+        import langchain_openai
+
+        monkeypatch.setattr(langchain_openai, "ChatOpenAI", _Chat)
+
+        provider = OpenAIProvider(_settings("https://hosted8.example.com/v1", "llama_cpp"))
+        assert provider.build_model("m", 0.0, max_tokens=512).invoke("hi") == "ok"
+
+        assert len(lines) == 1
+        assert "overrides llm.openai.compat" in lines[0]
+
     def test_a_local_server_that_never_complains_keeps_its_extras(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

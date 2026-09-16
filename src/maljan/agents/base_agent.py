@@ -207,19 +207,40 @@ def _provider_fault(exc: BaseException) -> str:
 
 
 def _retry_after(exc: BaseException, default: int) -> int:
-    """The provider's own ``Retry-After``, when it sent a usable one."""
+    """The provider's own ``Retry-After``, when it sent a usable one.
+
+    Both forms RFC 9110 allows: delta-seconds, and an HTTP-date, which several
+    hosted providers send on 429 and 503. Either way the answer is clamped —
+    a provider asking for an hour is asking for longer than the caller has.
+    """
     headers = getattr(getattr(exc, "response", None), "headers", None)
     raw = ""
     if headers is not None:
         with contextlib.suppress(Exception):
-            raw = str(headers.get("retry-after") or "")
-    try:
-        seconds = int(float(raw.strip()))
-    except (TypeError, ValueError):
+            raw = str(headers.get("retry-after") or "").strip()
+    if not raw:
         return default
+    try:
+        seconds = int(float(raw))
+    except (TypeError, ValueError):
+        seconds = _seconds_until(raw)
     if 0 < seconds <= _MAX_RETRY_AFTER_SECONDS:
         return seconds
     return default
+
+
+def _seconds_until(http_date: str) -> int:
+    """An HTTP-date as seconds from now, or ``0`` when it is not one."""
+    from datetime import UTC, datetime
+    from email.utils import parsedate_to_datetime
+
+    try:
+        when = parsedate_to_datetime(http_date)
+    except (TypeError, ValueError):
+        return 0
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=UTC)
+    return int((when - datetime.now(UTC)).total_seconds())
 
 
 async def retry_on_connection_error(
@@ -270,6 +291,12 @@ async def retry_on_connection_error(
             if isinstance(exc, APIStatusError) and status not in RETRYABLE_STATUSES:
                 raise
             kind = f"HTTP {status}" if isinstance(exc, APIStatusError) else "connection error"
+            # The cause chain is what tells a dropped socket from this
+            # process using a pool on the wrong loop, and it is worth having
+            # for a transport failure. A status error has no such ambiguity
+            # and its chain can carry the provider's own body, which is where
+            # a credential quoted back would be.
+            cause = "no cause recorded" if isinstance(exc, APIStatusError) else cause_chain(exc)
             if attempt >= attempts - 1:
                 emit.error(
                     "%s: %s after %d attempts: %r (caused by %s)",
@@ -277,7 +304,7 @@ async def retry_on_connection_error(
                     kind,
                     attempts,
                     _provider_fault(exc),
-                    cause_chain(exc),
+                    cause,
                 )
                 raise
             wait = _retry_after(exc, 2**attempt)
@@ -288,7 +315,7 @@ async def retry_on_connection_error(
                 attempt + 1,
                 attempts,
                 _provider_fault(exc),
-                cause_chain(exc),
+                cause,
                 wait,
             )
             await asyncio.sleep(wait)

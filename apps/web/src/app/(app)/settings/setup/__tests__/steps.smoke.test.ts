@@ -7,7 +7,7 @@ import ServerFormStep, { serverStepSection } from "../steps/ServerFormStep";
 import VirustotalStep, { QUOTA_NOTE, SUBMIT_NOTE } from "../steps/VirustotalStep";
 
 /**
- * The four step components are reachable code before any guide declares them
+ * The step components are reachable code before any guide declares them
  * (the guides declare them later), so nothing else would notice if one of them
  * stopped compiling or lost its default export. This mounts nothing — there
  * is no jsdom here — it only proves each module loads and still exports the

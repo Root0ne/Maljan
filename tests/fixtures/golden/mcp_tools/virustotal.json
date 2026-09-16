@@ -23,7 +23,7 @@
       "sha256"
     ]
   },
-  "note": "Vendored, not captured by scripts/goldens/capture_builtin_tool_sets.py: this server is VirusTotal's, reached over streamable-HTTP, and a capture needs a registered agent token and a call to their host. Captured from a live handshake against https://ai.virustotal.com/mcp with vt-mcp 0.8.4. submit_local_file is absent on purpose -- it exists only when the same server runs over stdio on the host that holds the sample.",
+  "note": "Vendored, not captured by scripts/goldens/capture_builtin_tool_sets.py: this server is VirusTotal's, reached over streamable-HTTP, and a capture needs a registered agent token and a call to their host. Captured from a live handshake against https://ai.virustotal.com/mcp with vt-mcp 0.8.4. submit_local_file is absent on purpose -- it exists only when the same server runs over stdio on the host that holds the sample. To re-capture: register an agent token from Settings, then run one initialize plus tools/list against the endpoint with that token as the bearer header (the shape scripts/goldens/capture_builtin_tool_sets.py uses over stdio) and overwrite this file with the tool names and their argument names.",
   "server": "virustotal",
   "source": "vendored live handshake over streamable-http",
   "tools": [
