@@ -35,6 +35,7 @@ from pydantic import (
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 from maljan.agents.prompts import ANDROID_STATIC_PROMPT, REVERSER_PROMPT, TRIAGE_PROMPT
+from maljan.core import virustotal
 
 # ---------------------------------------------------------------------------
 # Per-provider LLM configs
@@ -673,12 +674,19 @@ SERVER_KEY_PATTERN = r"^[a-z][a-z0-9_-]{0,31}$"
 # The one value in ``ProfileDefinition.exclude_servers`` that is not a key.
 # It cannot collide with one: the key pattern above admits no ``*``.
 ALL_SERVERS = "*"
-BUILTIN_SERVER_KEYS: tuple[str, ...] = ("analysis", "knowledge", "network", "threatintel")
+BUILTIN_SERVER_KEYS: tuple[str, ...] = (
+    "analysis",
+    "knowledge",
+    "network",
+    "threatintel",
+    virustotal.SERVER_KEY,
+)
 RESERVED_SERVER_KEYS: tuple[str, ...] = (
     "analysis",
     "knowledge",
     "network",
     "threatintel",
+    virustotal.SERVER_KEY,
     "ghidra",
     "cape",
 )
@@ -720,7 +728,7 @@ class MCPServerConfig(BaseModel):
 
 
 def _builtin_servers() -> dict[str, MCPServerConfig]:
-    """The four sidecars every run depends on, as settings rather than constants.
+    """The servers a deployment starts with, as settings rather than constants.
 
     ``analysis`` and ``knowledge`` are the tool sidecars: every static-analysis
     capability the pipeline used to run in-process, and every reference lookup
@@ -744,6 +752,11 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
     threat-intel one alone allowed to see the two intel keys. ``tools=None``
     keeps the whole manifest, which is what those agents did, and what
     ``tests/fixtures/golden/mcp_tools/*.json`` pins.
+
+    ``virustotal`` is the one entry that is neither a sidecar of this repo nor
+    a local process: it is VirusTotal's own server, reached over HTTP with an
+    agent token, and the one built-in that ships disabled and with a narrowed
+    tool list.
     """
     return {
         "analysis": MCPServerConfig(
@@ -783,6 +796,25 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
             env_allow=["VIRUSTOTAL_API_KEY", "ABUSEIPDB_API_KEY"],
             agents=["judge"],
             label="Threat intel MCP",
+        ),
+        # VirusTotal's own MCP server, reached over its streamable-HTTP
+        # endpoint. Off until an operator registers an agent token, because
+        # there is nothing to seed a credential with and a server that dials
+        # out on every run without one would only ever contribute a failure.
+        #
+        # ``tools`` is the one built-in that ships a narrowed list. Every
+        # lookup is read-only; the submit tools upload the sample to
+        # VirusTotal, so they stay unticked until the operator says otherwise.
+        # ``agents=[]`` for the reason the tool sidecars carry it: the
+        # definitions in ``_builtin_definitions()`` reference this server by
+        # name, and a role binding on top would make those lists decorative.
+        virustotal.SERVER_KEY: MCPServerConfig(
+            enabled=False,
+            transport="streamable-http",
+            url=virustotal.MCP_ENDPOINT,
+            tools=list(virustotal.LOOKUP_TOOLS),
+            agents=[],
+            label=virustotal.SERVER_LABEL,
         ),
     }
 
@@ -1369,12 +1401,16 @@ def _builtin_definitions() -> dict[str, AgentDefinition]:
             tools=[
                 ToolRef(kind="mcp", server="network"),
                 ToolRef(kind="mcp", server="knowledge"),
+                ToolRef(kind="mcp", server=virustotal.SERVER_KEY),
             ],
         ),
         JUDGE_AGENT_KEY: AgentDefinition(
             role="judge",
             label="Judge",
-            tools=[ToolRef(kind="mcp", server="knowledge")],
+            tools=[
+                ToolRef(kind="mcp", server="knowledge"),
+                ToolRef(kind="mcp", server=virustotal.SERVER_KEY),
+            ],
         ),
         REPORTER_AGENT_KEY: AgentDefinition(
             role="report",
@@ -1394,6 +1430,7 @@ def _builtin_definitions() -> dict[str, AgentDefinition]:
             tools=[
                 ToolRef(kind="mcp", server="analysis"),
                 ToolRef(kind="mcp", server="knowledge"),
+                ToolRef(kind="mcp", server=virustotal.SERVER_KEY),
             ],
         ),
         "android_static": AgentDefinition(

@@ -196,7 +196,11 @@ class TestBuiltinToolsOnAStage:
             ]
         )
         assert mcp_refs_for(settings, "static") == []
-        assert [r.server for r in mcp_refs_for(settings, "network")] == ["network", "knowledge"]
+        assert [r.server for r in mcp_refs_for(settings, "network")] == [
+            "network",
+            "knowledge",
+            "virustotal",
+        ]
 
 
 REPORT = {

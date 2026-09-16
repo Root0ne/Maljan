@@ -271,8 +271,8 @@ def _withheld_servers(settings: Settings, key: str) -> set[str]:
 
     Two sources, and they stack. The profile's own ``exclude_servers`` is the
     tool-free baseline's lever and applies to every member. A stage's
-    ``builtin_tools=False`` is the narrower one: it withholds the four built-in
-    sidecars from that stage's agents only, so a triage stage can be made to
+    ``builtin_tools=False`` is the narrower one: it withholds every built-in
+    server from that stage's agents only, so a triage stage can be made to
     read what it was handed instead of going looking, without cloning the
     definitions it runs.
     """
