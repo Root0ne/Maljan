@@ -502,7 +502,7 @@ def _sandbox_apis(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> N
         "sandbox_api_calls",
         "API calls observed",
         "table",
-        columns=["API", "Calls", "Category", "First arguments"],
+        columns=["API", "Calls", "Processes", "First arguments"],
     )
     for row in rows[:MAX_ROWS]:
         if not isinstance(row, dict):
@@ -512,7 +512,7 @@ def _sandbox_apis(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> N
             [
                 _text(row.get("api")),
                 _text(row.get("count")),
-                _text(row.get("category")),
+                ", ".join(str(p) for p in row.get("processes") or []),
                 _text(row.get("first_args")),
             ],
         )

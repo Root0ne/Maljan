@@ -151,7 +151,7 @@ class TestTypedBlocks:
             ),
             entry(
                 "sandbox_api_calls",
-                {"apis": [{"api": "VirtualAllocEx", "count": 4, "category": "process_injection"}]},
+                {"apis": [{"api": "VirtualAllocEx", "count": 4, "processes": ["evil.exe"]}]},
                 counter,
                 agent="dynamic",
             ),

@@ -175,6 +175,74 @@ class TestReportSection:
         assert result["total"] == 9
 
 
+class TestApiCalls:
+    """One row per API, carrying what the sandbox recorded and nothing else.
+
+    The rows used to carry a behaviour category and a suspicious flag copied
+    from the import table, and an analyst read the label as a finding. What
+    an API is used for is the knowledge server's question.
+    """
+
+    def test_a_row_is_the_sandbox_s_facts_and_no_label(self) -> None:
+        rows = sandbox_tools.sandbox_api_calls(REPORT)["apis"]
+
+        assert [r["api"] for r in rows] == ["CreateRemoteThread", "WriteProcessMemory"]
+        for row in rows:
+            assert set(row) == {"api", "dll", "processes", "count", "first_args", "first_seen"}
+            assert row["processes"] == ["invoice.exe"]
+
+    def test_the_first_call_s_arguments_module_and_time_are_kept(self) -> None:
+        report = {
+            "behavior": {
+                "processes": [
+                    {
+                        "pid": 7,
+                        "process_name": "a.exe",
+                        "calls": [
+                            {
+                                "api": "CreateFileW",
+                                "dll": "kernel32.dll",
+                                "timestamp": "12:00:01",
+                                "arguments": [{"name": "FileName", "value": "C:\\x"}],
+                            },
+                            {"api": "CreateFileW", "arguments": [{"name": "FileName"}]},
+                        ],
+                    }
+                ]
+            }
+        }
+
+        (row,) = sandbox_tools.sandbox_api_calls(report)["apis"]
+
+        assert (row["dll"], row["first_seen"], row["count"]) == ("kernel32.dll", "12:00:01", 0)
+        assert "C:" in row["first_args"]
+
+    def test_a_name_substring_narrows_the_rows(self) -> None:
+        answer = sandbox_tools.sandbox_api_calls(REPORT, name="remote")
+
+        assert [r["api"] for r in answer["apis"]] == ["CreateRemoteThread"]
+        assert answer["total"] == 1
+
+    def test_a_process_narrows_by_pid_or_name(self) -> None:
+        by_name = sandbox_tools.sandbox_api_calls(REPORT, process="invoice.exe")["apis"]
+        by_pid = sandbox_tools.sandbox_api_calls(REPORT, process="1234")["apis"]
+        other = sandbox_tools.sandbox_api_calls(REPORT, process="cmd.exe")["apis"]
+
+        assert len(by_name) == len(by_pid) == 2
+        assert other == []
+
+    def test_the_tool_takes_a_name_filter_and_no_category(self) -> None:
+        tool = next(
+            t
+            for t in sandbox_tools.sandbox_tools(_Container(REPORT))
+            if t.name == "sandbox_api_calls"
+        )
+
+        fields = set(tool.args_schema.model_fields)
+        assert fields == {"process", "name", "limit"}
+        assert "api_capability" in tool.description
+
+
 class TestNoReport:
     def test_every_tool_says_there_is_no_report_rather_than_answering_empty(self) -> None:
         for call in (

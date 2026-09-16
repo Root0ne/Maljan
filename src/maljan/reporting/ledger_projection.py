@@ -429,7 +429,7 @@ def dynamic_from_ledger(
                 {
                     "api": str(row.get("api") or ""),
                     "count": _int(row.get("count")),
-                    "category": row.get("category"),
+                    "process": ", ".join(str(p) for p in row.get("processes") or []),
                     "arguments": str(row.get("first_args") or ""),
                 }
             )

@@ -288,23 +288,48 @@ def sandbox_registry_ops(report: dict[str, Any] | None, limit: int = _ROW_LIMIT)
     return {"registry": ordered[:bound], "total": len(ordered)}
 
 
+def _calls_by_process(report: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    """Every API call with the pid that made it, ``""`` when the report lost it.
+
+    The same walk as :func:`_calls`, keeping the process each nested list
+    belongs to; a flat ``behavior.calls`` carries its pid on the row or not at
+    all.
+    """
+    behavior = _behavior(report)
+    flat = behavior.get("calls")
+    if isinstance(flat, list) and flat:
+        return [(str(row.get("pid") or ""), row) for row in flat if isinstance(row, dict)]
+    out: list[tuple[str, dict[str, Any]]] = []
+    for proc in behavior.get("processes") or []:
+        if isinstance(proc, dict):
+            pid = str(proc.get("pid") or "")
+            out.extend((pid, row) for row in (proc.get("calls") or []) if isinstance(row, dict))
+    return out
+
+
 def sandbox_api_calls(
     report: dict[str, Any] | None,
     process: str | None = None,
-    category: str | None = None,
+    name: str | None = None,
     limit: int = 300,
 ) -> dict[str, Any]:
-    """The API-call histogram, categorised, with the first arguments of each call.
+    """The API-call histogram, with the first call of each API.
 
     The call stream itself is where a behaviour report's bulk is, so what comes
-    back is one row per API rather than one per call: the name, how often it was
-    called, the behaviour category it belongs to, and the arguments of the first
-    call, which is usually the one that says what the sample was after.
-    ``process`` narrows by pid or process name, ``category`` by behaviour.
+    back is one row per API rather than one per call: the name, the module the
+    sandbox resolved it from when it recorded one, the processes that made it,
+    how often, and the arguments and time of the first call, which is usually
+    the one that says what the sample was after. ``process`` narrows by pid or
+    process name, ``name`` by a substring of the API name.
+
+    What the sandbox recorded and nothing else. The rows used to carry a
+    behaviour category and a suspicious flag copied from the import table,
+    which was this tool doing the analysis; what an API is used for is the
+    knowledge server's ``api_capability`` question, asked when the model
+    decides the answer matters.
     """
     if report is None:
         return dict(_NO_REPORT)
-    from maljan.extractors.pe_extractor import classify_import
 
     behavior = _behavior(report)
     names_by_pid = {
@@ -313,46 +338,58 @@ def sandbox_api_calls(
         if isinstance(proc, dict)
     }
     wanted_process = (process or "").strip().lower()
-    wanted_category = (category or "").strip().lower()
+    wanted_name = (name or "").strip().lower()
+
+    def _is_wanted(pid: str) -> bool:
+        if not wanted_process:
+            return True
+        return wanted_process in {pid.lower(), names_by_pid.get(pid, "").lower()}
+
+    def _label(pid: str) -> str:
+        return names_by_pid.get(pid) or pid
 
     counts: dict[str, int] = {}
+    callers: dict[str, set[str]] = {}
     apistats = behavior.get("apistats")
     if isinstance(apistats, dict):
         for pid, stats in apistats.items():
-            if wanted_process and wanted_process not in {
-                str(pid).lower(),
-                names_by_pid.get(str(pid), "").lower(),
-            }:
+            if not _is_wanted(str(pid)) or not isinstance(stats, dict):
                 continue
-            if isinstance(stats, dict):
-                for api, count in stats.items():
-                    try:
-                        counts[str(api)] = counts.get(str(api), 0) + int(count)
-                    except (TypeError, ValueError):
-                        continue
+            for api, count in stats.items():
+                try:
+                    counts[str(api)] = counts.get(str(api), 0) + int(count)
+                except (TypeError, ValueError):
+                    continue
+                if _label(str(pid)):
+                    callers.setdefault(str(api), set()).add(_label(str(pid)))
 
-    first_args: dict[str, str] = {}
-    for call in _calls(report):
+    first_call: dict[str, dict[str, Any]] = {}
+    for pid, call in _calls_by_process(report):
         api = str(call.get("api") or "")
-        if not api:
+        if not api or (pid and not _is_wanted(pid)):
             continue
         counts.setdefault(api, 0)
-        if api not in first_args:
-            arguments = call.get("arguments")
-            first_args[api] = str(arguments)[:400] if arguments else ""
+        if pid and _label(pid):
+            callers.setdefault(api, set()).add(_label(pid))
+        if api not in first_call:
+            first_call[api] = call
 
     rows: list[dict[str, Any]] = []
     for api, count in sorted(counts.items(), key=lambda item: (-item[1], item[0])):
-        api_category, suspicious = classify_import(api)
-        if wanted_category and (api_category or "").lower() != wanted_category:
+        if wanted_name and wanted_name not in api.lower():
             continue
+        call = first_call.get(api, {})
+        arguments = call.get("arguments")
+        module = call.get("dll") or call.get("module")
+        seen = call.get("timestamp") or call.get("time")
         rows.append(
             {
                 "api": api,
+                "dll": str(module) if module else None,
+                "processes": sorted(callers.get(api, set()))[:8],
                 "count": count,
-                "category": api_category,
-                "suspicious": bool(suspicious),
-                "first_args": first_args.get(api, ""),
+                "first_args": str(arguments)[:400] if arguments else "",
+                "first_seen": str(seen) if seen not in (None, "") else None,
             }
         )
     return {"apis": rows[: max(0, int(limit))], "total": len(rows)}
@@ -468,9 +505,14 @@ def sandbox_tools(container: Any) -> list[BaseTool]:
         """List the registry keys the sample touched, with what it did to each."""
         return sandbox_registry_ops(report, limit)
 
-    def _api_calls(process: str = "", category: str = "", limit: int = 300) -> dict[str, Any]:
-        """List the API calls observed, by frequency, optionally narrowed."""
-        return sandbox_api_calls(report, process or None, category or None, limit)
+    def _api_calls(process: str = "", name: str = "", limit: int = 300) -> dict[str, Any]:
+        """List the API calls observed, by frequency, with each API's first call.
+
+        ``process`` narrows to one pid or process name, ``name`` to APIs whose
+        name contains the text. Rows carry what the sandbox recorded; ask
+        api_capability what an API is used for.
+        """
+        return sandbox_api_calls(report, process or None, name or None, limit)
 
     def _mutexes() -> dict[str, Any]:
         """List the named mutexes the sample created or opened."""
