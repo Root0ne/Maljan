@@ -295,27 +295,32 @@ async def retry_on_connection_error(
             # process using a pool on the wrong loop, and it is worth having
             # for a transport failure. A status error has no such ambiguity
             # and its chain can carry the provider's own body, which is where
-            # a credential quoted back would be.
-            cause = "no cause recorded" if isinstance(exc, APIStatusError) else cause_chain(exc)
+            # a credential quoted back would be — so that branch says the
+            # status and stops, rather than reporting an absence of causes as
+            # though something had named itself.
+            cause_args: tuple[str, ...] = ()
+            cause_clause = ""
+            if not isinstance(exc, APIStatusError):
+                cause_clause, cause_args = " (caused by %s)", (cause_chain(exc),)
             if attempt >= attempts - 1:
                 emit.error(
-                    "%s: %s after %d attempts: %r (caused by %s)",
+                    "%s: %s after %d attempts: %r" + cause_clause,
                     what,
                     kind,
                     attempts,
                     _provider_fault(exc),
-                    cause,
+                    *cause_args,
                 )
                 raise
             wait = _retry_after(exc, 2**attempt)
             emit.warning(
-                "%s: %s (attempt %d/%d): %r (caused by %s) — retrying in %ds.",
+                "%s: %s (attempt %d/%d): %r" + cause_clause + " — retrying in %ds.",
                 what,
                 kind,
                 attempt + 1,
                 attempts,
                 _provider_fault(exc),
-                cause,
+                *cause_args,
                 wait,
             )
             await asyncio.sleep(wait)

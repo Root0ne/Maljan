@@ -320,6 +320,36 @@ class TestATransientProviderAnswerIsRetried:
         with pytest.raises(APIStatusError):
             await retry_on_connection_error(_overloaded, what="x")
 
+    @pytest.mark.asyncio
+    async def test_the_status_line_does_not_report_an_absence_of_causes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A status error's line says the status and stops.
+
+        The clause is dropped rather than filled with a sentence: "(caused by
+        no cause recorded)" reads as though something had named itself.
+        """
+        lines: list[str] = []
+
+        class _Log:
+            def warning(self, template: str, *args: object) -> None:
+                lines.append(template % args)
+
+            def error(self, template: str, *args: object) -> None:
+                lines.append(template % args)
+
+        calls = {"n": 0}
+
+        async def _overloaded() -> str:
+            calls["n"] += 1
+            if calls["n"] < 2:
+                raise _status_error(503)
+            return "ok"
+
+        assert await retry_on_connection_error(_overloaded, what="x", log=_Log()) == "ok"
+        assert lines and "caused by" not in lines[0]
+        assert "HTTP 503" in lines[0]
+
 
 class TestTheCallSitesActuallyUseIt:
     """A helper nobody calls is not a fix. These assert the wiring, because the

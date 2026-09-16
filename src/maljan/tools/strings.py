@@ -671,6 +671,12 @@ _MAX_STRINGS_LIMIT = 20_000
 # blindly through offsets 0, 5000, 10000 and up. A page that fits inside the
 # budget the answer is read under is a page the model can actually reason
 # about, and ``next_offset`` says where the following one starts.
+#
+# The number is chosen against the model's budget and not against this
+# process's: every call scans the whole file, because ``total_matched`` and
+# ``next_offset`` are only true if the counting runs to the end, so a smaller
+# page means proportionally more full scans for a caller that pages through a
+# large binary. ``pattern`` is the way out and the tool's description says so.
 DEFAULT_STRINGS_LIMIT = 150
 
 # The shortest run the caller may ask for. Below three characters the scan
@@ -756,7 +762,10 @@ def strings(
             rows.append({"offset": at, "enc": enc, "text": decoded})
             if total >= _MAX_STRINGS_SCANNED:
                 break
-    more = matched > offset + len(rows)
+    # ``more and rows``, not ``more`` alone: ``limit=0`` keeps every match out
+    # of the page while leaving matches behind it, and an offset that does not
+    # advance is a caller paging on ``next_offset`` forever.
+    more = matched > offset + len(rows) and bool(rows)
     return {
         "strings": rows,
         "total": total,

@@ -187,6 +187,34 @@ class TestAReportOfAbsence:
         assert {v.path for v in ungrounded_capabilities(text, self._thin())} == {"exfiltration"}
 
 
+class TestTheKnownLimitsOfTheWindow:
+    """What the two rules cost, pinned so a later change measures itself.
+
+    Both err toward the answer that spends a feedback turn rather than the one
+    that clears a real over-claim, which is the direction a validator against
+    over-claiming should fail in.
+    """
+
+    def _thin(self) -> CapabilityGrounding:
+        return CapabilityGrounding.from_report(_report(techniques=("T1027",)))
+
+    def test_a_comma_splice_hides_the_second_claim(self) -> None:
+        """The comma is not a clause break, so the cue still reaches across it.
+
+        The alternative re-flagged "does not, in any sandbox run, establish
+        command-and-control", which is the honest sentence the validator wants.
+        """
+        text = "No persistence was observed, the sample injects code into explorer.exe"
+
+        assert ungrounded_capabilities(text, self._thin()) == []
+
+    def test_the_last_item_of_a_long_negative_list_is_still_flagged(self) -> None:
+        """The cue is further back than the window reaches."""
+        text = "There is no evidence of keylogging, credential theft, or exfiltration."
+
+        assert {v.path for v in ungrounded_capabilities(text, self._thin())} == {"exfiltration"}
+
+
 class TestWhatTheFeedbackSays:
     def test_it_names_the_term_and_what_the_run_has(self) -> None:
         grounding = CapabilityGrounding.from_report(

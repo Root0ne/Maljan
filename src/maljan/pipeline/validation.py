@@ -559,6 +559,20 @@ _NOT_A_NEGATION = ("no doubt", "not only")
 # it, not the whole paragraph: "no persistence was observed and the sample
 # injects code into explorer.exe" is one honest negative and one real claim,
 # and a window this size keeps the second one.
+#
+# Two known limits, both of them the price of the two rules above, and both
+# erring toward the answer that costs a feedback turn rather than the one that
+# clears a real over-claim:
+#
+#   * a comma splice — "No persistence was observed, the sample injects code"
+#     — leaves the second claim unflagged, because the comma is not a clause
+#     break and the window still reaches the cue;
+#   * the last item of a long negative list — "no evidence of keylogging,
+#     credential theft, or exfiltration" — is flagged, because the cue is
+#     further back than this.
+#
+# ``TestTheKnownLimitsOfTheWindow`` pins both, so a later change to the break
+# set or the window is measured against them rather than discovering them.
 _NEGATION_WINDOW = 40
 
 

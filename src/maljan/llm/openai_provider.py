@@ -264,7 +264,7 @@ class OpenAIProvider:
             return built
         # The rebuild the self-heal needs, carried on the model rather than
         # looked up again: only the provider knows what it sent.
-        return _with_standard_retry(built, self, model, temperature, base_url, kwargs)
+        return _with_standard_retry(built, self, model, temperature, base_url, kwargs, compat)
 
     def _add_llama_cpp_extras(self, build_kwargs: dict[str, Any], base_url: str | None) -> None:
         """The three request fields only llama.cpp and its forks read.
@@ -368,6 +368,7 @@ def _with_standard_retry(
     temperature: float,
     base_url: str | None,
     kwargs: dict[str, Any],
+    compat: str,
 ) -> BaseChatModel:
     """Wrap the model so one 400 about our own extras rebuilds it without them.
 
@@ -407,7 +408,6 @@ def _with_standard_retry(
                 return healed[0]
             first = note_standard_only(base_url)
             if first:
-                compat = str(getattr(provider._config.llm.openai, "compat", "auto") or "auto")
                 declared = (
                     " The endpoint's answer overrides llm.openai.compat, which is 'llama_cpp'."
                     if compat == "llama_cpp"

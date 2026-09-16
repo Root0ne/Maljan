@@ -58,10 +58,14 @@ _DEFAULT_STAGING_TTL_HOURS = 24.0
 
 # What a model writes when it means "I am not passing this one". A local model
 # asked for an optional filter it does not want fills the field in rather than
-# omitting it, and the words it fills it with are these. Read as the absence
-# they mean, once, here — every tool on this server goes through ``_guard``, so
-# no tool has to know about it and none of them can disagree.
-_ABSENT_WORDS = frozenset({"null", "none", "nil", "undefined", ""})
+# omitting it, and these are the two words it writes. Read as the absence they
+# mean, once, here — every tool on this server goes through ``_guard``, so no
+# tool has to know about it and none of them can disagree.
+#
+# Case-sensitive, and only these two: ``NULL`` is an ordinary token to search a
+# binary for, and a search for it has to keep working. A string of nothing but
+# spaces is the third form of the same intention and is read the same way.
+_ABSENT_WORDS = frozenset({"null", "None"})
 
 
 def _optional_string_params(call: Any) -> frozenset[str]:
@@ -80,13 +84,16 @@ def _optional_string_params(call: Any) -> frozenset[str]:
     return frozenset(name for name, parameter in parameters.items() if parameter.default is None)
 
 
+def _means_absent(value: Any) -> bool:
+    """Whether a string argument is one of the ways of writing "not passing this"."""
+    return isinstance(value, str) and (value in _ABSENT_WORDS or not value.strip())
+
+
 def _read_absent_words(call: Any, kwargs: dict[str, Any]) -> dict[str, Any]:
     """``kwargs`` with each optional argument's "null" read as ``None``."""
     optional = _optional_string_params(call)
     return {
-        name: None
-        if name in optional and isinstance(value, str) and value.strip().lower() in _ABSENT_WORDS
-        else value
+        name: None if name in optional and _means_absent(value) else value
         for name, value in kwargs.items()
     }
 
