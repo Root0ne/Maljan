@@ -124,8 +124,8 @@ def ledger_ids_in(msgs: Sequence[Any]) -> list[str]:
     seen: list[str] = []
     for message in msgs:
         for found in ENTRY_ID_RE.findall(str(getattr(message, "content", "") or "")):
-            if found not in seen:
-                seen.append(found)
+            if found.lower() not in seen:
+                seen.append(found.lower())
     return seen
 
 

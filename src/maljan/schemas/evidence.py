@@ -49,8 +49,15 @@ _ID_DIGITS = 4
 # An entry id wherever one is written: in a claim's evidence line, in a
 # findings block, in a tool result the recorder stamped. Spelled once, beside
 # the function that issues them, because two copies of it disagreed on case
-# for ids that one counter produces.
-ENTRY_ID_RE = re.compile(r"\bev_\d{3,}\b")
+# for ids that one counter produces. The counter issues lowercase; a model
+# that writes ``EV_0002`` back is citing the same entry, and a false flag
+# here costs a full analyst feedback turn.
+ENTRY_ID_RE = re.compile(r"\bev_\d{3,}\b", re.IGNORECASE)
+
+
+def entry_ids_in(text: str) -> set[str]:
+    """The entry ids written in ``text``, in the spelling the counter issues."""
+    return {found.lower() for found in ENTRY_ID_RE.findall(text)}
 
 
 def format_entry_id(seq: int) -> str:

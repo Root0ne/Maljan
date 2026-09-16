@@ -75,6 +75,19 @@ class TestWhatIsNot:
 
         assert UNGROUNDED_TECHNIQUE_CODE not in _codes(validate_isr(isr, ledger_ids=LEDGER))
 
+    def test_the_id_is_read_whatever_its_case(self) -> None:
+        """The counter issues lowercase; a model that writes it back in capitals
+        is citing the same entry, and a false flag costs a feedback turn."""
+        isr = _isr(_claim("the import table [EV_0002] lists VirtualAllocEx"))
+
+        assert UNGROUNDED_TECHNIQUE_CODE not in _codes(validate_isr(isr, ledger_ids=LEDGER))
+
+    def test_an_id_this_run_never_issued_is_not_a_citation(self) -> None:
+        """The feedback names three real ids, so the shape of one proves nothing."""
+        isr = _isr(_claim("the import table [ev_9999] lists VirtualAllocEx"))
+
+        assert UNGROUNDED_TECHNIQUE_CODE in _codes(validate_isr(isr, ledger_ids=LEDGER))
+
     def test_an_id_in_the_claim_prose_is_not_a_citation(self) -> None:
         """ "As ev_0001 does not show, this may be injection" is not a citation.
 
@@ -112,6 +125,16 @@ class TestWhatIsNot:
         isr = _isr(_claim("API call: VirtualAllocEx @ 0x401234"))
         isr.findings = [
             Finding(title="Obfuscated strings", technique_ids=["T1027"], evidence_ids=["ev_0002"])
+        ]
+
+        assert UNGROUNDED_TECHNIQUE_CODE in _codes(validate_isr(isr, ledger_ids=LEDGER))
+
+    def test_a_findings_block_citing_an_id_from_another_run_does_not(self) -> None:
+        from maljan.schemas.isr_models import Finding
+
+        isr = _isr(_claim("API call: VirtualAllocEx @ 0x401234"))
+        isr.findings = [
+            Finding(title="Injection", technique_ids=["T1055"], evidence_ids=["ev_0099"])
         ]
 
         assert UNGROUNDED_TECHNIQUE_CODE in _codes(validate_isr(isr, ledger_ids=LEDGER))

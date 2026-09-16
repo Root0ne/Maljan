@@ -29,7 +29,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from maljan.core.logger import logger
-from maljan.schemas.evidence import ENTRY_ID_RE
+from maljan.schemas.evidence import entry_ids_in
 from maljan.schemas.judgement import SEVERITY_RATINGS
 
 # How many alternatives a suggestion list carries. Three is what fits in one
@@ -148,8 +148,8 @@ def feedback_text(violations: Sequence[Violation]) -> str:
 UNGROUNDED_TECHNIQUE_CODE = "isr.ungrounded_technique"
 
 
-def _techniques_cited_by_findings(isr: Any) -> set[str]:
-    """The techniques the findings block already cites a ledger entry for.
+def _techniques_cited_by_findings(isr: Any, citable: set[str]) -> set[str]:
+    """The techniques the findings block already cites one of this run's entries for.
 
     The structured channel is where the analyst is asked for ids by machine,
     and an analyst that used it has answered the question the claim line asks
@@ -158,8 +158,8 @@ def _techniques_cited_by_findings(isr: Any) -> set[str]:
     """
     cited: set[str] = set()
     for finding in getattr(isr, "findings", None) or []:
-        ids = [str(value) for value in (getattr(finding, "evidence_ids", None) or [])]
-        if not any(ENTRY_ID_RE.search(value) for value in ids):
+        ids = " ".join(str(value) for value in (getattr(finding, "evidence_ids", None) or []))
+        if not entry_ids_in(ids) & citable:
             continue
         for technique in getattr(finding, "technique_ids", None) or []:
             text = str(technique).strip().upper()
@@ -168,7 +168,7 @@ def _techniques_cited_by_findings(isr: Any) -> set[str]:
     return cited
 
 
-def _cites_a_ledger_entry(claim: Any, cited_by_findings: set[str]) -> bool:
+def _cites_a_ledger_entry(claim: Any, cited_by_findings: set[str], citable: set[str]) -> bool:
     """Whether a claim points at something the run actually recorded.
 
     Two ways, and only two. The evidence line is where the claim format asks
@@ -176,8 +176,12 @@ def _cites_a_ledger_entry(claim: Any, cited_by_findings: set[str]) -> bool:
     have cited one for this technique. The claim's own prose is deliberately
     not searched: "as ev_0001 does not show, this may be injection" is not a
     citation, and reading it as one is how a validator stops validating.
+
+    The id has to be one this run issued. The feedback names three real ones,
+    so the shape of an id is no proof of anything, and an ``ev_9999`` the run
+    never recorded is a citation of nothing.
     """
-    if ENTRY_ID_RE.search(str(getattr(claim, "evidence_ref", "") or "")):
+    if entry_ids_in(str(getattr(claim, "evidence_ref", "") or "")) & citable:
         return True
     technique = str(getattr(claim, "technique_id", "") or "").strip().upper()
     return bool(technique and technique in cited_by_findings)
@@ -200,7 +204,8 @@ def validate_isr(
     with no tools at all — is exempt, because it has nothing it could cite.
     """
     citable = [str(i) for i in (ledger_ids or []) if str(i).strip()]
-    cited_by_findings = _techniques_cited_by_findings(isr)
+    known = {i.strip().lower() for i in citable}
+    cited_by_findings = _techniques_cited_by_findings(isr, known)
     violations: list[Violation] = []
     claims = list(getattr(isr, "claims", None) or [])
     agent = str(getattr(isr, "agent_id", "") or "")
@@ -244,7 +249,7 @@ def validate_isr(
         # speculative" — and the judge read them as sixteen techniques and said
         # Malware. The analyst is asked to cite the entry it read the technique
         # from or to drop it; nothing here removes the claim or the id.
-        if tid and citable and not _cites_a_ledger_entry(claim, cited_by_findings):
+        if tid and citable and not _cites_a_ledger_entry(claim, cited_by_findings, known):
             shown = ", ".join(citable[:3])
             violations.append(
                 Violation(
@@ -1065,7 +1070,7 @@ def unsupported_benign_violations(
 
     if analyst_claims > 0 or decide_from_bundle(bundle) != "Benign":
         return []
-    known = {str(entry).strip() for entry in (ledger_ids or []) if str(entry).strip()}
+    known = {str(entry).strip().lower() for entry in (ledger_ids or []) if str(entry).strip()}
     # A run with nothing recorded has nothing to cite, and ``verdict_for_run``
     # already calls it inconclusive: the retry could not be satisfied and could
     # not change the reported verdict.
@@ -1076,7 +1081,7 @@ def unsupported_benign_violations(
     except Exception as exc:  # noqa: BLE001 — an unreadable bundle cites nothing
         logger.debug("validation: the bundle could not be read for citations (%s).", exc)
         text = ""
-    if set(ENTRY_ID_RE.findall(text)) & known:
+    if entry_ids_in(text) & known:
         return []
     listed = ", ".join(sorted(known)[:3])
     return [

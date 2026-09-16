@@ -258,6 +258,16 @@ class TestABenignVerdictWithNoAnalysisBehindIt:
             == []
         )
 
+    def test_the_cited_id_is_read_whatever_its_case(self) -> None:
+        bundle = self._benign(note="Authenticode signature valid, read from EV_0003.")
+
+        assert (
+            unsupported_benign_violations(
+                bundle, analyst_claims=0, ledger_ids=["ev_0001", "ev_0003"]
+            )
+            == []
+        )
+
     def test_an_id_that_is_not_from_this_run_does_not_clear_it(self) -> None:
         bundle = self._benign(note="signature valid, see ev_0099.")
 
