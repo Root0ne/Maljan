@@ -7,7 +7,7 @@
  * testing without mounting React.
  */
 
-export type StageKind = "analysis" | "debate" | "verdict" | "report";
+export type StageKind = "triage" | "analysis" | "debate" | "verdict" | "report";
 
 export interface StageRow {
   key: string;
@@ -47,6 +47,11 @@ export const KIND_STEPS: Record<
   Exclude<StageKind, "analysis">,
   { id: string; title: string; description: string }
 > = {
+  triage: {
+    id: "triage",
+    title: "Triage pack",
+    description: "The deterministic tools, run by the pipeline and written to the evidence ledger.",
+  },
   debate: {
     id: "negotiation",
     title: "Multi-Agent Negotiation",
@@ -181,6 +186,10 @@ export function stepStatus(stepId: string, facts: StepFacts): StepStatus {
   if (!facts.hasReport) return "pending";
   switch (stepId) {
     case "ingestion":
+      return "done";
+    // The pack has no finding of its own; a run that reached a report either
+    // ran it or recorded that it declined, and both are over.
+    case "triage":
       return "done";
     case "negotiation":
       if (facts.negotiationFailed) return "failed";

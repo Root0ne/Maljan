@@ -25,10 +25,12 @@ const input =
 /** Seeded by the settings model, so they lock rather than delete. */
 const BUILTIN_PROFILES = new Set(["default", "measurement", "mobile", "deep_static"]);
 
-const KINDS: StageKind[] = ["analysis", "debate", "verdict", "report"];
+const KINDS: StageKind[] = ["triage", "analysis", "debate", "verdict", "report"];
 
 /** What each stage kind is for, in one line, under the selector. */
 const KIND_HELP: Record<StageKind, string> = {
+  triage:
+    "The pipeline runs the deterministic tools over the sample and writes each result to the evidence ledger before any analyst starts. It names no agent.",
   analysis: "Runs the agents it names, on the data they are configured to read.",
   debate: "Argues over the analysis stages upstream of it until they agree or the rounds run out.",
   verdict: "Runs the judge over everything the stages before it produced.",
