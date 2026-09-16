@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from maljan.core import virustotal
 from maljan.core.config import MCPServerConfig
 from maljan.core.logger import logger
 from maljan.core.paths import resolve_data
@@ -459,6 +460,14 @@ async def probe_mcp(v: dict[str, Any]) -> ProbeResult:
     except ValidationError as exc:
         fields = _validation_detail(exc)
         return ProbeResult(False, _ms(t0), f"invalid server settings: {fields}")
+    # VirusTotal's endpoint answers an unauthenticated handshake with a
+    # transport error whose text says nothing about credentials, so the one
+    # state an operator actually lands in -- the built-in is there, nobody has
+    # registered yet -- is named here instead of being read out of a stack
+    # trace. Only this server: every other token-less server may legitimately
+    # be open.
+    if name == virustotal.SERVER_KEY and not config.auth_token.get_secret_value():
+        return ProbeResult(False, _ms(t0), virustotal.NO_TOKEN_DETAIL)
     try:
         names = await handshake_tools(config, name)
     except TimeoutError:
