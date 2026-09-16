@@ -155,6 +155,15 @@ class TestWhatIsNot:
         assert "ev_0002" in CLAIM_FORMAT_FRAGMENT
         assert "naming the tool result you read it from" in CLAIM_FORMAT_FRAGMENT
 
+    def test_the_view_prompt_and_the_schema_field_ask_for_the_same_id(self) -> None:
+        """The two places a reader looks for the format after the analysts."""
+        from maljan.agents.base_agent import _VIEW_SYSTEM
+        from maljan.schemas.isr_models import ClaimEvidence
+
+        assert "naming the tool result you read it from" in _VIEW_SYSTEM
+        assert "[ev_0002]" in _VIEW_SYSTEM
+        assert "ev_0002" in str(ClaimEvidence.model_fields["evidence_ref"].description)
+
     def test_every_analyst_prompt_uses_that_one_fragment(self) -> None:
         import inspect
 

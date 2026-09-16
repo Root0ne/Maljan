@@ -28,6 +28,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 if TYPE_CHECKING:
     from langchain_core.messages import BaseMessage
 
+from maljan.agents.prompt_fragments import CLAIM_FORMAT_FRAGMENT
 from maljan.core.config import get_settings
 from maljan.core.exceptions import AgentLoopCancelled, AnalystError
 from maljan.core.logger import logger
@@ -649,9 +650,10 @@ def _messages_text(messages: list) -> str:
 # not a content split. Views run concurrently and merge via merge_chunk_isrs.
 # ---------------------------------------------------------------------------
 
-# Generic, tools-free system prompt for a single view. Reproduces the analysts'
-# forced CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE format so _text_to_isr can parse it,
-# and carries the "cite an artifact, do not invent" rule the §3.2 study needs.
+# Generic, tools-free system prompt for a single view. Renders the same claim
+# format the analysts are given, so ``parse_structured_claims`` reads it and
+# the format is written in one place, and carries the "cite an artifact, do
+# not invent" rule the §3.2 study needs.
 _VIEW_SYSTEM = (
     "You are an expert malware analyst examining one focused facet of a sample. "
     "Analyse ONLY the aspect named in the instruction; ignore everything else. "
@@ -659,8 +661,7 @@ _VIEW_SYSTEM = (
     "registry key, host/domain). DO NOT invent capabilities or technique IDs — if "
     "the evidence does not support a claim, omit it. Cite MITRE ATT&CK technique "
     "IDs in the form Txxxx or Txxxx.yyy only when the evidence supports them.\n"
-    "Return each finding as:\nCLAIM: <text>\nEVIDENCE: <artifact>\n"
-    "CONFIDENCE: <0.0-1.0>\nTECHNIQUE: <T-ID or NONE>\n---"
+    + CLAIM_FORMAT_FRAGMENT
 )
 
 # Per-domain ordered facets. ``_view_specs`` returns the first N (N=2 -> the first
