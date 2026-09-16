@@ -29,6 +29,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from maljan.core.logger import logger
+from maljan.schemas.evidence import ENTRY_ID_RE
 from maljan.schemas.judgement import SEVERITY_RATINGS
 
 # How many alternatives a suggestion list carries. Three is what fits in one
@@ -155,8 +156,6 @@ def _techniques_cited_by_findings(isr: Any) -> set[str]:
     in prose. Asking it twice for one technique is a feedback turn spent on
     bookkeeping.
     """
-    from maljan.schemas.evidence import ENTRY_ID_RE
-
     cited: set[str] = set()
     for finding in getattr(isr, "findings", None) or []:
         ids = [str(value) for value in (getattr(finding, "evidence_ids", None) or [])]
@@ -178,8 +177,6 @@ def _cites_a_ledger_entry(claim: Any, cited_by_findings: set[str]) -> bool:
     not searched: "as ev_0001 does not show, this may be injection" is not a
     citation, and reading it as one is how a validator stops validating.
     """
-    from maljan.schemas.evidence import ENTRY_ID_RE
-
     if ENTRY_ID_RE.search(str(getattr(claim, "evidence_ref", "") or "")):
         return True
     technique = str(getattr(claim, "technique_id", "") or "").strip().upper()
@@ -1065,7 +1062,6 @@ def unsupported_benign_violations(
     call it is here to ask for.
     """
     from maljan.pipeline.outcome import decide_from_bundle
-    from maljan.schemas.evidence import ENTRY_ID_RE
 
     if analyst_claims > 0 or decide_from_bundle(bundle) != "Benign":
         return []

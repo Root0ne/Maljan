@@ -39,7 +39,7 @@ from maljan.pipeline.validation import (
     retry_with_feedback_sync,
     validate_isr,
 )
-from maljan.schemas.evidence import EvidenceCounter, LedgerEntry, apply_budget
+from maljan.schemas.evidence import ENTRY_ID_RE, EvidenceCounter, LedgerEntry, apply_budget
 from maljan.schemas.isr_models import AgentISR, Artifact, ClaimEvidence, Finding
 from maljan.schemas.tool_evidence import CapturedToolOutput
 
@@ -121,8 +121,6 @@ def ledger_ids_in(msgs: Sequence[Any]) -> list[str]:
     what the caller needs is the set of ids the model can still read, and one
     written into prose is one it can read.
     """
-    from maljan.schemas.evidence import ENTRY_ID_RE
-
     seen: list[str] = []
     for message in msgs:
         for found in ENTRY_ID_RE.findall(str(getattr(message, "content", "") or "")):
