@@ -184,6 +184,10 @@ JUDGE_VERDICT_SYSTEM = (
     "  Omit any of the four you cannot support. A family name MUST cite the "
     "evidence ids it was read from; a family with no evidence ids is a guess, "
     "and the report will say so.\n"
+    "- Benign is a finding, not a default. It says the evidence was examined "
+    "and nothing malicious was in it. If this run produced no evidence and no "
+    "analyst claim, say so and return Suspicious: an empty report is not a "
+    "clean sample.\n"
     "- Return ONLY a valid JSON STIX 2.1 Bundle. No markdown wrappers."
 )
 

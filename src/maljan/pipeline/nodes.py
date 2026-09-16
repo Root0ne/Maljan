@@ -41,6 +41,7 @@ from maljan.pipeline.events import (
     summarize_claims,
 )
 from maljan.pipeline.evidence_summary import summarise
+from maljan.pipeline.outcome import verdict_for_run
 from maljan.pipeline.state import AgentArgument, AnalysisState, _merge_stage_results
 from maljan.pipeline.sycophancy_detector import build_revision_directive, detect_sycophancy
 from maljan.pipeline.validation import (
@@ -2120,6 +2121,17 @@ def make_judge_node(
             bundle = verdict.bundle
             stix_output: dict[str, Any] = bundle.model_dump() if isinstance(bundle, Bundle) else {}
             decision = _decide_from_bundle(bundle) if isinstance(bundle, Bundle) else "Suspicious"
+            # An empty bundle over an empty run is not a clean sample. The
+            # judge emitted no malware object because there was nothing to
+            # emit one from -- no tool call was recorded and no analyst
+            # claimed anything -- and reporting that as Benign is a false
+            # negative with a confidence number attached.
+            decision, _inconclusive = verdict_for_run(
+                decision, evidence_entries=_ledger, isr_reports=isr_reports
+            )
+            if _inconclusive:
+                _degradation_reasons.append(_inconclusive)
+                _degraded_mode = True
 
             # What the analysts and the judge were told and did not fix. Both
             # are recorded rather than resolved, and both are what
