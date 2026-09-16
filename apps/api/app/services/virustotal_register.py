@@ -56,7 +56,7 @@ async def register_agent(*, client: httpx.AsyncClient | None = None) -> dict[str
     try:
         response = await http.post(virustotal.REGISTER_URL, json=payload)
     except httpx.HTTPError as exc:
-        raise RegistrationError(f"{type(exc).__name__}: {exc}") from exc
+        raise RegistrationError(f"VirusTotal could not be reached ({type(exc).__name__})") from exc
     finally:
         if owned:
             await http.aclose()
@@ -71,7 +71,7 @@ async def register_agent(*, client: httpx.AsyncClient | None = None) -> dict[str
     try:
         body = response.json()
     except ValueError as exc:
-        raise RegistrationError(f"VirusTotal's answer was not JSON: {exc}") from exc
+        raise RegistrationError("VirusTotal's answer was not JSON") from exc
     if not isinstance(body, dict):
         raise RegistrationError("VirusTotal's answer was not an object")
     token = str(body.get("agent_token") or "")
