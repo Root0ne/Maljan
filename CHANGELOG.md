@@ -228,6 +228,16 @@ change landed on `main`.
 
 ### Fixed
 
+- **Carved payloads land under the sidecar's staging directory, never where the
+  model says.** `carve_payloads` took a model-chosen `out_dir`, so a tool could
+  write live malware anywhere the analysis sidecar could write; a live run
+  passed the two-character string `""` and a directory literally named `""`
+  with a carved PE body in it appeared in the sidecar's own cwd. The argument
+  is gone: files land in `<staging>/carved/<sha256 of the sample>/`, created
+  private like the staging directory. A string of nothing but quote characters
+  now counts as an absent value for every optional string argument on that
+  server, as a blank one already did.
+
 - **An API-call row carries what the sandbox recorded.** `sandbox_api_calls`
   copied the import table's category and a suspicious flag onto every row and
   filtered by that category. Rows now carry the API, the module the sandbox
