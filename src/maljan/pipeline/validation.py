@@ -532,13 +532,28 @@ class CapabilityGrounding:
 
 # What ends the clause a term was written in. A capability word after one of
 # these is a new statement, so a negation before it does not reach it.
-_CLAUSE_BREAK_RE = re.compile(r"[.;:!?\n,]|\bbut\b|\bhowever\b|\bwhereas\b", re.IGNORECASE)
+#
+# A comma is deliberately not one of them. "The loader does not, in any
+# sandbox run, establish command-and-control" is one clause with a
+# parenthetical in it, and treating the commas as boundaries threw the cue
+# away and re-flagged the honest negative. The window below is the limiter.
+_CLAUSE_BREAK_RE = re.compile(r"[.;:!?\n]|\bbut\b|\bhowever\b|\bwhereas\b", re.IGNORECASE)
 
 # The cues that turn a capability word into a report of its absence.
+#
+# ``free`` is not among them. "free of" is the only construction it would have
+# earned, and it cost a real claim: "a free dynamic-DNS host for command and
+# control" is an over-claim the validator exists to catch.
 _NEGATION_RE = re.compile(
-    r"\b(?:no|not|never|without|lack(?:s|ed|ing)?|absence|free|none)\b|n't\b|\bfailed to\b",
+    r"\b(?:no|not|never|without|lack(?:s|ed|ing)?|absence|none)\b|n't\b|\bfailed to\b",
     re.IGNORECASE,
 )
+
+# The phrases that open with a cue and assert the opposite of one. "There is no
+# doubt that the sample exfiltrates data" is a claim, and "not only does it
+# persist" is two. Checked at the cue's own position, so a real cue elsewhere
+# in the window still counts.
+_NOT_A_NEGATION = ("no doubt", "not only")
 
 # How far back a cue is allowed to reach. A negation governs the words next to
 # it, not the whole paragraph: "no persistence was observed and the sample
@@ -561,7 +576,11 @@ def _is_negated(text: str, start: int) -> bool:
     breaks = list(_CLAUSE_BREAK_RE.finditer(window))
     if breaks:
         window = window[breaks[-1].end() :]
-    return bool(_NEGATION_RE.search(window))
+    lowered = window.lower()
+    return any(
+        not lowered.startswith(_NOT_A_NEGATION, cue.start())
+        for cue in _NEGATION_RE.finditer(window)
+    )
 
 
 def _claimed(pattern: re.Pattern[str], text: str) -> bool:
@@ -852,6 +871,52 @@ def assessment_violations(bundle: Any) -> list[Violation]:
             code=ASSESSMENT_MISSING_CODE,
             message=ASSESSMENT_MISSING_MESSAGE,
             path="x_maljan_assessment",
+        )
+    ]
+
+
+ASSESSMENT_CONFLICT_CODE = "verdict.assessment_conflict"
+
+# The pairs that cannot both be meant. A malicious verdict whose severity is
+# Informational, and a clean verdict rated High or Critical, are two answers to
+# one question: a live run said Malware at 0.6 while its own rationale read
+# "there is no evidence of malicious functionality", and the report printed
+# both without a word about the contradiction.
+_CONFLICTING_RATINGS: dict[str, frozenset[str]] = {
+    "Malware": frozenset({"Informational"}),
+    "Benign": frozenset({"High", "Critical"}),
+}
+
+
+def assessment_conflict_violations(bundle: Any) -> list[Violation]:
+    """Whether the judge's verdict and its own severity say the same thing.
+
+    Both fields are the judge's, and neither is touched here: what the judge
+    gets is one turn in which both are named and it is asked which it meant.
+    A contradiction that survives the turn is recorded rather than resolved,
+    because picking one of the two for the judge would be exactly the silent
+    override this module exists to replace.
+    """
+    from maljan.pipeline.outcome import decide_from_bundle
+
+    verdict = decide_from_bundle(bundle)
+    conflicting = _CONFLICTING_RATINGS.get(verdict)
+    if not conflicting:
+        return []
+    assessment = getattr(bundle, "x_maljan_assessment", None)
+    rating = str(getattr(getattr(assessment, "severity", None), "rating", "") or "").strip()
+    if rating not in conflicting:
+        return []
+    return [
+        Violation(
+            code=ASSESSMENT_CONFLICT_CODE,
+            message=(
+                f"The bundle's objects say {verdict} and x_maljan_assessment.severity.rating "
+                f"says {rating}; those are two different answers about the same sample. "
+                "Reconcile them: either the objects or the rating is what you meant, and "
+                "the rationale should support whichever it is."
+            ),
+            path="x_maljan_assessment.severity.rating",
         )
     ]
 

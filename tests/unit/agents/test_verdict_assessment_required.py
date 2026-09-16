@@ -77,10 +77,16 @@ class TestTheJudgeAsksOnce:
 
         from maljan.agents.judge_agent import JudgeAgent
 
+        # The corrected answer names a malware object as well as the block.
+        # A bundle with no objects reads as Benign, and a Benign verdict rated
+        # High is a conflict of its own (``verdict.assessment_conflict``) —
+        # a second finding this test is not about.
         answers = [
             '{"type": "bundle", "objects": []}',
             (
-                '{"type": "bundle", "objects": [], "x_maljan_assessment": '
+                '{"type": "bundle", "objects": [{"type": "malware", '
+                '"id": "malware--aaaaaaaa-0000-4000-8000-bbbbbbbbbbbb", "name": "loader"}], '
+                '"x_maljan_assessment": '
                 '{"severity": {"rating": "High", "rationale": "it injects"}, '
                 '"malware_category": "loader", "confidence": 0.8}}'
             ),

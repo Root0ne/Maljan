@@ -44,6 +44,7 @@ from maljan.pipeline.state import AgentArgument
 from maljan.pipeline.validation import (
     ValidationTally,
     Violation,
+    assessment_conflict_violations,
     assessment_violations,
     drop_ungrounded_indicators,
     retry_with_feedback,
@@ -787,6 +788,7 @@ class JudgeAgent:
             return [
                 *validate_verdict_bundle(bundle, evidence_corpus, attck=_knowledge),
                 *assessment_violations(bundle),
+                *assessment_conflict_violations(bundle),
             ]
 
         tally = ValidationTally()

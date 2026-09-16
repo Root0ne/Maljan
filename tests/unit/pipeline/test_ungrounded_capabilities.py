@@ -148,8 +148,35 @@ class TestAReportOfAbsence:
             "process_injection"
         }
 
-    def test_a_comma_ends_the_clause_too(self) -> None:
+    def test_a_contrast_word_ends_the_clause_too(self) -> None:
         text = "The sample does not exfiltrate data, but it maintains a C2 channel."
+        assert {v.path for v in ungrounded_capabilities(text, self._thin())} == {
+            "command_and_control"
+        }
+
+    def test_a_parenthetical_does_not_cut_the_cue_off_from_its_term(self) -> None:
+        """A comma opens an aside, it does not end the statement.
+
+        Treating it as a clause boundary threw the cue away and re-flagged the
+        honest negative, which is the failure this whole rule exists to stop.
+        """
+        text = "The loader does not, in any sandbox run, establish command-and-control."
+        assert ungrounded_capabilities(text, self._thin()) == []
+
+    def test_no_doubt_asserts_the_claim_rather_than_denying_it(self) -> None:
+        text = "There is no doubt that the sample exfiltrates collected data."
+        assert {v.path for v in ungrounded_capabilities(text, self._thin())} == {"exfiltration"}
+
+    def test_not_only_is_two_claims_and_neither_is_cleared(self) -> None:
+        text = "Not only does it persist, it also steals credentials."
+        assert {v.path for v in ungrounded_capabilities(text, self._thin())} == {
+            "persistence",
+            "credential_theft",
+        }
+
+    def test_a_free_service_is_not_an_absence(self) -> None:
+        """``free`` reads as a cue and is one only in "free of"."""
+        text = "The sample uses a free dynamic-DNS host for command and control."
         assert {v.path for v in ungrounded_capabilities(text, self._thin())} == {
             "command_and_control"
         }
