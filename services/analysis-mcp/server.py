@@ -32,6 +32,7 @@ from maljan.tools import binary as binary_tools
 from maljan.tools import identify as identify_tools
 from maljan.tools import rules as rule_tools
 from maljan.tools import strings as string_tools
+from maljan.tools.strings import DEFAULT_STRINGS_LIMIT
 
 mcp = FastMCP("AnalysisMCP")
 
@@ -55,6 +56,41 @@ _MAX_SAMPLE_BYTES = 2 * 1024 * 1024 * 1024
 _DEFAULT_STAGING_TTL_HOURS = 24.0
 
 
+# What a model writes when it means "I am not passing this one". A local model
+# asked for an optional filter it does not want fills the field in rather than
+# omitting it, and the words it fills it with are these. Read as the absence
+# they mean, once, here — every tool on this server goes through ``_guard``, so
+# no tool has to know about it and none of them can disagree.
+_ABSENT_WORDS = frozenset({"null", "none", "nil", "undefined", ""})
+
+
+def _optional_string_params(call: Any) -> frozenset[str]:
+    """The parameters of ``call`` whose absence is spelled ``None``.
+
+    Only those: a required argument that arrived as the word "null" is a call
+    that is wrong in a way the tool itself should answer, and turning it into
+    ``None`` would trade a readable error for a confusing one.
+    """
+    import inspect
+
+    try:
+        parameters = inspect.signature(call).parameters
+    except (TypeError, ValueError):  # pragma: no cover - builtins have no signature
+        return frozenset()
+    return frozenset(name for name, parameter in parameters.items() if parameter.default is None)
+
+
+def _read_absent_words(call: Any, kwargs: dict[str, Any]) -> dict[str, Any]:
+    """``kwargs`` with each optional argument's "null" read as ``None``."""
+    optional = _optional_string_params(call)
+    return {
+        name: None
+        if name in optional and isinstance(value, str) and value.strip().lower() in _ABSENT_WORDS
+        else value
+        for name, value in kwargs.items()
+    }
+
+
 def _guard(tool: str, call: Any, **kwargs: Any) -> dict[str, Any]:
     """Run one tool call, turning any exception into a returned error.
 
@@ -64,7 +100,7 @@ def _guard(tool: str, call: Any, **kwargs: Any) -> dict[str, Any]:
     and one that retries the same broken call until its step budget is gone.
     """
     try:
-        return dict(call(**kwargs))
+        return dict(call(**_read_absent_words(call, kwargs)))
     except Exception as exc:  # noqa: BLE001 — a tool server answers, it does not raise
         return {"error": f"{type(exc).__name__}: {exc}", "tool": tool}
 
@@ -102,7 +138,7 @@ def strings(
     path: str,
     min_len: int = 6,
     encodings: list[str] | None = None,
-    limit: int = 2000,
+    limit: int = DEFAULT_STRINGS_LIMIT,
     offset: int = 0,
     pattern: str | None = None,
     start: int | None = None,
@@ -110,10 +146,16 @@ def strings(
 ) -> dict[str, Any]:
     """List printable ASCII and UTF-16LE runs with their byte offsets.
 
-    ``offset`` pages through runs, not bytes: ``offset=2000, limit=1000``
-    returns the 2001st to 3000th run. Use ``start``/``end`` for a byte range
-    and ``pattern`` to keep only the runs containing a marker (case-insensitive
-    substring, or ``re:<expression>`` for a regular expression).
+    The page is small on purpose: 150 runs by default, because a larger answer
+    is cut before you see it. Read ``next_offset`` in the answer and pass it as
+    ``offset`` to get the following page — it is ``null`` when this page was
+    the last one — and read ``total_matched`` to see how many runs the filters
+    kept in all. Paging counts runs, not bytes.
+
+    Use ``start``/``end`` for a byte range and ``pattern`` to keep only the runs
+    containing a marker (case-insensitive substring, or ``re:<expression>`` for
+    a regular expression); searching with ``pattern`` finds more in one call
+    than paging through everything.
     """
     return _guard(
         "strings",

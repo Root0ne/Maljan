@@ -664,6 +664,15 @@ _ENCODINGS: tuple[str, ...] = ("ascii", "utf16le")
 # One tool call must not try to return a whole binary's worth of text.
 _MAX_STRINGS_LIMIT = 20_000
 
+# What one page holds when the caller does not say. A live run asked for the
+# default 2000 runs and was answered with 250-530 KB per call; the agent's
+# output guardrail then cut each answer to 8000 characters, so the model was
+# shown a twentieth of a page it had no way to know it was missing and paged
+# blindly through offsets 0, 5000, 10000 and up. A page that fits inside the
+# budget the answer is read under is a page the model can actually reason
+# about, and ``next_offset`` says where the following one starts.
+DEFAULT_STRINGS_LIMIT = 150
+
 # The shortest run the caller may ask for. Below three characters the scan
 # returns essentially every byte of a binary as a "string".
 _MIN_REQUESTABLE_LENGTH = 3
@@ -687,7 +696,7 @@ def strings(
     path: str,
     min_len: int = _MIN_STRING_LENGTH,
     encodings: tuple[str, ...] = ("ascii", "utf16le"),
-    limit: int = 2000,
+    limit: int = DEFAULT_STRINGS_LIMIT,
     offset: int = 0,
     pattern: str | None = None,
     start: int | None = None,
@@ -702,10 +711,12 @@ def strings(
     case-insensitive substring, or a regular expression when it is written
     ``re:<expression>``.
 
-    ``total`` is how many runs the scan found, ``matched_total`` how many of
+    ``total`` is how many runs the scan found, ``total_matched`` how many of
     them the filters kept, and ``page_offset``/``page_limit`` echo the paging
     this answer was cut with, so a caller can see at once whether an empty page
-    means "nothing matched" or "you asked past the end".
+    means "nothing matched" or "you asked past the end". ``next_offset`` is the
+    offset of the following page, or ``None`` when this one ended the set — a
+    caller that reads it never has to guess at a stride.
     """
     target = Path(path)
     if not target.is_file():
@@ -745,13 +756,18 @@ def strings(
             rows.append({"offset": at, "enc": enc, "text": decoded})
             if total >= _MAX_STRINGS_SCANNED:
                 break
+    more = matched > offset + len(rows)
     return {
         "strings": rows,
         "total": total,
-        "matched_total": matched,
+        "total_matched": matched,
         "page_offset": offset,
         "page_limit": limit,
-        "truncated": matched > offset + len(rows),
+        # Echoed as it was understood, not as it arrived: a caller that sent
+        # the word "null" for "no filter" sees that it was read as no filter.
+        "pattern": pattern,
+        "next_offset": offset + len(rows) if more else None,
+        "truncated": more,
     }
 
 

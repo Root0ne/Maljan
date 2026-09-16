@@ -83,7 +83,7 @@ class TestStrings:
         found = tool.strings(str(target), pattern="asyncrat")
 
         assert [r["text"] for r in found["strings"]] == ["AsyncRAT client v0.5.7B"]
-        assert found["matched_total"] == 1
+        assert found["total_matched"] == 1
         assert found["total"] == 201
 
     def test_a_regex_pattern_is_written_with_the_re_prefix(self, tmp_path: Path) -> None:
@@ -113,7 +113,7 @@ class TestStrings:
 
         assert [r["text"] for r in tail["strings"]] == ["second-run-here"]
         assert [r["text"] for r in head["strings"]] == ["first-run-here"]
-        assert (tail["total"], tail["matched_total"]) == (2, 1)
+        assert (tail["total"], tail["total_matched"]) == (2, 1)
 
     def test_the_page_the_answer_was_cut_with_is_echoed(self, tmp_path: Path) -> None:
         target = tmp_path / "s.bin"
@@ -123,7 +123,7 @@ class TestStrings:
 
         assert page["page_offset"] == 4
         assert page["page_limit"] == 3
-        assert page["matched_total"] == 10
+        assert page["total_matched"] == 10
 
     def test_paging_counts_matches_rather_than_every_run(self, tmp_path: Path) -> None:
         target = tmp_path / "s.bin"
@@ -135,7 +135,7 @@ class TestStrings:
         page = tool.strings(str(target), pattern="marker", offset=8)
 
         assert [r["text"] for r in page["strings"]] == ["marker008", "marker009"]
-        assert page["matched_total"] == 10
+        assert page["total_matched"] == 10
         assert page["truncated"] is False
 
 
