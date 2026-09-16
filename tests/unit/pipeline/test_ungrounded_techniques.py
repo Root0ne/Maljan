@@ -224,14 +224,17 @@ class TestTheEvidenceLineKeepsItsId:
             assert claim.evidence_ref == "import table [ev_0002]"
 
     def test_an_id_the_cut_sliced_through_is_not_left_half_written(self) -> None:
-        """The field is what the report prints and what memory embeds."""
+        """The field is what the report prints and what memory embeds, and the
+        cut can land on any character of the id."""
+        import re
+
         from maljan.agents.base_agent import evidence_ref_text
 
-        stored = evidence_ref_text("y" * 196 + "[ev_0007]")
+        for pad in range(188, 201):
+            stored = evidence_ref_text("y" * pad + "[ev_0007] [ev_0008] [ev_0009] [ev_0010]")
 
-        assert "[ev_ " not in stored
-        assert stored.endswith("[ev_0007]")
-        assert stored.count("ev_0007") == 1
+            assert re.fullmatch(r"y+ ?\[ev_\d{4}\]( \[ev_\d{4}\])*", stored), (pad, stored)
+            assert stored.count("ev_0007") == 1, (pad, stored)
 
     def test_the_ids_written_back_are_bounded(self) -> None:
         from maljan.agents.base_agent import _EVIDENCE_REF_CHARS, evidence_ref_text

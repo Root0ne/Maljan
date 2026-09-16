@@ -527,8 +527,10 @@ def strip_tool_call_scaffolding(text: str) -> str:
 _EVIDENCE_REF_CHARS = 200
 _EVIDENCE_REF_IDS = 3
 
-# The start of an id the cut sliced through, at the end of the kept text.
-_PARTIAL_ID_AT_END_RE = re.compile(r"\s*\[?ev_\d{0,3}$", re.IGNORECASE)
+# The start of an id the cut sliced through, at the end of the kept text: any
+# prefix of ``[ev_NNNN``, from the bare bracket up to a whole id whose closing
+# bracket was cut, and the space before it. The whole id is written back.
+_PARTIAL_ID_AT_END_RE = re.compile(r"\s*(?:\[(?:e(?:v(?:_\d{0,4})?)?)?)?$", re.IGNORECASE)
 
 
 def evidence_ref_text(evidence_text: str) -> str:

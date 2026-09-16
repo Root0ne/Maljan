@@ -832,12 +832,13 @@ def validate_verdict_bundle(
     exactly the case this violation exists for. Passing ``None`` skips the
     catalogue question rather than answering it wrongly.
 
-    ``sample`` is the identity block's dict; its hashes and file name ground
-    an indicator the way a ledger entry does, and only when the indicator's
-    value is one of them exactly. They are kept out of the corpus haystack,
-    which is searched by substring: the file name is whatever the submitter
-    typed, and a name carrying an address would otherwise ground an indicator
-    for it. Every other indicator value still needs a ledger entry.
+    ``sample`` is the identity block's dict; a quoted value equal to one of
+    its hashes or its file name counts as found, the way a corpus hit does.
+    They are kept out of the corpus haystack, which is searched by substring:
+    the file name is whatever the submitter typed, and a name carrying an
+    address would otherwise ground an indicator for it. A pattern is grounded
+    when one of its quoted values is found, in the corpus or in the identity,
+    as it always was for the corpus alone; the denylists run first either way.
     """
     violations: list[Violation] = []
     objects = list(getattr(bundle, "objects", None) or [])
@@ -1153,9 +1154,9 @@ def _indicator_problem(
     log line nobody sees.
 
     ``identity`` is the sample's own lowercased hashes and file name. A literal
-    equal to one of them is grounded whatever the pattern's type; a literal
-    merely contained in one is not, so neither a slice of the sha256 nor a
-    value written inside the submitted name passes.
+    equal to one of them counts as found wherever the haystack is consulted; a
+    literal merely contained in one does not, so neither a slice of the sha256
+    nor a value written inside the submitted name passes.
     """
     from maljan.agents._indicator_denylists import (
         COMPILE_ARTIFACT_RE,
@@ -1171,8 +1172,10 @@ def _indicator_problem(
     if not literals:
         return "the indicator pattern quotes no value."
     own = set(identity)
-    if any(literal.lower() in own for literal in literals):
-        return ""
+
+    def _found(literal: str) -> bool:
+        return literal.lower() in haystack or literal.lower() in own
+
     stripped = pattern.lstrip()
 
     if stripped.startswith("[url:value"):
@@ -1180,7 +1183,7 @@ def _indicator_problem(
             host = _url_host(literal)
             if host and any(host.endswith(d) or d in host for d in URL_DENY_HOSTS):
                 return f"the URL host in {literal!r} is documentation or vendor infrastructure."
-        if not any(literal.lower() in haystack for literal in literals):
+        if not any(_found(literal) for literal in literals):
             return f"the URL {literals[0]!r} appears nowhere in this run's evidence."
         return ""
 
@@ -1196,6 +1199,7 @@ def _indicator_problem(
                 any(lowered.endswith(ext) for ext in IOC_FILE_EXTENSIONS)
                 or any(literal.startswith(prefix) for prefix in IOC_OS_RESOURCE_PREFIXES)
                 or lowered in runtime_paths
+                or lowered in own
             ):
                 return ""
         return (
@@ -1207,7 +1211,7 @@ def _indicator_problem(
     # quotes the hash algorithm as well as the hash, and requiring every quoted
     # string to appear in the corpus would reject the digest for the company it
     # keeps.
-    if any(literal.lower() in haystack for literal in literals):
+    if any(_found(literal) for literal in literals):
         return ""
     return (
         f"the indicator pattern names {', '.join(literals)}, which appears nowhere "

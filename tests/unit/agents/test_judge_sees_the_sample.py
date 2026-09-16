@@ -352,6 +352,28 @@ class TestTheSampleSOwnIdentityIsGrounded:
         assert validate_verdict_bundle(bundle, set(), sample={"file_name": "sample"}) == []
         assert validate_verdict_bundle(bundle, set(), sample={"file_name": "other"})
 
+    def test_a_submitted_name_that_is_a_toolchain_artefact_is_still_refused(self) -> None:
+        """The identity is one more place a value can be found, not a way past
+        the denylists, which run before anything is looked up."""
+        from maljan.schemas.stix_models import Indicator
+
+        bundle = Bundle(
+            objects=[
+                Indicator(
+                    id=f"indicator--{'a' * 8}-0000-4000-8000-{'b' * 12}",
+                    pattern="[file:name = '/toolchain/bin/ld']",
+                )
+            ]
+        )
+        by_identity = validate_verdict_bundle(
+            bundle, set(), sample={"file_name": "/toolchain/bin/ld"}
+        )
+        by_corpus = validate_verdict_bundle(bundle, {"/toolchain/bin/ld"})
+
+        assert [v.code for v in by_identity] == ["stix.ungrounded_indicator"]
+        assert [v.code for v in by_corpus] == ["stix.ungrounded_indicator"]
+        assert "toolchain artefact" in by_identity[0].message
+
     def test_the_md5_and_the_file_name_count_too(self) -> None:
         assert {"e" * 64, "f" * 32, "putty.exe"} <= sample_identity_values(SAMPLE)
         assert "1633792" not in sample_identity_values(SAMPLE), "a size is not an indicator"
