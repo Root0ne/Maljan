@@ -282,6 +282,14 @@ class TestABenignVerdictWithNoAnalysisBehindIt:
 
         assert unsupported_benign_violations(bundle, analyst_claims=0, ledger_ids=["ev_0001"]) == []
 
+    def test_a_run_that_recorded_nothing_is_not_asked_for_a_citation(self) -> None:
+        """No entry exists to cite, and the pipeline already calls such a run
+        inconclusive, so the retry could satisfy nothing and change nothing."""
+        assert unsupported_benign_violations(self._benign(), analyst_claims=0, ledger_ids=[]) == []
+        assert (
+            unsupported_benign_violations(self._benign(), analyst_claims=0, ledger_ids=None) == []
+        )
+
     def test_a_run_whose_analysts_claimed_something_is_not_this_validator_s_business(
         self,
     ) -> None:

@@ -1070,15 +1070,19 @@ def unsupported_benign_violations(
     if analyst_claims > 0 or decide_from_bundle(bundle) != "Benign":
         return []
     known = {str(entry).strip() for entry in (ledger_ids or []) if str(entry).strip()}
+    # A run with nothing recorded has nothing to cite, and ``verdict_for_run``
+    # already calls it inconclusive: the retry could not be satisfied and could
+    # not change the reported verdict.
+    if not known:
+        return []
     try:
         text = json.dumps(bundle.model_dump(mode="json"), default=str)
     except Exception as exc:  # noqa: BLE001 — an unreadable bundle cites nothing
         logger.debug("validation: the bundle could not be read for citations (%s).", exc)
         text = ""
-    if known and set(ENTRY_ID_RE.findall(text)) & known:
+    if set(ENTRY_ID_RE.findall(text)) & known:
         return []
     listed = ", ".join(sorted(known)[:3])
-    where = f" The entries this run recorded include {listed}." if listed else ""
     return [
         Violation(
             code=UNSUPPORTED_BENIGN_CODE,
@@ -1087,7 +1091,8 @@ def unsupported_benign_violations(
                 "sample, so nothing examined it. Benign is a finding and needs evidence: "
                 "cite the ledger entry that establishes it — a valid signature from "
                 "signing_info is the usual one — or return Suspicious and say in the "
-                f"rationale that the run was inconclusive.{where}"
+                f"rationale that the run was inconclusive. The entries this run recorded "
+                f"include {listed}."
             ),
             path="objects",
         )
