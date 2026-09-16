@@ -101,7 +101,20 @@ class ValidationTally:
         self.unresolved.extend(other.unresolved)
 
     def to_dict(self) -> dict[str, Any]:
-        return {"retries": int(self.retries), "by_code": dict(sorted(self.by_code.items()))}
+        """The tally as the run summary carries it.
+
+        ``unresolved`` is part of it whenever there is any: a serialisation
+        that dropped the rows would leave a reader the counts and none of the
+        claims they were counted for. An empty list is left out, so a run that
+        over-claimed nothing does not carry an empty key saying so.
+        """
+        out: dict[str, Any] = {
+            "retries": int(self.retries),
+            "by_code": dict(sorted(self.by_code.items())),
+        }
+        if self.unresolved:
+            out["unresolved"] = [dict(row) for row in self.unresolved]
+        return out
 
 
 # A validator reads a produced object and says what is wrong with it. It never
@@ -517,6 +530,50 @@ class CapabilityGrounding:
         )
 
 
+# What ends the clause a term was written in. A capability word after one of
+# these is a new statement, so a negation before it does not reach it.
+_CLAUSE_BREAK_RE = re.compile(r"[.;:!?\n,]|\bbut\b|\bhowever\b|\bwhereas\b", re.IGNORECASE)
+
+# The cues that turn a capability word into a report of its absence.
+_NEGATION_RE = re.compile(
+    r"\b(?:no|not|never|without|lack(?:s|ed|ing)?|absence|free|none)\b|n't\b|\bfailed to\b",
+    re.IGNORECASE,
+)
+
+# How far back a cue is allowed to reach. A negation governs the words next to
+# it, not the whole paragraph: "no persistence was observed and the sample
+# injects code into explorer.exe" is one honest negative and one real claim,
+# and a window this size keeps the second one.
+_NEGATION_WINDOW = 40
+
+
+def _is_negated(text: str, start: int) -> bool:
+    """Whether the term at ``start`` sits inside a statement of absence.
+
+    Read backwards from the match through at most ``_NEGATION_WINDOW``
+    characters, stopping at whatever ended the previous clause. A cue in what
+    is left governs this term: "contains no keylogging or credential theft"
+    negates both words, while "no persistence was observed; it injects code"
+    negates only the first, because the semicolon ends the clause the cue was
+    in.
+    """
+    window = text[max(0, start - _NEGATION_WINDOW) : start]
+    breaks = list(_CLAUSE_BREAK_RE.finditer(window))
+    if breaks:
+        window = window[breaks[-1].end() :]
+    return bool(_NEGATION_RE.search(window))
+
+
+def _claimed(pattern: re.Pattern[str], text: str) -> bool:
+    """Whether ``text`` claims the capability rather than reporting its absence.
+
+    One surviving match is enough: a report that says the sample does not
+    exfiltrate data in one sentence and does exfiltrate it in another has made
+    the claim, and it is the claim that has to be grounded.
+    """
+    return any(not _is_negated(text, match.start()) for match in pattern.finditer(text))
+
+
 def _base_technique(technique_id: Any) -> str:
     """``T1055.012`` as ``T1055``; anything else as ""."""
     value = str(technique_id or "").strip().upper()
@@ -542,7 +599,11 @@ def ungrounded_capabilities(
         return []
     violations: list[Violation] = []
     for label, pattern, techniques, keys in _COMPILED_CAPABILITY_TERMS:
-        if not pattern.search(text):
+        # A report of absence is not a claim. Saying "no command-and-control
+        # communication was observed" is the prose a thin run should produce,
+        # and flagging it spends the one retry arguing against the honest
+        # sentence this validator exists to encourage.
+        if not _claimed(pattern, text):
             continue
         if grounding.grounds(techniques, keys, pattern):
             continue

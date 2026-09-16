@@ -328,7 +328,9 @@ class NarrativeAgent:
         # reads this and folds it in rather than the builder collecting it.
         self.validation_tally = ValidationTally()
 
-    async def generate(self, report: MalwareReport) -> NarrativeOutput | None:
+    async def generate(
+        self, report: MalwareReport, isr_reports: Any = None
+    ) -> NarrativeOutput | None:
         """Return a ``NarrativeOutput`` or ``None`` if both paths fail.
 
         Path 1 — ``with_structured_output(NarrativeOutput).ainvoke(messages)``
@@ -341,7 +343,12 @@ class NarrativeAgent:
         # What this run actually established, so a summary cannot be the first
         # place "command-and-control" or "data exfiltration" appears. Run 3's
         # did exactly that, over one technique and no network data at all.
-        grounding = CapabilityGrounding.from_report(report)
+        #
+        # The analysts' own words are one of the three grounding sources, and
+        # this round is graded on the same grounding the composer is: without
+        # the ISRs, a capability an analyst stated in a claim would be a
+        # violation here and a pass there, on one run.
+        grounding = CapabilityGrounding.from_report(report, isr_reports)
 
         # Skip the structured path entirely on endpoints where it does not
         # work. Measured live 2026-08-07: against llama-server this call hung

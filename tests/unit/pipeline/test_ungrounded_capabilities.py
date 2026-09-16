@@ -117,6 +117,49 @@ class TestTheRunThatProducedIt:
         assert ungrounded_capabilities("It persists across reboots.", grounding) == []
 
 
+class TestAReportOfAbsence:
+    """Saying a capability was *not* found is the prose this validator wants.
+
+    Matched by bare regex, every one of these sentences was recorded as an
+    over-claim: the retry then argued against a correct negative, and a term
+    that survived reached the run summary as "the text claims command and
+    control" for a report that said the opposite.
+    """
+
+    def _thin(self) -> CapabilityGrounding:
+        return CapabilityGrounding.from_report(_report(techniques=("T1027",)))
+
+    def test_no_persistence_and_no_exfiltration_is_not_a_claim(self) -> None:
+        text = "No persistence mechanism was observed and the sample does not exfiltrate data."
+        assert ungrounded_capabilities(text, self._thin()) == []
+
+    def test_no_evidence_of_command_and_control_is_not_a_claim(self) -> None:
+        text = "There is no evidence of command-and-control communication."
+        assert ungrounded_capabilities(text, self._thin()) == []
+
+    def test_one_cue_covers_both_terms_of_its_own_clause(self) -> None:
+        text = "The sample contains no keylogging or credential theft functionality."
+        assert ungrounded_capabilities(text, self._thin()) == []
+
+    def test_a_claim_after_the_clause_ends_is_still_a_claim(self) -> None:
+        """A cue governs its clause, not the rest of the sentence."""
+        text = "No persistence was observed; the sample injects code into another process."
+        assert {v.path for v in ungrounded_capabilities(text, self._thin())} == {
+            "process_injection"
+        }
+
+    def test_a_comma_ends_the_clause_too(self) -> None:
+        text = "The sample does not exfiltrate data, but it maintains a C2 channel."
+        assert {v.path for v in ungrounded_capabilities(text, self._thin())} == {
+            "command_and_control"
+        }
+
+    def test_the_same_word_claimed_elsewhere_is_still_reported(self) -> None:
+        """One honest negative does not license the claim in the next sentence."""
+        text = "No exfiltration was observed. The sample exfiltrates collected documents."
+        assert {v.path for v in ungrounded_capabilities(text, self._thin())} == {"exfiltration"}
+
+
 class TestWhatTheFeedbackSays:
     def test_it_names_the_term_and_what_the_run_has(self) -> None:
         grounding = CapabilityGrounding.from_report(
@@ -212,7 +255,7 @@ class TestTheSummaryIsKeptAndTheTermsRecorded:
 
         return NarrativeAgent(llm=_LLM())  # type: ignore[arg-type]
 
-    def _run(self, agent: Any, report: MalwareReport) -> Any:
+    def _run(self, agent: Any, report: MalwareReport, isr_reports: Any = None) -> Any:
         import asyncio
 
         from maljan.llm import registry
@@ -223,7 +266,7 @@ class TestTheSummaryIsKeptAndTheTermsRecorded:
             import maljan.reporting.narrative_agent as module
 
             module.structured_output_supported_for_llm = lambda _llm: False  # type: ignore[assignment]
-            return asyncio.run(agent.generate(report))
+            return asyncio.run(agent.generate(report, isr_reports))
         finally:
             registry.structured_output_supported_for_llm = original  # type: ignore[assignment]
 
@@ -257,3 +300,38 @@ class TestTheSummaryIsKeptAndTheTermsRecorded:
         assert {row["code"] for row in rows} == {UNGROUNDED_CAPABILITY_CODE}
         assert {row["agent"] for row in rows} == {"narrative"}
         assert len(rows) == 4
+
+    def test_an_analysts_own_word_grounds_the_narrative_round(self) -> None:
+        """The narrative is graded on the grounding the composer is graded on.
+
+        The analysts' words are one of the three sources, and the composer has
+        always been given them. Without them here, a capability an analyst
+        stated in a claim was a violation on the narrative and a pass on the
+        composer for one run — and the round spent its retry on it.
+        """
+        report = _report(techniques=("T1027",))
+        isrs = {
+            "static": AgentISR(
+                agent_id="static",
+                domain="static",
+                claims=[
+                    ClaimEvidence(
+                        claim="the binary embeds a hard-coded command-and-control host",
+                        evidence_ref="ev_0004",
+                        confidence=0.7,
+                    )
+                ],
+            )
+        }
+        summary = (
+            "The sample embeds a hard-coded command-and-control host in its strings, "
+            "which is the whole of what this run established about its network use."
+        )
+        agent = self._agent([self._narrative_json(summary)])
+
+        output = self._run(agent, report, isrs)
+
+        assert output is not None
+        assert output.executive_summary == summary
+        assert agent.validation_tally.retries == 0, "the analyst had already said it"
+        assert agent.validation_tally.unresolved == []

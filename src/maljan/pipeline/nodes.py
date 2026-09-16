@@ -711,7 +711,11 @@ def _amended_validation(run_summary: Any, tally: ValidationTally) -> dict[str, A
     # A capability claim the run does not establish survives into the report,
     # because deleting the sentence would leave neither the claim nor a record
     # of it. The row is how a reader learns the summary outran the evidence.
-    block["unresolved"] = [*(block.get("unresolved") or []), *tally.unresolved]
+    # Written only when there is one: a run that over-claimed nothing should
+    # not carry an empty key implying the question was asked and answered.
+    merged_unresolved = [*(block.get("unresolved") or []), *tally.unresolved]
+    if merged_unresolved:
+        block["unresolved"] = merged_unresolved
     return block
 
 
@@ -2735,7 +2739,8 @@ def make_report_node(
                 # not speak again until 17:55:54, on attempt 1 of 3 — a job
                 # that looked alive purely because of the worker heartbeat.
                 narrative_output = await asyncio.wait_for(
-                    narrative_agent.generate(report), timeout=_NARRATIVE_TIMEOUT_SECONDS
+                    narrative_agent.generate(report, state.get("isr_reports")),
+                    timeout=_NARRATIVE_TIMEOUT_SECONDS,
                 )
             except TimeoutError:
                 logger.error(
