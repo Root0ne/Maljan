@@ -263,6 +263,137 @@ class TestTheSelfHeal:
         assert await model.ainvoke("hello") == "async answer"
         assert not built[1]
 
+    def test_one_cached_model_pays_one_400_and_builds_one_replacement(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Five calls on the model a job caches, not five models.
+
+        The endpoint memory only helps models built afterwards, and the
+        container hands out one model per loop for the life of a job. Without a
+        memo on the wrapper itself, every call raised the same 400 again and
+        built another client that was used once and never closed.
+        """
+        built: list[dict[str, Any] | None] = []
+        rejected: list[str] = []
+
+        class _Chat:
+            def __init__(self, **kwargs: Any) -> None:
+                self.extra_body = kwargs.get("extra_body")
+                self.http_async_client = kwargs.get("http_async_client")
+                built.append(self.extra_body)
+
+            def invoke(self, *args: Any, **kwargs: Any) -> Any:
+                if self.extra_body:
+                    rejected.append("400")
+                    raise TestTheSelfHeal._bad_request("Unsupported parameter(s): n_predict")
+                return "ok"
+
+            async def ainvoke(self, *args: Any, **kwargs: Any) -> Any:  # pragma: no cover
+                return self.invoke(*args, **kwargs)
+
+        import langchain_openai
+
+        monkeypatch.setattr(langchain_openai, "ChatOpenAI", _Chat)
+
+        provider = OpenAIProvider(_settings("https://hosted3.example.com/v1", "llama_cpp"))
+        model = provider.build_model("m", 0.0, max_tokens=512)
+
+        assert [model.invoke("hi") for _ in range(5)] == ["ok"] * 5
+        assert len(rejected) == 1, "the endpoint is asked with the extras exactly once"
+        assert len(built) == 2, "one model with the extras, one replacement without"
+
+    def test_the_replacement_inherits_the_pool_rather_than_opening_one(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A pool per heal is the leak the memo exists to stop.
+
+        The endpoint objected to a request field, not to the connection, so
+        the rebuilt model is handed the client the original already owns.
+        """
+        pools: list[Any] = []
+        closed: list[str] = []
+
+        class _SyncClient:
+            def close(self) -> None:
+                closed.append("sync")
+
+        class _Chat:
+            def __init__(self, **kwargs: Any) -> None:
+                self.extra_body = kwargs.get("extra_body")
+                self.http_async_client = kwargs.get("http_async_client") or object()
+                self.root_client = _SyncClient()
+                pools.append(self.http_async_client)
+
+            def invoke(self, *args: Any, **kwargs: Any) -> Any:
+                if self.extra_body:
+                    raise TestTheSelfHeal._bad_request("Unsupported parameter(s): n_predict")
+                return "ok"
+
+            async def ainvoke(self, *args: Any, **kwargs: Any) -> Any:  # pragma: no cover
+                return self.invoke(*args, **kwargs)
+
+        import langchain_openai
+
+        monkeypatch.setattr(langchain_openai, "ChatOpenAI", _Chat)
+
+        provider = OpenAIProvider(_settings("https://hosted4.example.com/v1", "llama_cpp"))
+        assert provider.build_model("m", 0.0, max_tokens=512).invoke("hi") == "ok"
+
+        assert pools[0] is pools[1], "the replacement was handed the original's pool"
+        assert closed == ["sync"], "the client the replacement does not inherit is closed"
+
+    def test_the_container_caches_the_replacement_rather_than_the_model_that_raised(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A heal swaps the cached model, so no later caller starts from it."""
+        from maljan.core.container import PerLoopModels, _swap_healed_llm
+
+        class _Chat:
+            def __init__(self, **kwargs: Any) -> None:
+                self.extra_body = kwargs.get("extra_body")
+
+            def invoke(self, *args: Any, **kwargs: Any) -> Any:
+                if self.extra_body:
+                    raise TestTheSelfHeal._bad_request("Unsupported parameter(s): n_predict")
+                return "ok"
+
+            async def ainvoke(self, *args: Any, **kwargs: Any) -> Any:  # pragma: no cover
+                return self.invoke(*args, **kwargs)
+
+        import langchain_openai
+
+        monkeypatch.setattr(langchain_openai, "ChatOpenAI", _Chat)
+
+        from maljan.core import container as container_module
+
+        provider = OpenAIProvider(_settings("https://hosted5.example.com/v1", "llama_cpp"))
+        model = provider.build_model("m", 0.0, max_tokens=512)
+
+        cache = PerLoopModels()
+        cache.put(None, "judge", model)
+
+        class _Holder:
+            def __init__(self) -> None:
+                import threading
+
+                self._lock = threading.RLock()
+                self._expert_llm_cache = cache
+                self._judge_llm_cache = cache
+                self._reporter_llm_cache = PerLoopModels()
+                self._summarizer_llm_cache = PerLoopModels()
+                self._agent_llm_cache = PerLoopModels()
+
+        holder = _Holder()
+        monkeypatch.setattr(container_module, "_LIVE_CONTAINERS", [holder])
+        monkeypatch.setattr(
+            "maljan.llm.openai_provider._HEAL_LISTENERS", [_swap_healed_llm], raising=False
+        )
+
+        assert model.invoke("hi") == "ok"
+
+        assert cache.lookup(None, "judge") is not model
+        assert cache.lookup(None, "judge").invoke("hi") == "ok"
+
     def test_a_local_server_that_never_complains_keeps_its_extras(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

@@ -121,6 +121,10 @@ class TestOneModelPerLoop:
         assert registry.built == ["agent:static", "agent:network", "agent:static"]
 
 
+class _FakeLoop:
+    """A stand-in for an event loop: identity, and weak-referenceable."""
+
+
 class TestWhatRetirementDrops:
     def test_every_model_cache_and_the_shared_pool(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from maljan.core import container as module
@@ -153,6 +157,37 @@ class TestWhatRetirementDrops:
         assert container._narrative_agent_cache is None
         assert container._report_composer_cache is None
         assert cleared == [True], "the shared httpx pool is what the rebuild was inheriting"
+
+    def test_a_loop_that_is_still_running_keeps_its_own_models(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Retiring one loop must not throw away another loop's valid models.
+
+        The retired loop's pools are unusable and the ``None`` partition is
+        the analyst tool loop's, which is the loop being retired. Everything
+        else is bound to a loop that is still running.
+        """
+        from maljan.core import container as module
+
+        container, _registry = _container()
+        # Weakly keyed, so the stand-in loops must be objects a weak
+        # reference can be taken to.
+        retired, other = _FakeLoop(), _FakeLoop()
+        container._judge_llm_cache.put(retired, "judge", object())
+        container._judge_llm_cache.put(None, "judge", object())
+        survivor = object()
+        container._judge_llm_cache.put(other, "judge", survivor)
+
+        monkeypatch.setattr(
+            module, "_LIVE_CONTAINERS", module.weakref.WeakSet([container]), raising=False
+        )
+        monkeypatch.setattr("maljan.llm.openai_provider.clear_shared_httpx_clients", lambda: None)
+
+        module._drop_llm_caches_on_retirement(retired)
+
+        assert container._judge_llm_cache.lookup(retired, "judge") is None
+        assert container._judge_llm_cache.lookup(None, "judge") is None
+        assert container._judge_llm_cache.lookup(other, "judge") is survivor
 
     def test_the_next_call_rebuilds(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from maljan.core import container as module

@@ -69,12 +69,22 @@ def sends_llama_cpp_extras(base_url: str | None, compat: str) -> bool:
     if not base_url:
         # api.openai.com itself, which has always been left alone.
         return False
+    if compat == "standard":
+        return False
     if base_url in _STANDARD_ONLY_ENDPOINTS:
+        # What the self-heal learned beats what ``auto`` would guess, and it
+        # beats an explicit ``llama_cpp`` too: the endpoint itself said no.
+        # An operator who declared the setting is told that, once, rather than
+        # having their declaration quietly reversed.
+        if compat == "llama_cpp":
+            logger.warning(
+                "openai provider: llm.openai.compat is 'llama_cpp', but %s rejected the "
+                "llama.cpp extras, so standard fields are sent to it.",
+                base_url,
+            )
         return False
     if compat == "llama_cpp":
         return True
-    if compat == "standard":
-        return False
     return is_local_endpoint(base_url)
 
 
@@ -92,7 +102,9 @@ def unsupported_parameter(message: str) -> str | None:
         # matched last and only when nothing more specific is named.
         if key != "max_tokens" and key in lowered:
             return key
-    return "max_tokens" if "max_tokens" in lowered or "n_predict" in lowered else None
+    # ``n_predict`` is one of the keys above and has already returned, so this
+    # last line answers for ``max_tokens`` alone.
+    return "max_tokens" if "max_tokens" in lowered else None
 
 
 def note_standard_only(base_url: str | None) -> bool:
@@ -311,6 +323,48 @@ class OpenAIProvider:
         logger.debug("openai provider: sending llama.cpp extras to %s.", base_url)
 
 
+# Called with (replaced model, healed model) whenever the self-heal swaps one
+# for the other. The container subscribes so the model it cached for a loop
+# becomes the healed one; the provider itself neither knows nor needs to know
+# who is holding a reference.
+_HEAL_LISTENERS: list[Any] = []
+
+
+def on_model_healed(callback: Any) -> None:
+    """Subscribe to self-heal swaps. Idempotent for the same callback."""
+    if callback not in _HEAL_LISTENERS:
+        _HEAL_LISTENERS.append(callback)
+
+
+def _announce_healed(replaced: Any, healed: Any) -> None:
+    """Tell every listener about one swap, never failing the call that healed."""
+    for callback in list(_HEAL_LISTENERS):
+        try:
+            callback(replaced, healed)
+        except Exception as exc:  # noqa: BLE001 — a listener never costs an answer
+            logger.debug("openai provider: a heal listener raised (%s).", exc)
+
+
+def _close_sync_client(model_obj: Any) -> None:
+    """Close the synchronous httpx client of a model that is being replaced.
+
+    Only the sync one: the healed model is built with the original's *async*
+    pool, so closing that would break the model the caller is about to use.
+    Best-effort, because the shape of these attributes belongs to the openai
+    SDK and a client that will not close is a smaller problem than a request
+    that does not happen.
+    """
+    for attribute in ("root_client", "client"):
+        client = getattr(model_obj, attribute, None)
+        close = getattr(getattr(client, "_client", client), "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception as exc:  # noqa: BLE001 — best-effort teardown
+                logger.debug("openai provider: the replaced sync client did not close (%s).", exc)
+            return
+
+
 def _with_standard_retry(
     model_obj: BaseChatModel,
     provider: OpenAIProvider,
@@ -326,10 +380,22 @@ def _with_standard_retry(
     nobody knew was wrong. The rebuild happens once: the endpoint is recorded,
     every model built for it afterwards is standard, and the operator is told
     at warning level which setting to make explicit.
+
+    "Once" has to mean once for *this* model object too, which is what the
+    ``healed`` cell is for. Recording the endpoint only helps models built
+    afterwards, and the container caches one model per loop for the life of a
+    job — so without the cell every call on that one model raised the same 400
+    again, built another ``ChatOpenAI``, and left another connection pool
+    behind. From the first heal on, the original attempt is skipped entirely
+    and the healed model answers directly.
     """
     from openai import BadRequestError
 
+    healed: list[BaseChatModel] = []
+
     def _heal(exc: BadRequestError) -> BaseChatModel | None:
+        if healed:
+            return healed[0]
         parameter = unsupported_parameter(str(exc))
         if parameter is None:
             return None
@@ -342,28 +408,47 @@ def _with_standard_retry(
                 base_url,
                 parameter,
             )
-        return provider._build(model, temperature, base_url, kwargs, force_standard=True)
+        # The rebuilt model inherits this one's connection pool rather than
+        # opening a second: the pool is not what the endpoint objected to, and
+        # a pool per heal is the leak this whole cell exists to stop. What the
+        # original keeps to itself is its *sync* client, which the rebuild does
+        # replace and which is closed below.
+        rebuild_kwargs = dict(kwargs)
+        pool = getattr(model_obj, "http_async_client", None)
+        if pool is not None:
+            rebuild_kwargs.setdefault("http_async_client", pool)
+        replacement = provider._build(
+            model, temperature, base_url, rebuild_kwargs, force_standard=True
+        )
+        healed.append(replacement)
+        _close_sync_client(model_obj)
+        _announce_healed(model_obj, replacement)
+        return replacement
 
     original_invoke = model_obj.invoke
     original_ainvoke = model_obj.ainvoke
 
     def invoke(*args: Any, **call_kwargs: Any) -> Any:
+        if healed:
+            return healed[0].invoke(*args, **call_kwargs)
         try:
             return original_invoke(*args, **call_kwargs)
         except BadRequestError as exc:
-            healed = _heal(exc)
-            if healed is None:
+            replacement = _heal(exc)
+            if replacement is None:
                 raise
-            return healed.invoke(*args, **call_kwargs)
+            return replacement.invoke(*args, **call_kwargs)
 
     async def ainvoke(*args: Any, **call_kwargs: Any) -> Any:
+        if healed:
+            return await healed[0].ainvoke(*args, **call_kwargs)
         try:
             return await original_ainvoke(*args, **call_kwargs)
         except BadRequestError as exc:
-            healed = _heal(exc)
-            if healed is None:
+            replacement = _heal(exc)
+            if replacement is None:
                 raise
-            return await healed.ainvoke(*args, **call_kwargs)
+            return await replacement.ainvoke(*args, **call_kwargs)
 
     # Assigned on the instance, not the class: a second model built for a
     # different endpoint must not inherit this one's retry.

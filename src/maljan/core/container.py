@@ -31,6 +31,7 @@ import asyncio
 import os
 import threading
 import weakref
+from contextlib import suppress
 from typing import TYPE_CHECKING, Any, cast
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -81,15 +82,19 @@ _RETIREMENT_HOOK_REGISTERED = threading.Event()
 
 
 def _drop_llm_caches_on_retirement(loop: object) -> None:
-    """Forget every cached chat model when an agent loop is retired.
+    """Forget the retired loop's cached chat models.
 
     A LangChain chat model lazily builds an httpx async pool bound to the loop
     that first awaits it — the single-loop invariant ``base_agent`` documents.
     After a retirement those pools belong to a loop nothing will run again, and
     reusing one on the fresh loop parks on a future that can never complete, so
-    the caches are emptied and the next call rebuilds. Which loop a given model
-    was bound to is not knowable from here, so all of them go: rebuilding is
-    cheap and a stale one is a hang.
+    that loop's partition is dropped and the next call rebuilds.
+
+    Two partitions go, not all of them: the retired loop's own, and the
+    ``None`` partition, whose models are used by the analyst tool loop — which
+    is the loop being retired. Every other loop's models are still bound to a
+    loop that is still running, and discarding them would throw away exactly
+    the precision ``PerLoopModels`` was added for.
 
     Deliberately narrow: providers and server handles are *not* dropped here.
     Handles are handled at their own site (``providers.servers``), and an
@@ -102,11 +107,15 @@ def _drop_llm_caches_on_retirement(loop: object) -> None:
 
     for container in list(_LIVE_CONTAINERS):
         with container._lock:
-            container._expert_llm_cache.clear()
-            container._judge_llm_cache.clear()
-            container._reporter_llm_cache.clear()
-            container._summarizer_llm_cache.clear()
-            container._agent_llm_cache.clear()
+            for cache in (
+                container._expert_llm_cache,
+                container._judge_llm_cache,
+                container._reporter_llm_cache,
+                container._summarizer_llm_cache,
+                container._agent_llm_cache,
+            ):
+                cache.drop(loop)
+                cache.drop(None)
             container._function_summarizer_cache = None
             container._narrative_agent_cache = None
             container._report_composer_cache = None
@@ -118,13 +127,36 @@ def _drop_llm_caches_on_retirement(loop: object) -> None:
     clear_shared_httpx_clients()
 
 
+def _swap_healed_llm(replaced: object, healed: object) -> None:
+    """Put the self-healed model where the one it replaced was cached.
+
+    The 400 self-heal rebuilds a model without the llama.cpp extras the
+    endpoint rejected. The model that raised is of no further use against that
+    endpoint, and the container hands out one model per loop for the life of a
+    job, so leaving it cached means every later caller reaches the endpoint
+    through a wrapper that has already had to heal once.
+    """
+    for container in list(_LIVE_CONTAINERS):
+        with container._lock:
+            for cache in (
+                container._expert_llm_cache,
+                container._judge_llm_cache,
+                container._reporter_llm_cache,
+                container._summarizer_llm_cache,
+                container._agent_llm_cache,
+            ):
+                cache.replace(replaced, healed)
+
+
 def _register_retirement_hook() -> None:
     """Subscribe once to agent-loop retirements. Imported late to avoid a cycle."""
     if _RETIREMENT_HOOK_REGISTERED.is_set():
         return
     from maljan.agents.base_agent import on_agent_loop_retired
+    from maljan.llm.openai_provider import on_model_healed
 
     on_agent_loop_retired(_drop_llm_caches_on_retirement)
+    on_model_healed(_swap_healed_llm)
     _RETIREMENT_HOOK_REGISTERED.set()
 
 
@@ -182,9 +214,33 @@ class PerLoopModels:
     def put(self, loop: Any | None, name: str, value: Any) -> None:
         self._slot(loop)[name] = value
 
+    def replace(self, old: Any, new: Any) -> int:
+        """Swap one cached model for another wherever it is held.
+
+        For the 400 self-heal: the model that raised is never usable against
+        that endpoint again, so leaving it in the cache means every later
+        caller starts from the wrapper that has already healed once. Returns
+        how many slots were swapped, which is what a test can assert on.
+        """
+        swapped = 0
+        for slot in [self._without_loop, *self._by_loop.values()]:
+            for name, value in list(slot.items()):
+                if value is old:
+                    slot[name] = new
+                    swapped += 1
+        return swapped
+
     def clear(self) -> None:
         self._by_loop = weakref.WeakKeyDictionary()
         self._without_loop = {}
+
+    def drop(self, loop: Any | None) -> None:
+        """Forget one loop's partition, leaving every other loop's alone."""
+        if loop is None:
+            self._without_loop = {}
+            return
+        with suppress(KeyError, TypeError):
+            del self._by_loop[loop]
 
     def __len__(self) -> int:
         return len(self._without_loop) + sum(len(slot) for slot in self._by_loop.values())
