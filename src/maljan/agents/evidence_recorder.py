@@ -256,7 +256,12 @@ def repeat_notice(
 
 
 def served_repeat_notice(
-    tool: str, entry_id: str, unused_args: Sequence[str] = (), *, last_warning: bool = False
+    tool: str,
+    entry_id: str,
+    unused_args: Sequence[str] = (),
+    *,
+    last_warning: bool = False,
+    failed: bool = False,
 ) -> str:
     """The steering appended to the second identical call, which is still served.
 
@@ -267,11 +272,20 @@ def served_repeat_notice(
 
     ``last_warning`` is the second such notice in one loop, where the sentence
     stops being advice: the next repeated call ends the loop and the analyst
-    writes its answer from what it has.
+    writes its answer from what it has. ``failed`` is the second call raising
+    as the first did, where what is above is a failure and so is the entry it
+    points at, and the sentence says so instead of calling it an answer.
     """
+    what_happened = (
+        f"This call to {tool} failed the same way before, in [{entry_id}]"
+        if failed
+        else (
+            f"This is the second call to {tool} with these arguments and the answer above is "
+            f"also in [{entry_id}]"
+        )
+    )
     return (
-        f"This is the second call to {tool} with these arguments and the answer above is "
-        f"also in [{entry_id}]. A third will not be run: "
+        f"{what_happened}. A third will not be run: "
         f"{_do_something_else(tool, unused_args)}{_ENDING_SENTENCE if last_warning else ''}"
     )
 
@@ -372,7 +386,7 @@ def _record_tool(tool: Any, recorder: EvidenceRecorder, repeats: RepeatGuard | N
             repeats.note_repeat()
         return repeated
 
-    def _steering(kwargs: dict[str, Any], repeated: str | None) -> str:
+    def _steering(kwargs: dict[str, Any], repeated: str | None, *, failed: bool = False) -> str:
         """What is appended to a served repeat, and nothing for a first call.
 
         Appended to what the model reads, not to the ledger: the entry records
@@ -381,7 +395,11 @@ def _record_tool(tool: Any, recorder: EvidenceRecorder, repeats: RepeatGuard | N
         if repeated is None or repeats is None:
             return ""
         notice = served_repeat_notice(
-            name, repeated, _unused(kwargs), last_warning=repeats.warning_of_the_end()
+            name,
+            repeated,
+            _unused(kwargs),
+            last_warning=repeats.warning_of_the_end(),
+            failed=failed,
         )
         return f"\n\n{notice}"
 
@@ -425,7 +443,7 @@ def _record_tool(tool: Any, recorder: EvidenceRecorder, repeats: RepeatGuard | N
             duration_ms=int((time.monotonic() - started) * 1000),
         )
         _note(kwargs, entry.id)
-        return f"[{entry.id}] tool call failed: {message}{_steering(kwargs, repeated)}"
+        return f"[{entry.id}] tool call failed: {message}{_steering(kwargs, repeated, failed=True)}"
 
     wrapped_func = None
     wrapped_coroutine = None

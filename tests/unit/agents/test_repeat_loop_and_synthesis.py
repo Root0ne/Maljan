@@ -179,6 +179,8 @@ class TestTheGuardEndsTheLoop:
 
         assert "tool call failed" in answers[0]
         assert "A third will not be run" in answers[1]
+        assert "failed the same way before, in [ev_0001]" in answers[1]
+        assert "the answer above" not in answers[1], "what is above is a failure"
         assert (guard.served_repeats, guard.ending_the_loop()) == (3, True)
 
     def test_a_replayed_conversation_starts_the_count_again(self) -> None:
