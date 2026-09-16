@@ -228,6 +228,30 @@ change landed on `main`.
 
 ### Fixed
 
+- **An import row states what the import table states.** `pe_info` and
+  `elf_info` copied the old capability table's category onto every import row
+  (`BitBlt` came back as `keylogging`), and on a signed PuTTY the static
+  analyst wrote the label up as its first claim and the judge said Malware. A
+  tool that labels an import has done the analysis. Rows now carry library,
+  name or ordinal, hint and address; what an API is used for is the knowledge
+  server's `api_capability` question, asked when the model decides it matters.
+
+- **The sample's own identity values are grounded indicators.** The identity
+  block gave the judge the sha256, the judge emitted it as an indicator, and
+  the grounding check rejected it on a run that never called `hashes`. The
+  sha256, sha1, md5 and file name the router established ground an indicator
+  the way a ledger entry does; every other value still needs one.
+
+- **The citation checks read the run's own ids.** `EV_0002` is the same entry
+  as `ev_0002`; an `ev_9999` the run never issued is a citation of nothing; an
+  evidence line longer than the field keeps the id the cut used to drop; and a
+  Benign verdict over a run that recorded no entries at all is not asked to
+  name one, since the pipeline already calls that run inconclusive.
+
+- **A repeated tool call that raises counts as a repeat.** The guard counted a
+  repeat after the call returned, so a tool that throws on the same arguments
+  every time ended the loop one call late.
+
 - **A repeating ReAct loop is actually ended.** The guard counted only the
   repeats it served, which is reachable once per call, so an analyst that asked
   one tool sixteen times counted one repeat and ran to its step budget. Every
