@@ -910,6 +910,12 @@ class ServiceContainer:
         structured-output prompts so no new provider build is needed. Callers
         receive ``None`` in mock mode and must fall back to the deterministic
         narrative template.
+
+        One instance per container, holding the model it was built with, which
+        is the shape the per-loop model store exists to avoid. It is safe
+        because of the call site rather than because of this cache: the report
+        node is the only caller and it runs on one loop. A second caller on
+        another loop would need this to be per-loop as well.
         """
         if self.is_mock:
             return None
@@ -931,7 +937,9 @@ class ServiceContainer:
 
         ``None`` in mock mode or when ``composer_enabled`` is
         off (callers then simply skip the professional spine). Runs on the
-        reporter's model like the NarrativeAgent.
+        reporter's model like the NarrativeAgent, and pins it for the same
+        reason and under the same condition: the report node is the one
+        caller, on one loop.
         """
         if self.is_mock or not self.config.reporting.composer_enabled:
             return None

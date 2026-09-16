@@ -230,6 +230,12 @@ def _record_tool(tool: Any, recorder: EvidenceRecorder, repeats: RepeatGuard | N
     server = server_of(tool) or None
     accepted = tuple(getattr(args_schema, "model_fields", {}) or {})
 
+    required = tuple(
+        name
+        for name, field in (getattr(args_schema, "model_fields", {}) or {}).items()
+        if getattr(field, "is_required", lambda: False)()
+    )
+
     def _unused(kwargs: dict[str, Any]) -> tuple[str, ...]:
         """The arguments this tool takes that the call did not really set.
 
@@ -237,8 +243,12 @@ def _record_tool(tool: Any, recorder: EvidenceRecorder, repeats: RepeatGuard | N
         before calling it, so a caller that asked nothing of ``start`` still
         arrives here with ``start=0``, and a hint that omitted it would omit
         every optional argument the model has not thought to use.
+
+        The schema's required fields are excluded, because for those the same
+        reading is wrong: a call that correctly passed ``offset=0`` set it, and
+        offering it back as a way to narrow the search is noise.
         """
-        return tuple(arg for arg in accepted if not kwargs.get(arg))
+        return tuple(arg for arg in accepted if arg not in required and not kwargs.get(arg))
 
     def _already_answered(kwargs: dict[str, Any]) -> str | None:
         """The note for a call that has been made twice already, if it has."""
