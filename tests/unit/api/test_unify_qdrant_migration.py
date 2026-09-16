@@ -179,6 +179,62 @@ def test_the_downgrade_puts_the_api_rows_back() -> None:
     assert rows["core.memory.qdrant_url"] == "http://qdrant:6333", "the source is left in place"
 
 
+class TestThePostgresStatement:
+    """The dialect the revision actually runs against, without a server.
+
+    Every other test here builds a SQLite engine whose column is TEXT, so the
+    ``CAST(... AS JSONB)`` statement and the decoded read shape PostgreSQL
+    hands back were never executed — which is how a revision that aborts on
+    the target database shipped green. A stub connection reaches both.
+    """
+
+    class _Connection:
+        """Enough of a connection for ``_write``: a dialect and a recorder."""
+
+        def __init__(self) -> None:
+            self.dialect = type("_D", (), {"name": "postgresql"})()
+            self.statements: list[Any] = []
+            self.params: list[dict[str, Any]] = []
+
+        def execute(self, statement: Any, params: dict[str, Any]) -> None:
+            self.statements.append(statement)
+            self.params.append(params)
+
+    def _written(self, value: Any) -> dict[str, Any]:
+        mod = _module()
+        conn = self._Connection()
+
+        mod._write(conn, "core.memory.qdrant_url", value, False)
+
+        assert "JSONB" in str(conn.statements[0]), "the PostgreSQL statement was the one used"
+        return conn.params[0]
+
+    def test_a_decoded_url_is_written_as_a_json_document(self) -> None:
+        """PostgreSQL hands back the decoded str, and ``CAST`` needs JSON."""
+        params = self._written("http://localhost:6333")
+
+        assert json.loads(params["v"]) == "http://localhost:6333"
+
+    def test_a_ciphertext_is_written_as_a_json_document_too(self) -> None:
+        params = self._written("enc:v1:abc")
+
+        assert json.loads(params["v"]) == "enc:v1:abc"
+
+    def test_a_value_that_arrives_as_json_text_is_not_double_encoded(self) -> None:
+        """SQLite hands back the document; reading and re-dumping is a no-op."""
+        params = self._written('"http://localhost:6333"')
+
+        assert json.loads(params["v"]) == "http://localhost:6333"
+
+    def test_the_secret_flag_is_carried_on_the_statement(self) -> None:
+        mod = _module()
+        conn = self._Connection()
+
+        mod._write(conn, "core.memory.qdrant_api_key", "enc:v1:abc", True)
+
+        assert conn.params[0]["s"] is True
+
+
 def test_it_imports_no_application_code() -> None:
     """A migration that imports the app breaks the moment the app moves on."""
     source = MIGRATION.read_text(encoding="utf-8")

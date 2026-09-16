@@ -60,28 +60,38 @@ def _row(conn: sa.engine.Connection, key: str) -> Any:
     ).fetchone()
 
 
-def _is_empty(raw: object) -> bool:
-    """Whether a stored value says nothing, whichever way the driver read it.
+def _decoded(raw: object) -> object:
+    """One stored value as Python, whichever way the driver handed it over.
 
-    JSONB comes back parsed and a TEXT column comes back as the JSON document,
-    so both are asked the same question here: an absent row, a null, an empty
-    string and a string holding ``"null"`` all mean the operator set nothing.
+    The column is JSONB, so PostgreSQL decodes it and hands back the str
+    ``http://localhost:6333``, while SQLite stores the column as TEXT and hands
+    back the JSON document ``"http://localhost:6333"``. Reading through this
+    and writing through ``json.dumps`` makes the pair idempotent on both: the
+    alternative — passing a str through untouched — reached PostgreSQL as
+    ``CAST('http://localhost:6333' AS JSONB)``, which is not a JSON document
+    and aborts the whole upgrade.
     """
-    if raw is None:
-        return True
-    value = raw
     if isinstance(raw, str):
         try:
-            value = json.loads(raw)
+            return json.loads(raw)
         except ValueError:
-            value = raw
+            return raw
+    return raw
+
+
+def _is_empty(raw: object) -> bool:
+    """Whether a stored value says nothing.
+
+    An absent row, a null, and a string with nothing in it all mean the
+    operator set nothing here.
+    """
+    value = _decoded(raw)
     return value is None or (isinstance(value, str) and not value.strip())
 
 
 def _write(conn: sa.engine.Connection, key: str, value: object, is_secret: bool) -> None:
     statement = _UPSERT_PG if conn.dialect.name == "postgresql" else _UPSERT_OTHER
-    payload = value if isinstance(value, str) else json.dumps(value)
-    conn.execute(statement, {"k": key, "v": payload, "s": is_secret})
+    conn.execute(statement, {"k": key, "v": json.dumps(_decoded(value)), "s": is_secret})
 
 
 def _delete(conn: sa.engine.Connection, keys: list[str]) -> None:
