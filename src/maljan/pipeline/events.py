@@ -369,6 +369,19 @@ _AFTER = r"(?:\A|(?<=[\s\"'`<>=:,{\[(\\]|[^\x00-\x7f]))"
 # starts the next run after it.
 _UNTIL_CHARS = r"[^\s\"'`<>;,)\]}]"
 _UNTIL = _UNTIL_CHARS + r"*"
+# A URL's authority, which ends only where the authority ends: at the ``/`` of
+# the path, the ``?`` of the query, the ``#`` of a fragment, or a character no
+# URL can carry at all. A semicolon is legal in userinfo and a password
+# containing one used to end the run in front of the ``@`` — which handed
+# ``_shorten_url`` the *user* as the host and left the real host, the fragment
+# and the password standing in the text.
+_AUTHORITY = r"[^\s\"'`<>,)\]}/?#]*"
+# A path run ends later than any other run. A directory name may carry a
+# semicolon or a comma, and stopping at one cut the *prefix* off and left the
+# rest of the path — the intermediate directories — standing where the whole
+# point was to remove them. Whitespace and the quoting characters still end
+# it: a path with a space in it cannot be told from a path followed by prose.
+_PATH_UNTIL = r"[^\s\"'`<>)\]}]*"
 # An authorization scheme and the secret after it, which no per-value rule can
 # see as one thing: "Bearer" is a word and the secret is the next one, however
 # short it is. Bounded by the same separators as every other run rather than
@@ -409,7 +422,9 @@ _PATH_SHAPED = re.compile(r"\A(?:/|\./|\.\./|~/|[A-Za-z]:/)[^/]*/")
 _DIGEST = re.compile(r"\A[A-Fa-f0-9]{32}\Z|\A[A-Fa-f0-9]{40}\Z|\A[A-Fa-f0-9]{64}\Z")
 # A URL, wherever it starts. Found before the path pass, so the slashes in
 # ``https://host/x`` are never read as a path.
-_URL_RUN = re.compile(_AFTER + r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.\-]*)://(?P<rest>" + _UNTIL + r")")
+_URL_RUN = re.compile(
+    _AFTER + r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.\-]*)://(?P<rest>" + _AUTHORITY + _UNTIL + r")"
+)
 # One value, for the credential test. Delimited rather than whitespace-split,
 # because a key a tool server echoes arrives as ``{"api_key":"sk-…"}`` with no
 # spaces in it at all.
@@ -454,9 +469,17 @@ _VALUE_RUN = re.compile(r"[^\s\"'`<>;:{}\[\](),=\\\x80-\U0010ffff]+")
 # marker cut ``"\\d+"`` — a regex argument — down to ``d+``. Two or more
 # backslashes are accepted at each separator because the whole path arrives
 # doubled when the tool serialised it as JSON.
-_UNC = r"\\{2,}[A-Za-z0-9._-]+\\+."
+# The host segment admits ``:`` and ``@`` because a UNC path carries
+# credentials in front of its host exactly as a URL does, and one that did
+# not match the marker was left in the text whole — password included.
+_UNC = r"\\{2,}[A-Za-z0-9._:@-]+\\+."
 _PATH_RUN = re.compile(
-    _AFTER + r"(?P<run>(?:/(?!/)|\./|\.\./|~/|[A-Za-z]:(?:\\|/(?!/))|" + _UNC + r")" + _UNTIL + r")"
+    _AFTER
+    + r"(?P<run>(?:/(?!/)|\./|\.\./|~/|[A-Za-z]:(?:\\|/(?!/))|"
+    + _UNC
+    + r")"
+    + _PATH_UNTIL
+    + r")"
 )
 # One argument's value, and the whole summary. Short on purpose: this is the
 # line under a chat bubble that says which call is running, not a record of it.
@@ -579,9 +602,27 @@ def _shorten_path(found: re.Match[str]) -> str:
     identifier and whose prefix is wherever this deployment happens to be
     installed, and neither belongs in a payload that a browser and a
     long-lived table both keep; the file name is the part a reader is reading.
+
+    Two things the marker alone does not decide. A UNC path can carry
+    credentials in front of its host, exactly like a URL, and they are the
+    whole reason that path must not travel — so they go whatever else happens.
+    And a single rootless word is not a path at all: ``</token>`` in a tool
+    result matched the marker and was rewritten to ``<token>``, silently
+    corrupting the XML the model then read back. A run is cut when it has more
+    than one segment or a segment with a dot in it, which every real path has
+    and a closing tag does not.
     """
     run = found.group("run")
-    return run.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1] or run
+    flat = run.replace("\\", "/").rstrip("/")
+    credentialed = "@" in flat
+    if credentialed:
+        flat = flat.rsplit("@", 1)[1]
+    segments = [segment for segment in flat.split("/") if segment]
+    if not segments:
+        return run
+    if not credentialed and len(segments) < 2 and not any("." in s for s in segments):
+        return run
+    return segments[-1]
 
 
 def _hide_credentials(found: re.Match[str]) -> str:

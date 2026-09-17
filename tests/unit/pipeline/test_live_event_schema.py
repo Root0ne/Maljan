@@ -602,6 +602,55 @@ class TestTheKeyShapesARunOfWordCharactersMisses:
         assert ev.scrub("/opt/maljan/data/samples/dropper") == "dropper"
 
 
+class TestTheRunsThatEndedTooEarly:
+    """A value that carries one of the run's own terminators in the middle.
+
+    Each of these was confirmed leaving ``scrub`` with the part after the
+    terminator standing: a UNC path with credentials in front of its host, a
+    URL whose userinfo carries a semicolon, and a host path with a punctuated
+    directory in the middle of it.
+    """
+
+    def test_a_unc_path_with_credentials_loses_them(self) -> None:
+        unc = chr(92) * 2 + "user:pass@server" + chr(92) + "share" + chr(92) + "secret.txt"
+
+        assert ev.scrub(unc) == "secret.txt"
+
+    def test_a_plain_unc_path_is_still_cut_to_its_file(self) -> None:
+        assert ev.scrub(r"\\fileserver\share\sample.exe") == "sample.exe"
+
+    def test_a_url_whose_userinfo_carries_a_semicolon_still_loses_it(self) -> None:
+        said = "http://" + "u" + ":" + "p;x" + "@host.example.com/a#frag"
+
+        scrubbed = ev.scrub(said)
+
+        assert scrubbed == "http://host.example.com/…"
+
+    def test_a_password_never_survives_the_authority(self) -> None:
+        said = _url_with_userinfo("operator", "hunter2;now", "db.internal:5432/maljan")
+
+        assert "hunter2" not in ev.scrub(said)
+
+    def test_a_url_still_ends_where_it_used_to(self) -> None:
+        assert ev.scrub("https://h/x;") == "https://h/…;"
+        assert ev.scrub("<https://h/x>") == "<https://h/…>"
+        assert ev.scrub("https://h:8080/x") == "https://h:8080/…"
+        assert ev.scrub("file:///home/op/samples/x.exe") == "file:///…"
+
+    def test_a_path_with_a_punctuated_directory_keeps_no_tail(self) -> None:
+        for value in ("/home/operator/a;b/c/x.exe", "/srv/maljan,prod/data/x.exe"):
+            assert ev.scrub(value) == "x.exe", value
+
+    def test_a_closing_tag_is_not_a_path(self) -> None:
+        """``</token>`` was rewritten to ``<token>``, which corrupts the XML a
+        model then reads back."""
+        assert ev.scrub("<token>value</token>") == "<token>value</token>"
+        assert ev.scrub("</Data></EventData>") == "</Data></EventData>"
+
+    def test_a_multi_segment_path_with_no_dot_is_still_cut(self) -> None:
+        assert ev.scrub("key:/var/lib/x/y") == "key:y"
+
+
 class TestValidationFeedback:
     def test_the_correction_names_its_code_and_its_retry(self) -> None:
         recorded, sink = _sink()

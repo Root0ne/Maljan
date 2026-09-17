@@ -439,6 +439,19 @@ change landed on `main`.
 
 ### Fixed
 
+- **Three runs the scrubber ended in the middle of a value.** A UNC path
+  carrying credentials (`\\user:pass@server\share\x`) travelled whole,
+  because the marker did not admit `:` or `@` in its host; a URL whose
+  userinfo held a `;` had its run cut in front of the `@`, so the user was
+  read as the host and the real host, the fragment and the password stayed in
+  the text; and a path with a punctuated directory in the middle
+  (`/home/op/a;b/c/x.exe`) lost its prefix and kept a tail naming the
+  directories in between. The authority of a URL now ends where an authority
+  ends, a path run ends only at whitespace or a quoting character, and a UNC
+  path loses everything in front of its last `@`. A run that is a single
+  rootless word is no longer treated as a path at all: `</token>` in a tool
+  result was being rewritten to `<token>`, corrupting the XML the model read
+  back.
 - **Four key shapes the event scrubber could not see.** A credential run was
   anchored to `[A-Za-z0-9_-]`, so a standard base64 key (`+` and `/` in the
   alphabet), a bare JWT — this project's own access-token shape — a key behind
