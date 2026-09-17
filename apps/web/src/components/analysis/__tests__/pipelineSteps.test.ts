@@ -47,6 +47,20 @@ describe("pipelineSteps: a run that recorded its stages", () => {
     expect(steps.find((s) => s.id === "report")?.title).toBe("Report");
   });
 
+  it("draws a stage that ran and failed as failed, whatever its kind", () => {
+    const steps = pipelineSteps({
+      stages: [
+        stage({ key: "triage_pack", kind: "triage", agents: [], failure: true, reason: "pack broke" }),
+        stage({ agents: ["static"] }),
+        stage({ key: "debate", kind: "debate", failure: true, reason: "mediation timed out" }),
+        stage({ key: "verdict", kind: "verdict", agents: ["judge"] }),
+      ],
+    });
+    expect(steps.find((s) => s.id === "triage")?.skipped).toBe("failed: pack broke");
+    expect(steps.find((s) => s.id === "negotiation")?.skipped).toBe("failed: mediation timed out");
+    expect(steps.find((s) => s.id === "judge")?.skipped).toBe("");
+  });
+
   it("gives every row a key that is unique across the list", () => {
     const steps = pipelineSteps({ stages: DEFAULT_TEAM });
     const keys = steps.map((s) => `${s.stage}/${s.id}`);

@@ -13,6 +13,8 @@ export interface StageRow {
   key: string;
   kind: StageKind;
   ran: boolean;
+  /** The stage ran and went wrong; `reason` says how. */
+  failure?: boolean;
   reason: string;
   agents: string[];
   duration_ms: number;
@@ -144,11 +146,11 @@ export function pipelineSteps(runSummary: unknown): PipelineStep[] {
 
   const steps: PipelineStep[] = [INGESTION_STEP];
   for (const stage of stages) {
-    // A stage that ran carries a reason only when it failed: the triage pack
-    // that crashed says so here rather than drawing as done.
+    // A stage that ran and failed — a crashed pack, a mediation that timed
+    // out — says so here rather than drawing as done.
     const skipped = stage.ran
-      ? stage.kind === "triage" && stage.reason
-        ? `failed: ${stage.reason}`
+      ? stage.failure
+        ? `failed: ${stage.reason || "the stage failed"}`
         : ""
       : stage.reason || "did not run";
     if (stage.kind === "analysis") {
