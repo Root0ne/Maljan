@@ -182,6 +182,19 @@ export function parseTechniques(raw: unknown[]): Tactic[] {
   return Array.from(tacticMap.values());
 }
 
+/**
+ * Whether these rows produce a matrix at all.
+ *
+ * The tab rule asks this before offering ATT&CK, and the tab draws what the
+ * same parser keeps, so the two cannot disagree about whether there is a
+ * mapping: a row that is not an object, or a list of rows that parses to no
+ * technique, is not a mapping however long the array is.
+ */
+export function hasMappedTechniques(raw: unknown[] | null | undefined): boolean {
+  if (!Array.isArray(raw) || raw.length === 0) return false;
+  return parseTechniques(raw).some((tactic) => tactic.techniques.length > 0);
+}
+
 /** The columns, in canonical Enterprise matrix order. */
 export function orderedTactics(tactics: Tactic[]): Tactic[] {
   return [...tactics].sort((a, b) => tacticOrder(a.id) - tacticOrder(b.id));

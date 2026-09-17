@@ -147,9 +147,11 @@ curl -X POST http://localhost:8000/api/v1/jobs \
 ```
 
 Progress streams over the WebSocket at `/ws/analysis/{job_id}`, which is what
-the console's analysis page subscribes to. The **PROCESS** tab draws the run as
-the stages the team has, each one filling in as it starts and finishes; the
-**EVIDENCE** tab is the ledger of every tool call the run made. When the run
+the console's analysis page subscribes to. The **CONVERSATION** tab draws the
+run as the exchange it is — every agent's messages, its tool calls and the
+verdict — while the analysis header draws the stages the team has, each one
+filling in as it starts and finishes; the **EVIDENCE** tab is the ledger of
+every tool call the run made. See [console.md](console.md). When the run
 finishes, the report appears under the analysis detail page, and the same
 content is available as Markdown, HTML, PDF, STIX 2.1 and a MITRE view under
 `/api/v1/reports/{report_id}/...` — see [api.md](api.md).
@@ -189,7 +191,7 @@ runs.
 and `dynamic`, then the debate, the verdict and the report. Upload an APK and run
 it under `profile: "mobile"`.
 
-Two things are worth watching on the PROCESS tab. The `android_static` stage
+Two things are worth watching on the stage strip. The `android_static` stage
 runs only when the sample really is an APK or a DEX (`when: file_type in
 ("apk", "dex")`), and the `dynamic` stage only when a sandbox report reached
 the run. Submit a PE under the same team and the Android stage appears as a row

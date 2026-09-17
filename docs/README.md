@@ -11,6 +11,7 @@ routers under `apps/api/app/api/v1/` and the compose stack in `docker/`.
 | :-- | :-- |
 | [getting-started.md](getting-started.md) | Prerequisites, the two configuration files, starting the stack, first login and first analysis. |
 | [configuration.md](configuration.md) | The bootstrap environment contract, Settings → Configuration, the setup guides, connection probes, JSON export and import, secret storage. |
+| [console.md](console.md) | The navigation tree, the analysis tabs, the Conversation view and how the console follows a run. |
 | [architecture.md](architecture.md) | Components, the request and job lifecycle, teams as stages, agents and their tools, the evidence ledger, validation loops and report assembly. |
 | [deployment.md](deployment.md) | Compose services and healthchecks, required secrets, health endpoints, Kubernetes and systemd notes, upgrades and migrations. |
 | [operations.md](operations.md) | Logs, what a run's metrics mean, staged samples, the audit trail, rate limits, backups and a troubleshooting table. |

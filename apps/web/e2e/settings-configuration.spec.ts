@@ -942,14 +942,24 @@ test.describe("Settings → Configuration (stale stored override)", () => {
 });
 
 test.describe("Settings → Configuration (non-admin)", () => {
-  test("the tab is disabled with 'Admin role required' and cannot be opened", async ({
-    authenticatedPage: page,
-  }) => {
+  test("the admin tabs are not offered at all", async ({ authenticatedPage: page }) => {
+    /* They used to be drawn disabled, with an "Admin role required" tooltip:
+     * two permanently dead entries on every visit by a reader who can never
+     * use either. */
     await page.goto("/settings/profile");
 
-    const tab = page.getByText("Configuration", { exact: true });
-    await expect(tab).toHaveAttribute("aria-disabled", "true");
-    await expect(tab).toHaveAttribute("title", "Admin role required");
+    await expect(page.getByRole("link", { name: "Profile" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "API keys" })).toBeVisible();
+    await expect(page.getByText("Configuration", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Setup guides", { exact: true })).toHaveCount(0);
     await expect(page.locator("#settings-search")).toHaveCount(0);
+  });
+
+  test("the route itself still says who it is for", async ({ authenticatedPage: page }) => {
+    await page.goto("/settings/configuration");
+
+    await expect(
+      page.getByRole("alert").filter({ hasText: "admin role required" }),
+    ).toBeVisible();
   });
 });

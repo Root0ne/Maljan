@@ -74,7 +74,8 @@ change landed on `main`.
   the end of each tool loop; `stage_ended_at_cap` when a cap ended the work
   (`steps`, `time`, `repeats`, or the triage pack's `budget_seconds`);
   `run_summary.budget` per agent (loops, steps, seconds, delegated steps, the
-  caps hit); the console's pipeline panel names the cap beside the step.
+  caps hit); the console's conversation names the cap that ended an agent's
+  work where it ended.
 - **An agent can ask another agent, as a tool call.** `ToolRef(kind="agent",
   agent=<key>)` on a definition binds a tool `ask_<key>` (`task`, optional
   `context`) described from the callee's label and role. Calling it runs the
@@ -436,6 +437,103 @@ change landed on `main`.
   made when the result parses; a trailing comma, a key with no value or a
   missing colon is still left to the path that drops it. The ledger entry
   carries `args_repaired` and `args_raw` (revision `20260923000000`).
+- **The run, as one conversation.** A new CONVERSATION tab on an analysis
+  (`/analysis/{id}/conversation`) draws a run as the group exchange it is,
+  live and replayed by the same view: participants named by the label their
+  operator gave them, messages grouped by stage and round, tool calls as one
+  line each with the ledger id their result is filed under, validator
+  corrections and cap notices as room notes, the judge's questions and
+  delegated asks and answers with an arrow to the agent addressed, the verdict
+  as a closing card, and streamed text appending into the speaker's open
+  bubble until the message that closes the turn replaces it. Filters narrow it
+  by participant and by kind; the stream follows the newest message while the
+  reader is at the bottom of it and offers a way back when they are not.
+- **What a reputation service said about the sample.** A run asks one service
+  about the file's hash — `get_file_report` on VirusTotal's own MCP server, or
+  `check_hash` on the threat-intel sidecar — and the console dropped the
+  answer. IDENTITY now draws it beside the hashes, under the name of the
+  service that gave it, with its engine counts, the labels the industry gives
+  the file and when it was first and last seen. It is read from that service's
+  ledger entry and from nothing else, so a configured service that was never
+  asked draws no section.
+- **One store and one socket per run.** `apps/web/src/lib/runStore.ts` holds a
+  run's events, roster, stages, connection and cursor in a module-level map
+  keyed by job id, opens the single socket a job gets, back-fills from
+  `GET /api/v1/jobs/{id}/events` and resumes with `?since=<last seq>`. Leaving
+  the analysis and coming back re-renders from what is already held instead of
+  redialling and re-reading; the socket outlives the page by a grace period.
+  Events order and dedupe on the publisher's `seq`, and a run recorded before
+  the numbering existed keeps the order its events arrived in.
+
+### Changed
+
+- **A run's watchers are no longer drawn as members of its team.** The
+  mediator and the sycophancy detector publish as `pipeline` with
+  `kind: "system"` and name themselves in the line, so the console draws a
+  notice instead of adding a participant the operator never composed; the
+  judge publishes under its agent key with its configured `display_name`,
+  which is the key its roster entry carries, so a run draws one judge rather
+  than two. A failure on any of the three published paths — the judge, the
+  mediator and an analyst's revision — names the class of the exception and
+  never its message: the log keeps the words for an operator, and an
+  exception's text can carry a path, a host or a credential.
+- **An analysis offers only the tabs the run filled.** A tab is drawn when the
+  report carries what it draws — a ledger section routed to it, or its own
+  typed block — so twelve tabs no longer stand ready for ten of them to
+  apologise. SUMMARY, CONVERSATION and EVIDENCE are always offered, and a
+  running job offers those three alone until the report fills the rest. Inside
+  a tab the same rule reaches every panel: a run with no observed traffic
+  draws no empty Domains table, and the only empty states left are the two
+  that say something — a string filter that matched nothing, and a sandbox
+  that traced no process because the sample detected it.
+- **A row that says nothing is not drawn.** Across the report tabs, a
+  key/value row whose value is empty, `-` or an empty list is dropped, and a
+  key/value section whose every row said nothing is not drawn at all. IDENTITY
+  applies it twice over: the `identity` section's hashes move into the File
+  hashes block, which lists only the fingerprints a tool produced rather than
+  a dash per field the extractor has, and its three signing rows — one per
+  format `signing_info` knows about, of which all but one are that tool's
+  untouched defaults — become the one for the format the run routed on, as a
+  sentence rather than as `present=no`. SUMMARY's severity card is drawn only
+  when the judge assessed a rating or named a category.
+- **One list of analyses.** A report is a completed job, so `/reports` is gone
+  and lands on `/jobs` with its status filter applied; the verdict it carried
+  is a column on the row it belongs to, the search palette offers samples and
+  analyses rather than three lists, and the dashboard shows the five latest
+  runs as a way into the list rather than a second copy of it. On SUMMARY the
+  verdict and the confidence are the header's, the techniques and the
+  endpoints are counts that open the tab holding the lists, the threat-intel
+  enrichment button is here once instead of on NETWORK and ATTRIBUTION both,
+  and a Run record disclosure carries the job's configuration and what the run
+  spent.
+- **Settings open on what a first run needs.** Before a language model is
+  connected the hub lists the four guides a first analysis needs and the
+  configuration console is not offered — its route only bounced back to the
+  guides — and a non-admin sees the two entries they can use rather than four,
+  two of them permanently disabled. The LLM guide drops its Limits step, which
+  staged five keys the console already renders. An analyst is drawn under the
+  name its operator gave it, with its key beside it only where the two differ,
+  in the stage list, the agent list and the run's stage strip.
+- **One icon set, and no colour that eases into another.** `lucide-react`
+  replaces the nineteen hand-drawn inline SVGs the console had and gives the
+  navigation, the analysis tabs, the settings rail, the guide cards and the
+  verdict badge an icon at 16 or 18 px in `currentColor`. Every one of the
+  eighty-four `transition-colors` and the one `backdrop-blur` are gone: a
+  hover state arrives with the pointer. A unit test reads the tree for
+  gradients, colour transitions and the blur.
+- **The nine retired analysis routes redirect from the server.** They were
+  client components that mounted only to replace the URL; `next.config.ts`
+  answers with a 308 instead.
+- **The LIVE and PROCESS tabs are gone**, along with their duplicate socket,
+  duplicate back-fill and second status poll. `/live`, `/process`, `/agents`,
+  `/pipeline` and `/timeline` redirect to CONVERSATION, the per-agent results
+  table sits under the conversation and states what each agent concluded while
+  the participants strip above it states how much work each one did — one
+  number, counted from the run's own feed and falling back to the ledger only
+  for a run recorded before the feed carried tool calls — and the stage strip
+  moved to the analysis header, where every tab reads the same one. The Pipeline and Timeline panels are removed: the
+  discussion history, the confidence history and the agent reports they held
+  are the conversation itself, drawn in the order they happened.
 
 ### Fixed
 

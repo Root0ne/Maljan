@@ -418,7 +418,7 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
             <button
               type="button"
               disabled={ctx.saving || stagedCount === 0 || applied !== null}
-              className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent text-white rounded hover:bg-accent-hover transition-colors disabled:opacity-50"
+              className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent text-white rounded hover:bg-accent-hover disabled:opacity-50"
               onClick={onApply}
             >
               {ctx.saving ? "Saving…" : "Apply"}
@@ -435,7 +435,7 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
             <button
               type="button"
               disabled={blockedReason !== null || index >= steps.length - 1}
-              className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent text-white rounded hover:bg-accent-hover transition-colors disabled:opacity-50"
+              className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent text-white rounded hover:bg-accent-hover disabled:opacity-50"
               onClick={() => {
                 const next = steps[index + 1];
                 if (next) goTo(next.id);

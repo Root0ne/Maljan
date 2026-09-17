@@ -1,4 +1,4 @@
-import type { TranscriptRow } from "@/lib/transcript";
+import type { TranscriptRow } from "@/lib/conversation";
 import type { JobRoster } from "@/types/events";
 import type { EvidenceListResponse, EvidenceQuery } from "@/types/evidence";
 import type {

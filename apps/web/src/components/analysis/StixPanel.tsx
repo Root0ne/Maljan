@@ -159,7 +159,7 @@ export default function StixPanel() {
               setActionError("Could not copy to the clipboard — copy the JSON below manually.");
             }
           }}
-          className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors"
+          className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted"
         >
           {copied ? "copied" : "Copy JSON"}
         </button>
@@ -167,7 +167,7 @@ export default function StixPanel() {
           onClick={() =>
             downloadBlob(raw, "maljan-stix-bundle.json", "application/json")
           }
-          className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors"
+          className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted"
         >
           Download
         </button>

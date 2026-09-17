@@ -29,12 +29,16 @@ test.describe("Dashboard", () => {
     ).toBeVisible();
   });
 
-  test("recent analyses identify samples by name, not an opaque UUID", async ({
+  test("the latest runs identify samples by name, not an opaque UUID", async ({
     authenticatedPage,
   }) => {
     await expect(
-      authenticatedPage.getByRole("heading", { name: /recent analyses/i })
+      authenticatedPage.getByRole("heading", { name: /latest runs/i })
     ).toBeVisible();
+    // A way into the one list, not a second copy of it.
+    await expect(
+      authenticatedPage.getByRole("link", { name: "Every analysis" })
+    ).toHaveAttribute("href", "/jobs");
 
     // The jobs list is mocked (e2e/mocks.ts, MOCK_JOB_SUMMARY), so this no
     // longer needs the "if there are no rows, skip" escape hatch it carried

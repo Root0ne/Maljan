@@ -2,50 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Download, Upload } from "lucide-react";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import ImportDialog from "./ImportDialog";
 import { useSettingsContext } from "./SettingsContext";
 
 const SEARCH_PATH = "/settings/configuration/search";
-
-function DownloadIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 16 16"
-      className="w-3.5 h-3.5"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M8 2v8" />
-      <path d="M4.5 7.5 8 11l3.5-3.5" />
-      <path d="M2.5 13h11" />
-    </svg>
-  );
-}
-
-function UploadIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 16 16"
-      className="w-3.5 h-3.5"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M8 10V2" />
-      <path d="M4.5 4.5 8 1l3.5 3.5" />
-      <path d="M2.5 13h11" />
-    </svg>
-  );
-}
 
 /**
  * The strip above every settings page: search, the "only changed" filter,
@@ -127,7 +90,7 @@ export default function Toolbar() {
             aria-checked={s.onlyChanged}
             aria-label="Only changed"
             onClick={() => s.setOnlyChanged(!s.onlyChanged)}
-            className={`relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+            className={`relative inline-flex h-5 w-9 shrink-0 rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
               s.onlyChanged ? "bg-accent" : "bg-border"
             }`}
           >
@@ -152,7 +115,7 @@ export default function Toolbar() {
             }
           }}
         >
-          <DownloadIcon />
+          <Download size={16} aria-hidden="true" />
           Export configuration
         </button>
         <button
@@ -160,7 +123,7 @@ export default function Toolbar() {
           className="flex items-center gap-1.5 text-xs text-accent-strong shrink-0"
           onClick={() => setImportOpen(true)}
         >
-          <UploadIcon />
+          <Upload size={16} aria-hidden="true" />
           Import configuration
         </button>
       </form>
