@@ -229,7 +229,12 @@ class MaljanApp:
                     try:
                         import tempfile
 
+                        from maljan.tools.roots import add_sample_root
+
                         pcap_dir = Path(tempfile.gettempdir()) / "maljan-cape-pcap"
+                        # The capture lands here, so this is where the network
+                        # sidecar is allowed to read one from.
+                        add_sample_root(pcap_dir)
                         pcap_path = provider.fetch_pcap(task_id, str(pcap_dir))
                         if pcap_path:
                             net = result.report.setdefault("network", {})
@@ -305,6 +310,16 @@ class MaljanApp:
         logger.info("Analysts: %s", self.container.analyst_keys())
         logger.info("Max iterations: %d", self.config.negotiation.max_iterations)
         logger.info("-" * 60)
+
+        # Where this run's sample is, for the tool sidecars. They read a path
+        # argument only inside the roots they were given, and the directory
+        # holding the sample the caller named is one of them: the caller is
+        # the operator or the worker, never a model. A run with no sample path
+        # names nothing, and the sidecars read only what they staged.
+        if sample_path:
+            from maljan.tools.roots import add_sample_root
+
+            add_sample_root(Path(sample_path).parent)
 
         # Submit to sandbox if sample_path is provided
         sandbox_report = await self._submit_to_sandbox(sample_path)

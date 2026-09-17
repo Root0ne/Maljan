@@ -800,13 +800,14 @@ name the prompt showed it.
 
 The built-in `analysis` sidecar implements `put_sample*` even though it ships as
 a stdio server, because an operator may run that same file behind an HTTP
-transport on another host. Two environment variables configure it, and they are
-the only ones it is allowed to see:
+transport on another host. Three environment variables configure it, and they
+are the only ones it is allowed to see:
 
 | variable | default | meaning |
 | :-- | :-- | :-- |
 | `MALJAN_STAGING_DIR` | a `maljan-analysis-mcp` directory under the system temp dir | where uploads land |
 | `MALJAN_STAGING_TTL_HOURS` | `24` | how long a staged sample is kept; `0` disables pruning |
+| `MALJAN_SAMPLE_ROOTS` | empty | the other directories a path argument may name, separated by `:` |
 
 The directory is created with mode 0o700 and refused if what is already at that
 path is a symlink or belongs to another user — the default name is predictable
@@ -814,6 +815,31 @@ and the system temp directory is shared. Each file is created with
 `O_CREAT|O_EXCL|O_NOFOLLOW` at 0o600 rather than written and then chmodded, and
 every `put_sample*` call prunes entries past the TTL, so a long-lived server
 does not accumulate samples without bound.
+
+### Which directories a sidecar may read
+
+A sample is adversary-authored content and the analyst model reads it, so the
+path a tool is asked for is a path the sample's author may have written. Both
+file-reading sidecars — `analysis` and `network` — therefore resolve every
+`path`, `pcap_path` and `ruleset` argument (symlinks followed) and refuse
+anything that lands outside the directories they were given:
+
+* the staging directory `MALJAN_STAGING_DIR` names, where their own uploads
+  land, and
+* every directory in `MALJAN_SAMPLE_ROOTS`, a list separated by `:`, empty by
+  default.
+
+A refusal is the ordinary structured error with the code `path_outside_roots`
+and a remedy, and it names no host path.
+
+The worker fills `MALJAN_SAMPLE_ROOTS` in for itself: its download directory
+(`UPLOAD_TEMP_DIR`), the sample mirrors under `SAMPLES_DIR` and the directory a
+sandbox capture is fetched to are exported before any sidecar starts, so a
+default deployment needs no configuration. Set the variable when a sample lives
+somewhere the worker did not put it — a corpus directory an operator points the
+CLI at, or an HTTP sidecar on another host that is handed paths rather than
+uploads. `ruleset` is held to the rule corpora instead: the repository's `data`
+tree and whatever `MALJAN_YARA_RULES_DIR` and `MALJAN_SIGMA_RULES_DIR` name.
 
 ## Writing a tool server
 

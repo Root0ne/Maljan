@@ -211,6 +211,13 @@ def mirror_static_samples(
                 continue
             host_mirror, container_path = target
             mirror_target_path = host_mirror
+            # This job's mirror directory is a directory the sidecars may read
+            # a path in. Named here rather than only at startup because the
+            # settings of the job decide which subdirectory a provider mirrors
+            # into, and a sidecar reads only the roots it was given.
+            from maljan.tools.roots import add_sample_root
+
+            add_sample_root(host_mirror.parent)
             if host_mirror not in copied_host_paths:
                 copy_fn(Path(temp_path), host_mirror)
                 host_mirrors.append(host_mirror)
@@ -1853,6 +1860,11 @@ async def startup(ctx: dict) -> None:
         # minus the environment read.
         core = build_settings({})
         sample_files.sweep(mirror_dir=core.static.r2.mirror_dir)
+        # The directories this worker hands a sidecar a path into. A tool
+        # server reads a path argument only inside the roots it was given, and
+        # these are the ones the worker itself writes a sample to; without
+        # them a sidecar would refuse the sample it was started for.
+        sample_files.export_sample_roots(core.static.r2.mirror_dir)
     except OSError as exc:
         logger.warning(
             "Startup sample sweep failed (non-fatal): %s",

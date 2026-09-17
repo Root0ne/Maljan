@@ -36,6 +36,18 @@ def server() -> Any:
     return module
 
 
+@pytest.fixture(autouse=True)
+def _the_test_s_own_directory_is_a_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The sample a test writes is a sample this server may read.
+
+    Every path argument is held to the staging directory plus the roots
+    ``MALJAN_SAMPLE_ROOTS`` names (see ``maljan.tools.roots``), which is how a
+    deployment says where its samples arrive. A test that writes one under
+    ``tmp_path`` says the same thing about that directory.
+    """
+    monkeypatch.setenv("MALJAN_SAMPLE_ROOTS", str(tmp_path))
+
+
 def _sample(tmp_path: Path) -> str:
     """A file with 40 findable runs in it."""
     blob = b"".join(b"\x00\x00" + f"marker{index:03d}".encode() for index in range(40))
@@ -155,11 +167,17 @@ class TestTheWordsThatMeanAbsence:
         ]
 
     def test_a_required_argument_is_left_to_the_tool_to_answer_for(self, server: Any) -> None:
-        """ "null" as a path is a wrong call, and the error naming it is more
-        use than a second error about something else."""
+        """ "null" as a path is a wrong call, and it is answered as one.
+
+        A bare name resolves against the server's own working directory, which
+        is not a directory this server may read, so the refusal is the root
+        check's rather than the tool's — and it carries the remedy that names
+        the right path, which is the thing the caller has to do next.
+        """
         answer = server.strings("null")
 
-        assert "no such file" in answer["error"]["message"]
+        assert answer["error"]["code"] == "path_outside_roots"
+        assert answer["error"]["remediation"]
 
     def test_every_tool_on_the_server_gets_it(self, server: Any, tmp_path: Path) -> None:
         """The normalisation is in the guard every tool calls, not in one tool."""

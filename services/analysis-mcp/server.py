@@ -29,6 +29,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from maljan.core.paths import resolve_data
 from maljan.tools import binary as binary_tools
 from maljan.tools import identify as identify_tools
 from maljan.tools import rules as rule_tools
@@ -36,10 +37,12 @@ from maljan.tools import strings as string_tools
 from maljan.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, manifest, module
 from maljan.tools.errors import (
     BAD_ARGUMENT,
+    PATH_OUTSIDE_ROOTS,
     code_for_exception,
     normalise_error,
     tool_error,
 )
+from maljan.tools.roots import PathOutsideRoots, resolve_under_roots
 from maljan.tools.strings import DEFAULT_STRINGS_LIMIT
 
 mcp = FastMCP("AnalysisMCP")
@@ -151,6 +154,40 @@ def _read_absent_words(call: Any, kwargs: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# The arguments that name a file on this host. Held to the allowed roots in
+# ``_guard`` rather than in each tool, so a tool added later is confined by
+# having gone through the guard every tool here already goes through.
+_PATH_ARGUMENTS = ("path", "pcap_path")
+
+# The argument that names a rule corpus rather than a sample. It is a path
+# too, and it is chosen by the same model, but the directories it may name are
+# the rule directories rather than the sample ones — so it is held to
+# ``rule_tools.corpus_roots()`` instead. ``default`` and the empty string name
+# the shipped corpus and are not paths at all.
+_CORPUS_ARGUMENT = "ruleset"
+_CORPUS_WORDS = ("", "default")
+
+
+def _confined(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """``kwargs`` with every path argument resolved inside the allowed roots.
+
+    The resolved path replaces the one the caller passed, so the tool opens
+    the file the check was made about rather than resolving the argument a
+    second time. A ruleset is checked where it stands: the tool resolves that
+    one itself, against the roots it was checked against.
+    """
+    out = dict(kwargs)
+    for name in _PATH_ARGUMENTS:
+        value = out.get(name)
+        if not isinstance(value, str) or not value.strip():
+            continue
+        out[name] = str(resolve_under_roots(value, extra_roots=(_staging_base(),)))
+    corpus = out.get(_CORPUS_ARGUMENT)
+    if isinstance(corpus, str) and corpus not in _CORPUS_WORDS:
+        resolve_under_roots(resolve_data(corpus), extra_roots=rule_tools.corpus_roots())
+    return out
+
+
 def _guard(tool: str, call: Any, **kwargs: Any) -> dict[str, Any]:
     """Run one tool call, turning any exception into a returned error.
 
@@ -161,9 +198,16 @@ def _guard(tool: str, call: Any, **kwargs: Any) -> dict[str, Any]:
     error carries a code and a remediation (``maljan.tools.errors``), and an
     implementation's flat ``{"error": "<text>"}`` is rewritten into the same
     shape on the way out.
+
+    A path argument is held to the allowed roots first, and a refusal is
+    answered in that same shape — the sample is adversary-authored content
+    that this model reads, so the path it asks for is the one argument that
+    may have been written by the sample's author.
     """
     try:
-        return dict(normalise_error(dict(call(**_read_absent_words(call, kwargs)))))
+        return dict(normalise_error(dict(call(**_confined(_read_absent_words(call, kwargs))))))
+    except PathOutsideRoots as refusal:
+        return tool_error(PATH_OUTSIDE_ROOTS, str(refusal), tool=tool)
     except Exception as exc:  # noqa: BLE001 — a tool server answers, it does not raise
         return tool_error(code_for_exception(exc), f"{type(exc).__name__}: {exc}", tool=tool)
 
@@ -429,6 +473,17 @@ def _staging_ttl_seconds() -> float:
     return hours * 3600.0
 
 
+def _staging_base() -> Path:
+    """The staging path this server is configured for, created or not.
+
+    Separate from ``_staging_dir`` because every read goes through the root
+    check and a read must not create a directory, validate one or fail on a
+    staging path that is wrong in a way only an upload would care about.
+    """
+    configured = os.environ.get("MALJAN_STAGING_DIR", "").strip()
+    return Path(configured) if configured else Path(tempfile.gettempdir()) / "maljan-analysis-mcp"
+
+
 def _staging_dir() -> Path:
     """Where uploaded samples land: ``MALJAN_STAGING_DIR`` or a private temp dir.
 
@@ -439,8 +494,7 @@ def _staging_dir() -> Path:
     at that path and receive live malware into a location of their choosing —
     and the chmod would then be applied to their target.
     """
-    configured = os.environ.get("MALJAN_STAGING_DIR", "").strip()
-    base = Path(configured) if configured else Path(tempfile.gettempdir()) / "maljan-analysis-mcp"
+    base = _staging_base()
     try:
         base.mkdir(mode=0o700, parents=True, exist_ok=True)
     except FileExistsError as exc:  # a non-directory already sits at that path

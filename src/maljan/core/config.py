@@ -725,9 +725,12 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
     it used to consult from one stage, offered to an agent as a tool. An
     operator turns one off by flipping ``enabled`` rather than by editing code.
     ``analysis``
-    is the one built-in that sees environment variables of its own —
-    ``MALJAN_STAGING_DIR`` and ``MALJAN_STAGING_TTL_HOURS``, which say where
-    its ``put_sample`` uploads land and how long they are kept.
+    sees environment variables of its own — ``MALJAN_STAGING_DIR`` and
+    ``MALJAN_STAGING_TTL_HOURS``, which say where its ``put_sample`` uploads
+    land and how long they are kept. Both file-reading sidecars also see
+    ``MALJAN_SAMPLE_ROOTS``: the directories they may read a path argument in,
+    on top of the staging directory. The worker exports the mirror it copies
+    a sample into; without it a sidecar reads only what it staged itself.
 
     The two tool sidecars carry ``agents=[]`` on purpose. They are bound by the
     ``ToolRef``s in ``_builtin_definitions()`` and by nothing else, so a clone
@@ -755,7 +758,11 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
             command=sys.executable,
             args=["services/analysis-mcp/server.py"],
             cwd="services/analysis-mcp",
-            env_allow=["MALJAN_STAGING_DIR", "MALJAN_STAGING_TTL_HOURS"],
+            env_allow=[
+                "MALJAN_STAGING_DIR",
+                "MALJAN_STAGING_TTL_HOURS",
+                "MALJAN_SAMPLE_ROOTS",
+            ],
             agents=[],
             label="Analysis MCP",
         ),
@@ -774,6 +781,7 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
             command=sys.executable,
             args=["services/network-mcp/server.py"],
             cwd="services/network-mcp",
+            env_allow=["MALJAN_STAGING_DIR", "MALJAN_SAMPLE_ROOTS"],
             agents=["network"],
             label="Network MCP",
         ),

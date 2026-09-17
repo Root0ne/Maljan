@@ -1,6 +1,8 @@
 import copy
 import json
 import os
+import tempfile
+from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -9,10 +11,12 @@ from maljan.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, manifest, mo
 from maljan.tools.errors import (
     MISSING_DEPENDENCY,
     NO_SUCH_FILE,
+    PATH_OUTSIDE_ROOTS,
     code_for_exception,
     normalise_error,
     tool_error,
 )
+from maljan.tools.roots import PathOutsideRoots, resolve_under_roots
 
 # scapy is the one library every tool here reads a capture with. Imported
 # guarded so a host without it still starts the server and answers the
@@ -54,6 +58,27 @@ def _text_error(code: str, message: str, tool: str) -> str:
     return json.dumps(tool_error(code, message, tool=tool))
 
 
+def _staging_base() -> Path:
+    """The delivery directory a capture may have been staged into.
+
+    The same ``MALJAN_STAGING_DIR`` the analysis sidecar writes uploads to: on
+    a host where both sidecars run, a capture delivered there is a capture
+    this server may read. Nothing here writes to it.
+    """
+    configured = os.environ.get("MALJAN_STAGING_DIR", "").strip()
+    return Path(configured) if configured else Path(tempfile.gettempdir()) / "maljan-analysis-mcp"
+
+
+def _capture(pcap_path: str) -> Path:
+    """One ``pcap_path`` argument, resolved inside the directories this server may read.
+
+    A capture is named by the model, and a model that has read a sample has
+    read whatever its author wrote there. Raises ``PathOutsideRoots`` for
+    anything that resolves elsewhere; see ``maljan.tools.roots``.
+    """
+    return resolve_under_roots(pcap_path, extra_roots=(_staging_base(),))
+
+
 @mcp.tool(name=CAPABILITIES_TOOL)
 def capabilities() -> dict[str, Any]:
     """What this server can do on this host.
@@ -70,10 +95,14 @@ def read_pcap_summary(pcap_path: str, packet_limit: int = 100) -> str:
     """Read a summary of packets from a PCAP file."""
     if _SCAPY_MISSING:
         return _text_error(MISSING_DEPENDENCY, _SCAPY_MISSING, "read_pcap_summary")
-    if not os.path.exists(pcap_path):
+    try:
+        capture = _capture(pcap_path)
+    except PathOutsideRoots as refusal:
+        return _text_error(PATH_OUTSIDE_ROOTS, str(refusal), "read_pcap_summary")
+    if not capture.exists():
         return _text_error(NO_SUCH_FILE, f"no such file: {pcap_path}", "read_pcap_summary")
     try:
-        packets = rdpcap(pcap_path, count=packet_limit)
+        packets = rdpcap(str(capture), count=packet_limit)
         output = []
         for i, pkt in enumerate(packets):
             if IP in pkt:
@@ -95,11 +124,15 @@ def extract_dns(pcap_path: str) -> str:
     """Extract all DNS queries from a PCAP file."""
     if _SCAPY_MISSING:
         return _text_error(MISSING_DEPENDENCY, _SCAPY_MISSING, "extract_dns")
-    if not os.path.exists(pcap_path):
+    try:
+        capture = _capture(pcap_path)
+    except PathOutsideRoots as refusal:
+        return _text_error(PATH_OUTSIDE_ROOTS, str(refusal), "extract_dns")
+    if not capture.exists():
         return _text_error(NO_SUCH_FILE, f"no such file: {pcap_path}", "extract_dns")
     try:
         # Load all packets, filter for DNS
-        packets = rdpcap(pcap_path)
+        packets = rdpcap(str(capture))
         queries = set()
         for pkt in packets:
             if DNSQR in pkt:
@@ -115,10 +148,14 @@ def extract_http(pcap_path: str) -> str:
     """Extract raw HTTP request headers from a PCAP file (basic extraction)."""
     if _SCAPY_MISSING:
         return _text_error(MISSING_DEPENDENCY, _SCAPY_MISSING, "extract_http")
-    if not os.path.exists(pcap_path):
+    try:
+        capture = _capture(pcap_path)
+    except PathOutsideRoots as refusal:
+        return _text_error(PATH_OUTSIDE_ROOTS, str(refusal), "extract_http")
+    if not capture.exists():
         return _text_error(NO_SUCH_FILE, f"no such file: {pcap_path}", "extract_http")
     try:
-        packets = rdpcap(pcap_path)
+        packets = rdpcap(str(capture))
         requests = []
         for pkt in packets:
             if TCP in pkt and pkt[TCP].payload:
@@ -149,7 +186,11 @@ def pcap_summary(pcap_path: str, packet_limit: int = 5000) -> dict[str, Any]:
     from maljan.tools.pcap import pcap_summary as summarize
 
     try:
-        return dict(normalise_error(dict(summarize(pcap_path, packet_limit=packet_limit))))
+        capture = _capture(pcap_path)
+    except PathOutsideRoots as refusal:
+        return tool_error(PATH_OUTSIDE_ROOTS, str(refusal), tool="pcap_summary")
+    try:
+        return dict(normalise_error(dict(summarize(str(capture), packet_limit=packet_limit))))
     except Exception as exc:  # noqa: BLE001 - a tool server answers, it does not raise
         return tool_error(
             code_for_exception(exc), f"{type(exc).__name__}: {exc}", tool="pcap_summary"

@@ -113,6 +113,27 @@ def work_dirs(mirror_dir: str | None = None) -> list[Path]:
     return [work_dir(name) for name in seen]
 
 
+def export_sample_roots(mirror_dir: str | None = None) -> list[Path]:
+    """Tell the tool sidecars which directories this worker's samples live in.
+
+    A sidecar reads a path argument only inside the roots it was given (see
+    ``maljan.tools.roots``), and the ones this worker uses are its own: the
+    download target every sample lands in and the mirror subdirectories a
+    static provider reads from. Nothing here comes from a model, and none of
+    it is a secret — the variable says where a sample is, not what is in it.
+
+    Called at worker startup, before any job can start a sidecar, and again
+    per job for a worker whose settings named another mirror directory.
+    Returns the roots it exported, for the caller that wants to log them.
+    """
+    from maljan.tools.roots import add_sample_root
+
+    roots = [temp_dir(), *work_dirs(mirror_dir)]
+    for root in roots:
+        add_sample_root(root)
+    return roots
+
+
 def private_copy(src: Path, dest: Path) -> None:
     fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "wb") as out, src.open("rb") as inp:

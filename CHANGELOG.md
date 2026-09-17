@@ -439,6 +439,22 @@ change landed on `main`.
 
 ### Fixed
 
+- **A tool server reads the sample it was given, and nothing else on the host.**
+  Every `path`, `pcap_path` and `ruleset` argument of the `analysis` and
+  `network` sidecars is now resolved with symlinks followed and refused unless
+  it lands inside the staging directory or one of the directories
+  `MALJAN_SAMPLE_ROOTS` names (`:`-separated, empty by default); a `ruleset` is
+  held to the `data` tree and the two rule-directory variables instead. A
+  sample is adversary-authored content that the analyst model reads, so an
+  instruction inside it could point `iocs_from_file` — a tool whose purpose is
+  extracting typed secrets — at any file the sidecar could open, and the answer
+  went to the ledger, the report and the event feed. A refusal is the ordinary
+  structured error with the code `path_outside_roots` and a remedy, and it
+  names no host path. The worker exports the directories it writes samples to
+  (the download directory, each static provider's mirror and the directory a
+  sandbox capture is fetched to), so a default deployment configures nothing;
+  a sample that lives anywhere else needs the variable. `put_sample` and the
+  carve destination keep their own write confinement.
 - **The capability manifest says only what it knows about this host.** A
   missing module is reported in the import's own words; a broken install or a
   shared library that will not load is reported by exception type alone, so no
