@@ -140,10 +140,18 @@ manager = ConnectionManager()
 # How much of a resume is read at once, and how many of those a single resume
 # may take. The page size is the reader's own ceiling; the page count bounds a
 # socket that would otherwise sit replaying a pathological run while the
-# client waits for its first live event. 40 pages is 40 000 events, which is
-# more than any run this has seen publishes.
+# client waits for its first live event.
+#
+# Ten pages is ten thousand events. A long run publishes a few thousand — two
+# per tool call plus a delta per model turn — so this is well above any run
+# this has seen while being small enough that a client reconnecting in a loop
+# cannot use the handshake as an amplifier: nothing rate-limits reconnects,
+# and forty pages of a thousand was forty database reads and forty thousand
+# frames per attempt. A resume that reaches the bound stops and says so; the
+# client has every event's ``seq`` and can page ``GET /jobs/{id}/events`` for
+# the rest.
 _REPLAY_PAGE = 1000
-_REPLAY_PAGES = 40
+_REPLAY_PAGES = 10
 
 
 async def _replay(websocket: WebSocket, job_id: str, since: int) -> None:
@@ -193,6 +201,16 @@ async def _replay(websocket: WebSocket, job_id: str, since: int) -> None:
                         # has no second page to ask for.
                         break
                     cursor = highest
+                    # One page at a time, and the loop gets a turn between
+                    # them: a resume is a burst of sends on a socket that is
+                    # also carrying live events for this job and others.
+                    await asyncio.sleep(0)
+                else:
+                    logger.info(
+                        "WebSocket resume reached its page bound at seq=%s: job=%s",
+                        log_safe(cursor),
+                        log_safe(job_id),
+                    )
         finally:
             try:
                 await redis_conn.aclose()

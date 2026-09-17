@@ -227,6 +227,37 @@ class TestTheJudgeAsks:
         judge._publish_questions(conversation, already)
         assert len(sink.of("judge_question")) == 1
 
+    def test_a_question_asked_twice_is_published_twice(self) -> None:
+        """The dedupe is per turn, not per sentence.
+
+        A model that repeats itself is the degenerate loop this codebase
+        guards against elsewhere; a feed that showed one question where the
+        judge asked two would hide it.
+        """
+        from langchain_core.messages import AIMessage
+        from maljan.agents.judge_agent import JudgeAgent
+
+        sink = _Sink()
+        judge = JudgeAgent.__new__(JudgeAgent)
+        judge._container = type("C", (), {"event_sink": sink})()
+        judge.pipeline_stage = "verdict"
+        judge.logger = type("L", (), {"debug": staticmethod(lambda *a, **k: None)})()
+
+        # No ids: the fallback key is what is under test.
+        asked = "Is this a packer stub?"
+        conversation = [
+            AIMessage(content=asked, id=None),
+            AIMessage(content="Reading the ledger.", id=None),
+            AIMessage(content=asked, id=None),
+        ]
+        already: set[str] = set()
+        judge._publish_questions(conversation, already)
+        assert len(sink.of("judge_question")) == 2
+
+        # And the same conversation seen again publishes nothing further.
+        judge._publish_questions(conversation, already)
+        assert len(sink.of("judge_question")) == 2
+
     def test_a_question_that_delegates_names_the_agent_it_asks(self) -> None:
         from langchain_core.messages import AIMessage
 

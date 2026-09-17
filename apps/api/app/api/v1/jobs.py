@@ -289,12 +289,13 @@ def _remember_roster(key: str, roster: dict[str, Any]) -> None:
         # Drop what has already expired; if nothing has, drop the oldest.
         now = time.monotonic()
         stale = [
-            key
-            for key, (written, _) in _ROSTER_CACHE.items()
+            cached
+            for cached, (written, _) in _ROSTER_CACHE.items()
             if now - written > _ROSTER_CACHE_SECONDS
         ]
-        for k in stale or [min(_ROSTER_CACHE, key=lambda k: _ROSTER_CACHE[k][0])]:
-            _ROSTER_CACHE.pop(k, None)
+        oldest = min(_ROSTER_CACHE, key=lambda cached: _ROSTER_CACHE[cached][0])
+        for evicted in stale or [oldest]:
+            _ROSTER_CACHE.pop(evicted, None)
     _ROSTER_CACHE[key] = (time.monotonic(), roster)
 
 

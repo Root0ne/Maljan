@@ -360,16 +360,17 @@ class JudgeAgent(BudgetMeter):
         actually answer or wait on. A turn that also calls ``ask_<key>`` names
         that agent as the addressee, because that is who the judge is asking.
 
-        Identified by what the turn said, so a hook that sees the same
-        conversation twice — which it does, once per model turn — publishes
-        each question once. Never raises: this is telemetry inside a prompt
-        hook, and a hook that throws ends the loop.
+        Identified by where the turn sits and what it said, so a hook that
+        sees the same conversation twice — which it does, once per model turn
+        — publishes each question once, while a judge that asks the identical
+        question a second time is published twice. Never raises: this is
+        telemetry inside a prompt hook, and a hook that throws ends the loop.
         """
         try:
-            for message in conversation:
+            for index, message in enumerate(conversation):
                 if getattr(message, "type", "") != "ai":
                     continue
-                marker = _turn_key(message)
+                marker = _turn_key(message, index)
                 if marker in already:
                     continue
                 already.add(marker)

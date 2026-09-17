@@ -392,20 +392,27 @@ def lock_for(agent: Any) -> Any:
     return lock if lock is not None else contextlib.nullcontext()
 
 
-def _turn_key(message: Any) -> str:
+def _turn_key(message: Any, index: int) -> str:
     """What identifies one model turn, for publishing it exactly once.
 
-    Not ``id(message)``: CPython reuses an address after collection, so a
-    turn that had been collected could suppress a later one, and a graph that
+    Not ``id(message)``: CPython reuses an address after collection, so a turn
+    that had been collected could suppress a later one, and a graph that
     copied its state between snapshots — a checkpointer, a serialising reducer
     — would make every turn look new on every snapshot and republish the whole
-    conversation each time. langchain gives a message its own id; a message
-    without one is keyed on what it says, which is the thing being published.
+    conversation each time.
+
+    langchain gives a message its own id. A message without one is keyed on
+    its place in the conversation *and* on what it says: the place alone
+    cannot survive a conversation being replayed from the first message, which
+    a connection error does, and the text alone would swallow a turn a model
+    genuinely repeated — the degenerate loop this codebase guards against
+    elsewhere, where the interesting thing is precisely that it said the same
+    thing again.
     """
     own = getattr(message, "id", None)
     if own:
         return f"id:{own}"
-    return f"text:{hash(str(getattr(message, 'content', '') or ''))}"
+    return f"turn:{index}:{hash(str(getattr(message, 'content', '') or ''))}"
 
 
 def _steps_this_loop_spent(ledger: LoopBudget, messages: list) -> int:
@@ -1769,10 +1776,10 @@ class BudgetMeter:
             if not bool(getattr(getattr(config, "events", None), "stream_deltas", True)):
                 return
             messages = snapshot.get("messages") if isinstance(snapshot, dict) else None
-            for message in list(messages or []):
+            for index, message in enumerate(list(messages or [])):
                 if getattr(message, "type", "") != "ai":
                     continue
-                marker = _turn_key(message)
+                marker = _turn_key(message, index)
                 if marker in already:
                     continue
                 already.add(marker)
