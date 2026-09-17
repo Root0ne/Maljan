@@ -208,7 +208,11 @@ carries one sorted id list per domain (`enterprise`, `mobile`, `ics`), and
 platforms. The two files come from the same bundles and the same script, so
 they never disagree about which domain an id belongs to. Between them they
 answer the validity and the domain-and-platform halves of the technique check
-with no network and no bundle load (`tools.knowledge.attck_scope`);
+with no network and no bundle load (`tools.knowledge.attck_scope`).
+`data/attck_retired_ids.json`, written by the same script from the catalogue it
+overwrites, names the ids a previous release had and the release that retired
+them, so an older report's `T1562.001` is reported as retired rather than as an
+invented id;
 `src/maljan/memory/attck_loader.py` downloads and caches each domain's STIX
 bundle under `~/.cache/maljan/attck/` (or `MALJAN_ATTCK_CACHE`) for the names,
 the tactics and the index, and consults it for platforms only when a real id is

@@ -8,6 +8,13 @@ change landed on `main`.
 
 ### Added
 
+- **An id retired by a catalogue move is reported as retired, not invented.**
+  `data/attck_retired_ids.json` — per id, its domain and the ATT&CK release
+  that retired it — is written by the autoupdate script from the catalogue it
+  is about to overwrite; `attck_validate` and `attck_lookup` carry
+  `retired_in`, and `attck.unknown_id` and the judge's attack-pattern message
+  add "(retired in ATT&CK 19.2)" so a stored report or a prompt still naming
+  `T1562.001` reads honestly. The id stays as written.
 - **The ATT&CK platform map ships beside the id catalogue.**
   `data/attck_platforms.json` carries, per technique, its domain and MITRE
   platforms, written by `scripts/knowledge/prepare_attck_malware_fixtures.py`
@@ -297,6 +304,22 @@ change landed on `main`.
 
 ### Fixed
 
+- **The ledger keeps the full parsed result.** `build_entry` parsed
+  `structured` from the output it had already cut at `MAX_OUTPUT_CHARS`, so a
+  pack result longer than six thousand characters was stored with no
+  structured payload and corroboration, the projections and the evidence
+  sections saw nothing of it; on the live proof that hid a real rule hit.
+  `structured` is now the whole result and `output` the text a model reads;
+  `apply_budget` counts what is stored against the per-agent evidence byte
+  budget.
+- **The signature facts come from the pack's `signing_info` entry, cited by
+  id.** `identity.signing` was never filled from the ledger, so a signed
+  sample read `Signed: no`; the projection now reads presence, subject and
+  issuer (a chain verdict only when the tool reports one) and the `Signed`
+  row prints the entry id.
+- **One helper decides which API rules fired.** `api_capability_hits` applies
+  a rule's `min_apis` over the pooled matched APIs; the report's projection
+  and the corroboration collector both read it.
 - **Corroboration reads the ids capa and Sigma really write.** The extractor
   behind `asserted_by` matched a whole string against `T1234`, so capa's
   decorated `attck` strings and a Sigma match's `attack.t1055.012` tags never
@@ -758,6 +781,10 @@ change landed on `main`.
 
 ### Removed
 
+- **The static analyst's case-prior hint and its settings.**
+  `StaticAnalyst._compute_attck_case_hint`, `analysis.attck_case_rag` and the
+  five `preprocessing.attck_case_*` settings; alembic revision
+  `20260920000000` deletes the stored rows. `similar_cases` stays.
 - **The in-process case-prior retrieval in the judge node.** The block that
   retrieved ATT&CK techniques from similar prior cases inside the judge node,
   the `attck_case_candidates` state channel and `FamilyAttribution` field, the
