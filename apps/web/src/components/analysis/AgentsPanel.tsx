@@ -220,7 +220,7 @@ export default function AgentsTab() {
             {group.rows.map((agent) => {
               const style = SIGNAL_STYLES[agent.signal] || SIGNAL_STYLES.unknown;
               return (
-                <tr key={agent.name} className="hover:bg-bg-hover transition-colors">
+                <tr key={agent.name} className="hover:bg-bg-hover">
                   <td className="px-4 py-3">
                     <span className="text-sm text-text-primary">{agent.name}</span>
                     {agent.domain && (

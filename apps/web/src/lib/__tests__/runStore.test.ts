@@ -140,6 +140,31 @@ describe("the roster and the stages", () => {
     expect(getRun(JOB).roster?.agents[0].label).toBe("Ahmet");
   });
 
+  it("takes the roster the run announces when it has no other", () => {
+    applyRunEvents(JOB, [
+      event("roster", {
+        seq: 1,
+        agents: [{ key: "lead", label: "Lead analyst", role: "analyst", stages: ["analysis"] }],
+        stages: [{ key: "analysis", label: "Analysis", kind: "analysis", agents: ["lead"] }],
+      }),
+    ]);
+
+    expect(getRun(JOB).roster?.agents[0].label).toBe("Lead analyst");
+    expect(getRun(JOB).roster?.stages[0].key).toBe("analysis");
+  });
+
+  it("keeps the roster the job carried over the one the run announces", () => {
+    setRunRoster(JOB, {
+      agents: [{ key: "lead", label: "From the job", role: "analyst", stages: [] }],
+      stages: [],
+    });
+    applyRunEvents(JOB, [
+      event("roster", { seq: 1, agents: [{ key: "lead", label: "From the feed", role: "analyst", stages: [] }], stages: [] }),
+    ]);
+
+    expect(getRun(JOB).roster?.agents[0].label).toBe("From the job");
+  });
+
   it("lays live stage events over the stored rollup", () => {
     setRunStoredStages(JOB, [
       { key: "analysis", kind: "analysis", ran: true, reason: "", agents: [], duration_ms: 10 },

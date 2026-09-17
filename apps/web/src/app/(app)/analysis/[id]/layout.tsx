@@ -404,7 +404,7 @@ export default function AnalysisLayout({
                     <Link
                       key={tab.key}
                       href={href}
-                      className={`px-3 py-2.5 text-xs font-medium uppercase tracking-wider border-b-2 transition-colors ${
+                      className={`px-3 py-2.5 text-xs font-medium uppercase tracking-wider border-b-2 ${
                         active
                           ? "border-accent text-accent"
                           : "border-transparent text-text-secondary hover:text-text-primary"

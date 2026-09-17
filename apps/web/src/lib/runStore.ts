@@ -187,9 +187,30 @@ interface RunEntry {
   retryTimer: ReturnType<typeof setTimeout> | null;
   closeTimer: ReturnType<typeof setTimeout> | null;
   arrivals: number;
+  /** When this run was last subscribed to, for eviction order. */
+  touched: number;
 }
 
 const runs = new Map<string, RunEntry>();
+
+/** How many runs a session keeps in memory. A reader moves between a handful
+ *  of runs and expects each to be there when they come back; beyond that the
+ *  oldest run nobody is reading is dropped rather than held for the life of
+ *  the tab. */
+const MAX_RUNS = 5;
+
+let clock = 0;
+
+function evictIdleRuns(): void {
+  if (runs.size <= MAX_RUNS) return;
+  const idle = [...runs.values()]
+    .filter((entry) => entry.readers === 0 && entry.listeners.size === 0)
+    .sort((a, b) => a.touched - b.touched);
+  for (const entry of idle) {
+    if (runs.size <= MAX_RUNS) break;
+    resetRun(entry.state.jobId);
+  }
+}
 
 const STAGE_EVENTS = new Set(["stage_started", "stage_skipped", "stage_finished"]);
 
@@ -225,6 +246,7 @@ function entryFor(jobId: string): RunEntry {
     retryTimer: null,
     closeTimer: null,
     arrivals: 0,
+    touched: clock,
   };
   runs.set(jobId, created);
   return created;
@@ -305,16 +327,26 @@ export function applyRunEvents(jobId: string, incoming: IncomingEvent[]): void {
   }
 
   let lastSeq = entry.state.lastSeq;
+  let roster = entry.state.roster;
   for (const event of added) {
     if (event.seq !== undefined && event.seq > lastSeq) lastSeq = event.seq;
     if (STAGE_EVENTS.has(event.type)) entry.stageEvents.push({ type: event.type, data: event.data });
+    /* The run names its own cast before anybody speaks. A reader who opened
+     * the job already has the same roster from the job endpoint; whichever
+     * arrives first is the one kept, because they say the same thing. */
+    if (event.type === "roster" && !roster && Array.isArray(event.data.agents)) {
+      roster = {
+        agents: event.data.agents as JobRoster["agents"],
+        stages: (Array.isArray(event.data.stages) ? event.data.stages : []) as JobRoster["stages"],
+      };
+    }
   }
 
   const stages = added.some((event) => STAGE_EVENTS.has(event.type))
     ? stageTimeline(entry.stageEvents, entry.storedStages)
     : entry.state.stages;
 
-  patch(entry, { events, lastSeq, stages });
+  patch(entry, { events, lastSeq, stages, roster });
 }
 
 /**
@@ -454,8 +486,11 @@ async function backfill(entry: RunEntry): Promise<void> {
  */
 export function subscribeRun(jobId: string, listener: () => void): () => void {
   const entry = entryFor(jobId);
+  clock += 1;
+  entry.touched = clock;
   entry.listeners.add(listener);
   entry.readers += 1;
+  evictIdleRuns();
   if (entry.closeTimer) {
     clearTimeout(entry.closeTimer);
     entry.closeTimer = null;
