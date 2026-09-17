@@ -92,7 +92,7 @@ class TestWhatTheBlockSays:
     def test_the_budget_line_is_there_only_when_a_budget_is_given(self) -> None:
         assert "budget" not in render_run_state(STATE)
         assert render_run_state(STATE, steps_left=7, seconds_left=91.9).endswith(
-            "budget remaining: 7 steps, 91 s"
+            "budget remaining: 7 model turns, 91 s"
         )
 
     def test_an_empty_state_renders_nothing(self) -> None:
@@ -127,10 +127,10 @@ class TestOneBlockPerPrompt:
     def test_a_block_is_appended_once_and_replaced_after_that(self) -> None:
         system = with_run_state("You are an analyst.", "sample: a")
         assert system == f"You are an analyst.\n\n{RUN_STATE_BEGIN}\nsample: a\n{RUN_STATE_END}"
-        again = with_run_state(system, "sample: b\nbudget remaining: 3 steps")
+        again = with_run_state(system, "sample: b\nbudget remaining: 3 model turns")
         assert again.count(RUN_STATE_BEGIN) == 1
         assert "sample: a" not in again
-        assert again.endswith(f"sample: b\nbudget remaining: 3 steps\n{RUN_STATE_END}")
+        assert again.endswith(f"sample: b\nbudget remaining: 3 model turns\n{RUN_STATE_END}")
 
     def test_an_empty_body_takes_the_block_out(self) -> None:
         system = with_run_state("You are an analyst.", "sample: a")
@@ -199,9 +199,11 @@ class TestThePerTurnRefresh:
         agent.run_state_block = "sample: c"
         refresh = agent._run_state_refresher(max_steps=10, timeout=600.0, started=time.monotonic())
         first = refresh({"messages": [SystemMessage(content="sys"), HumanMessage(content="t")]})
-        line = re.search(r"budget remaining: (\d+) steps, (\d+) s", str(first[0].content))
+        line = re.search(r"budget remaining: (\d+) model turns, (\d+) s", str(first[0].content))
         assert line is not None
-        assert int(line.group(1)) == 10
+        # recursion_limit=10 is five model turns: a turn that calls a tool
+        # costs two graph steps, so the first turn reads half the limit.
+        assert int(line.group(1)) == 5
         assert 590 <= int(line.group(2)) <= 600
         later = refresh(
             {
@@ -213,7 +215,9 @@ class TestThePerTurnRefresh:
                 ]
             }
         )
-        assert "budget remaining: 8 steps" in str(later[0].content)
+        # One tool round (two steps) and one plain assistant turn (one step)
+        # leave seven of ten, which is four model turns at most.
+        assert "budget remaining: 4 model turns" in str(later[0].content)
         assert str(later[0].content).count(RUN_STATE_BEGIN) == 1
 
     def test_a_real_executor_calls_the_refresher_before_the_model(self) -> None:
@@ -250,10 +254,24 @@ class TestThePerTurnRefresh:
         executor.invoke({"messages": [SystemMessage(content="sys"), HumanMessage(content="t")]})
         assert seen
         system = str(seen[0][0].content)
-        assert RUN_STATE_BEGIN in system and "budget remaining: 10 steps" in system
+        assert RUN_STATE_BEGIN in system and "budget remaining: 5 model turns" in system
 
     def test_an_agent_without_a_block_hands_the_turn_back_untouched(self) -> None:
         agent = _Analyst()
         refresh = agent._run_state_refresher(max_steps=10, timeout=600.0, started=0.0)
         messages = [SystemMessage(content="sys"), HumanMessage(content="t")]
         assert [m.content for m in refresh({"messages": messages})] == ["sys", "t"]
+
+
+class TestNotRunIsNotFailed:
+    def test_a_skipped_lookup_is_not_listed_as_a_failed_tool(self) -> None:
+        state = {
+            **STATE,
+            "evidence_ledger": [
+                *STATE["evidence_ledger"],
+                _row("reputation", "not run: core.triage.reputation is off", 9, ok=False),
+            ],
+        }
+        text = render_run_state(state)
+        assert "tools failed: capa (pipeline)" in text
+        assert "reputation" not in text.split("tools failed:")[1].splitlines()[0]

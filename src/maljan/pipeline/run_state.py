@@ -17,7 +17,7 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-from maljan.pipeline.triage_pack import PIPELINE, pack_entries, render_pack
+from maljan.pipeline.triage_pack import NOT_RUN_PREFIX, PIPELINE, pack_entries, render_pack
 
 __all__ = [
     "RUN_STATE_BEGIN",
@@ -121,10 +121,13 @@ def _lines(
         first, last = ids[0], ids[-1]
         span = f"{first}–{last}" if first != last else first
         lines.append(f"ledger: {total} entries ({span}), {len(pack)} from the triage pack")
+    # A call that was never made — a skipped lookup, a step after the budget —
+    # is not a failed tool; the pack line says "not done" for it, and so does
+    # this one by leaving it out.
     failed = [
         f"{_get(row, 'tool')} ({_get(row, 'agent') or PIPELINE})"
         for row in rows
-        if _get(row, "ok") is False
+        if _get(row, "ok") is False and not _was_not_made(row)
     ]
     if failed:
         lines.append(
@@ -135,7 +138,7 @@ def _lines(
 
     budget = []
     if steps_left is not None:
-        budget.append(f"{max(0, int(steps_left))} steps")
+        budget.append(f"{max(0, int(steps_left))} model turns")
     if seconds_left is not None:
         budget.append(f"{max(0, int(seconds_left))} s")
     if budget:
@@ -151,3 +154,8 @@ def _get(row: Any, key: str) -> Any:
     if isinstance(row, Mapping):
         return row.get(key)
     return getattr(row, key, None)
+
+
+def _was_not_made(row: Any) -> bool:
+    text = str(_get(row, "error") or _get(row, "output") or "")
+    return text.startswith(NOT_RUN_PREFIX)

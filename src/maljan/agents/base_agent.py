@@ -227,13 +227,21 @@ def _trim_for_synthesis(msgs: list, budget: int) -> list:
     return [*head, *[m for unit in units for m in unit]]
 
 
-# Range constraints derived from the public MITRE ATT&CK Enterprise dataset.
-# Anything outside these bounds is treated as a hallucination.
-_TECHNIQUE_MIN: int = 1001
-_TECHNIQUE_MAX: int = 1700
+def model_turns_left(max_steps: int, messages: list) -> int:
+    """How many model turns the loop still has, counted the way langgraph counts.
 
-# Explicit placeholders that LLMs sometimes emit when uncertain.
-_INVALID_TIDS: frozenset[str] = frozenset({"T0000", "T0000.000", "T9999", "T1234"})
+    ``max_steps`` is handed to langgraph as ``recursion_limit``, and langgraph
+    counts node executions: an assistant turn is one, and a turn that called
+    tools costs a second for the tool node. So the budget in model turns is
+    half the steps, rounded up, less what the transcript already spent — one
+    per assistant turn plus one per tool round. What the model is told is a
+    number it can act on; the graph's own step count is not.
+    """
+    ai_turns = [m for m in messages if getattr(m, "type", "") == "ai"]
+    tool_rounds = sum(1 for m in ai_turns if getattr(m, "tool_calls", None))
+    used = len(ai_turns) + tool_rounds
+    return max(0, (int(max_steps) - used + 1) // 2)
+
 
 # The one human turn a tool loop gets when its last message is neither a
 # structured report nor a findings block. Exactly one: a model that will not
@@ -648,7 +656,11 @@ def parse_structured_claims(text: str) -> list[ClaimEvidence]:
         technique_id: str | None = None
         if technique_match:
             raw_tid = technique_match.group(1).upper()
-            if raw_tid != "NONE" and _technique_id_is_valid(raw_tid):
+            # Kept as written. Whether the id is real, retired or a
+            # placeholder is ``attck.unknown_id``'s question, asked with
+            # feedback and recorded; a parser that dropped it here would be
+            # the silent rewrite this pipeline does not do.
+            if raw_tid != "NONE":
                 technique_id = raw_tid
 
         claims.append(
@@ -662,21 +674,9 @@ def parse_structured_claims(text: str) -> list[ClaimEvidence]:
     return claims
 
 
-def _technique_id_is_valid(tid: str) -> bool:
-    """Return True if a technique ID is within the ATT&CK enterprise range."""
-    if tid in _INVALID_TIDS:
-        return False
-    try:
-        major = int(tid[1:5])
-    except ValueError:
-        return False
-    return _TECHNIQUE_MIN <= major <= _TECHNIQUE_MAX
-
-
 def _extract_technique_ids(text: str) -> list[str]:
-    """Extract all unique valid MITRE ATT&CK technique IDs mentioned in text."""
-    candidates = _TECHNIQUE_RE.findall(text)
-    return list(dict.fromkeys(t for t in candidates if _technique_id_is_valid(t)))
+    """Every distinct technique id mentioned in the text, in order, as written."""
+    return list(dict.fromkeys(_TECHNIQUE_RE.findall(text)))
 
 
 def _messages_text(messages: list) -> str:
@@ -1846,7 +1846,7 @@ class BaseAnalyst(ABC):
             return ""
         budget = []
         if steps_left is not None:
-            budget.append(f"{max(0, int(steps_left))} steps")
+            budget.append(f"{max(0, int(steps_left))} model turns")
         if seconds_left is not None:
             budget.append(f"{max(0, int(seconds_left))} s")
         return f"{body}\nbudget remaining: {', '.join(budget)}" if budget else body
@@ -1882,14 +1882,14 @@ class BaseAnalyst(ABC):
             messages = list(messages)
             if not str(getattr(self, "run_state_block", "") or ""):
                 return messages
-            # A step is a model turn. The framing and the tool results are
-            # not steps, so the first turn reads the whole budget and each
-            # assistant turn since then takes one off it.
-            spent = sum(1 for m in messages if getattr(m, "type", "") == "ai")
+            # The budget is stated in model turns (``model_turns_left``): the
+            # framing and the tool results cost nothing, an assistant turn
+            # costs one and a tool round costs one more, which is how the
+            # graph's recursion limit is spent.
             try:
                 return self.frame_messages(
                     messages,
-                    steps_left=max_steps - spent,
+                    steps_left=model_turns_left(max_steps, messages),
                     seconds_left=float(timeout) - (time.monotonic() - started),
                 )
             except Exception as exc:  # noqa: BLE001 — the block never costs a turn
@@ -1958,7 +1958,9 @@ class BaseAnalyst(ABC):
 
         # The two standing blocks: the pack at the head of the task, the run
         # state in the system turn with this loop's whole budget still ahead.
-        prebuilt = self.frame_messages(prebuilt, steps_left=max_steps, seconds_left=float(timeout))
+        prebuilt = self.frame_messages(
+            prebuilt, steps_left=model_turns_left(max_steps, []), seconds_left=float(timeout)
+        )
 
         if not self.tools:
             return self._capture_findings(self._invoke_llm_with_timeout(prebuilt, timeout))
@@ -1996,6 +1998,11 @@ class BaseAnalyst(ABC):
         # The run-state block is regenerated on every model turn with the
         # budget this loop has left, which is why the executor's prompt is a
         # callable rather than the fixed messages.
+        # The per-turn refresher rides ``create_react_agent(prompt=...)``, which
+        # langgraph 1.x deprecates in favour of ``langchain.agents.create_agent``
+        # and its middleware hook. The contract this loop needs is one call
+        # before every model turn that can replace the system message; that is
+        # what moves when the helper does.
         agent_executor = create_react_agent(
             self.llm,
             record_tools(self.pinned_tools(), recorder, repeats),
@@ -2272,7 +2279,7 @@ class BaseAnalyst(ABC):
         """
         from langchain_core.messages import HumanMessage
 
-        remaining_steps = max_steps - len(msgs)
+        remaining_steps = model_turns_left(max_steps, list(msgs))
         if remaining_steps < 1:
             self.logger.info(
                 "%s: no step budget left for the final-answer nudge.",

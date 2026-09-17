@@ -117,8 +117,10 @@ class TestTheNudge:
         llm = _FakeLLM([_REPORT])
         analyst = _Analyst(llm)
 
+        # One assistant turn under a recursion limit of one is the whole
+        # budget in model turns; there is no turn left for the nudge.
         answer = analyst._nudge_for_final_answer(
-            _conversation(), timeout=60, elapsed=1.0, max_steps=3
+            _conversation(), timeout=60, elapsed=1.0, max_steps=1
         )
 
         assert answer is None
