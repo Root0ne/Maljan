@@ -29,7 +29,12 @@ from maljan.agents.judge_agent import JudgeVerdict
 from maljan.core.config import JUDGE_AGENT_KEY, Settings
 from maljan.core.token_ledger import TokenLedger
 from maljan.core.truncation_ledger import TruncationLedger
-from maljan.pipeline.nodes import ROOM_SPEAKER, make_judge_node, make_negotiation_node
+from maljan.pipeline.nodes import (
+    ROOM_SPEAKER,
+    make_judge_node,
+    make_negotiation_node,
+    make_revision_node,
+)
 from maljan.schemas.evidence import EvidenceCounter
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 from maljan.schemas.stix_models import Bundle
@@ -193,3 +198,59 @@ class TestAWatcherIsNotAParticipant:
         assert "[ERROR]" in message["text"]
         assert "RuntimeError" in message["text"]
         assert "secret.sock" not in message["text"]
+
+
+class TestAFailedRevisionNamesItsException:
+    """The third failure path, held to the rule the other two already keep.
+
+    A revision that dies is published to every reader of the run, and the
+    exception it died of is whatever the tool, the transport or the model
+    server put in it — a socket path, a host, a bearer token. The class of it
+    says as much as a reader of the console can act on; the operator's log
+    keeps the words.
+    """
+
+    def _revise(self, sink: Recorder, error: BaseException, *, parallel: bool) -> dict[str, Any]:
+        container = _container(sink, agents=["static"])
+        container.config.llm.parallel_analysts = parallel
+        container.load_chunked.side_effect = RuntimeError("force the load_data fallback")
+        container.load_data.return_value = "raw analysis data"
+        agent = MagicMock()
+        # `safe_revise_isr` is synchronous; the node runs it on a thread.
+        agent.safe_revise_isr = MagicMock(side_effect=error)
+        container.get_agent.return_value = agent
+        return asyncio.run(
+            make_revision_node(container)(
+                {"iteration_count": 1, "reports": {"static": "the first report"}}
+            )
+        )
+
+    def test_the_class_is_named_and_the_message_is_not(self) -> None:
+        rec = Recorder()
+        self._revise(
+            rec,
+            ConnectionError("POST https://user:hunter2@llm.internal/v1 refused"),
+            parallel=True,
+        )
+
+        failure = next(m for m in rec.messages() if m["status"] == "failed")
+        assert failure["speaker"] == "static"
+        assert "ConnectionError" in failure["text"]
+        assert "hunter2" not in failure["text"]
+        assert "llm.internal" not in failure["text"]
+
+    def test_the_sequential_path_says_the_same_thing(self) -> None:
+        # The two branches build the failure list differently — gather returns
+        # the exception, the loop catches it — and both reach this line.
+        rec = Recorder()
+        self._revise(rec, RuntimeError("socket /tmp/secret.sock refused"), parallel=False)
+
+        failure = next(m for m in rec.messages() if m["status"] == "failed")
+        assert "RuntimeError" in failure["text"]
+        assert "secret.sock" not in failure["text"]
+
+    def test_the_analyst_keeps_the_report_it_had(self) -> None:
+        rec = Recorder()
+        result = self._revise(rec, RuntimeError("boom"), parallel=True)
+
+        assert result["revised_reports"]["static"] == "the first report"

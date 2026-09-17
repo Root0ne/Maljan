@@ -2497,7 +2497,12 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     container.event_sink,
                     speaker=name,
                     role="reviser",
-                    text=f"[ERROR] {name} revision failed: {result}",
+                    # The class of the failure and nothing else, as the judge
+                    # and the mediator already say it. The log above keeps the
+                    # exception's own words for an operator; this line goes to
+                    # every reader of the run, and an exception's text can
+                    # carry a path, a host or a credential.
+                    text=f"[ERROR] {name} revision failed ({type(result).__name__}).",
                     round_index=iteration,
                     status="failed",
                     stage=stage_key_of(stage, "debate"),
