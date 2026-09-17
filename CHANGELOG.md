@@ -370,8 +370,15 @@ change landed on `main`.
   model, the endpoint and the probe's last message; saving a per-agent model is
   refused with the same sentence, and the console shows it as written in both
   places. A changed endpoint or model finds no row and is refused until it is
-  probed. `core.llm.require_probe` is on; turning it off is the only way past,
-  for an air-gapped batch run.
+  probed. Where a call goes is worked out once, in
+  `maljan.core.model_assignments`, for the probe and the gate alike, so a
+  vendor API and a base URL with a trailing slash file and resolve under one
+  spelling. The `llm` probe asks each pair once and one at a time, ninety
+  seconds per call and five minutes for the whole probe; a pair there was no
+  room left to ask is named as not tried and files no row, and a failing pair's
+  sentence prints its endpoint as scheme and host.
+  `core.llm.require_probe` is on; turning it off is the only way past, for an
+  air-gapped batch run.
 - **The same indicator or finding said twice is written once.**
   `reporting.dedupe` says what makes two indicators one — the kind and the
   value with its case, its padding and its defanging undone — and both the

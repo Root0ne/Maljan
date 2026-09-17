@@ -186,14 +186,31 @@ actually completed a call with, carrying the provider, whether the model
 answered and the sentence it came back with. The `llm` probe completes one call
 per pair it will file: the selected provider's **expert** model at its own
 endpoint, and every per-agent override at *its* own endpoint, which is how a
-second llama.cpp or a second Ollama host is proved. It does not file the judge
-model, which it lists and never calls. The `agent` probe files the one pair its
-agent would use.
+second llama.cpp or a second Ollama host is proved. Anthropic and Gemini have
+one endpoint apiece, named rather than addressed, so a per-agent entry there
+differs only in its model — and each is still asked, because a key may be
+refused for one model and not another. The same pair named twice is one call
+and one row. The judge model is listed and never called, so it is not filed.
+The `agent` probe files the one pair its agent would use.
+
+Where a call goes is worked out in one place (`maljan.core.model_assignments`)
+for the probe and for the gate alike, trailing slash and all, so a base URL
+typed `http://box:8080/v1/` files and resolves under the same spelling as the
+same URL typed without it.
 
 A call that ran out of time leaves **no** row at all — neither a pass nor a
 failure. Nothing was learned about that pair, and writing a cold model down as
 a missing one would lock the operator out of their own jobs; the probe says so
 and asks to be run again once the model is warm.
+
+**What it costs.** The `llm` probe asks its pairs one after another — a single
+local server told to load several models at once is the failure this project
+has already diagnosed — with ninety seconds for each call and five minutes for
+the whole probe. A pair there was no room left to ask is named in the answer as
+not tried and files no row, exactly as a timeout does; pressing **Test** again
+asks it. In a failing pair's sentence an endpoint is printed as its scheme and
+host, so a base URL that carries credentials does not reach the screen or the
+stored row.
 
 **Where the gate stands.** Submitting a job reads that record for every model
 the run can reach — the agents its team's stages name, and every agent those

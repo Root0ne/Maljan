@@ -47,6 +47,31 @@ class _Db:
         return result
 
 
+class _Store:
+    """A session that keeps what ``record_probe`` writes and answers what reads it.
+
+    The point of writing through the real recorder rather than building rows by
+    hand is that the recorder has a rule of its own — a pair with an empty half
+    is dropped — and a probe whose rows it silently drops is exactly the gap
+    these tests are here to close.
+    """
+
+    def __init__(self) -> None:
+        self.rows: list[Any] = []
+
+    async def execute(self, _statement: Any) -> Any:
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = None
+        result.scalars.return_value.all.return_value = list(self.rows)
+        return result
+
+    def add(self, row: Any) -> None:
+        self.rows.append(row)
+
+    async def commit(self) -> None:
+        return None
+
+
 class TestWhereACallWouldGo:
     def test_an_agent_with_no_override_inherits_the_global_expert_model(self) -> None:
         settings = _settings(provider="ollama", ollama={"expert_model": "qwen3.5:9b"})
@@ -259,3 +284,130 @@ class TestSubmitting:
 
     def test_a_team_whose_models_were_all_reached_is_accepted(self, client) -> None:
         assert _submit(client, []).status_code == 201
+
+
+class TestOneAddressUnderBothHalves:
+    """What the probe files and what the gate looks up are one pair.
+
+    The two used to be two computations of the same thing, and they agreed
+    until they did not: a vendor API that has no URL, a base URL typed with a
+    trailing slash. Either way the operator saw a green **Test** followed by a
+    refused job, with nothing on either screen naming the disagreement.
+    """
+
+    CASES = {
+        "openai": (
+            {
+                "provider": "openai",
+                "base_url": "http://box:8080/v1/",
+                "api_key": "k",
+                "expert_model": "qwen",
+            },
+            {
+                "provider": "openai",
+                "openai": {"base_url": "http://box:8080/v1/", "expert_model": "qwen"},
+            },
+        ),
+        "ollama": (
+            {
+                "provider": "ollama",
+                "ollama_base_url": "http://ollama:11434/",
+                "ollama_expert_model": "qwen3:8b",
+                "ollama_judge_model": "qwen3:8b",
+            },
+            {
+                "provider": "ollama",
+                "ollama": {"base_url": "http://ollama:11434/", "expert_model": "qwen3:8b"},
+            },
+        ),
+        "anthropic": (
+            {
+                "provider": "anthropic",
+                "anthropic_api_key": "k",
+                "anthropic_expert_model": "claude-x",
+            },
+            {"provider": "anthropic", "anthropic": {"expert_model": "claude-x"}},
+        ),
+        "gemini": (
+            {
+                "provider": "gemini",
+                "gemini_api_key": "k",
+                "gemini_expert_model": "gemini-2.5-pro",
+            },
+            {"provider": "gemini", "gemini": {"expert_model": "gemini-2.5-pro"}},
+        ),
+    }
+
+    @staticmethod
+    def _server(provider: str):
+        """A stand-in for one provider: a catalogue on GET, one short answer on POST."""
+        import httpx
+
+        listing = {
+            "openai": {"data": [{"id": "qwen"}]},
+            "anthropic": {"data": [{"id": "claude-x"}]},
+            "ollama": {"models": [{"name": "qwen3:8b"}]},
+            "gemini": {"models": [{"name": "models/gemini-2.5-pro"}]},
+        }[provider]
+        answer = {
+            "openai": {"choices": [{"message": {"content": "OK"}}]},
+            "anthropic": {"content": [{"type": "text", "text": "OK"}]},
+            "ollama": {"response": "OK"},
+            "gemini": {"candidates": [{"content": {"parts": [{"text": "OK"}]}}]},
+        }[provider]
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json=answer if request.method == "POST" else listing)
+
+        return handler
+
+    async def _probed(self, monkeypatch, provider: str) -> list[dict[str, Any]]:
+        import httpx
+
+        from app.services import settings_probes as probes
+
+        monkeypatch.setattr(
+            probes,
+            "_client",
+            lambda *_a, **_k: httpx.AsyncClient(
+                transport=httpx.MockTransport(self._server(provider)), timeout=10
+            ),
+        )
+        result = await probes.probe_llm(dict(self.CASES[provider][0]))
+        assert result.ok, result.detail
+        return list((result.details or {})["completions"])
+
+    @pytest.mark.parametrize("provider", ["openai", "ollama", "anthropic", "gemini"])
+    @pytest.mark.asyncio
+    async def test_the_pair_filed_is_the_pair_the_gate_resolves(
+        self, provider: str, monkeypatch
+    ) -> None:
+        completions = await self._probed(monkeypatch, provider)
+        settings = _settings(**self.CASES[provider][1])
+
+        filed = {(pair["endpoint"], pair["model"]) for pair in completions}
+
+        assert filed == {assignment_for(settings, "static").key}
+        assert all(pair["endpoint"] for pair in completions), "an empty endpoint files no row"
+
+    @pytest.mark.parametrize("provider", ["anthropic", "gemini"])
+    @pytest.mark.asyncio
+    async def test_a_test_then_a_submit_passes_the_gate(self, provider: str, monkeypatch) -> None:
+        """The vendor APIs, end to end: press Test, then submit a job."""
+        from app.services.model_probes import record_probe
+
+        completions = await self._probed(monkeypatch, provider)
+        store = _Store()
+        for pair in completions:
+            await record_probe(
+                store,
+                endpoint=pair["endpoint"],
+                model=pair["model"],
+                provider=pair["provider"],
+                ok=pair["ok"],
+                detail=pair["detail"],
+            )
+
+        assert store.rows, "the probe filed something"
+        settings = _settings(**self.CASES[provider][1])
+        assert await unprobed_models(store, settings, ["static", "network"]) == []

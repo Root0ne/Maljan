@@ -804,3 +804,145 @@ def test_the_per_agent_map_is_annotated_with_the_llm_probe():
     from maljan.core.settings_annotations import ANNOTATIONS
 
     assert ANNOTATIONS["llm.agents"].get("probe") == "llm"
+
+
+@pytest.mark.asyncio
+async def test_the_llm_probe_asks_one_pair_once(monkeypatch):
+    """Agents that all name the global model at the global endpoint are one call.
+
+    On a local server every completion is a model load, so six ways of asking
+    the same question would be six loads for one answer.
+    """
+    asked = []
+
+    def handler(req: httpx.Request):
+        if req.url.path.endswith("/api/generate"):
+            asked.append(json.loads(req.content or b"{}").get("model", ""))
+            return httpx.Response(200, json={"response": "OK"})
+        return httpx.Response(200, json={"models": [{"name": "qwen3:8b"}]})
+
+    monkeypatch.setattr(
+        probes,
+        "_client",
+        lambda *_a, **_k: httpx.AsyncClient(transport=transport(handler), timeout=10),
+    )
+    r = await probes.probe_llm(
+        {
+            "provider": "ollama",
+            "ollama_base_url": "http://ollama:11434",
+            "ollama_expert_model": "qwen3:8b",
+            "ollama_judge_model": "qwen3:8b",
+            "agents": {
+                name: {"provider": "ollama", "model": "qwen3:8b"}
+                for name in ("static", "network", "dynamic", "reverser", "triage")
+            },
+        }
+    )
+
+    assert asked == ["qwen3:8b"], "one pair, one call"
+    assert r.ok is True
+    assert (r.details or {})["completions"] == [
+        {
+            "endpoint": "http://ollama:11434",
+            "model": "qwen3:8b",
+            "provider": "ollama",
+            "ok": True,
+            "detail": "'qwen3:8b' answered",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_the_llm_probe_stops_at_its_own_budget_and_says_what_it_did_not_try(monkeypatch):
+    """The whole probe is bounded, and an unasked pair files nothing.
+
+    A person is at the button. Pairs are asked one after another, so their
+    budgets add up; the ones there was no room left for are named, and pressing
+    Test again asks them.
+    """
+
+    class _Clock:
+        """Time that only moves when a completion is made, a whole budget at a time."""
+
+        def __init__(self) -> None:
+            self.now = 0.0
+
+        def monotonic(self) -> float:
+            return self.now
+
+        def perf_counter(self) -> float:
+            return self.now
+
+    clock = _Clock()
+
+    def handler(req: httpx.Request):
+        if req.url.path.endswith("/api/generate"):
+            clock.now += probes.COMPLETION_TIMEOUT
+            return httpx.Response(200, json={"response": "OK"})
+        return httpx.Response(200, json={"models": [{"name": "qwen3:8b"}]})
+
+    monkeypatch.setattr(probes, "time", clock)
+    monkeypatch.setattr(
+        probes,
+        "_client",
+        lambda *_a, **_k: httpx.AsyncClient(transport=transport(handler), timeout=10),
+    )
+    r = await probes.probe_llm(
+        {
+            "provider": "ollama",
+            "ollama_base_url": "http://ollama:11434",
+            "ollama_expert_model": "qwen3:8b",
+            "ollama_judge_model": "qwen3:8b",
+            "agents": {
+                "a1": {"provider": "ollama", "model": "qwen3:1b"},
+                "a2": {"provider": "ollama", "model": "qwen3:2b"},
+                "a3": {"provider": "ollama", "model": "qwen3:3b"},
+                "a4": {"provider": "ollama", "model": "qwen3:4b"},
+            },
+        }
+    )
+
+    filed = [pair["model"] for pair in (r.details or {})["completions"]]
+    fits = int(probes.LLM_PROBE_BUDGET_SECONDS // probes.COMPLETION_TIMEOUT)
+    assert filed == ["qwen3:8b", "qwen3:1b", "qwen3:2b"][:fits]
+    assert r.ok is False, "a pair nobody asked is not a pass"
+    assert f"not tried within {int(probes.LLM_PROBE_BUDGET_SECONDS)} s" in r.detail
+    assert "a3=qwen3:3b" in r.detail and "a4=qwen3:4b" in r.detail
+    assert "press Test again" in r.detail
+
+
+@pytest.mark.asyncio
+async def test_a_failing_pair_names_its_server_and_nothing_else(monkeypatch):
+    """The sentence reaches the operator's screen and the stored row.
+
+    A base URL may carry credentials in front of the host and a path behind it;
+    neither says which server answered.
+    """
+    base = _dsn("http", "opuser:opsecret", "box:8080/v1")
+
+    def handler(req: httpx.Request):
+        if req.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": "qwen"}]})
+        return httpx.Response(404, json={"error": "no such model"})
+
+    monkeypatch.setattr(
+        probes,
+        "_client",
+        lambda *_a, **_k: httpx.AsyncClient(transport=transport(handler), timeout=10),
+    )
+    r = await probes.probe_llm(
+        {
+            "provider": "openai",
+            "base_url": "http://box:8080/v1",
+            "api_key": "k",
+            "expert_model": "qwen",
+            "agents": {"judge": {"provider": "openai", "model": "ghost", "base_url": base}},
+        }
+    )
+
+    assert r.ok is False
+    assert "judge=ghost @ http://box:8080" in r.detail
+    assert "opuser" not in r.detail and "opsecret" not in r.detail
+    assert "/v1" not in r.detail, "a path says nothing about which server answered"
+    filed = {(pair["endpoint"], pair["model"]) for pair in (r.details or {})["completions"]}
+    assert (base, "ghost") in filed, "the row is still filed under the address it called"
