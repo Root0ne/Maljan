@@ -45,6 +45,23 @@ change landed on `main`.
   markers, regenerated on every model turn of a tool loop and never trimmed.
   With a pack present, `isr.ungrounded_technique` no longer exempts an analyst
   whose own ledger is empty: the pack's ids are citable by every agent.
+- **The ATT&CK technique check comes back in four parts, none of them a
+  rewrite.** Validity keeps `attck.unknown_id` and, when the catalogue cannot
+  be read, records `validation.not_run` and a degradation reason instead of
+  an empty result. `attck.platform_mismatch` puts the catalogue's domain and
+  platforms against the routed sample in the analyst's loop and on the
+  judge's attack-patterns; `CapabilityCell` carries `domain` and `platforms`
+  and the FP linter's C1 reads them. `attck.weak_alignment` is the paper's
+  gate: on a warm ATT&CK index the claim text is ranked, the id's gate score
+  and the top candidates are written on the claim and shown to the judge and
+  in the report, and an id the index neither ranked nor scored above
+  `validation.alignment_threshold` is questioned once — never substituted.
+  `run_summary.corroboration` becomes `{technique: {asserted_by, claimed_by}}`,
+  the deterministic sources that carry their own ids (capa, sigma, lolbin,
+  api_capability) beside the agents, with no weights; the report renders the
+  table and the console's technique cards show the two lists. Settings:
+  `validation.alignment_gate` (auto | off), `validation.alignment_gate_build`
+  (false) and `validation.alignment_threshold` (0.05).
 - **A Malware verdict over a run nobody analysed is challenged, like Benign.**
   `verdict.unsupported_malware` asks the judge to cite the entries that
   establish it — a reputation entry, a YARA or capa hit — or to return

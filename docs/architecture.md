@@ -186,6 +186,48 @@ Two producers use it:
   claim citing no evidence. An id that survives the retry keeps the analyst's
   spelling and is flagged `technique_id_valid=False`; the report, the STIX
   minting step and the FP linter read the flag.
+
+### The technique check
+
+Four parts, all in `pipeline/validation.py` and `tools/knowledge.py`, none of
+them a rewrite: the check produces violations and annotations, and the id an
+analyst wrote stays the id in the report.
+
+1. **Validity** (`attck.unknown_id`, exact). Every id against the vendored
+   catalogue. When the catalogue cannot be read the check says so instead of
+   answering "nothing unknown": `run_summary.validation.not_run` lists
+   `attck.unknown_id` and the run carries a degradation reason.
+2. **Domain and platform consistency** (`attck.platform_mismatch`, exact). The
+   catalogue's domain and platforms for the id against the routed sample —
+   a Windows PE is `enterprise`/Windows, an APK `mobile`/Android, an ELF
+   `enterprise`/Linux, a Mach-O `enterprise`/macOS, an unknown platform is no
+   check. Raised in the analyst's loop and on the judge's attack-patterns;
+   the feedback names the technique, its domain and platforms and the
+   sample's. `CapabilityCell` carries `domain` and `platforms` from the
+   catalogue and the FP linter's C1 reads them.
+3. **Alignment** (`attck.weak_alignment`, the paper's gate, heuristic). For
+   every technique an analyst keeps, the claim text is ranked against the
+   hybrid ATT&CK index; the claimed id's own TF-IDF gate score and the index's
+   top candidates are written on the claim (`ClaimEvidence.alignment`). The
+   violation is raised only when the index neither ranked the id among its
+   candidates nor scored it at or above `validation.alignment_threshold`
+   (0.05); the feedback lists the candidates and says the analyst may keep
+   the id and say why. It runs only when the index is warm in this worker
+   (`validation.alignment_gate = auto`); `validation.alignment_gate_build`
+   lets the first run that wants it start the build on a thread and go
+   without. The index never substitutes an id.
+4. **Corroboration** (exact). Per technique in the run, `asserted_by` — the
+   deterministic sources carrying their own ATT&CK ids: capa's `attck`
+   field, a Sigma rule's technique tags, `lolbin_lookup`, `api_capability`'s
+   technique rules — and `claimed_by`, the agents. Two flat lists in
+   `run_summary.corroboration`, rendered as a table in the report and shown
+   on the console's technique cards. No weights, no score; a technique
+   nothing asserted keeps its row with the empty list showing, which is the
+   firing-rate reading the paper argues for.
+
+What the check questioned and the analyst kept reaches the judge as a
+`TECHNIQUE CHECK` block beside the evidence summary, and the report's
+validation section lists the unresolved rows with their messages.
 * **The judge** (`agents/judge_agent.py`) — `validate_verdict_bundle` reports an
   indicator whose pattern names a value no tool in the run saw, an
   attack-pattern with an unresolvable id, a severity outside the enum, and a

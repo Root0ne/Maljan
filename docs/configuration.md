@@ -394,6 +394,14 @@ pack runs the real tools in mock mode too, so a local observation run with a
 reputation server enabled makes that one outbound call; a team that withholds
 the server, or `triage.reputation = off`, keeps such a run offline.
 
+The technique check's one heuristic part has three settings in the same
+group: `validation.alignment_gate` (`auto` runs the alignment gate only on a
+worker whose ATT&CK index is already built; `off` never),
+`validation.alignment_gate_build` (false; true lets the first run that wants
+the gate build the index once, on a thread, and go without it) and
+`validation.alignment_threshold` (0.05, the paper's gate). See *The technique
+check* in [architecture.md](architecture.md).
+
 `mobile` and `deep_static` are built from three seeded generic agent
 definitions — `triage`, `android_static` and `reverser` — whose prompts live in
 `src/maljan/agents/prompts/`. A generic agent has no class: it is a definition,
