@@ -906,7 +906,7 @@ class MarkdownRenderer:
             lines.append(f"- Report sections with no evidence: {ungrounded}")
         corroboration = run_summary.get("corroboration") or {}
         if corroboration:
-            from maljan.pipeline.validation import corroboration_sources
+            from maljan.analysis.corroboration import corroboration_sources, technique_label
 
             multi = sum(1 for row in corroboration.values() if len(corroboration_sources(row)) > 1)
             asserted = sum(
@@ -936,15 +936,23 @@ class MarkdownRenderer:
             lines.append("")
             lines.append("**Corroboration per technique:**")
             lines.append("")
-            lines.append("| Technique | Asserted by | Claimed by |")
-            lines.append("|---|---|---|")
+            lines.append(
+                "_Catalogue is the API table's association, shown for reference; "
+                "it is not a rule match and counts for nothing._"
+            )
+            lines.append("")
+            lines.append("| Technique | Asserted by | Claimed by | Catalogue |")
+            lines.append("|---|---|---|---|")
             for tid, row in sorted(corroboration.items()):
                 if isinstance(row, dict):
                     asserted_by = ", ".join(row.get("asserted_by") or []) or "—"
                     claimed_by = ", ".join(row.get("claimed_by") or []) or "—"
+                    associated = ", ".join(row.get("associated_by") or []) or "—"
                 else:
                     asserted_by, claimed_by = "—", ", ".join(str(s) for s in row) or "—"
-                lines.append(f"| {tid} | {asserted_by} | {claimed_by} |")
+                    associated = "—"
+                label = technique_label(str(tid), row if isinstance(row, dict) else None)
+                lines.append(f"| {label} | {asserted_by} | {claimed_by} | {associated} |")
             lines.append("")
         return "\n".join(lines)
 

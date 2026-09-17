@@ -28,7 +28,11 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from maljan.analysis.corroboration import corroboration_row, corroboration_sources
+from maljan.analysis.corroboration import (
+    corroboration_row,
+    corroboration_sources,
+    technique_label,
+)
 
 # ---------------------------------------------------------------------------
 # Sub-components
@@ -337,8 +341,8 @@ class RunSummary:
                 "their own ATT&CK ids, and the agents. Two lists, not a combined confidence:",
                 "nothing here multiplies one layer's number by another's.",
                 "",
-                "| Technique | Asserted by | Claimed by |",
-                "|---|---|---|",
+                "| Technique | Asserted by | Claimed by | Catalogue |",
+                "|---|---|---|---|",
             ]
             for tid, sources in sorted(
                 self.corroboration.items(),
@@ -346,7 +350,10 @@ class RunSummary:
             ):
                 asserted = ", ".join(sources.get("asserted_by") or []) or "—"
                 claimed = ", ".join(sources.get("claimed_by") or []) or "—"
-                lines.append(f"| {tid} | {asserted} | {claimed} |")
+                associated = ", ".join(sources.get("associated_by") or []) or "—"
+                lines.append(
+                    f"| {technique_label(tid, sources)} | {asserted} | {claimed} | {associated} |"
+                )
             lines.append("")
             if self.techniques_by_layer:
                 lines.append("**Per-source attribution:**")
@@ -478,8 +485,7 @@ class RunSummary:
             ],
             "validation": None,
             "corroboration": {
-                k: {"asserted_by": list(v["asserted_by"]), "claimed_by": list(v["claimed_by"])}
-                for k, v in sorted(self.corroboration.items())
+                k: corroboration_row(v) for k, v in sorted(self.corroboration.items())
             },
             "tokens": None,
             "degraded_mode": self.degraded_mode,

@@ -6,8 +6,10 @@ import { useReport } from "../layout";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import {
+  associatedBy,
   corroborationLists,
   corroborationSources,
+  retiredIn,
   isCorroborated,
   orderedTactics,
   parseTechniques,
@@ -199,6 +201,11 @@ export default function AttackTab() {
                             <summary className="text-[10px] uppercase tracking-wider text-text-muted cursor-pointer">
                               Asserted by {lists.asserted_by.length}
                               , claimed by {lists.claimed_by.length}
+                              {retiredIn(corroboration, tech.id) && (
+                                <span className="ml-1 normal-case tracking-normal text-status-orange">
+                                  (retired in ATT&amp;CK {retiredIn(corroboration, tech.id)})
+                                </span>
+                              )}
                             </summary>
                             <div className="mt-1 space-y-1">
                               <div>
@@ -228,6 +235,12 @@ export default function AttackTab() {
                                   ))}
                                 </ul>
                               </div>
+                              {associatedBy(corroboration, tech.id).length > 0 && (
+                                <div className="text-[11px] text-text-muted">
+                                  Catalogue association (reference, not a source):{" "}
+                                  <span className="font-mono">{associatedBy(corroboration, tech.id).join(", ")}</span>
+                                </div>
+                              )}
                             </div>
                           </details>
                         )}

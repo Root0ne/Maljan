@@ -47,7 +47,6 @@ MAX_SUGGESTIONS = 3
 # as noise rather than as a correction.
 MAX_SCHEMA_VIOLATIONS = 6
 
-_TID_RE = TECHNIQUE_ID_EXACT_RE
 
 # The literals a STIX pattern quotes, e.g. ``[file:name = 'x.exe']`` -> ``x.exe``.
 _PATTERN_LITERAL_RE = re.compile(r"'([^']*)'")
@@ -997,7 +996,7 @@ def _claimed(pattern: re.Pattern[str], text: str) -> bool:
 def _base_technique(technique_id: Any) -> str:
     """``T1055.012`` as ``T1055``; anything else as ""."""
     value = str(technique_id or "").strip().upper()
-    return value.split(".")[0] if _TID_RE.match(value) else ""
+    return value.split(".")[0] if TECHNIQUE_ID_EXACT_RE.match(value) else ""
 
 
 def ungrounded_capabilities(
@@ -1148,7 +1147,7 @@ def validate_verdict_bundle(
             tid = _attack_pattern_technique_id(obj)
             if not tid:
                 continue
-            if not _TID_RE.match(tid):
+            if not TECHNIQUE_ID_EXACT_RE.match(tid):
                 violations.append(
                     Violation(
                         code="stix.unknown_technique",
@@ -1723,20 +1722,25 @@ def validation_metrics(
 
 # What the deterministic sources are called in a corroboration row. The
 # tools that carry their own ATT&CK ids: capa's ``attck`` field, a Sigma rule's
-# tags, ``lolbin_lookup``'s technique id, ``api_capability``'s technique rules.
+# tags, a YARA TTP rule's ``meta.technique_id``, ``lolbin_lookup``'s technique
+# id.
 # A tool this table does not name is listed under its own name.
 ASSERTING_SOURCES: dict[str, str] = {
     "capa": "capa",
     "sigma_match": "sigma",
     "sigma_match_sandbox": "sigma",
     "lolbin_lookup": "lolbin",
-    "api_capability": "api_capability",
+    # Our own YARA TTP rules carry ``meta.technique_id``; a match asserts it.
+    "yara_scan": "yara",
 }
+# ``api_capability`` is deliberately absent: the API catalogue associates a
+# technique with an import set, it does not observe one. Its associations
+# travel under ``associated_by`` and never count as a source.
 
 
 def corroboration(
     isrs: dict[str, Any] | None, ledger: Sequence[Any] | None
-) -> dict[str, dict[str, list[str]]]:
+) -> dict[str, dict[str, Any]]:
     """Per technique id, who asserted it and who claimed it, by name.
 
     ``asserted_by`` is the deterministic sources that carry their own ATT&CK
@@ -1751,11 +1755,15 @@ def corroboration(
     The same collection feeds the judge's evidence-summary block, so the metric
     the report carries and the block the judge read cannot disagree.
     """
-    from maljan.pipeline.evidence_summary import collect
+    from maljan.pipeline.evidence_summary import catalogue_associations, collect
 
     agents = {str(getattr(isr, "agent_id", "") or name) for name, isr in (isrs or {}).items()}
+    associations = catalogue_associations(ledger)
     out: dict[str, dict[str, list[str]]] = {}
-    for tid, sources in sorted(collect(isrs, ledger).items()):
+    collected = collect(isrs, ledger)
+    for tid in associations:
+        collected.setdefault(tid, [])
+    for tid, sources in sorted(collected.items()):
         asserted: list[str] = []
         claimed: list[str] = []
         for source, _confidence in sources:
@@ -1766,8 +1774,25 @@ def corroboration(
                 label = ASSERTING_SOURCES.get(source, source)
                 if label not in asserted:
                     asserted.append(label)
-        out[tid] = {"asserted_by": sorted(asserted), "claimed_by": sorted(claimed)}
+        row: dict[str, Any] = {"asserted_by": sorted(asserted), "claimed_by": sorted(claimed)}
+        if tid in associations:
+            row["associated_by"] = list(associations[tid])
+        # Upstream Sigma rules and the case corpus still name ids the
+        # catalogue retired; the row says so, the way the validity message does.
+        retired = _retired_release(tid)
+        if retired:
+            row["retired_in"] = retired
+        out[tid] = row
     return out
+
+
+def _retired_release(technique_id: str) -> str | None:
+    try:
+        from maljan.memory.attck_loader import retired_in
+
+        return retired_in(technique_id)
+    except Exception:  # noqa: BLE001 — a note, not a check
+        return None
 
 
 UNSUPPORTED_MALWARE_CODE = "verdict.unsupported_malware"

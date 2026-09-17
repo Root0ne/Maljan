@@ -31,8 +31,6 @@ MAX_TECHNIQUES = 25
 # How many sources are listed per technique before the rest are counted.
 MAX_SOURCES_PER_TECHNIQUE = 6
 
-_TID_RE = TECHNIQUE_ID_EXACT_RE
-
 
 def summarise(isrs: dict[str, Any] | None, ledger: Sequence[Any] | None = None) -> str:
     """The evidence summary block, or "" when nothing named a technique."""
@@ -73,7 +71,7 @@ def collect(
     seen: dict[str, set[str]] = {}
 
     def add(tid: str, source: str, confidence: float | None) -> None:
-        if not _TID_RE.match(tid):
+        if not TECHNIQUE_ID_EXACT_RE.match(tid):
             return
         if source in seen.setdefault(tid, set()):
             return
@@ -95,18 +93,31 @@ def collect(
 
     for entry in ledger or []:
         tool = str(getattr(entry, "tool", "") or "tool")
-        structured = getattr(entry, "structured", None)
-        # The API rules assert a technique only when the import set cleared
-        # the rule's floor; a rule that merely lists one of the APIs does not.
-        ids = (
-            {hit["technique_id"] for hit in api_capability_hits(structured)}
-            if tool == "api_capability"
-            else _technique_ids(structured)
-        )
-        for tid in ids:
+        # The API catalogue associates a technique with an import set; it did
+        # not observe the technique, and BitBlt plus CreateCompatibleDC reads
+        # as screen capture on any GUI program. Associations are read by
+        # ``catalogue_associations`` and shown apart; they never assert.
+        if tool == "api_capability":
+            continue
+        for tid in _technique_ids(getattr(entry, "structured", None)):
             add(tid, tool, None)
 
     return rows
+
+
+def catalogue_associations(ledger: Sequence[Any] | None) -> dict[str, list[str]]:
+    """``{technique_id: ["api_capability"]}`` for the rules the import set cleared.
+
+    Reference, not evidence: the table says these APIs are listed under the
+    technique, and a reader may weigh that; nothing counts it as a source.
+    """
+    out: dict[str, list[str]] = {}
+    for entry in ledger or []:
+        if str(getattr(entry, "tool", "") or "") != "api_capability":
+            continue
+        for hit in api_capability_hits(getattr(entry, "structured", None)):
+            out.setdefault(hit["technique_id"], ["api_capability"])
+    return out
 
 
 def _as_confidence(value: Any) -> float | None:

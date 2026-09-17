@@ -56,7 +56,10 @@ def attck_validate(ids: list[str]) -> dict[str, Any]:
 
 @mcp.tool()
 def api_capability(api_names: list[str]) -> dict[str, Any]:
-    """Look up what named APIs do and which techniques cite them as evidence."""
+    """Look up what named APIs do and which techniques the catalogue associates them with.
+
+    A reference association, not an observation of the technique.
+    """
     return _guard("api_capability", knowledge_tools.api_capability, api_names=api_names)
 
 

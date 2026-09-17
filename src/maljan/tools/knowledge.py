@@ -325,7 +325,12 @@ def api_capability(
     behaviour_map: str = DEFAULT_API_BEHAVIOUR_MAP,
     attck_map: str = DEFAULT_API_ATTCK_MAP,
 ) -> dict[str, Any]:
-    """What each named API does, and which techniques cite it as evidence.
+    """What each named API does, and which techniques the catalogue associates it with.
+
+    A reference lookup, not an observation: the catalogue lists ``BitBlt``
+    and ``CreateCompatibleDC`` under screen capture, and every GUI program
+    imports them. What comes back is an association a reader may weigh; it
+    is never counted as a rule match or a source.
 
     ``behaviours`` is the catalog's own category for the API; ``techniques``
     are the technique rules the *whole* import set clears whose evidence

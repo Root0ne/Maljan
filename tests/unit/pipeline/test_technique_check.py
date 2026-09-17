@@ -494,9 +494,11 @@ class TestCorroborationCounts:
             "dynamic": AgentISR(agent_id="dynamic", domain="dynamic", claims=[_claim("T1055")]),
         }
         rows = corroboration(isrs, ledger)
+        # The API catalogue's association is shown apart and counts for nothing.
         assert rows["T1055"] == {
-            "asserted_by": ["api_capability", "capa"],
+            "asserted_by": ["capa"],
             "claimed_by": ["dynamic", "static"],
+            "associated_by": ["api_capability"],
         }
         assert rows["T1547.001"] == {"asserted_by": ["sigma"], "claimed_by": []}
         assert rows["T1218.011"] == {"asserted_by": ["lolbin"], "claimed_by": []}
@@ -725,3 +727,44 @@ class TestARetiredId:
 
         violations = validate_isr(_isr(_claim("T9999")), attck=knowledge, sample=PE)
         assert "retired" not in violations[0].message
+
+
+class TestAssertionsFromYaraAndFromRetiredIds:
+    def test_a_yara_ttp_rule_asserts_under_the_yara_label(self) -> None:
+        yara = {
+            "matches": [
+                {"rule": "process_hollowing", "meta": {"technique_id": "T1055.012"}, "tags": []}
+            ]
+        }
+        rows = corroboration({}, [_entry("yara_scan", yara, 1)])
+        assert rows["T1055.012"] == {"asserted_by": ["yara"], "claimed_by": []}
+
+    def test_an_upstream_rule_asserting_a_retired_id_is_marked(self) -> None:
+        from maljan.analysis.corroboration import technique_label
+
+        sigma = {"matches": [{"title": "x", "tags": ["attack.t1562.004"], "matched_fields": []}]}
+        rows = corroboration({}, [_entry("sigma_match_sandbox", sigma, 1)])
+        assert rows["T1562.004"]["asserted_by"] == ["sigma"]
+        assert rows["T1562.004"]["retired_in"] == "19.2"
+        assert technique_label("T1562.004", rows["T1562.004"]) == (
+            "T1562.004 (retired in ATT&CK 19.2)"
+        )
+        # A live id carries no such key.
+        assert "retired_in" not in corroboration({"static": _isr(_claim("T1055"))}, [])["T1055"]
+
+
+class TestACatalogueAssociationIsNeverASource:
+    def test_it_is_shown_apart_and_counts_for_nothing(self) -> None:
+        """BitBlt plus CreateCompatibleDC reads as screen capture on any GUI
+        program; the association is shown for reference and is not asserted."""
+        from maljan.tools.knowledge import api_capability
+
+        payload = api_capability(["BitBlt", "CreateCompatibleDC", "GetDC", "GetDIBits"])
+        assert any(row["techniques"] for row in payload["capabilities"])
+        rows = corroboration({}, [_entry("api_capability", payload, 1)])
+        assert rows["T1113"] == {
+            "asserted_by": [],
+            "claimed_by": [],
+            "associated_by": ["api_capability"],
+        }
+        assert corroboration_sources(rows["T1113"]) == []
