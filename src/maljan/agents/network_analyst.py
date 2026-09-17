@@ -181,7 +181,7 @@ class NetworkAnalyst(BaseAnalyst):
             # Messages, not a template: the resolved system prompt carries a
             # literal JSON example and a template would read its braces as
             # variables.
-            response = self.llm.invoke(prompt_to_messages(prompt_messages))
+            response = self.llm.invoke(self.frame_messages(prompt_to_messages(prompt_messages)))
             content = self._capture_findings(str(response.content))
 
         return str(content)
@@ -213,7 +213,7 @@ class NetworkAnalyst(BaseAnalyst):
             mediator_feedback,
             isr=False,
         )
-        response = self.llm.invoke(prompt_to_messages(messages))
+        response = self.llm.invoke(self.frame_messages(prompt_to_messages(messages)))
         return str(response.content)
 
     # ------------------------------------------------------------------
@@ -300,7 +300,7 @@ class NetworkAnalyst(BaseAnalyst):
             # Messages, not a template: the resolved system prompt carries a
             # literal JSON example and a template would read its braces as
             # variables.
-            response = self.llm.invoke(prompt_to_messages(prompt_messages))
+            response = self.llm.invoke(self.frame_messages(prompt_to_messages(prompt_messages)))
             content = self._capture_findings(str(response.content))
 
         claims = _parse_claim_blocks(content)
@@ -341,7 +341,7 @@ class NetworkAnalyst(BaseAnalyst):
         # that obeys it puts a JSON fence into the revised report, and nothing
         # downstream of here — the claim parser, the transcript, the Composer —
         # should ever see it.
-        response = self.llm.invoke(prompt_to_messages(messages))
+        response = self.llm.invoke(self.frame_messages(prompt_to_messages(messages)))
         content = self._capture_findings(str(response.content))
 
         claims = _parse_claim_blocks(content)

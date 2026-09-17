@@ -45,6 +45,7 @@ from maljan.pipeline.events import (
 )
 from maljan.pipeline.evidence_summary import summarise
 from maljan.pipeline.outcome import corrected_reasons, decide_from_bundle, verdict_for_run
+from maljan.pipeline.run_state import render_run_state
 from maljan.pipeline.state import AgentArgument, AnalysisState, _merge_stage_results
 from maljan.pipeline.sycophancy_detector import build_revision_directive, detect_sycophancy
 from maljan.pipeline.triage_pack import (
@@ -52,6 +53,8 @@ from maljan.pipeline.triage_pack import (
     CapaSettings,
     PackInputs,
     failure_reason,
+    pack_block,
+    pack_entries,
     run_pack,
 )
 from maljan.pipeline.validation import (
@@ -816,6 +819,36 @@ def _ledger_servers(state: AnalysisState) -> set[str]:
 # ---------------------------------------------------------------------------
 
 
+def pack_text(state: AnalysisState, container: ServiceContainer) -> str:
+    """The triage pack as every agent is shown it, or ``""`` on a run without one.
+
+    Cut at ``reporting.upstream_findings_max_chars``, the same bound the
+    upstream findings block has: both are what a stage is told before it
+    starts, and one budget for the two keeps a long pack from spending a
+    late stage's context.
+    """
+    limit = 6000
+    with suppress(AttributeError, TypeError, ValueError):
+        limit = int(container.config.reporting.upstream_findings_max_chars)
+    return pack_block(pack_entries(state.get("evidence_ledger") or []), limit)
+
+
+def pack_ledger_ids(state: AnalysisState) -> list[str]:
+    """The ids of the pack's entries: what every agent may cite besides its own."""
+    return [entry.id for entry in pack_entries(state.get("evidence_ledger") or [])]
+
+
+def brief_agent(agent: Any, state: AnalysisState, container: ServiceContainer) -> None:
+    """Hand an agent the run's two standing blocks and the ids it may cite.
+
+    Assigned unconditionally, like the pinned sample path: agents are cached
+    across samples, and a block from the previous sample is worse than none.
+    """
+    agent.facts_block = pack_text(state, container)
+    agent.pack_ledger_ids = pack_ledger_ids(state)
+    agent.run_state_block = render_run_state(state)
+
+
 def stage_context(state: AnalysisState) -> StageContext:
     """The sample and the run so far, as a stage condition sees them.
 
@@ -1262,6 +1295,10 @@ def make_stage_agent_node(
             role = container.agent_role(agent_name)
 
             agent.pipeline_stage = stage.key
+            # What the pipeline established before this analyst, and the run
+            # as it stands: the pack at the head of its first turn, the run
+            # state in its system turn on every turn.
+            brief_agent(agent, state, container)
             sandbox_report = state.get("sandbox_report")
 
             # The two roles whose tools open the sample by path need the path
@@ -1890,6 +1927,11 @@ def make_negotiation_node(
                     # leaves the mediator on the global setting, which is what
                     # the stage's options were seeded from.
                     consensus_threshold=_debate_threshold(stage),
+                    # The same facts the analysts were given, so the mediator
+                    # weighs their reports against the record rather than
+                    # against each other alone.
+                    facts_block=pack_text(state, container),
+                    run_state=render_run_state(state),
                 ),
                 hard_timeout=mediation_timeout,
                 label="mediation",
@@ -2057,6 +2099,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 return original_reports.get(name, ""), _empty_isr(name, revision_round=iteration)
             data = _build_revision_context(state, container, name)
             agent = container.get_agent(name)
+            brief_agent(agent, state, container)
             own_report = original_reports.get(name, "")
             peer_reports = {k: v for k, v in original_reports.items() if k != name}
             return await asyncio.to_thread(
@@ -2462,6 +2505,8 @@ def make_judge_node(
                 # What the run recorded, so a verdict that says the sample is
                 # clean can be asked which entry says so.
                 ledger_ids=[entry.id for entry in _ledger],
+                facts_block=pack_text(state, container),
+                run_state=render_run_state(state),
             )
             # A verdict the judge never expressed as a bundle is the thinnest
             # answer this pipeline can produce — no severity, no reasoning the
@@ -3112,7 +3157,11 @@ def make_report_node(
                 # not speak again until 17:55:54, on attempt 1 of 3 — a job
                 # that looked alive purely because of the worker heartbeat.
                 narrative_output = await asyncio.wait_for(
-                    narrative_agent.generate(report, state.get("isr_reports")),
+                    narrative_agent.generate(
+                        report,
+                        state.get("isr_reports"),
+                        facts_block=pack_text(state, container),
+                    ),
                     timeout=_NARRATIVE_TIMEOUT_SECONDS,
                 )
             except TimeoutError:
@@ -3154,7 +3203,9 @@ def make_report_node(
             composer = None
         if composer is not None:
             try:
-                await composer.compose(report, state.get("isr_reports"))
+                await composer.compose(
+                    report, state.get("isr_reports"), facts_block=pack_text(state, container)
+                )
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "report_node: ReportComposer.compose raised (%s); spine skipped.", exc

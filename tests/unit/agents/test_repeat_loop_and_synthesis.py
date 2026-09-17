@@ -420,7 +420,7 @@ class TestTheLoopStopsMidStream:
 
         executor = None
 
-        def _build(model: Any, tools: list[Any]) -> Any:
+        def _build(model: Any, tools: list[Any], **_kwargs: Any) -> Any:
             nonlocal executor
             executor = self._executor(tools)
             return executor

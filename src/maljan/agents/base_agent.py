@@ -1311,6 +1311,41 @@ def prompt_to_messages(prompt_messages: list[tuple[str, str]]) -> list[BaseMessa
     return built
 
 
+def frame_messages(
+    messages: list[BaseMessage], *, facts_block: str = "", run_state: str = ""
+) -> list[BaseMessage]:
+    """The conversation with the run's two standing blocks in their places.
+
+    ``facts_block`` goes at the head of the first human turn, once: it is the
+    triage pack, and the human turn is where the task and the data are.
+    ``run_state`` goes into the first system turn between its markers,
+    replacing the block already there — the same conversation framed twice
+    carries one block, the newer one. Empty blocks change nothing, so an
+    agent outside a staged run sends exactly what it always sent.
+    """
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    from maljan.pipeline.run_state import RUN_STATE_BEGIN, with_run_state
+    from maljan.pipeline.triage_pack import PACK_HEADING
+
+    out: list[BaseMessage] = list(messages)
+    if run_state or any(
+        isinstance(m, SystemMessage) and RUN_STATE_BEGIN in str(m.content) for m in out
+    ):
+        for index, message in enumerate(out):
+            if isinstance(message, SystemMessage):
+                out[index] = SystemMessage(content=with_run_state(str(message.content), run_state))
+                break
+    if facts_block:
+        for index, message in enumerate(out):
+            if isinstance(message, HumanMessage):
+                content = str(message.content)
+                if PACK_HEADING not in content:
+                    out[index] = HumanMessage(content=f"{facts_block}\n\n{content}")
+                break
+    return out
+
+
 def revision_messages(
     system_prompt: str,
     original_data: str,
@@ -1406,6 +1441,14 @@ class BaseAnalyst(ABC):
         self.name = name
         self.tools = tools or []
         self.logger = logger.getChild(self.name.lower())
+        # What the pipeline established before this agent started, rendered
+        # for a prompt, and the ids of the entries it may cite for it. Set by
+        # the node on every run, empty for an agent outside a staged run.
+        self.facts_block: str = ""
+        self.pack_ledger_ids: list[str] = []
+        # The run-state block's body, derived from the state by the node and
+        # regenerated with the remaining budget on every turn of a tool loop.
+        self.run_state_block: str = ""
         # Per-run token ledger (findings-log §4 Item 1). The container attaches
         # the shared ledger in get_agent(); None when an agent runs standalone.
         self.token_ledger: TokenLedger | None = None
@@ -1720,6 +1763,61 @@ class BaseAnalyst(ABC):
             agent_name=self.name,
         )
 
+    def _run_state_body(self, steps_left: int | None, seconds_left: float | None) -> str:
+        """The node's run-state lines plus this loop's remaining budget."""
+        body = str(getattr(self, "run_state_block", "") or "").rstrip()
+        if not body:
+            return ""
+        budget = []
+        if steps_left is not None:
+            budget.append(f"{max(0, int(steps_left))} steps")
+        if seconds_left is not None:
+            budget.append(f"{max(0, int(seconds_left))} s")
+        return f"{body}\nbudget remaining: {', '.join(budget)}" if budget else body
+
+    def frame_messages(
+        self,
+        messages: list[BaseMessage],
+        *,
+        steps_left: int | None = None,
+        seconds_left: float | None = None,
+    ) -> list[BaseMessage]:
+        """``messages`` with this agent's facts block and run-state block in place."""
+        return frame_messages(
+            messages,
+            facts_block=str(getattr(self, "facts_block", "") or ""),
+            run_state=self._run_state_body(steps_left, seconds_left),
+        )
+
+    def _run_state_refresher(self, max_steps: int, timeout: float, started: float) -> Any:
+        """The per-turn hook that regenerates the run-state block's budget line.
+
+        Handed to the ReAct executor as its prompt: every model turn goes
+        through it, so the block the model reads says how many steps and
+        seconds this loop has left as of that turn. Nothing accumulates — the
+        block is replaced, not appended — and a loop with no block returns
+        the conversation untouched.
+        """
+
+        def refresh(state: Any) -> list[BaseMessage]:
+            messages = state.get("messages") if isinstance(state, dict) else None
+            if messages is None:
+                messages = getattr(state, "messages", None) or []
+            messages = list(messages)
+            if not str(getattr(self, "run_state_block", "") or ""):
+                return messages
+            try:
+                return self.frame_messages(
+                    messages,
+                    steps_left=max_steps - len(messages),
+                    seconds_left=float(timeout) - (time.monotonic() - started),
+                )
+            except Exception as exc:  # noqa: BLE001 — the block never costs a turn
+                self.logger.debug("%s: run-state refresh skipped (%s).", self.name, exc)
+                return messages
+
+        return refresh
+
     def execute_tool_loop(self, prompt_messages: list) -> str:
         """Executes a tool-calling ReAct loop if tools are available.
 
@@ -1768,6 +1866,14 @@ class BaseAnalyst(ABC):
         cfg_for_timeout = get_settings()
         _timeout_overrides = getattr(cfg_for_timeout, "react_agent_timeout_overrides", {}) or {}
         no_tools_timeout = _timeout_overrides.get(self.name, cfg_for_timeout.react_agent_timeout)
+        _step_overrides = getattr(cfg_for_timeout, "react_agent_max_steps_overrides", {}) or {}
+        _max_steps = _step_overrides.get(self.name, cfg_for_timeout.react_agent_max_steps)
+
+        # The two standing blocks: the pack at the head of the task, the run
+        # state in the system turn with this loop's whole budget still ahead.
+        prebuilt = self.frame_messages(
+            prebuilt, steps_left=_max_steps, seconds_left=float(no_tools_timeout)
+        )
 
         if not self.tools:
             return self._capture_findings(self._invoke_llm_with_timeout(prebuilt, no_tools_timeout))
@@ -1799,9 +1905,6 @@ class BaseAnalyst(ABC):
         # The repeat guard is per loop, like the recorder: a second chunk is a
         # new conversation and the model has not seen the first one's answers.
         repeats = RepeatGuard()
-        agent_executor = create_react_agent(
-            self.llm, record_tools(self.pinned_tools(), recorder, repeats)
-        )
 
         messages = prebuilt
 
@@ -1817,6 +1920,14 @@ class BaseAnalyst(ABC):
         # returned the "need more steps" stop message instead of real claims.
         step_overrides = getattr(cfg, "react_agent_max_steps_overrides", {}) or {}
         max_steps = step_overrides.get(self.name, cfg.react_agent_max_steps)
+        # The run-state block is regenerated on every model turn with the
+        # budget this loop has left, which is why the executor's prompt is a
+        # callable rather than the fixed messages.
+        agent_executor = create_react_agent(
+            self.llm,
+            record_tools(self.pinned_tools(), recorder, repeats),
+            prompt=self._run_state_refresher(int(max_steps), float(timeout), time.monotonic()),
+        )
 
         # Run the ReAct coroutine on the shared, never-closing agent
         # loop (see ``_get_agent_loop``) instead of a throwaway per-call loop.
@@ -2726,14 +2837,18 @@ class BaseAnalyst(ABC):
             self.logger.debug("Validation skipped, the knowledge tools are unavailable: %s", exc)
             return isr
 
-        # This analyst's own ledger, as it stands when the answer is checked.
-        # It decides whether a technique claim that cites nothing is a
-        # violation: an analyst that called no tool has nothing to cite.
+        # What this analyst may cite: its own ledger as it stands when the
+        # answer is checked, and the triage pack's entries, which every agent
+        # was shown. It decides whether a technique claim that cites nothing
+        # is a violation: an analyst with neither has nothing to cite.
         ledger_ids = [
             str(getattr(entry, "id", ""))
             for entry in (getattr(self, "_evidence_entries", None) or [])
             if getattr(entry, "id", "")
         ]
+        ledger_ids.extend(
+            str(i) for i in (getattr(self, "pack_ledger_ids", None) or []) if str(i).strip()
+        )
 
         def _validator(candidate: AgentISR) -> list[Violation]:
             return validate_isr(candidate, attck=knowledge, ledger_ids=ledger_ids)

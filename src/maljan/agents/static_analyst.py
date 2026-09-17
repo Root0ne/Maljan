@@ -785,7 +785,7 @@ class StaticAnalyst(BaseAnalyst):
         # that obeys it puts a JSON fence into the revised report, and nothing
         # downstream of here — the claim parser, the transcript, the Composer —
         # should ever see it.
-        response = self.llm.invoke(messages)
+        response = self.llm.invoke(self.frame_messages(messages))
         content = self._capture_findings(str(response.content))
 
         parsed = _parse_claim_blocks(content)

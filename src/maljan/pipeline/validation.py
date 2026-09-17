@@ -198,10 +198,12 @@ def validate_isr(
     rather than failing it: a box that cannot read ATT&CK has a thinner report,
     not a run full of invented violations.
 
-    ``ledger_ids`` are the entries this analyst's own tool calls produced in
-    this run. They decide one thing: a technique claim that cites none of them
-    is asked for one. An analyst with an empty ledger — a measurement profile
-    with no tools at all — is exempt, because it has nothing it could cite.
+    ``ledger_ids`` are the entries this analyst may cite: what its own tool
+    calls produced in this run, and the triage pack's entries, which every
+    agent is shown. They decide one thing: a technique claim that cites none
+    of them is asked for one. An analyst with nothing citable at all — a
+    measurement profile, which has no tools and no pack — is exempt, because
+    it has nothing it could cite.
     """
     citable = [str(i) for i in (ledger_ids or []) if str(i).strip()]
     known = {i.strip().lower() for i in citable}
