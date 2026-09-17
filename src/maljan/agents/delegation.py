@@ -1,0 +1,355 @@
+"""One agent asking another, as a tool call.
+
+A lead analyst gives work to specialists; a specialist checks a point with a
+colleague. Both are the same act here: ``ToolRef(kind="agent", agent=<key>)``
+on a definition puts a tool named ``ask_<key>`` in that agent's toolbox, and
+calling it runs the named agent under the same job — the same container, the
+same sample paths, the same pack and run state — with the task as its human
+turn, and hands its answer back as the tool's result.
+
+Expressing delegation as a tool is the whole design. Nothing about it is a
+second mechanism: the ask is a ledger entry (``server="team"``,
+``tool="ask_<key>"``) recorded by the same wrapper as every other call, with
+the callee's wall clock as its duration; the callee's own tool calls are
+ledger entries under the callee's key, written to the caller's evidence buffer
+so the stage node that drains the caller writes them all; the callee's turns
+are charged to the caller's loop budget; and the ask and the answer are two
+``agent_message`` events with ``addressed_to`` set, so the transcript shows
+who asked whom and what came back.
+
+The answer is the callee's ISR text, verbatim. The caller reads it as a tool
+result and decides what to make of it; nothing here edits a claim, a
+confidence or a technique id on the way through.
+
+Three guards, each a tool error the model reads rather than a job failure:
+a callee that is not defined or is disabled is refused by name; an ask that
+would nest deeper than ``core.agents.delegation_depth`` is refused with the
+chain that reached it; and an ask back up the chain — the callee asking its
+caller, or anyone already waiting on this answer — is refused as a cycle.
+"""
+
+from __future__ import annotations
+
+import time
+from typing import TYPE_CHECKING, Any
+
+from pydantic import BaseModel, Field
+
+from maljan.agents.tool_pinning import SERVER_METADATA_KEY
+from maljan.core.logger import logger
+from maljan.pipeline.events import claims_to_payload, emit_agent_message, summarize_claims
+from maljan.pipeline.validation import Violation
+
+if TYPE_CHECKING:
+    from langchain_core.tools import BaseTool
+
+    from maljan.schemas.isr_models import AgentISR
+
+# The server a delegation entry is recorded under. Not a tool server: the
+# name says the call went to a member of the team.
+TEAM_SERVER = "team"
+
+# An ask that would leave its caller with less than this cannot be answered
+# in the time: the callee's loop needs a first model turn and the caller a
+# last one to read the answer.
+MIN_SECONDS_TO_ASK = 20.0
+MIN_STEPS_TO_ASK = 2
+# Kept back from what the caller has left, so the callee's hard cap fires
+# before the caller's own does and the caller still reads the answer.
+SECONDS_KEPT_FOR_THE_CALLER = 15.0
+
+# How much of a callee's raw answer is shown when it carried no claim.
+_ANSWER_WITHOUT_CLAIMS_CHARS = 2000
+
+
+class DelegationRefused(Exception):
+    """An ask that is not made, with the reason in the words the model reads."""
+
+
+class AskArguments(BaseModel):
+    """What one ask carries. ``task`` is the question; ``context`` is optional."""
+
+    task: str = Field(
+        description=(
+            "What this agent should establish or check: one focused question it can "
+            "answer with its own tools over this sample."
+        )
+    )
+    context: str = Field(
+        default="",
+        description=(
+            "Facts, ledger ids or findings the agent should start from, when the task needs them."
+        ),
+    )
+
+
+def tool_name(agent_key: str) -> str:
+    """The name the tool carries in a caller's toolbox."""
+    return f"ask_{agent_key}"
+
+
+def ask_tool(container: Any, caller_key: str, callee_key: str) -> BaseTool:
+    """The ``ask_<callee>`` tool for ``caller_key``, described from the callee.
+
+    A synchronous function on purpose: the ReAct executor runs a sync tool on
+    a worker thread, which is the one place a nested tool loop may block on
+    the shared agent loop without deadlocking it.
+    """
+    from langchain_core.tools import StructuredTool
+
+    definition = container.config.agents.definitions.get(callee_key)
+    label = str(getattr(definition, "label", "") or "") or callee_key
+    role = str(getattr(definition, "role", "") or "agent")
+    description = (
+        f"Ask {label} ({callee_key}, role {role}) to work on one focused task with its "
+        "own tools over this sample. Its answer comes back as its own claims, each with "
+        "the ledger ids it cited, exactly as it gave them. Its tool calls and its turns "
+        "count against your budget."
+    )
+
+    def _ask(task: str, context: str = "") -> str:
+        return ask(
+            container, caller_key=caller_key, callee_key=callee_key, task=task, context=context
+        )
+
+    return StructuredTool.from_function(
+        func=_ask,
+        name=tool_name(callee_key),
+        description=description,
+        args_schema=AskArguments,
+        infer_schema=False,
+        metadata={SERVER_METADATA_KEY: TEAM_SERVER},
+    )
+
+
+def refusal(container: Any, caller: Any, callee_key: str) -> str | None:
+    """Why this ask is not made, or ``None`` when it may be.
+
+    The definition and the enabled flag are read from the job's settings; the
+    depth and the cycle are read from the caller's own call chain, which is
+    the list of agents whose asks it is itself answering.
+    """
+    definitions = container.config.agents.definitions
+    definition = definitions.get(callee_key)
+    if definition is None:
+        available = ", ".join(sorted(definitions)) or "(none)"
+        return f"there is no agent named {callee_key!r} to ask. Available: {available}"
+    if not getattr(definition, "enabled", True):
+        return f"agent {callee_key!r} is disabled in this deployment and cannot be asked"
+    chain = (*tuple(getattr(caller, "call_chain", ()) or ()), str(caller.name))
+    if callee_key in chain:
+        path = " -> ".join((*chain, callee_key))
+        return (
+            f"asking {callee_key!r} would be a cycle: it is already waiting on this answer ({path})"
+        )
+    limit = int(getattr(container.config.agents, "delegation_depth", 2) or 2)
+    if len(chain) > limit:
+        path = " -> ".join(chain)
+        return (
+            f"asking {callee_key!r} would nest deeper than the delegation depth of "
+            f"{limit} ({path}); answer from what you have or ask through your caller"
+        )
+    budget = getattr(caller, "loop_budget", None)
+    if budget is not None:
+        seconds = budget.seconds_left() - SECONDS_KEPT_FOR_THE_CALLER
+        steps = budget.steps_for_a_callee()
+        if seconds < MIN_SECONDS_TO_ASK or steps < MIN_STEPS_TO_ASK:
+            return (
+                f"not enough budget left to ask {callee_key!r}: {max(0, int(seconds))} s "
+                f"and {steps} step(s) remain; write your answer from what you have"
+            )
+    return None
+
+
+def ask(container: Any, *, caller_key: str, callee_key: str, task: str, context: str = "") -> str:
+    """Run ``callee_key`` on ``task`` for ``caller_key`` and return its ISR text.
+
+    Raises ``DelegationRefused`` for a guarded ask and whatever the callee's
+    loop raises for one that failed; the recorder turns either into a failed
+    ledger entry whose message the caller reads.
+    """
+    caller = container.get_agent(caller_key)
+    why = refusal(container, caller, callee_key)
+    if why is not None:
+        logger.info("delegation refused (%s -> %s): %s", caller_key, callee_key, why)
+        raise DelegationRefused(why)
+    callee = container.get_agent(callee_key)
+    # One ask at a time per callee: the instance is cached per job and keeps
+    # its own buffers, so a second caller waits for the first to be answered.
+    with callee.delegation_lock:
+        return _ask(container, caller, callee, str(task or "").strip(), str(context or "").strip())
+
+
+def _ask(container: Any, caller: Any, callee: Any, task: str, context: str) -> str:
+    from maljan.agents.base_agent import BudgetCeiling
+
+    stage = str(getattr(caller, "pipeline_stage", "") or "analysis")
+    round_index = int(getattr(caller, "current_round", 0) or 0)
+    sink = getattr(container, "event_sink", None)
+    emit_agent_message(
+        sink,
+        speaker=str(caller.name),
+        role="analyst",
+        text=task,
+        round_index=round_index,
+        report=context or None,
+        stage=stage,
+        addressed_to=str(callee.name),
+    )
+
+    _brief_callee(caller, callee, stage=stage, round_index=round_index)
+    budget = getattr(caller, "loop_budget", None)
+    if budget is not None:
+        callee._budget_ceiling = BudgetCeiling(
+            steps=budget.steps_for_a_callee(),
+            seconds=budget.seconds_left() - SECONDS_KEPT_FOR_THE_CALLER,
+        )
+    spent_before = int(getattr(callee, "steps_spent", 0) or 0)
+    started = time.monotonic()
+    try:
+        text, isr = callee.answer_task(_task_turn(str(caller.name), task, context, callee))
+    finally:
+        callee._budget_ceiling = None
+        callee.call_chain = ()
+        spent = int(getattr(callee, "steps_spent", 0) or 0) - spent_before
+        if budget is not None:
+            budget.charge(spent)
+        _hand_over_the_record(caller, callee)
+        logger.info(
+            "delegation %s -> %s: %d step(s), %.1f s",
+            caller.name,
+            callee.name,
+            spent,
+            time.monotonic() - started,
+        )
+
+    answer = _answer_text(isr, text)
+    emit_agent_message(
+        sink,
+        speaker=str(callee.name),
+        role="analyst",
+        text=summarize_claims(isr.claims, speaker=str(callee.name)),
+        round_index=round_index,
+        status=_status(isr),
+        claims=claims_to_payload(isr.claims),
+        dissent=list(isr.dissent_items or []),
+        report=answer,
+        stage=stage,
+        addressed_to=str(caller.name),
+    )
+    return answer
+
+
+def _brief_callee(caller: Any, callee: Any, *, stage: str, round_index: int) -> None:
+    """Give the callee what the node gave the caller: the same job, the same view.
+
+    The pack, the run state, the format and the round come from the caller
+    as it stands. The sample path is chosen for the callee the way the node
+    chooses it for a stage agent — its own provider's mirror first — from the
+    choices the node kept on the caller; a caller outside a staged run has
+    none, and the callee then shares the caller's pinned path.
+    """
+    callee.pipeline_stage = stage
+    callee.current_round = round_index
+    callee.facts_block = str(getattr(caller, "facts_block", "") or "")
+    callee.pack_ledger_ids = list(getattr(caller, "pack_ledger_ids", None) or [])
+    callee.run_state_block = str(getattr(caller, "run_state_block", "") or "")
+    callee.sample_format = tuple(getattr(caller, "sample_format", ("unknown", "unknown")))
+    callee.call_chain = (*tuple(getattr(caller, "call_chain", ()) or ()), str(caller.name))
+    choices = getattr(caller, "sample_path_choices", None) or {}
+    resolved = getattr(callee, "_resolved", None)
+    provider_id = str(getattr(resolved, "static_provider_id", "") or "")
+    callee._analysis_file_path = (
+        (choices.get("by_provider") or {}).get(provider_id)
+        or choices.get("static")
+        or choices.get("host")
+        or getattr(caller, "_analysis_file_path", None)
+        or None
+    )
+    callee._path_by_server = dict(getattr(resolved, "path_by_server", {}) or {})
+
+
+def _task_turn(caller_name: str, task: str, context: str, callee: Any) -> str:
+    """The callee's human turn: where the sample is, the task, the context, the shape.
+
+    The pack is not here; ``frame_messages`` puts it at the head of this turn
+    inside the loop, the same way it does for a stage agent's first turn.
+    """
+    from maljan.agents.configurable_analyst import _ISR_FORMAT_INSTRUCTION, _PATH_HEADER
+
+    parts: list[str] = []
+    path = getattr(callee, "_analysis_file_path", None)
+    if path:
+        parts.append(_PATH_HEADER.format(path=path).rstrip())
+    parts.append(f"Task from {caller_name}:\n{task}")
+    if context:
+        parts.append(f"Context from {caller_name}:\n{context}")
+    parts.append(
+        "Answer the task and nothing wider. Cite the ledger id of every tool call and "
+        "every fact you rely on.\n\n" + _ISR_FORMAT_INSTRUCTION.rstrip()
+    )
+    return "\n\n".join(parts)
+
+
+def _hand_over_the_record(caller: Any, callee: Any) -> None:
+    """Move what the callee recorded onto the caller, so one node writes it all.
+
+    The ledger entries keep the callee's key; the stage node that drains the
+    caller writes them to the run's ledger with everything else. The
+    validation findings are carried the same way, each naming the callee, so
+    a callee that never runs a stage of its own still has its check counted.
+    """
+    try:
+        entries = callee.drain_evidence_entries()
+    except Exception as exc:  # noqa: BLE001 — the record is handed over best-effort
+        logger.debug("delegation: the callee's ledger could not be read (%s).", exc)
+        entries = []
+    if entries:
+        caller._evidence_entries.extend(entries)
+    try:
+        rows, retries, fed_back = callee.drain_validation_findings()
+        not_run = callee.drain_validation_not_run()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("delegation: the callee's validation state could not be read (%s).", exc)
+        return
+    for row in rows:
+        caller.validation_findings.append(
+            Violation(
+                code=str(row.get("code", "")),
+                message=f"{callee.name}: {row.get('message', '')}",
+                path=str(row.get("path", "")),
+            )
+        )
+    caller.validation_retries += int(retries or 0)
+    for code, count in (fed_back or {}).items():
+        caller.validation_fed_back[code] = caller.validation_fed_back.get(code, 0) + int(count)
+    for code in not_run:
+        if code not in caller.validation_not_run:
+            caller.validation_not_run.append(code)
+
+
+def _answer_text(isr: AgentISR, text: str) -> str:
+    """The callee's ISR text, verbatim, with its raw answer after it when it had no claim.
+
+    The summary is what the caller cites from. An answer that parsed to no
+    claim still said something, and the caller is better placed to read it
+    than to be told only that nothing was claimed.
+    """
+    summary = isr.to_text_summary()
+    if isr.claims:
+        return summary
+    reason = str(getattr(isr, "status_reason", "") or "").strip()
+    note = f" ({reason})" if reason else ""
+    body = (text or "").strip()
+    if not body:
+        return f"{summary}\n  No claim in the CLAIM format{note}."
+    if len(body) > _ANSWER_WITHOUT_CLAIMS_CHARS:
+        body = body[:_ANSWER_WITHOUT_CLAIMS_CHARS] + "…"
+    return f"{summary}\n  No claim in the CLAIM format{note}. The agent's answer follows.\n{body}"
+
+
+def _status(isr: AgentISR) -> str:
+    declared = str(getattr(isr, "status", "") or "").strip()
+    if declared:
+        return declared
+    return "complete" if list(isr.claims or []) else "no_claims"

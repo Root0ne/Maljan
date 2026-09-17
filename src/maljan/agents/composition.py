@@ -24,6 +24,12 @@ path *is* resolved here.
 ``ToolRef(kind="sandbox")`` is the third half and the simplest: the job's
 sandbox report is already on the container, so the tools over it are closures
 built here with nothing to open and nothing that can hang.
+
+``ToolRef(kind="agent")`` is the fourth: another agent of the same job, as a
+tool named ``ask_<key>``. Built here as a closure over the container and the
+two keys (``agents.delegation``), it opens nothing at resolution time; the
+callee is resolved when it is first asked, through the container, like any
+stage agent.
 """
 
 from __future__ import annotations
@@ -248,15 +254,31 @@ def _sandbox_tools(container: Any, definition: AgentDefinition) -> list[Any]:
     return list(sandbox_tools(container))
 
 
+def _agent_tools(container: Any, definition: AgentDefinition, key: str) -> list[Any]:
+    """The ``ask_<agent>`` tools, one per agent reference on the definition.
+
+    In-process like the sandbox tools, and only bound where the definition
+    asks: an agent with no agent reference has no way to ask anyone, which is
+    what keeps the default profile's analysts exactly what they were.
+    """
+    refs = [ref for ref in definition.tools if ref.kind == "agent" and ref.agent]
+    if not refs:
+        return []
+    from maljan.agents.delegation import ask_tool
+
+    return [ask_tool(container, key, str(ref.agent)) for ref in refs]
+
+
 def _claim_in_process_tools(
     incoming: list[Any], source: str, tools: list[Any], seen: dict[str, str]
 ) -> None:
     """Put an in-process half into ``tools`` and record what it claimed.
 
-    Two halves come through here: the static provider's tools and the sandbox
-    report's. Both are first, so neither renames anything; recording their
-    names under the source's own id is what makes a later server's identically
-    named tool take the prefix rather than vanish into ``_dedupe``.
+    Three halves come through here: the static provider's tools, the sandbox
+    report's and the team's ``ask_<agent>`` tools. All are first, so none
+    renames anything; recording their names under the source's own id is what
+    makes a later server's identically named tool take the prefix rather than
+    vanish into ``_dedupe``.
     """
     for tool in incoming:
         name = str(getattr(tool, "name", ""))
@@ -455,6 +477,7 @@ def resolve_agent(key: str, container: Any, job_key: str = "job") -> ResolvedAge
         seen,
     )
     _claim_in_process_tools(_sandbox_tools(container, definition), "sandbox", tools, seen)
+    _claim_in_process_tools(_agent_tools(container, definition, key), "team", tools, seen)
     registry = container.get_server_registry()
     bound, bound_reasons = registry.tools_for(
         key, job_key, exclude=_excluded_servers(settings, key), seen=seen
@@ -510,6 +533,7 @@ async def aresolve_agent(key: str, container: Any, job_key: str = "job") -> Reso
         seen,
     )
     _claim_in_process_tools(_sandbox_tools(container, definition), "sandbox", tools, seen)
+    _claim_in_process_tools(_agent_tools(container, definition, key), "team", tools, seen)
     registry = container.get_server_registry()
     bound, bound_reasons = await registry.atools_for(
         key, job_key, exclude=_excluded_servers(settings, key), seen=seen

@@ -213,8 +213,8 @@ class TestTheGuardEndsTheLoop:
         source = inspect.getsource(base_agent.BaseAnalyst.execute_tool_loop)
 
         assert "if repeats.ending_the_loop():" in source
-        assert "ended_on_repeats = repeats.ending_the_loop()" in source
-        assert "hit_step_cap or ended_on_repeats" in source
+        assert "ended_early = repeats.ending_the_loop() or budget.spent_by_delegates()" in source
+        assert "hit_step_cap or ended_early" in source
 
 
 class TestTheSynthesisBudget:

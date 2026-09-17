@@ -371,6 +371,14 @@ def _pin_sample_path(agent: Any, state: AnalysisState) -> None:
         or _absolute_host_sample_path(state)
         or None
     )
+    # The same three choices, kept on the agent for the agents it may ask: a
+    # callee's tools open the mirror its own provider was given, which the
+    # caller's pinned path cannot say. See ``agents.delegation``.
+    agent.sample_path_choices = {
+        "by_provider": dict(state.get("static_sample_paths") or {}),
+        "static": state.get("static_sample_path") or None,
+        "host": _absolute_host_sample_path(state) or None,
+    }
     # And the per-server overrides, for a tool server that was handed the
     # bytes instead of sharing this filesystem. Assigned unconditionally for
     # the same reason the path above is: an agent is cached across samples.

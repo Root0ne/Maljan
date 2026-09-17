@@ -227,6 +227,18 @@ def _trim_for_synthesis(msgs: list, budget: int) -> list:
     return [*head, *[m for unit in units for m in unit]]
 
 
+def steps_used(messages: list) -> int:
+    """The graph steps a conversation has spent, counted the way langgraph counts.
+
+    An assistant turn is one node execution, and a turn that called tools
+    costs a second for the tool node; the framing and the tool results cost
+    nothing.
+    """
+    ai_turns = [m for m in messages if getattr(m, "type", "") == "ai"]
+    tool_rounds = sum(1 for m in ai_turns if getattr(m, "tool_calls", None))
+    return len(ai_turns) + tool_rounds
+
+
 def model_turns_left(max_steps: int, messages: list) -> int:
     """How many model turns the loop still has, counted the way langgraph counts.
 
@@ -237,10 +249,91 @@ def model_turns_left(max_steps: int, messages: list) -> int:
     per assistant turn plus one per tool round. What the model is told is a
     number it can act on; the graph's own step count is not.
     """
-    ai_turns = [m for m in messages if getattr(m, "type", "") == "ai"]
-    tool_rounds = sum(1 for m in ai_turns if getattr(m, "tool_calls", None))
-    used = len(ai_turns) + tool_rounds
-    return max(0, (int(max_steps) - used + 1) // 2)
+    return max(0, (int(max_steps) - steps_used(messages) + 1) // 2)
+
+
+class LoopBudget:
+    """One tool loop's steps and seconds, shared with the agents it asks.
+
+    The loop's own turns are counted from its conversation, refreshed on
+    every model turn; what the agents it delegated to spent is charged here
+    by the delegation when each of them returns. Both come off the same
+    ``max_steps``, so an agent that asked three specialists has three
+    specialists' worth of turns fewer for itself, and the budget line it
+    reads says so. The wall clock needs no charging: a delegated call runs
+    inside the caller's own timeout.
+    """
+
+    def __init__(self, max_steps: int, timeout: float, started: float | None = None) -> None:
+        self.max_steps = int(max_steps)
+        self.timeout = float(timeout)
+        self.started = time.monotonic() if started is None else float(started)
+        self.own_steps = 0
+        self.delegated_steps = 0
+
+    def note_turns(self, messages: list) -> None:
+        """Record what the loop's own conversation has spent so far."""
+        self.own_steps = steps_used(messages)
+
+    def charge(self, steps: int) -> None:
+        """Take what a delegated agent spent off this loop's budget."""
+        self.delegated_steps += max(0, int(steps))
+
+    # What the tool round making an ask costs: the assistant turn that called
+    # the tool and the tool node running it. The refresher counted the
+    # conversation before that turn, so an ask made from inside it is two
+    # steps further on than ``own_steps`` says.
+    STEPS_IN_FLIGHT = 2
+
+    def steps_left(self) -> int:
+        return max(0, self.max_steps - self.own_steps - self.delegated_steps)
+
+    def steps_for_a_callee(self) -> int:
+        """What an agent asked from inside this loop's current turn may spend."""
+        return max(0, self.steps_left() - self.STEPS_IN_FLIGHT)
+
+    def turns_left(self, messages: list) -> int:
+        """The budget line's number: model turns left after every charge."""
+        return model_turns_left(self.max_steps - self.delegated_steps, messages)
+
+    def seconds_left(self) -> float:
+        return max(0.0, self.timeout - (time.monotonic() - self.started))
+
+    def spent_by_delegates(self) -> bool:
+        """Whether delegated work has used what the loop's own turns had left.
+
+        Only then is the loop ended early: with nothing delegated, the graph's
+        own recursion limit is the one that ends it, as it always has.
+        """
+        return self.delegated_steps > 0 and self.steps_left() <= 0
+
+
+class BudgetCeiling:
+    """The most a delegated loop may spend: what its caller had left."""
+
+    def __init__(self, steps: int, seconds: float) -> None:
+        self.steps = int(steps)
+        self.seconds = float(seconds)
+
+
+def loop_limits(agent_name: str, ceiling: BudgetCeiling | None = None) -> tuple[int, int]:
+    """``(timeout, max_steps)`` for one loop of ``agent_name``.
+
+    The per-agent overrides first, then the ceiling a caller set when the
+    agent is answering a delegated task: a callee never gets more than its
+    caller had left, in either dimension. A module function rather than only
+    a method, so a duck-typed analyst that borrows one method reads the same
+    numbers.
+    """
+    cfg = get_settings()
+    overrides = getattr(cfg, "react_agent_timeout_overrides", {}) or {}
+    timeout = int(overrides.get(agent_name, cfg.react_agent_timeout))
+    step_overrides = getattr(cfg, "react_agent_max_steps_overrides", {}) or {}
+    max_steps = int(step_overrides.get(agent_name, cfg.react_agent_max_steps))
+    if ceiling is not None:
+        max_steps = max(2, min(max_steps, int(ceiling.steps)))
+        timeout = max(1, min(timeout, int(ceiling.seconds)))
+    return timeout, max_steps
 
 
 # The one human turn a tool loop gets when its last message is neither a
@@ -1604,6 +1697,23 @@ class BaseAnalyst(ABC):
         # How the last final-answer nudge had to be sent when the plain way
         # would not do, or ``None``. The node reads it into the run summary.
         self._nudge_retry_mode: str | None = None
+        # Delegation state (``agents.delegation``). ``call_chain`` names the
+        # agents whose asks this one is answering, outermost first; empty for
+        # an agent running its own stage. ``loop_budget`` is the running
+        # loop's, so an ask made from inside it can read what is left and
+        # charge what the callee spent; ``_budget_ceiling`` is what a caller
+        # allows this agent when it is the callee. ``steps_spent`` counts every
+        # graph step this agent's loops have used, so a caller can charge the
+        # difference. ``current_round`` is the debate round the agent is
+        # working in, so an ask carries it. The lock keeps one callee to one
+        # ask at a time: two callers asking the same agent at once would share
+        # its buffers.
+        self.call_chain: tuple[str, ...] = ()
+        self.loop_budget: LoopBudget | None = None
+        self._budget_ceiling: BudgetCeiling | None = None
+        self.steps_spent: int = 0
+        self.current_round: int = 0
+        self.delegation_lock = threading.Lock()
 
     def _system_prompt(self, fallback: str | Callable[[], str]) -> str:
         """This analyst's system turn for the job it is actually running.
@@ -1865,7 +1975,17 @@ class BaseAnalyst(ABC):
             run_state=self._run_state_body(steps_left, seconds_left),
         )
 
-    def _run_state_refresher(self, max_steps: int, timeout: float, started: float) -> Any:
+    def _loop_limits(self) -> tuple[int, int]:
+        """This agent's ``(timeout, max_steps)`` for one loop; see ``loop_limits``."""
+        return loop_limits(self.name, getattr(self, "_budget_ceiling", None))
+
+    def _run_state_refresher(
+        self,
+        max_steps: int,
+        timeout: float,
+        started: float,
+        budget: LoopBudget | None = None,
+    ) -> Any:
         """The per-turn hook that regenerates the run-state block's budget line.
 
         Handed to the ReAct executor as its prompt: every model turn goes
@@ -1873,13 +1993,21 @@ class BaseAnalyst(ABC):
         seconds this loop has left as of that turn. Nothing accumulates — the
         block is replaced, not appended — and a loop with no block returns
         the conversation untouched.
+
+        ``budget`` is the loop's own when the loop made one; the arguments
+        describe a fresh one otherwise, so a caller with only the three
+        numbers reads the same line.
         """
+        ledger = budget if budget is not None else LoopBudget(max_steps, timeout, started)
 
         def refresh(state: Any) -> list[BaseMessage]:
             messages = state.get("messages") if isinstance(state, dict) else None
             if messages is None:
                 messages = getattr(state, "messages", None) or []
             messages = list(messages)
+            # Counted on every turn whether or not there is a block to show
+            # it in: the budget is what an ask from inside this loop reads.
+            ledger.note_turns(messages)
             if not str(getattr(self, "run_state_block", "") or ""):
                 return messages
             # The budget is stated in model turns (``model_turns_left``): the
@@ -1889,8 +2017,8 @@ class BaseAnalyst(ABC):
             try:
                 return self.frame_messages(
                     messages,
-                    steps_left=model_turns_left(max_steps, messages),
-                    seconds_left=float(timeout) - (time.monotonic() - started),
+                    steps_left=ledger.turns_left(messages),
+                    seconds_left=ledger.seconds_left(),
                 )
             except Exception as exc:  # noqa: BLE001 — the block never costs a turn
                 self.logger.debug("%s: run-state refresh skipped (%s).", self.name, exc)
@@ -1943,18 +2071,14 @@ class BaseAnalyst(ABC):
             elif role == "human":
                 prebuilt.append(HumanMessage(content=content))
 
-        cfg = get_settings()
-        # Per-agent timeout override. The static
-        # analyst with 31 Ghidra tools never finishes inside 180 s on
-        # commodity hardware; give it the operator-configured headroom.
-        overrides = getattr(cfg, "react_agent_timeout_overrides", {}) or {}
-        timeout = overrides.get(self.name, cfg.react_agent_timeout)
-        # Per-agent recursion-step override: the
-        # static analyst's Ghidra ReAct loop needs far more than the default
-        # ~4-tool-call budget. Without this it hit the step cap and LangGraph
-        # returned the "need more steps" stop message instead of real claims.
-        step_overrides = getattr(cfg, "react_agent_max_steps_overrides", {}) or {}
-        max_steps = step_overrides.get(self.name, cfg.react_agent_max_steps)
+        # Per-agent timeout override: the static analyst with 31 Ghidra tools
+        # never finishes inside 180 s on commodity hardware, so it gets the
+        # operator-configured headroom. Per-agent recursion-step override: its
+        # Ghidra loop needs far more than the default ~4-tool-call budget, and
+        # without it the loop hit the step cap and LangGraph returned the
+        # "need more steps" stop message instead of real claims. Both are
+        # capped by a caller's ceiling when this loop answers an ask.
+        timeout, max_steps = self._loop_limits()
 
         # The two standing blocks: the pack at the head of the task, the run
         # state in the system turn with this loop's whole budget still ahead.
@@ -1963,7 +2087,9 @@ class BaseAnalyst(ABC):
         )
 
         if not self.tools:
-            return self._capture_findings(self._invoke_llm_with_timeout(prebuilt, timeout))
+            answer = self._invoke_llm_with_timeout(prebuilt, timeout)
+            self.steps_spent += 1
+            return self._capture_findings(answer)
 
         from langgraph.prebuilt import create_react_agent
 
@@ -1995,6 +2121,11 @@ class BaseAnalyst(ABC):
 
         messages = prebuilt
 
+        # The loop's budget, readable by an ask made from inside it and
+        # charged by the delegation when the callee returns.
+        budget = LoopBudget(int(max_steps), float(timeout))
+        self.loop_budget = budget
+
         # The run-state block is regenerated on every model turn with the
         # budget this loop has left, which is why the executor's prompt is a
         # callable rather than the fixed messages.
@@ -2006,7 +2137,9 @@ class BaseAnalyst(ABC):
         agent_executor = create_react_agent(
             self.llm,
             record_tools(self.pinned_tools(), recorder, repeats),
-            prompt=self._run_state_refresher(int(max_steps), float(timeout), time.monotonic()),
+            prompt=self._run_state_refresher(
+                int(max_steps), float(timeout), budget.started, budget=budget
+            ),
         )
 
         # Run the ReAct coroutine on the shared, never-closing agent
@@ -2063,6 +2196,18 @@ class BaseAnalyst(ABC):
                                 "synthesising from what it gathered.",
                                 self.name,
                                 repeats.served_repeats,
+                            )
+                            break
+                        # The agents this loop asked spent what it had left:
+                        # the graph's own limit cannot see that, so the loop
+                        # is ended here and what was gathered is written up.
+                        if budget.spent_by_delegates():
+                            self.logger.warning(
+                                "%s ReAct loop ended: the agents it asked spent %d of its "
+                                "%d steps; synthesising from what it gathered.",
+                                self.name,
+                                budget.delegated_steps,
+                                budget.max_steps,
                             )
                             break
                 return dict(latest)
@@ -2137,11 +2282,15 @@ class BaseAnalyst(ABC):
             # thirty Ghidra calls made thirty calls, and losing all of them
             # because the last one timed out is the opposite of a ledger.
             self._finish_evidence(recorder)
+            self.loop_budget = None
 
         if thread_result is None:
             raise AnalystError(f"{self.name} ReAct agent returned no result")
 
         msgs = thread_result.get("messages", []) or []
+        # What this loop cost, for a caller that delegated to it: its own
+        # turns and the turns of everything it asked in turn.
+        self.steps_spent += steps_used(msgs) + budget.delegated_steps
         # Tool calls are AIMessage instances whose ``tool_calls`` attribute
         # is a non-empty list. Counting them is cheap and the most useful
         # single metric for "did this analyst overspend on Ghidra".
@@ -2205,12 +2354,13 @@ class BaseAnalyst(ABC):
         # tool-calling and synthesise now, so the gathered evidence becomes real
         # claims instead of a useless "need more steps" non-answer.
         hit_step_cap = bool(_RECURSION_STOP_RE.search(content))
-        # A loop ended for repeating itself is in the same place as one that
-        # spent its steps: it has evidence and no answer, and the salvage is
-        # what turns the first into the second.
-        ended_on_repeats = repeats.ending_the_loop()
+        # A loop ended for repeating itself, or because the agents it asked
+        # spent its steps, is in the same place as one that spent them
+        # itself: it has evidence and no answer, and the salvage is what turns
+        # the first into the second.
+        ended_early = repeats.ending_the_loop() or budget.spent_by_delegates()
         self._record_react_loop(hit_step_cap=hit_step_cap)
-        if tool_call_count > 0 and (not content.strip() or hit_step_cap or ended_on_repeats):
+        if tool_call_count > 0 and (not content.strip() or hit_step_cap or ended_early):
             self.logger.warning(
                 "%s ReAct loop ended without a final answer after %d tool calls "
                 "(messages=%d); forcing synthesis from gathered tool output.",
@@ -2657,6 +2807,34 @@ class BaseAnalyst(ABC):
         isr = self._text_to_isr(revised_text, revision_round=revision_round)
         return revised_text, isr
 
+    def answer_task(self, task: str) -> tuple[str, AgentISR]:
+        """Work on one task another agent handed over, and answer with claims.
+
+        The delegated path (``agents.delegation``): the agent's own system
+        prompt, the task as the human turn — framed like every other first
+        turn, with the pack in front and the run state in the system turn —
+        the tool loop, the parse into claims, and the same checks an answer to
+        a stage gets: the consistency gate and the technique check, in this
+        agent's own conversation. Returns the loop's text and the checked ISR.
+
+        The evidence the gate and the check read is the task plus what this
+        loop's own tool calls returned: a delegated answer rests on what the
+        agent went and looked at, not on a data chunk it was handed.
+
+        Raises whatever the loop raises. A caller reads the failure as a tool
+        error, which is the honest answer to an ask that could not be done.
+        """
+        self._try_initialize_mcp()
+        before = len(self._evidence_entries)
+        text = self.execute_tool_loop([("system", self._system_prompt("")), ("human", task)])
+        gathered = "\n".join(
+            str(getattr(entry, "output", "") or "") for entry in self._evidence_entries[before:]
+        )
+        evidence = f"{task}\n{gathered}" if gathered else task
+        isr = self._text_to_isr(text, revision_round=int(self.current_round))
+        isr = self._validate_isr(self._apply_consistency_gate(isr, evidence), evidence)
+        return text, self._drain_findings(isr)
+
     # ------------------------------------------------------------------
     # Safe wrappers (error handling + token protection)
     # ------------------------------------------------------------------
@@ -2674,6 +2852,7 @@ class BaseAnalyst(ABC):
 
     def safe_analyze_isr(self, data: str) -> AgentISR:
         """Wrapper around analyze_isr() with error handling and token protection."""
+        self.current_round = 0
         try:
             truncated = self._truncate_input(data)
             isr = self.analyze_isr(truncated)
@@ -3036,12 +3215,7 @@ class BaseAnalyst(ABC):
             run_state=str(getattr(self, "run_state_block", "") or ""),
         )
 
-        cfg = get_settings()
-        timeout = int(
-            (getattr(cfg, "react_agent_timeout_overrides", {}) or {}).get(
-                self.name, cfg.react_agent_timeout
-            )
-        )
+        timeout, _steps = loop_limits(self.name, getattr(self, "_budget_ceiling", None))
         first: list[Any] = [_PriorAnswer(isr)]
 
         def _run(turns: list[Any]) -> Any:
@@ -3176,6 +3350,7 @@ class BaseAnalyst(ABC):
         revision_round: int = 1,
     ) -> tuple[str, AgentISR]:
         """Wrapper around revise_isr() with error handling."""
+        self.current_round = int(revision_round)
         try:
             truncated = self._truncate_input(original_data)
             text, isr = self.revise_isr(
@@ -3369,6 +3544,14 @@ class BaseAnalyst(ABC):
     # Class-level default so an analyst built without ``__init__`` — a test
     # stand-in, a script — still answers the question the parser asks it.
     _answer_unstructured: bool = False
+    # The same, for the delegation state the loop reads and writes: a
+    # stand-in that never asks anyone and is never asked still runs a loop.
+    call_chain: tuple[str, ...] = ()
+    loop_budget: LoopBudget | None = None
+    _budget_ceiling: BudgetCeiling | None = None
+    steps_spent: int = 0
+    current_round: int = 0
+    sample_path_choices: dict[str, Any] = {}
 
     def _with_answer_status(self, isr: AgentISR) -> AgentISR:
         """Say on the ISR that the loop never produced a report, when it did not.

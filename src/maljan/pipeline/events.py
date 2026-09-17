@@ -69,6 +69,8 @@ def emit_agent_message(
     claims: list[dict[str, Any]] | None = None,
     dissent: list[str] | None = None,
     report: str | None = None,
+    stage: str | None = None,
+    addressed_to: str | None = None,
 ) -> None:
     """Emit one transcript line.
 
@@ -94,6 +96,12 @@ def emit_agent_message(
             away. Truncated to ``REPORT_CHAR_LIMIT``; when that happens the
             payload also carries ``report_truncated: True`` rather than leaving
             the reader to guess whether the report really ended there.
+        stage: The team stage the speaker is working in, when the producer
+            knows it. An ask and its answer carry it so the transcript can
+            place a delegated exchange inside the stage that made it.
+        addressed_to: The agent this line is said *to*, when it is said to one
+            agent rather than to the room: the caller's ask names the callee,
+            the callee's answer names the caller. Absent on every other line.
     """
     # ``confidence`` is spread into the literal rather than written in
     # afterwards. Nothing about the value changes either way; what changes is
@@ -108,6 +116,10 @@ def emit_agent_message(
         "text": text,
         **({"confidence": round(float(confidence), 4)} if confidence is not None else {}),
     }
+    if stage:
+        payload["stage"] = str(stage)
+    if addressed_to:
+        payload["addressed_to"] = str(addressed_to)
     if claims:
         payload["claims"] = claims
     if dissent:
