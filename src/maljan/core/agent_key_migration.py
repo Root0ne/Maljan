@@ -64,8 +64,10 @@ __all__ = [
 # it is what the console's own per-field error says, and renaming it would
 # silently grow a duplicate of a built-in instead. These five are different:
 # they were legal names yesterday.
-NEWLY_RESERVED_DEFINITIONS: frozenset[str] = frozenset({"triage", "android_static", "reverser"})
-NEWLY_RESERVED_PROFILES: frozenset[str] = frozenset({"mobile", "deep_static"})
+NEWLY_RESERVED_DEFINITIONS: frozenset[str] = frozenset(
+    {"triage", "android_static", "reverser", "lead"}
+)
+NEWLY_RESERVED_PROFILES: frozenset[str] = frozenset({"mobile", "deep_static", "team_lead"})
 
 # What a renamed key is called, before uniquifying. Chosen to read as the
 # operator's own thing rather than as damage: `reverser_custom` is what they

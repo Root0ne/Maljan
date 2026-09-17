@@ -1566,6 +1566,17 @@ ANNOTATIONS.update(
             "editor": "stages",
             "order": -1,
         },
+        "agents.delegation_depth": {
+            "title": "Delegation depth",
+            "description": (
+                "How far one agent's ask of another may nest. A stage's agent "
+                "asking a specialist is depth 1; that specialist asking another "
+                "is depth 2; an ask that would go deeper is refused with a "
+                "message the model reads. It bounds the nesting, never how many "
+                "times an agent may ask."
+            ),
+            "group": "agents",
+        },
         "agents.definitions": {
             "title": "Agent definitions",
             "description": (

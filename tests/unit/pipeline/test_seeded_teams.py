@@ -148,3 +148,21 @@ class TestTheDeepStaticTeam:
         _, final = _run("deep_static", file_name="evil.exe", file_type="pe")
         assert final["final_decision"] is not None
         assert final["stage_results"]["report"]["ran"] is True
+
+
+class TestTheTeamLeadTeam:
+    def test_it_is_seeded_and_builds_one_analyst_node(self) -> None:
+        assert "team_lead" in BUILTIN_PROFILES
+        container = ServiceContainer(_settings("team_lead"), mock=True)
+        nodes = set(build_graph(container).get_graph().nodes)
+        assert "lead_analyst" in nodes
+        assert "judge" in nodes and "report" in nodes
+        assert not any(node.startswith(("static_", "dynamic_", "network_")) for node in nodes)
+
+    def test_it_runs_end_to_end_in_mock_mode(self) -> None:
+        events, final = _run("team_lead", file_name="evil.exe", file_type="pe")
+        started = [p["stage"] for k, p in events if k == "stage_started"]
+        assert started[0] == "lead"
+        assert final["stage_results"]["lead"]["ran"] is True
+        assert final["stage_results"]["lead"]["agents"] == ["lead"]
+        assert final["final_decision"] is not None

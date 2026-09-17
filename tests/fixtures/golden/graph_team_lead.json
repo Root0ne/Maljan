@@ -1,0 +1,64 @@
+{
+  "parallel": {
+    "analysts": [
+      "lead"
+    ],
+    "conditional": {
+      "negotiation": {
+        "judge": "judge",
+        "revision": "revision"
+      }
+    },
+    "edges": [
+      "__start__->triage_pack",
+      "judge->report",
+      "lead_analyst->negotiation",
+      "negotiation->judge",
+      "negotiation->revision",
+      "report->__end__",
+      "revision->negotiation",
+      "triage_pack->lead_analyst"
+    ],
+    "nodes": [
+      "__end__",
+      "__start__",
+      "judge",
+      "lead_analyst",
+      "negotiation",
+      "report",
+      "revision",
+      "triage_pack"
+    ]
+  },
+  "sequential": {
+    "analysts": [
+      "lead"
+    ],
+    "conditional": {
+      "negotiation": {
+        "judge": "judge",
+        "revision": "revision"
+      }
+    },
+    "edges": [
+      "__start__->triage_pack",
+      "judge->report",
+      "lead_analyst->negotiation",
+      "negotiation->judge",
+      "negotiation->revision",
+      "report->__end__",
+      "revision->negotiation",
+      "triage_pack->lead_analyst"
+    ],
+    "nodes": [
+      "__end__",
+      "__start__",
+      "judge",
+      "lead_analyst",
+      "negotiation",
+      "report",
+      "revision",
+      "triage_pack"
+    ]
+  }
+}

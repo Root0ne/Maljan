@@ -37,7 +37,7 @@ from typing import TYPE_CHECKING, Any, cast
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from maljan.agents.registry import AgentRegistry
-from maljan.core.config import REPORTER_AGENT_KEY, Settings
+from maljan.core.config import PROMPT_ROLES, REPORTER_AGENT_KEY, Settings
 from maljan.core.exceptions import ConfigurationError
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger
@@ -706,7 +706,7 @@ class ServiceContainer:
         A built-in role runs its own class under the definition's key — a clone
         ``static_r2`` is a ``StaticAnalyst`` named ``static_r2`` — because
         those classes carry the provider-specific ISR extraction the goldens
-        pin. A ``generic`` role runs ``ConfigurableAnalyst``. Both get the
+        pin. A ``generic`` or ``lead`` role runs ``ConfigurableAnalyst``. Both get the
         per-run ledgers, a way back to this container, and their
         ``ResolvedAgent``, so nothing below re-derives a prompt or a tool set.
         """
@@ -721,7 +721,7 @@ class ServiceContainer:
             role = self.agent_role(name)
             resolved = resolve_agent(name, self, self.job_key())
             llm = cast(BaseChatModel, resolved.llm)
-            if role == "generic":
+            if role in PROMPT_ROLES:
                 agent: BaseAnalyst = ConfigurableAnalyst(name, resolved, llm)
             else:
                 agent = self.agent_registry.create(role, llm)
@@ -1077,7 +1077,7 @@ class ServiceContainer:
         "sample.chunks"]`` would hand a detonated sample both instead of one.
         """
         role = self.agent_role(agent_name)
-        if role == "generic":
+        if role in PROMPT_ROLES:
             static_context = self.load_chunked(file_hash, agent_name)
             sandbox_chunks: list[TextChunk] = []
             if sandbox_report:

@@ -26,7 +26,7 @@ from maljan.agents.judge_agent import (
 )
 from maljan.analysis.corroboration import corroboration_row
 from maljan.analysis.run_summary import RunSummaryBuilder
-from maljan.core.config import BUILTIN_AGENTS, ReportingConfig
+from maljan.core.config import BUILTIN_AGENTS, PROMPT_ROLES, ReportingConfig
 from maljan.core.container import ServiceContainer
 from maljan.core.exceptions import AnalystError, LLMError
 from maljan.core.logger import logger
@@ -145,7 +145,7 @@ def _is_placeholder_only(chunks: list, role: str = "") -> bool:
       mirrored for a provider, which is the same degraded-but-intentional
       path static falls back to, not an absence of data.
     """
-    if role in ("static", "generic") or len(chunks) != 1:
+    if role in SAMPLE_FED_ROLES or len(chunks) != 1:
         return False
     content = getattr(chunks[0], "content", "") or ""
     return bool(_STATIC_PLACEHOLDER_RE.match(content.strip()))
@@ -153,6 +153,12 @@ def _is_placeholder_only(chunks: list, role: str = "") -> bool:
 
 # The reason a sandbox-fed analyst is skipped when nothing was detonated.
 SYNTHETIC_SANDBOX_REASON = "no sandbox fixture for this sample"
+
+# The roles whose input is the sample itself rather than the sandbox report:
+# the static analyst, and the two roles that are a prompt over the sample and
+# whatever tools the definition gives them. These get the sample path pinned
+# and spliced into their first chunk; the others read a report.
+SAMPLE_FED_ROLES: tuple[str, ...] = ("static", *PROMPT_ROLES)
 
 
 def _sandbox_report_is_synthetic(state: AnalysisState) -> bool:
@@ -170,7 +176,7 @@ def _sandbox_report_is_synthetic(state: AnalysisState) -> bool:
 
 def _sandbox_fed(role: str) -> bool:
     """Whether this role's input is the sandbox report rather than the sample."""
-    return role not in ("static", "generic")
+    return role not in SAMPLE_FED_ROLES
 
 
 def _violations_from_rows(rows: Any) -> list[Violation]:
@@ -1402,7 +1408,7 @@ def make_stage_agent_node(
             # the failure path. The chunk carries the path for the model to
             # read; the pin carries it for the tool layer, which is what
             # actually corrects a model that sends the bare filename.
-            if role in ("static", "generic"):
+            if role in SAMPLE_FED_ROLES:
                 _pin_sample_path(agent, state)
 
             chunks = container.load_data_for_agent(
@@ -1412,7 +1418,7 @@ def make_stage_agent_node(
                 sample_path=_absolute_host_sample_path(state) or None,
             )
 
-            if role in ("static", "generic"):
+            if role in SAMPLE_FED_ROLES:
                 # The mirror is looked up by this agent's own static provider
                 # id so two static analysts on two providers each get their own
                 # mirror path, with the absolute host path as the fallback a

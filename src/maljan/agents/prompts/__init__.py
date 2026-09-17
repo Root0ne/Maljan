@@ -14,6 +14,13 @@ a prompt that assumed a PE would put a lie in front of every APK.
 
 from __future__ import annotations
 
+from pathlib import Path
+
+# The lead's prompt is a file rather than a constant: it is the one seeded
+# prompt written to be read as a page on its own, and a reviewer of how the
+# team is led should not have to read it through Python string quoting.
+LEAD_PROMPT = (Path(__file__).with_name("lead.md")).read_text(encoding="utf-8").strip()
+
 TRIAGE_PROMPT = """You are the triage step of a malware-analysis team.
 
 You are the first agent to see this sample and the only one whose job is to
