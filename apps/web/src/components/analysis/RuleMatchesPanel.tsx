@@ -98,7 +98,7 @@ function Section({
     <div className="border border-border rounded mb-4">
       <button
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-medium text-text-primary uppercase tracking-wider hover:bg-bg-hover transition-colors"
+        className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-medium text-text-primary uppercase tracking-wider hover:bg-bg-hover"
       >
         <span>{title}</span>
         <svg
@@ -164,16 +164,8 @@ export default function RulesTab() {
     );
   }
 
-  const hasData = yaraMatches.length > 0 || sigmaMatches.length > 0;
-  if (!hasData) {
-    return (
-      <div className="p-8 text-center text-sm text-text-secondary">
-        {report
-          ? "No YARA or Sigma rule matches were recorded for this analysis."
-          : "Analysis has not completed yet."}
-      </div>
-    );
-  }
+  // The DETECTION tab draws this section only when a rule fired.
+  if (yaraMatches.length === 0 && sigmaMatches.length === 0) return null;
 
   return (
     <div>
@@ -188,7 +180,7 @@ export default function RulesTab() {
             {yaraMatches.map((rule, i) => (
               <div
                 key={`${rule.rule_name}-${i}`}
-                className="flex items-start gap-3 px-4 py-2.5 hover:bg-bg-hover transition-colors"
+                className="flex items-start gap-3 px-4 py-2.5 hover:bg-bg-hover"
               >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 text-xs">
@@ -242,7 +234,7 @@ export default function RulesTab() {
               return (
                 <div
                   key={`${rule.rule_name}-${i}`}
-                  className="flex items-start gap-3 px-4 py-3 hover:bg-bg-hover transition-colors"
+                  className="flex items-start gap-3 px-4 py-3 hover:bg-bg-hover"
                 >
                   <div className="flex items-center gap-1 mt-0.5 shrink-0 w-20">
                     <div className="flex gap-0.5">

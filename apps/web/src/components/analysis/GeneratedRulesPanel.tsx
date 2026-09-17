@@ -44,13 +44,9 @@ export default function GeneratedRulesPanel() {
     return <div className="p-4 text-sm text-text-secondary">Loading...</div>;
   }
 
-  if (signatures.length === 0) {
-    return (
-      <div className="p-8 text-center text-sm text-text-secondary">
-        No detection signatures generated for this sample yet.
-      </div>
-    );
-  }
+  // The DETECTION tab draws this section only when the run wrote rules, so
+  // nothing here has to say that it did not.
+  if (signatures.length === 0) return null;
 
   return (
     <div className="space-y-4">
@@ -89,7 +85,7 @@ export default function GeneratedRulesPanel() {
                   );
                 }
               }}
-              className="px-2 py-1 text-[11px] uppercase tracking-wider text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors"
+              className="px-2 py-1 text-[11px] uppercase tracking-wider text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted"
             >
               ↓ {k} bundle
             </button>
@@ -127,7 +123,7 @@ function KindButton({
   return (
     <button
       onClick={onClick}
-      className={`text-[11px] uppercase tracking-wider px-2 py-0.5 rounded border transition-colors ${
+      className={`text-[11px] uppercase tracking-wider px-2 py-0.5 rounded border ${
         active
           ? "border-accent text-accent"
           : "border-border text-text-secondary hover:text-text-primary"
@@ -181,13 +177,13 @@ function RuleCard({ rule }: { rule: DetectionRule }) {
                 setTimeout(() => setCopied(false), 1500);
               }
             }}
-            className="px-2 py-1 text-[11px] uppercase tracking-wider text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors"
+            className="px-2 py-1 text-[11px] uppercase tracking-wider text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted"
           >
             {copied ? "copied" : "copy"}
           </button>
           <button
             onClick={() => downloadBlob(rule.body, filename, KIND_MIME[rule.kind])}
-            className="px-2 py-1 text-[11px] uppercase tracking-wider text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors"
+            className="px-2 py-1 text-[11px] uppercase tracking-wider text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted"
           >
             ↓ {KIND_EXT[rule.kind]}
           </button>

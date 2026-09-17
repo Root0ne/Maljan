@@ -119,7 +119,8 @@ export default function DynamicTab() {
         <ArtifactSections sections={evidenceSections} />
         {evidenceSections.length === 0 && (
           <div className="p-8 text-center text-sm text-text-secondary">
-            No dynamic-analysis data available — the sample may not have been detonated.
+            The sample was not detonated on this run, so there is no behaviour
+            to show.
           </div>
         )}
         {analystFindings.length > 0 && <AnalystFindings findings={analystFindings} />}
@@ -154,7 +155,7 @@ export default function DynamicTab() {
         </div>
       )}
 
-      {showsProcessTree && (
+      {showsProcessTree && (dyn.process_tree.length > 0 || antiEmulationHit) && (
       <div className="bg-bg-surface border border-border rounded">
         <div className="px-4 py-3 border-b border-border">
           <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
@@ -163,19 +164,13 @@ export default function DynamicTab() {
         </div>
         <div className="p-4">
           {dyn.process_tree.length === 0 ? (
+            /* An empty tree is drawn only where the run can say why it is
+             * empty: a sample that detected the sandbox and left is a finding,
+             * and "no process activity recorded" beside nothing is not. */
             <div className="text-xs text-text-muted">
-              {antiEmulationHit ? (
-                <>
-                  Sandbox traced no process activity — sample employed
-                  anti-emulation behaviour
-                  <span className="ml-1 text-status-orange">
-                    ({antiEmulationHit.name})
-                  </span>
-                  .
-                </>
-              ) : (
-                <>No process activity recorded.</>
-              )}
+              Sandbox traced no process activity — sample employed
+              anti-emulation behaviour
+              <span className="ml-1 text-status-orange">({antiEmulationHit?.name})</span>.
             </div>
           ) : (
             <div className="font-mono text-xs space-y-1">
@@ -189,17 +184,14 @@ export default function DynamicTab() {
 
       )}
 
-      {showsSignatures && (
+      {showsSignatures && sortedSignatures.length > 0 && (
       <div className="bg-bg-surface border border-border rounded">
         <div className="px-4 py-3 border-b border-border">
           <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
             Sandbox Signatures ({sortedSignatures.length})
           </h2>
         </div>
-        {sortedSignatures.length === 0 ? (
-          <div className="p-8 text-center text-sm text-text-muted">No signatures triggered.</div>
-        ) : (
-          <div className="divide-y divide-border-light">
+        <div className="divide-y divide-border-light">
             {sortedSignatures.map((sig, i) => (
               <div key={i} className="p-4">
                 <div className="flex items-start gap-3">
@@ -252,24 +244,18 @@ export default function DynamicTab() {
                 </div>
               </div>
             ))}
-          </div>
-        )}
+        </div>
       </div>
       )}
 
-      {showsRegistry && (
+      {showsRegistry && dyn.registry_mods.length > 0 && (
         <div className="bg-bg-surface border border-border rounded">
           <div className="px-4 py-3 border-b border-border">
             <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
               Registry Modifications ({dyn.registry_mods.length})
             </h2>
           </div>
-          {dyn.registry_mods.length === 0 ? (
-            <div className="p-8 text-center text-sm text-text-muted">
-              No registry activity recorded.
-            </div>
-          ) : (
-            <table className="w-full">
+          <table className="w-full">
               <thead>
                 <tr className="border-b border-border">
                   <Th>Op</Th>
@@ -281,7 +267,7 @@ export default function DynamicTab() {
               </thead>
               <tbody className="divide-y divide-border-light">
                 {dyn.registry_mods.slice(0, 200).map((r, i) => (
-                  <tr key={i} className="hover:bg-bg-hover transition-colors">
+                  <tr key={i} className="hover:bg-bg-hover">
                     <td className="px-4 py-2 text-[11px] uppercase tracking-wider text-text-muted">
                       {r.operation}
                     </td>
@@ -297,7 +283,6 @@ export default function DynamicTab() {
                 ))}
               </tbody>
             </table>
-          )}
           {dyn.registry_mods.length > 200 && (
             <div className="px-4 py-2 text-[11px] text-text-muted border-t border-border">
               Showing first 200 of {dyn.registry_mods.length}.

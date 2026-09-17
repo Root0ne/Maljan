@@ -2,10 +2,30 @@
 
 import Link from "next/link";
 import { usePathname, useParams } from "next/navigation";
-import { useEffect, useRef, useState, createContext, useContext } from "react";
+import { useEffect, useMemo, useRef, useState, createContext, useContext } from "react";
+import {
+  Activity,
+  Anchor,
+  Binary,
+  CircleAlert,
+  CircleCheck,
+  CircleHelp,
+  CircleMinus,
+  FileText,
+  Globe,
+  IdCard,
+  LayoutGrid,
+  MessagesSquare,
+  ScrollText,
+  Shield,
+  ShieldCheck,
+  Tags,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { api } from "@/lib/api";
 import type { ReportDetailDTO, JobDTO } from "@/lib/api";
 import PipelineStrip from "@/components/analysis/PipelineStrip";
+import { TAB_GROUP_ORDER, tabsFor, type TabIcon } from "@/components/analysis/analysisTabs";
 import {
   hydrateRunTranscript,
   setRunRoster,
@@ -44,62 +64,45 @@ export function useReport() {
  * The human label comes from `verdictLabel` for the same reason. */
 const VERDICT_CONFIG: Record<
   VerdictBucket,
-  { bg: string; border: string; text: string; icon: string }
+  { border: string; text: string; icon: LucideIcon }
 > = {
   malicious: {
-    bg: "bg-status-red/10",
-    border: "border-status-red/30",
+    border: "border-status-red/40",
     text: "text-status-red",
-    icon: "!",
+    icon: CircleAlert,
   },
   suspicious: {
-    bg: "bg-status-orange/10",
-    border: "border-status-orange/30",
+    border: "border-status-orange/40",
     text: "text-status-orange",
-    icon: "?",
+    icon: CircleHelp,
   },
   benign: {
-    bg: "bg-status-green/10",
-    border: "border-status-green/30",
+    border: "border-status-green/40",
     text: "text-status-green",
-    icon: "\u2713",
+    icon: CircleCheck,
   },
   unknown: {
-    bg: "bg-text-muted/10",
-    border: "border-text-muted/30",
+    border: "border-text-muted/40",
     text: "text-text-muted",
-    icon: "-",
+    icon: CircleMinus,
   },
 };
 
-interface TabDef {
-  key: string;
-  label: string;
-  group: "overview" | "analysis" | "intel" | "advanced";
-}
-
-const TABS: TabDef[] = [
-  { key: "", label: "SUMMARY", group: "overview" },
-  // The run as it happens and as it happened: one route for both, which is
-  // what replaced the old LIVE and PROCESS pair.
-  { key: "/conversation", label: "CONVERSATION", group: "overview" },
-  { key: "/identity", label: "IDENTITY", group: "overview" },
-  { key: "/static", label: "STATIC", group: "analysis" },
-  { key: "/dynamic", label: "DYNAMIC", group: "analysis" },
-  { key: "/network", label: "NETWORK", group: "analysis" },
-  { key: "/persistence", label: "PERSISTENCE", group: "analysis" },
-  { key: "/capabilities", label: "ATT&CK", group: "intel" },
-  { key: "/attribution", label: "ATTRIBUTION", group: "intel" },
-  // SIGNATURES + RULES merged into one DETECTION tab, which also folds the
-  // STIX export bundle in as a third section.
-  { key: "/detection", label: "DETECTION", group: "intel" },
-  { key: "/defense", label: "DEFENSE", group: "intel" },
-  // The ledger every other tab cites. A citation chip anywhere in the report
-  // links straight to one of its rows.
-  { key: "/evidence", label: "EVIDENCE", group: "advanced" },
-];
-
-const TAB_GROUP_ORDER: TabDef["group"][] = ["overview", "analysis", "intel", "advanced"];
+/** The icon each tab is drawn with, keyed by the name `analysisTabs` gives it. */
+const TAB_ICON: Record<TabIcon, LucideIcon> = {
+  summary: FileText,
+  conversation: MessagesSquare,
+  identity: IdCard,
+  static: Binary,
+  dynamic: Activity,
+  network: Globe,
+  persistence: Anchor,
+  attack: LayoutGrid,
+  attribution: Tags,
+  detection: ShieldCheck,
+  defense: Shield,
+  evidence: ScrollText,
+};
 
 export default function AnalysisLayout({
   children,
@@ -245,6 +248,13 @@ export default function AnalysisLayout({
   const analyzedAt = analyzedAtIso ? formatDateTime(analyzedAtIso) : "";
 
   const v = VERDICT_CONFIG[verdict];
+  const VerdictIcon = v.icon;
+
+  /* The tabs this run earned. A tab is a promise that there is something
+   * behind it, so one the run never filled is absent rather than present and
+   * apologetic — and while the job is still running only the three that can
+   * answer anything are offered. */
+  const tabs = useMemo(() => tabsFor(report), [report]);
 
   /* The H1 should identify the sample, not restate the verdict (the verdict
    * badge already shows it). Prefer the original filename from the rich
@@ -312,9 +322,9 @@ export default function AnalysisLayout({
           <div className="flex items-start gap-5">
             {/* Verdict Badge */}
             <div
-              className={`flex items-center justify-center w-16 h-16 rounded-full border-2 ${v.bg} ${v.border} shrink-0`}
+              className={`flex items-center justify-center w-10 h-10 rounded-full border ${v.border} ${v.text} shrink-0`}
             >
-              <span className={`text-2xl font-bold ${v.text}`}>{v.icon}</span>
+              <VerdictIcon size={18} aria-hidden="true" />
             </div>
 
             {/* Info */}
@@ -323,7 +333,7 @@ export default function AnalysisLayout({
                 <h1 className="text-lg font-semibold text-text-primary truncate max-w-full" title={headerTitle}>
                   {headerTitle}
                 </h1>
-                <span className={`text-xs px-2 py-0.5 rounded ${v.bg} ${v.text}`}>
+                <span className={`text-xs px-2 py-0.5 rounded bg-bg-active ${v.text}`}>
                   {verdictLabel(report?.verdict)}
                 </span>
                 <span className="text-xs text-text-secondary bg-bg-active px-2 py-0.5 rounded">
@@ -382,13 +392,18 @@ export default function AnalysisLayout({
         </div>
 
         {/* Tab Bar — grouped by section with thin separators */}
-        <div className="flex flex-wrap items-end border-b border-border mb-4">
+        <nav aria-label="Analysis sections" className="flex flex-wrap items-end border-b border-border mb-4">
           {TAB_GROUP_ORDER.map((group, gi) => {
-            const groupTabs = TABS.filter((t) => t.group === group);
+            const groupTabs = tabs.filter((t) => t.group === group);
             if (groupTabs.length === 0) return null;
+            // A separator belongs between two groups that both drew something,
+            // never before the first one a run happens to have.
+            const earlier = TAB_GROUP_ORDER.slice(0, gi).some((g) =>
+              tabs.some((t) => t.group === g),
+            );
             return (
               <div key={group} className="flex items-end">
-                {gi > 0 && (
+                {earlier && (
                   <span
                     aria-hidden="true"
                     className="h-5 w-px bg-border mx-1.5 mb-2 self-center"
@@ -400,16 +415,19 @@ export default function AnalysisLayout({
                     tab.key === ""
                       ? pathname === basePath
                       : pathname.startsWith(href);
+                  const Icon = TAB_ICON[tab.icon];
                   return (
                     <Link
                       key={tab.key}
                       href={href}
-                      className={`px-3 py-2.5 text-xs font-medium uppercase tracking-wider border-b-2 ${
+                      aria-current={active ? "page" : undefined}
+                      className={`flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium uppercase tracking-wider border-b-2 ${
                         active
                           ? "border-accent text-accent"
                           : "border-transparent text-text-secondary hover:text-text-primary"
                       }`}
                     >
+                      <Icon size={16} aria-hidden="true" />
                       {tab.label}
                     </Link>
                   );
@@ -417,7 +435,7 @@ export default function AnalysisLayout({
               </div>
             );
           })}
-        </div>
+        </nav>
 
         {/* Tab Content */}
         {children}

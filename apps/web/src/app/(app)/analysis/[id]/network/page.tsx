@@ -1,20 +1,13 @@
 "use client";
 
-import { useState } from "react";
-
 import { useReport } from "../layout";
-import { api } from "@/lib/api";
-import { getErrorMessage } from "@/lib/errors";
 import Th from "@/components/ui/Th";
 import { ArtifactSections } from "@/components/analysis/ArtifactTable";
 import { isCoveredBySection, sectionsForTab } from "@/components/analysis/reportSections";
-import { ENRICH_STATUS_MESSAGE, ENRICH_BUTTON_LABEL } from "@/lib/enrichment";
 import type { NetworkDomain, NetworkIP } from "@/types/malware-report";
 
 export default function NetworkTab() {
   const { report, loading } = useReport();
-  const [enrichBusy, setEnrichBusy] = useState(false);
-  const [enrichMsg, setEnrichMsg] = useState<string | null>(null);
 
   if (loading) {
     return <div className="p-4 text-sm text-text-secondary">Loading...</div>;
@@ -41,62 +34,27 @@ export default function NetworkTab() {
   if (!net && staticIocs.length === 0 && evidenceSections.length === 0) {
     return (
       <div className="p-8 text-center text-sm text-text-secondary">
-        No network IOCs available — the sample may not have contacted the network
-        during analysis.
+        Nothing on this run looked at the network: no capture, no sandbox
+        channel, and no endpoint in the sample&apos;s own strings.
       </div>
     );
   }
-
-  const reportId = report?.id;
-  const triggerEnrich = async () => {
-    if (!reportId || enrichBusy) return;
-    setEnrichBusy(true);
-    setEnrichMsg(null);
-    try {
-      // The endpoint distinguishes queued /
-      // already_queued / skipped_no_network_iocs — say which one happened
-      // instead of always promising a refresh.
-      const res = await api.enrichReport(reportId);
-      setEnrichMsg(ENRICH_STATUS_MESSAGE[res.status] ?? ENRICH_STATUS_MESSAGE.queued);
-    } catch (e) {
-      setEnrichMsg(`Failed to queue enrichment: ${getErrorMessage(e)}`);
-    } finally {
-      setEnrichBusy(false);
-    }
-  };
 
   return (
     <div className="space-y-4">
       <ArtifactSections sections={evidenceSections} />
 
-      <div className="flex items-center justify-between">
-        <div className="text-xs text-text-muted">
-          {(net?.domains.length ?? 0) +
-            staticIocs.filter((s) => s.kind === "domain").length}{" "}
-          domain(s) · {(net?.ips.length ?? 0) +
-            staticIocs.filter((s) => s.kind === "ip").length}{" "}
-          IP(s) · {(net?.urls.length ?? 0) +
-            staticIocs.filter((s) => s.kind === "url").length}{" "}
-          URL(s)
-          {staticIocs.length > 0 && (
-            <span className="ml-1 text-text-disabled">
-              ({staticIocs.length} from static strings)
-            </span>
-          )}
-        </div>
-        <button
-          onClick={triggerEnrich}
-          disabled={enrichBusy || !reportId}
-          className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors disabled:text-text-disabled disabled:cursor-not-allowed"
-        >
-          {enrichBusy ? "queueing..." : ENRICH_BUTTON_LABEL}
-        </button>
+      <div className="text-xs text-text-muted">
+        {(net?.domains.length ?? 0) + staticIocs.filter((s) => s.kind === "domain").length}{" "}
+        domain(s) · {(net?.ips.length ?? 0) + staticIocs.filter((s) => s.kind === "ip").length}{" "}
+        IP(s) · {(net?.urls.length ?? 0) + staticIocs.filter((s) => s.kind === "url").length}{" "}
+        URL(s)
+        {staticIocs.length > 0 && (
+          <span className="ml-1 text-text-disabled">
+            ({staticIocs.length} from static strings)
+          </span>
+        )}
       </div>
-      {enrichMsg && (
-        <div className="text-xs text-text-secondary bg-bg-active border border-border rounded p-2">
-          {enrichMsg}
-        </div>
-      )}
 
       {showsStaticIocs && (
         <div className="bg-bg-surface border border-border rounded">
@@ -113,7 +71,7 @@ export default function NetworkTab() {
             {staticIocs.map((s, i) => (
               <div
                 key={`${s.kind}-${s.value}-${i}`}
-                className="px-4 py-2 flex items-center gap-3 hover:bg-bg-hover transition-colors"
+                className="px-4 py-2 flex items-center gap-3 hover:bg-bg-hover"
               >
                 <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-bg-active text-text-muted shrink-0">
                   {s.kind}
@@ -133,51 +91,32 @@ export default function NetworkTab() {
         </div>
       )}
 
-      {net && showsObservedTraffic && (
-      <>
-      <div className="bg-bg-surface border border-border rounded">
-        <div className="px-4 py-3 border-b border-border">
-          <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-            Domains
-          </h2>
-        </div>
-        {net.domains.length === 0 ? (
-          <div className="p-8 text-center text-sm text-text-muted">No domains observed.</div>
-        ) : (
+      {/* A table with nothing in it is not a finding. The tab is offered only
+        * when the run saw traffic at all (see `analysisTabs`), and inside it
+        * each list draws only where there is something to list — five
+        * "No X observed." panels under one another said nothing five times. */}
+      {net && showsObservedTraffic && net.domains.length > 0 && (
+        <Panel title="Domains">
           <div className="divide-y divide-border-light">
             {net.domains.map((d, i) => (
               <DomainCard key={`${d.fqdn}-${i}`} domain={d} />
             ))}
           </div>
-        )}
-      </div>
+        </Panel>
+      )}
 
-      <div className="bg-bg-surface border border-border rounded">
-        <div className="px-4 py-3 border-b border-border">
-          <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-            IP Endpoints
-          </h2>
-        </div>
-        {net.ips.length === 0 ? (
-          <div className="p-8 text-center text-sm text-text-muted">No IPs observed.</div>
-        ) : (
+      {net && showsObservedTraffic && net.ips.length > 0 && (
+        <Panel title="IP Endpoints">
           <div className="divide-y divide-border-light">
             {net.ips.map((ip, i) => (
               <IPCard key={`${ip.address}-${i}`} ip={ip} />
             ))}
           </div>
-        )}
-      </div>
+        </Panel>
+      )}
 
-      <div className="bg-bg-surface border border-border rounded">
-        <div className="px-4 py-3 border-b border-border">
-          <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-            HTTP URLs
-          </h2>
-        </div>
-        {net.urls.length === 0 ? (
-          <div className="p-8 text-center text-sm text-text-muted">No HTTP URLs observed.</div>
-        ) : (
+      {net && showsObservedTraffic && net.urls.length > 0 && (
+        <Panel title="HTTP URLs">
           <table className="w-full">
             <thead>
               <tr className="border-b border-border">
@@ -189,7 +128,7 @@ export default function NetworkTab() {
             </thead>
             <tbody className="divide-y divide-border-light">
               {net.urls.map((u, i) => (
-                <tr key={i} className="hover:bg-bg-hover transition-colors">
+                <tr key={i} className="hover:bg-bg-hover">
                   <td className="px-4 py-2 text-[11px] uppercase tracking-wider text-text-muted">
                     {u.method}
                   </td>
@@ -206,86 +145,57 @@ export default function NetworkTab() {
               ))}
             </tbody>
           </table>
-        )}
-      </div>
-
-      </>
+        </Panel>
       )}
 
-      {net && (
-      <>
-      <div className="bg-bg-surface border border-border rounded">
-        <div className="px-4 py-3 border-b border-border">
-          <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-            User-Agents ({net.user_agents.length})
-          </h2>
-        </div>
-        {net.user_agents.length === 0 ? (
-          <div className="p-8 text-center text-sm text-text-muted">No user agents observed.</div>
-        ) : (
-          <ul className="divide-y divide-border-light">
-            {net.user_agents.map((ua, i) => (
-              <li
-                key={i}
-                className="px-4 py-2 text-xs font-mono text-text-secondary break-all hover:bg-bg-hover transition-colors"
-              >
-                {ua}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      {net && net.user_agents.length > 0 && (
+        <Panel title={`User-Agents (${net.user_agents.length})`}>
+          <StringList values={net.user_agents} />
+        </Panel>
+      )}
 
-      <div className="bg-bg-surface border border-border rounded">
-        <div className="px-4 py-3 border-b border-border">
-          <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-            JA3 Fingerprints ({net.ja3_fingerprints.length})
-          </h2>
-        </div>
-        {net.ja3_fingerprints.length === 0 ? (
-          <div className="p-8 text-center text-sm text-text-muted">
-            No TLS JA3 fingerprints observed.
-          </div>
-        ) : (
-          <ul className="divide-y divide-border-light">
-            {net.ja3_fingerprints.map((j, i) => (
-              <li
-                key={i}
-                className="px-4 py-2 text-xs font-mono text-text-secondary break-all hover:bg-bg-hover transition-colors"
-              >
-                {typeof j === "string" ? j : JSON.stringify(j)}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      {net && net.ja3_fingerprints.length > 0 && (
+        <Panel title={`JA3 Fingerprints (${net.ja3_fingerprints.length})`}>
+          <StringList values={net.ja3_fingerprints} />
+        </Panel>
+      )}
 
-      <div className="bg-bg-surface border border-border rounded">
-        <div className="px-4 py-3 border-b border-border">
-          <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-            JA3S Fingerprints ({net.ja3s_fingerprints.length})
-          </h2>
-        </div>
-        {net.ja3s_fingerprints.length === 0 ? (
-          <div className="p-8 text-center text-sm text-text-muted">
-            No TLS JA3S fingerprints observed.
-          </div>
-        ) : (
-          <ul className="divide-y divide-border-light">
-            {net.ja3s_fingerprints.map((j, i) => (
-              <li
-                key={i}
-                className="px-4 py-2 text-xs font-mono text-text-secondary break-all hover:bg-bg-hover transition-colors"
-              >
-                {typeof j === "string" ? j : JSON.stringify(j)}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-      </>
+      {net && net.ja3s_fingerprints.length > 0 && (
+        <Panel title={`JA3S Fingerprints (${net.ja3s_fingerprints.length})`}>
+          <StringList values={net.ja3s_fingerprints} />
+        </Panel>
       )}
     </div>
+  );
+}
+
+/** One titled card; the tab draws one per list that has something in it. */
+function Panel({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="bg-bg-surface border border-border rounded">
+      <div className="px-4 py-3 border-b border-border">
+        <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+          {title}
+        </h2>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+/** The fingerprint and user-agent lists, which are the same list twice over. */
+function StringList({ values }: { values: unknown[] }) {
+  return (
+    <ul className="divide-y divide-border-light">
+      {values.map((value, i) => (
+        <li
+          key={i}
+          className="px-4 py-2 text-xs font-mono text-text-secondary break-all hover:bg-bg-hover"
+        >
+          {typeof value === "string" ? value : JSON.stringify(value)}
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -344,11 +254,7 @@ function DomainCard({ domain }: { domain: NetworkDomain }) {
             </div>
           )}
         </div>
-        {rep ? (
-          <ReputationBadge rep={rep} />
-        ) : (
-          <span className="text-[11px] text-text-muted">no reputation</span>
-        )}
+        {rep && <ReputationBadge rep={rep} />}
       </div>
     </div>
   );
@@ -384,11 +290,7 @@ function IPCard({ ip }: { ip: NetworkIP }) {
             )}
           </div>
         </div>
-        {ip.reputation ? (
-          <ReputationBadge rep={ip.reputation as Record<string, unknown>} />
-        ) : (
-          <span className="text-[11px] text-text-muted">no reputation</span>
-        )}
+        {ip.reputation && <ReputationBadge rep={ip.reputation as Record<string, unknown>} />}
       </div>
     </div>
   );

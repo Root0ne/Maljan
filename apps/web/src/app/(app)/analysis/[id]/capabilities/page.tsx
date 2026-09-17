@@ -87,9 +87,12 @@ export default function AttackTab() {
     .filter((t) => t.techniques.length > 0);
 
   if (rawTechniques.length === 0) {
+    /* The tab is offered only when the run mapped something, so this is what a
+     * direct link to it sees: either the mapping could not be read, which is a
+     * different claim from an empty mapping, or the run mapped nothing. */
     return (
       <div className="p-8 text-center text-sm text-text-secondary">
-        {fetchError ?? "No MITRE ATT&CK techniques were mapped for this analysis."}
+        {fetchError ?? "This run mapped no ATT&CK technique."}
       </div>
     );
   }
@@ -139,7 +142,7 @@ export default function AttackTab() {
                     return (
                       <div
                         key={`${tactic.id}-${tech.id}`}
-                        className="bg-bg-elevated border border-border px-3 py-2.5 hover:bg-bg-active transition-colors"
+                        className="bg-bg-elevated border border-border px-3 py-2.5 hover:bg-bg-active"
                       >
                         <p className="text-xs text-text-primary font-medium leading-tight mb-1">
                           {tech.name}

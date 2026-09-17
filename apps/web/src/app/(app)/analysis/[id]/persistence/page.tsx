@@ -94,7 +94,7 @@ export default function PersistenceTab() {
   if ((!items || items.length === 0) && evidenceSections.length === 0) {
     return (
       <div className="p-8 text-center text-sm text-text-secondary">
-        No persistence mechanisms identified for this sample.
+        Nothing on this run established persistence.
       </div>
     );
   }
