@@ -385,9 +385,14 @@ it first, a team written by hand may leave it out, and a stored team gains it
 on upgrade (`make migrate`). Its three settings sit in the Analysis layers
 group: `triage.enabled` (off leaves the stage in place and makes it decline
 with that reason), `triage.strings_head` (how many printable runs the strings
-entry keeps; 300) and `triage.reputation` (`auto` asks the enabled reputation
+entry keeps; 300), `triage.reputation` (`auto` asks the enabled reputation
 server once for the sample hash — VirusTotal's own server when enabled, else
-the threat-intel sidecar — and `off` records a skipped entry instead).
+the threat-intel sidecar, never one the team lists in `exclude_servers` — and
+`off` records a skipped entry instead) and `triage.budget_seconds` (1200; a
+step that would start after the budget is spent is recorded as not run). The
+pack runs the real tools in mock mode too, so a local observation run with a
+reputation server enabled makes that one outbound call; a team that withholds
+the server, or `triage.reputation = off`, keeps such a run offline.
 
 `mobile` and `deep_static` are built from three seeded generic agent
 definitions — `triage`, `android_static` and `reverser` — whose prompts live in
