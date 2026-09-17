@@ -212,3 +212,20 @@ def test_a_pack_placed_after_a_dependency_is_an_ordinary_stage():
     assert "__start__->static_analyst" in shape["edges"]
     assert "static_analyst->facts" in shape["edges"]
     assert "facts->network_analyst" in shape["edges"]
+
+
+TEAM_LEAD_GOLDEN = GOLDEN.with_name("graph_team_lead.json")
+
+
+def test_the_team_lead_graph_is_the_one_pinned():
+    """One analyst node; the specialists are its tools, not stages."""
+    expected = json.loads(TEAM_LEAD_GOLDEN.read_text(encoding="utf-8"))
+    for parallel, key in ((False, "sequential"), (True, "parallel")):
+        cfg = Settings(_env_file=None, llm={"parallel_analysts": parallel})
+        cfg.agents.profile = "team_lead"
+        shape = compiled_shape(ServiceContainer(cfg, mock=True))
+        assert shape["nodes"] == expected[key]["nodes"]
+        assert shape["edges"] == expected[key]["edges"]
+        assert shape["conditional"] == expected[key]["conditional"]
+        assert shape["analysts"] == ["lead"]
+    assert "static_analyst" not in expected["sequential"]["nodes"]

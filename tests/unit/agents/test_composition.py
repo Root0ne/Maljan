@@ -561,3 +561,47 @@ def test_only_exclude_servers_may_differ_on_a_built_in_profile():
             _env_file=None,
             agents={"profiles": {"measurement": {"analysts": ["static"]}}},
         )
+
+
+class TestAnAgentReference:
+    """``ask_<key>`` is bound where a definition asks for it, and nowhere else."""
+
+    def test_the_lead_resolves_to_one_ask_tool_per_reference(self):
+        cfg = Settings(_env_file=None)
+        cfg.agents.profile = "team_lead"
+        resolved = resolve_agent("lead", _Container(cfg))
+        names = [t.name for t in resolved.tools]
+        assert names[:5] == [
+            "ask_static",
+            "ask_dynamic",
+            "ask_network",
+            "ask_reverser",
+            "ask_triage",
+        ]
+        assert resolved.role == "lead"
+
+    def test_the_async_resolver_binds_the_same_tools(self):
+        import asyncio
+
+        cfg = Settings(_env_file=None)
+        cfg.agents.profile = "team_lead"
+        resolved = asyncio.run(aresolve_agent("lead", _Container(cfg)))
+        assert [t.name for t in resolved.tools][:5] == [
+            "ask_static",
+            "ask_dynamic",
+            "ask_network",
+            "ask_reverser",
+            "ask_triage",
+        ]
+
+    def test_an_agent_with_no_reference_cannot_ask_anyone(self):
+        cfg = Settings(_env_file=None)
+        for key in ("static", "dynamic", "network", "triage", "reverser"):
+            names = [t.name for t in resolve_agent(key, _Container(cfg)).tools]
+            assert not any(name.startswith("ask_") for name in names), key
+
+    def test_the_tool_is_described_from_the_callee_s_label(self):
+        cfg = Settings(_env_file=None)
+        cfg.agents.profile = "team_lead"
+        tool = resolve_agent("lead", _Container(cfg)).tools[0]
+        assert tool.description.startswith("Ask Static analyst (static, role static)")

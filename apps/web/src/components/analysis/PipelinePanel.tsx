@@ -4,7 +4,13 @@ import { useReport } from "@/app/(app)/analysis/[id]/layout";
 import { useState } from "react";
 import { confidenceBarColor, confidenceClass } from "@/lib/report-utils";
 import { verdictLabel } from "@/lib/verdict";
-import { analystIdsOf, pipelineSteps, stepStatus as statusOfStep } from "./pipelineSteps";
+import {
+  CAP_LABEL,
+  analystIdsOf,
+  capsHit,
+  pipelineSteps,
+  stepStatus as statusOfStep,
+} from "./pipelineSteps";
 import type { PipelineStep } from "./pipelineSteps";
 import {
   formatStageDuration,
@@ -381,6 +387,17 @@ export default function PipelineTab() {
                 Did not run
               </span>
             )}
+            {/* A cap, not an answer, ended this agent's work: said beside the
+                step rather than left in the run summary's JSON. */}
+            {capsHit(runSummary, step.id).map((cap) => (
+              <span
+                key={cap}
+                className="text-[11px] px-1.5 py-0.5 rounded bg-status-orange/10 text-status-orange"
+                title={`cap: ${cap}`}
+              >
+                {CAP_LABEL[cap] ?? `ended at cap ${cap}`}
+              </span>
+            ))}
           </div>
           <p className="text-[11px] text-text-muted mt-0.5">{step.description}</p>
         </div>

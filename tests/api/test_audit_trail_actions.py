@@ -17,7 +17,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -104,13 +104,16 @@ def test_submitting_a_job_is_audited_with_its_sample_and_profile(rows):
     app.dependency_overrides[jobs_module._get_service] = lambda: svc
     client = TestClient(app)
 
-    response = client.post(
-        "/api/v1/jobs",
-        json={
-            "sample_id": str(sample_id),
-            "config": {"llm_provider": "openai", "mock_mode": True, "api_key": "sk-secret"},
-        },
-    )
+    # The submit-time probe gate reads the database; what is asserted here is
+    # the audit row, so it stands aside.
+    with patch.object(jobs_module, "_unprobed_models_for", AsyncMock(return_value=[])):
+        response = client.post(
+            "/api/v1/jobs",
+            json={
+                "sample_id": str(sample_id),
+                "config": {"llm_provider": "openai", "mock_mode": True, "api_key": "sk-secret"},
+            },
+        )
     assert response.status_code == 201, response.text
 
     row = rows.one("job.submit")

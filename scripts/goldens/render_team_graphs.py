@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[2]
 ASSETS = ROOT / "docs" / "assets"
 
 # The teams drawn on the architecture page, in the order they are introduced.
-TEAMS: tuple[str, ...] = ("default", "mobile", "deep_static")
+TEAMS: tuple[str, ...] = ("default", "mobile", "deep_static", "team_lead")
 
 BOX_WIDTH = 460
 BOX_HEIGHT = 58

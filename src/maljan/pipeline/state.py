@@ -40,6 +40,16 @@ def _merge_dicts[V](left: dict[str, V], right: dict[str, V]) -> dict[str, V]:
     return merged
 
 
+def _merge_budget_records(
+    left: dict[str, list[dict[str, Any]]], right: dict[str, list[dict[str, Any]]]
+) -> dict[str, list[dict[str, Any]]]:
+    """Per agent, the rows of both sides in order: a revision adds a loop, never replaces one."""
+    merged = {key: list(rows) for key, rows in (left or {}).items()}
+    for key, rows in (right or {}).items():
+        merged[key] = [*merged.get(key, []), *list(rows or [])]
+    return merged
+
+
 def _merge_counts(left: dict[str, int], right: dict[str, int]) -> dict[str, int]:
     """LangGraph reducer for a per-code counter: add, never replace."""
     merged = dict(left)
@@ -246,6 +256,12 @@ class AnalysisState(TypedDict):
     # plain one, and which way. Written by the analyst nodes, merged per agent,
     # read by the judge into ``run_summary.nudge``.
     nudge_retry_modes: Annotated[dict[str, str], _merge_dicts]
+
+    # The budget meter's rows, per agent: one per tool loop the agent ran,
+    # with its steps against the cap, its seconds against the limit and the
+    # cap that ended it when one did. Written by the nodes that drain an
+    # agent, merged per agent, read by the judge into ``run_summary.budget``.
+    budget_records: Annotated[dict[str, list[dict[str, Any]]], _merge_budget_records]
 
     # How many feedback retries the run spent, across every producer.
     # Append-only: two analysts running in parallel each add their own.

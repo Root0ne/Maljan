@@ -445,3 +445,27 @@ class TestSycophancyAndJudgeSpeak:
             )
 
         assert [m["speaker"] for m in rec.messages()] == ["Mediator"]
+
+
+class TestAnAddressedMessage:
+    def test_stage_and_addressee_travel_when_given(self) -> None:
+        rec = Recorder()
+        emit_agent_message(
+            rec,
+            speaker="lead",
+            role="analyst",
+            text="Does it open a socket?",
+            stage="lead",
+            addressed_to="static",
+        )
+        payload = rec.messages()[0]
+        assert payload["stage"] == "lead"
+        assert payload["addressed_to"] == "static"
+
+    def test_a_line_said_to_the_room_carries_neither(self) -> None:
+        rec = Recorder()
+        emit_agent_message(
+            rec, speaker="static", role="analyst", text="hi", stage="", addressed_to=""
+        )
+        assert "stage" not in rec.messages()[0]
+        assert "addressed_to" not in rec.messages()[0]

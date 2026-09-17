@@ -302,11 +302,12 @@ bound and `tool_choice="none"`, the one other shape the server accepts.
 
 ## Agents and teams
 
-Eight agent definitions ship built in. Five have a class behind them: the
+Nine agent definitions ship built in. Five have a class behind them: the
 `static`, `dynamic` and `network` analysts, the `judge` and the `reporter`.
-Three are generic — `triage`, `android_static` and `reverser` — which means
-they are a prompt and a tool list and nothing else, and are what the `mobile`
-and `deep_static` teams are built from. Each definition carries its role,
+Four are a prompt and a tool list and nothing else: the three generic agents —
+`triage`, `android_static` and `reverser` — that the `mobile` and `deep_static`
+teams are built from, and `lead`, whose role is `lead` and whose tools are the
+other analysts (see *Delegation* below). Each definition carries its role,
 whether it is enabled, the tools it may call, the data it reads and — for an
 analyst — the static provider it reads through. The judge and the reporter are
 not analysts: a team names them from its verdict and report stages, and no
@@ -331,7 +332,7 @@ stages upstream of it. The one `verdict` stage runs the judge. The optional
 
 ### The teams that ship
 
-Four teams are seeded, and every one of them is editable only in its debate
+Five teams are seeded, and every one of them is editable only in its debate
 options, its built-in tool switches and `exclude_servers`. The rest of a
 seeded team is a claim the product makes about how the analysis is arranged,
 so changing it means cloning the team.
@@ -367,16 +368,107 @@ read.
 
 ![The deep_static team](assets/team-deep-static.svg)
 
+**`team_lead`** is a team led by one agent: the pack, then a `lead` stage whose
+only agent is `lead`, then the verdict and the report. The specialists —
+`static`, `dynamic`, `network`, `reverser` and `triage` — are the lead's tools
+rather than stages, so which of them work on a sample, in what order and how
+often is the lead's decision rather than a fixed sequence. Their tool calls are
+in the ledger under their own keys and their answers are in the transcript,
+addressed to the lead.
+
+It is the one seeded team with no debate stage. A debate is agents arguing
+with each other, and this team has one analyst: the stage would hand the lead
+its own report, ask it to revise against nobody, and cost a second full loop —
+with the asks that loop makes — for a round that cannot change a position. The
+disagreement happens in the lead's own asks instead, where a specialist that
+contradicts it does so in the answer it reads.
+
+![The team_lead team](assets/team-team-lead.svg)
+
 The diagrams are generated from the seeded profiles by
 `scripts/goldens/render_team_graphs.py`, and
 `tests/unit/scripts/test_render_team_graphs.py` fails if the committed SVGs
 stop matching the teams, so a stage that moves cannot leave the page behind.
 
 The three generic agents these teams are built from — `triage`,
-`android_static` and `reverser` — are seeded definitions like any other, with
-their prompts in `src/maljan/agents/prompts/`. A generic agent is a definition
-and a prompt and nothing else, which is what makes a team something an operator
-can write rather than something that needs a class.
+`android_static` and `reverser` — and the `lead` are seeded definitions like
+any other, with their prompts in `src/maljan/agents/prompts/`. A generic agent
+is a definition and a prompt and nothing else, which is what makes a team
+something an operator can write rather than something that needs a class.
+
+### Delegation
+
+An agent may ask another agent for work the way it calls a tool, because it
+*is* a tool. `ToolRef(kind="agent", agent="static")` on a definition puts
+`ask_static` in that agent's toolbox, with one required argument `task` and an
+optional `context`, described from the static analyst's label and role. Any
+analyst may carry such a reference — a lead that gives out work, a static clone
+that checks a point with the network analyst — and an agent with none cannot
+ask anyone, which is what keeps the `default` team's analysts what they were.
+
+Calling it runs the named agent under the same job: the same container, the
+same sample paths (its own provider's mirror first, as a stage agent gets), the
+same triage pack at the head of its first turn and the same run-state block in
+its system turn. The callee's human turn is the task, with the context after it
+and the claim format it answers in; it runs its own tool loop, its answer is
+parsed into claims and checked by the technique check in its own conversation,
+and the resulting ISR text — the claims with the ledger ids they cite — is the
+tool result, word for word. Nothing between the callee and the caller edits a
+claim, a confidence or a technique id (`tests/unit/test_no_silent_overrides.py`
+holds for `agents/delegation.py` like for everything else).
+
+Everything the exchange did is in the machinery every other tool call is in.
+The callee's own calls are ledger entries under the callee's key, handed to the
+caller's buffer so the stage node that drains the caller writes them all. The
+ask itself is a ledger entry under the caller's key with `server="team"`,
+`tool="ask_<key>"`, the task and context as its arguments, the answer as its
+output and the callee's wall clock as its duration — so a report can cite the
+ask (`ev_0012`) or what the specialist looked at (`ev_0009`). The callee's turns
+carry a budget of their own (`core.agents.delegation_steps`,
+`core.agents.delegation_timeout_seconds`): the caller's step budget is not
+spent by its specialists' work, only its wall clock is, and an ask is cut to
+the time the caller has left and refused when that is below what a first model
+turn needs. A callee that reaches its step cap writes up what it gathered, the
+way an analyst at its own cap does. Two `agent_message`
+events carry the exchange, each with `stage`, `round` and `addressed_to`: the
+caller's ask, addressed to the callee, and the callee's answer with its claims,
+addressed to the caller. The console draws the arrow live, and in the replay
+window the events are still in; `agent_messages` has no column for `stage` or
+`addressed_to` yet, so a transcript read after the events expire shows the
+lines without the arrow until the event model carries them.
+
+What the callee's answer is checked against is the task plus what the callee's
+own tool calls returned, read from its ledger entries — which the ledger has
+already trimmed to its per-entry cap. A stage agent's answer is checked against
+its full data chunk, so with `use_claim_consistency_gate` on a delegated claim
+citing something past that cap is dropped where the same claim in a stage
+survives.
+
+Four guards, each a tool error the model reads rather than a job failure. A
+callee that is not defined, or is disabled, is refused by name. An ask that
+would nest deeper than `core.agents.delegation_depth` (2: a stage's agent asking
+a specialist is depth 1, that specialist asking another is depth 2) is refused
+with the chain that reached it; the depth bounds the nesting, never how many
+times an agent may ask. An ask back up the chain — the callee asking its
+caller, or anyone already waiting on this answer — is refused as a cycle. And
+an ask that would come back with a server the asking stage withholds is refused
+naming the stage and the servers: a callee's effective tool set is its own
+definition narrowed by the tool policy of the stage doing the asking, so a
+stage with `builtin_tools=False` cannot reach `knowledge` or `network` through
+a colleague that no stage narrows. The settings model refuses the static cases
+at save time: a reference to an agent that does not exist, to the definition
+itself, to the judge or the reporter, or on the judge or the reporter.
+
+One agent does one thing at a time, on both sides. A caller's asks take its own
+lock, so two `ask_*` calls in one assistant turn — which langgraph gathers and
+runs at once — go one after the other rather than putting two nested loops on
+one llama-server slot. An ask of an agent, a second ask of it and its own stage
+run take *its* lock, because all three drive the same buffers and the same call
+chain. The two are different objects, which is what lets an ask made from
+inside an ask still nest. A caller waits for a busy callee only as long as it
+can still read an answer in, and one that does not free up in that time is a
+refusal like the others. An agent asked twice with the same task is served the
+second time and refused the third, by the same repeat guard every tool has.
 
 ### The stage graph
 
@@ -454,6 +546,18 @@ caller. Two rules hold across all of them: they report facts rather than
 verdicts (a packer section name is a match, not "packed"), and an optional
 dependency that is missing costs one tool's answer, never the server.
 
+Each sidecar also answers `capabilities`: which of its tools need an optional
+library, a binary or a setting, and which of those are present on its host,
+probed when the server starts. The registry keeps the manifest on the server's
+entry when it attaches, the settings probe returns it so the console's server
+card names the unavailable tools before a run, and an analysis stage records
+each bound tool the manifest marks unavailable as
+`server.<key>.<tool>_unavailable(<reason>); <remedy>` when it starts. A tool
+that cannot answer returns an error with a code and an authored remediation
+(`maljan.tools.errors`) rather than raising, and the sidecars' guards rewrite
+an implementation's flat error into that shape. See *Writing a tool server* in
+[configuration.md](configuration.md).
+
 The `dynamic` analyst's tools are the exception: its sandbox report is already
 in the worker's memory, so `ToolRef(kind="sandbox")` resolves to in-process
 tools over that report (`src/maljan/providers/sandbox_tools.py`) with no
@@ -512,7 +616,24 @@ Ids (`ev_0007`) are monotonic across the whole job. The triage pack's calls
 are the first entries of every run that has one, under `agent="pipeline"`, and
 the judge's own calls — threat intel on a disputed indicator, a knowledge
 lookup — go through the same recorder under `agent="judge"`, so a verdict that
-leans on one can cite it.
+leans on one can cite it. An agent's ask of another agent is an entry under
+`server="team"`, `tool="ask_<key>"`, and the calls the asked agent made are
+entries under its own key (see *Delegation*).
+
+A call that failed is an entry with `ok` false whichever way it failed: a
+tool that raised, and a tool that returned an error. The entry keeps the
+message in `error` and, when the tool authored one, the remedy in
+`remediation`; `run_summary.evidence.failures` lists each distinct failure
+once with its count, the report header prints that list, and the console's
+evidence row shows the message and the remedy under the call.
+
+The tool loop also meters itself. `budget_tick` events carry an agent's steps
+against its cap and seconds against its limit every five steps and at the end
+of each loop; `stage_ended_at_cap` says which cap ended the work when one did
+(`steps`, `time`, `repeats`, or the triage pack's `budget_seconds`); and
+`run_summary.budget` sums the spend per agent, with the caps it hit, so a
+reader learns that an analyst ran out of steps from the summary and the
+pipeline panel rather than from a log line.
 That stamp is what makes a report checkable: the model can cite the call it read
 a fact from, a report section lists the entries it was built from, and `GET
 /api/v1/jobs/{id}/evidence` serves those entries back.

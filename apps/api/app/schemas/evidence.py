@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 class EvidenceEntryResponse(BaseModel):
@@ -19,12 +19,22 @@ class EvidenceEntryResponse(BaseModel):
     server: str | None = None
     tool: str
     ok: bool
+    error: str | None = None
+    remediation: str | None = None
     duration_ms: int
     seq: int
     args: dict[str, Any] | None = None
+    args_repaired: bool = False
+    args_raw: str | None = None
     output: str = ""
     structured: Any | None = None
     created_at: datetime | None = None
+
+    @field_validator("args_repaired", mode="before")
+    @classmethod
+    def _absent_is_false(cls, value: Any) -> bool:
+        """A row written before the column existed made an ordinary call."""
+        return bool(value)
 
 
 class EvidenceListResponse(BaseModel):

@@ -104,7 +104,9 @@ class TestCarvedPayloadsLandUnderStaging:
 
         answer = server.carve_payloads(str(tmp_path / "absent.bin"))
 
-        assert answer["tool"] == "carve_payloads" and "no such file" in answer["error"]
+        assert answer["tool"] == "carve_payloads"
+        assert "no such file" in answer["error"]["message"]
+        assert answer["error"]["code"] == "no_such_file" and answer["error"]["remediation"]
         assert not (staging / "carved").exists()
 
 
@@ -157,7 +159,7 @@ class TestTheWordsThatMeanAbsence:
         use than a second error about something else."""
         answer = server.strings("null")
 
-        assert "no such file" in answer["error"]
+        assert "no such file" in answer["error"]["message"]
 
     def test_every_tool_on_the_server_gets_it(self, server: Any, tmp_path: Path) -> None:
         """The normalisation is in the guard every tool calls, not in one tool."""

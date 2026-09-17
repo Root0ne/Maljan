@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 
@@ -25,7 +27,9 @@ async def test_llm_probe_lists_models_and_completes(monkeypatch):
         return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
 
     monkeypatch.setattr(
-        probes, "_client", lambda: httpx.AsyncClient(transport=transport(handler), timeout=10)
+        probes,
+        "_client",
+        lambda *_a, **_k: httpx.AsyncClient(transport=transport(handler), timeout=10),
     )
     r = await probes.probe_llm(
         {"base_url": "http://llm/v1", "api_key": "k", "expert_model": "qwen"}
@@ -38,7 +42,9 @@ async def test_ghidra_probe_reports_http_error(monkeypatch):
     monkeypatch.setattr(
         probes,
         "_client",
-        lambda: httpx.AsyncClient(transport=transport(lambda r: httpx.Response(401)), timeout=10),
+        lambda *_a, **_k: httpx.AsyncClient(
+            transport=transport(lambda r: httpx.Response(401)), timeout=10
+        ),
     )
     r = await probes.probe_ghidra({"url": "http://ghidra:8089", "auth_token": "t"})
     assert r.ok is False and "401" in r.detail
@@ -61,7 +67,7 @@ async def test_ghidra_probe_reads_the_authenticated_schema_and_lists_tools(monke
     monkeypatch.setattr(
         probes,
         "_client",
-        lambda: httpx.AsyncClient(transport=transport(handler), timeout=10),
+        lambda *_a, **_k: httpx.AsyncClient(transport=transport(handler), timeout=10),
     )
     r = await probes.probe_ghidra({"url": "http://ghidra:8089/", "auth_token": "t"})
     assert seen == {"path": "/mcp/schema", "auth": "Bearer t"}
@@ -74,7 +80,9 @@ async def test_timeout_is_reported_not_raised(monkeypatch):
         raise httpx.ReadTimeout("slow")
 
     monkeypatch.setattr(
-        probes, "_client", lambda: httpx.AsyncClient(transport=transport(handler), timeout=10)
+        probes,
+        "_client",
+        lambda *_a, **_k: httpx.AsyncClient(transport=transport(handler), timeout=10),
     )
     r = await probes.probe_qdrant({"url": "http://q:6333", "collection": "c"})
     assert r.ok is False and "timeout" in r.detail.lower()
@@ -149,7 +157,9 @@ async def test_probe_results_never_leak_secret_values(monkeypatch):
         return httpx.Response(500)
 
     monkeypatch.setattr(
-        probes, "_client", lambda: httpx.AsyncClient(transport=transport(handler), timeout=10)
+        probes,
+        "_client",
+        lambda *_a, **_k: httpx.AsyncClient(transport=transport(handler), timeout=10),
     )
     r = await probes.probe_virustotal({"api_key": "super-secret-value"})
     assert "super-secret-value" not in r.detail
@@ -160,12 +170,16 @@ async def test_llm_probe_anthropic_ok(monkeypatch):
     def handler(req: httpx.Request):
         assert req.headers["x-api-key"] == "sk-ant-secret"
         assert req.headers["anthropic-version"] == probes.ANTHROPIC_VERSION
+        if req.url.path.endswith("/messages"):
+            return httpx.Response(200, json={"content": [{"type": "text", "text": "OK"}]})
         return httpx.Response(
             200, json={"data": [{"id": "claude-sonnet-4-20250514"}, {"id": "claude-haiku"}]}
         )
 
     monkeypatch.setattr(
-        probes, "_client", lambda: httpx.AsyncClient(transport=transport(handler), timeout=10)
+        probes,
+        "_client",
+        lambda *_a, **_k: httpx.AsyncClient(transport=transport(handler), timeout=10),
     )
     r = await probes.probe_llm(
         {
@@ -180,11 +194,15 @@ async def test_llm_probe_anthropic_ok(monkeypatch):
 @pytest.mark.asyncio
 async def test_llm_probe_ollama_ok(monkeypatch):
     def handler(req: httpx.Request):
+        if req.url.path.endswith("/api/generate"):
+            return httpx.Response(200, json={"response": "OK"})
         assert req.url.path.endswith("/api/tags")
         return httpx.Response(200, json={"models": [{"name": "qwen3.5:9b"}, {"name": "llama3:8b"}]})
 
     monkeypatch.setattr(
-        probes, "_client", lambda: httpx.AsyncClient(transport=transport(handler), timeout=10)
+        probes,
+        "_client",
+        lambda *_a, **_k: httpx.AsyncClient(transport=transport(handler), timeout=10),
     )
     r = await probes.probe_llm(
         {
@@ -202,10 +220,16 @@ async def test_llm_probe_gemini_ok(monkeypatch):
     def handler(req: httpx.Request):
         assert req.headers["x-goog-api-key"] == "goog-secret"
         assert "key=" not in str(req.url)
+        if req.url.path.endswith(":generateContent"):
+            return httpx.Response(
+                200, json={"candidates": [{"content": {"parts": [{"text": "OK"}]}}]}
+            )
         return httpx.Response(200, json={"models": [{"name": "models/gemini-2.5-pro"}]})
 
     monkeypatch.setattr(
-        probes, "_client", lambda: httpx.AsyncClient(transport=transport(handler), timeout=10)
+        probes,
+        "_client",
+        lambda *_a, **_k: httpx.AsyncClient(transport=transport(handler), timeout=10),
     )
     r = await probes.probe_llm(
         {
@@ -228,7 +252,9 @@ async def test_llm_probe_anthropic_and_gemini_keys_never_leak_on_failure(monkeyp
     monkeypatch.setattr(
         probes,
         "_client",
-        lambda: httpx.AsyncClient(transport=transport(lambda r: httpx.Response(403)), timeout=10),
+        lambda *_a, **_k: httpx.AsyncClient(
+            transport=transport(lambda r: httpx.Response(403)), timeout=10
+        ),
     )
     r1 = await probes.probe_llm(
         {"provider": "anthropic", "anthropic_api_key": "sk-ant-super-secret"}
@@ -282,7 +308,9 @@ async def test_qdrant_probe_sends_the_api_key_header_when_set(monkeypatch):
         return httpx.Response(200, json={})
 
     monkeypatch.setattr(
-        probes, "_client", lambda: httpx.AsyncClient(transport=transport(handler), timeout=10)
+        probes,
+        "_client",
+        lambda *_a, **_k: httpx.AsyncClient(transport=transport(handler), timeout=10),
     )
     r = await probes.probe_qdrant({"url": "http://q:6333", "collection": "c", "api_key": "k"})
     assert r.ok
@@ -295,7 +323,9 @@ async def test_qdrant_probe_omits_the_header_when_no_api_key(monkeypatch):
         return httpx.Response(200, json={})
 
     monkeypatch.setattr(
-        probes, "_client", lambda: httpx.AsyncClient(transport=transport(handler), timeout=10)
+        probes,
+        "_client",
+        lambda *_a, **_k: httpx.AsyncClient(transport=transport(handler), timeout=10),
     )
     r = await probes.probe_qdrant({"url": "http://q:6333", "collection": "c"})
     assert r.ok
@@ -314,7 +344,9 @@ async def test_triage_probe_reports_ok(monkeypatch):
         return httpx.Response(200, json={})
 
     monkeypatch.setattr(
-        probes, "_client", lambda: httpx.AsyncClient(transport=transport(handler), timeout=10)
+        probes,
+        "_client",
+        lambda *_a, **_k: httpx.AsyncClient(transport=transport(handler), timeout=10),
     )
     r = await probes.probe_triage({"base_url": "https://tria.ge/api/v0", "api_token": "tok"})
     assert r.ok is True
@@ -325,7 +357,9 @@ async def test_triage_probe_reports_401_without_the_token_value(monkeypatch):
     monkeypatch.setattr(
         probes,
         "_client",
-        lambda: httpx.AsyncClient(transport=transport(lambda r: httpx.Response(401)), timeout=10),
+        lambda *_a, **_k: httpx.AsyncClient(
+            transport=transport(lambda r: httpx.Response(401)), timeout=10
+        ),
     )
     r = await probes.probe_triage(
         {"base_url": "https://tria.ge/api/v0", "api_token": "super-secret-triage-token"}
@@ -635,12 +669,27 @@ async def test_rest_probe_never_puts_the_token_in_the_url_or_detail(monkeypatch)
 
 
 def _tags_transport(monkeypatch, names):
+    """An Ollama server that lists ``names`` and generates with those only.
+
+    The probe asks for both: the tag list says the endpoint is up and the name
+    is in its catalogue, and the one-turn completion says the server will
+    actually load it. A tag it does not have is refused with a 404, the way
+    Ollama refuses it.
+    """
+
     def handler(req: httpx.Request):
+        if req.url.path.endswith("/api/generate"):
+            asked = json.loads(req.content or b"{}").get("model", "")
+            if asked not in names:
+                return httpx.Response(404, json={"error": f"model {asked!r} not found"})
+            return httpx.Response(200, json={"response": "OK"})
         assert req.url.path.endswith("/api/tags")
         return httpx.Response(200, json={"models": [{"name": n} for n in names]})
 
     monkeypatch.setattr(
-        probes, "_client", lambda: httpx.AsyncClient(transport=transport(handler), timeout=10)
+        probes,
+        "_client",
+        lambda *_a, **_k: httpx.AsyncClient(transport=transport(handler), timeout=10),
     )
 
 
@@ -684,11 +733,19 @@ async def test_llm_probe_asks_a_per_agent_endpoint_for_its_own_catalogue(monkeyp
     }
 
     def handler(req: httpx.Request):
+        names = catalogues[req.url.host]
+        if req.url.path.endswith("/api/generate"):
+            asked = json.loads(req.content or b"{}").get("model", "")
+            if asked not in names:
+                return httpx.Response(404, json={"error": f"model {asked!r} not found"})
+            return httpx.Response(200, json={"response": "OK"})
         assert req.url.path.endswith("/api/tags")
-        return httpx.Response(200, json={"models": [{"name": n} for n in catalogues[req.url.host]]})
+        return httpx.Response(200, json={"models": [{"name": n} for n in names]})
 
     monkeypatch.setattr(
-        probes, "_client", lambda: httpx.AsyncClient(transport=transport(handler), timeout=10)
+        probes,
+        "_client",
+        lambda *_a, **_k: httpx.AsyncClient(transport=transport(handler), timeout=10),
     )
     values = {
         "provider": "ollama",
@@ -747,3 +804,145 @@ def test_the_per_agent_map_is_annotated_with_the_llm_probe():
     from maljan.core.settings_annotations import ANNOTATIONS
 
     assert ANNOTATIONS["llm.agents"].get("probe") == "llm"
+
+
+@pytest.mark.asyncio
+async def test_the_llm_probe_asks_one_pair_once(monkeypatch):
+    """Agents that all name the global model at the global endpoint are one call.
+
+    On a local server every completion is a model load, so six ways of asking
+    the same question would be six loads for one answer.
+    """
+    asked = []
+
+    def handler(req: httpx.Request):
+        if req.url.path.endswith("/api/generate"):
+            asked.append(json.loads(req.content or b"{}").get("model", ""))
+            return httpx.Response(200, json={"response": "OK"})
+        return httpx.Response(200, json={"models": [{"name": "qwen3:8b"}]})
+
+    monkeypatch.setattr(
+        probes,
+        "_client",
+        lambda *_a, **_k: httpx.AsyncClient(transport=transport(handler), timeout=10),
+    )
+    r = await probes.probe_llm(
+        {
+            "provider": "ollama",
+            "ollama_base_url": "http://ollama:11434",
+            "ollama_expert_model": "qwen3:8b",
+            "ollama_judge_model": "qwen3:8b",
+            "agents": {
+                name: {"provider": "ollama", "model": "qwen3:8b"}
+                for name in ("static", "network", "dynamic", "reverser", "triage")
+            },
+        }
+    )
+
+    assert asked == ["qwen3:8b"], "one pair, one call"
+    assert r.ok is True
+    assert (r.details or {})["completions"] == [
+        {
+            "endpoint": "http://ollama:11434",
+            "model": "qwen3:8b",
+            "provider": "ollama",
+            "ok": True,
+            "detail": "'qwen3:8b' answered",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_the_llm_probe_stops_at_its_own_budget_and_says_what_it_did_not_try(monkeypatch):
+    """The whole probe is bounded, and an unasked pair files nothing.
+
+    A person is at the button. Pairs are asked one after another, so their
+    budgets add up; the ones there was no room left for are named, and pressing
+    Test again asks them.
+    """
+
+    class _Clock:
+        """Time that only moves when a completion is made, a whole budget at a time."""
+
+        def __init__(self) -> None:
+            self.now = 0.0
+
+        def monotonic(self) -> float:
+            return self.now
+
+        def perf_counter(self) -> float:
+            return self.now
+
+    clock = _Clock()
+
+    def handler(req: httpx.Request):
+        if req.url.path.endswith("/api/generate"):
+            clock.now += probes.COMPLETION_TIMEOUT
+            return httpx.Response(200, json={"response": "OK"})
+        return httpx.Response(200, json={"models": [{"name": "qwen3:8b"}]})
+
+    monkeypatch.setattr(probes, "time", clock)
+    monkeypatch.setattr(
+        probes,
+        "_client",
+        lambda *_a, **_k: httpx.AsyncClient(transport=transport(handler), timeout=10),
+    )
+    r = await probes.probe_llm(
+        {
+            "provider": "ollama",
+            "ollama_base_url": "http://ollama:11434",
+            "ollama_expert_model": "qwen3:8b",
+            "ollama_judge_model": "qwen3:8b",
+            "agents": {
+                "a1": {"provider": "ollama", "model": "qwen3:1b"},
+                "a2": {"provider": "ollama", "model": "qwen3:2b"},
+                "a3": {"provider": "ollama", "model": "qwen3:3b"},
+                "a4": {"provider": "ollama", "model": "qwen3:4b"},
+            },
+        }
+    )
+
+    filed = [pair["model"] for pair in (r.details or {})["completions"]]
+    fits = int(probes.LLM_PROBE_BUDGET_SECONDS // probes.COMPLETION_TIMEOUT)
+    assert filed == ["qwen3:8b", "qwen3:1b", "qwen3:2b"][:fits]
+    assert r.ok is False, "a pair nobody asked is not a pass"
+    assert f"not tried within {int(probes.LLM_PROBE_BUDGET_SECONDS)} s" in r.detail
+    assert "a3=qwen3:3b" in r.detail and "a4=qwen3:4b" in r.detail
+    assert "press Test again" in r.detail
+
+
+@pytest.mark.asyncio
+async def test_a_failing_pair_names_its_server_and_nothing_else(monkeypatch):
+    """The sentence reaches the operator's screen and the stored row.
+
+    A base URL may carry credentials in front of the host and a path behind it;
+    neither says which server answered.
+    """
+    base = _dsn("http", "opuser:opsecret", "box:8080/v1")
+
+    def handler(req: httpx.Request):
+        if req.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": "qwen"}]})
+        return httpx.Response(404, json={"error": "no such model"})
+
+    monkeypatch.setattr(
+        probes,
+        "_client",
+        lambda *_a, **_k: httpx.AsyncClient(transport=transport(handler), timeout=10),
+    )
+    r = await probes.probe_llm(
+        {
+            "provider": "openai",
+            "base_url": "http://box:8080/v1",
+            "api_key": "k",
+            "expert_model": "qwen",
+            "agents": {"judge": {"provider": "openai", "model": "ghost", "base_url": base}},
+        }
+    )
+
+    assert r.ok is False
+    assert "judge=ghost @ http://box:8080" in r.detail
+    assert "opuser" not in r.detail and "opsecret" not in r.detail
+    assert "/v1" not in r.detail, "a path says nothing about which server answered"
+    filed = {(pair["endpoint"], pair["model"]) for pair in (r.details or {})["completions"]}
+    assert (base, "ghost") in filed, "the row is still filed under the address it called"

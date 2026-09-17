@@ -66,6 +66,61 @@ export interface TranscriptMessage {
   ts?: string;
   /** Emission order within the run. Only present on persisted rows. */
   seq?: number;
+  /**
+   * The agent this line was said *to*, when it was said to one agent rather
+   * than to the room: a caller's ask names the callee and the callee's answer
+   * names the caller. Absent on every other line.
+   */
+  addressedTo?: string;
+  /** The team stage the speaker was working in, when the producer said. */
+  stage?: string;
+}
+
+/**
+ * A short, stable digest of a line's text.
+ *
+ * FNV-1a, because what is wanted is that the same text gives the same key in
+ * every copy of the same line and two different lines almost never collide —
+ * not that the key is hard to forge.
+ */
+function shortHash(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(36);
+}
+
+/**
+ * The identity of one message: who said it, in which round, and what it said.
+ *
+ * One scheme for all three readers, and that is the whole point. `role:speaker:round`
+ * alone is enough for a line said to the room but not for a delegated one — a
+ * lead that asks three specialists in one round speaks three times as the same
+ * role in the same round — so the digest of the text is always part of it.
+ *
+ * Derived from the content rather than counted, and never from anything only
+ * one source has. A counter gave the back-filled copy of an ask the *next*
+ * number, so both copies were kept; then the addressee was put in the id, and
+ * since `agent_messages` has no column for it, a stored report and events
+ * still inside the stream's TTL drew every ask twice again — once with the
+ * arrow and once without. The text is the one thing a live event and its
+ * persisted row both carry verbatim, so it is what they are keyed on. The
+ * addressee stays on the message, for drawing the arrow; it is not in the id
+ * until both sides have it.
+ */
+function messageId(
+  role: TranscriptRole,
+  speaker: string,
+  round: number,
+  text: string
+): string {
+  return `${role}:${speaker}:${round}#${shortHash(text)}`;
+}
+
+function asAddressee(value: unknown): string | undefined {
+  return typeof value === "string" && value ? value : undefined;
 }
 
 const ROLES: TranscriptRole[] = [
@@ -165,11 +220,11 @@ export function messagesFromEvents(events: WSEvent[]): TranscriptMessage[] {
     const role = asRole(d.role);
     const round = Number(d.round ?? 0);
     const text = String(d.text ?? "").trim();
+    const addressedTo = asAddressee(d.addressed_to);
 
     // The stream back-fill and the live socket overlap by design, so the same
-    // message can arrive twice. Identity is (speaker, role, round) — a given
-    // agent speaks once per role per round.
-    const id = `${role}:${speaker}:${round}`;
+    // message can arrive twice; `messageId` says what makes two the same.
+    const id = messageId(role, speaker, round, text);
     if (seen.has(id)) continue;
     seen.add(id);
 
@@ -186,6 +241,8 @@ export function messagesFromEvents(events: WSEvent[]): TranscriptMessage[] {
       claims: asClaims(d.claims),
       dissent: asStrings(d.dissent),
       ts: event.ts,
+      addressedTo,
+      stage: typeof d.stage === "string" && d.stage ? d.stage : undefined,
     });
   }
   return sortTranscript(out);
@@ -207,6 +264,8 @@ export interface TranscriptRow {
   claims?: unknown;
   dissent?: unknown;
   ts?: string | null;
+  addressed_to?: string | null;
+  stage?: string | null;
 }
 
 /**
@@ -221,17 +280,43 @@ export interface TranscriptRow {
  *
  * `messagesFromReport` below remains for reports written before the recording
  * existed.
+ *
+ * A delegated round is the one shape where several rows share an identity.
+ * `addressed_to` has no column yet, so a lead's report and each of its asks
+ * come back as `analyst:lead:0` — duplicate React keys, and a merge that
+ * cannot tell them apart. Every row of such a group carries its own `seq`
+ * instead, which is the recording's own order and unique by construction. A
+ * row whose identity is already unique keeps it, so it still collapses onto
+ * its live twin.
  */
 export function messagesFromTranscript(
   rows: TranscriptRow[] | null | undefined
 ): TranscriptMessage[] {
   const out: TranscriptMessage[] = [];
-  for (const row of rows ?? []) {
+  const all = rows ?? [];
+  /* Two rows that say the same thing in the same round are two rows: an agent
+     asked twice with the same words. Only those carry their `seq`, because a
+     row that is already unique has to keep the id its live twin has. */
+  const shared = new Set<string>();
+  const once = new Set<string>();
+  for (const row of all) {
+    const id = messageId(
+      asRole(row.role),
+      String(row.speaker ?? "unknown"),
+      Number(row.round ?? 0),
+      String(row.text ?? "")
+    );
+    if (once.has(id)) shared.add(id);
+    once.add(id);
+  }
+  for (const row of all) {
     const role = asRole(row.role);
     const speaker = String(row.speaker ?? "unknown");
     const round = Number(row.round ?? 0);
+    const addressedTo = asAddressee(row.addressed_to);
+    const id = messageId(role, speaker, round, String(row.text ?? ""));
     out.push({
-      id: `${role}:${speaker}:${round}`,
+      id: shared.has(id) ? `${id}#${Number(row.seq ?? 0)}` : id,
       speaker,
       role,
       round,
@@ -247,6 +332,8 @@ export function messagesFromTranscript(
       dissent: asStrings(row.dissent),
       ts: row.ts || undefined,
       seq: Number(row.seq ?? 0),
+      addressedTo,
+      stage: row.stage || undefined,
     });
   }
   return sortTranscript(out);
@@ -290,13 +377,16 @@ export function messagesFromReport(
     // after revising, not its opening one. Label it truthfully; for these
     // legacy reports the per-round ISRs were never written down.
     const revised = (f.revision_rounds ?? 0) > 0;
+    const role: TranscriptRole = revised ? "reviser" : "analyst";
+    const round = revised ? f.revision_rounds : 0;
+    const text = f.status_reason || summarizeClaims(asClaims(f.claims), f.domain);
     out.push({
-      id: `analyst:${f.agent_name}:0`,
+      id: messageId(role, f.agent_name, round, text),
       speaker: f.agent_name,
-      role: revised ? "reviser" : "analyst",
-      round: revised ? f.revision_rounds : 0,
+      role,
+      round,
       status: (f.status ?? "complete") as TranscriptStatus,
-      text: f.status_reason || summarizeClaims(asClaims(f.claims), f.domain),
+      text,
       confidence: f.final_confidence,
       claims: asClaims(f.claims),
       dissent: asStrings(f.dissent_items),
@@ -311,7 +401,7 @@ export function messagesFromReport(
       const text = String(entry.argument ?? "").trim();
       if (!text) continue;
       out.push({
-        id: `negotiator:${speaker}:${round}`,
+        id: messageId("negotiator", speaker, round, text),
         speaker,
         role: "negotiator",
         round,
@@ -396,9 +486,9 @@ const ROLE_ORDER: Record<TranscriptRole, number> = {
  * "no agent findings" for the entire duration of every analysis.
  *
  * Persisted messages take precedence on conflict because they are the record —
- * they carry the final revision round and the stored status. Identity is the
- * shared `role:speaker:round` key, so the same message from both sources
- * collapses to one.
+ * they carry the final revision round and the stored status. Identity is what
+ * `messageId` says it is — who spoke, in which round, and a digest of what was
+ * said — so the same message from both sources collapses to one.
  */
 export function mergeTranscripts(
   persisted: TranscriptMessage[],

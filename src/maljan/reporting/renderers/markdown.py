@@ -138,6 +138,24 @@ class MarkdownRenderer:
             if trimmed:
                 line += f", {trimmed} evidence entries trimmed to the budget"
             header += line + "."
+        # Each distinct failure once, with what would fix it: a reader who is
+        # told document_info failed for want of olefile, and how to install
+        # it, can act; a count of failures alone is a number.
+        failures = [row for row in (evidence.get("failures") or []) if isinstance(row, dict)]
+        if failures:
+            lines = []
+            for row in failures:
+                tool = str(row.get("tool") or "tool")
+                server = row.get("server")
+                where = f" ({server})" if server else ""
+                count = int(row.get("count") or 1)
+                times = f" ×{count}" if count > 1 else ""
+                message = str(row.get("error") or "").strip() or "failed"
+                remedy = str(row.get("remediation") or "").strip()
+                lines.append(
+                    f"- `{tool}`{where}{times}: {message}" + (f" — {remedy}" if remedy else "")
+                )
+            header += "\n\n**Tool failures**:\n" + "\n".join(lines)
         profile = (report.run_summary or {}).get("profile") or {}
         # Live-verification L2: a reduced profile (fewer/different analysts than
         # the default ensemble) changes what evidence backs the verdict, but

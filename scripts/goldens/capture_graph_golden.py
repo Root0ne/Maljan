@@ -7,12 +7,16 @@ edge's path map and the analyst order are captured here from a live
 ``build_graph`` — for both values of ``llm.parallel_analysts``, because the
 two topologies are different graphs and only one of them is the default.
 
-Run: ``uv run python scripts/goldens/capture_graph_golden.py``
+Run: ``uv run python scripts/goldens/capture_graph_golden.py [profile]``. With no
+argument the default profile is captured to ``graph_default.json``; a profile
+name captures that seeded team to ``graph_<profile>.json``, which is how the
+``team_lead`` golden was written.
 """
 
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -20,13 +24,18 @@ ROOT = Path(__file__).resolve().parents[2]
 GOLDEN = ROOT / "tests" / "fixtures" / "golden" / "graph_default.json"
 
 
-def graph_shape(parallel: bool) -> dict[str, Any]:
+def golden_path(profile: str) -> Path:
+    return GOLDEN.with_name(f"graph_{profile}.json")
+
+
+def graph_shape(parallel: bool, profile: str = "default") -> dict[str, Any]:
     """The node set, edge set, conditional path map and analyst order."""
     from maljan.core.config import Settings
     from maljan.core.container import ServiceContainer
     from maljan.pipeline.builder import build_graph
 
     cfg = Settings(_env_file=None, llm={"parallel_analysts": parallel})
+    cfg.agents.profile = profile
     container = ServiceContainer(cfg, mock=True)
     compiled = build_graph(container)
     drawn = compiled.get_graph()
@@ -67,13 +76,15 @@ def _analyst_order(drawn: Any, analysts: list[str], parallel: bool) -> list[str]
 
 
 def main() -> None:
+    profile = sys.argv[1] if len(sys.argv) > 1 else "default"
     payload = {
-        "sequential": graph_shape(parallel=False),
-        "parallel": graph_shape(parallel=True),
+        "sequential": graph_shape(parallel=False, profile=profile),
+        "parallel": graph_shape(parallel=True, profile=profile),
     }
-    GOLDEN.parent.mkdir(parents=True, exist_ok=True)
-    GOLDEN.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(f"wrote {GOLDEN}")
+    target = golden_path(profile)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(f"wrote {target}")
 
 
 if __name__ == "__main__":

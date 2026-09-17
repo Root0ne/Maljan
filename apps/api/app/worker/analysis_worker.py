@@ -1159,9 +1159,15 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                         server=(str(_entry["server"])[:100] if _entry.get("server") else None),
                         tool=str(_entry.get("tool", ""))[:200],
                         ok=bool(_entry.get("ok", True)),
+                        error=(str(_entry["error"]) if _entry.get("error") else None),
+                        remediation=(
+                            str(_entry["remediation"]) if _entry.get("remediation") else None
+                        ),
                         duration_ms=int(_entry.get("duration_ms", 0) or 0),
                         seq=int(_entry.get("seq", 0) or 0),
                         args=_entry.get("args") or {},
+                        args_repaired=bool(_entry.get("args_repaired", False)),
+                        args_raw=(str(_entry["args_raw"]) if _entry.get("args_raw") else None),
                         output=str(_entry.get("output", "") or ""),
                         structured=_entry.get("structured"),
                     )

@@ -48,6 +48,7 @@ from maljan.pipeline.conditions import TriageFacts
 from maljan.providers import sandbox_tools
 from maljan.schemas.evidence import LedgerEntry, apply_budget
 from maljan.tools import binary, identify, knowledge, pcap, rules, strings
+from maljan.tools.errors import error_parts, normalise_error
 
 __all__ = [
     "ESSENTIAL_TOOLS",
@@ -109,6 +110,7 @@ def failure_reason(tool: str) -> str:
 ESSENTIAL_TOOLS: frozenset[str] = frozenset({"identify_file", "hashes", "pack"})
 
 _REASON_RE = re.compile(r"^triage\.(?P<tool>.+)_failed$")
+_UNAVAILABLE_RE = re.compile(r"^server\.[^.]+\.[^.(]+_unavailable\(")
 
 
 def is_pack_reason(reason: str) -> bool:
@@ -122,6 +124,17 @@ def degrades_run(reason: str) -> bool:
     return bool(match and match.group("tool") in ESSENTIAL_TOOLS)
 
 
+def is_unavailable_tool_reason(reason: str) -> bool:
+    """Whether ``reason`` says one tool of a server is missing on its host.
+
+    ``server.<key>.<tool>_unavailable(<why>)`` is recorded at stage start from
+    the server's capability manifest. Like an optional tool of the pack that
+    failed, it is an absence the reader is told about, not a reason to call
+    the whole run degraded: the server attached and every other tool answered.
+    """
+    return bool(_UNAVAILABLE_RE.match(str(reason or "")))
+
+
 def run_is_degraded(reasons: Sequence[str]) -> bool:
     """Whether a run's degradation reasons make it degraded.
 
@@ -130,7 +143,10 @@ def run_is_degraded(reasons: Sequence[str]) -> bool:
     that ran out of budget is an absence the judge is told about, not a
     degraded run.
     """
-    return any(degrades_run(reason) if is_pack_reason(reason) else True for reason in reasons or [])
+    return any(
+        degrades_run(reason) if is_pack_reason(reason) else not is_unavailable_tool_reason(reason)
+        for reason in reasons or []
+    )
 
 
 # The reputation tools, whichever server answered: their failure is one
@@ -203,6 +219,9 @@ class PackResult:
     facts: TriageFacts = field(default_factory=TriageFacts)
     failed: list[str] = field(default_factory=list)
     duration_ms: int = 0
+    # The steps the pack's own budget stopped before they started, in order.
+    # A skipped lookup is not one of these; it was never going to run.
+    stopped_by_budget: list[str] = field(default_factory=list)
 
     @property
     def degradation_reasons(self) -> list[str]:
@@ -333,7 +352,13 @@ class _Pack:
             )
             self._failed(tool, entry)
             return None
-        error = value.get("error") if isinstance(value, dict) else None
+        # A flat error from an in-process implementation is given the code
+        # and the remedy the sidecars give it, so the entry a reader cites
+        # says what to do about it whichever way the tool was reached.
+        value = normalise_error(value)
+        parts = error_parts(value) if isinstance(value, dict) else None
+        error: Any = parts[1] if parts else None
+        remediation = parts[2] if parts else None
         if not error and isinstance(value, dict) and value.get("reason"):
             established = _ESTABLISHED.get(tool)
             if established is not None and not established(value):
@@ -345,6 +370,7 @@ class _Pack:
             output=result_text(value),
             ok=not error,
             error=str(error) if error else None,
+            remediation=remediation,
             started_at=wall_clock,
             duration_ms=int((time.monotonic() - started) * 1000),
         )
@@ -356,6 +382,7 @@ class _Pack:
     def _record_not_run(self, tool: str, args: dict[str, Any], spent: float) -> None:
         """The entry for a step the budget stopped before it started."""
         message = f"{NOT_RUN_PREFIX} the pack's budget of {int(spent)} s was spent before this step"
+        self.result.stopped_by_budget.append(tool)
         entry = self.recorder.record(
             tool=tool,
             args=args,

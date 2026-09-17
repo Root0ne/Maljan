@@ -57,6 +57,60 @@ def emit(sink: EventSink | None, event_type: str, data: dict[str, Any]) -> None:
         logger.debug("event sink raised (%s: %s); continuing.", type(exc).__name__, exc)
 
 
+# The budget meter. ``budget_tick`` is one agent's spend as of one model turn
+# — every ``BUDGET_TICK_EVERY`` steps and once more when its loop ends — and
+# ``stage_ended_at_cap`` says which cap, when a cap is what ended the work:
+# ``steps`` (the loop's own recursion limit), ``time``
+# (the wall-clock hard cap), ``repeats`` (the repeat guard) or
+# ``budget_seconds`` (the triage pack's budget). Both are telemetry; neither
+# changes what a model said.
+BUDGET_TICK = "budget_tick"
+STAGE_ENDED_AT_CAP = "stage_ended_at_cap"
+BUDGET_TICK_EVERY = 5
+CAPS: tuple[str, ...] = ("steps", "time", "repeats", "budget_seconds")
+
+
+def emit_budget_tick(
+    sink: EventSink | None,
+    *,
+    agent: str,
+    stage: str,
+    steps_used: int,
+    max_steps: int,
+    elapsed_s: float,
+    timeout_s: float,
+    prompt_chars: int,
+    ledger_entries: int,
+    final: bool = False,
+) -> None:
+    """One agent's spend as of now: steps against its cap, seconds against its limit."""
+    emit(
+        sink,
+        BUDGET_TICK,
+        {
+            "agent": str(agent),
+            "stage": str(stage),
+            "steps_used": max(0, int(steps_used)),
+            "max_steps": max(0, int(max_steps)),
+            "elapsed_s": round(max(0.0, float(elapsed_s)), 1),
+            "timeout_s": round(max(0.0, float(timeout_s)), 1),
+            "prompt_chars": max(0, int(prompt_chars)),
+            "ledger_entries": max(0, int(ledger_entries)),
+            "final": bool(final),
+        },
+    )
+
+
+def emit_stage_ended_at_cap(
+    sink: EventSink | None, *, stage: str, agent: str, cap: str, detail: str = ""
+) -> None:
+    """A cap, not an answer, ended this agent's work in this stage."""
+    payload: dict[str, Any] = {"stage": str(stage), "agent": str(agent), "cap": str(cap)}
+    if detail:
+        payload["detail"] = str(detail)
+    emit(sink, STAGE_ENDED_AT_CAP, payload)
+
+
 def emit_agent_message(
     sink: EventSink | None,
     *,
@@ -69,6 +123,8 @@ def emit_agent_message(
     claims: list[dict[str, Any]] | None = None,
     dissent: list[str] | None = None,
     report: str | None = None,
+    stage: str | None = None,
+    addressed_to: str | None = None,
 ) -> None:
     """Emit one transcript line.
 
@@ -94,6 +150,12 @@ def emit_agent_message(
             away. Truncated to ``REPORT_CHAR_LIMIT``; when that happens the
             payload also carries ``report_truncated: True`` rather than leaving
             the reader to guess whether the report really ended there.
+        stage: The team stage the speaker is working in, when the producer
+            knows it. An ask and its answer carry it so the transcript can
+            place a delegated exchange inside the stage that made it.
+        addressed_to: The agent this line is said *to*, when it is said to one
+            agent rather than to the room: the caller's ask names the callee,
+            the callee's answer names the caller. Absent on every other line.
     """
     # ``confidence`` is spread into the literal rather than written in
     # afterwards. Nothing about the value changes either way; what changes is
@@ -108,6 +170,10 @@ def emit_agent_message(
         "text": text,
         **({"confidence": round(float(confidence), 4)} if confidence is not None else {}),
     }
+    if stage:
+        payload["stage"] = str(stage)
+    if addressed_to:
+        payload["addressed_to"] = str(addressed_to)
     if claims:
         payload["claims"] = claims
     if dissent:

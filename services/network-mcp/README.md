@@ -11,3 +11,11 @@ Launched by `maljan.core.config._builtin_servers()` as the `network` server —
 `sys.executable services/network-mcp/server.py`, cwd `services/network-mcp`, no
 environment variables passed through — and its tools are bound to the `network`
 analyst.
+
+## Capabilities and errors
+
+`capabilities` (no argument) answers `{server, version, tools: [{name,
+optional_dependency, available, reason, timeout_s}]}`, computed when the server
+starts by probing what each tool needs on this host. A tool that cannot answer
+returns `{"error": {"code", "message", "remediation"}, "tool"}` rather than
+raising; see *Writing a tool server* in `docs/configuration.md`.

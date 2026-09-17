@@ -29,7 +29,9 @@ somewhere a reader of the report cannot see.
 from __future__ import annotations
 
 import ast
+import json
 from pathlib import Path
+from typing import Any
 
 SRC = Path(__file__).resolve().parents[2] / "src" / "maljan"
 
@@ -216,6 +218,108 @@ class TestTheScannerWouldActuallyCatchOne:
         source = "class A:\n    def later(self, severity):\n        self.severity = severity\n"
 
         assert offences(source, "probe.py") == ["probe.py:3: assignment to attribute 'severity'"]
+
+
+class TestAMergeOnlyGrowsASet:
+    """Two rows folded into one is the other way a decision could be rewritten.
+
+    The scan above catches an assignment; it cannot catch arithmetic that
+    averages two confidences into a third nobody wrote, or a fold that takes
+    the higher of two severities because two agents agreed. So the fold itself
+    is driven here, and what is asserted is that the numbers and the words
+    come out as the first occurrence wrote them while the ids and the agents
+    grow.
+    """
+
+    def _finding(self, title: str, confidence: float, evidence: list[str]) -> Any:
+        from maljan.schemas.isr_models import Finding
+
+        return Finding(
+            title=title,
+            technique_ids=["T1055"],
+            confidence=confidence,
+            evidence_ids=evidence,
+        )
+
+    def _isr(self, agent: str, finding: Any) -> Any:
+        from maljan.schemas.isr_models import AgentISR
+
+        return AgentISR(agent_id=agent, domain="static", claims=[], findings=[finding])
+
+    def test_a_merged_finding_keeps_the_first_confidence_and_gains_the_second_agent(self) -> None:
+        from maljan.reporting.dedupe import MergeTally
+        from maljan.reporting.ledger_report import build_sections
+
+        merges = MergeTally()
+        sections = {
+            section.key: section
+            for section in build_sections(
+                [],
+                {
+                    "static": self._isr(
+                        "static", self._finding("Injects into explorer.exe", 0.4, ["ev_0001"])
+                    ),
+                    "reverser": self._isr(
+                        "reverser", self._finding("injects into explorer.exe.", 0.9, ["ev_0002"])
+                    ),
+                },
+                merges=merges,
+            )
+        }
+
+        rows = sections["findings"].rows
+        assert len(rows) == 1, "the same finding twice is one row"
+        agent, title, techniques, confidence, evidence = rows[0]
+        assert confidence == "0.40", "the second agent's higher confidence is not taken"
+        assert title == "Injects into explorer.exe", "the first writer's words are kept"
+        assert techniques == "T1055"
+        assert agent == "static, reverser"
+        assert evidence == "ev_0001, ev_0002"
+        assert merges.findings_merged == 1
+
+    def test_a_merged_indicator_keeps_the_first_notes_and_gains_the_second_id(self) -> None:
+        from maljan.reporting.dedupe import MergeTally
+        from maljan.reporting.ledger_report import build_sections
+        from maljan.schemas.evidence import build_entry
+
+        def _entry(entry_id: str, seq: int, value: str, notes: str) -> Any:
+            return build_entry(
+                entry_id=entry_id,
+                seq=seq,
+                agent="static",
+                tool="iocs_from_file",
+                args={},
+                server="analysis",
+                output=json.dumps({"iocs": [{"kind": "url", "value": value, "notes": notes}]}),
+            )
+
+        merges = MergeTally()
+        sections = {
+            section.key: section
+            for section in build_sections(
+                [
+                    _entry("ev_0001", 1, "http://c2.evil.tld/gate.php", "hard-coded"),
+                    _entry("ev_0002", 2, "hxxp://c2[.]evil[.]tld/gate.php", "seen in the sandbox"),
+                ],
+                merges=merges,
+            )
+        }
+
+        rows = sections["iocs"].rows
+        assert len(rows) == 1, "one endpoint written two ways is one indicator"
+        kind, value, notes, evidence = rows[0]
+        assert (kind, value) == ("url", "http://c2.evil.tld/gate.php")
+        assert notes == "hard-coded", "the first writer's note is kept"
+        assert evidence == "ev_0001, ev_0002"
+        assert merges.indicators_merged == 1
+
+    def test_two_different_indicators_are_never_folded(self) -> None:
+        from maljan.reporting.dedupe import indicator_fingerprint
+
+        assert indicator_fingerprint("url", "http://a.tld/one") != indicator_fingerprint(
+            "url", "http://a.tld/two"
+        )
+        assert indicator_fingerprint("domain", "a.tld") != indicator_fingerprint("url", "a.tld")
 
 
 def test_every_exempt_path_and_whitelist_entry_still_exists():

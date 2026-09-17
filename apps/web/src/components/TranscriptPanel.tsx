@@ -278,7 +278,8 @@ export default function TranscriptPanel({
               !newRound &&
               previous !== null &&
               previous.speaker === message.speaker &&
-              previous.role === message.role;
+              previous.role === message.role &&
+              (previous.addressedTo ?? "") === (message.addressedTo ?? "");
 
             return (
               <div key={message.id}>
@@ -434,6 +435,18 @@ function Bubble({
             <span className="text-xs font-medium" style={{ color }}>
               {speakerLabel(message.speaker)}
             </span>
+            {/* A line said to one agent rather than to the room: the lead's
+                ask names the specialist, the specialist's answer names the
+                lead. The arrow is the whole of the addressing. */}
+            {message.addressedTo && (
+              <span
+                className="text-xs"
+                style={{ color: speakerColor(message.addressedTo) }}
+                aria-label={`to ${speakerLabel(message.addressedTo)}`}
+              >
+                → {speakerLabel(message.addressedTo)}
+              </span>
+            )}
             {(ROLE_LABEL[message.role] ?? message.role) && (
               <span className="text-[10px] uppercase tracking-wider text-text-muted">
                 {ROLE_LABEL[message.role] ?? message.role}

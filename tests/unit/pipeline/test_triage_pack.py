@@ -235,7 +235,12 @@ class TestFailures:
         (capa,) = [entry for entry in result.entries if entry.tool == "capa"]
         assert capa.ok is False
         assert capa.error == "capa produced no result"
-        assert capa.structured == {"error": "capa produced no result", "tool": "capa"}
+        # The flat error the implementation wrote is kept as the message and
+        # given the code and the remedy the sidecars give it.
+        assert capa.structured["error"]["message"] == "capa produced no result"
+        assert capa.structured["error"]["code"] == "tool_failed"
+        assert capa.remediation == capa.structured["error"]["remediation"]
+        assert capa.structured["tool"] == "capa"
         assert result.degradation_reasons == ["triage.capa_failed"]
 
     def test_the_counts_the_run_summary_reports(self, tmp_path: Path, monkeypatch) -> None:

@@ -37,7 +37,7 @@ from typing import TYPE_CHECKING, Any, cast
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from maljan.agents.registry import AgentRegistry
-from maljan.core.config import REPORTER_AGENT_KEY, Settings
+from maljan.core.config import PROMPT_ROLES, REPORTER_AGENT_KEY, Settings
 from maljan.core.exceptions import ConfigurationError
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger
@@ -656,6 +656,27 @@ class ServiceContainer:
         entries.sort(key=lambda entry: getattr(entry, "seq", 0))
         return entries
 
+    def drain_all_judge_budget_records(self) -> list[dict[str, Any]]:
+        """Every budget row the judge agents' loops left, from each cached role.
+
+        Drained beside the ledger and for the same reason: the judge is cached
+        per role, only some of those instances run a tool loop, and a meter
+        that is never drained reports nothing for the one loop with a hard
+        wall-clock timeout.
+        """
+        with self._lock:
+            judges = list(self._judge_agent_cache.values())
+        rows: list[dict[str, Any]] = []
+        for judge in judges:
+            drain = getattr(judge, "drain_budget_records", None)
+            if drain is None:
+                continue
+            try:
+                rows.extend(drain() or [])
+            except Exception as exc:  # noqa: BLE001 — the meter never fails a run
+                logger.debug("budget drain skipped for a judge agent: %s", exc)
+        return rows
+
     # ------------------------------------------------------------------
     # Composition accessors
     # ------------------------------------------------------------------
@@ -706,7 +727,7 @@ class ServiceContainer:
         A built-in role runs its own class under the definition's key — a clone
         ``static_r2`` is a ``StaticAnalyst`` named ``static_r2`` — because
         those classes carry the provider-specific ISR extraction the goldens
-        pin. A ``generic`` role runs ``ConfigurableAnalyst``. Both get the
+        pin. A ``generic`` or ``lead`` role runs ``ConfigurableAnalyst``. Both get the
         per-run ledgers, a way back to this container, and their
         ``ResolvedAgent``, so nothing below re-derives a prompt or a tool set.
         """
@@ -721,7 +742,7 @@ class ServiceContainer:
             role = self.agent_role(name)
             resolved = resolve_agent(name, self, self.job_key())
             llm = cast(BaseChatModel, resolved.llm)
-            if role == "generic":
+            if role in PROMPT_ROLES:
                 agent: BaseAnalyst = ConfigurableAnalyst(name, resolved, llm)
             else:
                 agent = self.agent_registry.create(role, llm)
@@ -1077,7 +1098,7 @@ class ServiceContainer:
         "sample.chunks"]`` would hand a detonated sample both instead of one.
         """
         role = self.agent_role(agent_name)
-        if role == "generic":
+        if role in PROMPT_ROLES:
             static_context = self.load_chunked(file_hash, agent_name)
             sandbox_chunks: list[TextChunk] = []
             if sandbox_report:

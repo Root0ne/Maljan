@@ -371,6 +371,7 @@ class MaljanApp:
             "validation_not_run": [],
             "triage_facts": {},
             "nudge_retry_modes": {},
+            "budget_records": {},
         }
 
         result = await self.graph.ainvoke(initial_state)

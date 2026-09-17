@@ -54,7 +54,7 @@ def test_the_default_profile_is_every_built_in_analyst_and_neither_of_the_others
     # ``measurement`` is the second built-in: the same three analysts with
     # every tool server withheld, which is the baseline the tool sidecars are
     # measured against.
-    assert BUILTIN_PROFILES == ("default", "measurement", "mobile", "deep_static")
+    assert BUILTIN_PROFILES == ("default", "measurement", "mobile", "deep_static", "team_lead")
     baseline = Settings(_env_file=None).agents.profiles["measurement"]
     assert baseline.analysis_agents == profile.analysis_agents
     assert baseline.static_provider == "none"

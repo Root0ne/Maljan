@@ -79,6 +79,18 @@ then chmodded, uploads are capped at 2 GiB, an unfinished chunked upload is
 evicted after fifteen minutes, and every `put_sample*` call prunes staged files
 past the TTL.
 
+### Capabilities
+
+| tool | arguments |
+| --- | --- |
+| `capabilities` | — |
+
+Answers `{server, version, tools: [{name, optional_dependency, available,
+reason, timeout_s}]}`, computed when the server starts by probing each optional
+module. A tool that cannot answer returns `{"error": {"code", "message",
+"remediation"}, "tool"}` (`maljan.tools.errors`); see *Writing a tool server*
+in `docs/configuration.md`.
+
 ## Optional dependencies
 
 Install with `uv sync --extra tools`. Each is optional and its absence costs

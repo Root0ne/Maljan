@@ -37,3 +37,11 @@ model takes seconds to load.
 catalog (`data/family_fingerprints_v1.json`, `data/attck_case_corpus_v1.json`).
 Without either they answer an empty list and a `reason` — never an error the
 caller has to interpret, and never an exception.
+
+## Capabilities and errors
+
+`capabilities` (no argument) answers `{server, version, tools: [{name,
+optional_dependency, available, reason, timeout_s}]}`, computed when the server
+starts by probing what each tool needs on this host. A tool that cannot answer
+returns `{"error": {"code", "message", "remediation"}, "tool"}` rather than
+raising; see *Writing a tool server* in `docs/configuration.md`.

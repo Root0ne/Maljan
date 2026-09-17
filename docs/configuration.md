@@ -167,6 +167,70 @@ Thirteen probes back the "Test" buttons
 that fails answers 200 with the failure as data — a connection test that fails
 is an answer, not an error.
 
+### A model is probed before a job may name it
+
+**What the probe does.** Both the `llm` and the `agent` probe end by asking for
+one short answer — one turn, eight tokens, at the endpoint and on the model the
+run will use, through each provider's own completion API (`/chat/completions`
+for an OpenAI-compatible server, `/api/generate` for Ollama, `/v1/messages` for
+Anthropic, `:generateContent` for Gemini). Listing a provider's catalogue comes
+first and is not enough on its own: a server can offer a name it will not load,
+a key can be refused for one model and not another, and a misspelling can land
+on a name the catalogue happens to hold. A call that came back with nothing in
+it — an empty `choices`, a candidate that was filtered away — is a failure too.
+The completion gets ninety seconds of its own, because a local server reloads a
+model it had unloaded and a large one is not a ten-second load.
+
+**What is written down.** One row per `(endpoint, model)` pair the probe
+actually completed a call with, carrying the provider, whether the model
+answered and the sentence it came back with. The `llm` probe completes one call
+per pair it will file: the selected provider's **expert** model at its own
+endpoint, and every per-agent override at *its* own endpoint, which is how a
+second llama.cpp or a second Ollama host is proved. Anthropic and Gemini have
+one endpoint apiece, named rather than addressed, so a per-agent entry there
+differs only in its model — and each is still asked, because a key may be
+refused for one model and not another. The same pair named twice is one call
+and one row. The judge model is listed and never called, so it is not filed.
+The `agent` probe files the one pair its agent would use.
+
+Where a call goes is worked out in one place (`maljan.core.model_assignments`)
+for the probe and for the gate alike, trailing slash and all, so a base URL
+typed `http://box:8080/v1/` files and resolves under the same spelling as the
+same URL typed without it.
+
+A call that ran out of time leaves **no** row at all — neither a pass nor a
+failure. Nothing was learned about that pair, and writing a cold model down as
+a missing one would lock the operator out of their own jobs; the probe says so
+and asks to be run again once the model is warm.
+
+**What it costs.** The `llm` probe asks its pairs one after another — a single
+local server told to load several models at once is the failure this project
+has already diagnosed — with ninety seconds for each call and five minutes for
+the whole probe. A pair there was no room left to ask is named in the answer as
+not tried and files no row, exactly as a timeout does; pressing **Test** again
+asks it. In a failing pair's sentence an endpoint is printed as its scheme and
+host, so a base URL that carries credentials does not reach the screen or the
+stored row.
+
+**Where the gate stands.** Submitting a job reads that record for every model
+the run can reach — the agents its team's stages name, and every agent those
+can ask through `ask_<key>`, and so on — and refuses with 422 when one of them
+has no passing row, naming the agent, the model, the endpoint and the probe's
+last message. Saving a per-agent model (`core.llm.agents.*`) is refused with
+the same sentence, because an operator who saves a model nothing can reach has
+made the mistake the gate is about and the settings page is where it can be
+fixed. The console shows the sentence as written in both places.
+
+The pair is also the invalidation. A changed endpoint or a changed model is a
+different question, finds no row, and is refused until it is probed: nothing
+has to expire a result, because a result is never read for a pair it was not
+taken against.
+
+`core.llm.require_probe` is on, and turning it off is the only way past the
+gate — neither a job nor a save can ask to skip it. It is there for an
+air-gapped batch run, where the endpoint is known good and nobody is at a
+console to press a button.
+
 ### Format routing and the sandbox
 
 No sample is refused for its format. Routing detects the file type from magic
@@ -280,7 +344,7 @@ with `uv sync --extra tools` (the backend image already does); without them
 `{"error": "<module> is not installed"}`. Nothing else changes, and the server
 starts either way.
 
-Four teams ship built in; they are listed under **Teams** below. `default` is
+Five teams ship built in; they are listed under **Teams** below. `default` is
 the three analysts with their tools.
 `measurement` is the same three analysts with `exclude_servers: ["*"]`,
 `exclude_sandbox_tools` on and `static_provider` forced to `none` — the
@@ -387,6 +451,7 @@ pipeline → Teams) is an ordered list of stages. Each stage is:
 | `measurement` | The four after the pack, with every tool server withheld and no pack | What the ensemble contributes with nothing to call and nothing established. |
 | `mobile` | `triage_pack` → `triage` → `android_static` → `dynamic` → `debate` → `verdict` → `report` | An APK or a DEX. |
 | `deep_static` | `triage_pack` → `triage` → `static` → `reversing` → `network` → `debate` → `verdict` → `report` | Reading the code. |
+| `team_lead` | `triage_pack` → `lead` (lead) → `verdict` → `report` | One lead agent gives the specialists their work; see *Delegation* below. The one seeded team with no debate: a debate over a single analyst costs a second full loop and cannot change a position. |
 
 `triage_pack` is a stage of kind `triage`: the pipeline itself running the
 deterministic tools over the sample and writing each result to the evidence
@@ -445,19 +510,75 @@ have no other tools at all is named as running with nothing to call; one that
 also holds a tool server, as `deep_static`'s reverser does, is named as running
 without the decompiler.
 
-Like every built-in team, all four are editable only in their debate options,
+Like every built-in team, all five are editable only in their debate options,
 their `builtin_tools` switches and `exclude_servers`. Everything else means
 cloning the team, which the console does in one click.
+
+### Delegation
+
+A definition's `tools` list takes four kinds of reference. `mcp` names a
+server (and optionally one tool of it), `provider` means the agent's own static
+provider's tools, `sandbox` the in-process tools over the job's sandbox report,
+and `agent` names another definition:
+
+```json
+{"kind": "agent", "agent": "static"}
+```
+
+Bound to an agent, that reference is a tool named `ask_static` in its toolbox:
+the model hands the static analyst a `task` (and, when it helps, a `context`),
+the static analyst works on it with its own tools under the same job, and its
+answer — its claims with the ledger ids they cite — comes back as the tool
+result, unedited. The console's agent editor offers every other analyst-role
+definition under **Ask another agent** in the Tools tree; the settings model
+refuses a reference to an agent that does not exist, to the definition itself,
+to the judge or the reporter, and any such reference on the judge or the
+reporter. A disabled callee is refused when it is asked, by name, so a built-in
+team may keep a disabled member while another team runs, and so is an ask that
+would come back with a server the asking stage withholds — a stage with
+**Built-in tools** off cannot reach them through a colleague that no stage
+narrows. A `provider` reference is valid on a `generic` or a `lead` definition;
+every other role opens its provider itself.
+
+The seeded `lead` definition (role `lead`, prompt in
+`src/maljan/agents/prompts/lead.md`) references `static`, `dynamic`,
+`network`, `reverser` and `triage`, and keeps the `knowledge` server; the
+`team_lead` team runs it as its one analysis stage. A team of your own may put
+a reference on any analyst: a static clone that asks the network analyst is as
+legal as a lead.
+
+Three settings govern it, in the Agents group. `agents.delegation_depth` (2)
+bounds the nesting: a stage's agent asking a specialist is depth 1, that
+specialist asking another is depth 2, and an ask that would go deeper is
+refused with a message the model reads. It bounds the nesting, never the
+number of asks.
+
+`agents.delegation_steps` (12) and `agents.delegation_timeout_seconds` (300)
+are what one ask gets. They are the delegation's own budget, not a share of
+the caller's: an ask carries them whole, whatever the caller has spent, and
+the caller's own step budget is not reduced by what its specialists do. The
+one thing the two really share is the wall clock — the caller waits inside its
+own timeout — so an ask is cut to what the caller has left, and an ask is
+refused only when that is below the floor a first model turn needs. A callee
+that reaches its step cap writes up what it gathered, the way an analyst at
+its own cap does.
+
+That makes the caller's stage timeout the thing that decides how many asks fit
+in one loop: the seeded `lead` has `react_agent_timeout_overrides` of 1800 s
+and `react_agent_max_steps_overrides` of 40, which is room for five asks and
+the turns to weigh them. The `ask_<key>` tool's description tells the model
+the same numbers. See *Delegation* in [architecture.md](architecture.md) for
+what the ledger and the transcript record.
 
 ### A name a later release takes
 
 Seeding a built-in takes a name. `triage`, `android_static`, `reverser`,
-`mobile` and `deep_static` were all legal names for an operator's own agent or
-team before they were seeded, and a stored entry under one of them would
-otherwise be refused as tampering with a built-in — on every read, which is to
-say at boot.
+`lead`, `mobile`, `deep_static` and `team_lead` were all legal names for an
+operator's own agent or team before they were seeded, and a stored entry under
+one of them would otherwise be refused as tampering with a built-in — on every
+read, which is to say at boot.
 
-So a stored entry under one of those five names that is not the seed is renamed
+So a stored entry under one of those seven names that is not the seed is renamed
 out of the way on load: `reverser` becomes `reverser_custom`, and every
 reference to it moves with it — the teams that named it, the per-agent model
 entry under `llm.agents`, each server's `agents` binding and both
@@ -668,6 +789,70 @@ and the system temp directory is shared. Each file is created with
 `O_CREAT|O_EXCL|O_NOFOLLOW` at 0o600 rather than written and then chmodded, and
 every `put_sample*` call prunes entries past the TTL, so a long-lived server
 does not accumulate samples without bound.
+
+## Writing a tool server
+
+Any MCP server works: Maljan reads its manifest and calls its tools. Two
+optional conventions make a server a better citizen of a run, and the four
+built-in sidecars follow both.
+
+**The capability manifest.** A tool named `capabilities`, taking no argument,
+answers what the server can do on the host it runs on:
+
+```json
+{"server": "analysis", "version": "1.0.0",
+ "tools": [{"name": "document_info", "optional_dependency": "olefile",
+            "available": false, "reason": "olefile is not installed",
+            "timeout_s": null,
+            "remediation": "install the optional tool libraries on the host that runs this server: uv sync --extra tools",
+            "without": "the PDF and OOXML halves"}]}
+```
+
+Compute it when the server starts, by probing — an import, a `which`, an
+environment variable — never by asserting; `maljan.tools.capabilities.manifest`
+does that for a list of `ToolNeeds` and is what the sidecars use. The registry
+reads the manifest once per job when it attaches the server and keeps it on
+the server's entry; the connection test (`POST /api/v1/settings/test/mcp`)
+returns it under `details.capabilities`, and the console's server card lists
+the unavailable tools with their reason before any run. When an analysis
+stage's agent starts, each tool it binds that its server's manifest marks
+unavailable is recorded once as
+`server.<key>.<tool>_unavailable(<reason>); still answers <without>; <remediation>`
+in the run's degradation reasons, instead of being discovered by a failed call
+mid-run. `timeout_s` is the tool's real timeout, taken from the constant the
+tool itself uses, so a manifest cannot say a call has none when it gives up
+after fifteen seconds. An unavailable tool does not make the run degraded on its own; a
+server that could not be attached still does.
+
+**Errors that name their remedy.** A tool that cannot answer returns, never
+raises:
+
+```json
+{"error": {"code": "missing_dependency",
+           "message": "olefile is not installed",
+           "remediation": "install the optional tool libraries: uv sync --extra tools"},
+ "tool": "document_info"}
+```
+
+The codes are `missing_dependency`, `timeout`, `bad_argument`, `no_such_file`,
+`unsupported_format`, `not_configured` and `tool_failed`; a code of your own is
+kept as written. `maljan.tools.errors.tool_error(code, message, tool=...)`
+builds the shape with the authored remediation for the code, and each sidecar's
+guard maps an exception it catches to a code. The older flat shape,
+`{"error": "<text>"}`, is still read: the sidecars rewrite it into the
+structured one on the way out, inferring the code from the text, and the
+ledger reads either. A returned error is a failed ledger entry: `ok` false,
+`error` the message, `remediation` the hint — the report header lists each
+distinct failure once with its remedy, the console's evidence row shows both,
+and `GET /api/v1/jobs/{id}/evidence` serves them.
+
+**The budget meter** needs nothing from a server. The tool loop emits
+`budget_tick` every five steps and once more when it ends (steps used against
+the cap, seconds against the limit, prompt characters, ledger entries so far)
+and `stage_ended_at_cap` when a cap ended the work — `steps`, `time`,
+`repeats` or, for the triage pack, `budget_seconds`; `run_summary.budget` sums
+the spend per agent with the caps it hit, and the console's pipeline panel
+says beside the step which cap ended it.
 
 ## Export and import
 

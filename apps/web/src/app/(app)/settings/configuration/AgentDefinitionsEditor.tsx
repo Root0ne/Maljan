@@ -35,13 +35,21 @@ export const BUILTIN_AGENT_KEYS = new Set([
   "reporter",
 ]);
 /** Roles that read a static provider; the others have nothing to point at. */
-const PROVIDER_ROLES = new Set(["static", "generic"]);
+/* The roles that pick a static provider of their own: the built-in static
+   analyst, and the two that are a prompt rather than a class. A `lead` is
+   the same class as a generic agent, so the API takes a provider reference
+   on it and the console has to be able to express one. */
+const PROVIDER_ROLES = new Set(["static", "generic", "lead"]);
 /** The roles a custom definition may take. `judge` and `report` are missing on
  *  purpose: there is exactly one of each and both are built-ins, so offering
  *  either here would only produce a definition the settings model rejects. */
 const ROLE_CHOICES: AgentDefinitionEntry["role"][] = [
-  "static", "dynamic", "network", "generic",
+  "static", "dynamic", "network", "generic", "lead",
 ];
+/** The roles an agent may be asked to work for another: the judge and the
+ *  reporter are not analysts and the settings model refuses a reference to
+ *  either. */
+const ASKABLE_ROLES = new Set(["static", "dynamic", "network", "generic", "lead"]);
 
 export const EMPTY_DEFINITION: AgentDefinitionEntry = {
   role: "generic",
@@ -363,17 +371,38 @@ export function AgentDetail({
     onChange(removeEntry(definitions, key));
   };
 
+  const sameRef = (a: ToolRefEntry, b: ToolRefEntry) =>
+    a.kind === b.kind &&
+    a.server === b.server &&
+    a.name === b.name &&
+    (a.agent ?? null) === (b.agent ?? null);
+
   const toggleRef = (key: string, ref: ToolRefEntry, on: boolean) => {
-    const same = (a: ToolRefEntry) =>
-      a.kind === ref.kind && a.server === ref.server && a.name === ref.name;
     const tools = definitions[key].tools;
-    put(key, { tools: on ? [...tools, ref] : tools.filter((t) => !same(t)) });
+    put(key, { tools: on ? [...tools, ref] : tools.filter((t) => !sameRef(t, ref)) });
   };
 
   const hasRef = (key: string, ref: ToolRefEntry) =>
-    definitions[key].tools.some(
-      (t) => t.kind === ref.kind && t.server === ref.server && t.name === ref.name
-    );
+    definitions[key].tools.some((t) => sameRef(t, ref));
+
+  /** One `ask_<agent>` reference, in the shape the API stores it. */
+  const askRef = (agent: string): ToolRefEntry => ({
+    kind: "agent",
+    server: null,
+    name: null,
+    agent,
+  });
+
+  /** The agents this one may be given as tools: every other analyst-role
+   *  definition, whether or not it is enabled — a disabled one is refused at
+   *  run time by name rather than silently missing from the list. Empty for a
+   *  judge or a reporter, whose references the API always refuses, so the
+   *  group is not offered where ticking a row is a guaranteed save error. */
+  const askable = ASKABLE_ROLES.has(definitions[agentKey]?.role)
+    ? Object.entries(definitions)
+        .filter(([key, d]) => key !== agentKey && ASKABLE_ROLES.has(d.role))
+        .map(([key]) => key)
+    : [];
 
   /** The message the API put on one named field, so it can be rendered under
    *  that field rather than at the foot of the detail. */
@@ -714,7 +743,7 @@ export function AgentDetail({
         <fieldset className="border border-border rounded p-2">
           <legend className="text-xs text-text-muted px-1">Tools</legend>
           <ul role="tree" aria-label={`${agentKey} tools`} className="space-y-1">
-            {agent.role === "generic" && !locked && (
+            {PROVIDER_ROLES.has(agent.role) && agent.role !== "static" && !locked && (
               <li
                 role="treeitem"
                 aria-selected={hasRef(agentKey, {
@@ -738,6 +767,34 @@ export function AgentDetail({
                   />
                   its static provider&rsquo;s tools
                 </label>
+              </li>
+            )}
+            {/* Delegation is a tool like any other, so it sits in the same
+                tree: one row per agent this one may hand a task to. The row
+                is titled by the tool's name because that is what the model
+                reads in its toolbox. */}
+            {askable.length > 0 && (
+              <li role="treeitem" aria-expanded={true} aria-selected={false}>
+                <span className="text-xs text-text-muted">Ask another agent</span>
+                <ul role="group" className="ml-4 mt-1 space-y-0.5">
+                  {askable.map((other) => (
+                    <li key={other} role="treeitem" aria-selected={hasRef(agentKey, askRef(other))}>
+                      <label className="text-xs text-text-secondary flex items-center gap-1">
+                        <input
+                          type="checkbox"
+                          aria-label={`${agentKey} asks ${other}`}
+                          disabled={locked}
+                          checked={hasRef(agentKey, askRef(other))}
+                          onChange={(e) => toggleRef(agentKey, askRef(other), e.target.checked)}
+                        />
+                        <span className="font-mono">ask_{other}</span>
+                        <span className="text-text-muted">
+                          {definitions[other].label || other}
+                        </span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
               </li>
             )}
             {Object.keys(servers).map((server) => {

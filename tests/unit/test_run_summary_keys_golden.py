@@ -102,6 +102,21 @@ def _default_profile_summary() -> RunSummary:
     )
     builder.set_triage({"entries": 11, "failed": 1, "duration_ms": 900, "yara_hits": 2})
     builder.set_nudge({"static": "invalid_tool_calls_dropped"})
+    builder.set_budget(
+        {
+            "static": [
+                {
+                    "stage": "analysis",
+                    "steps_used": 12,
+                    "max_steps": 40,
+                    "elapsed_s": 88.0,
+                    "timeout_s": 1500.0,
+                    "delegated_steps": 0,
+                    "cap": "steps",
+                }
+            ]
+        }
+    )
     builder.set_degraded_mode(False, [])
     builder.set_failed_analysts([])
     builder.set_token_usage(
@@ -143,6 +158,7 @@ _DATA_KEYED = frozenset(
         "corroboration",
         "validation.by_code",
         "nudge.retry_mode",
+        "budget",
     }
 )
 

@@ -2,6 +2,7 @@
   "server": "threatintel",
   "source": "live handshake",
   "tools": [
+    "capabilities",
     "check_domain_reputation",
     "check_hash",
     "check_ip_reputation",

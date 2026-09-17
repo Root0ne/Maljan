@@ -10,13 +10,15 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from maljan.agents.delegation import REFUSAL_PREFIX
 from maljan.agents.evidence_recorder import EvidenceRecorder
 from maljan.agents.judge_agent import (
     VERDICT_FALLBACK_CODE,
@@ -26,7 +28,7 @@ from maljan.agents.judge_agent import (
 )
 from maljan.analysis.corroboration import corroboration_row
 from maljan.analysis.run_summary import RunSummaryBuilder
-from maljan.core.config import BUILTIN_AGENTS, ReportingConfig
+from maljan.core.config import BUILTIN_AGENTS, PROMPT_ROLES, ReportingConfig
 from maljan.core.container import ServiceContainer
 from maljan.core.exceptions import AnalystError, LLMError
 from maljan.core.logger import logger
@@ -42,6 +44,7 @@ from maljan.pipeline.events import (
     claims_to_payload,
     emit,
     emit_agent_message,
+    emit_stage_ended_at_cap,
     summarize_claims,
 )
 from maljan.pipeline.evidence_summary import summarise
@@ -78,6 +81,7 @@ from maljan.reporting.ledger_report import section_is_grounded
 from maljan.schemas.evidence import LedgerEntry, apply_budget
 from maljan.schemas.isr_models import AgentISR
 from maljan.schemas.stix_models import Bundle
+from maljan.schemas.tool_evidence import trim_output
 
 if TYPE_CHECKING:
     from maljan.memory.long_term_memory import MemoryStore
@@ -145,7 +149,7 @@ def _is_placeholder_only(chunks: list, role: str = "") -> bool:
       mirrored for a provider, which is the same degraded-but-intentional
       path static falls back to, not an absence of data.
     """
-    if role in ("static", "generic") or len(chunks) != 1:
+    if role in SAMPLE_FED_ROLES or len(chunks) != 1:
         return False
     content = getattr(chunks[0], "content", "") or ""
     return bool(_STATIC_PLACEHOLDER_RE.match(content.strip()))
@@ -153,6 +157,12 @@ def _is_placeholder_only(chunks: list, role: str = "") -> bool:
 
 # The reason a sandbox-fed analyst is skipped when nothing was detonated.
 SYNTHETIC_SANDBOX_REASON = "no sandbox fixture for this sample"
+
+# The roles whose input is the sample itself rather than the sandbox report:
+# the static analyst, and the two roles that are a prompt over the sample and
+# whatever tools the definition gives them. These get the sample path pinned
+# and spliced into their first chunk; the others read a report.
+SAMPLE_FED_ROLES: tuple[str, ...] = ("static", *PROMPT_ROLES)
 
 
 def _sandbox_report_is_synthetic(state: AnalysisState) -> bool:
@@ -170,7 +180,7 @@ def _sandbox_report_is_synthetic(state: AnalysisState) -> bool:
 
 def _sandbox_fed(role: str) -> bool:
     """Whether this role's input is the sandbox report rather than the sample."""
-    return role not in ("static", "generic")
+    return role not in SAMPLE_FED_ROLES
 
 
 def _violations_from_rows(rows: Any) -> list[Violation]:
@@ -186,6 +196,47 @@ def _violations_from_rows(rows: Any) -> list[Violation]:
                 )
             )
     return out
+
+
+def _judge_budget(container: Any) -> dict[str, Any]:
+    """The judges' budget rows, drained wherever their ledger is drained.
+
+    Every path that drains one drains the other: a meter that is read on one
+    of them and not the other reports a loop that made calls and spent
+    nothing.
+    """
+    try:
+        rows = container.drain_all_judge_budget_records()
+    except Exception as exc:  # noqa: BLE001 — the meter never breaks a run
+        logger.debug("budget records not read for the judges: %s", exc)
+        return {}
+    return {"budget_records": {"judge": rows}} if rows else {}
+
+
+def _budget_update(agent: Any, agent_name: str) -> dict[str, Any]:
+    """The budget meter's rows for this agent since it was last drained.
+
+    Filed under the agent that ran the loop, not the one that was drained.
+    A lead hands over what its specialists spent, and a summary that counted
+    those against the lead would say the lead ended at a cap a specialist hit
+    and would have no row at all for the specialist. The row names its own
+    agent; only a row that does not falls back to the drained key.
+    """
+    drain = getattr(agent, "drain_budget_records", None)
+    if not callable(drain):
+        return {}
+    try:
+        rows = list(drain() or [])
+    except Exception as exc:  # noqa: BLE001 — telemetry never breaks a run
+        logger.debug("budget records not read for %s: %s", agent_name, exc)
+        return {}
+    if not rows:
+        return {}
+    by_agent: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        whose = str(row.get("agent") or agent_name)
+        by_agent.setdefault(whose, []).append(row)
+    return {"budget_records": by_agent}
 
 
 def _nudge_mode(agent: Any) -> str | None:
@@ -365,6 +416,14 @@ def _pin_sample_path(agent: Any, state: AnalysisState) -> None:
         or _absolute_host_sample_path(state)
         or None
     )
+    # The same three choices, kept on the agent for the agents it may ask: a
+    # callee's tools open the mirror its own provider was given, which the
+    # caller's pinned path cannot say. See ``agents.delegation``.
+    agent.sample_path_choices = {
+        "by_provider": dict(state.get("static_sample_paths") or {}),
+        "static": state.get("static_sample_path") or None,
+        "host": _absolute_host_sample_path(state) or None,
+    }
     # And the per-server overrides, for a tool server that was handed the
     # bytes instead of sharing this filesystem. Assigned unconditionally for
     # the same reason the path above is: an agent is cached across samples.
@@ -624,17 +683,15 @@ def _reputation_lookup(container: ServiceContainer, sha256: str) -> Any:
                 started_at=wall_clock,
                 duration_ms=int((time.monotonic() - started) * 1000),
             )
-        # The MCP client answers a server-side failure as text rather than
-        # raising, so the wrapper an agent runs under records it as a result.
-        # The pack reads that text for what it is: a call that did not answer.
-        error = _tool_error_text(output)
+        # Handed in as a success and left to ``build_entry`` to read: it
+        # already knows the structured shape, the flat one and the MCP
+        # client's own marker, and one place deciding what a failure looks
+        # like is what keeps the pack and an agent's loop agreeing.
         return recorder.record(
             tool=tool_name,
             args=args,
             server=server,
             output=output,
-            ok=error is None,
-            error=error,
             started_at=wall_clock,
             duration_ms=int((time.monotonic() - started) * 1000),
         )
@@ -642,19 +699,70 @@ def _reputation_lookup(container: ServiceContainer, sha256: str) -> Any:
     return lookup
 
 
-def _tool_error_text(output: str) -> str | None:
-    """The failure an MCP tool result carries, or ``None`` for an answer."""
-    text = (output or "").strip()
-    if not text.startswith("{"):
-        return None
-    try:
-        parsed = json.loads(text)
-    except (ValueError, TypeError):
-        return None
-    if isinstance(parsed, dict) and parsed.get("tool_error"):
-        detail = parsed.get("detail") or parsed.get("type") or ""
-        return f"{parsed['tool_error']}: {detail}" if detail else str(parsed["tool_error"])
-    return None
+# Held while a degradation reason is added, so a parallel stage fan-out cannot
+# write the same sentence twice.
+_REASON_LOCK = threading.Lock()
+
+
+# How much of a failure's message the header prints. A tool server on another
+# host can answer with a stack trace, and the header is a list of things to
+# fix rather than a log.
+MAX_FAILURE_CHARS = 400
+
+
+def tool_failures(ledger: Sequence[Any], limit: int = 20) -> list[dict[str, Any]]:
+    """Each distinct tool failure in the ledger, once, with its remedy.
+
+    Keyed by tool and message so a call that failed the same way five times
+    is one row with a count of five; the report header and the console read
+    this rather than walking the ledger. A step the pack's budget stopped is
+    not a failure and is left out, as the run-state block leaves it out.
+    """
+    rows: dict[tuple[str, str], dict[str, Any]] = {}
+    for entry in ledger:
+        if getattr(entry, "ok", True) or getattr(entry, "repeated_of", None):
+            continue
+        # A refused ask is a guard working: a cycle, a depth, a clock the
+        # caller had already spent. It is a failed entry so the model reads
+        # it, and it is not a tool an operator can go and fix. A callee that
+        # raised or ran out of time is a different thing and stays in the
+        # list, which is why this reads the refusal rather than the server.
+        if str(getattr(entry, "error", "") or "").startswith(REFUSAL_PREFIX):
+            continue
+        message = str(getattr(entry, "error", "") or getattr(entry, "output", "") or "").strip()
+        if message.startswith(NOT_RUN_PREFIX):
+            continue
+        # Trimmed the way the ledger trims a result: an external server that
+        # answers a failure with a stack trace would otherwise print it whole
+        # in the report header.
+        message = trim_output(message, MAX_FAILURE_CHARS)
+        key = (str(getattr(entry, "tool", "")), message)
+        row = rows.get(key)
+        if row is None:
+            rows[key] = row = {
+                "tool": key[0],
+                "server": getattr(entry, "server", None),
+                "error": message,
+                "remediation": getattr(entry, "remediation", None),
+                "entry_id": str(getattr(entry, "id", "")),
+                "count": 0,
+            }
+        row["count"] += 1
+    kept = list(rows.values())[:limit]
+    if len(rows) > limit:
+        # Said rather than silently dropped: a header that shows twenty of
+        # thirty-one failures and does not say so reads as thirty-one fixed.
+        kept.append(
+            {
+                "tool": "",
+                "server": None,
+                "error": f"and {len(rows) - limit} more distinct failure(s), not listed",
+                "remediation": None,
+                "entry_id": "",
+                "count": len(rows) - limit,
+            }
+        )
+    return kept
 
 
 def _function_matches_step(container: ServiceContainer, state: AnalysisState) -> Any:
@@ -822,6 +930,15 @@ def make_triage_node(
             len(result.failed),
             result.duration_ms,
         )
+        stopped = list(getattr(result, "stopped_by_budget", None) or [])
+        if stopped:
+            emit_stage_ended_at_cap(
+                container.event_sink,
+                stage=stage.key,
+                agent=PIPELINE,
+                cap="budget_seconds",
+                detail=f"{len(stopped)} step(s) not run: {', '.join(stopped)}",
+            )
         update = {
             "triage_facts": result.to_state(),
             **stage_record(stage, ran=True, duration_ms=_elapsed_ms()),
@@ -1291,6 +1408,72 @@ def make_join_node(stage: Any, container: ServiceContainer, finishes: tuple[str,
     return node_fn
 
 
+def note_unavailable_tools(container: ServiceContainer, agent: Any) -> list[str]:
+    """Record, once, each bound tool the server's manifest says cannot answer here.
+
+    Read at stage start from the capability manifests the registry kept when
+    it attached the servers, so an operator sees ``document_info`` is missing
+    its library before the analyst spends a step discovering it. The reason
+    is ``server.<key>.<tool>_unavailable(<why>)`` with the remedy after it; it
+    goes on the registry's list, which the judge reads into the run summary,
+    and is written there once however many agents bind the tool.
+    """
+    from maljan.agents.tool_pinning import server_of
+
+    registry = getattr(container, "_server_registry_cache", None)
+    if registry is None:
+        return []
+    by_server: dict[str, list[str]] = {}
+    for tool in list(getattr(agent, "tools", None) or []):
+        key = server_of(tool)
+        if key:
+            bound = str(getattr(tool, "name", ""))
+            by_server.setdefault(key, []).append(_manifest_name(key, bound))
+    noted: list[str] = []
+    for key, names in by_server.items():
+        try:
+            manifest = registry.get(key).capabilities
+        except Exception:  # noqa: BLE001 — a server that is gone has no manifest
+            continue
+        if manifest is None:
+            continue
+        for missing in manifest.unavailable(names):
+            reason = missing.degradation_reason
+            noted.append(reason)
+            if _record_once(registry.degradation_reasons, reason):
+                logger.info("stage start: %s", reason)
+    return noted
+
+
+def _record_once(reasons: list[str], reason: str) -> bool:
+    """Append ``reason`` unless it is already there, and say whether it was new.
+
+    Under this module's lock, because a parallel fan-out has two stage nodes
+    starting at once and check-then-append can write the same sentence twice.
+    The registry appends its own attach reasons to the same list without it,
+    so this closes the race between two stage starts rather than every race
+    on the list.
+    """
+    with _REASON_LOCK:
+        if reason in reasons:
+            return False
+        reasons.append(reason)
+        return True
+
+
+def _manifest_name(server: str, bound: str) -> str:
+    """A bound tool's name as its server's manifest spells it.
+
+    Two servers offering one tool name is legal, and the registry renames the
+    second to ``<server>__<tool>`` so a model can call both. The manifest is
+    keyed by the name the server itself uses, so the prefix has to come off
+    before the lookup — without this the renamed tool's cell is never found
+    and its stage-start record is lost with nothing saying so.
+    """
+    prefix = f"{server}__"
+    return bound[len(prefix) :] if bound.startswith(prefix) else bound
+
+
 def make_stage_agent_node(
     stage: Any,
     agent_name: str,
@@ -1381,12 +1564,14 @@ def make_stage_agent_node(
             mode = _nudge_mode(bound_agent)
             if mode:
                 update["nudge_retry_modes"] = {agent_name: mode}
+            update.update(_budget_update(bound_agent, agent_name))
             return update
 
         try:
             agent = container.get_agent(agent_name)
             bound_agent = agent
             role = container.agent_role(agent_name)
+            note_unavailable_tools(container, agent)
 
             agent.pipeline_stage = stage.key
             # What the pipeline established before this analyst, and the run
@@ -1402,7 +1587,7 @@ def make_stage_agent_node(
             # the failure path. The chunk carries the path for the model to
             # read; the pin carries it for the tool layer, which is what
             # actually corrects a model that sends the bare filename.
-            if role in ("static", "generic"):
+            if role in SAMPLE_FED_ROLES:
                 _pin_sample_path(agent, state)
 
             chunks = container.load_data_for_agent(
@@ -1412,7 +1597,7 @@ def make_stage_agent_node(
                 sample_path=_absolute_host_sample_path(state) or None,
             )
 
-            if role in ("static", "generic"):
+            if role in SAMPLE_FED_ROLES:
                 # The mirror is looked up by this agent's own static provider
                 # id so two static analysts on two providers each get their own
                 # mirror path, with the absolute host path as the fallback a
@@ -2070,6 +2255,7 @@ def make_negotiation_node(
                 # Mediation is the only place a judge agent calls a tool, so
                 # this is where those calls have to leave the agent.
                 "evidence_ledger": _judge_evidence(),
+                **_judge_budget(container),
                 **_debate_record(stage, started),
             }
         except Exception as e:  # noqa: BLE001 — per-run fault-isolation boundary
@@ -2110,6 +2296,7 @@ def make_negotiation_node(
                 ],
                 # A mediation that timed out still made the calls it made.
                 "evidence_ledger": _judge_evidence(),
+                **_judge_budget(container),
                 **_debate_record(stage, started, reason=f"mediation {label}"),
             }
 
@@ -2241,6 +2428,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
         # analysts revise without tools; a composed agent does not.
         revision_ledger: list[dict[str, Any]] = []
         revision_nudge_modes: dict[str, str] = {}
+        revision_budget: dict[str, list[dict[str, Any]]] = {}
 
         # strict=True: agent_names and results MUST be equal length; mismatch
         # is a programming error and must surface, not be silently truncated.
@@ -2273,6 +2461,13 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 revision_mode = _nudge_mode(container.get_agent(name))
                 if revision_mode:
                     revision_nudge_modes[name] = revision_mode
+                # This round's loop spent budget too, and the analysis node
+                # that drained this agent has already run: rows left here
+                # would never reach the state at all.
+                for agent_key, rows in (
+                    _budget_update(container.get_agent(name), name).get("budget_records") or {}
+                ).items():
+                    revision_budget.setdefault(agent_key, []).extend(rows)
                 emit_agent_message(
                     container.event_sink,
                     speaker=name,
@@ -2294,6 +2489,8 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
             out["evidence_ledger"] = revision_ledger
         if revision_nudge_modes:
             out["nudge_retry_modes"] = revision_nudge_modes
+        if revision_budget:
+            out["budget_records"] = revision_budget
         return out
 
     node_fn.__name__ = "revision_node"
@@ -2744,6 +2941,7 @@ def make_judge_node(
                     .set_truncation(container.get_truncation_ledger().snapshot())
                     .set_triage(_triage_facts)
                     .set_nudge(state.get("nudge_retry_modes") or {})
+                    .set_budget(state.get("budget_records") or {})
                     .build()
                 )
                 run_summary_dict = summary.to_dict()
@@ -2939,6 +3137,7 @@ def make_judge_node(
                     # channel the analysts use, so a verdict that leans on one can
                     # cite it and the citation resolves.
                     "evidence_ledger": _judge_evidence(),
+                    **_judge_budget(container),
                     "isr_reports": isr_reports,
                     # Surface the degraded-mode signal to the report
                     # node and downstream consumers (API/dashboard).
@@ -2991,6 +3190,7 @@ def make_judge_node(
                     "degraded_mode": True,
                     "degradation_reasons": [f"judge failed ({type(e).__name__})"],
                     "evidence_ledger": _judge_evidence(),
+                    **_judge_budget(container),
                 }
             )
 
@@ -3237,6 +3437,7 @@ def make_report_node(
             "failed": sum(1 for e in _ledger if not e.ok),
             "trimmed": sum(1 for e in _ledger if e.truncated),
             "by_tool": dict(sorted(_by_tool.items())),
+            "failures": tool_failures(_ledger),
         }
         _summary["sections_without_evidence"] = sum(
             1 for section in report.sections if not section_is_grounded(section)

@@ -31,6 +31,132 @@ if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
 
 
+# The closers a repair may append, and nothing else. A repair that deleted a
+# character, changed one or inserted one anywhere but the end would be this
+# code deciding what the model meant.
+_CLOSERS = {"{": "}", "[": "]"}
+
+
+def repair_arguments(text: str) -> dict[str, Any] | None:
+    """One truncated tool call's arguments, closed off, or ``None``.
+
+    A local model that runs out of generation mid-call emits arguments that
+    stop in the middle: an unterminated string, an array with no ``]``, an
+    object with no ``}``. langchain marks the call invalid, no tool runs and
+    nothing answers it, so the loop ends on a turn that cost a step and
+    produced nothing.
+
+    The repair closes brackets and nothing else. Read the text once, tracking
+    whether the cursor is inside a string and which brackets are open, and
+    append the closers that are missing. Nothing is removed, nothing is
+    substituted and nothing is inserted anywhere but the end.
+
+    A value cut in the middle of a string is *not* repaired, and that is the
+    rule this exists under: closing the quote would hand the tool an argument
+    the model never finished writing — ``{"path": "/tmp/dropper.ex`` becomes a
+    path that exists nowhere, and a ``strings`` pattern cut mid-token becomes
+    a different search. The call is refused with the message it was already
+    refused with, which is the honest answer to a call whose meaning is
+    genuinely unknown. A trailing comma, a key with no value and a missing
+    colon are refused the same way.
+    """
+    raw = str(text or "")
+    if not raw.strip():
+        return None
+    stack: list[str] = []
+    in_string = False
+    escaped = False
+    for char in raw:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char in _CLOSERS:
+            stack.append(char)
+        elif char in _CLOSERS.values() and stack and _CLOSERS[stack[-1]] == char:
+            stack.pop()
+    if in_string:
+        # The model was still writing a value. Whatever it meant to type next
+        # is not something this may guess.
+        return None
+    tail = "".join(_CLOSERS[open_] for open_ in reversed(stack))
+    if not tail:
+        # Nothing was left open, so whatever is wrong with this call is not
+        # something appending can fix.
+        return None
+    try:
+        parsed = json.loads(raw + tail)
+    except (ValueError, TypeError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+class ArgumentRepairs:
+    """The repairs made for one loop, so the ledger can say a call was one.
+
+    The repair happens where the model's turn is read and the call happens a
+    node later, with the arguments langchain filled the defaults into, so the
+    two cannot be matched on the arguments as sent. They are matched on the
+    arguments the repair produced being what the call carries: every key the
+    repair wrote, with the value it wrote, present in the call.
+    """
+
+    def __init__(self) -> None:
+        self._pending: list[tuple[str, dict[str, Any], str]] = []
+
+    def note(self, tool: str, args: dict[str, Any], raw: str) -> None:
+        self._pending.append((str(tool), dict(args), str(raw)))
+
+    def take(self, tool: str, kwargs: dict[str, Any]) -> str | None:
+        """The original text of the repaired call ``kwargs`` came from, once."""
+        for index, (name, args, raw) in enumerate(self._pending):
+            if name != tool:
+                continue
+            if all(key in kwargs and kwargs[key] == value for key, value in args.items()):
+                self._pending.pop(index)
+                return raw
+        return None
+
+
+def repair_invalid_tool_calls(message: Any, repairs: ArgumentRepairs) -> Any | None:
+    """``message`` with its repairable calls made, or ``None`` when none were.
+
+    The one seam between the model's turn and the tool node: langgraph runs
+    the tools named by ``tool_calls`` and ignores ``invalid_tool_calls``
+    entirely, so a call whose arguments never parsed is not refused anywhere —
+    it simply never happens, and the loop ends holding a turn it paid for. A
+    call this could close off is moved across; one it could not is left where
+    it was, and the final-answer nudge drops it as it always has.
+    """
+    invalid = list(getattr(message, "invalid_tool_calls", None) or [])
+    if not invalid:
+        return None
+    calls = list(getattr(message, "tool_calls", None) or [])
+    still_invalid: list[Any] = []
+    repaired_any = False
+    for call in invalid:
+        name = str(call.get("name") or "")
+        args = repair_arguments(call.get("args")) if name else None
+        if args is None:
+            still_invalid.append(call)
+            continue
+        repairs.note(name, args, str(call.get("args") or ""))
+        calls.append({"name": name, "args": args, "id": call.get("id"), "type": "tool_call"})
+        repaired_any = True
+        logger.warning(
+            "tool call arguments for '%s' were truncated and were closed off to be read.", name
+        )
+    if not repaired_any:
+        return None
+    return message.model_copy(update={"tool_calls": calls, "invalid_tool_calls": still_invalid})
+
+
 def result_text(value: Any) -> str:
     """A tool's return value as the text both the model and the ledger see.
 
@@ -78,6 +204,9 @@ class EvidenceRecorder:
         started_at: float = 0.0,
         duration_ms: int = 0,
         repeated_of: str | None = None,
+        remediation: str | None = None,
+        args_repaired: bool = False,
+        args_raw: str | None = None,
     ) -> LedgerEntry:
         """Append one entry and return it, so the caller can quote its id."""
         entry_id, seq = self.counter.next_id()
@@ -95,6 +224,9 @@ class EvidenceRecorder:
             duration_ms=duration_ms,
             stage=self.stage,
             repeated_of=repeated_of,
+            remediation=remediation,
+            args_repaired=args_repaired,
+            args_raw=args_raw,
         )
         self.entries.append(entry)
         return entry
@@ -216,6 +348,16 @@ class RepeatGuard:
         self._first.setdefault(key, entry_id)
 
 
+# What the model is told when its call ran on arguments that were closed off.
+# It is on the result rather than only in the ledger, because the model is the
+# one that can look at the answer and say the brackets were not what it meant.
+REPAIRED_NOTICE = (
+    "\n\nThe arguments for this call stopped in the middle and were closed off "
+    "before it ran. Read the answer against what you meant to ask, and call it "
+    "again with the whole arguments if it is not."
+)
+
+
 # What both notices say on the call before the loop ends. One sentence, in one
 # place, because the model reads it from whichever branch it lands in.
 _ENDING_SENTENCE = (
@@ -291,13 +433,21 @@ def served_repeat_notice(
 
 
 def record_tools(
-    tools: list[Any], recorder: EvidenceRecorder, repeats: RepeatGuard | None = None
+    tools: list[Any],
+    recorder: EvidenceRecorder,
+    repeats: RepeatGuard | None = None,
+    repairs: ArgumentRepairs | None = None,
 ) -> list[BaseTool]:
     """Every tool, each writing its call to ``recorder`` and stamping the id."""
-    return [_record_tool(tool, recorder, repeats) for tool in tools]
+    return [_record_tool(tool, recorder, repeats, repairs) for tool in tools]
 
 
-def _record_tool(tool: Any, recorder: EvidenceRecorder, repeats: RepeatGuard | None = None) -> Any:
+def _record_tool(
+    tool: Any,
+    recorder: EvidenceRecorder,
+    repeats: RepeatGuard | None = None,
+    repairs: ArgumentRepairs | None = None,
+) -> Any:
     """One tool, rebuilt so its result is recorded and stamped.
 
     Fail-safe in both directions: a tool this cannot rebuild faithfully is
@@ -403,10 +553,15 @@ def _record_tool(tool: Any, recorder: EvidenceRecorder, repeats: RepeatGuard | N
         )
         return f"\n\n{notice}"
 
+    def _was_repaired(kwargs: dict[str, Any]) -> str | None:
+        """The arguments as the model wrote them, when this call was closed off."""
+        return repairs.take(name, kwargs) if repairs is not None else None
+
     def _stamp(
         kwargs: dict[str, Any], started: float, wall_clock: float, value: Any, repeated: str | None
     ) -> str:
         text = result_text(value)
+        raw = _was_repaired(kwargs)
         entry = recorder.record(
             tool=name,
             args=kwargs,
@@ -414,15 +569,22 @@ def _record_tool(tool: Any, recorder: EvidenceRecorder, repeats: RepeatGuard | N
             output=text,
             started_at=wall_clock,
             duration_ms=int((time.monotonic() - started) * 1000),
+            args_repaired=raw is not None,
+            args_raw=raw,
         )
         _note(kwargs, entry.id)
+        if raw is not None:
+            text = f"{text}{REPAIRED_NOTICE}"
         # ``text``, not ``entry.output``: the ledger trims what it stores, and
         # what the model reads is not the ledger's business. The size of a tool
         # result in a prompt is decided where it has always been decided —
         # ``llm.max_tool_output_chars`` and the summariser guardrail the MCP
         # toolkit applies before the tool ever returns — and a second, silent
         # cut here would make raising that setting do nothing.
-        return f"[{entry.id}]\n{text}{_steering(kwargs, repeated)}"
+        # ``failed=not entry.ok``: a tool that answers with an error twice is
+        # repeating a failure, and the notice that calls it an answer reads as
+        # if the model already has what it asked for.
+        return f"[{entry.id}]\n{text}{_steering(kwargs, repeated, failed=not entry.ok)}"
 
     def _stamp_error(
         kwargs: dict[str, Any],
@@ -432,6 +594,7 @@ def _record_tool(tool: Any, recorder: EvidenceRecorder, repeats: RepeatGuard | N
         repeated: str | None,
     ) -> str:
         message = f"{type(exc).__name__}: {exc}"
+        raw = _was_repaired(kwargs)
         entry = recorder.record(
             tool=name,
             args=kwargs,
@@ -441,6 +604,8 @@ def _record_tool(tool: Any, recorder: EvidenceRecorder, repeats: RepeatGuard | N
             error=message,
             started_at=wall_clock,
             duration_ms=int((time.monotonic() - started) * 1000),
+            args_repaired=raw is not None,
+            args_raw=raw,
         )
         _note(kwargs, entry.id)
         return f"[{entry.id}] tool call failed: {message}{_steering(kwargs, repeated, failed=True)}"

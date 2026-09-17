@@ -22,6 +22,7 @@ Heterogeneous Model Ensemble:
 import contextvars
 import re
 import sys
+from collections.abc import Mapping
 from pathlib import PurePosixPath
 from typing import Annotated, Any, Literal
 
@@ -29,12 +30,19 @@ from pydantic import (
     BaseModel,
     Field,
     SecretStr,
+    SerializerFunctionWrapHandler,
     field_validator,
+    model_serializer,
     model_validator,
 )
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
-from maljan.agents.prompts import ANDROID_STATIC_PROMPT, REVERSER_PROMPT, TRIAGE_PROMPT
+from maljan.agents.prompts import (
+    ANDROID_STATIC_PROMPT,
+    LEAD_PROMPT,
+    REVERSER_PROMPT,
+    TRIAGE_PROMPT,
+)
 from maljan.core import virustotal
 
 # ---------------------------------------------------------------------------
@@ -258,6 +266,16 @@ class LLMConfig(BaseModel):
     frontier: FrontierConfig = Field(default_factory=FrontierConfig)
     # Per-agent overrides: {"static": AgentLLMConfig(...), "dynamic": ...}
     agents: dict[str, AgentLLMConfig] = Field(default_factory=dict)
+
+    # Whether a job is refused when an agent names a model no probe has
+    # reached. A model name is the one part of a definition nothing validates
+    # until the run gets to that agent: a typo in it, or an endpoint that no
+    # longer serves it, fails minutes into an analysis with a sample already
+    # uploaded and a queue slot spent. The settings probe already answers the
+    # question; this makes the answer a precondition rather than a courtesy.
+    # Turned off for an air-gapped batch run, where the endpoint is known good
+    # and there is nobody at a console to press the button.
+    require_probe: bool = True
 
     # Hard output cap for the judge verdict generation (max_tokens). The judge
     # otherwise has no output bound — only the 600 s wall-clock timeout — so a
@@ -604,12 +622,27 @@ class PreprocessingConfig(BaseModel):
 # MCP (Model Context Protocol) Integration
 # ---------------------------------------------------------------------------
 
-# The role a definition plays in the fixed skeleton. ``generic`` is the one
-# role with no class of its own: it runs as ``ConfigurableAnalyst``. ``report``
-# is the one role that is only a prompt template: the reporter definition picks
-# the LLM and the prompt the narrative and composer steps run with, and the
-# report stage is a deterministic build around them rather than an agent loop.
-AnalystRole = Literal["static", "dynamic", "network", "judge", "generic", "report"]
+# The role a definition plays in the fixed skeleton. ``generic`` and ``lead``
+# are the roles with no class of their own: both run as ``ConfigurableAnalyst``
+# and are nothing but their prompt and their tools. ``lead`` is the one whose
+# tools are, first of all, other agents: it plans, delegates and weighs, and
+# naming that as a role is what lets the console, the transcript and a report
+# say which agent led. ``report`` is the one role that is only a prompt
+# template: the reporter definition picks the LLM and the prompt the narrative
+# and composer steps run with, and the report stage is a deterministic build
+# around them rather than an agent loop.
+AnalystRole = Literal["static", "dynamic", "network", "judge", "generic", "lead", "report"]
+# The roles that are a prompt rather than a class, and therefore need one.
+PROMPT_ROLES: tuple[str, ...] = ("generic", "lead")
+
+# Why a provider reference is refused, in one sentence both the settings model
+# and the API's definition editor raise, so the two never word it differently.
+# A built-in role opens the provider its class knows about; a definition that
+# is only a prompt is the one that has to say which one it wants.
+PROVIDER_REFERENCE_RULE = (
+    f"provider tool references are only valid on {' and '.join(PROMPT_ROLES)} "
+    "definitions; built-in roles open their provider themselves"
+)
 
 # Deprecated. ``MCPServerConfig.agents`` used to be a Literal of the four
 # built-in roles; an operator can now bind a server to any definition key, so
@@ -833,10 +866,10 @@ BUILTIN_AGENTS: tuple[str, ...] = ("static", "dynamic", "network", "judge", "rep
 # time a fourth is added.
 def seeded_generic_agents() -> tuple[str, ...]:
     """The seeded definitions that are a prompt rather than a class."""
-    return tuple(key for key, d in _builtin_definitions().items() if d.role == "generic")
+    return tuple(key for key, d in _builtin_definitions().items() if d.role in PROMPT_ROLES)
 
 
-BUILTIN_PROFILES: tuple[str, ...] = ("default", "measurement", "mobile", "deep_static")
+BUILTIN_PROFILES: tuple[str, ...] = ("default", "measurement", "mobile", "deep_static", "team_lead")
 
 # What an agent may be handed as its input text. ``sample.path`` is the
 # container-visible path its tools load the sample from; ``sample.chunks`` the
@@ -878,19 +911,47 @@ class ToolRef(BaseModel):
     report, read through ``providers.sandbox_tools``. It carries nothing else
     for the same reason a provider reference does not — there is exactly one
     report per job and naming it twice could disagree.
+
+    ``kind="agent"`` names another definition. Bound to an agent, it appears in
+    that agent's toolbox as ``ask_<agent>``: a tool that hands the named agent a
+    task, runs it under the same job, and returns its answer. It is a tool and
+    nothing more, so the ask, the answer and everything the callee did on the
+    way are in the ledger, the budget and the transcript like any other call
+    (``agents.delegation``).
     """
 
-    kind: Literal["mcp", "provider", "sandbox"]
+    kind: Literal["mcp", "provider", "sandbox", "agent"]
     server: str | None = None
     name: str | None = None
+    agent: str | None = None
+
+    @model_serializer(mode="wrap")
+    def _agent_only_when_named(self, handler: SerializerFunctionWrapHandler) -> Any:
+        """Dump ``agent`` only on an agent reference.
+
+        Every stored definition, every export and every pinned dump was
+        written before the field existed; a reference of any other kind dumps
+        exactly as it always did, so none of them reads as changed.
+        """
+        dumped = handler(self)
+        if isinstance(dumped, dict) and self.kind != "agent":
+            dumped.pop("agent", None)
+        return dumped
 
     @model_validator(mode="after")
     def _shape_matches_the_kind(self) -> "ToolRef":
         if self.kind == "mcp":
             if not self.server:
                 raise ValueError("an mcp tool reference needs a server")
-        elif self.server is not None or self.name is not None:
-            raise ValueError(f"a {self.kind} tool reference names no server and no tool")
+            if self.agent is not None:
+                raise ValueError("an mcp tool reference names no agent")
+        elif self.kind == "agent":
+            if not self.agent:
+                raise ValueError("an agent tool reference needs an agent")
+            if self.server is not None or self.name is not None:
+                raise ValueError("an agent tool reference names no server and no tool")
+        elif self.server is not None or self.name is not None or self.agent is not None:
+            raise ValueError(f"a {self.kind} tool reference names no server, tool or agent")
         return self
 
 
@@ -1490,6 +1551,24 @@ def _builtin_definitions() -> dict[str, AgentDefinition]:
                 ToolRef(kind="mcp", server=virustotal.SERVER_KEY),
             ],
         ),
+        # The lead analyst: its tools are the other analysts. It asks the
+        # three the paper measured, the reverser for a function-level answer
+        # and the triage agent for a second reading of the pack, and keeps
+        # the knowledge server so it can check a technique id a specialist
+        # cited before it repeats it.
+        "lead": AgentDefinition(
+            role="lead",
+            label="Lead analyst",
+            prompt=LEAD_PROMPT,
+            tools=[
+                ToolRef(kind="agent", agent="static"),
+                ToolRef(kind="agent", agent="dynamic"),
+                ToolRef(kind="agent", agent="network"),
+                ToolRef(kind="agent", agent="reverser"),
+                ToolRef(kind="agent", agent="triage"),
+                ToolRef(kind="mcp", server="knowledge"),
+            ],
+        ),
     }
 
 
@@ -1536,6 +1615,7 @@ def _builtin_profiles() -> dict[str, ProfileDefinition]:
         ),
         "mobile": ProfileDefinition(label="Mobile", stages=_mobile_stages()),
         "deep_static": ProfileDefinition(label="Deep static", stages=_deep_static_stages()),
+        "team_lead": ProfileDefinition(label="Team lead", stages=_team_lead_stages()),
     }
 
 
@@ -1679,6 +1759,89 @@ def _deep_static_stages() -> list[StageDefinition]:
     ]
 
 
+def _team_lead_stages() -> list[StageDefinition]:
+    """A team led by one agent: the pack, the lead, the verdict.
+
+    The lead is the only analyst the stage list names. The specialists it
+    asks are its tools, not stages: which of them run, in what order and how
+    often is the lead's decision on this sample, which is the point of having
+    a lead rather than a fixed sequence. What they did is still in the ledger
+    under their own keys, and the verdict reads the lead's report with their
+    evidence cited in it.
+
+    No debate stage, and that is the whole difference from the other seeded
+    teams. A debate is agents arguing with each other, and this team has one
+    analyst: the stage would hand the lead its own report, ask it to revise
+    against nobody, and cost a second full loop — with the asks that loop
+    makes — for a round that cannot change a position. The lead's own asks
+    are where the disagreement happens here; a specialist that contradicts
+    the lead does it in the answer the lead reads, not in a round afterwards.
+    """
+    return [
+        triage_stage(),
+        StageDefinition(
+            key="lead",
+            label="Lead",
+            kind="analysis",
+            agents=["lead"],
+            inject_upstream="none",
+        ),
+        StageDefinition(
+            key="verdict",
+            label="Verdict",
+            kind="verdict",
+            agents=[JUDGE_AGENT_KEY],
+            depends_on=["lead"],
+            inject_upstream="none",
+        ),
+        StageDefinition(
+            key="report",
+            label="Report",
+            kind="report",
+            agents=[REPORTER_AGENT_KEY],
+            depends_on=["verdict"],
+            inject_upstream="none",
+        ),
+    ]
+
+
+def agent_reference_problems(
+    key: str, definition: AgentDefinition, definitions: Mapping[str, AgentDefinition]
+) -> list[str]:
+    """Everything wrong with ``definition``'s agent references, as sentences.
+
+    Shared by the settings model and the API's definition editor so the two
+    refuse the same things in the same words. A reference to an agent that is
+    not there, to the definition itself, to the judge or the reporter, and a
+    reference on the judge or the reporter are all refused here; whether the
+    named agent is enabled is a runtime question, answered by the ask itself,
+    because a built-in profile may keep a disabled member while another
+    profile runs.
+    """
+    problems: list[str] = []
+    refs = [ref for ref in definition.tools if ref.kind == "agent"]
+    if refs and definition.role in ("judge", "report"):
+        problems.append(f"a {definition.role} definition cannot ask other agents")
+    seen: set[str] = set()
+    for ref in refs:
+        callee = str(ref.agent)
+        if callee in seen:
+            problems.append(f"agent {callee!r} is referenced twice")
+            continue
+        seen.add(callee)
+        if callee == key:
+            problems.append("an agent cannot ask itself")
+            continue
+        target = definitions.get(callee)
+        if target is None:
+            available = ", ".join(sorted(definitions)) or "(none)"
+            problems.append(f"unknown agent {callee!r} in a tool reference. Available: {available}")
+            continue
+        if target.role in ("judge", "report"):
+            problems.append(f"{callee!r} has role {target.role!r} and cannot be asked")
+    return problems
+
+
 def convert_builtin_profile_document(name: str, entry: Any) -> Any:
     """A stored built-in profile, read with the pack choice its seed made.
 
@@ -1739,11 +1902,34 @@ def _profile_stage_identity(stages: Any) -> Any:
 
 
 class AgentsConfig(BaseModel):
-    """The agent definitions, the profiles, and which profile is active."""
+    """The agent definitions, the profiles, and which profile is active.
+
+    ``delegation_depth`` bounds how far one ask may nest: a stage's agent asking
+    a specialist is depth 1, that specialist asking another is depth 2, and an
+    ask that would go deeper is refused with a tool error the model reads. It
+    bounds the nesting, never the number of asks.
+
+    ``delegation_steps`` and ``delegation_timeout_seconds`` are what one ask
+    gets. They are the delegation's own budget, not a share of the caller's:
+    a callee derived from what its caller had left ran out of steps before it
+    had made a tool call — the live proof watched a static specialist die at a
+    recursion limit of five, and every later ask refused with "0 s and 3 steps
+    remain". An ask is bounded by the caller's remaining wall clock and by
+    nothing else, because the wall clock is the one thing the two really
+    share: the ask runs inside the caller's own timeout.
+    """
 
     profile: str = "default"
     profiles: dict[str, ProfileDefinition] = Field(default_factory=_builtin_profiles)
     definitions: dict[str, AgentDefinition] = Field(default_factory=_builtin_definitions)
+    delegation_depth: Annotated[int, Field(ge=1)] = 2
+    # Twelve steps is about five tool rounds and an answer — what a specialist
+    # needs to open the sample, look at two or three things and write a claim.
+    delegation_steps: Annotated[int, Field(ge=2)] = 12
+    # Five minutes per ask on a local model: a specialist with tools spends
+    # most of it waiting for its own tool calls, and a lead with a long stage
+    # timeout can still make several asks inside one loop.
+    delegation_timeout_seconds: Annotated[int, Field(ge=1)] = 300
 
     @model_validator(mode="before")
     @classmethod
@@ -1895,14 +2081,13 @@ class AgentsConfig(BaseModel):
                 raise ValueError(f"{key!r}: only the built-in judge may have role judge")
             if definition.role == "report" and key != REPORTER_AGENT_KEY:
                 raise ValueError(f"{key!r}: only the built-in reporter may have role report")
-            if definition.role == "generic" and not (definition.prompt or "").strip():
-                raise ValueError(f"{key!r}: a generic agent needs a prompt")
+            if definition.role in PROMPT_ROLES and not (definition.prompt or "").strip():
+                raise ValueError(f"{key!r}: a {definition.role} agent needs a prompt")
             has_provider_ref = any(ref.kind == "provider" for ref in definition.tools)
-            if has_provider_ref and definition.role != "generic":
-                raise ValueError(
-                    f"{key!r}: provider tool references are only valid on generic "
-                    "definitions; built-in roles open their provider themselves"
-                )
+            if has_provider_ref and definition.role not in PROMPT_ROLES:
+                raise ValueError(f"{key!r}: {PROVIDER_REFERENCE_RULE}")
+            for problem in agent_reference_problems(key, definition, self.definitions):
+                raise ValueError(f"{key!r}: {problem}")
 
         for name, profile in self.profiles.items():
             self._check_profile_members(name, profile)
@@ -2474,6 +2659,12 @@ class Settings(BaseSettings):
             # safe_analyze_isr_chunked still tolerates a genuinely wedged chunk.
             # Override via ``REACT_AGENT_TIMEOUT_OVERRIDES__static=1500``.
             "static": 1500,
+            # A lead's stage has to hold several asks end to end. At the
+            # default 300 s per ask, 1800 fits five of them with the lead's
+            # own turns around them; the per-ask timeout is what bounds any
+            # one specialist, and the refusal is what stops the last ask that
+            # would not fit.
+            "lead": 1800,
             # Judge budget bumped 300 → 600 for the same reason — the
             # final-verdict LLM call on Qwen 35B repeatedly bottlenecked
             # at 180-300s in the 2026-05-28 sequential live runs.
@@ -2531,6 +2722,12 @@ class Settings(BaseSettings):
         default_factory=lambda: {
             "static": 40,
             "network": 6,
+            # A lead spends its steps on asks and on reading what comes back,
+            # and each ask is two of them — the turn that calls the tool and
+            # the node that runs it. Six asks and the turns to weigh them is
+            # forty; the specialists' own steps are their own and do not come
+            # out of this.
+            "lead": 40,
         }
     )
 

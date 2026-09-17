@@ -249,6 +249,17 @@ class RunSummary:
     # way failed: ``{"retry_mode": {"static": "invalid_tool_calls_dropped"}}``.
     # ``None`` when no analyst needed a different way.
     nudge: dict[str, Any] | None = None
+    # The budget meter, per agent: ``{loops, steps_used, max_steps,
+    # elapsed_s, timeout_s, delegated_steps, caps}`` summed over the agent's
+    # loops, ``caps`` being the caps that ended one of them (``steps``,
+    # ``time``, ``repeats``, ``budget_seconds``). ``None`` on a run that
+    # recorded no loop.
+    budget: dict[str, Any] | None = None
+    # ``dedupe`` is deliberately not a field here. What the report folded is
+    # counted while the report's sections are built, which happens after this
+    # object exists, so the report builder writes ``dedupe`` onto the summary
+    # *dict* it was handed (``reporting.builder``). A field nothing could ever
+    # set would read as a summary that folded nothing on every run.
 
     # ------------------------------------------------------------------
     # Rendering
@@ -496,6 +507,7 @@ class RunSummary:
             "stages": [dict(row) for row in self.stages],
             "triage": dict(self.triage) if self.triage else None,
             "nudge": dict(self.nudge) if self.nudge else None,
+            "budget": dict(self.budget) if self.budget else None,
         }
 
         if self.validation:
@@ -578,6 +590,37 @@ class RunSummaryBuilder:
         self._stages: list[dict[str, Any]] = []
         self._triage: dict[str, Any] | None = None
         self._nudge: dict[str, Any] | None = None
+        self._budget: dict[str, Any] | None = None
+
+    def set_budget(self, records: dict[str, list[dict[str, Any]]] | None) -> RunSummaryBuilder:
+        """What each agent spent, summed over its loops, and the caps that ended them.
+
+        ``records`` is the state channel the nodes write: per agent, one row
+        per loop as ``BaseAnalyst`` recorded it. Summed here rather than kept
+        as rows because the summary is read per agent; the caps are kept as
+        the distinct list, in the order they were hit.
+        """
+        out: dict[str, Any] = {}
+        for agent, rows in (records or {}).items():
+            loops = [row for row in (rows or []) if isinstance(row, dict)]
+            if not loops:
+                continue
+            caps: list[str] = []
+            for row in loops:
+                cap = row.get("cap")
+                if cap and str(cap) not in caps:
+                    caps.append(str(cap))
+            out[str(agent)] = {
+                "loops": len(loops),
+                "steps_used": sum(int(row.get("steps_used") or 0) for row in loops),
+                "max_steps": max(int(row.get("max_steps") or 0) for row in loops),
+                "elapsed_s": round(sum(float(row.get("elapsed_s") or 0.0) for row in loops), 1),
+                "timeout_s": max(float(row.get("timeout_s") or 0.0) for row in loops),
+                "delegated_steps": sum(int(row.get("delegated_steps") or 0) for row in loops),
+                "caps": caps,
+            }
+        self._budget = out or None
+        return self
 
     def set_nudge(self, retry_modes: dict[str, str] | None) -> RunSummaryBuilder:
         """Which analysts needed the nudge sent another way, and which way."""
@@ -838,6 +881,7 @@ class RunSummaryBuilder:
             stages=self._stages,
             triage=self._triage,
             nudge=self._nudge,
+            budget=self._budget,
         )
 
 

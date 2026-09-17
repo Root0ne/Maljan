@@ -84,7 +84,7 @@ class TestBinaryBuilders:
 class TestOtherToolBuilders:
     def test_iocs(self) -> None:
         sections = _by_key(build_sections([_entry("iocs_from_file")]))
-        assert ["domain", "c2.evil.tld", "hard-coded"] in sections["iocs"].rows
+        assert ["domain", "c2.evil.tld", "hard-coded", "ev_0001"] in sections["iocs"].rows
 
     def test_strings(self) -> None:
         sections = _by_key(build_sections([_entry("strings")]))

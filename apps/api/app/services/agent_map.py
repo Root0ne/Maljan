@@ -15,11 +15,14 @@ from typing import Any
 from maljan.core.config import (
     AGENT_KEY_PATTERN,
     BUILTIN_PROFILES,
+    PROMPT_ROLES,
+    PROVIDER_REFERENCE_RULE,
     REPORTER_AGENT_KEY,
     AgentDefinition,
     ProfileDefinition,
     _builtin_definitions,
     _builtin_profiles,
+    agent_reference_problems,
     convert_builtin_profile_document,
 )
 from maljan.core.settings_overrides import build_settings
@@ -154,19 +157,16 @@ def validate_definitions(
         if model.role == "judge" and name != "judge":
             errors[name] = f"{name!r}: only the built-in judge may have role judge"
             continue
-        if model.role == "generic" and not (model.prompt or "").strip():
-            errors[f"{name}.prompt"] = "a generic agent needs a prompt"
+        if model.role in PROMPT_ROLES and not (model.prompt or "").strip():
+            errors[f"{name}.prompt"] = f"a {model.role} agent needs a prompt"
         if model.static_provider and model.static_provider not in provider_ids:
             errors[f"{name}.static_provider"] = (
                 f"unknown static provider {model.static_provider!r}. "
                 f"Available: {', '.join(sorted(provider_ids))}"
             )
         has_provider_ref = any(ref.kind == "provider" for ref in model.tools)
-        if has_provider_ref and model.role != "generic":
-            errors[name] = (
-                f"{name!r}: provider tool references are only valid on generic "
-                "definitions; built-in roles open their provider themselves"
-            )
+        if has_provider_ref and model.role not in PROMPT_ROLES:
+            errors[name] = f"{name!r}: {PROVIDER_REFERENCE_RULE}"
             continue
         for ref in model.tools:
             if ref.kind != "mcp":
@@ -183,13 +183,22 @@ def validate_definitions(
                 break
         out[name] = dumped
 
-    if errors:
-        raise AgentMapError(_qualified(AGENT_DEFINITIONS_KEY, errors))
-
     # A built-in the body left out is re-seeded rather than removed, exactly as
     # the settings model would do on the next load.
     for name, seed in seeds.items():
         out.setdefault(name, seed)
+
+    # An agent reference points into the map, so it is checked against the map
+    # as it will be stored, seeds included, once every entry has a shape.
+    if not errors:
+        typed = {name: AgentDefinition.model_validate(entry) for name, entry in out.items()}
+        for name, definition in typed.items():
+            problems = agent_reference_problems(name, definition, typed)
+            if problems:
+                errors[f"{name}.tools"] = f"{name!r}: {problems[0]}"
+
+    if errors:
+        raise AgentMapError(_qualified(AGENT_DEFINITIONS_KEY, errors))
     return out
 
 

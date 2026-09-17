@@ -23,7 +23,13 @@ const input =
   "w-full bg-bg-deep border border-border rounded px-2 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent";
 
 /** Seeded by the settings model, so they lock rather than delete. */
-const BUILTIN_PROFILES = new Set(["default", "measurement", "mobile", "deep_static"]);
+const BUILTIN_PROFILES = new Set([
+  "default",
+  "measurement",
+  "mobile",
+  "deep_static",
+  "team_lead",
+]);
 
 const KINDS: StageKind[] = ["triage", "analysis", "debate", "verdict", "report"];
 

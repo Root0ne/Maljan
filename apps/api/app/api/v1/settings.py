@@ -44,7 +44,13 @@ from app.services.audit import record as audit_record
 from app.services.mapping_preview import PREVIEW_MAX_BYTES, preview_mapping
 from app.services.server_map import SERVER_MAP_KEY, TOKEN_MASK
 from app.services.settings_catalog_api import catalog_index, full_catalog, resolved_catalog
-from app.services.settings_probes import PROBES, run_agent_probe, run_mcp_probe, run_probe
+from app.services.settings_probes import (
+    PROBES,
+    candidate_settings,
+    run_agent_probe,
+    run_mcp_probe,
+    run_probe,
+)
 from app.services.settings_service import (
     SettingsService,
     SettingsValidationError,
@@ -138,6 +144,31 @@ async def _agent_warnings(db: AsyncSession) -> dict[str, str]:
         return {}
 
 
+async def _unprobed_models_in(db: AsyncSession, changes: dict[str, Any]) -> list[str]:
+    """Every per-agent model this save names that no probe has reached.
+
+    Judged against the settings as this save would leave them, so an operator
+    moving an agent to a new endpoint and a new model in one change is judged
+    on the pair they are moving it to rather than the one they are leaving.
+
+    A save that names no per-agent model is answered before the store is read:
+    every PATCH goes through here, most of them carry one leaf of one group,
+    and reading the overrides back and rebuilding the whole settings model to
+    conclude that there was nothing to check is work on the path of every save.
+    """
+    from app.services.model_probes import AGENT_MODELS_KEY, unprobed_models_being_saved
+
+    if AGENT_MODELS_KEY not in changes:
+        return []
+    try:
+        stored = await SettingsService(db).load_overrides()
+        settings = candidate_settings(changes, stored)
+    except Exception as exc:  # noqa: BLE001 — a change the model rejects is refused below
+        logger.debug("probe gate skipped for this save (%s).", type(exc).__name__)
+        return []
+    return await unprobed_models_being_saved(db, settings, changes, stored)
+
+
 @router.patch("", response_model=PatchResponse)
 async def patch_values(
     body: PatchRequest,
@@ -145,6 +176,17 @@ async def patch_values(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> PatchResponse | JSONResponse:
+    unprobed = await _unprobed_models_in(db, body.changes)
+    if unprobed:
+        from app.services.model_probes import AGENT_MODELS_KEY, refusal_sentence
+
+        # The same refusal a job gets, on the page that can fix it: a model
+        # saved here is one a run will call, and finding out at submit time
+        # means finding out somewhere else.
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content={"errors": {AGENT_MODELS_KEY: refusal_sentence(unprobed)}},
+        )
     try:
         res = await SettingsService(db).save(body.changes, user_id=user.id, ip=_client_ip(request))
     except SettingsValidationError as exc:
@@ -458,6 +500,36 @@ async def register_virustotal_agent(
     )
 
 
+async def _write_down_what_was_reached(db: AsyncSession, pairs: list[dict[str, Any]]) -> None:
+    """File a row for every pair the probe actually completed a call with.
+
+    The list comes from the probe itself (``details["completions"]``), so what
+    is written down and what was called are one thing rather than two
+    computations that have to agree. A pair the probe timed out on is not in
+    it: nothing was learned, so nothing is recorded, and the operator is told
+    to try again.
+
+    Never raises. A probe is an operator pressing a button and reading a
+    sentence; a store that could not be written is a reason to log, not a
+    reason to give them an error instead of their answer.
+    """
+    from app.services.model_probes import record_probe
+
+    for pair in pairs:
+        try:
+            await record_probe(
+                db,
+                endpoint=str(pair.get("endpoint") or ""),
+                model=str(pair.get("model") or ""),
+                provider=str(pair.get("provider") or ""),
+                ok=bool(pair.get("ok")),
+                detail=str(pair.get("detail") or ""),
+            )
+        except Exception as exc:  # noqa: BLE001 — the answer still reaches the operator
+            logger.warning("probe result not stored: %s", type(exc).__name__)
+            continue
+
+
 @router.post("/test/agent", response_model=ProbeResponse)
 async def test_agent(
     body: ProbeRequest,
@@ -468,11 +540,19 @@ async def test_agent(
     """Resolve one agent definition and report what it would get.
 
     Takes staged values so an operator can resolve a definition they have not
-    saved yet — the same contract every other probe has. No LLM call is made:
-    this reports the model that *would* be used, never a completion.
+    saved yet — the same contract every other probe has. It ends by asking that
+    agent's model for one short answer at the endpoint the agent would call,
+    because the row this files is what refuses a job later and a gate has to
+    rest on a call that was made.
+
+    What it reached is written down against the endpoint and the model it
+    named, so submitting a job can refuse a team whose agents name a model
+    nothing has ever answered for.
     """
     stored = await SettingsService(db).load_overrides()
-    return await _probe_response(run_agent_probe(name, body.values, stored))
+    response = await _probe_response(run_agent_probe(name, body.values, stored))
+    await _write_down_what_was_reached(db, (response.details or {}).get("completions") or [])
+    return response
 
 
 @router.post("/test/{probe}", response_model=ProbeResponse)
@@ -485,7 +565,10 @@ async def test_probe(
     if probe not in PROBES:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown probe: {probe}")
     stored = await SettingsService(db).load_overrides()
-    return await _probe_response(run_probe(probe, body.values, stored))
+    response = await _probe_response(run_probe(probe, body.values, stored))
+    if probe == "llm":
+        await _write_down_what_was_reached(db, (response.details or {}).get("completions") or [])
+    return response
 
 
 async def _capped_body(request: Request) -> dict[str, Any]:

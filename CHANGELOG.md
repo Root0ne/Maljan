@@ -8,6 +8,64 @@ change landed on `main`.
 
 ### Added
 
+- **Each tool server says what it can do on its host, before a run.** The four
+  built-in sidecars answer a `capabilities` tool — per tool, its optional
+  library, binary or setting, whether it is present, the reason it is not and
+  its timeout — computed by probing when the server starts
+  (`maljan.tools.capabilities`). The registry reads it once per job and keeps
+  it on the server's entry; `POST /api/v1/settings/test/mcp` returns it under
+  `details.capabilities` and the console's server card lists the unavailable
+  tools with their reason; an analysis stage records each bound tool its
+  server's manifest marks unavailable as
+  `server.<key>.<tool>_unavailable(<reason>); <remedy>` when it starts, once,
+  and such a reason does not make the run degraded by itself.
+- **A tool failure names its remedy.** Sidecar tools return
+  `{"error": {"code", "message", "remediation"}, "tool"}` with codes
+  `missing_dependency`, `timeout`, `bad_argument`, `no_such_file`,
+  `unsupported_format`, `not_configured` and `tool_failed`
+  (`maljan.tools.errors`); the guards map exceptions to codes and rewrite an
+  implementation's flat `{"error": "<text>"}` into the shape, which is still
+  accepted from any server. A returned error is now a failed ledger entry
+  (`ok` false, `error` the message, the new `remediation` the hint; revision
+  `20260922000000` adds the two columns), `run_summary.evidence.failures`
+  lists each distinct failure once with its count, the report header prints
+  the list with the remedies, and the console's evidence row shows both.
+- **The budget meter.** `budget_tick` events (per agent: steps used and cap,
+  elapsed and limit, prompt chars, ledger entries) every five steps and at
+  the end of each tool loop; `stage_ended_at_cap` when a cap ended the work
+  (`steps`, `time`, `repeats`, or the triage pack's `budget_seconds`);
+  `run_summary.budget` per agent (loops, steps, seconds, delegated steps, the
+  caps hit); the console's pipeline panel names the cap beside the step.
+- **An agent can ask another agent, as a tool call.** `ToolRef(kind="agent",
+  agent=<key>)` on a definition binds a tool `ask_<key>` (`task`, optional
+  `context`) described from the callee's label and role. Calling it runs the
+  callee under the same job — same container, sample paths, triage pack and
+  run state — with the task as its human turn, checks its answer the way a
+  stage answer is checked, and returns its ISR text verbatim. The callee's tool
+  calls are ledger entries under its own key; the ask is an entry under
+  `server="team"`, `tool="ask_<key>"`, with the callee's wall clock as its
+  duration; two `agent_message` events carry the exchange with `stage`,
+  `round` and `addressed_to`. An ask carries a budget of its own —
+  `core.agents.delegation_steps` (12) and `core.agents.delegation_timeout_seconds`
+  (300) — cut to the time the caller has left and to nothing else: a caller's
+  own step budget is not spent by its specialists' work, only its wall clock
+  is. Guards, each a readable tool error: `core.agents.delegation_depth` (2),
+  a cycle back up the call chain, a callee that is undefined or disabled, a
+  callee whose servers the asking stage withholds, and not enough time left to
+  ask. The settings model and the API refuse a reference to an unknown agent,
+  to the definition itself, to the judge or the reporter, and any such
+  reference on those two. A new seeded definition
+  `lead` (role `lead`, `src/maljan/agents/prompts/lead.md`) references
+  `static`, `dynamic`, `network`, `reverser` and `triage`; a new seeded team
+  `team_lead` runs it as its one analysis stage, with no debate stage — a
+  debate over a single analyst hands the lead its own report, asks it to
+  revise against nobody and costs a second full loop, with the asks that loop
+  makes, for a round that cannot change a position; the disagreement happens
+  in the lead's own asks instead
+  (`tests/fixtures/golden/graph_team_lead.json`, `docs/assets/team-team-lead.svg`).
+  The `default` team is unchanged. The console's agent editor offers **Ask
+  another agent** in the Tools tree and the transcript draws the addressee
+  arrow on an ask and its answer.
 - **An id retired by a catalogue move is reported as retired, not invented.**
   `data/attck_retired_ids.json` — per id, its domain and the ATT&CK release
   that retired it — is written by the autoupdate script from the catalogue it
@@ -302,8 +360,135 @@ change landed on `main`.
   operator who runs it behind HTTP, writing under `MALJAN_STAGING_DIR` with
   `MALJAN_STAGING_TTL_HOURS` pruning.
 
+- **A model is probed before a job may name it.** Both probes end by asking
+  the model for one short answer — one turn, eight tokens, at the endpoint and
+  on the model the run will use, through each provider's own completion API —
+  and only a call that came back is written down as a passing `(endpoint,
+  model)` row (`model_probes`, revision `20260924000000`). Submitting a job
+  reads that record for every model the run can reach, the delegation targets
+  of its team's agents included, and refuses with 422 naming the agent, the
+  model, the endpoint and the probe's last message; saving a per-agent model is
+  refused with the same sentence, and the console shows it as written in both
+  places. A changed endpoint or model finds no row and is refused until it is
+  probed. Where a call goes is worked out once, in
+  `maljan.core.model_assignments`, for the probe and the gate alike, so a
+  vendor API and a base URL with a trailing slash file and resolve under one
+  spelling. The `llm` probe asks each pair once and one at a time, ninety
+  seconds per call and five minutes for the whole probe; a pair there was no
+  room left to ask is named as not tried and files no row, and a failing pair's
+  sentence prints its endpoint as scheme and host.
+  `core.llm.require_probe` is on; turning it off is the only way past, for an
+  air-gapped batch run.
+- **The same indicator or finding said twice is written once.**
+  `reporting.dedupe` says what makes two indicators one — the kind and the
+  value with its case, its padding and its defanging undone — and both the
+  report's indicator table and the STIX bundle's integrity pass read it. A
+  finding is fingerprinted on its first technique id and its normalised title.
+  A fold keeps the first occurrence's words, its confidence and every other
+  number as written, and grows only the set-shaped cells: the ledger ids, the
+  agents, an indicator's labels. `run_summary.dedupe` states what was folded.
+- **A tool call the model ran out of room to finish is closed off.** langchain
+  marks a call whose arguments never parsed invalid and langgraph ignores it,
+  so nothing ran and the loop ended holding a turn it paid a step for. The
+  quote and the brackets the arguments are missing are appended — never
+  removing, substituting or inserting anywhere but the end — and the call is
+  made when the result parses; a trailing comma, a key with no value or a
+  missing colon is still left to the path that drops it. The ledger entry
+  carries `args_repaired` and `args_raw` (revision `20260923000000`).
+
 ### Fixed
 
+- **The capability manifest says only what it knows about this host.** A
+  missing module is reported in the import's own words; a broken install or a
+  shared library that will not load is reported by exception type alone, so no
+  absolute path reaches a probe response, the console, the run summary or the
+  judge's prompt. `timeout_s` is declared from the constant the tool itself
+  uses — 60 s for `yara_scan`, 300 s for `capa`, 15 s for every threatintel
+  lookup — and a test asserts the two match for every tool of every sidecar. A
+  degradation reason now says what the tool still answers without its library,
+  each requirement is probed once per cell, and `capabilities()` hands back a
+  copy nothing can reach into.
+- **The threatintel sidecar answers a failure as one.** Its four lookups
+  returned prose for a timeout, a bad status and an invalid key, which every
+  consumer read as an answer; they now return the structured error with its
+  code and remedy, while a lookup that simply found nothing stays an answer.
+  The `put_sample` family returns `bad_argument` in the same shape, and a
+  missing credential is no longer read as a missing file.
+- **The budget meter counts the loop that was cut off.** A loop that ended at
+  its wall clock recorded `steps_used: 0` — the one run the meter exists to
+  explain; it now reads the budget's own count. The judge runs the same meter
+  as the analysts, so the one loop with a hard timeout says which cap ended
+  it, and budget rows are drained on every path that drains a ledger: the
+  stage node, the revision node, the delegation hand-over and the judge. A
+  tick before the last one counts the calls made so far. A stage-start check
+  now finds a tool the collision rule renamed, the failure list says when it
+  cut and trims a message, and one place decides what a failure looks like.
+
+- **An ask has a budget of its own.** Deriving a callee's steps from what its
+  caller had left starved both: the live proof watched a specialist die at a
+  recursion limit of five before it had made a tool call, later asks refused
+  with "0 s and 3 steps remain", and the lead close with no techniques.
+  `agents.delegation_steps` (12) and `agents.delegation_timeout_seconds` (300)
+  are what one ask gets, bounded by the caller's remaining wall clock and by
+  nothing else; the caller's own step budget is not reduced by what its
+  specialists spend, and an ask is refused only when the caller has less time
+  left than a first model turn needs. A loop that reaches the graph's own step
+  cap writes up what it gathered instead of raising a recursion error. A budget
+  row counts its own agent's turns and nothing else, with what its specialists
+  spent beside it as `delegated_steps`, so `steps_used` can no longer pass
+  `max_steps`. The seeded `lead` gets 40 steps and a 1800 s stage, and the
+  `ask_<key>` tool's description and `lead.md` both tell the model that an ask
+  has a budget of its own and costs it wall clock.
+- **A caller asks one agent at a time.** langgraph gathers a turn's tool calls,
+  so a model that emitted two `ask_*` calls ran two nested loops at once — two
+  analysts against one llama-server slot, which is the re-prefill timeout this
+  project has diagnosed once already. A per-caller lock serialises them, and it
+  is a different object from the per-callee one so an ask made from inside an
+  ask still nests. A callee's unavailable tools are recorded when it is asked,
+  the way a stage records them when it starts, and a budget row is filed under
+  the agent that ran the loop rather than the one that handed it over, so a
+  lead's step cap is the lead's and a specialist's is the specialist's. The
+  judge counts its own turns, so its time-capped loop no longer records zero
+  steps. A refused ask is no longer listed as a broken tool.
+- **A delegated round is drawn once.** Recorded rows and live events now share
+  one identity — who spoke, in which round, and a digest of what was said —
+  because the addressee is the one thing only the live copy has, and putting it
+  in the id drew every ask twice on a job that had both a report and events
+  still inside the stream's TTL.
+- **The argument repair never finishes a value.** It closes brackets and
+  nothing else: a call cut in the middle of a string is refused with the
+  message it was already refused with, because closing the quote would hand
+  the tool a path that exists nowhere or a different search. A call that was
+  closed off says so in the result the model reads, not only in the ledger.
+- **Two findings with different techniques are two findings**, and a STIX
+  indicator keeps its case wherever the case is part of the value — a URL path
+  is case-sensitive, and folding one away removes a fact from a report. A
+  failed threat-intel lookup is never cached, and `check_ip_reputation` answers
+  two sources as one answer or one failure rather than a JSON document glued to
+  a sentence.
+
+- **A delegated ask stays inside the stage that made it.** A callee's
+  effective tool set is its own definition narrowed by the tool policy of the
+  stage doing the asking, so a stage with `builtin_tools=False` can no longer
+  reach a built-in server through a specialist that no stage narrows; the ask
+  is refused naming the stage and the servers. A profile that excludes every
+  server withholds the `ask_*` tools too. The callee's hard cap stops at the
+  ceiling its caller set, so it cannot outlive the caller waiting for it, and
+  a hand-over to a caller whose loop has already ended drains the callee
+  without folding anything onto an agent that is done with. Each agent's lock
+  is now taken by its own stage run as well as by an ask of it, so the two
+  cannot drive one instance's buffers at once, and a caller waits for a busy
+  callee only as long as it can still read an answer in. The brief written
+  onto a callee is given back afterwards, its findings and artifacts travel to
+  the caller with the callee named as their source, and a `lead` may carry a
+  provider reference like the generic agent it otherwise is.
+- **The transcript draws a delegated round once.** Every line is identified by
+  who spoke, in which round, and a digest of what was said — never by a counter
+  taken before the duplicate check, and never by the addressee, which only the
+  live copy has — so the stream back-fill, the live socket and the stored rows
+  all collapse onto one line. Two recorded rows that say the same thing in the
+  same round carry their own `seq`. The agent editor offers **Ask another
+  agent** only where a reference can be saved.
 - **The budget a model is told is in model turns.** The run-state line
   reported graph steps as turns, about twice the truth (a tool round is two
   graph steps); `model_turns_left` counts what langgraph counts and the

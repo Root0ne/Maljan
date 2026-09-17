@@ -42,10 +42,19 @@ class EvidenceEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     tool: Mapped[str] = mapped_column(String(200), nullable=False)
 
     ok: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # The failure text when ``ok`` is false, and what the tool said would make
+    # the next call succeed, when it said (``maljan.tools.errors``).
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    remediation: Mapped[str | None] = mapped_column(Text, nullable=True)
     duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     seq: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     args: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    # Whether the model's arguments were truncated and were closed off before
+    # the call ran, and what it wrote before they were
+    # (``maljan.agents.evidence_recorder``).
+    args_repaired: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    args_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Text, not String(n): a decompilation runs to thousands of characters and
     # the producer already caps it (schemas.evidence).
     output: Mapped[str] = mapped_column(Text, nullable=False, default="")

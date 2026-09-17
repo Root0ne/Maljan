@@ -378,6 +378,17 @@ ANNOTATIONS: dict[str, Annotation] = {
         "probe": "llm",
         "subgroup": "Google Gemini",
     },
+    "llm.require_probe": {
+        "title": "Require a passing model probe",
+        "description": (
+            "Refuse a job whose agents name a model no probe has reached at the "
+            "endpoint they would use. The probe result is stored against that "
+            "endpoint and model, so changing either asks for it again. Turn this "
+            "off for an air-gapped batch run, where the endpoint is known good "
+            "and nobody is at the console to press the button."
+        ),
+        "probe": "llm",
+    },
     "llm.judge_max_tokens": {
         "title": "Judge max output tokens",
         "description": (
@@ -1565,6 +1576,38 @@ ANNOTATIONS.update(
             "group": "agents",
             "editor": "stages",
             "order": -1,
+        },
+        "agents.delegation_depth": {
+            "title": "Delegation depth",
+            "description": (
+                "How far one agent's ask of another may nest. A stage's agent "
+                "asking a specialist is depth 1; that specialist asking another "
+                "is depth 2; an ask that would go deeper is refused with a "
+                "message the model reads. It bounds the nesting, never how many "
+                "times an agent may ask."
+            ),
+            "group": "agents",
+        },
+        "agents.delegation_steps": {
+            "title": "Steps one ask gets",
+            "description": (
+                "How many graph steps a delegated agent may spend answering one "
+                "ask — about five tool rounds and an answer at the default. It is "
+                "the ask's own budget, not a share of the caller's: a callee that "
+                "inherited what its caller had left ran out before it had made a "
+                "tool call. The caller's own step budget is not reduced by what "
+                "its specialists spend; its wall clock is."
+            ),
+            "group": "agents",
+        },
+        "agents.delegation_timeout_seconds": {
+            "title": "Seconds one ask gets",
+            "description": (
+                "How long a delegated agent may take over one ask. An ask is also "
+                "bounded by the time its caller has left, so the caller's own "
+                "stage timeout is what decides how many asks fit in one loop."
+            ),
+            "group": "agents",
         },
         "agents.definitions": {
             "title": "Agent definitions",
