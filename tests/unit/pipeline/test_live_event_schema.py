@@ -16,6 +16,13 @@ import hashlib
 from typing import Any
 
 from maljan.pipeline import events as ev
+from tests.credential_shapes import (
+    jwt,
+    lowercase_base64_blob,
+    lowercase_body,
+    prefixed_key,
+    standard_base64_key,
+)
 
 # Credential-shaped values are assembled rather than written down. What these
 # tests need is the *shape* each rule reads — a vendor prefix, an unbroken run
@@ -523,7 +530,7 @@ class TestTheKeyShapesARunOfWordCharactersMisses:
 
     def test_a_standard_base64_key_is_replaced(self) -> None:
         """``+`` and ``/`` are in the alphabet; a run of word characters is not."""
-        key = "wJalrXUtnFEMI" + "/" + "K7MDENG" + "+" + "bPxRfiCYEXAMPLEKEY"
+        key = standard_base64_key()
 
         assert ev.scrub(f"secret={key}") == "secret=***"
         assert ev.summarize_args({"value": key}) == "value=***"
@@ -535,18 +542,22 @@ class TestTheKeyShapesARunOfWordCharactersMisses:
 
     def test_a_bare_jwt_is_replaced(self) -> None:
         """The platform's own access-token shape, which travels with no prefix."""
-        jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27uhbUJU1p1r_wW1g"
+        token = jwt()
 
-        assert ev.scrub(f"the socket sent {jwt}") == "the socket sent ***"
+        assert token.startswith("eyJ"), "the prefix rule is the one under test here"
+        assert ev.scrub(f"the socket sent {token}") == "the socket sent ***"
 
     def test_a_jwt_is_recognised_by_what_its_head_decodes_to(self) -> None:
-        """A dotted run is only a token when its first part is a JSON header."""
-        import base64 as _b64
+        """A dotted run is only a token when its first part is a JSON header.
 
-        head = _b64.urlsafe_b64encode(b'{"alg":"none"}').decode().rstrip("=")
-        jwt = f"{head}.eyJzdWIiOiJhYmNkZWZnaCJ9.c2lnbmF0dXJlLWhlcmUtMTIz"
+        A header whose JSON starts with a space encodes to something that is
+        not ``eyJ``, so the prefix shortcut cannot answer and the rule has to
+        decode the head to find the object it begins.
+        """
+        token = jwt(header=b'{ "alg":"HS256"}')
 
-        assert ev.scrub(jwt) == "***"
+        assert not token.startswith("eyJ"), "the shortcut would answer instead"
+        assert ev.scrub(token) == "***"
 
     def test_a_dotted_run_that_is_not_a_token_survives(self) -> None:
         for value in (
@@ -570,12 +581,12 @@ class TestTheKeyShapesARunOfWordCharactersMisses:
         assert key not in ev.scrub(body)
 
     def test_a_unicode_dash_ends_a_value(self) -> None:
-        key = "AbCdEfGhIjKlMnOpQrStUvWxYz012345"
+        key = _opaque_run(32)
 
         assert ev.scrub(f"authorization —{key}") == "authorization —***"
 
     def test_a_unicode_quote_ends_a_value(self) -> None:
-        key = "AbCdEfGhIjKlMnOpQrStUvWxYz012345"
+        key = _opaque_run(32)
 
         assert ev.scrub(f"“{key}”") == "“***”"
 
@@ -614,25 +625,24 @@ class TestTheKeyShapesARunOfWordCharactersMisses:
         are known — in the publisher, by key — and never here, by shape.
         """
         for value in (
-            "key-3ax6xnjp29jd6fds4gc373sgvjxteol0",
-            "gocspx-abcdefghijklmnopqrstuvwx",
-            "ghs_abcdefghijklmnopqrstuvwxyz0123456789",
-            "abcdefghij0123456789klmnopqrstuv",
-            "dghpc2lzyxzlcnlsb25nc2vjcmv0a2v5mtizndu2nzg5ma",
+            prefixed_key("key-"),
+            prefixed_key("gocspx-", 24),
+            prefixed_key("ghs_", 36),
+            lowercase_body(32),
+            lowercase_base64_blob(),
         ):
             assert ev.scrub(value) == "***", value
 
     def test_a_lowercase_key_inside_a_tool_result_is_replaced(self) -> None:
         """The shape the audit's own scenario produces: a result quoting one."""
-        summary = ev.summarize_result(
-            '{"secrets":["key-3ax6xnjp29jd6fds4gc373sgvjxteol0"],"count":1}'
-        )
+        summary = ev.summarize_result('{"secrets":["' + prefixed_key("key-") + '"],"count":1}')
 
         assert summary == '{"secrets":["***"],"count":1}'
 
     def test_a_long_hex_run_is_still_a_key(self) -> None:
+        """Not every hex run is a digest: these two are the wrong lengths."""
         assert ev.scrub("d" * 48) == "***"
-        assert ev.scrub("abcdef0123456789abcdef0123456789abcd") == "***"
+        assert ev.scrub(_digest("sha256")[:36]) == "***"
 
     def test_a_mime_type_still_travels_whole(self) -> None:
         """Long enough for the base64 rule, and the one shape that must survive it."""

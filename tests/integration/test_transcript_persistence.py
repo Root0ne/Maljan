@@ -24,6 +24,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from app.worker.analysis_worker import _make_event_sink, _parse_event_ts
 from maljan.pipeline.events import AGENT_MESSAGE, emit_agent_message
+from tests.credential_shapes import prefixed_key
 
 
 def _sink_with_recorder() -> tuple[Any, list[dict[str, Any]]]:
@@ -138,7 +139,7 @@ class TestTheRecorderRecordsWhatIsSent:
         loop = MagicMock()
         loop.call_soon_threadsafe.side_effect = RuntimeError("event loop is closed")
         sink = _make_event_sink(AsyncMock(), "job-1", loop, recorder=recorded)
-        secret = "key-3ax6xnjp29jd6fds4gc373sgvjxteol0"
+        secret = prefixed_key("key-")
 
         emit_agent_message(
             sink,

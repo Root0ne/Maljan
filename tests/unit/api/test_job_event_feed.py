@@ -14,6 +14,11 @@ import uuid
 from typing import Any
 
 import pytest
+from tests.credential_shapes import (
+    lowercase_base64_blob,
+    lowercase_body,
+    prefixed_key,
+)
 
 from app.services.job_events import read_events
 from app.worker.analysis_worker import _JobEventBuffer, _publish_event, _start_event_feed
@@ -612,11 +617,11 @@ class TestWhatTheScrubMustNotTouchAndWhatItMust:
     @pytest.mark.parametrize(
         "secret",
         [
-            "key-3ax6xnjp29jd6fds4gc373sgvjxteol0",
-            "gocspx-abcdefghijklmnopqrstuvwx",
-            "ghs_abcdefghijklmnopqrstuvwxyz0123456789",
-            "abcdefghij0123456789klmnopqrstuv",
-            "dghpc2lzyxzlcnlsb25nc2vjcmv0a2v5mtizndu2nzg5ma",
+            prefixed_key("key-"),
+            prefixed_key("gocspx-", 24),
+            prefixed_key("ghs_", 36),
+            lowercase_body(32),
+            lowercase_base64_blob(),
         ],
     )
     def test_a_lowercase_key_in_a_tool_result_is_replaced(self, secret: str) -> None:
@@ -722,7 +727,7 @@ class TestWhatTheScrubMustNotTouchAndWhatItMust:
     def test_an_identity_field_exempts_a_name_and_not_a_sentence(self) -> None:
         """The exemption reaches a string and a list of strings under that key,
         never a structure nested below one."""
-        secret = "key-3ax6xnjp29jd6fds4gc373sgvjxteol0"
+        secret = prefixed_key("key-")
 
         data = self._publish(
             "agent_message",
@@ -744,7 +749,7 @@ class TestWhatTheScrubMustNotTouchAndWhatItMust:
             "pipeline_started",
             {
                 "agents": ["static"],
-                "sample_filename": "key-3ax6xnjp29jd6fds4gc373sgvjxteol0",
+                "sample_filename": prefixed_key("key-"),
                 "sha256": "ab12" + "0" * 12 + "...",
             },
         )
