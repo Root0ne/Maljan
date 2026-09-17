@@ -353,15 +353,18 @@ change landed on `main`.
   operator who runs it behind HTTP, writing under `MALJAN_STAGING_DIR` with
   `MALJAN_STAGING_TTL_HOURS` pruning.
 
-- **A model is probed before a job may name it.** The `llm` and `agent`
-  probes write down every `(endpoint, model)` pair they reached, with the
-  provider and the sentence they came back with (`model_probes`, revision
-  `20260924000000`). Submitting a job reads that record for every model its
-  team's agents would call and refuses with 422 naming the agent, the model,
-  the endpoint and the probe's last message; the console shows the same
-  sentence on the submit form. A changed endpoint or model finds no row and is
-  refused until it is probed. `core.llm.require_probe` is on; turning it off is
-  the only way past, for an air-gapped batch run.
+- **A model is probed before a job may name it.** Both probes end by asking
+  the model for one short answer — one turn, eight tokens, at the endpoint and
+  on the model the run will use, through each provider's own completion API —
+  and only a call that came back is written down as a passing `(endpoint,
+  model)` row (`model_probes`, revision `20260924000000`). Submitting a job
+  reads that record for every model the run can reach, the delegation targets
+  of its team's agents included, and refuses with 422 naming the agent, the
+  model, the endpoint and the probe's last message; saving a per-agent model is
+  refused with the same sentence, and the console shows it as written in both
+  places. A changed endpoint or model finds no row and is refused until it is
+  probed. `core.llm.require_probe` is on; turning it off is the only way past,
+  for an air-gapped batch run.
 - **The same indicator or finding said twice is written once.**
   `reporting.dedupe` says what makes two indicators one — the kind and the
   value with its case, its padding and its defanging undone — and both the
@@ -406,6 +409,34 @@ change landed on `main`.
   tick before the last one counts the calls made so far. A stage-start check
   now finds a tool the collision rule renamed, the failure list says when it
   cut and trims a message, and one place decides what a failure looks like.
+
+- **A caller asks one agent at a time.** langgraph gathers a turn's tool calls,
+  so a model that emitted two `ask_*` calls ran two nested loops at once — two
+  analysts against one llama-server slot, which is the re-prefill timeout this
+  project has diagnosed once already. A per-caller lock serialises them, and it
+  is a different object from the per-callee one so an ask made from inside an
+  ask still nests. A callee's unavailable tools are recorded when it is asked,
+  the way a stage records them when it starts, and a budget row is filed under
+  the agent that ran the loop rather than the one that handed it over, so a
+  lead's step cap is the lead's and a specialist's is the specialist's. The
+  judge counts its own turns, so its time-capped loop no longer records zero
+  steps. A refused ask is no longer listed as a broken tool.
+- **A delegated round is drawn once.** Recorded rows and live events now share
+  one identity — who spoke, in which round, and a digest of what was said —
+  because the addressee is the one thing only the live copy has, and putting it
+  in the id drew every ask twice on a job that had both a report and events
+  still inside the stream's TTL.
+- **The argument repair never finishes a value.** It closes brackets and
+  nothing else: a call cut in the middle of a string is refused with the
+  message it was already refused with, because closing the quote would hand
+  the tool a path that exists nowhere or a different search. A call that was
+  closed off says so in the result the model reads, not only in the ledger.
+- **Two findings with different techniques are two findings**, and a STIX
+  indicator keeps its case wherever the case is part of the value — a URL path
+  is case-sensitive, and folding one away removes a fact from a report. A
+  failed threat-intel lookup is never cached, and `check_ip_reputation` answers
+  two sources as one answer or one failure rather than a JSON document glued to
+  a sentence.
 
 - **A delegated ask stays inside the stage that made it.** A callee's
   effective tool set is its own definition narrowed by the tool policy of the
