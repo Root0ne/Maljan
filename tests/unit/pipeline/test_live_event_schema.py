@@ -346,6 +346,37 @@ class TestArgumentSummaries:
         assert ev.scrub(digest) == digest
         assert ev.scrub("https://vt.example/v3/files?apikey=SECRETKEY") == "https://vt.example/…"
 
+    def test_a_path_in_markdown_prose_is_still_cut(self) -> None:
+        """The same punctuation that hid a key used to hide a host path.
+
+        The value run learned to split on a backtick before the passes that
+        find a URL and a path did, so a key in prose was replaced while an
+        absolute host path beside it travelled whole — the per-job directory
+        and the install prefix included.
+        """
+        said = "the sample is at `/home/op/data/samples/ab12/evil.exe` now"
+        assert ev.scrub(said) == "the sample is at `evil.exe` now"
+
+    def test_a_url_in_markdown_prose_loses_its_path_and_query(self) -> None:
+        # And the closing backtick is kept rather than swallowed by the run.
+        assert ev.scrub("`https://vt.example/v3/files?apikey=X`") == "`https://vt.example/…`"
+
+    def test_a_run_ends_cleanly_at_every_terminator_it_should(self) -> None:
+        assert ev.scrub("<https://h/x>") == "<https://h/…>"
+        assert ev.scrub("https://h/x;") == "https://h/…;"
+        assert ev.scrub("https://h/x>") == "https://h/…>"
+
+    def test_a_colon_still_belongs_inside_a_url(self) -> None:
+        """The one terminator the run deliberately does not take.
+
+        What follows a ``://`` carries a colon whenever there is userinfo or a
+        port, so ending the run at the first one would hand the shortener the
+        host ``u`` and leave ``:p@h/x`` — the password included — standing in
+        the text.
+        """
+        assert ev.scrub("https://u:p@h/x") == "https://h/…"
+        assert ev.scrub("https://h:8080/x") == "https://h:8080/…"
+
     def test_a_one_character_url_scheme_is_not_a_drive_letter(self) -> None:
         # ``a:/`` is also how a drive letter begins; the slash after the colon
         # has to be a lone one for the path rule to claim it.

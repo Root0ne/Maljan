@@ -339,15 +339,34 @@ _CREDENTIAL_PREFIXES = ("sk-", "sk_", "nvapi-", "ghp_", "gho_", "xoxb-")
 # character that separates values. Whitespace is not enough — a compact JSON
 # body from a tool server is one whitespace-separated word, and everything
 # worth finding inside it sits behind a quote, a colon, a comma or a brace.
-_AFTER = r"(?:\A|(?<=[\s\"'=:,{\[(]))"
+#
+# The backtick and the angle brackets are here for the same reason the value
+# run excludes them: a path or a URL in markdown prose, or in the angle
+# brackets a placeholder is written in, sits against one of them, and a
+# lookbehind that did not admit them let an absolute host path through whole
+# while the credential pass beside it was splitting the same punctuation off
+# cleanly. Admitting a character here only lets a match *begin*; every marker
+# requirement below still has to be met.
+_AFTER = r"(?:\A|(?<=[\s\"'`<>=:,{\[(]))"
 # Where such a run ends: the next separator that cannot be part of a path, a
 # URL or a key.
-_UNTIL = r"[^\s\"',)\]}]*"
+#
+# The colon is deliberately *not* one of them, which is the one place this
+# class and the value run's differ. ``_UNTIL`` matches the rest of a URL after
+# its ``://``, and that rest carries a colon whenever there is userinfo
+# (``u:p@h``) or a port (``h:8080``): ending the run at the first colon would
+# hand ``_shorten_url`` the host ``u`` and leave ``:p@h/x`` — the password
+# included — standing in the text. A colon can also be the drive letter's own
+# separator. Everywhere a colon genuinely ends a value, ``_AFTER`` already
+# starts the next run after it.
+_UNTIL_CHARS = r"[^\s\"'`<>;,)\]}]"
+_UNTIL = _UNTIL_CHARS + r"*"
 # An authorization scheme and the secret after it, which no per-value rule can
 # see as one thing: "Bearer" is a word and the secret is the next one, however
-# short it is. Bounded by the same separators rather than by ``\S+``, which
-# used to swallow the closing quote of a JSON string.
-_SCHEME_AND_SECRET = re.compile(r"(?i)\b(bearer|basic|token)\s+[^\s\"',)\]}]+")
+# short it is. Bounded by the same separators as every other run rather than
+# by ``\S+``, which used to swallow the closing quote of a JSON string — and
+# by the same *constant*, so the two cannot drift apart again.
+_SCHEME_AND_SECRET = re.compile(r"(?i)\b(bearer|basic|token)\s+" + _UNTIL_CHARS + r"+")
 # 24 is above a CRC, a short hash prefix and a ledger id, and below every API
 # key shape this has met.
 _CREDENTIAL_RUN = re.compile(r"(?:[A-Fa-f0-9]{24,}|[A-Za-z0-9_\-]{24,}={0,2})\Z")
