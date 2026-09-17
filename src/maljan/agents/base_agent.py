@@ -316,6 +316,27 @@ class BudgetCeiling:
         self.seconds = float(seconds)
 
 
+# How long past its own timeout a loop is left alone before it is aborted
+# outright. The soft timeout ends the model's turn; this one ends the thread
+# that would not come back from it.
+HARD_CAP_GRACE = 30.0
+
+
+def hard_cap(timeout: float, ceiling: BudgetCeiling | None = None) -> float:
+    """The wall a loop is aborted at, never later than a caller is waiting for.
+
+    A delegated loop runs on a tool thread that cannot be cancelled, so the
+    grace it is normally given is the time it can outlive the caller by: the
+    caller's own wait fires, its node fails and drains it, and a callee still
+    running writes its ledger onto an agent that has finished. The ceiling is
+    what the caller had left, so the callee's wall never goes past it.
+    """
+    wall = float(timeout) + HARD_CAP_GRACE
+    if ceiling is not None:
+        wall = min(wall, float(ceiling.seconds))
+    return max(1.0, wall)
+
+
 def loop_limits(agent_name: str, ceiling: BudgetCeiling | None = None) -> tuple[int, int]:
     """``(timeout, max_steps)`` for one loop of ``agent_name``.
 
@@ -1341,7 +1362,7 @@ def _run_coro_blocking(coro: Any, hard_timeout: float, label: str = "") -> Any:
         # is ever *delivered* is a separate question, and one the watchdog
         # answers rather than assuming.
         _cancel_and_watch(loop, future, running, what)
-        raise TimeoutError(f"{what} exceeded hard cap of {hard_timeout}s") from None
+        raise TimeoutError(f"{what} exceeded hard cap of {int(hard_timeout)}s") from None
     except _FuturesCancelled as exc:
         # It cancelled itself. ``concurrent.futures.CancelledError`` is an
         # ``Exception`` whose ``str()`` is empty, so left alone it reaches the
@@ -1392,7 +1413,7 @@ async def run_on_agent_loop(coro: Any, hard_timeout: float, label: str = "") -> 
         return await asyncio.wait_for(asyncio.wrap_future(future), hard_timeout)
     except TimeoutError:
         _cancel_and_watch(loop, future, running, what)
-        raise TimeoutError(f"{what} exceeded hard cap of {hard_timeout}s") from None
+        raise TimeoutError(f"{what} exceeded hard cap of {int(hard_timeout)}s") from None
     except (asyncio.CancelledError, _FuturesCancelled) as exc:
         # Same distinction as ``_run_coro_blocking``, and here the old code was
         # actively misleading: it folded cancellation into ``TimeoutError``, so
@@ -2334,7 +2355,7 @@ class BaseAnalyst(ABC):
         import time as _time
 
         _t0 = _time.monotonic()
-        hard_timeout = timeout + 30
+        hard_timeout = hard_cap(timeout, getattr(self, "_budget_ceiling", None))
         try:
             try:
                 thread_result: dict | None = _run_coro_blocking(
@@ -2347,7 +2368,10 @@ class BaseAnalyst(ABC):
                     hard_timeout,
                 )
                 self._record_budget(
-                    budget, [], "time", detail=f"the loop exceeded its {hard_timeout}s hard cap"
+                    budget,
+                    [],
+                    "time",
+                    detail=f"the loop exceeded its {int(hard_timeout)}s hard cap",
                 )
                 raise
             except AnalystError:
@@ -2831,7 +2855,7 @@ class BaseAnalyst(ABC):
             return str(response.content)
 
         _t0 = _time.monotonic()
-        hard_timeout = timeout + 30
+        hard_timeout = hard_cap(timeout, getattr(self, "_budget_ceiling", None))
         try:
             content = _run_coro_blocking(_invoke(), hard_timeout, label=f"llm:{self.name}")
         except TimeoutError:

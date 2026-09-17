@@ -246,7 +246,9 @@ def _ask(container: Any, caller: Any, callee: Any, task: str, context: str) -> s
         spent = int(getattr(callee, "steps_spent", 0) or 0) - spent_before
         if budget is not None:
             budget.charge(spent)
-        _hand_over_the_record(caller, callee)
+        _hand_over_the_record(
+            caller, callee, still_running=getattr(caller, "loop_budget", None) is budget
+        )
         logger.info(
             "delegation %s -> %s: %d step(s), %.1f s",
             caller.name,
@@ -323,19 +325,35 @@ def _task_turn(caller_name: str, task: str, context: str, callee: Any) -> str:
     return "\n\n".join(parts)
 
 
-def _hand_over_the_record(caller: Any, callee: Any) -> None:
+def _hand_over_the_record(caller: Any, callee: Any, *, still_running: bool = True) -> None:
     """Move what the callee recorded onto the caller, so one node writes it all.
 
     The ledger entries keep the callee's key; the stage node that drains the
     caller writes them to the run's ledger with everything else. The
     validation findings are carried the same way, each naming the callee, so
     a callee that never runs a stage of its own still has its check counted.
+
+    ``still_running`` is false when the caller's loop ended while this ask was
+    in flight. Its node has already failed it and drained it, so anything
+    appended now would either be lost or re-emitted in a later round. The
+    callee is drained all the same — its buffers must not carry into its next
+    run — and what could not be handed over is logged and counted.
     """
     try:
         entries = callee.drain_evidence_entries()
     except Exception as exc:  # noqa: BLE001 — the record is handed over best-effort
         logger.debug("delegation: the callee's ledger could not be read (%s).", exc)
         entries = []
+    if not still_running:
+        logger.warning(
+            "delegation %s -> %s: the caller's loop ended first; %d ledger entr(y/ies) "
+            "and the callee's validation state are dropped.",
+            caller.name,
+            callee.name,
+            len(entries),
+        )
+        _drop_the_callee_s_validation_state(callee)
+        return
     if entries:
         caller._evidence_entries.extend(entries)
     try:
@@ -358,6 +376,15 @@ def _hand_over_the_record(caller: Any, callee: Any) -> None:
     for code in not_run:
         if code not in caller.validation_not_run:
             caller.validation_not_run.append(code)
+
+
+def _drop_the_callee_s_validation_state(callee: Any) -> None:
+    """Empty the callee's checks without folding them anywhere, and never raise."""
+    try:
+        callee.drain_validation_findings()
+        callee.drain_validation_not_run()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("delegation: the callee's validation state could not be read (%s).", exc)
 
 
 def _answer_text(isr: AgentISR, text: str) -> str:

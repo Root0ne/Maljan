@@ -53,6 +53,10 @@ class _Scripted(BaseChatModel):
     def _generate(self, messages: Any, stop: Any = None, run_manager: Any = None, **_: Any):
         self.seen.append(list(messages))
         answer = self.script.pop(0) if self.script else AIMessage(content="")
+        # A script entry that is an exception is a model turn that failed, so
+        # a callee that cannot answer is driven the same way as one that can.
+        if isinstance(answer, BaseException):
+            raise answer
         return ChatResult(generations=[ChatGeneration(message=answer)])
 
     @property
@@ -501,6 +505,66 @@ class TestTheCeiling:
         helper._budget_ceiling = BudgetCeiling(steps=1000, seconds=100000.0)
         timeout, steps = helper._loop_limits()
         assert timeout <= 180 and steps <= 10
+
+
+class TestACalleeNeverOutlivesItsCaller:
+    def test_the_hard_cap_is_the_ceiling_when_the_ceiling_is_the_shorter(self) -> None:
+        from maljan.agents.base_agent import hard_cap
+
+        assert hard_cap(120.0) == 150.0
+        assert hard_cap(45.0, BudgetCeiling(steps=4, seconds=45.7)) == 45.7
+        assert hard_cap(120.0, BudgetCeiling(steps=4, seconds=1000.0)) == 150.0
+        assert hard_cap(1.0, BudgetCeiling(steps=2, seconds=0.0)) == 1.0
+
+    def test_a_caller_whose_loop_ended_is_not_given_the_record(self) -> None:
+        """Its node has already drained it; appending now loses the entries or repeats them."""
+        from maljan.agents.delegation import _hand_over_the_record
+        from maljan.schemas.evidence import build_entry
+
+        container = _team([], [])
+        boss = container.get_agent("boss")
+        helper = container.get_agent("helper")
+        helper._evidence_entries = [
+            build_entry(
+                entry_id="ev_0001",
+                seq=1,
+                agent="helper",
+                tool="peek",
+                args={},
+                server=None,
+                output="{}",
+            )
+        ]
+        helper.validation_findings = []
+        helper.validation_retries = 2
+
+        _hand_over_the_record(boss, helper, still_running=False)
+
+        assert boss._evidence_entries == []
+        assert boss.validation_retries == 0
+        assert helper._evidence_entries == [], "the callee is drained either way"
+
+    def test_a_callee_that_never_answers_leaves_the_caller_able_to_finish(self) -> None:
+        container = _team(
+            boss_script=[
+                _call(tool_name("helper"), {"task": "Does it open a socket?"}, "ask_1"),
+                AIMessage(content=BOSS_REPORT),
+            ],
+            helper_script=[TimeoutError("the model did not answer in time")],
+        )
+
+        isr = _run_boss(container)
+
+        assert [claim.claim for claim in isr.claims] == ["the helper saw a raw socket"]
+        failed = [entry for entry in container.get_agent("boss")._evidence_entries if not entry.ok]
+        assert [entry.tool for entry in failed] == [tool_name("helper")]
+        assert "TimeoutError" in str(failed[0].error), "the caller reads why the ask failed"
+
+    def test_the_ask_hands_over_while_the_caller_is_still_in_its_loop(self, team) -> None:
+        _run_boss(team)
+        boss = team.get_agent("boss")
+
+        assert [entry.agent for entry in boss._evidence_entries].count("helper") == 1
 
 
 class TestTheLoopBudget:
