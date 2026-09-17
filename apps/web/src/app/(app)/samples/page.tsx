@@ -2,6 +2,7 @@
 
 import { Suspense, useState, useRef, useCallback, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { Upload, X } from "lucide-react";
 import { api } from "@/lib/api";
 import type { SampleDTO, SandboxReportDTO } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
@@ -289,14 +290,7 @@ function SamplesPageContent() {
             : "border-border hover:border-text-muted"
         }`}
       >
-        <svg
-          className="mx-auto mb-2 text-text-muted"
-          width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"
-        >
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-          <polyline points="17 8 12 3 7 8" />
-          <line x1="12" y1="3" x2="12" y2="15" />
-        </svg>
+        <Upload size={18} aria-hidden="true" className="mx-auto mb-2 text-text-muted" />
         <p className="text-sm text-text-secondary">
           {uploading
             ? "Uploading..."
@@ -410,10 +404,7 @@ function SamplesPageContent() {
                 onClick={() => setDetailSample(null)}
                 className="text-text-muted hover:text-text-primary"
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
+                <X size={16} aria-hidden="true" />
               </button>
             </div>
             <div className="space-y-3 text-xs">
@@ -475,10 +466,7 @@ function SamplesPageContent() {
                 onClick={closeSubmitDialog}
                 className="text-text-muted hover:text-text-primary"
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
+                <X size={16} aria-hidden="true" />
               </button>
             </div>
 

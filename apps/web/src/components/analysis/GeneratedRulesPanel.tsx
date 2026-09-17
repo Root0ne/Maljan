@@ -29,7 +29,12 @@ export default function GeneratedRulesPanel() {
   // used to do nothing at all — the button just felt broken.
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
-  const signatures: DetectionRule[] = report?.malware_report?.detection_signatures ?? [];
+  /* The `?? []` is a fresh array on every render, which is a new dependency
+   * for both memos below; the report's own list, memoised, is not. */
+  const signatures: DetectionRule[] = useMemo(
+    () => report?.malware_report?.detection_signatures ?? [],
+    [report?.malware_report?.detection_signatures],
+  );
   const filtered = useMemo(() => {
     if (activeKind === "all") return signatures;
     return signatures.filter((s) => s.kind === activeKind);

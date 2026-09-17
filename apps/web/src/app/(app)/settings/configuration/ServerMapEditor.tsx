@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Server } from "lucide-react";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import type { CatalogEntry, McpServerEntry, ProbeResult, SettingValue } from "@/types/settings";
@@ -331,7 +332,10 @@ export function ServerDetail({
       {showHeader && (
         <>
           <div className="flex items-center justify-between gap-2 flex-wrap">
-            <span className="text-sm text-text-primary font-mono">{serverKey}</span>
+            <span className="flex items-center gap-2 text-sm text-text-primary font-mono">
+              <Server size={16} aria-hidden="true" className="text-text-muted" />
+              {serverKey}
+            </span>
             <div className="flex items-center gap-3">
               <label className="text-xs text-text-secondary flex items-center gap-1">
                 <input

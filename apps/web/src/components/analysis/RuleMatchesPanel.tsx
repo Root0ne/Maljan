@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import { useReport } from "@/app/(app)/analysis/[id]/layout";
 import type { AgentFinding } from "@/types";
 
@@ -101,12 +102,11 @@ function Section({
         className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-medium text-text-primary uppercase tracking-wider hover:bg-bg-hover"
       >
         <span>{title}</span>
-        <svg
-          className={`w-4 h-4 text-text-muted transition-transform ${open ? "rotate-180" : ""}`}
-          viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-        >
-          <path d="m6 9 6 6 6-6" />
-        </svg>
+        <ChevronDown
+          size={16}
+          aria-hidden="true"
+          className={`text-text-muted transition-transform ${open ? "rotate-180" : ""}`}
+        />
       </button>
       {open && <div className="border-t border-border">{children}</div>}
     </div>

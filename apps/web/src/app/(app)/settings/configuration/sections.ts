@@ -4,17 +4,21 @@ export interface SectionDef {
   key: "models" | "tools" | "agents" | "layers" | "platform";
   title: string;
   groups: string[];
+  /** The lucide icon the rail draws this section with. */
+  icon: SectionIcon;
 }
+
+export type SectionIcon = "models" | "tools" | "agents" | "layers" | "platform";
 
 /** Maps the 16 backend catalog groups onto five settings-page sections. Group
  *  keys not literally listed here fall through to "platform", in schema
  *  order, titled from the schema — see `groupsBySection`. */
 export const SECTIONS: SectionDef[] = [
-  { key: "models", title: "Models", groups: ["llm", "providers"] },
-  { key: "tools", title: "Analysis tools", groups: ["static", "sandbox", "mcp", "memory"] },
-  { key: "agents", title: "Agents and pipeline", groups: ["agents", "profiles", "negotiation", "chunking"] },
-  { key: "layers", title: "Layers and reporting", groups: ["analysis", "reporting"] },
-  { key: "platform", title: "Platform", groups: ["enrichment", "api", "tracing", "frontier", "system"] },
+  { key: "models", title: "Models", groups: ["llm", "providers"], icon: "models" },
+  { key: "tools", title: "Analysis tools", groups: ["static", "sandbox", "mcp", "memory"], icon: "tools" },
+  { key: "agents", title: "Agents and pipeline", groups: ["agents", "profiles", "negotiation", "chunking"], icon: "agents" },
+  { key: "layers", title: "Layers and reporting", groups: ["analysis", "reporting"], icon: "layers" },
+  { key: "platform", title: "Platform", groups: ["enrichment", "api", "tracing", "frontier", "system"], icon: "platform" },
 ];
 
 /** Groups synthesised from a slice of a real backend group's entries rather

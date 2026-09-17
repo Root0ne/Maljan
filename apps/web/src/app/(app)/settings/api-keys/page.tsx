@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { X } from "lucide-react";
 import { api } from "@/lib/api";
 import type { ApiKeyDTO, ApiKeyCreateDTO } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
@@ -269,10 +270,7 @@ export default function SettingsApiKeysPage() {
                 disabled={revoking}
                 className="text-text-muted hover:text-text-primary disabled:text-text-disabled"
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
+                <X size={16} aria-hidden="true" />
               </button>
             </div>
             <p className="text-sm text-text-secondary mb-4 leading-relaxed">

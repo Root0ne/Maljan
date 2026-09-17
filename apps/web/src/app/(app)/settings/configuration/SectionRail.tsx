@@ -2,8 +2,19 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { groupsBySection, VIRTUAL_GROUPS, type RailGroup } from "./sections";
+import { Brain, FileText, Server, Users, Wrench } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import { groupsBySection, VIRTUAL_GROUPS, type RailGroup, type SectionIcon } from "./sections";
 import { useSettingsContext } from "./SettingsContext";
+
+/** One icon per section, so the rail is scannable before it is read. */
+const SECTION_ICON: Record<SectionIcon, LucideIcon> = {
+  models: Brain,
+  tools: Wrench,
+  agents: Users,
+  layers: FileText,
+  platform: Server,
+};
 
 function stagedIn(keys: string[], pending: Record<string, unknown>): number {
   return keys.filter((k) => k in pending).length;
@@ -43,9 +54,12 @@ export default function SectionRail() {
         data-testid="settings-rail"
         className="hidden lg:block space-y-4"
       >
-        {sections.map(({ section, groups }) => (
+        {sections.map(({ section, groups }) => {
+          const Icon = SECTION_ICON[section.icon];
+          return (
           <div key={section.key}>
-            <h3 className="text-[11px] uppercase tracking-wider text-text-muted px-2 mb-1">
+            <h3 className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-text-muted px-2 mb-1">
+              <Icon size={16} aria-hidden="true" />
               {section.title}
             </h3>
             <ul className="space-y-0.5">
@@ -76,7 +90,8 @@ export default function SectionRail() {
               })}
             </ul>
           </div>
-        ))}
+          );
+        })}
       </nav>
       <div className="lg:hidden mb-4">
         <label htmlFor="settings-group-select" className="sr-only">
