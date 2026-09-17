@@ -183,3 +183,51 @@ def _count_reputations(malware_report: dict[str, Any], key: str) -> int:
 def _count_similar_samples(malware_report: dict[str, Any]) -> int:
     attribution = malware_report.get("attribution") or {}
     return len(attribution.get("similar_samples") or [])
+
+
+async def purge_old_job_events(ctx: dict) -> dict[str, Any]:
+    """Drop feed rows older than ``core.events.retention_days``. Never raises.
+
+    The live conversation is worth keeping for as long as somebody might open
+    the run that produced it, and no longer: a busy deployment writes tens of
+    thousands of rows a day, and the parts of a run that matter a month later
+    — the transcript, the agent findings, the evidence ledger — are kept by
+    the report and the job and are not touched here.
+
+    Scheduled beside the enrichment task rather than as a worker of its own
+    because it is one statement a night against the same database this process
+    already holds a session factory for.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import delete, or_
+
+    from app.models.job_event import JobEvent
+
+    db_session_factory = ctx["db_session"]
+    try:
+        days = int((await runtime_config.core()).events.retention_days)
+    except Exception as exc:  # noqa: BLE001 — an unreadable setting skips the sweep
+        logger.warning("events sweep: retention not readable (%s); skipping.", exc)
+        return {"status": "skipped"}
+
+    cutoff = datetime.now(UTC) - timedelta(days=max(1, days))
+    try:
+        async with db_session_factory() as db:
+            result = await db.execute(
+                delete(JobEvent).where(
+                    # ``ts`` is when the publisher stamped the event and is
+                    # what age means here; a row that somehow carries none
+                    # falls back to when it was written, so nothing can sit in
+                    # the table for ever by having no clock.
+                    or_(JobEvent.ts < cutoff, JobEvent.ts.is_(None) & (JobEvent.created_at < cutoff))
+                )
+            )
+            await db.commit()
+        removed = int(result.rowcount or 0)
+    except Exception as exc:  # noqa: BLE001 — a sweep never takes the worker down
+        logger.warning("events sweep failed (%s).", exc)
+        return {"status": "failed"}
+
+    logger.info("events sweep: removed %d row(s) older than %d day(s).", removed, days)
+    return {"status": "ok", "removed": removed, "retention_days": days}

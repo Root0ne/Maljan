@@ -61,6 +61,32 @@ class JobCreateRequest(BaseModel):
         return value
 
 
+class RosterAgent(BaseModel):
+    """One participant of a run: its key, the label it is drawn under, its
+    role, and the stages it speaks in."""
+
+    key: str
+    label: str
+    role: str
+    stages: list[str] = []
+
+
+class RosterStage(BaseModel):
+    """One step of the team, and who takes part in it."""
+
+    key: str
+    label: str
+    kind: str
+    agents: list[str] = []
+
+
+class JobRoster(BaseModel):
+    """Everyone who can speak in one run, and the stages they speak in."""
+
+    agents: list[RosterAgent] = []
+    stages: list[RosterStage] = []
+
+
 class JobResponse(BaseModel):
     """Analysis job status response."""
 
@@ -79,6 +105,11 @@ class JobResponse(BaseModel):
     completed_at: datetime | None
     duration_seconds: float | None
     error_message: str | None
+    # Who can speak in this run, with the label an operator gave each agent
+    # and the stages it takes part in. Filled on the single-job endpoint,
+    # where the team can be resolved; ``None`` in a listing, which is a page
+    # of rows rather than a run somebody is watching.
+    roster: JobRoster | None = None
 
     model_config = {"from_attributes": True}
 
@@ -185,6 +216,8 @@ class AgentMessageResponse(BaseModel):
     confidence: float | None = None
     claims: list | None = None
     dissent: list | None = None
+    # The agent this line was said to, or ``None`` for a line said to the room.
+    addressed_to: str | None = None
     ts: datetime | None = None
 
     model_config = {"from_attributes": True}

@@ -137,12 +137,61 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
+async def _replay(websocket: WebSocket, job_id: str, since: int) -> None:
+    """Send everything this job published after ``since``, then return.
+
+    Sent after the socket has joined the fan-out rather than before, so an
+    event published while the replay is being read is broadcast rather than
+    dropped between the two. That can put a live event in front of a replayed
+    one; both carry ``seq`` and the client orders and dedupes on it, which is
+    what the cursor is for.
+
+    Never raises. A replay that cannot be read leaves the client where it
+    already was — attached, and one refresh away from the endpoint that reads
+    the same two stores.
+    """
+    try:
+        from app.services.job_events import read_events
+
+        redis_conn = aioredis.from_url(settings.redis_url, decode_responses=True)
+        try:
+            async with async_session_factory() as db:
+                events = await read_events(db, redis_conn, job_id, since=since)
+        finally:
+            try:
+                await redis_conn.aclose()
+            except Exception:  # noqa: BLE001
+                pass
+        for event in events:
+            await websocket.send_text(json.dumps(event))
+        logger.info(
+            "WebSocket replayed %d event(s) after seq=%s: job=%s",
+            len(events),
+            log_safe(since),
+            log_safe(job_id),
+        )
+    except Exception as exc:  # noqa: BLE001 — a replay never closes a socket
+        logger.warning(
+            "WebSocket replay failed (job=%s): %s", log_safe(job_id), log_safe(exc)
+        )
+
+
 @router.websocket("/ws/analysis/{job_id}")
-async def ws_analysis(websocket: WebSocket, job_id: str) -> None:
+async def ws_analysis(websocket: WebSocket, job_id: str, since: int | None = None) -> None:
     """WebSocket endpoint for real-time analysis event streaming.
 
     Clients connect here to receive live updates about an analysis job.
     Events are forwarded from the ARQ worker via Redis PubSub.
+
+    Resume:
+        ``?since=<seq>`` is the last sequence number the client already holds.
+        The server replays everything after it — from the Redis stream, or
+        from ``job_events`` when the stream has expired or no longer reaches
+        back that far — and then forwards live events as usual. Omitting it
+        attaches without a replay, which is what a client opening a fresh run
+        wants. The cursor changes nothing about the handshake: it is read
+        after the credential and the ownership check, and a socket that would
+        have been refused is still refused.
 
     Authentication:
         Pass the JWT access token as a WebSocket subprotocol, never as a
@@ -248,6 +297,8 @@ async def ws_analysis(websocket: WebSocket, job_id: str) -> None:
     # ── Connection accepted ──────────────────────────────────────────
     logger.info("WebSocket authenticated: user=%s job=%s", log_safe(user_id), log_safe(job_id))
     await manager.connect(websocket, job_id)
+    if since is not None and since >= 0:
+        await _replay(websocket, job_id, int(since))
 
     # The handshake checked
     # ``exp``, but a long-lived connection could outlive its token. Read

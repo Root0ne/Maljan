@@ -173,6 +173,14 @@ class AgentMessage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     claims: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     dissent: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
+    # The agent this line was said *to*, when it was said to one agent rather
+    # than to the room: a delegated ask names the callee and its answer names
+    # the caller. NULL everywhere else, which is what a line to the room is.
+    # Without it a stored ask and a stored report by the same agent in the
+    # same round were indistinguishable, and the console had to key them apart
+    # on a digest of the text.
+    addressed_to: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
     # When the pipeline emitted it, not when the row was written — the run can
     # finish minutes after the message was spoken.
     ts: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

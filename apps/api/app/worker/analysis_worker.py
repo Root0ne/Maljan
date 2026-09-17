@@ -22,7 +22,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import redis.asyncio as aioredis
-from arq import cron  # noqa: F401 — for future scheduled tasks
+from arq import cron
 from arq.connections import RedisSettings
 from maljan.core.config import Settings as _CoreSettings
 from maljan.core.settings_catalog import core_catalog
@@ -256,13 +256,142 @@ def settings_snapshot(
 # ── Redis event channel helper ───────────────────────────────────
 
 
+class _JobEventBuffer:
+    """One job's events on their way to ``job_events``, in batches.
+
+    A row per event, committed as the event is published, would put a
+    transaction between every tool call and the next on a database the same
+    process is running the analysis against. A batch — fifty events, or two
+    seconds, whichever comes first — costs one transaction per batch and still
+    leaves a cancelled run holding all but its last handful of lines, which is
+    the case the table exists for.
+
+    Never raises and never blocks the publish it was called from. A feed that
+    could fail a run would be worse than no feed: the rows are a record of the
+    analysis, not part of it. A batch that will not insert is dropped with a
+    warning rather than retried, because the events it holds are already on
+    the socket and in the Redis stream, and a retry queue that grows during a
+    database outage is a second failure on top of the first.
+    """
+
+    BATCH = 50
+    SECONDS = 2.0
+
+    def __init__(self, job_id: str, db_session: async_sessionmaker) -> None:
+        self.job_id = job_id
+        self._db_session = db_session
+        self._pending: list[dict[str, Any]] = []
+        self._last_flush = time.monotonic()
+        self._lock = asyncio.Lock()
+
+    async def add(self, seq: int, event_type: str, data: dict[str, Any], ts: str) -> None:
+        """Queue one event, flushing when the batch is full or old enough."""
+        async with self._lock:
+            self._pending.append(
+                {
+                    "seq": int(seq),
+                    "type": str(event_type)[:64],
+                    "payload": data,
+                    "ts": _parse_event_ts(ts),
+                }
+            )
+            due = (
+                len(self._pending) >= self.BATCH
+                or (time.monotonic() - self._last_flush) >= self.SECONDS
+            )
+        if due:
+            await self.flush()
+
+    async def flush(self) -> None:
+        """Write what is queued. Never raises."""
+        async with self._lock:
+            rows, self._pending = self._pending, []
+            self._last_flush = time.monotonic()
+        if not rows:
+            return
+        try:
+            from app.models.job_event import JobEvent
+
+            async with self._db_session() as db:
+                db.add_all([JobEvent(job_id=uuid.UUID(self.job_id), **row) for row in rows])
+                await db.commit()
+        except Exception as exc:  # noqa: BLE001 — the feed never costs a run
+            logger.warning(
+                "Could not persist %d event(s) for job %s (%s).",
+                len(rows),
+                self.job_id,
+                exc,
+                extra={"job_id": self.job_id, "component": "pubsub"},
+            )
+
+
+# The jobs this process is persisting a feed for. ``_publish_event`` is called
+# from a dozen places with nothing but a Redis handle and a job id, so the
+# session factory is registered once by the task that has one rather than
+# threaded through every call site.
+_EVENT_BUFFERS: dict[str, _JobEventBuffer] = {}
+
+
+def _start_event_feed(job_id: str, db_session: async_sessionmaker) -> None:
+    """Persist this job's feed from here on, in batches."""
+    _EVENT_BUFFERS[job_id] = _JobEventBuffer(job_id, db_session)
+
+
+async def _stop_event_feed(job_id: str) -> None:
+    """Write whatever is still queued and forget this job. Never raises.
+
+    Called from the task's one ``finally``, which every path out of a run goes
+    through — success, failure, and the early return a cancellation takes — so
+    the last handful of lines of a run that stopped part-way is written rather
+    than lost with the process.
+    """
+    buffer = _EVENT_BUFFERS.pop(job_id, None)
+    _LAST_SEQ.pop(job_id, None)
+    if buffer is not None:
+        await buffer.flush()
+
+
+# The per-job sequence counter, and the last number this process handed out
+# for each job. Redis ``INCR`` is the source of truth — it is atomic, so two
+# publishers cannot be given the same number — and the local map is both a
+# mirror of it and the fallback for a Redis that is refusing writes: a feed
+# with no counter at all is a feed a client cannot resume, which is worse than
+# one whose numbering restarts after an outage.
+_LAST_SEQ: dict[str, int] = {}
+
+
+def _seq_key(job_id: str) -> str:
+    return f"analysis:{job_id}:seq"
+
+
+async def _next_seq(redis_conn: aioredis.Redis, job_id: str) -> int:
+    """The next sequence number for this job's feed. Never raises."""
+    try:
+        seq = int(await redis_conn.incr(_seq_key(job_id)))
+        # The same 24 h the stream gets: the counter is only meaningful while
+        # there is a stream to read alongside it, and the table keeps its own
+        # copy of every number for the replay after that.
+        await redis_conn.expire(_seq_key(job_id), 86_400)
+    except Exception as exc:  # noqa: BLE001 — a counter never costs a run
+        logger.debug(
+            "Event sequence INCR failed (%s); numbering locally.",
+            exc,
+            extra={"job_id": job_id, "component": "pubsub"},
+        )
+        seq = _LAST_SEQ.get(job_id, 0) + 1
+    # Written without an await in between, so two coroutines interleaving here
+    # cannot both read the same previous value.
+    _LAST_SEQ[job_id] = max(seq, _LAST_SEQ.get(job_id, 0))
+    return seq
+
+
 async def _publish_event(
     redis_conn: aioredis.Redis,
     job_id: str,
     event_type: str,
     data: dict[str, Any] | None = None,
 ) -> None:
-    """Publish a pipeline progress event to Redis PubSub + Stream.
+    """Publish a pipeline progress event to Redis PubSub + Stream + the table.
 
     PubSub channel ``analysis:{job_id}`` is used by the live WebSocket
     fan-out. A parallel Redis Stream ``analysis:{job_id}:events`` keeps
@@ -271,15 +400,32 @@ async def _publish_event(
 
     Message format on both channels:
     ``{"type": ..., "data": ..., "ts": ...}``.
+
+    Every event is stamped with a per-job ``seq`` *here* and nowhere else.
+    Nothing in ``maljan`` knows which job it is running under, so nothing in
+    ``maljan`` can number a run; and a second counter anywhere would order one
+    conversation two ways. The number is what a client resumes from, on the
+    socket and on the events endpoint alike.
+
+    The same event is queued for ``job_events`` when this job registered a
+    session factory (see ``_persist_events_for``), which is what keeps the
+    conversation of a failed or cancelled run readable after the stream's
+    24 h TTL.
     """
     import json
 
+    seq = await _next_seq(redis_conn, job_id)
+    stamped = {**(data or {}), "seq": seq}
+    ts = datetime.now(UTC).isoformat()
     payload = {
         "type": event_type,
-        "data": data or {},
-        "ts": datetime.now(UTC).isoformat(),
+        "data": stamped,
+        "ts": ts,
     }
     message = json.dumps(payload)
+    buffer = _EVENT_BUFFERS.get(job_id)
+    if buffer is not None:
+        await buffer.add(seq, event_type, stamped, ts)
     await redis_conn.publish(f"analysis:{job_id}", message)
     # Persist into the bounded Stream so the live page can replay missed
     # events when it mounts after the worker already started publishing.
@@ -398,6 +544,10 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
 
     redis_conn: aioredis.Redis = ctx["redis"]
     db_session: async_sessionmaker = ctx["db_session"]
+
+    # Before the first event of the run, which is the status change below: a
+    # feed that starts late starts at the wrong ``seq``.
+    _start_event_feed(job_id, db_session)
 
     async with db_session() as db:
         job = None  # Ensure job is defined for the except block
@@ -671,6 +821,12 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     "sha256": sample.sha256[:16] + "...",
                 },
             )
+            # Everyone who can speak in this run and the stages they speak in,
+            # once, before anybody does. ``pipeline_started`` names the
+            # analysis-stage agents by key; this names every participant of
+            # every stage, with the label the operator gave it, so a reader
+            # who cannot open the admin settings still sees a name.
+            await _publish_event(redis_conn, job_id, "roster", _roster_for(app.container))
             # Roster only — "waiting", not "analyzing". Analysts are serialised
             # on the single-slot local model, so marking them all busy up front
             # was simply false; each analyst node now announces its own start
@@ -1200,6 +1356,11 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                         confidence=message.get("confidence"),
                         claims=message.get("claims") or [],
                         dissent=message.get("dissent") or [],
+                        addressed_to=(
+                            str(message["addressed_to"])[:100]
+                            if message.get("addressed_to")
+                            else None
+                        ),
                         ts=_parse_event_ts(message.get("ts")),
                     )
                 )
@@ -1345,6 +1506,12 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             return {"status": "failed", "error": error_msg}
 
         finally:
+            # Whatever is still queued of this job's conversation, written
+            # before the task returns. First in the block: the teardown below
+            # can take a while and a reader who opens a cancelled run wants
+            # its last lines, not the ones from two seconds earlier.
+            await _stop_event_feed(job_id)
+
             # The worker's own private copies of the sample never outlive the
             # job that downloaded them, on success, failure or cancellation
             # alike (H3, security hardening). ``remove_quietly`` is a no-op
@@ -1398,6 +1565,22 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
 
 
 # ── Helpers ──────────────────────────────────────────────────────
+
+
+def _roster_for(container: Any) -> dict[str, Any]:
+    """The run's roster, or an empty one when the team cannot be read.
+
+    Never raises: a roster is how the console draws names, and a run that
+    stopped because it could not build one would trade the whole analysis for
+    a label.
+    """
+    try:
+        from maljan.pipeline.events import roster_payload
+
+        return roster_payload(container.active_profile(), container.config.agents.definitions)
+    except Exception as exc:  # noqa: BLE001 — a roster never costs a run
+        logger.warning("Could not build the roster for this run (%s).", exc)
+        return {"agents": [], "stages": []}
 
 
 def _extract_confidence(result: dict) -> float:
@@ -1664,7 +1847,7 @@ async def shutdown(ctx: dict) -> None:
 # The enrichment task lives in a sibling module. Importing it at module
 # scope is fine — ``enrich_worker`` only re-enters this module lazily from
 # inside its function, so there is no real circular dependency.
-from app.worker.enrich_worker import enrich_threat_intel  # noqa: E402
+from app.worker.enrich_worker import enrich_threat_intel, purge_old_job_events  # noqa: E402
 
 # Resident-memory ceiling for the worker process, in MiB. Above this, the
 # worker finishes reporting the job it just completed and then exits so Docker
@@ -1743,6 +1926,10 @@ class WorkerSettings:
     """ARQ worker settings — configure connection and task functions."""
 
     functions = [run_analysis, enrich_threat_intel]
+    # The one scheduled task this worker runs: the nightly sweep that bounds
+    # ``job_events`` to ``core.events.retention_days``. Off-hour and off-minute
+    # so it does not land on top of whatever else a deployment runs at 03:00.
+    cron_jobs = [cron(purge_old_job_events, hour=3, minute=17)]
     on_startup = startup
     on_shutdown = shutdown
     after_job_end = _recycle_if_bloated

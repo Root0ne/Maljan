@@ -238,8 +238,17 @@ async def get_job(
     job_id: uuid.UUID,
     user: User = Depends(get_current_user),
     svc: AnalysisService = Depends(_get_service),
+    db: AsyncSession = Depends(get_db),
 ) -> Any:
-    """Get a specific job's status and details."""
+    """Get a specific job's status and details, with the roster of its team.
+
+    The roster is here rather than only in the run's event feed because a
+    reader who opens a finished run, or one whose feed has aged out, still
+    needs names for the speakers. The labels live on the agent definitions,
+    which only an admin may read through the settings endpoint; a job's own
+    roster is as sensitive as the job, so it goes out with the job and a
+    non-admin analyst sees "Lead analyst" instead of ``lead``.
+    """
     job = await svc.get_job(job_id, user)
     if not job:
         logger.warning(
@@ -247,29 +256,75 @@ async def get_job(
             extra={"job_id": log_safe(job_id), "user_id": log_safe(user.id)},
         )
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
-    return job
+    return JobResponse.model_validate(job).model_copy(
+        update={"roster": await _roster_for_job(db, job)}
+    )
+
+
+async def _roster_for_job(db: AsyncSession, job: Any) -> dict[str, Any]:
+    """Who can speak in this job's run, by key, label, role and stage.
+
+    Read off the team the job names, or the stored default when it names none,
+    through the same effective maps the submit checks use — so the roster a
+    reader is shown is the team the worker composed rather than a second
+    reading of the settings.
+
+    Never raises. A roster is how the console draws names; a job endpoint that
+    500s because a stored profile will not validate would take the run's
+    status down with the label.
+    """
+    from maljan.core.config import ProfileDefinition
+    from maljan.pipeline.events import roster_payload
+
+    from app.services.agent_map import effective_definitions, effective_profiles
+
+    try:
+        overrides = await SettingsService(db).load_overrides()
+        profiles = effective_profiles(overrides)
+        name = str((job.config or {}).get("profile") or "") or str(
+            overrides.get("core.agents.profile") or "default"
+        )
+        document = profiles.get(name) or profiles.get("default") or {}
+        # Validated rather than read raw: a team written as a flat analyst
+        # list has no stages in the document, and the model is where that
+        # conversion lives.
+        return roster_payload(ProfileDefinition.model_validate(document), effective_definitions(overrides))
+    except Exception as exc:  # noqa: BLE001 — a label is never worth a 500
+        logger.warning(f"Could not build a roster for job {log_safe(job.id)}: {log_safe(exc)}")
+        return {"agents": [], "stages": []}
 
 
 @router.get("/{job_id}/events")
 async def get_job_events(
     job_id: uuid.UUID,
     limit: int = Query(500, ge=1, le=1000),
+    since: int | None = Query(
+        None,
+        ge=0,
+        description="Return only events whose seq is greater than this. Omit for the whole feed.",
+    ),
     user: User = Depends(get_current_user),
     svc: AnalysisService = Depends(_get_service),
+    db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Return historical pipeline events for this job.
+    """Return this job's pipeline events, in sequence order.
 
-    The Live tab uses this on mount to back-fill its event log before
-    attaching the WebSocket. Events live in
-    Redis Stream ``analysis:{job_id}:events`` with a 24 h TTL and a
-    1 000-entry cap. ``stream_id`` is the canonical ordering key —
-    clients dedupe against it when WS events arrive concurrently.
+    The console uses this to back-fill before it attaches the WebSocket, and
+    to resume after a navigation: ``since`` is the last ``seq`` it already
+    holds, so a reconnect costs the events it missed rather than a re-read of
+    the whole window.
+
+    Events live in the Redis Stream ``analysis:{job_id}:events`` with a 24 h
+    TTL and a 1 000-entry cap, and in ``job_events`` against the job for
+    ``core.events.retention_days``. The stream is read first and the table
+    answers what the stream can no longer reach — an expired stream, or a
+    cursor older than the cap. ``seq`` is the ordering key; ``stream_id`` is
+    still on an event the stream answered, for a client that keyed on it.
     """
-    import json
-
     import redis.asyncio as aioredis
 
     from app.config import settings
+    from app.services.job_events import read_events
 
     job = await svc.get_job(job_id, user)
     if not job:
@@ -277,29 +332,13 @@ async def get_job_events(
 
     redis_conn = aioredis.from_url(settings.redis_url, decode_responses=True)
     try:
-        entries = await redis_conn.xrange(
-            f"analysis:{job_id}:events", min="-", max="+", count=limit
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(f"Event stream read failed for job={log_safe(job_id)}: {log_safe(exc)}")
-        entries = []
+        events = await read_events(db, redis_conn, job_id, since=since, limit=limit)
     finally:
         try:
             await redis_conn.aclose()
         except Exception:  # noqa: BLE001
             pass
 
-    events: list[dict[str, Any]] = []
-    for stream_id, fields in entries:
-        payload_raw = fields.get("payload") if isinstance(fields, dict) else None
-        if not payload_raw:
-            continue
-        try:
-            payload = json.loads(payload_raw)
-        except (ValueError, TypeError):
-            continue
-        payload["stream_id"] = stream_id
-        events.append(payload)
     return {"job_id": str(job_id), "events": events, "count": len(events)}
 
 
