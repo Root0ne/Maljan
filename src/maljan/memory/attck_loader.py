@@ -64,6 +64,10 @@ VALID_IDS_FILE = Path(__file__).resolve().parents[3] / "data" / "attck_valid_ids
 # platform half of the technique check answerable with no network and no
 # bundle load; the cached bundles are consulted only for an id it lacks.
 PLATFORMS_FILE = Path(__file__).resolve().parents[3] / "data" / "attck_platforms.json"
+# Ids a previous vendored catalogue had and the current release does not, with
+# the release they went in, written by the same script. What lets a stored
+# report or a prompt that still names T1562.001 read as retired, not invented.
+RETIRED_IDS_FILE = Path(__file__).resolve().parents[3] / "data" / "attck_retired_ids.json"
 
 # Our platform vocabulary translated into MITRE's ``x_mitre_platforms`` strings.
 # An empty tuple means "do not filter on platform": a cross-platform or
@@ -500,6 +504,30 @@ def _vendored_platforms() -> dict[str, tuple[str, ...]]:
     return _platform_map_cache
 
 
+_retired_cache: dict[str, str] | None = None
+
+
+def retired_ids() -> dict[str, str]:
+    """``{technique_id: release it was retired in}`` from the vendored file."""
+    global _retired_cache
+    if _retired_cache is None:
+        try:
+            raw = json.loads(RETIRED_IDS_FILE.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            raw = {}
+        _retired_cache = {
+            str(tid).upper(): str((row or {}).get("retired_in") or "unknown")
+            for tid, row in (raw.items() if isinstance(raw, dict) else [])
+            if isinstance(row, dict)
+        }
+    return _retired_cache
+
+
+def retired_in(technique_id: str) -> str | None:
+    """The release that retired the id; ``None`` when no catalogue we shipped had it."""
+    return retired_ids().get((technique_id or "").strip().upper())
+
+
 _platform_cache: dict[str, tuple[str, ...]] | None = None
 
 
@@ -552,10 +580,11 @@ def reset_caches() -> None:
 
     For tests and the refresh CLI.
     """
-    global _valid_ids_cache, _platform_cache, _platform_map_cache
+    global _valid_ids_cache, _platform_cache, _platform_map_cache, _retired_cache
     _valid_ids_cache = None
     _platform_cache = None
     _platform_map_cache = None
+    _retired_cache = None
 
 
 def _main() -> None:

@@ -68,3 +68,37 @@ class TestThePlatformMap:
         assert json.loads(out.read_text(encoding="utf-8")) == {
             "T1055": {"domain": "enterprise", "platforms": ["Windows"]}
         }
+
+
+class TestTheRetiredSet:
+    def test_ids_the_previous_catalogue_had_are_kept_with_their_release(self) -> None:
+        script = _script()
+        retired = script.retired_ids(
+            {"enterprise": {"T1055", "T1562.001"}, "mobile": {"T1400"}},
+            {"enterprise": ["T1055"], "mobile": ["T1400"], "ics": []},
+            "19.2",
+        )
+        assert retired == {"T1562.001": {"domain": "enterprise", "retired_in": "19.2"}}
+
+    def test_an_earlier_retirement_keeps_its_release_and_a_comeback_leaves(self) -> None:
+        script = _script()
+        existing = {
+            "T1500": {"domain": "enterprise", "retired_in": "18.0"},
+            "T1055": {"domain": "enterprise", "retired_in": "18.0"},
+        }
+        retired = script.retired_ids(
+            {"enterprise": {"T1055", "T1562.001"}},
+            {"enterprise": ["T1055"], "mobile": [], "ics": []},
+            "19.2",
+            existing,
+        )
+        assert retired == {
+            "T1500": {"domain": "enterprise", "retired_in": "18.0"},
+            "T1562.001": {"domain": "enterprise", "retired_in": "19.2"},
+        }
+
+    def test_the_release_is_read_from_the_bundle(self) -> None:
+        script = _script()
+        bundle = {"objects": [{"type": "x-mitre-collection", "x_mitre_version": "19.2"}]}
+        assert script.bundle_version(bundle) == "19.2"
+        assert script.bundle_version({"objects": []}) == "unknown"

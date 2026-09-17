@@ -293,7 +293,8 @@ def validate_isr(
                 Violation(
                     code="attck.unknown_id",
                     message=(
-                        f"TECHNIQUE {tid} is not in the MITRE ATT&CK catalogue.{hint} "
+                        f"TECHNIQUE {tid} is not in the MITRE ATT&CK catalogue"
+                        f"{_retired_note(tid, attck)}.{hint} "
                         "Use one of them, or omit the technique id."
                     ),
                     path=path,
@@ -625,6 +626,19 @@ def unknown_technique_ids(ids: Sequence[str], attck: Any) -> set[str]:
 def _technique_is_known(technique_id: str, attck: Any) -> bool:
     """Whether the id is a real technique."""
     return not unknown_technique_ids([technique_id], attck)
+
+
+def _retired_note(technique_id: str, attck: Any) -> str:
+    """`` (retired in ATT&CK 19.2)`` when a previous vendored catalogue had the id."""
+    ask = getattr(attck, "attck_retired_in", None)
+    if ask is None:
+        return ""
+    try:
+        release = ask(technique_id)
+    except Exception as exc:  # noqa: BLE001 — a note, not a check
+        logger.debug("validation: the retired-id lookup for %s failed (%s).", technique_id, exc)
+        return ""
+    return f" (retired in ATT&CK {release})" if release else ""
 
 
 def _suggest_techniques(claim_text: str, attck: Any) -> list[str]:
@@ -1146,8 +1160,9 @@ def validate_verdict_bundle(
                         code="stix.unknown_technique",
                         message=(
                             f"the attack-pattern names {tid}, which the MITRE ATT&CK "
-                            "catalogue has no entry for in any domain. Use a real "
-                            "technique id or drop the attack-pattern."
+                            f"catalogue has no entry for in any domain"
+                            f"{_retired_note(tid, attck)}. Use a real technique id or "
+                            "drop the attack-pattern."
                         ),
                         path=f"objects[{index}]",
                     )

@@ -692,3 +692,36 @@ class TestAPreOnlyTechnique:
         assert "belongs to the ATT&CK mobile domain" in platform_mismatch_message(
             "T1000", _Scope(), ("enterprise", ("Windows",))
         )
+
+
+class TestARetiredId:
+    """T1562.001 was a real id in the catalogue this tree shipped before 19.2.
+    A stored report or a prompt that still names it must read as retired,
+    not as invented."""
+
+    def test_the_analyst_is_told_the_id_was_retired_and_in_which_release(self) -> None:
+        from maljan.tools import knowledge
+
+        isr = _isr(_claim("T1562.001"))
+        violations = validate_isr(isr, attck=knowledge, sample=PE)
+        assert [v.code for v in violations] == ["attck.unknown_id"]
+        assert (
+            "TECHNIQUE T1562.001 is not in the MITRE ATT&CK catalogue (retired in ATT&CK 19.2)"
+            in (violations[0].message)
+        )
+        assert isr.claims[0].technique_id == "T1562.001"
+
+    def test_the_knowledge_tools_say_so_too(self) -> None:
+        from maljan.tools import knowledge
+
+        row = knowledge.attck_validate(["T1562.001"])["invalid"][0]
+        assert row["retired_in"] == "19.2"
+        looked = knowledge.attck_lookup("T1562.001")
+        assert looked["valid"] is False and looked["reason"] == "retired in ATT&CK 19.2"
+        assert knowledge.attck_retired_in("T1055") is None
+
+    def test_an_invented_id_carries_no_such_note(self) -> None:
+        from maljan.tools import knowledge
+
+        violations = validate_isr(_isr(_claim("T9999")), attck=knowledge, sample=PE)
+        assert "retired" not in violations[0].message

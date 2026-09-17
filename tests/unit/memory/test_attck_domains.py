@@ -209,3 +209,23 @@ class TestTheVendoredPlatformMap:
         attck_loader.reset_caches()
         monkeypatch.setattr(attck_loader, "_platform_cache", {})
         assert attck_loader.platforms_for("T1055") == ()
+
+
+class TestRetiredIds:
+    def test_an_id_the_previous_catalogue_had_names_the_release_that_retired_it(self) -> None:
+        attck_loader.reset_caches()
+        assert attck_loader.retired_in("T1562.001") == "19.2"
+        assert attck_loader.retired_in("t1070.001") == "19.2"
+        assert "T1562.001" not in attck_loader.valid_ids()
+
+    def test_an_id_no_catalogue_had_is_not_retired(self) -> None:
+        assert attck_loader.retired_in("T9999") is None
+        assert attck_loader.retired_in("T1055") is None
+
+    def test_a_missing_file_is_an_empty_set(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(attck_loader, "RETIRED_IDS_FILE", tmp_path / "absent.json")
+        attck_loader.reset_caches()
+        assert attck_loader.retired_ids() == {}
+        attck_loader.reset_caches()

@@ -218,7 +218,7 @@ def resolve_technique(text: str, k: int = 5, domain: str | None = None) -> dict[
 
 def attck_lookup(technique_id: str) -> dict[str, Any]:
     """One technique's catalogue entry, and whether it exists at all."""
-    from maljan.memory.attck_loader import domain_of, platforms_for, valid_ids
+    from maljan.memory.attck_loader import domain_of, platforms_for, retired_in, valid_ids
 
     tid = (technique_id or "").strip().upper()
     if not tid:
@@ -235,8 +235,22 @@ def attck_lookup(technique_id: str) -> dict[str, Any]:
         or f"https://attack.mitre.org/techniques/{tid.replace('.', '/')}/",
     }
     if technique is None:
-        out["reason"] = "the ATT&CK catalogue has no entry for this id"
+        retired = retired_in(tid)
+        out["reason"] = (
+            f"retired in ATT&CK {retired}"
+            if retired
+            else "the ATT&CK catalogue has no entry for this id"
+        )
+        if retired:
+            out["retired_in"] = retired
     return out
+
+
+def attck_retired_in(technique_id: str) -> str | None:
+    """The ATT&CK release that retired the id, from the vendored set; ``None`` otherwise."""
+    from maljan.memory.attck_loader import retired_in
+
+    return retired_in(technique_id)
 
 
 def attck_scope(technique_id: str) -> dict[str, Any]:
@@ -265,7 +279,7 @@ def attck_validate(ids: list[str]) -> dict[str, Any]:
     every id is real never loads it, which is what makes this cheap enough to
     call inside an analyst's own loop.
     """
-    from maljan.memory.attck_loader import valid_ids
+    from maljan.memory.attck_loader import retired_in, valid_ids
 
     known = valid_ids()
     unknown = [t for t in (str(raw).strip().upper() for raw in ids or []) if t and t not in known]
@@ -275,6 +289,11 @@ def attck_validate(ids: list[str]) -> dict[str, Any]:
     invalid: list[dict[str, Any]] = []
     for tid in unknown:
         row: dict[str, Any] = {"id": tid, "suggestions": []}
+        # An id a previous catalogue had is retired, not invented; the release
+        # that retired it is the fact a reader of an older report needs.
+        retired = retired_in(tid)
+        if retired:
+            row["retired_in"] = retired
         # The parent of a bogus sub-technique is the single most likely intent,
         # and it is a string operation rather than a search — a suggestion that
         # cost an embedding model would be worse than no suggestion.
