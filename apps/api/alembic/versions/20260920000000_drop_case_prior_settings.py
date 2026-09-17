@@ -1,13 +1,16 @@
-"""Drop the retired case-prior retrieval settings from the stored overrides.
+"""Drop the retired preprocessing settings from the stored overrides.
 
 ``use_attck_case_rag``, ``attck_case_corpus_path``, ``attck_case_rag_top_k``,
 ``attck_case_rag_min_score`` and ``attck_case_rag_max_techniques`` gated an
 in-process retrieval of ATT&CK techniques from similar prior cases, run
-inside the judge node and the static analyst. Both are gone — prior cases
+inside the judge node and the static analyst; both are gone, and prior cases
 are reached through the knowledge tool ``similar_cases``, which an analyst
-calls and cites — so this revision deletes the five flat rows. A stored
-override that names a setting the catalog no longer knows would otherwise
-be refused by the settings service.
+calls and cites. ``use_api_behaviour_map`` and ``api_behaviour_map_path``
+gated the extractor's labelling of imports, which is gone too: the pack's
+``api_capability`` entry reads the catalogue directly. This revision deletes
+the seven flat rows. A stored override that names a setting the catalog no
+longer knows would otherwise be refused by the settings service on the next
+import.
 
 Downgrade restores nothing: the values selected a retrieval that no longer
 exists.
@@ -32,6 +35,8 @@ _LEAVES = (
     "attck_case_rag_top_k",
     "attck_case_rag_min_score",
     "attck_case_rag_max_techniques",
+    "use_api_behaviour_map",
+    "api_behaviour_map_path",
 )
 FLAT_KEYS = tuple(f"core.preprocessing.{name}" for name in _LEAVES)
 

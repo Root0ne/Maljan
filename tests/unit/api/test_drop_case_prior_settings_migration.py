@@ -1,4 +1,4 @@
-"""The five case-prior rows leave the stored overrides, and nothing else does."""
+"""The seven retired preprocessing rows leave the stored overrides, and nothing else does."""
 
 from __future__ import annotations
 
@@ -53,7 +53,7 @@ def _run(conn, module) -> None:
 
 
 class TestTheDrop:
-    def test_the_five_rows_go_and_their_neighbours_stay(self) -> None:
+    def test_the_seven_rows_go_and_their_neighbours_stay(self) -> None:
         module = _load()
         conn = _engine(
             {
@@ -62,6 +62,8 @@ class TestTheDrop:
                 "core.preprocessing.attck_case_rag_top_k": "5",
                 "core.preprocessing.attck_case_rag_min_score": "0.35",
                 "core.preprocessing.attck_case_rag_max_techniques": "8",
+                "core.preprocessing.use_api_behaviour_map": "true",
+                "core.preprocessing.api_behaviour_map_path": '"data/api_behaviour_map_v1.json"',
                 "core.preprocessing.use_family_feature_rag": "false",
                 "core.triage.enabled": "true",
             }
