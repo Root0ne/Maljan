@@ -381,10 +381,114 @@ class TestTheGuards:
         why = refusal(container, boss, "helper")
         assert why is not None and "not enough budget" in why
 
-    def test_a_refusal_reaches_the_model_as_a_failed_tool_call(self) -> None:
+    def test_the_refusal_is_raised_before_the_callee_is_touched(self) -> None:
         container = _team([], [])
         with pytest.raises(DelegationRefused, match="no agent named"):
             ask(container, caller_key="boss", callee_key="nobody", task="t")
+
+    def test_a_refusal_reaches_the_model_as_one_failed_ledger_entry(self) -> None:
+        """What the model reads is the recorder's, not an exception the loop survives."""
+        from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
+
+        container = _team([], [])
+        recorder = EvidenceRecorder("boss", stage="lead")
+        tool = record_tools([ask_tool(container, "boss", "nobody")], recorder)[0]
+
+        answer = tool.invoke({"task": "Have a look."})
+
+        assert len(recorder.entries) == 1
+        entry = recorder.entries[0]
+        assert entry.ok is False and entry.server == TEAM_SERVER
+        assert entry.tool == tool_name("nobody")
+        assert "no agent named 'nobody'" in str(entry.error)
+        assert entry.id in answer and "no agent named 'nobody'" in answer
+
+    def test_an_ask_cannot_reach_a_server_the_asking_stage_withholds(self) -> None:
+        """A stage told to read what it was handed cannot go looking through a colleague."""
+        container = _Container(
+            _settings(
+                definitions={
+                    "helper": {
+                        "role": "generic",
+                        "prompt": "You help.",
+                        "tools": [{"kind": "mcp", "server": "knowledge"}],
+                    }
+                },
+                profiles={
+                    "led": {
+                        "stages": [
+                            {
+                                "key": "lead",
+                                "kind": "analysis",
+                                "agents": ["boss"],
+                                "builtin_tools": False,
+                            },
+                            {
+                                "key": "verdict",
+                                "kind": "verdict",
+                                "agents": ["judge"],
+                                "depends_on": ["lead"],
+                            },
+                        ]
+                    }
+                },
+            ),
+            models={},
+            tools={},
+        )
+
+        why = refusal(container, container.get_agent("boss"), "helper")
+
+        assert why is not None and "knowledge" in why and "stage 'lead'" in why
+
+    def test_a_callee_in_the_same_withholding_stage_is_still_askable(self) -> None:
+        """Its own stage already took those servers off it, so nothing is widened."""
+        container = _Container(
+            _settings(
+                definitions={
+                    "helper": {
+                        "role": "generic",
+                        "prompt": "You help.",
+                        "tools": [{"kind": "mcp", "server": "knowledge"}],
+                    }
+                },
+                profiles={
+                    "led": {
+                        "stages": [
+                            {
+                                "key": "lead",
+                                "kind": "analysis",
+                                "agents": ["boss", "helper"],
+                                "builtin_tools": False,
+                            },
+                            {
+                                "key": "verdict",
+                                "kind": "verdict",
+                                "agents": ["judge"],
+                                "depends_on": ["lead"],
+                            },
+                        ]
+                    }
+                },
+            ),
+            models={},
+            tools={},
+        )
+
+        assert refusal(container, container.get_agent("boss"), "helper") is None
+
+    def test_a_profile_with_nothing_to_call_binds_no_ask_tool(self) -> None:
+        """``exclude_servers: ['*']`` is the tool-free baseline, delegation included."""
+        from maljan.agents.composition import _agent_tools
+
+        container = _Container(
+            _settings(profiles={"led": {"stages": _stages(), "exclude_servers": ["*"]}}),
+            models={},
+            tools={},
+        )
+        definition = container.config.agents.definitions["boss"]
+
+        assert _agent_tools(container, definition, "boss") == []
 
 
 class TestTheCeiling:

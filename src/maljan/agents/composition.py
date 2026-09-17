@@ -260,9 +260,17 @@ def _agent_tools(container: Any, definition: AgentDefinition, key: str) -> list[
     In-process like the sandbox tools, and only bound where the definition
     asks: an agent with no agent reference has no way to ask anyone, which is
     what keeps the default profile's analysts exactly what they were.
+
+    A profile that excludes every server excludes this one too. ``*`` is the
+    measurement baseline's way of saying "nothing to call", and an agent that
+    could still hand its task to a colleague with tools would call through it.
     """
     refs = [ref for ref in definition.tools if ref.kind == "agent" and ref.agent]
     if not refs:
+        return []
+    from maljan.core.config import ALL_SERVERS
+
+    if ALL_SERVERS in _withheld_servers(container.config, key):
         return []
     from maljan.agents.delegation import ask_tool
 
@@ -331,6 +339,30 @@ def mcp_refs_for(settings: Settings, key: str) -> list[ToolRef]:
     if definition is None:
         return []
     return _mcp_refs(settings, definition, key)
+
+
+def servers_withheld_from(settings: Settings, caller_key: str, callee_key: str) -> list[str]:
+    """The servers ``callee_key`` brings that ``caller_key``'s own stage may not reach.
+
+    A callee's effective tool set is its own definition narrowed by the tool
+    policy of the stage doing the asking: a stage with ``builtin_tools=False``
+    is told to read what it was handed, and an ask that came back with a
+    ``knowledge`` lookup or a ``network`` query would have gone around it.
+
+    Reported rather than applied, because the callee is one cached instance
+    per job: narrowing the instance for one ask would narrow it for whoever
+    asks next, and for its own stage. The delegation refuses the ask instead,
+    in words the model reads.
+    """
+    from maljan.core.config import ALL_SERVERS
+
+    withheld = _withheld_servers(settings, caller_key)
+    if not withheld:
+        return []
+    brought = {str(ref.server) for ref in mcp_refs_for(settings, callee_key)}
+    if ALL_SERVERS in withheld:
+        return sorted(brought)
+    return sorted(brought & withheld)
 
 
 def _excluded_servers(settings: Settings, key: str = "") -> str:

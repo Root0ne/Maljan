@@ -21,11 +21,14 @@ The answer is the callee's ISR text, verbatim. The caller reads it as a tool
 result and decides what to make of it; nothing here edits a claim, a
 confidence or a technique id on the way through.
 
-Three guards, each a tool error the model reads rather than a job failure:
+Four guards, each a tool error the model reads rather than a job failure:
 a callee that is not defined or is disabled is refused by name; an ask that
 would nest deeper than ``core.agents.delegation_depth`` is refused with the
-chain that reached it; and an ask back up the chain — the callee asking its
-caller, or anyone already waiting on this answer — is refused as a cycle.
+chain that reached it; an ask back up the chain — the callee asking its
+caller, or anyone already waiting on this answer — is refused as a cycle; and
+an ask that would come back with a server the asking stage withholds is
+refused naming the stage and the servers, because a callee's effective tool
+set is its own definition narrowed by the tool policy of the stage asking.
 """
 
 from __future__ import annotations
@@ -136,6 +139,13 @@ def refusal(container: Any, caller: Any, callee_key: str) -> str | None:
         return f"there is no agent named {callee_key!r} to ask. Available: {available}"
     if not getattr(definition, "enabled", True):
         return f"agent {callee_key!r} is disabled in this deployment and cannot be asked"
+    beyond = _servers_the_caller_may_not_reach(container, caller, callee_key)
+    if beyond:
+        return (
+            f"asking {callee_key!r} would reach {', '.join(beyond)}, which "
+            f"{_where_the_caller_runs(container, caller)} withholds from the agents in it; "
+            "work from the tools you were given"
+        )
     chain = (*tuple(getattr(caller, "call_chain", ()) or ()), str(caller.name))
     if callee_key in chain:
         path = " -> ".join((*chain, callee_key))
@@ -159,6 +169,28 @@ def refusal(container: Any, caller: Any, callee_key: str) -> str | None:
                 f"and {steps} step(s) remain; write your answer from what you have"
             )
     return None
+
+
+def _servers_the_caller_may_not_reach(container: Any, caller: Any, callee_key: str) -> list[str]:
+    """The callee's servers the caller's own stage withholds, or nothing."""
+    from maljan.agents.composition import servers_withheld_from
+
+    try:
+        return servers_withheld_from(container.config, str(caller.name), callee_key)
+    except Exception as exc:  # noqa: BLE001 — a guard never costs a run
+        logger.debug("delegation: the caller's tool policy could not be read (%s).", exc)
+        return []
+
+
+def _where_the_caller_runs(container: Any, caller: Any) -> str:
+    """The stage the caller is in, named the way the refusal reads best."""
+    from maljan.agents.composition import stage_for_agent
+
+    try:
+        stage = stage_for_agent(container.config, str(caller.name))
+    except Exception:  # noqa: BLE001 — the sentence still reads without it
+        stage = None
+    return f"stage {str(stage.key)!r}" if stage is not None else "this profile"
 
 
 def ask(container: Any, *, caller_key: str, callee_key: str, task: str, context: str = "") -> str:
