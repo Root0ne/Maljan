@@ -1332,6 +1332,27 @@ def stage_rollup(
     return rows
 
 
+def stage_key_of(stage: Any, default: str) -> str:
+    """The key of the stage a node belongs to, or ``default`` when it has none.
+
+    Every transcript line says which step of the team said it, so the console
+    can file a message under the stage that produced it rather than under the
+    run as a whole. A node built without a stage — the graph a test assembles
+    by hand — falls back to the name its kind has always had.
+    """
+    return str(getattr(stage, "key", "") or default)
+
+
+def label_of(container: ServiceContainer, key: str) -> str:
+    """The label an operator gave this agent, or its key. Never raises."""
+    try:
+        from maljan.agents.composition import display_name
+
+        return display_name(container.config, key)
+    except Exception:  # noqa: BLE001 — a name is never worth a node
+        return str(key)
+
+
 def announce_started(container: ServiceContainer, stage: Any) -> None:
     """``stage_started``, from the one node of the stage that announces it."""
     emit(
@@ -1652,6 +1673,8 @@ def make_stage_agent_node(
                     role="analyst",
                     text=no_data_text,
                     status="no_data",
+                    stage=stage_key_of(stage, "analysis"),
+                    display_name=label_of(container, agent_name),
                 )
                 return _closing(
                     {
@@ -1760,6 +1783,8 @@ def make_stage_agent_node(
                 # a disclosure. Previously this text reached the database as
                 # ``agent_reports`` and the UI could only show it as a JSON dump.
                 report=report,
+                stage=stage_key_of(stage, "analysis"),
+                display_name=label_of(container, agent_name),
             )
 
             technique_ids = tuple(
@@ -1808,6 +1833,8 @@ def make_stage_agent_node(
                 role="analyst",
                 text=failed_text,
                 status="failed",
+                stage=stage_key_of(stage, "analysis"),
+                display_name=label_of(container, agent_name),
             )
             return _closing(
                 {
@@ -1843,6 +1870,8 @@ def make_stage_agent_node(
                 role="analyst",
                 text=crashed_text,
                 status="failed",
+                stage=stage_key_of(stage, "analysis"),
+                display_name=label_of(container, agent_name),
             )
             return _closing(
                 {
@@ -2237,6 +2266,7 @@ def make_negotiation_node(
                 round_index=iteration + 1,
                 status="complete",
                 confidence=argument.confidence_score,
+                stage=stage_key_of(stage, "debate"),
             )
             if syco:
                 emit_agent_message(
@@ -2250,6 +2280,10 @@ def make_negotiation_node(
                     ),
                     round_index=iteration + 1,
                     status="complete",
+                    stage=stage_key_of(stage, "debate"),
+                    # A notice to the room, not a line somebody said: the
+                    # console draws it centred rather than as a bubble.
+                    kind="system",
                 )
 
             return {
@@ -2283,6 +2317,7 @@ def make_negotiation_node(
                 text=f"[ERROR] Mediation {label}: {describe_exception(e)}",
                 round_index=iteration + 1,
                 status=status,
+                stage=stage_key_of(stage, "debate"),
             )
             return {
                 "iteration_count": iteration + 1,
@@ -2450,6 +2485,8 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     text=f"[ERROR] {name} revision failed: {result}",
                     round_index=iteration,
                     status="failed",
+                    stage=stage_key_of(stage, "debate"),
+                    display_name=label_of(container, name),
                 )
             else:
                 revised_text, isr = result
@@ -2488,6 +2525,8 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     # so what an agent said *after* the negotiation existed only
                     # inside the run.
                     report=revised_text,
+                    stage=stage_key_of(stage, "debate"),
+                    display_name=label_of(container, name),
                 )
 
         out: dict[str, Any] = {"revised_reports": revised, "isr_reports": revised_isrs}
@@ -3129,6 +3168,10 @@ def make_judge_node(
                 ),
                 round_index=state.get("iteration_count", 0),
                 status="complete",
+                stage=stage_key_of(verdict_stage, "verdict"),
+                # The line that closes the conversation, which the console
+                # draws as a full-width card rather than as another bubble.
+                kind="verdict",
             )
 
             return _closing(
@@ -3176,6 +3219,7 @@ def make_judge_node(
                 ),
                 round_index=state.get("iteration_count", 0),
                 status="failed",
+                stage=stage_key_of(verdict_stage, "verdict"),
             )
             # A judge-body failure must ALSO flag the run as degraded so the
             # report node caps ``overall_confidence`` and the UI shows the
