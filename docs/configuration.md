@@ -169,25 +169,42 @@ is an answer, not an error.
 
 ### A model is probed before a job may name it
 
-The `llm` and `agent` probes write down what they reached: one row per
-`(endpoint, model)` pair, with the provider, whether the probe got there and
-the sentence it came back with. Submitting a job reads that record for every
-model the team's agents would call, and refuses the job with 422 when one of
-them has no passing result — naming the agent, the model, the endpoint and the
-probe's last message. The console shows that sentence on the submit form.
+**What the probe does.** Both the `llm` and the `agent` probe end by asking the
+model for one short answer — one turn, eight tokens, at the endpoint and on the
+model the run will use, through each provider's own completion API
+(`/chat/completions` for an OpenAI-compatible server, `/api/generate` for
+Ollama, `/v1/messages` for Anthropic, `:generateContent` for Gemini). Listing a
+provider's catalogue comes first and is not enough on its own: a server can
+offer a name it will not load, a key can be refused for one model and not
+another, and a misspelling can land on a name the catalogue happens to hold.
+The probe passes only when the call came back.
+
+**What is written down.** One row per `(endpoint, model)` pair, with the
+provider, whether the model answered and the sentence the probe came back with.
+The `llm` probe files the selected provider's **expert** model at its own
+endpoint — the one it completed with — and, on Ollama, each per-agent override
+at its own server; it does not file the judge model, which it lists and never
+calls. The `agent` probe files the one pair its agent would use, which is how a
+per-agent endpoint or a per-agent model gets a row of its own.
+
+**Where the gate stands.** Submitting a job reads that record for every model
+the run can reach — the agents its team's stages name, and every agent those
+can ask through `ask_<key>`, and so on — and refuses with 422 when one of them
+has no passing row, naming the agent, the model, the endpoint and the probe's
+last message. Saving a per-agent model (`core.llm.agents.*`) is refused with
+the same sentence, because an operator who saves a model nothing can reach has
+made the mistake the gate is about and the settings page is where it can be
+fixed. The console shows the sentence as written in both places.
 
 The pair is also the invalidation. A changed endpoint or a changed model is a
 different question, finds no row, and is refused until it is probed: nothing
 has to expire a result, because a result is never read for a pair it was not
-taken against. The `llm` probe records the selected provider's expert and
-judge models at its own endpoint, and on Ollama each per-agent override at its
-own server; an agent sitting on a different provider or its own endpoint is
-recorded by its own **Test** button in the agent editor.
+taken against.
 
 `core.llm.require_probe` is on, and turning it off is the only way past the
-gate — a job cannot ask to skip it. It is there for an air-gapped batch run,
-where the endpoint is known good and nobody is at a console to press a
-button.
+gate — neither a job nor a save can ask to skip it. It is there for an
+air-gapped batch run, where the endpoint is known good and nobody is at a
+console to press a button.
 
 ### Format routing and the sandbox
 

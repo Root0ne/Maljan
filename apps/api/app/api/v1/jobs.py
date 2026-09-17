@@ -87,8 +87,33 @@ async def _unprobed_models_for(db: AsyncSession, config: dict[str, Any]) -> list
         # An unknown profile is refused a few lines further on, with the list
         # of the ones that exist; saying it twice, differently, helps nobody.
         return []
-    agents = [agent for stage in team.stages for agent in stage.agents]
-    return await unprobed_models(db, settings, agents)
+    named = [agent for stage in team.stages for agent in stage.agents]
+    return await unprobed_models(db, settings, _everyone_the_run_can_reach(settings, named))
+
+
+def _everyone_the_run_can_reach(settings: Any, named: list[str]) -> list[str]:
+    """The stages' agents, and every agent they can ask, and so on.
+
+    The lead team names one agent in its only analysis stage: the specialists
+    that do the work sit in no stage and are reached through ``ask_<key>``.
+    Checking the stages alone would skip exactly the definitions most likely
+    to carry a model of their own. The reference graph is acyclic — the
+    settings model refuses a self-reference and the run refuses a cycle — so
+    the closure terminates; it is written as one anyway, because a set that
+    grows is the honest way to say "and so on".
+    """
+    definitions = settings.agents.definitions
+    reached = list(dict.fromkeys(named))
+    pending = list(reached)
+    while pending:
+        definition = definitions.get(pending.pop())
+        for ref in getattr(definition, "tools", None) or []:
+            callee = str(getattr(ref, "agent", "") or "")
+            if getattr(ref, "kind", "") != "agent" or not callee or callee in reached:
+                continue
+            reached.append(callee)
+            pending.append(callee)
+    return reached
 
 
 # The config keys an audit row may carry. A job config is operator-supplied and
@@ -128,13 +153,11 @@ async def create_job(
     )
     unprobed = await _unprobed_models_for(db, body.config or {})
     if unprobed:
+        from app.services.model_probes import refusal_sentence
+
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=(
-                "A model this team would call has no passing probe. Test it in "
-                "Settings, or turn off core.llm.require_probe for an air-gapped "
-                "run. " + "; ".join(unprobed)
-            ),
+            detail=refusal_sentence(unprobed),
         )
     profile = (body.config or {}).get("profile")
     if profile is not None:

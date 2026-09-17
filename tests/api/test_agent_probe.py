@@ -9,9 +9,11 @@ anything reaches for one.
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from typing import Any
 
+import httpx
 import pytest
 
 from app.services import settings_probes  # noqa: E402
@@ -424,3 +426,102 @@ async def test_a_non_ollama_agent_model_is_not_checked_against_any_tag_list(monk
     result = await probe_agent({"name": "network", "settings": staged})
     assert result.ok is True
     assert calls == []
+
+
+class TestTheProbeMakesTheCallTheJobWillMake:
+    """A gate that refuses a job has to rest on a probe that reached the model.
+
+    Listing a catalogue says the endpoint is up and that a name appears in it.
+    It does not say the server will load that model, that the key may use it,
+    or that a misspelling has not landed on a name the catalogue happens to
+    hold — and those are the failures the gate exists to catch before a sample
+    is uploaded and a queue slot spent.
+    """
+
+    @pytest.mark.parametrize(
+        ("provider", "endpoint", "fragment"),
+        [
+            ("openai", "http://127.0.0.1:8080/v1", "/chat/completions"),
+            ("ollama", "http://box:11434", "/api/generate"),
+            ("anthropic", "", "api.anthropic.com/v1/messages"),
+            ("gemini", "", ":generateContent"),
+        ],
+    )
+    def test_every_provider_is_asked_for_one_short_answer(
+        self, provider: str, endpoint: str, fragment: str
+    ) -> None:
+        from app.services.settings_probes import COMPLETION_MAX_TOKENS, _completion_request
+
+        url, _headers, body = _completion_request(provider, endpoint, "a-model", "k")
+
+        assert url is not None and fragment in url
+        assert "a-model" in (url + json.dumps(body))
+        assert str(COMPLETION_MAX_TOKENS) in json.dumps(body)
+
+    @pytest.mark.asyncio
+    async def test_a_completion_that_was_refused_is_not_a_pass(self, monkeypatch) -> None:
+        from app.services import settings_probes
+
+        class _Client:
+            async def __aenter__(self) -> Any:
+                return self
+
+            async def __aexit__(self, *_: Any) -> None:
+                return None
+
+            async def post(self, *_: Any, **__: Any) -> Any:
+                return httpx.Response(404, request=httpx.Request("POST", "http://x"))
+
+        monkeypatch.setattr(settings_probes, "_client", lambda: _Client())
+
+        ok, said = await settings_probes.complete_one_turn(
+            "openai", endpoint="http://127.0.0.1:8080/v1", model="ghost"
+        )
+
+        assert ok is False and "ghost" in said and "404" in said
+
+    @pytest.mark.asyncio
+    async def test_a_completion_that_answered_is_a_pass(self, monkeypatch) -> None:
+        from app.services import settings_probes
+
+        class _Client:
+            async def __aenter__(self) -> Any:
+                return self
+
+            async def __aexit__(self, *_: Any) -> None:
+                return None
+
+            async def post(self, *_: Any, **__: Any) -> Any:
+                return httpx.Response(200, request=httpx.Request("POST", "http://x"), json={})
+
+        monkeypatch.setattr(settings_probes, "_client", lambda: _Client())
+
+        ok, said = await settings_probes.complete_one_turn(
+            "openai", endpoint="http://127.0.0.1:8080/v1", model="qwen"
+        )
+
+        assert ok is True and "qwen" in said
+
+    @pytest.mark.asyncio
+    async def test_an_agent_that_names_no_model_is_not_a_pass(self) -> None:
+        from app.services.settings_probes import complete_one_turn
+
+        ok, said = await complete_one_turn("openai", endpoint="http://x/v1", model="  ")
+
+        assert ok is False and said == "no model named"
+
+    def test_the_llm_probe_files_only_the_model_it_completed_with(self) -> None:
+        from app.services.settings_probes import models_the_llm_probe_reached
+        from maljan.core.config import Settings
+
+        settings = Settings(
+            _env_file=None,
+            llm={
+                "provider": "ollama",
+                "ollama": {"expert_model": "qwen3.5:9b", "judge_model": "qwen3.5:70b"},
+            },
+        )
+
+        filed = {model for _endpoint, model, _provider in models_the_llm_probe_reached(settings)}
+
+        assert filed == {"qwen3.5:9b"}, "the judge model was listed, never called"

@@ -89,6 +89,93 @@ async def _get(
 
 ANTHROPIC_VERSION = "2023-06-01"
 
+# What every completion probe asks for and how much of an answer it will take.
+# One turn, eight tokens: enough to prove the endpoint serves this model and
+# short enough that a person at a button is not left waiting for prose.
+COMPLETION_PROMPT = "Reply with OK."
+COMPLETION_MAX_TOKENS = 8
+
+
+async def complete_one_turn(
+    provider: str, *, endpoint: str, model: str, api_key: str = ""
+) -> tuple[bool, str]:
+    """Ask ``model`` at ``endpoint`` for one short answer; ``(ok, what happened)``.
+
+    The only check that proves anything. Listing a provider's models says the
+    endpoint is up and that a name appears in a catalogue; it does not say the
+    server will load that model, that the key may use it, or that the name has
+    not been misspelled in a way the catalogue happens to contain. A gate that
+    refuses a job on the strength of a probe has to rest on a probe that made
+    the call the job will make.
+
+    Never raises: a probe answers with what happened, including when what
+    happened is that nothing did.
+    """
+    model = str(model or "").strip()
+    if not model:
+        return False, "no model named"
+    url, headers, body = _completion_request(provider, endpoint, model, api_key)
+    if url is None:
+        return False, f"unknown provider: {provider!r}"
+    try:
+        async with _client() as client:
+            answer = await client.post(url, headers=headers, json=body)
+    except httpx.TimeoutException:
+        return False, f"{model!r} did not answer within {int(TIMEOUT)} s"
+    except httpx.HTTPError as exc:
+        return False, redact_url(f"{model!r} could not be reached: {type(exc).__name__}: {exc}")
+    if answer.status_code >= 400:
+        return False, f"{model!r} answered HTTP {answer.status_code}"
+    return True, f"{model!r} answered"
+
+
+def _completion_request(
+    provider: str, endpoint: str, model: str, api_key: str
+) -> tuple[str | None, dict[str, str], dict[str, Any]]:
+    """The one-turn request each provider takes, as ``(url, headers, body)``."""
+    base = str(endpoint or "").rstrip("/")
+    if provider == "openai":
+        return (
+            f"{base or 'https://api.openai.com/v1'}/chat/completions",
+            {"Authorization": f"Bearer {api_key or 'none'}"},
+            {
+                "model": model,
+                "max_tokens": COMPLETION_MAX_TOKENS,
+                "messages": [{"role": "user", "content": COMPLETION_PROMPT}],
+            },
+        )
+    if provider == "ollama":
+        return (
+            f"{base or 'http://localhost:11434'}/api/generate",
+            {},
+            {
+                "model": model,
+                "prompt": COMPLETION_PROMPT,
+                "stream": False,
+                "options": {"num_predict": COMPLETION_MAX_TOKENS},
+            },
+        )
+    if provider == "anthropic":
+        return (
+            "https://api.anthropic.com/v1/messages",
+            {"x-api-key": api_key, "anthropic-version": ANTHROPIC_VERSION},
+            {
+                "model": model,
+                "max_tokens": COMPLETION_MAX_TOKENS,
+                "messages": [{"role": "user", "content": COMPLETION_PROMPT}],
+            },
+        )
+    if provider == "gemini":
+        return (
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+            {"x-goog-api-key": api_key},
+            {
+                "contents": [{"parts": [{"text": COMPLETION_PROMPT}]}],
+                "generationConfig": {"maxOutputTokens": COMPLETION_MAX_TOKENS},
+            },
+        )
+    return None, {}, {}
+
 
 async def _probe_llm_openai(v: dict[str, Any]) -> ProbeResult:
     t0 = time.perf_counter()
@@ -99,35 +186,10 @@ async def _probe_llm_openai(v: dict[str, Any]) -> ProbeResult:
         return ProbeResult(False, _ms(t0), f"model list: {detail}")
     models = [m.get("id", "") for m in r.json().get("data", [])]
     model = v.get("expert_model") or (models[0] if models else "")
-    try:
-        async with _client() as c:
-            cr = await c.post(
-                f"{base}/chat/completions",
-                headers=headers,
-                json={
-                    "model": model,
-                    "max_tokens": 8,
-                    "messages": [{"role": "user", "content": "Reply with OK."}],
-                },
-            )
-    except httpx.TimeoutException:
-        return ProbeResult(
-            False, _ms(t0), f"{len(models)} models listed; completion timed out", models
-        )
-    except httpx.HTTPError as exc:
-        return ProbeResult(
-            False, _ms(t0), f"{len(models)} models listed; completion failed: {exc}", models
-        )
-    if cr.status_code >= 400:
-        return ProbeResult(
-            False,
-            _ms(t0),
-            f"{len(models)} models listed; completion with {model!r}: HTTP {cr.status_code}",
-            models,
-        )
-    return ProbeResult(
-        True, _ms(t0), f"{len(models)} models listed; completion with {model!r} succeeded", models
+    answered, said = await complete_one_turn(
+        "openai", endpoint=base, model=str(model), api_key=str(v.get("api_key") or "")
     )
+    return ProbeResult(answered, _ms(t0), f"{len(models)} models listed; {said}", models)
 
 
 async def _probe_llm_anthropic(v: dict[str, Any]) -> ProbeResult:
@@ -141,7 +203,13 @@ async def _probe_llm_anthropic(v: dict[str, Any]) -> ProbeResult:
         return ProbeResult(False, _ms(t0), f"model list: {detail}")
     models = [m.get("id", "") for m in r.json().get("data", [])]
     model = v.get("anthropic_expert_model") or (models[0] if models else "")
-    return ProbeResult(True, _ms(t0), f"{len(models)} models listed; {model!r} configured", models)
+    answered, said = await complete_one_turn(
+        "anthropic",
+        endpoint="",
+        model=str(model),
+        api_key=str(v.get("anthropic_api_key") or ""),
+    )
+    return ProbeResult(answered, _ms(t0), f"{len(models)} models listed; {said}", models)
 
 
 def _ollama_agent_models(v: dict[str, Any]) -> dict[str, tuple[str, str | None]]:
@@ -216,9 +284,8 @@ async def _probe_llm_ollama(v: dict[str, Any]) -> ProbeResult:
             f"missing per-agent model(s): {', '.join(missing_agents)}",
             models,
         )
-    return ProbeResult(
-        True, _ms(t0), f"{len(models)} models available; expert/judge present", models
-    )
+    answered, said = await complete_one_turn("ollama", endpoint=base, model=str(expert))
+    return ProbeResult(answered, _ms(t0), f"{len(models)} models available; {said}", models)
 
 
 async def _probe_llm_gemini(v: dict[str, Any]) -> ProbeResult:
@@ -229,7 +296,10 @@ async def _probe_llm_gemini(v: dict[str, Any]) -> ProbeResult:
         return ProbeResult(False, _ms(t0), f"model list: {detail}")
     models = [m.get("name", "") for m in r.json().get("models", [])]
     model = v.get("gemini_expert_model") or (models[0] if models else "")
-    return ProbeResult(True, _ms(t0), f"{len(models)} models listed; {model!r} configured", models)
+    answered, said = await complete_one_turn(
+        "gemini", endpoint="", model=str(model), api_key=str(v.get("gemini_api_key") or "")
+    )
+    return ProbeResult(answered, _ms(t0), f"{len(models)} models listed; {said}", models)
 
 
 _LLM_PROBES: dict[str, Callable[[dict[str, Any]], Awaitable[ProbeResult]]] = {
@@ -674,17 +744,24 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
         llm_model = agent_llm.model if agent_llm else settings.llm.expert_model
         listed = ", ".join(tools[:8]) + ("…" if len(tools) > 8 else "")
         detail = f"{len(tools)} tools: {listed}" if tools else "resolved; no tools"
-        ok = True
-        # A model name is the one thing resolution cannot check for itself:
-        # Ollama serves what it has pulled, and a typo there fails the job at
-        # the agent rather than here (BUG 8).
-        if llm_provider == "ollama" and llm_model:
-            agent_base_url = (
-                getattr(agent_llm, "base_url", None) if agent_llm else None
-            ) or settings.llm.ollama.base_url
-            if await _ollama_tag_is_absent(agent_base_url, llm_model):
-                ok = False
-                detail = f"model {llm_model!r} is not present on the Ollama server"
+        # The model is the one thing resolution cannot answer for. Listing a
+        # provider's catalogue is not enough either: a server can offer a name
+        # it will not load, a key can be refused for one model and not
+        # another, and a misspelling can land on a name the catalogue happens
+        # to hold. Submitting a job refuses a team on the strength of this
+        # probe, so the probe makes the call the job will make — one turn,
+        # eight tokens, at the agent's own endpoint and on its own model.
+        endpoint = endpoint_for(
+            settings, llm_provider, getattr(agent_llm, "base_url", None) if agent_llm else None
+        )
+        answered, said = await complete_one_turn(
+            llm_provider,
+            endpoint=endpoint,
+            model=str(llm_model or ""),
+            api_key=_provider_key(settings, llm_provider),
+        )
+        ok = answered
+        detail = f"{detail}; {said}"
         return ProbeResult(
             ok,
             _ms(t0),
@@ -702,13 +779,9 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
                 "llm": {
                     "provider": llm_provider,
                     "model": llm_model,
-                    # Where the call would go, so the probe's answer can be
-                    # filed under the pair it was taken against.
-                    "endpoint": endpoint_for(
-                        settings,
-                        llm_provider,
-                        getattr(agent_llm, "base_url", None) if agent_llm else None,
-                    ),
+                    # Where the call went, so the probe's answer is filed
+                    # under the pair it was taken against.
+                    "endpoint": endpoint,
                 },
                 "static_provider": resolved.static_provider_id,
                 "servers": servers,
@@ -718,6 +791,21 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
         return ProbeResult(False, _ms(t0), f"{type(exc).__name__}: {exc}")
     finally:
         await container.aclose()
+
+
+def _provider_key(settings: Any, provider: str) -> str:
+    """The credential a provider authenticates with, as a plain string.
+
+    A per-agent entry may point at its own endpoint, but never carries its own
+    key: the credential stays global (``AgentLLMConfig``), so one lookup by
+    provider answers for every agent.
+    """
+    block = getattr(settings.llm, provider, None)
+    secret = getattr(block, "api_key", None)
+    if secret is None:
+        return ""
+    reveal = getattr(secret, "get_secret_value", None)
+    return str(reveal() if callable(reveal) else secret)
 
 
 async def run_agent_probe(name: str, values: dict[str, Any], stored: dict[str, Any]) -> ProbeResult:
@@ -1067,20 +1155,19 @@ def candidate_settings(values: dict[str, Any], stored: dict[str, Any]) -> Any:
 def models_the_llm_probe_reached(settings: Any) -> list[tuple[str, str, str]]:
     """``(endpoint, model, provider)`` for every pair the LLM probe checked.
 
-    Only the pairs it actually asked about. The probe reaches the selected
-    provider's own endpoint and the expert and judge models it serves; on
-    Ollama it also asks each per-agent override's server for that override's
-    tag by name. An agent sitting on a different provider was not tested here
-    and is left for its own probe to answer for, because recording a pass for
+    Only the pairs it actually asked about. The probe completes one turn with
+    the selected provider's **expert** model at its own endpoint, so that is
+    the one pair it can vouch for; the judge model is listed in the catalogue
+    and never called, so filing it would be filing an answer nobody got. On
+    Ollama the probe also asks each per-agent override's own server for that
+    override's tag by name. An agent sitting on a different provider was not
+    tested here and is left for its own probe, because recording a pass for
     something nothing reached is worse than recording nothing.
     """
     llm = settings.llm
     provider = str(llm.provider)
     home = endpoint_for(settings, provider)
-    pairs = [
-        (home, str(llm.expert_model), provider),
-        (home, str(llm.judge_model), provider),
-    ]
+    pairs = [(home, str(llm.expert_model), provider)]
     if provider == "ollama":
         for override in llm.agents.values():
             if str(override.provider) != "ollama" or not override.model:

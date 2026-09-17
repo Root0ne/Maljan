@@ -12,10 +12,18 @@ is refused in the same breath with the one sentence that applies — that it has
 not been tested — rather than being let through on the grounds that nothing is
 known against it.
 
-``core.llm.require_probe`` turns the whole gate off. It exists for the
-air-gapped batch case, where the endpoint is known good and nobody is at a
-console to press a button, and it is the only way past: there is deliberately
-no per-job override, because a gate a submitter can wave away is not a gate.
+The gate stands in two places, and it is the same sentence in both. Submitting
+a job is one; applying a per-agent model (``core.llm.agents.*``) is the other,
+because an operator who saves a model nothing can reach has made the mistake
+the gate is about, and finding out at submit time means finding out on a page
+that cannot fix it. The **Test** button beside the field is what turns the
+refusal into a save.
+
+``core.llm.require_probe`` turns the whole gate off, in both places. It exists
+for the air-gapped batch case, where the endpoint is known good and nobody is
+at a console to press a button, and it is the only way past: there is
+deliberately no per-job and no per-save override, because a gate the caller
+can wave away is not a gate.
 """
 
 from __future__ import annotations
@@ -32,6 +40,19 @@ logger = get_logger("services.model_probes")
 
 # What a refusal says about a model no probe has ever been taken against.
 NEVER_PROBED = "no probe has reached it"
+
+
+def refusal_sentence(refusals: list[str]) -> str:
+    """The whole refusal, as the submit form and the settings page both print it.
+
+    One sentence in one place: an operator who reads it on the settings page
+    and then on the submit form has to be reading the same instruction, or the
+    second one looks like a different problem.
+    """
+    return (
+        "A model this team would call has no passing probe. Test it in Settings, "
+        "or turn off core.llm.require_probe for an air-gapped run. "
+    ) + "; ".join(refusals)
 
 
 async def record_probe(
@@ -90,6 +111,29 @@ def _sentence(assignment: ModelAssignment, detail: str) -> str:
         f"agent {assignment.agent!r} names model {assignment.model!r} at "
         f"{assignment.endpoint}: {detail}"
     )
+
+
+AGENT_MODELS_KEY = "core.llm.agents"
+
+
+async def unprobed_models_being_saved(
+    db: AsyncSession, settings: Any, changes: dict[str, Any]
+) -> list[str]:
+    """Every per-agent model in ``changes`` that no probe has reached.
+
+    Only the entries this save actually names, and only the ones that carry a
+    model of their own: a save that touches a temperature, or a prompt, or
+    anything outside ``core.llm.agents``, asks nothing of this. The settings
+    that the pairs are read against are the ones being written, so an operator
+    moving an agent to a new endpoint and a new model in one save is judged on
+    the pair they are moving it to.
+    """
+    if not getattr(settings.llm, "require_probe", True):
+        return []
+    entry = changes.get(AGENT_MODELS_KEY)
+    if not isinstance(entry, dict) or not entry:
+        return []
+    return await unprobed_models(db, settings, [str(name) for name in entry])
 
 
 async def unprobed_models(db: AsyncSession, settings: Any, agents: list[str]) -> list[str]:

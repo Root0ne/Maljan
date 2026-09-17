@@ -130,6 +130,46 @@ class TestTheGate:
         assert await unprobed_models(_Db([]), settings, ["static", "network"]) == []
 
 
+class TestWhoTheGateChecks:
+    def test_it_follows_the_agents_a_lead_can_ask(self) -> None:
+        """The lead team names one agent in its stage; the rest are reached by name."""
+        from app.api.v1.jobs import _everyone_the_run_can_reach
+
+        settings = Settings(
+            _env_file=None,
+            agents={
+                "definitions": {
+                    "boss": {
+                        "role": "lead",
+                        "prompt": "You lead.",
+                        "tools": [
+                            {"kind": "agent", "agent": "helper"},
+                            {"kind": "agent", "agent": "second"},
+                        ],
+                    },
+                    "helper": {
+                        "role": "generic",
+                        "prompt": "p",
+                        "tools": [{"kind": "agent", "agent": "third"}],
+                    },
+                    "second": {"role": "generic", "prompt": "p"},
+                    "third": {"role": "generic", "prompt": "p"},
+                    "stranger": {"role": "generic", "prompt": "p"},
+                }
+            },
+        )
+
+        reached = _everyone_the_run_can_reach(settings, ["boss", "judge"])
+
+        assert set(reached) == {"boss", "judge", "helper", "second", "third"}
+        assert "stranger" not in reached
+
+    def test_an_agent_nothing_names_is_not_checked(self) -> None:
+        from app.api.v1.jobs import _everyone_the_run_can_reach
+
+        assert _everyone_the_run_can_reach(_settings(), ["static"]) == ["static"]
+
+
 @pytest.fixture
 def client() -> TestClient:
     app = FastAPI()
@@ -159,6 +199,51 @@ def _submit(client: TestClient, refusals: list[str]) -> Any:
         patch("app.api.v1.jobs.SettingsService.load_overrides", AsyncMock(return_value={})),
     ):
         return client.post("/api/v1/jobs", json={"sample_id": str(uuid.uuid4())})
+
+
+class TestSavingAModel:
+    @pytest.mark.asyncio
+    async def test_a_per_agent_model_no_probe_reached_is_refused_on_save(self) -> None:
+        from app.services.model_probes import AGENT_MODELS_KEY, unprobed_models_being_saved
+
+        settings = _settings(
+            provider="ollama",
+            agents={"static": {"provider": "ollama", "model": "qwen3:4b"}},
+        )
+
+        refusals = await unprobed_models_being_saved(
+            _Db([]), settings, {AGENT_MODELS_KEY: {"static": {"model": "qwen3:4b"}}}
+        )
+
+        assert refusals and "agent 'static' names model 'qwen3:4b'" in refusals[0]
+
+    @pytest.mark.asyncio
+    async def test_a_save_that_names_no_model_asks_nothing(self) -> None:
+        from app.services.model_probes import unprobed_models_being_saved
+
+        settings = _settings(provider="ollama", ollama={"expert_model": "qwen3.5:9b"})
+
+        assert (
+            await unprobed_models_being_saved(_Db([]), settings, {"core.llm.provider": "ollama"})
+            == []
+        )
+
+    @pytest.mark.asyncio
+    async def test_the_setting_turns_this_half_off_too(self) -> None:
+        from app.services.model_probes import AGENT_MODELS_KEY, unprobed_models_being_saved
+
+        settings = _settings(
+            provider="ollama",
+            require_probe=False,
+            agents={"static": {"provider": "ollama", "model": "qwen3:4b"}},
+        )
+
+        assert (
+            await unprobed_models_being_saved(
+                _Db([]), settings, {AGENT_MODELS_KEY: {"static": {"model": "qwen3:4b"}}}
+            )
+            == []
+        )
 
 
 class TestSubmitting:

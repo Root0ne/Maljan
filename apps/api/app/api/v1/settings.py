@@ -145,6 +145,25 @@ async def _agent_warnings(db: AsyncSession) -> dict[str, str]:
         return {}
 
 
+async def _unprobed_models_in(db: AsyncSession, changes: dict[str, Any]) -> list[str]:
+    """Every per-agent model this save names that no probe has reached.
+
+    Judged against the settings as this save would leave them, so an operator
+    moving an agent to a new endpoint and a new model in one change is judged
+    on the pair they are moving it to rather than the one they are leaving.
+    """
+    from app.services.model_probes import unprobed_models_being_saved
+    from app.services.settings_probes import candidate_settings
+
+    try:
+        stored = await SettingsService(db).load_overrides()
+        settings = candidate_settings(changes, stored)
+    except Exception as exc:  # noqa: BLE001 — a change the model rejects is refused below
+        logger.debug("probe gate skipped for this save (%s).", type(exc).__name__)
+        return []
+    return await unprobed_models_being_saved(db, settings, changes)
+
+
 @router.patch("", response_model=PatchResponse)
 async def patch_values(
     body: PatchRequest,
@@ -152,6 +171,17 @@ async def patch_values(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> PatchResponse | JSONResponse:
+    unprobed = await _unprobed_models_in(db, body.changes)
+    if unprobed:
+        from app.services.model_probes import AGENT_MODELS_KEY, refusal_sentence
+
+        # The same refusal a job gets, on the page that can fix it: a model
+        # saved here is one a run will call, and finding out at submit time
+        # means finding out somewhere else.
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content={"errors": {AGENT_MODELS_KEY: refusal_sentence(unprobed)}},
+        )
     try:
         res = await SettingsService(db).save(body.changes, user_id=user.id, ip=_client_ip(request))
     except SettingsValidationError as exc:
@@ -483,7 +513,7 @@ async def _write_down_what_was_reached(
             )
         except Exception as exc:  # noqa: BLE001 — the answer still reaches the operator
             logger.warning("probe result not stored: %s", type(exc).__name__)
-            return
+            continue
 
 
 @router.post("/test/agent", response_model=ProbeResponse)
