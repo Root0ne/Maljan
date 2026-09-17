@@ -439,6 +439,16 @@ change landed on `main`.
 
 ### Fixed
 
+- **A delegation guard that reads both ways an agent is bound to a server.**
+  `servers_withheld_from` computed what a callee brings from the `mcp`
+  references on its definition alone, but the shipped binding mechanism is the
+  other one — `core.mcp.servers.<key>.agents` naming the agent, which is how
+  the default map binds every built-in. A stage with `builtin_tools=False`
+  could therefore ask a stage-less specialist and get back a `knowledge`,
+  `network` or `threatintel` answer, which is the guarantee
+  `docs/architecture.md` states. The callee's effective set is now the union of
+  both, minus what the profile withholds from the callee itself; a disabled
+  server brings nothing.
 - **The publisher scrubs every event, so a producer that forgets cannot leak.**
   `scrub` was applied by two of the seven producers, so
   `agent_message.text`/`report`, `validation_feedback.message` and

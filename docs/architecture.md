@@ -452,10 +452,12 @@ with the chain that reached it; the depth bounds the nesting, never how many
 times an agent may ask. An ask back up the chain — the callee asking its
 caller, or anyone already waiting on this answer — is refused as a cycle. And
 an ask that would come back with a server the asking stage withholds is refused
-naming the stage and the servers: a callee's effective tool set is its own
-definition narrowed by the tool policy of the stage doing the asking, so a
-stage with `builtin_tools=False` cannot reach `knowledge` or `network` through
-a colleague that no stage narrows. The settings model refuses the static cases
+naming the stage and the servers: a callee's effective tool set is everything
+it is bound to — the `mcp` references on its own definition and the servers
+whose `agents` list names it — narrowed by the tool policy of the stage doing
+the asking, so a stage with `builtin_tools=False` cannot reach `knowledge` or
+`network` through a colleague that no stage narrows, whichever way that
+colleague was bound to them. The settings model refuses the static cases
 at save time: a reference to an agent that does not exist, to the definition
 itself, to the judge or the reporter, or on the judge or the reporter.
 

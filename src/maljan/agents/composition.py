@@ -353,6 +353,32 @@ def mcp_refs_for(settings: Settings, key: str) -> list[ToolRef]:
     return _mcp_refs(settings, definition, key)
 
 
+def servers_bound_to(settings: Settings, key: str) -> set[str]:
+    """Every server agent ``key`` can reach under the active profile.
+
+    Two binding mechanisms, and both count. A definition's
+    ``ToolRef(kind="mcp")`` is one; ``core.mcp.servers.<server>.agents``
+    naming the agent is the other, and it is the one the shipped map uses for
+    ``network``, ``threatintel`` and every other role-bound server. Reading
+    only the first said a stage-less specialist brought nothing with it.
+
+    Narrowed by what the profile withholds from this agent, because a server
+    it cannot resolve is not one it brings.
+    """
+    from maljan.core.config import ALL_SERVERS
+
+    withheld = _withheld_servers(settings, key)
+    if ALL_SERVERS in withheld:
+        return set()
+    bound = {str(ref.server) for ref in mcp_refs_for(settings, key)}
+    bound |= {
+        str(name)
+        for name, server in settings.mcp.servers.items()
+        if server.enabled and key in server.agents and str(name) not in withheld
+    }
+    return bound
+
+
 def servers_withheld_from(
     settings: Settings,
     caller_key: str,
@@ -361,10 +387,12 @@ def servers_withheld_from(
 ) -> list[str]:
     """The servers ``callee_key`` brings that ``caller_key``'s own stage may not reach.
 
-    A callee's effective tool set is its own definition narrowed by the tool
-    policy of the stage doing the asking: a stage with ``builtin_tools=False``
-    is told to read what it was handed, and an ask that came back with a
-    ``knowledge`` lookup or a ``network`` query would have gone around it.
+    A callee's effective tool set is what it is bound to — by its own
+    definition and by the server map alike, see ``servers_bound_to`` —
+    narrowed by the tool policy of the stage doing the asking: a stage with
+    ``builtin_tools=False`` is told to read what it was handed, and an ask
+    that came back with a ``knowledge`` lookup or a ``network`` query would
+    have gone around it.
 
     Reported rather than applied, because the callee is one cached instance
     per job: narrowing the instance for one ask would narrow it for whoever
@@ -380,7 +408,7 @@ def servers_withheld_from(
     withheld = _withheld_servers(settings, caller_key) | set(also)
     if not withheld:
         return []
-    brought = {str(ref.server) for ref in mcp_refs_for(settings, callee_key)}
+    brought = servers_bound_to(settings, callee_key)
     if ALL_SERVERS in withheld:
         return sorted(brought)
     return sorted(brought & withheld)
