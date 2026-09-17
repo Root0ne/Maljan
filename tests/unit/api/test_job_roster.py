@@ -236,11 +236,10 @@ def test_the_run_and_the_job_endpoint_describe_the_same_team() -> None:
     set of names and the finished one another, which is the whole failure this
     roster exists to prevent.
     """
-    from maljan.core.config import Settings
-    from maljan.pipeline.events import roster_payload
-
     from app.services.agent_map import effective_definitions, effective_profiles
     from app.worker.analysis_worker import _roster_for
+    from maljan.core.config import Settings
+    from maljan.pipeline.events import roster_payload
 
     settings = Settings()
 
