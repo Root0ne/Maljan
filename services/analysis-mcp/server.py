@@ -430,11 +430,11 @@ def _carve_under_staging(path: str) -> dict[str, Any]:
         return {"error": f"no such file: {path}", "tool": "carve_payloads"}
     # Read in pieces rather than whole: this runs on live samples, and the
     # upload ceiling above admits 2 GiB of them.
-    digest = hashlib.sha256()
+    hasher = hashlib.sha256()
     with target.open("rb") as handle:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    digest = digest.hexdigest()
+            hasher.update(block)
+    digest = hasher.hexdigest()
     destination = _staging_dir() / "carved"
     for directory in (destination, destination / digest):
         directory.mkdir(mode=0o700, exist_ok=True)

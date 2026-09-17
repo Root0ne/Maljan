@@ -399,8 +399,18 @@ class TestAnArgumentIsBoundedBeforeItIsRead:
         analysis.yara_scan(text="x", timeout_s=86_400)
         analysis.yara_scan(text="x", timeout_s=5)
         analysis.yara_scan(text="x", timeout_s=-1)
+        analysis.yara_scan(text="x", timeout_s=0)
 
-        assert asked == [analysis.YARA_TIMEOUT_S, 5, 1]
+        assert asked == [analysis.YARA_TIMEOUT_S, 5, 1, 1]
+
+    def test_a_floor_of_one_second_is_what_the_engines_already_did(self) -> None:
+        """Zero was never "the tool's own default": both engines floor it."""
+        import inspect
+
+        from maljan.tools import rules
+
+        source = inspect.getsource(rules)
+        assert source.count("max(1, int(timeout_s))") == 2
 
     def test_a_capa_timeout_cannot_exceed_the_declared_one(
         self, analysis: Any, staging: Path, monkeypatch: pytest.MonkeyPatch

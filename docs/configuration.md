@@ -233,7 +233,8 @@ has no passing row, naming the agent, the model, the endpoint and the probe's
 last message. The endpoint appears there as its label — scheme and host — and
 never as the value a call is made with: that refusal is read by whoever
 submitted the job, not only by an admin, and a base URL configured with
-userinfo would otherwise show them the endpoint's credentials. Saving a per-agent model (`core.llm.agents.*`) is refused with
+userinfo would otherwise show them the endpoint's credentials. Saving a
+per-agent model (`core.llm.agents.*`) is refused with
 the same sentence, because an operator who saves a model nothing can reach has
 made the mistake the gate is about and the settings page is where it can be
 fixed. The console shows the sentence as written in both places.

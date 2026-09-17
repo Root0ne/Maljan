@@ -211,10 +211,17 @@ def mirror_static_samples(
                 continue
             host_mirror, container_path = target
             mirror_target_path = host_mirror
-            # This job's mirror directory is a directory the sidecars may read
-            # a path in. Named here rather than only at startup because the
-            # settings of the job decide which subdirectory a provider mirrors
-            # into, and a sidecar reads only the roots it was given.
+            # This job's mirror directory is a directory the sidecars may
+            # read a path in. Named here as well as at startup because the
+            # job's settings decide which subdirectory a provider mirrors into,
+            # and startup only knows the ones its own settings named.
+            #
+            # It has to be named *before* a sidecar starts, not merely before
+            # the path is used: ``child_env`` copies the environment into the
+            # child at spawn, so a root added afterwards never reaches a server
+            # that is already running. That holds here because the mirror runs
+            # in ``run_analysis`` and every sidecar is opened later, inside
+            # ``MaljanApp.arun``.
             from maljan.tools.roots import add_sample_root
 
             add_sample_root(host_mirror.parent)

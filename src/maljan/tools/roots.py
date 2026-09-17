@@ -73,12 +73,17 @@ def configured_roots() -> list[Path]:
 
 
 def add_sample_root(path: str | Path) -> None:
-    """Name ``path`` as a root for every sidecar this process starts.
+    """Name ``path`` as a root for every sidecar this process starts *after* this.
 
     For the caller that creates the directory: the worker's sample mirror, the
     capture a sandbox provider fetches, the file an operator passed on the
     command line. The value is a deployment fact either way, never something a
     model chose.
+
+    "After this" is the whole of the contract. A sidecar's environment is
+    copied into the child when it is spawned (``agents.subprocess_env``), so a
+    root added once a server is running does not reach that server. Every
+    caller here runs before the registry opens anything.
     """
     entry = str(path).strip()
     if not entry:
