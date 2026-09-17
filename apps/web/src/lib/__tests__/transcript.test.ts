@@ -71,18 +71,41 @@ describe("an addressed line in the transcript", () => {
     expect(row.addressedTo).toBe("lead");
     expect(row.stage).toBe("lead");
     // A recorded row and its live twin are the same line, so a job whose
-    // events have not yet expired does not draw the ask twice — even though
-    // only the live copy knows who it was said to.
+    // events have not yet expired does not draw the ask twice. They are the
+    // same by construction now: the publisher numbers the message once and
+    // the stored row is written with that same number.
     const [live] = messagesFromEvents([
-      say({ speaker: "static", role: "analyst", round: 1, text: "answer", addressed_to: "lead" }),
+      say({
+        seq: 3,
+        speaker: "static",
+        role: "analyst",
+        round: 1,
+        text: "answer",
+        addressed_to: "lead",
+      }),
     ]);
     expect(row.id).toBe(live.id);
+    expect(row.seq).toBe(3);
+  });
+
+  it("falls back to the derived id for a run recorded before there were numbers", () => {
+    // Nothing published a ``seq`` then, so what a live event and its stored
+    // row still had in common is who spoke, when, and what they said.
+    const [row] = messagesFromTranscript([
+      { seq: 0, speaker: "static", role: "analyst", round: 1, status: "complete", text: "answer" },
+    ]);
+    const [live] = messagesFromEvents([
+      say({ speaker: "static", role: "analyst", round: 1, text: "answer" }),
+    ]);
+    expect(row.id).toBe(live.id);
+    expect(row.id).not.toContain("seq:");
+    expect(row.seq).toBeUndefined();
   });
 
   it("gives every row of a delegated round an id of its own", () => {
-    /* `addressed_to` has no column, so a lead's report and each of its asks
-     * come back saying only who spoke and when. What they say is what tells
-     * them apart, and it is the one thing the live event carries too. */
+    /* A lead's report and each of its asks are said by the same speaker in
+     * the same round; the number the publisher gave each one is what tells
+     * them apart, and the live copy carries the same number. */
     const rows = messagesFromTranscript([
       { seq: 1, speaker: "lead", role: "analyst", round: 0, status: "complete", text: "first" },
       { seq: 2, speaker: "lead", role: "analyst", round: 0, status: "complete", text: "second" },
@@ -101,13 +124,26 @@ describe("an addressed line in the transcript", () => {
   });
 
   it("draws a delegated round once when a report and its events both exist", () => {
-    /* The defect this scheme exists for: the events carry the addressee and
-     * the stored rows cannot, so anything of the addressee in the id drew
-     * every ask twice — once with the arrow, once without. */
+    /* One number, assigned once, carried by both copies: the merge collapses
+     * them however differently they were worded or capped on the way. */
     const events = messagesFromEvents([
-      say({ speaker: "lead", role: "analyst", round: 0, text: "ask one", addressed_to: "static" }),
-      say({ speaker: "static", role: "analyst", round: 0, text: "answer", addressed_to: "lead" }),
-      say({ speaker: "lead", role: "analyst", round: 0, text: "my report" }),
+      say({
+        seq: 1,
+        speaker: "lead",
+        role: "analyst",
+        round: 0,
+        text: "ask one",
+        addressed_to: "static",
+      }),
+      say({
+        seq: 2,
+        speaker: "static",
+        role: "analyst",
+        round: 0,
+        text: "answer",
+        addressed_to: "lead",
+      }),
+      say({ seq: 3, speaker: "lead", role: "analyst", round: 0, text: "my report" }),
     ]);
     const persisted = messagesFromTranscript([
       { seq: 1, speaker: "lead", role: "analyst", round: 0, status: "complete", text: "ask one" },

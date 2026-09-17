@@ -390,6 +390,7 @@ async def _publish_event(
     job_id: str,
     event_type: str,
     data: dict[str, Any] | None = None,
+    stamp: dict[str, Any] | None = None,
 ) -> None:
     """Publish a pipeline progress event to Redis PubSub + Stream + the table.
 
@@ -408,13 +409,25 @@ async def _publish_event(
     socket and on the events endpoint alike.
 
     The same event is queued for ``job_events`` when this job registered a
-    session factory (see ``_persist_events_for``), which is what keeps the
+    session factory (see ``_start_event_feed``), which is what keeps the
     conversation of a failed or cancelled run readable after the stream's
     24 h TTL.
+
+    ``stamp`` is the transcript recorder's own copy of this message, given the
+    same number. The recorder takes its copy synchronously on the pipeline's
+    thread, before the publish is even scheduled — that is what keeps the
+    record safe from a Redis outage — so the number cannot be in it when it is
+    taken. Writing it here rather than numbering the transcript separately at
+    the end of the run is what makes one ``seq`` mean one thing: a live
+    message and the row that replaces it after the run carry the same
+    identity, and a console merging the two collapses them instead of drawing
+    both.
     """
     import json
 
     seq = await _next_seq(redis_conn, job_id)
+    if stamp is not None:
+        stamp["seq"] = seq
     stamped = {**(data or {}), "seq": seq}
     ts = datetime.now(UTC).isoformat()
     payload = {
@@ -501,15 +514,18 @@ def _make_event_sink(
     from maljan.pipeline.events import AGENT_MESSAGE
 
     def sink(event_type: str, data: dict[str, Any]) -> None:
+        recorded: dict[str, Any] | None = None
         if recorder is not None and event_type == AGENT_MESSAGE:
             try:
-                recorder.append({**data, "ts": datetime.now(UTC).isoformat()})
+                recorded = {**data, "ts": datetime.now(UTC).isoformat()}
+                recorder.append(recorded)
             except Exception as exc:  # noqa: BLE001 — recording must not fail a run
+                recorded = None
                 logger.debug("transcript recorder rejected an event (%s); continuing.", exc)
         try:
             loop.call_soon_threadsafe(
                 lambda: asyncio.ensure_future(  # noqa: RUF006 — fire-and-forget by design
-                    _publish_event(redis_conn, job_id, event_type, data)
+                    _publish_event(redis_conn, job_id, event_type, data, stamp=recorded)
                 )
             )
         except RuntimeError:
@@ -1341,11 +1357,18 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # is the only place the per-round positions, the sycophancy
             # intervention and the revised prose survive past the 24 h Redis
             # stream. See ``AgentMessage`` for the full rationale.
-            for seq, message in enumerate(transcript):
+            for index, message in enumerate(transcript):
                 db.add(
                     AgentMessage(
                         report_id=report.id,
-                        seq=seq,
+                        # The number the publisher gave this message when it
+                        # went out, so the stored row and the live event a
+                        # console still holds are one message rather than two.
+                        # A message the publisher never reached — a run whose
+                        # Redis was down throughout — falls back to its
+                        # position in the recording, which is the order it was
+                        # said in and all this column ever meant.
+                        seq=int(message.get("seq", index) or index),
                         speaker=str(message.get("speaker", "unknown"))[:100],
                         role=str(message.get("role", "system"))[:20],
                         round=int(message.get("round", 0) or 0),

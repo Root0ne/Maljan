@@ -119,6 +119,33 @@ function messageId(
   return `${role}:${speaker}:${round}#${shortHash(text)}`;
 }
 
+/**
+ * The identity of a message that carries a sequence number.
+ *
+ * `seq` is assigned once, by the publisher, and the stored row is given the
+ * same number as the event that went out — so a live message and its
+ * persisted twin are the same id by construction rather than by agreeing on a
+ * digest of their text. That is what the derived id above was standing in for
+ * while the two sources had nothing in common, and it is exact where the
+ * digest was only careful: two asks that happen to be worded identically are
+ * two messages, and a message whose stored text was capped differently from
+ * the broadcast one is still one.
+ *
+ * Runs recorded before the publisher numbered anything carry no `seq` at all;
+ * those fall back to the derived id, which is why both still exist.
+ */
+function sequencedId(seq: number): string {
+  return `seq:${seq}`;
+}
+
+/** The `seq` a live event carries, or `undefined` for a run from before there
+ *  were any. Zero is not a sequence number: the publisher's counter starts at
+ *  one, so a `0` is a payload that never had the field. */
+function asSeq(value: unknown): number | undefined {
+  const seq = Number(value ?? 0);
+  return Number.isFinite(seq) && seq > 0 ? seq : undefined;
+}
+
 function asAddressee(value: unknown): string | undefined {
   return typeof value === "string" && value ? value : undefined;
 }
@@ -221,15 +248,18 @@ export function messagesFromEvents(events: WSEvent[]): TranscriptMessage[] {
     const round = Number(d.round ?? 0);
     const text = String(d.text ?? "").trim();
     const addressedTo = asAddressee(d.addressed_to);
+    const seq = asSeq(d.seq);
 
     // The stream back-fill and the live socket overlap by design, so the same
-    // message can arrive twice; `messageId` says what makes two the same.
-    const id = messageId(role, speaker, round, text);
+    // message can arrive twice. The publisher's `seq` is what makes two the
+    // same; a run from before it existed falls back to the derived id.
+    const id = seq === undefined ? messageId(role, speaker, round, text) : sequencedId(seq);
     if (seen.has(id)) continue;
     seen.add(id);
 
     out.push({
       id,
+      seq,
       speaker,
       role,
       round,
@@ -281,42 +311,30 @@ export interface TranscriptRow {
  * `messagesFromReport` below remains for reports written before the recording
  * existed.
  *
- * A delegated round is the one shape where several rows share an identity.
- * `addressed_to` has no column yet, so a lead's report and each of its asks
- * come back as `analyst:lead:0` — duplicate React keys, and a merge that
- * cannot tell them apart. Every row of such a group carries its own `seq`
- * instead, which is the recording's own order and unique by construction. A
- * row whose identity is already unique keeps it, so it still collapses onto
- * its live twin.
+ * Identity is the row's `seq`, which is the number the publisher gave the
+ * message when it went out and therefore the number its live twin carries
+ * too: the two collapse into one line by construction rather than by agreeing
+ * on a digest of their text. A row from a run recorded before the publisher
+ * numbered anything falls back to the derived id, which is what the two
+ * sources had in common then.
  */
 export function messagesFromTranscript(
   rows: TranscriptRow[] | null | undefined
 ): TranscriptMessage[] {
   const out: TranscriptMessage[] = [];
   const all = rows ?? [];
-  /* Two rows that say the same thing in the same round are two rows: an agent
-     asked twice with the same words. Only those carry their `seq`, because a
-     row that is already unique has to keep the id its live twin has. */
-  const shared = new Set<string>();
-  const once = new Set<string>();
-  for (const row of all) {
-    const id = messageId(
-      asRole(row.role),
-      String(row.speaker ?? "unknown"),
-      Number(row.round ?? 0),
-      String(row.text ?? "")
-    );
-    if (once.has(id)) shared.add(id);
-    once.add(id);
-  }
   for (const row of all) {
     const role = asRole(row.role);
     const speaker = String(row.speaker ?? "unknown");
     const round = Number(row.round ?? 0);
     const addressedTo = asAddressee(row.addressed_to);
-    const id = messageId(role, speaker, round, String(row.text ?? ""));
+    const seq = asSeq(row.seq);
+    const id =
+      seq === undefined
+        ? messageId(role, speaker, round, String(row.text ?? ""))
+        : sequencedId(seq);
     out.push({
-      id: shared.has(id) ? `${id}#${Number(row.seq ?? 0)}` : id,
+      id,
       speaker,
       role,
       round,
@@ -331,7 +349,7 @@ export function messagesFromTranscript(
       claims: asClaims(row.claims),
       dissent: asStrings(row.dissent),
       ts: row.ts || undefined,
-      seq: Number(row.seq ?? 0),
+      seq,
       addressedTo,
       stage: row.stage || undefined,
     });

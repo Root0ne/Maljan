@@ -1,4 +1,5 @@
 import type { TranscriptRow } from "@/lib/transcript";
+import type { JobRoster } from "@/types/events";
 import type { EvidenceListResponse, EvidenceQuery } from "@/types/evidence";
 import type {
   EnrichTriggerResponse,
@@ -52,6 +53,11 @@ export interface JobDTO {
   completed_at: string | null;
   duration_seconds: number | null;
   error_message: string | null;
+  /** Who can speak in this run, with the label an operator gave each agent
+   *  and the stages it takes part in. Present on `GET /jobs/{id}`, which is
+   *  where a non-admin reader gets names for the speakers without the
+   *  admin-only settings endpoint; absent from a listing. */
+  roster?: JobRoster | null;
 }
 
 export interface SandboxReportDTO {
@@ -697,21 +703,29 @@ class ApiClient {
   }
 
   /**
-   * Replay historical pipeline events for a job from the Redis stream.
-   * Used by the Live tab on mount to back-fill events that fired before
-   * the WebSocket subscribed.
+   * Replay a job's pipeline events, in sequence order.
+   *
+   * Used on mount to back-fill what fired before the WebSocket subscribed,
+   * and on return to a run with `since` set to the last `seq` already held —
+   * which costs the events that were missed rather than a re-read of the
+   * whole window. The server reads the Redis stream first and the
+   * `job_events` table second, so a run whose stream has expired replays the
+   * same recording.
    */
-  getJobEvents(jobId: string, limit = 500) {
+  getJobEvents(jobId: string, limit = 500, since?: number) {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (since !== undefined) params.set("since", String(since));
     return this.request<{
       job_id: string;
       events: Array<{
         type: string;
         data: Record<string, unknown>;
-        ts: string;
-        stream_id: string;
+        ts: string | null;
+        /** Present only on an event the Redis stream answered. */
+        stream_id?: string;
       }>;
       count: number;
-    }>(`/api/v1/jobs/${jobId}/events?limit=${limit}`);
+    }>(`/api/v1/jobs/${jobId}/events?${params.toString()}`);
   }
 
   /**

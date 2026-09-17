@@ -134,10 +134,14 @@ class AgentMessage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     ``maljan.pipeline.events.emit_agent_message`` field for field; the frontend
     maps them straight onto its transcript model with no reshaping.
 
-    Rows are immutable and append-only. ``seq`` is emission order within the
-    run, and is the ordering key: round number alone cannot separate the
-    speakers inside a round, and timestamps are too coarse for messages emitted
-    in the same millisecond.
+    Rows are immutable and append-only. ``seq`` is the number the publisher
+    gave the message when it went out — the same one the live event carries —
+    and is the ordering key: round number alone cannot separate the speakers
+    inside a round, and timestamps are too coarse for messages emitted in the
+    same millisecond. One number for the live message and its stored row is
+    what lets a console holding both collapse them into one line instead of
+    drawing it twice. It counts the whole run's events rather than only this
+    conversation, so it is monotonic and sparse.
     """
 
     __tablename__ = "agent_messages"
