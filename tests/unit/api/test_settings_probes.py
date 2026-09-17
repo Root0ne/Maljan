@@ -946,3 +946,174 @@ async def test_a_failing_pair_names_its_server_and_nothing_else(monkeypatch):
     assert "/v1" not in r.detail, "a path says nothing about which server answered"
     filed = {(pair["endpoint"], pair["model"]) for pair in (r.details or {})["completions"]}
     assert (base, "ghost") in filed, "the row is still filed under the address it called"
+
+
+# ---------------------------------------------------------------------------
+# The probe asks a local OpenAI-compatible server the same question the agents
+# ask it. A reasoning model left thinking spends the probe's eight tokens
+# inside its own chain of thought and comes back HTTP 200 with an empty
+# ``content`` and a filled ``reasoning_content``; the probe read that as
+# "answered nothing" and the submit gate then refused every job.
+# ---------------------------------------------------------------------------
+
+LOCAL_ENDPOINT = "http://127.0.0.1:8080/v1"
+
+
+def _answer(payload):
+    return httpx.Response(200, request=httpx.Request("POST", "http://x"), json=payload)
+
+
+def test_the_probe_sends_the_thinking_switch_the_agents_send():
+    _url, _headers, body = probes._completion_request(
+        "openai", LOCAL_ENDPOINT, "qwen3.6-35b-a3b", "k", disable_thinking=True
+    )
+
+    assert body["chat_template_kwargs"]["enable_thinking"] is False
+
+
+def test_the_thinking_switch_is_absent_unless_it_is_turned_on():
+    _url, _headers, body = probes._completion_request(
+        "openai", LOCAL_ENDPOINT, "qwen3.6-35b-a3b", "k", disable_thinking=False
+    )
+
+    assert "chat_template_kwargs" not in body
+
+
+def test_the_thinking_switch_goes_where_the_agents_would_send_it():
+    """The endpoints the agents' provider leaves alone are left alone here too.
+
+    ``sends_llama_cpp_extras`` is the provider's own predicate: a hosted
+    OpenAI-compatible API answers an unknown body field with 400, so neither
+    the run nor the probe that gates it may put one there.
+    """
+    _url, _headers, hosted = probes._completion_request(
+        "openai", "https://api.openai.com/v1", "gpt-4o-mini", "k", disable_thinking=True
+    )
+    _url2, _headers2, standard = probes._completion_request(
+        "openai", LOCAL_ENDPOINT, "qwen", "k", disable_thinking=True, compat="standard"
+    )
+    _url3, _headers3, forced = probes._completion_request(
+        "openai",
+        "https://box.example.com/v1",
+        "qwen",
+        "k",
+        disable_thinking=True,
+        compat="llama_cpp",
+    )
+
+    assert "chat_template_kwargs" not in hosted
+    assert "chat_template_kwargs" not in standard
+    assert forced["chat_template_kwargs"]["enable_thinking"] is False
+
+
+@pytest.mark.asyncio
+async def test_every_openai_endpoint_the_probe_asks_gets_the_thinking_switch(monkeypatch):
+    """A per-agent override is asked at its own endpoint, with the same switch."""
+    bodies: dict[str, dict] = {}
+
+    def handler(req: httpx.Request):
+        if req.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": "qwen"}]})
+        bodies[str(req.url.host)] = json.loads(req.content or b"{}")
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    monkeypatch.setattr(
+        probes,
+        "_client",
+        lambda *_a, **_k: httpx.AsyncClient(transport=transport(handler), timeout=10),
+    )
+    values = {
+        "provider": "openai",
+        "base_url": LOCAL_ENDPOINT,
+        "api_key": "k",
+        "expert_model": "qwen",
+        "disable_thinking": True,
+        "agents": {
+            "judge": {
+                "provider": "openai",
+                "model": "qwen",
+                "base_url": "http://192.168.1.9:8080/v1",
+            }
+        },
+    }
+
+    r = await probes.probe_llm(values)
+
+    assert r.ok is True
+    assert set(bodies) == {"127.0.0.1", "192.168.1.9"}
+    for host, body in bodies.items():
+        assert body["chat_template_kwargs"] == {"enable_thinking": False}, host
+
+    bodies.clear()
+    values["disable_thinking"] = False
+    assert (await probes.probe_llm(values)).ok is True
+    for host, body in bodies.items():
+        assert "chat_template_kwargs" not in body, host
+
+
+@pytest.mark.asyncio
+async def test_run_probe_carries_the_thinking_switch_into_the_llm_probe(monkeypatch):
+    """A staged switch is what the probe tests, not the stored one."""
+    seen: dict = {}
+
+    async def fake(values):
+        seen.update(values)
+        return probes.ProbeResult(True, 1, "x")
+
+    monkeypatch.setitem(probes.PROBES, "llm", fake)
+    await probes.run_probe(
+        "llm",
+        {"core.llm.openai.disable_thinking": True, "core.llm.openai.compat": "llama_cpp"},
+        {},
+    )
+
+    assert seen["disable_thinking"] is True
+    assert seen["compat"] == "llama_cpp"
+
+
+def test_an_endpoint_that_reasoned_did_answer():
+    """An empty ``content`` beside a filled ``reasoning_content`` is an answer.
+
+    The server answered on the model the run will use; it spent the eight
+    tokens on reasoning, which proves the model loaded and the key was
+    accepted. Calling that "answered nothing" refused every job.
+    """
+    reasoned = _answer(
+        {"choices": [{"message": {"content": "", "reasoning_content": "Thinking Process: ok"}}]}
+    )
+    older_spelling = _answer({"choices": [{"message": {"content": "", "reasoning": "ok"}}]})
+
+    assert probes._said_something("openai", reasoned) is True
+    assert probes._said_something("openai", older_spelling) is True
+
+
+def test_an_answer_with_nothing_in_it_at_all_is_still_nothing():
+    """The failure the check exists for is unchanged: an empty body is empty."""
+    empty = _answer({"choices": [{"message": {"content": "", "reasoning_content": "  "}}]})
+    no_message = _answer({"choices": [{"message": {}}]})
+
+    assert probes._said_something("openai", empty) is False
+    assert probes._said_something("openai", no_message) is False
+
+
+def test_a_reasoning_field_that_is_not_text_said_nothing():
+    """A structured ``reasoning`` is not an answer.
+
+    Some builds send an object there rather than a string. ``str(value or "")``
+    read a non-empty dict as text — it stringifies to something truthy — so a
+    server that returned an empty ``content`` beside a structured but contentless
+    ``reasoning`` passed a probe it should have failed.
+    """
+    structured = _answer(
+        {"choices": [{"message": {"content": "", "reasoning": {"content": "", "steps": []}}}]}
+    )
+    listed = _answer({"choices": [{"message": {"content": "", "reasoning_content": [{}]}}]})
+
+    assert probes._said_something("openai", structured) is False
+    assert probes._said_something("openai", listed) is False
+
+
+def test_a_reasoning_object_beside_real_text_is_still_an_answer():
+    """The guard drops the field, not the message: text elsewhere still counts."""
+    spoke = _answer({"choices": [{"message": {"content": "ok", "reasoning": {"steps": ["a"]}}}]})
+    assert probes._said_something("openai", spoke) is True

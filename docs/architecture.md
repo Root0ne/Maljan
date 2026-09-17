@@ -645,6 +645,83 @@ its outcome and its timing and drops its output, and the count of what was
 dropped reaches the run summary. The ledger lands in the pipeline state as an
 append-only list and is persisted with the report, in the same transaction.
 
+## Events
+
+A run narrates itself. Every node, every tool wrapper and every retry loop
+emits events through one sink (`src/maljan/pipeline/events.py`), the worker
+publishes them (`_publish_event` in `apps/api/app/worker/analysis_worker.py`),
+and the console draws the running analysis from them.
+
+| Event | Emitted by | Payload |
+|---|---|---|
+| `status_change` | the worker | `status` |
+| `pipeline_started` | the worker | `agents`, `sample_filename`, `sha256` |
+| `roster` | the worker, once, before anybody speaks | `agents[{key, label, role, stages}]`, `stages[{key, label, kind, agents}]` |
+| `agent_progress` | the worker and the analyst nodes | `agent`, `phase` |
+| `phase_change` | the worker | `phase` |
+| `stage_started` / `stage_skipped` / `stage_finished` | the stage nodes | `stage`, `kind`, and `agents` / `reason` / `duration_ms` |
+| `agent_message` | every speaking node | `speaker`, `role`, `round`, `status`, `text`, `kind`, and optionally `stage`, `addressed_to`, `display_name`, `confidence`, `claims`, `dissent`, `report` |
+| `agent_message_delta` | the analyst loop, behind `core.events.stream_deltas` | `stage`, `agent`, `text_delta` |
+| `tool_call_started` | the evidence recorder | `stage`, `agent`, `tool`, `server`, `args_summary` |
+| `tool_call_finished` | the evidence recorder, as each entry is written | `stage`, `agent`, `tool`, `server`, `evidence_id`, `ok`, `duration_ms`, `summary` |
+| `validation_feedback` | `pipeline/validation.retry_with_feedback` | `stage`, `agent`, `code`, `message`, `retry_index` |
+| `judge_question` | the judge's ReAct loop | `stage`, `text`, `addressed_to` |
+| `budget_tick` / `stage_ended_at_cap` | the budget meter | see *The evidence ledger* |
+| `completed` / `error` / `cancelled` | the worker | the outcome |
+
+`agent_message.kind` is one of `says`, `tool_call`, `tool_result`,
+`validation_feedback`, `judge_question`, `verdict`, `system`,
+`delegation_ask`, `delegation_answer`. An ask and its answer are the last two,
+with `addressed_to` naming the other side, which is what draws a delegated
+exchange as an arrow between two participants rather than as two lines to the
+room.
+
+**Sequence.** The publisher stamps every event with `seq`, a per-job counter
+taken from a Redis `INCR`. Nothing in `src/maljan` numbers anything: the core
+does not know which job it is running under, and a second counter would order
+one conversation two ways. `seq` is the ordering key, the dedupe identity and
+the cursor a client resumes from — `?since=<seq>` on `/ws/analysis/{id}` and
+on `GET /api/v1/jobs/{id}/events` return only what is newer, in order.
+
+The stored transcript row is written with the number its event went out under,
+so a live message and its replayed twin are one message. That changed what
+`agent_messages.seq` means: it used to be the message's position within the
+report, `0, 1, 2, …`, and it is now the publisher's run-wide count, so it is
+**monotonic and sparse** — a conversation of twelve lines in a run that
+published four hundred events has twelve numbers scattered through 1..400.
+Ordering is unchanged, and `ORDER BY seq` is still exactly the order the
+messages were said in; what is no longer true is that the numbers are
+contiguous or that they start at zero. A run recorded before this release
+keeps its old contiguous numbers, which still sort correctly among themselves;
+because those are a *different* number from the same run's live events, the
+report endpoint sends them as `null` rather than let a client mistake one for
+a publisher number. It tells the two apart from the rows themselves: a
+numbered run's largest `seq` is at least its row count, and the old
+`enumerate` numbering's is exactly one less.
+
+**Two stores.** Events go to the PubSub channel `analysis:{job_id}` for the
+live fan-out, to the Redis stream `analysis:{job_id}:events` (1 000 entries,
+24 h), and to `job_events` against the job, written in batches of fifty events
+or two seconds. The table is what makes a failed or cancelled run readable: no
+report is written for one, so before it the whole conversation vanished with
+the stream. Both readers ask Redis first and the table second — when the
+stream has expired, and when the cursor is older than the capped stream
+reaches. `core.events.retention_days` (default 30) bounds the table; the
+worker sweeps it nightly. The transcript, the agent findings and the evidence
+ledger are kept by the report and the job and are not touched by the sweep.
+
+**What never travels.** Tool arguments and results go out as short summaries,
+scrubbed where they are built: anything shaped like a credential is replaced,
+a URL keeps its scheme and host only, and every path is cut to its file name.
+A failed call travels as the remedy the tool offered, not as its error text.
+The arguments and the output as they were are on the ledger entry, behind the
+same ownership check as the report.
+
+**Names.** `roster` carries the label an operator gave each agent, and `GET
+/api/v1/jobs/{id}` carries the same roster, so a reader who is not an admin —
+and cannot read the agent definitions through the settings endpoint — still
+sees "Lead analyst" rather than `lead`, on a live run and on a finished one.
+
 ## The findings block
 
 An analyst may end its answer with a fenced `maljan-findings` block holding

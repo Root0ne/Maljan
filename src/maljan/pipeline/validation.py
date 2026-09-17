@@ -34,6 +34,7 @@ from maljan.analysis.corroboration import corroboration_row as corroboration_row
 from maljan.analysis.corroboration import corroboration_sources as corroboration_sources
 from maljan.analysis.technique_ids import TECHNIQUE_ID_EXACT_RE
 from maljan.core.logger import logger
+from maljan.pipeline.events import EventSink, emit_validation_feedback
 from maljan.schemas.evidence import entry_ids_in
 from maljan.schemas.judgement import SEVERITY_RATINGS
 
@@ -1604,19 +1605,58 @@ def _with_feedback(messages: list[Any], answer: Any, violations: Sequence[Violat
 def _announce_feedback(
     violations: Sequence[Violation],
     on_feedback: Callable[[Sequence[Violation]], None] | None,
+    feed: _FeedbackFeed | None = None,
+    retry_index: int = 0,
 ) -> None:
-    """Log the correction turn and hand its violations to the run's tally."""
+    """Log the correction turn, publish it, and hand it to the run's tally."""
     logger.info(
         "validation: retrying after %d violation(s): %s.",
         len(violations),
         ", ".join(sorted({v.code for v in violations})),
     )
+    if feed is not None:
+        feed.announce(violations, retry_index)
     if on_feedback is None:
         return
     try:
         on_feedback(violations)
     except Exception as exc:  # noqa: BLE001 — a metric is never worth a lost run
         logger.debug("validation: the feedback tally was not updated (%s).", exc)
+
+
+class _FeedbackFeed:
+    """Who is being corrected and where to say so, for one retry loop.
+
+    A tuple of three arguments repeated across two nearly identical loops and
+    their four call sites is a tuple somebody eventually passes in the wrong
+    order. The producer names itself once and the loops carry one object.
+    """
+
+    def __init__(self, sink: EventSink | None, agent: str, stage: str) -> None:
+        self.sink = sink
+        self.agent = str(agent)
+        self.stage = str(stage)
+
+    def announce(self, violations: Sequence[Violation], retry_index: int) -> None:
+        for violation in violations:
+            emit_validation_feedback(
+                self.sink,
+                stage=self.stage,
+                agent=self.agent,
+                code=str(violation.code),
+                message=str(violation.message),
+                retry_index=retry_index,
+            )
+
+
+def _feed(sink: EventSink | None, agent: str, stage: str) -> _FeedbackFeed | None:
+    """The feed for a caller that named a sink, or nothing for one that did not.
+
+    A loop run from the CLI, a test or the report composer has nobody to tell,
+    and an object that emits into ``None`` on every violation is cheaper to
+    skip than to build.
+    """
+    return _FeedbackFeed(sink, agent, stage) if sink is not None else None
 
 
 async def retry_with_feedback[T](
@@ -1627,6 +1667,9 @@ async def retry_with_feedback[T](
     max_retries: int = 1,
     parse: Callable[[Any], T],
     on_feedback: Callable[[Sequence[Violation]], None] | None = None,
+    sink: EventSink | None = None,
+    agent: str = "",
+    stage: str = "",
 ) -> tuple[T, list[Violation], int]:
     """Run, validate, and give the model one chance to fix what it got wrong.
 
@@ -1639,14 +1682,21 @@ async def retry_with_feedback[T](
     is shown. A violation the retry fixes leaves no other trace, and a run
     summary that counts only the leftovers cannot say what the retry was for
     — :class:`ValidationTally` is what the callers pass.
+
+    ``sink``, ``agent`` and ``stage`` put the same correction into the live
+    conversation, as one ``validation_feedback`` per violation, so a reader
+    watching the run sees why an agent is answering a second time. A caller
+    with nobody to tell — the CLI, a test, the report composer — passes no
+    sink and nothing is emitted.
     """
+    feed = _feed(sink, agent, stage)
     turns = list(messages)
     answer = await run(turns)
     parsed = parse(answer)
     violations = _collect(parsed, validators)
     retries = 0
     while violations and retries < max_retries:
-        _announce_feedback(violations, on_feedback)
+        _announce_feedback(violations, on_feedback, feed, retries + 1)
         turns = _with_feedback(turns, answer, violations)
         retries += 1
         answer = await run(turns)
@@ -1663,6 +1713,9 @@ def retry_with_feedback_sync[T](
     max_retries: int = 1,
     parse: Callable[[Any], T],
     on_feedback: Callable[[Sequence[Violation]], None] | None = None,
+    sink: EventSink | None = None,
+    agent: str = "",
+    stage: str = "",
 ) -> tuple[T, list[Violation], int]:
     """:func:`retry_with_feedback` for the analysts, whose loop is synchronous.
 
@@ -1671,13 +1724,14 @@ def retry_with_feedback_sync[T](
     analyst call site through a second bridge for no gain. The two functions
     share the feedback turn and the collection rule and differ only in the await.
     """
+    feed = _feed(sink, agent, stage)
     turns = list(messages)
     answer = run(turns)
     parsed = parse(answer)
     violations = _collect(parsed, validators)
     retries = 0
     while violations and retries < max_retries:
-        _announce_feedback(violations, on_feedback)
+        _announce_feedback(violations, on_feedback, feed, retries + 1)
         turns = _with_feedback(turns, answer, violations)
         retries += 1
         answer = run(turns)

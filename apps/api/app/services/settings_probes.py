@@ -133,7 +133,13 @@ def endpoint_label(endpoint: str) -> str:
 
 
 async def complete_one_turn(
-    provider: str, *, endpoint: str, model: str, api_key: str = ""
+    provider: str,
+    *,
+    endpoint: str,
+    model: str,
+    api_key: str = "",
+    disable_thinking: bool = False,
+    compat: str = "auto",
 ) -> tuple[bool | None, str]:
     """Ask ``model`` at ``endpoint`` for one short answer.
 
@@ -151,13 +157,24 @@ async def complete_one_turn(
     not a model that is missing, and writing it down as one would lock the
     operator out of their own jobs until they noticed.
 
+    ``disable_thinking`` and ``compat`` are the two OpenAI-compatible settings
+    that decide the request body's shape, carried in so that the turn asked
+    here is the turn an agent would ask. See ``_completion_request``.
+
     Never raises: a probe answers with what happened, including when what
     happened is that nothing did.
     """
     model = str(model or "").strip()
     if not model:
         return False, "no model named"
-    url, headers, body = _completion_request(provider, endpoint, model, api_key)
+    url, headers, body = _completion_request(
+        provider,
+        endpoint,
+        model,
+        api_key,
+        disable_thinking=disable_thinking,
+        compat=compat,
+    )
     if url is None:
         return False, f"unknown provider: {provider!r}"
     try:
@@ -180,6 +197,17 @@ async def complete_one_turn(
     return True, f"{model!r} answered"
 
 
+def _spoken(value: Any) -> str:
+    """One message field as the text it holds, or nothing when it holds none.
+
+    ``str(value or "")`` read a structured ``reasoning`` — an object rather
+    than a string, which some builds send — as an answer, because a non-empty
+    dict stringifies to something truthy. A field that is not text did not say
+    anything this check can read.
+    """
+    return value.strip() if isinstance(value, str) else ""
+
+
 def _said_something(provider: str, answer: httpx.Response) -> bool:
     """Whether the provider's answer carries text or a tool call.
 
@@ -199,7 +227,18 @@ def _said_something(provider: str, answer: httpx.Response) -> bool:
         if not isinstance(choices, list) or not choices:
             return False
         message = (choices[0] or {}).get("message") or {}
-        return bool(str(message.get("content") or "").strip() or message.get("tool_calls"))
+        # Reasoning text counts. A local server serving a reasoning model with
+        # thinking left on puts the whole answer in ``reasoning_content``
+        # (``reasoning`` on some builds) and hands back an empty ``content``:
+        # the model loaded, the key was accepted and the endpoint spoke, which
+        # is everything this check is asked to establish. An empty body with
+        # no reasoning and no tool call is still nothing.
+        return bool(
+            _spoken(message.get("content"))
+            or _spoken(message.get("reasoning_content"))
+            or _spoken(message.get("reasoning"))
+            or message.get("tool_calls")
+        )
     if provider == "ollama":
         return bool(str(payload.get("response") or "").strip())
     if provider == "anthropic":
@@ -216,8 +255,37 @@ def _said_something(provider: str, answer: httpx.Response) -> bool:
     return bool(payload)
 
 
+def _openai_extras(base: str, disable_thinking: bool, compat: str) -> dict[str, Any]:
+    """The llama.cpp-only request fields this endpoint would get in a run.
+
+    Decided by the provider's own two functions rather than by a second copy of
+    the rule here: ``sends_llama_cpp_extras`` says whether this endpoint takes
+    them at all — a hosted OpenAI-compatible API answers an unknown body field
+    with 400, so a probe that sent one would fail a model the run can reach —
+    and ``add_thinking_switch`` writes the one field. A probe that asks a
+    different question from the run it gates is the defect this removes: with
+    thinking left on, a local reasoning model spent the probe's eight tokens
+    inside its own chain of thought and answered with an empty string.
+
+    Imported inside the function: this is the API process, and the agents'
+    provider module pulls langchain in behind it.
+    """
+    from maljan.llm.openai_provider import add_thinking_switch, sends_llama_cpp_extras
+
+    extras: dict[str, Any] = {}
+    if sends_llama_cpp_extras(base, str(compat or "auto")):
+        add_thinking_switch(extras, bool(disable_thinking))
+    return extras
+
+
 def _completion_request(
-    provider: str, endpoint: str, model: str, api_key: str
+    provider: str,
+    endpoint: str,
+    model: str,
+    api_key: str,
+    *,
+    disable_thinking: bool = False,
+    compat: str = "auto",
 ) -> tuple[str | None, dict[str, str], dict[str, Any]]:
     """The one-turn request each provider takes, as ``(url, headers, body)``."""
     base = str(endpoint or "").rstrip("/")
@@ -229,6 +297,7 @@ def _completion_request(
                 "model": model,
                 "max_tokens": COMPLETION_MAX_TOKENS,
                 "messages": [{"role": "user", "content": COMPLETION_PROMPT}],
+                **_openai_extras(base, disable_thinking, compat),
             },
         )
     if provider == "ollama":
@@ -274,8 +343,16 @@ async def _probe_llm_openai(v: dict[str, Any]) -> ProbeResult:
     models = [m.get("id", "") for m in r.json().get("data", [])]
     model = v.get("expert_model") or (models[0] if models else "")
     pairs = _pairs_to_file(v, "openai", base, str(model))
+    # Every OpenAI-compatible pair, the per-agent ones at their own endpoints
+    # included, is asked with the request body its agent would send: the
+    # thinking switch is a global setting and the dialect decides, per
+    # endpoint, whether it goes on the wire at all.
     reached, broken, untried = await _complete_each_pair(
-        "openai", pairs, str(v.get("api_key") or "")
+        "openai",
+        pairs,
+        str(v.get("api_key") or ""),
+        disable_thinking=bool(v.get("disable_thinking")),
+        compat=str(v.get("compat") or "auto"),
     )
     return _completed(t0, reached, broken, untried, f"{len(models)} models listed", models)
 
@@ -377,7 +454,12 @@ def _pairs_to_file(
 
 
 async def _complete_each_pair(
-    provider: str, pairs: dict[tuple[str, str], str], api_key: str
+    provider: str,
+    pairs: dict[tuple[str, str], str],
+    api_key: str,
+    *,
+    disable_thinking: bool = False,
+    compat: str = "auto",
 ) -> tuple[list[dict[str, Any]], list[str], list[str]]:
     """One completion per pair in turn; what was reached, what failed, what was not tried.
 
@@ -402,7 +484,12 @@ async def _complete_each_pair(
             untried.append(label)
             continue
         answered, said = await complete_one_turn(
-            provider, endpoint=endpoint, model=model, api_key=api_key
+            provider,
+            endpoint=endpoint,
+            model=model,
+            api_key=api_key,
+            disable_thinking=disable_thinking,
+            compat=compat,
         )
         if answered is None:
             broken.append(f"{label}: {said}")
@@ -926,6 +1013,11 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
             endpoint=endpoint,
             model=str(llm_model or ""),
             api_key=_provider_key(settings, llm_provider),
+            # An agent's own endpoint gets the body its own run would carry;
+            # both settings are global to the OpenAI block and ignored by the
+            # other three providers.
+            disable_thinking=bool(settings.llm.openai.disable_thinking),
+            compat=str(settings.llm.openai.compat or "auto"),
         )
         detail = f"{detail}; {said}"
         # A call that ran out of time proves nothing either way, so the probe
@@ -1239,6 +1331,10 @@ _INPUTS: dict[str, dict[str, str]] = {
         "core.llm.openai.api_key": "api_key",
         "core.llm.openai.expert_model": "expert_model",
         "core.llm.openai.judge_model": "judge_model",
+        # The two leaves that shape an OpenAI-compatible request body. A probe
+        # that asked without them asked a question no agent asks.
+        "core.llm.openai.compat": "compat",
+        "core.llm.openai.disable_thinking": "disable_thinking",
         "core.llm.anthropic.api_key": "anthropic_api_key",
         "core.llm.anthropic.expert_model": "anthropic_expert_model",
         "core.llm.anthropic.judge_model": "anthropic_judge_model",

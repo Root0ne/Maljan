@@ -309,6 +309,18 @@ class TestAnAskThroughTheRealLoop:
         assert "Claim 1: the sample opens a raw socket" in answered["report"]
         assert messages.index(asked) < messages.index(answered)
 
+    def test_the_two_lines_carry_the_kinds_the_console_draws_as_an_arrow(self, team) -> None:
+        _run_boss(team)
+        messages = [payload for kind, payload in team.events if kind == "agent_message"]
+        asked = next(m for m in messages if m.get("addressed_to") == "helper")
+        answered = next(m for m in messages if m.get("addressed_to") == "boss")
+        assert asked["kind"] == "delegation_ask"
+        assert answered["kind"] == "delegation_answer"
+        # The label an operator gave, so a reader who cannot open the admin
+        # settings still sees a name rather than a registry key.
+        assert asked["display_name"] == "boss"
+        assert answered["display_name"] == "helper"
+
     def test_the_callee_is_framed_like_a_stage_agent(self, team) -> None:
         _run_boss(team)
         first_turn = team.models["helper"].seen[0]

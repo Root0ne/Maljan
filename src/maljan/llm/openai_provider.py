@@ -84,6 +84,28 @@ def sends_llama_cpp_extras(base_url: str | None, compat: str) -> bool:
     return is_local_endpoint(base_url)
 
 
+def add_thinking_switch(extra: dict[str, Any], disable_thinking: bool) -> None:
+    """Put ``chat_template_kwargs.enable_thinking=false`` into ``extra`` when asked.
+
+    A module-level function because two callers send this field and they have
+    to send the same one: this provider, on every model it builds for an
+    endpoint that takes the llama.cpp extras, and the settings probe, on the
+    one short turn it asks that endpoint for. The probe left it out, so a
+    reasoning model spent the probe's whole eight-token budget inside its own
+    chain of thought and came back with an empty answer — a green endpoint
+    reported as a model that says nothing, and a submit gate that then refused
+    every job.
+
+    Nothing already in ``extra`` is overwritten: a caller that set the key
+    itself has said something more specific than this switch.
+    """
+    if not disable_thinking:
+        return
+    kwargs = dict(extra.get("chat_template_kwargs") or {})
+    kwargs.setdefault("enable_thinking", False)
+    extra["chat_template_kwargs"] = kwargs
+
+
 def unsupported_parameter(message: str) -> str | None:
     """The extra of ours a 400 is complaining about, or ``None``.
 
@@ -309,10 +331,7 @@ class OpenAIProvider:
             extra.setdefault("max_tokens", cap)
             extra.setdefault("n_predict", cap)
 
-        if self._config.llm.openai.disable_thinking:
-            ctk = dict(extra.get("chat_template_kwargs") or {})
-            ctk.setdefault("enable_thinking", False)
-            extra["chat_template_kwargs"] = ctk
+        add_thinking_switch(extra, self._config.llm.openai.disable_thinking)
 
         if extra:
             build_kwargs["extra_body"] = extra

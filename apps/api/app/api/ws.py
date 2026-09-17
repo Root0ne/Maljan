@@ -137,12 +137,111 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
+# How much of a resume is read at once, and how many of those a single resume
+# may take. The page size is the reader's own ceiling; the page count bounds a
+# socket that would otherwise sit replaying a pathological run while the
+# client waits for its first live event.
+#
+# Ten pages is ten thousand events. A long run publishes a few thousand — two
+# per tool call plus a delta per model turn — so this is well above any run
+# this has seen while being small enough that a client reconnecting in a loop
+# cannot use the handshake as an amplifier: nothing rate-limits reconnects,
+# and forty pages of a thousand was forty database reads and forty thousand
+# frames per attempt. A resume that reaches the bound stops and says so; the
+# client has every event's ``seq`` and can page ``GET /jobs/{id}/events`` for
+# the rest.
+_REPLAY_PAGE = 1000
+_REPLAY_PAGES = 10
+
+
+async def _replay(websocket: WebSocket, job_id: str, since: int) -> None:
+    """Send everything this job published after ``since``, then return.
+
+    Sent after the socket has joined the fan-out rather than before, so an
+    event published while the replay is being read is broadcast rather than
+    dropped between the two. That can put a live event in front of a replayed
+    one; both carry ``seq`` and the client orders and dedupes on it, which is
+    what the cursor is for.
+
+    Paged rather than capped. A single read is bounded — by the reader's
+    ceiling and, before that, by the Redis stream's own length — so a resume
+    that asked for a long run used to get a prefix of what it asked for with
+    nothing saying so, and no way for the client to know it should page the
+    REST endpoint instead. Each page advances the cursor to the last ``seq``
+    it carried, so the next one continues from there.
+
+    Never raises. A replay that cannot be read leaves the client where it
+    already was — attached, and one refresh away from the endpoint that reads
+    the same two stores.
+    """
+    sent = 0
+    cursor = since
+    try:
+        from app.services.job_events import read_events
+
+        redis_conn = aioredis.from_url(settings.redis_url, decode_responses=True)
+        try:
+            async with async_session_factory() as db:
+                for _page in range(_REPLAY_PAGES):
+                    events = await read_events(
+                        db, redis_conn, job_id, since=cursor, limit=_REPLAY_PAGE
+                    )
+                    if not events:
+                        break
+                    for event in events:
+                        await websocket.send_text(json.dumps(event))
+                    sent += len(events)
+                    highest = max(
+                        (int((e.get("data") or {}).get("seq") or 0) for e in events), default=0
+                    )
+                    if highest <= cursor or len(events) < _REPLAY_PAGE:
+                        # Either the page was short — there is nothing more —
+                        # or it carried no number this could advance past,
+                        # which is a run from before there were numbers and
+                        # has no second page to ask for.
+                        break
+                    cursor = highest
+                    # One page at a time, and the loop gets a turn between
+                    # them: a resume is a burst of sends on a socket that is
+                    # also carrying live events for this job and others.
+                    await asyncio.sleep(0)
+                else:
+                    logger.info(
+                        "WebSocket resume reached its page bound at seq=%s: job=%s",
+                        log_safe(cursor),
+                        log_safe(job_id),
+                    )
+        finally:
+            try:
+                await redis_conn.aclose()
+            except Exception:  # noqa: BLE001
+                pass
+        logger.info(
+            "WebSocket replayed %d event(s) after seq=%s: job=%s",
+            sent,
+            log_safe(since),
+            log_safe(job_id),
+        )
+    except Exception as exc:  # noqa: BLE001 — a replay never closes a socket
+        logger.warning("WebSocket replay failed (job=%s): %s", log_safe(job_id), log_safe(exc))
+
+
 @router.websocket("/ws/analysis/{job_id}")
-async def ws_analysis(websocket: WebSocket, job_id: str) -> None:
+async def ws_analysis(websocket: WebSocket, job_id: str, since: int | None = None) -> None:
     """WebSocket endpoint for real-time analysis event streaming.
 
     Clients connect here to receive live updates about an analysis job.
     Events are forwarded from the ARQ worker via Redis PubSub.
+
+    Resume:
+        ``?since=<seq>`` is the last sequence number the client already holds.
+        The server replays everything after it — from the Redis stream, or
+        from ``job_events`` when the stream has expired or no longer reaches
+        back that far — and then forwards live events as usual. Omitting it
+        attaches without a replay, which is what a client opening a fresh run
+        wants. The cursor changes nothing about the handshake: it is read
+        after the credential and the ownership check, and a socket that would
+        have been refused is still refused.
 
     Authentication:
         Pass the JWT access token as a WebSocket subprotocol, never as a
@@ -248,6 +347,8 @@ async def ws_analysis(websocket: WebSocket, job_id: str) -> None:
     # ── Connection accepted ──────────────────────────────────────────
     logger.info("WebSocket authenticated: user=%s job=%s", log_safe(user_id), log_safe(job_id))
     await manager.connect(websocket, job_id)
+    if since is not None and since >= 0:
+        await _replay(websocket, job_id, int(since))
 
     # The handshake checked
     # ``exp``, but a long-lived connection could outlive its token. Read

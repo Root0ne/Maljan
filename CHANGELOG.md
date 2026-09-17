@@ -8,6 +8,45 @@ change landed on `main`.
 
 ### Added
 
+- **The live conversation of a run, sequenced, kept and resumable.** Six new
+  event types beside `agent_message`: `tool_call_started` /
+  `tool_call_finished` (the latter carrying the evidence-ledger id the result
+  is filed under, emitted as the recorder writes each entry, so the triage
+  pack streams too), `validation_feedback` from
+  `pipeline/validation.retry_with_feedback`, `judge_question` from the judge's
+  ReAct loop, `agent_message_delta` from the analyst loop behind
+  `core.events.stream_deltas`, and `roster` at pipeline start.
+  `agent_message` gains `kind` (`says`, `tool_call`, `tool_result`,
+  `validation_feedback`, `judge_question`, `verdict`, `system`,
+  `delegation_ask`, `delegation_answer`), `display_name` and `seq`; an ask and
+  its answer carry the delegation kinds with `addressed_to`.
+  The publisher stamps every event with a per-job `seq` from a Redis `INCR`,
+  and `?since=<seq>` on `/ws/analysis/{id}` and on
+  `GET /api/v1/jobs/{id}/events` returns only what is newer. Events are now
+  written to a `job_events` table against the job in batches of fifty or two
+  seconds (revision `20260925000000`), so a failed or cancelled run — which
+  writes no report — keeps its conversation; both readers take Redis first and
+  the table second, which is what replays a run whose stream has expired.
+  `core.events.retention_days` (30) bounds the table and the worker sweeps it
+  nightly. `GET /api/v1/jobs/{id}` now carries the roster, so a non-admin
+  reader sees the labels an operator gave the agents without the admin-only
+  settings endpoint. Tool arguments and results travel as short scrubbed
+  summaries — credential shapes replaced, URLs cut to scheme and host, paths
+  cut to file names, a failure carrying its remedy rather than its error text.
+  The same revision adds `agent_messages.addressed_to`, and the stored
+  transcript row is written with the `seq` its event went out under, so a live
+  message and its replayed twin are one message.
+- **Changed:** `agent_messages.seq` is now the publisher's run-wide event
+  number rather than the message's position within the report, so it is
+  monotonic and **sparse** — it no longer starts at zero and no longer counts
+  `0..n`. Ordering is unchanged and `ORDER BY seq` still yields the order the
+  messages were said in; a query or fixture that assumed contiguous per-report
+  numbering needs updating. Rows written before this release keep their old
+  numbering and the report endpoint sends their `seq` as `null`, so a client
+  cannot mistake a position for a publisher number and draw the line twice; it
+  tells the two apart from the rows themselves, so the answer does not change
+  when the event feed ages out.
+
 - **Each tool server says what it can do on its host, before a run.** The four
   built-in sidecars answer a `capabilities` tool — per tool, its optional
   library, binary or setting, whether it is present, the reason it is not and
@@ -378,7 +417,9 @@ change landed on `main`.
   room left to ask is named as not tried and files no row, and a failing pair's
   sentence prints its endpoint as scheme and host.
   `core.llm.require_probe` is on; turning it off is the only way past, for an
-  air-gapped batch run.
+  air-gapped batch run. The probe's OpenAI-compatible turn sends the same
+  thinking switch the agents' provider sends, at every endpoint it asks, and
+  reads a reasoning-only reply as an answer.
 - **The same indicator or finding said twice is written once.**
   `reporting.dedupe` says what makes two indicators one — the kind and the
   value with its case, its padding and its defanging undone — and both the

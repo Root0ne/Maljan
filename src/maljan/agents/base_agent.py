@@ -392,6 +392,29 @@ def lock_for(agent: Any) -> Any:
     return lock if lock is not None else contextlib.nullcontext()
 
 
+def _turn_key(message: Any, index: int) -> str:
+    """What identifies one model turn, for publishing it exactly once.
+
+    Not ``id(message)``: CPython reuses an address after collection, so a turn
+    that had been collected could suppress a later one, and a graph that
+    copied its state between snapshots — a checkpointer, a serialising reducer
+    — would make every turn look new on every snapshot and republish the whole
+    conversation each time.
+
+    langchain gives a message its own id. A message without one is keyed on
+    its place in the conversation *and* on what it says: the place alone
+    cannot survive a conversation being replayed from the first message, which
+    a connection error does, and the text alone would swallow a turn a model
+    genuinely repeated — the degenerate loop this codebase guards against
+    elsewhere, where the interesting thing is precisely that it said the same
+    thing again.
+    """
+    own = getattr(message, "id", None)
+    if own:
+        return f"id:{own}"
+    return f"turn:{index}:{hash(str(getattr(message, 'content', '') or ''))}"
+
+
 def _steps_this_loop_spent(ledger: LoopBudget, messages: list) -> int:
     """What *this* loop has used, from the conversation or from the budget itself.
 
@@ -1729,6 +1752,46 @@ class BudgetMeter:
         """The job's event sink, or ``None`` for an agent outside a job."""
         return getattr(getattr(self, "_container", None), "event_sink", None)
 
+    def _publish_deltas(self, snapshot: Any, already: set[str]) -> None:
+        """Publish what this agent has newly said, once per turn it says it in.
+
+        The loop reads its graph as a stream of whole states, so the smallest
+        thing there is to publish is one model turn's text — not a token. That
+        is still the difference between a reader watching an analyst work and
+        a reader watching a dot for half an hour, which is what this is for.
+
+        A turn is identified by what the model said rather than counted, so a
+        state yielded twice publishes nothing twice. Never raises, and silent
+        when ``core.events.stream_deltas`` is off or there is no sink.
+        """
+        sink = self._event_sink()
+        if sink is None:
+            return
+        try:
+            from maljan.pipeline.events import emit_agent_message_delta, scrub
+
+            # The job's settings, not the process's: a switch this job was
+            # submitted under is the one that decides what this job publishes.
+            config = getattr(getattr(self, "_container", None), "config", None)
+            if not bool(getattr(getattr(config, "events", None), "stream_deltas", True)):
+                return
+            messages = snapshot.get("messages") if isinstance(snapshot, dict) else None
+            for index, message in enumerate(list(messages or [])):
+                if getattr(message, "type", "") != "ai":
+                    continue
+                marker = _turn_key(message, index)
+                if marker in already:
+                    continue
+                already.add(marker)
+                emit_agent_message_delta(
+                    sink,
+                    stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
+                    agent=str(self.name),
+                    text_delta=scrub(str(getattr(message, "content", "") or "")),
+                )
+        except Exception as exc:  # noqa: BLE001 — a delta never costs a turn
+            self.logger.debug("%s: delta not published (%s).", self.name, exc)
+
     def _budget_tick(
         self, ledger: LoopBudget, messages: list, *, final: bool = False, ledger_entries: int = 0
     ) -> None:
@@ -2373,6 +2436,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             # which step of the team made the call rather than the constant
             # "analysis" every entry carried when there was only one.
             stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
+            sink=self._event_sink(),
         )
         # The repeat guard is per loop, like the recorder: a second chunk is a
         # new conversation and the model has not seen the first one's answers.
@@ -2471,10 +2535,12 @@ class BaseAnalyst(BudgetMeter, ABC):
                     {"recursion_limit": max_steps},
                     stream_mode="values",
                 )
+                spoken: set[str] = set()
                 async with contextlib.aclosing(stream) as snapshots:
                     try:
                         async for snapshot in snapshots:
                             latest.update(snapshot)
+                            self._publish_deltas(snapshot, spoken)
                             if repeats.ending_the_loop():
                                 self.logger.warning(
                                     "%s ReAct loop ended after %d repeated tool call(s); "
@@ -3554,7 +3620,14 @@ class BaseAnalyst(BudgetMeter, ABC):
         try:
             tally = ValidationTally()
             revised, violations, retries = retry_with_feedback_sync(
-                _run, messages, [_validator], parse=_parse, on_feedback=tally.count
+                _run,
+                messages,
+                [_validator],
+                parse=_parse,
+                on_feedback=tally.count,
+                sink=self._event_sink(),
+                agent=str(self.name),
+                stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
             )
         except Exception as exc:  # noqa: BLE001 — a retry that fails keeps the first answer
             self.logger.warning("Validation retry failed (%s); keeping the first answer.", exc)

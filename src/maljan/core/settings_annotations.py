@@ -48,6 +48,7 @@ GROUP_ORDER: list[tuple[str, str]] = [
     ("chunking", "Chunking"),
     ("reporting", "Reporting"),
     ("agents", "Agents"),
+    ("events", "Live events"),
     ("tracing", "Tracing"),
     ("enrichment", "Enrichment / threat intelligence"),
     ("api", "API"),
@@ -79,6 +80,10 @@ GROUP_DESCRIPTIONS: dict[str, str] = {
     "chunking": "How large inputs are split before they reach a model.",
     "reporting": "What the final report contains and the metadata stamped on it.",
     "agents": "The analysts Maljan can run, the profile that selects them, and the ReAct limits.",
+    "events": (
+        "The live conversation the console draws a running analysis from, and how long the "
+        "record of one is kept against the job."
+    ),
     "tracing": "LangSmith tracing of every model call.",
     "enrichment": "Threat-intelligence lookups for the indicators a report names.",
     "api": "Request limits and login protection of the HTTP API; changes take effect immediately.",
@@ -100,6 +105,7 @@ _PREFIX_GROUPS: list[tuple[str, str]] = [
     ("preprocessing", "analysis"),
     ("triage", "analysis"),
     ("validation", "analysis"),
+    ("events", "events"),
     ("static", "static"),
     ("mcp", "mcp"),
     ("reporting", "reporting"),
@@ -493,6 +499,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "constrained local hosts, where thinking otherwise consumes the whole "
             "output budget; has no effect on vanilla OpenAI."
         ),
+        "probe": "llm",
         "subgroup": "OpenAI",
         "advanced": True,
     },
@@ -906,6 +913,27 @@ ANNOTATIONS: dict[str, Annotation] = {
             "after it is spent is recorded as not run rather than started."
         ),
         "subgroup": "Triage pack",
+    },
+    "events.stream_deltas": {
+        "title": "Stream partial answers",
+        "description": (
+            "Publish an agent's text while its loop is still running, so the "
+            "conversation fills in as the agent works instead of arriving whole "
+            "at the end. What is published is one model turn's text as the loop "
+            "produces it, not a token at a time. Off leaves every finished "
+            "message exactly as it is."
+        ),
+        "applies": "next_job",
+    },
+    "events.retention_days": {
+        "title": "Keep the live feed for (days)",
+        "description": (
+            "How long a finished run's moment-by-moment feed stays on the job "
+            "before the worker's nightly sweep removes it. The transcript, the "
+            "agent findings and the evidence ledger are kept by the report and "
+            "the job and are not touched by this."
+        ),
+        "applies": "live",
     },
     "validation.alignment_gate": {
         "title": "Technique alignment gate",

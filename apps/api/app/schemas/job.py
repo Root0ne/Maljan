@@ -61,6 +61,39 @@ class JobCreateRequest(BaseModel):
         return value
 
 
+class RosterAgent(BaseModel):
+    """One participant of a run: its key, the label it is drawn under, its
+    role, the stages it speaks in, and who can task it.
+
+    A specialist that no stage names — the agents a lead reaches through its
+    ``ask_<key>`` tools — has an empty ``stages`` and a ``via`` naming the
+    agents that can task it. An agent a stage names carries no ``via``:
+    nothing had to ask it to be there.
+    """
+
+    key: str
+    label: str
+    role: str
+    stages: list[str] = []
+    via: list[str] | None = None
+
+
+class RosterStage(BaseModel):
+    """One step of the team, and who takes part in it."""
+
+    key: str
+    label: str
+    kind: str
+    agents: list[str] = []
+
+
+class JobRoster(BaseModel):
+    """Everyone who can speak in one run, and the stages they speak in."""
+
+    agents: list[RosterAgent] = []
+    stages: list[RosterStage] = []
+
+
 class JobResponse(BaseModel):
     """Analysis job status response."""
 
@@ -79,6 +112,11 @@ class JobResponse(BaseModel):
     completed_at: datetime | None
     duration_seconds: float | None
     error_message: str | None
+    # Who can speak in this run, with the label an operator gave each agent
+    # and the stages it takes part in. Filled on the single-job endpoint,
+    # where the team can be resolved; ``None`` in a listing, which is a page
+    # of rows rather than a run somebody is watching.
+    roster: JobRoster | None = None
 
     model_config = {"from_attributes": True}
 
@@ -172,9 +210,17 @@ class AgentMessageResponse(BaseModel):
     frontend maps a replayed conversation and a live one through the same code
     path — which is the point of storing the broadcast rather than
     reconstructing it from ``agent_findings``.
+
+    ``seq`` is the number the publisher gave the message when it went out, and
+    is the identity a client collapses a stored row onto its live twin with.
+    It is ``None`` for a run recorded before the publisher numbered anything:
+    such a row carries its old position within the report, which is a
+    different number from the same run's live events, and sending it would
+    have a client draw every line of that run twice. The endpoint tells the
+    two apart from the rows themselves — see ``app.api.v1.reports._is_numbered``.
     """
 
-    seq: int
+    seq: int | None = None
     speaker: str
     role: str
     round: int
@@ -185,6 +231,8 @@ class AgentMessageResponse(BaseModel):
     confidence: float | None = None
     claims: list | None = None
     dissent: list | None = None
+    # The agent this line was said to, or ``None`` for a line said to the room.
+    addressed_to: str | None = None
     ts: datetime | None = None
 
     model_config = {"from_attributes": True}

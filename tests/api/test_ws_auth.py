@@ -189,3 +189,93 @@ def test_subprotocol_token_is_accepted(client: TestClient, monkeypatch: pytest.M
         f"/ws/analysis/{job_id}", subprotocols=["maljan.v1", "maljan.v1.good"]
     ) as ws:
         assert ws.accepted_subprotocol == "maljan.v1"
+
+
+def test_a_resume_cursor_does_not_bypass_the_credential(client: TestClient) -> None:
+    """``?since=`` is read after the auth gate, never instead of it.
+
+    A cursor is the one thing a client may add to this handshake, so it is the
+    one thing worth pinning: an unauthenticated socket asking to resume is
+    refused exactly as an unauthenticated socket asking for nothing is, and
+    nothing is replayed to it.
+    """
+    job_id = str(uuid.uuid4())
+    with pytest.raises(WebSocketDisconnect) as exc:
+        with client.websocket_connect(f"/ws/analysis/{job_id}?since=0") as ws:
+            ws.receive_text()
+    assert exc.value.code == 4401
+
+
+def test_a_resume_cursor_does_not_bypass_the_ownership_check(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    replayed: list[int] = []
+
+    async def _recording_replay(websocket: object, job_id: str, since: int) -> None:
+        replayed.append(since)
+
+    monkeypatch.setattr(ws_module, "_replay", _recording_replay)
+    monkeypatch.setattr(
+        ws_module, "async_session_factory", lambda: _FakeSession(_FakeJob(created_by="somebody"))
+    )
+
+    job_id = str(uuid.uuid4())
+    with pytest.raises(WebSocketDisconnect) as exc:
+        with client.websocket_connect(
+            f"/ws/analysis/{job_id}?since=5", subprotocols=["maljan.v1", "maljan.v1.good"]
+        ) as ws:
+            ws.receive_text()
+
+    assert exc.value.code == 1008
+    assert "not your job" in (exc.value.reason or "")
+    assert replayed == []
+
+
+def test_an_owner_that_resumes_is_replayed_from_its_cursor(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    replayed: list[int] = []
+
+    async def _recording_replay(websocket: object, job_id: str, since: int) -> None:
+        replayed.append(since)
+
+    async def _no_listener(self: object, job_id: str) -> None:
+        return None
+
+    monkeypatch.setattr(ws_module, "_replay", _recording_replay)
+    monkeypatch.setattr(ws_module.ConnectionManager, "_redis_listener", _no_listener)
+    monkeypatch.setattr(
+        ws_module, "async_session_factory", lambda: _FakeSession(_FakeJob(created_by="u1"))
+    )
+
+    job_id = str(uuid.uuid4())
+    with client.websocket_connect(
+        f"/ws/analysis/{job_id}?since=42", subprotocols=["maljan.v1", "maljan.v1.good"]
+    ) as ws:
+        assert ws.accepted_subprotocol == "maljan.v1"
+    assert replayed == [42]
+
+
+def test_a_socket_with_no_cursor_is_not_replayed_to(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    replayed: list[int] = []
+
+    async def _recording_replay(websocket: object, job_id: str, since: int) -> None:
+        replayed.append(since)
+
+    async def _no_listener(self: object, job_id: str) -> None:
+        return None
+
+    monkeypatch.setattr(ws_module, "_replay", _recording_replay)
+    monkeypatch.setattr(ws_module.ConnectionManager, "_redis_listener", _no_listener)
+    monkeypatch.setattr(
+        ws_module, "async_session_factory", lambda: _FakeSession(_FakeJob(created_by="u1"))
+    )
+
+    job_id = str(uuid.uuid4())
+    with client.websocket_connect(
+        f"/ws/analysis/{job_id}", subprotocols=["maljan.v1", "maljan.v1.good"]
+    ):
+        pass
+    assert replayed == []
