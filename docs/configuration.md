@@ -178,6 +178,10 @@ first and is not enough on its own: a server can offer a name it will not load,
 a key can be refused for one model and not another, and a misspelling can land
 on a name the catalogue happens to hold. A call that came back with nothing in
 it — an empty `choices`, a candidate that was filtered away — is a failure too.
+The OpenAI-compatible body carries the same `chat_template_kwargs.enable_thinking`
+switch a run would send, under the same `llm.openai.compat` rule and at every
+endpoint asked, and a reply whose only text is `reasoning_content` counts as an
+answer: a model that reasoned is a model that loaded on a key that was accepted.
 The completion gets ninety seconds of its own, because a local server reloads a
 model it had unloaded and a large one is not a ten-second load.
 

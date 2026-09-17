@@ -49,7 +49,9 @@ def _the_model_answers(monkeypatch):
     is driven against a mocked client in ``TestTheProbeMakesTheCallTheJobWillMake``.
     """
 
-    async def _answered(provider: str, *, endpoint: str, model: str, api_key: str = ""):
+    async def _answered(
+        provider: str, *, endpoint: str, model: str, api_key: str = "", **_body: Any
+    ):
         return (bool(model.strip()), f"{model!r} answered" if model.strip() else "no model named")
 
     monkeypatch.setattr(settings_probes, "complete_one_turn", _answered)

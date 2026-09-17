@@ -407,7 +407,9 @@ change landed on `main`.
   room left to ask is named as not tried and files no row, and a failing pair's
   sentence prints its endpoint as scheme and host.
   `core.llm.require_probe` is on; turning it off is the only way past, for an
-  air-gapped batch run.
+  air-gapped batch run. The probe's OpenAI-compatible turn sends the same
+  thinking switch the agents' provider sends, at every endpoint it asks, and
+  reads a reasoning-only reply as an answer.
 - **The same indicator or finding said twice is written once.**
   `reporting.dedupe` says what makes two indicators one — the kind and the
   value with its case, its padding and its defanging undone — and both the

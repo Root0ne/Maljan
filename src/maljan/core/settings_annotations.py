@@ -499,6 +499,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "constrained local hosts, where thinking otherwise consumes the whole "
             "output budget; has no effect on vanilla OpenAI."
         ),
+        "probe": "llm",
         "subgroup": "OpenAI",
         "advanced": True,
     },
