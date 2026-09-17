@@ -480,8 +480,6 @@ class JudgeAgent(BudgetMeter):
             # an analyst that never made the call.
             stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
         )
-        agent_executor = create_react_agent(self.llm, record_tools(self.tools, recorder))
-
         messages = messages_pre
 
         settings = get_settings()
@@ -495,6 +493,26 @@ class JudgeAgent(BudgetMeter):
         budget = LoopBudget(max_steps, float(timeout))
         cap: str | None = None
         turns: list[Any] = []
+
+        def _count_the_turns(state: Any) -> list[Any]:
+            """Count the conversation before every model turn, and change nothing.
+
+            The analysts' loop counts on the same hook because it is already
+            there to refresh their run-state block. The judge has no block to
+            refresh, and without something counting, a loop cut off at its
+            wall clock hands the meter an empty conversation and records the
+            zero steps this meter exists to stop recording.
+            """
+            conversation = state.get("messages") if isinstance(state, dict) else None
+            if conversation is None:
+                conversation = getattr(state, "messages", None) or []
+            conversation = list(conversation)
+            budget.note_turns(conversation)
+            return conversation
+
+        agent_executor = create_react_agent(
+            self.llm, record_tools(self.tools, recorder), prompt=_count_the_turns
+        )
         self.logger.info(
             "JudgeAgent invoking ReAct (timeout=%ds, tools=%d)...",
             timeout,

@@ -324,6 +324,7 @@ class BudgetCeiling:
 # same answer the real agents get.
 _NO_PATH_CHOICES: Mapping[str, Any] = MappingProxyType({})
 _SHARED_STAND_IN_LOCK = threading.RLock()
+_SHARED_STAND_IN_ASKS_LOCK = threading.Lock()
 
 
 # How long past its own timeout a loop is left alone before it is aborted
@@ -1755,13 +1756,28 @@ class BudgetMeter:
             )
 
     def _note_budget(self, record: dict[str, Any]) -> None:
-        """Keep one loop's record, on this instance rather than on the class."""
-        self._budget_records = [*self._budget_records, record]
+        """Keep one loop's record, on this instance rather than on the class.
+
+        Under the meter's lock: the rebinding is a read-modify-write, and a
+        delegated hand-over runs it from an executor thread while this agent's
+        own loop may be recording one of its own.
+        """
+        with self._the_meter_s_lock():
+            self._budget_records = [*self._budget_records, record]
+
+    def _the_meter_s_lock(self) -> Any:
+        """This agent's lock for its read-modify-write counters, or nothing.
+
+        A duck-typed stand-in that borrows one of these methods and is never
+        driven from two threads has none and needs none.
+        """
+        return getattr(self, "_meter_lock", None) or contextlib.nullcontext()
 
     def drain_budget_records(self) -> list[dict[str, Any]]:
         """Every loop's budget record since the last drain, handing over ownership."""
-        records = list(self._budget_records)
-        self._budget_records = []
+        with self._the_meter_s_lock():
+            records = list(self._budget_records)
+            self._budget_records = []
         return records
 
 
@@ -1894,6 +1910,17 @@ class BaseAnalyst(BudgetMeter, ABC):
         self.current_round: int = 0
         self.sample_path_choices = {}
         self.delegation_lock = threading.RLock()
+        # The caller's side of the same rule: this agent's own asks run one
+        # after another, whether or not they name the same callee. A model
+        # that emits two ``ask_*`` calls in one turn has them gathered
+        # concurrently, and two nested loops against one llama-server slot
+        # clobber its recurrent state. A different object from the lock above,
+        # so an ask made from inside an ask still nests.
+        self.asks_lock = threading.Lock()
+        # Held while the meter's rows and the validation counters are read,
+        # changed and written back: those are read-modify-write, and a
+        # hand-over from a delegation runs on an executor thread.
+        self._meter_lock = threading.Lock()
         # The budget meter's record of every loop this agent ran since the
         # node last drained it: steps against the cap, seconds against the
         # limit, and the cap that ended it when one did. The node writes it
@@ -3840,6 +3867,7 @@ class BaseAnalyst(BudgetMeter, ABC):
     # The lock included: ``delegation.ask`` takes it on the callee, and a
     # stand-in that a real agent is allowed to ask must have one to take.
     delegation_lock: Any = _SHARED_STAND_IN_LOCK
+    asks_lock: Any = _SHARED_STAND_IN_ASKS_LOCK
     # Read-only, because one dict here would be one dict for every analyst
     # built without ``__init__``, and the node writes a whole new mapping
     # rather than into this one.

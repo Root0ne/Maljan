@@ -305,6 +305,40 @@ class TestEveryPathThatDrainsALedgerDrainsTheMeter:
         assert caller.drain_budget_records() == []
         assert callee.drain_budget_records() == [], "the callee is drained either way"
 
+    def test_a_row_is_filed_under_the_agent_that_ran_the_loop(self) -> None:
+        """A lead hands over what its specialists spent; the summary keeps them apart."""
+        from maljan.agents.base_agent import BudgetMeter, LoopBudget
+
+        class _Agent(BudgetMeter):
+            def __init__(self) -> None:
+                self.name = "lead"
+                self.logger = MagicMock()
+                self.pipeline_stage = "lead"
+                self._container = None
+                self._budget_records: list[dict[str, Any]] = []
+
+        lead = _Agent()
+        lead._record_budget(LoopBudget(max_steps=40, timeout=100.0), [], None)
+        lead._note_budget({"stage": "lead", "cap": "steps", "agent": "static"})
+
+        rows = _budget_update(lead, "lead")["budget_records"]
+
+        assert set(rows) == {"lead", "static"}
+        assert [row["cap"] for row in rows["static"]] == ["steps"]
+        assert [row["cap"] for row in rows["lead"]] == [None]
+
+    def test_the_judge_notes_its_turns_so_a_timed_out_loop_is_not_zero(self) -> None:
+        """Its loop has no run-state block to refresh, so nothing else counted."""
+        from langchain_core.messages import AIMessage, HumanMessage
+
+        from maljan.agents.base_agent import LoopBudget, _steps_this_loop_spent
+
+        budget = LoopBudget(max_steps=10, timeout=600.0)
+        budget.note_turns([HumanMessage(content="h"), AIMessage(content="a")])
+
+        assert budget.own_steps > 0
+        assert _steps_this_loop_spent(budget, []) == budget.own_steps
+
     def test_the_judge_meters_its_own_loop_and_the_container_drains_it(self) -> None:
         from maljan.agents.base_agent import BudgetMeter, LoopBudget
         from maljan.agents.judge_agent import JudgeAgent

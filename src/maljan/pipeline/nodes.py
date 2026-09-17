@@ -18,6 +18,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from maljan.agents.delegation import TEAM_SERVER
 from maljan.agents.evidence_recorder import EvidenceRecorder
 from maljan.agents.judge_agent import (
     VERDICT_FALLBACK_CODE,
@@ -213,7 +214,14 @@ def _judge_budget(container: Any) -> dict[str, Any]:
 
 
 def _budget_update(agent: Any, agent_name: str) -> dict[str, Any]:
-    """The budget meter's rows for this agent since it was last drained."""
+    """The budget meter's rows for this agent since it was last drained.
+
+    Filed under the agent that ran the loop, not the one that was drained.
+    A lead hands over what its specialists spent, and a summary that counted
+    those against the lead would say the lead ended at a cap a specialist hit
+    and would have no row at all for the specialist. The row names its own
+    agent; only a row that does not falls back to the drained key.
+    """
     drain = getattr(agent, "drain_budget_records", None)
     if not callable(drain):
         return {}
@@ -222,7 +230,13 @@ def _budget_update(agent: Any, agent_name: str) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 — telemetry never breaks a run
         logger.debug("budget records not read for %s: %s", agent_name, exc)
         return {}
-    return {"budget_records": {agent_name: rows}} if rows else {}
+    if not rows:
+        return {}
+    by_agent: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        whose = str(row.get("agent") or agent_name)
+        by_agent.setdefault(whose, []).append(row)
+    return {"budget_records": by_agent}
 
 
 def _nudge_mode(agent: Any) -> str | None:
@@ -707,6 +721,11 @@ def tool_failures(ledger: Sequence[Any], limit: int = 20) -> list[dict[str, Any]
     rows: dict[tuple[str, str], dict[str, Any]] = {}
     for entry in ledger:
         if getattr(entry, "ok", True) or getattr(entry, "repeated_of", None):
+            continue
+        # A refused ask is a guard working: a cycle, a depth, a budget the
+        # caller had already spent. It is a failed entry so the model reads
+        # it, and it is not a tool an operator can go and fix.
+        if str(getattr(entry, "server", "") or "") == TEAM_SERVER:
             continue
         message = str(getattr(entry, "error", "") or getattr(entry, "output", "") or "").strip()
         if message.startswith(NOT_RUN_PREFIX):
@@ -1427,9 +1446,11 @@ def note_unavailable_tools(container: ServiceContainer, agent: Any) -> list[str]
 def _record_once(reasons: list[str], reason: str) -> bool:
     """Append ``reason`` unless it is already there, and say whether it was new.
 
-    Under the registry's own lock, because a parallel fan-out has two stage
-    nodes starting at once and check-then-append can write the same sentence
-    twice.
+    Under this module's lock, because a parallel fan-out has two stage nodes
+    starting at once and check-then-append can write the same sentence twice.
+    The registry appends its own attach reasons to the same list without it,
+    so this closes the race between two stage starts rather than every race
+    on the list.
     """
     with _REASON_LOCK:
         if reason in reasons:
@@ -3115,7 +3136,6 @@ def make_judge_node(
                     # cite it and the citation resolves.
                     "evidence_ledger": _judge_evidence(),
                     **_judge_budget(container),
-                    **_judge_budget(container),
                     "isr_reports": isr_reports,
                     # Surface the degraded-mode signal to the report
                     # node and downstream consumers (API/dashboard).
@@ -3168,7 +3188,6 @@ def make_judge_node(
                     "degraded_mode": True,
                     "degradation_reasons": [f"judge failed ({type(e).__name__})"],
                     "evidence_ledger": _judge_evidence(),
-                    **_judge_budget(container),
                     **_judge_budget(container),
                 }
             )

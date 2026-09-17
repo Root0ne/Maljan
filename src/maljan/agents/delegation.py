@@ -238,26 +238,49 @@ def ask(container: Any, *, caller_key: str, callee_key: str, task: str, context:
         logger.info("delegation refused (%s -> %s): %s", caller_key, callee_key, why)
         raise DelegationRefused(why)
     callee = container.get_agent(callee_key)
-    # One thing at a time per callee. The instance is the job's, so a second
-    # caller asking it and the callee's own stage run drive the same buffers,
-    # the same budget and the same call chain; both take this lock, and the
-    # one that arrives second waits.
-    #
-    # Bounded, for two reasons. A caller must not spend more waiting than it
-    # has left to read the answer with, and two agents in one parallel stage
-    # that reference each other would otherwise each hold what the other
-    # wants. What the wait buys is an answer; what it costs is refused in
-    # words the model can act on.
     wait = _seconds_to_wait_for(caller)
-    if not callee.delegation_lock.acquire(timeout=wait):
+    # One ask at a time per caller. A model that emits two ``ask_*`` calls in
+    # one turn has them run concurrently — langgraph gathers a turn's tool
+    # calls — and two nested loops against one llama-server slot is the
+    # re-prefill failure this project has already diagnosed once: the slot's
+    # recurrent state is clobbered, every step re-processes the whole prompt,
+    # and the run times out looking like a model problem. The caller's own
+    # lock is a different object from any callee's, so an ask made from inside
+    # an ask still nests.
+    if not _held(caller.asks_lock, wait):
         raise DelegationRefused(
-            f"agent {callee_key!r} is busy with its own work and did not free up within "
-            f"{int(wait)} s; answer from what you have or ask someone else"
+            f"another of your asks is still running and did not finish within {int(wait)} s; "
+            "ask one agent at a time, or answer from what you have"
         )
     try:
-        return _ask(container, caller, callee, str(task or "").strip(), str(context or "").strip())
+        # One thing at a time per callee, too. The instance is the job's, so a
+        # second caller asking it and the callee's own stage run drive the
+        # same buffers, the same budget and the same call chain; both take
+        # this lock, and the one that arrives second waits.
+        #
+        # Bounded, for two reasons. A caller must not spend more waiting than
+        # it has left to read the answer with, and two agents in one parallel
+        # stage that reference each other would otherwise each hold what the
+        # other wants. What the wait buys is an answer; what it costs is
+        # refused in words the model can act on.
+        if not _held(callee.delegation_lock, wait):
+            raise DelegationRefused(
+                f"agent {callee_key!r} is busy with its own work and did not free up within "
+                f"{int(wait)} s; answer from what you have or ask someone else"
+            )
+        try:
+            return _ask(
+                container, caller, callee, str(task or "").strip(), str(context or "").strip()
+            )
+        finally:
+            callee.delegation_lock.release()
     finally:
-        callee.delegation_lock.release()
+        caller.asks_lock.release()
+
+
+def _held(lock: Any, wait: float) -> bool:
+    """Take ``lock`` within ``wait`` seconds, or say it could not be taken."""
+    return bool(lock.acquire(timeout=max(0.0, float(wait))))
 
 
 def _seconds_to_wait_for(caller: Any) -> float:
@@ -285,6 +308,11 @@ def _ask(container: Any, caller: Any, callee: Any, task: str, context: str) -> s
         addressed_to=str(callee.name),
     )
 
+    # What the callee cannot have on this host, recorded once, the way the
+    # stage node records it for an agent it is about to run. In the one team
+    # where the specialists hold the tools, the specialists are in no stage,
+    # so without this no unavailable tool of theirs is ever written down.
+    _note_what_the_callee_cannot_have(container, callee)
     its_own = _what_the_callee_had(callee)
     _brief_callee(caller, callee, stage=stage, round_index=round_index)
     budget = getattr(caller, "loop_budget", None)
@@ -331,6 +359,16 @@ def _ask(container: Any, caller: Any, callee: Any, task: str, context: str) -> s
         addressed_to=str(caller.name),
     )
     return answer
+
+
+def _note_what_the_callee_cannot_have(container: Any, callee: Any) -> None:
+    """Run the stage-start manifest check for an agent no stage will start."""
+    try:
+        from maljan.pipeline.nodes import note_unavailable_tools
+
+        note_unavailable_tools(container, callee)
+    except Exception as exc:  # noqa: BLE001 — a record is never worth a run
+        logger.debug("delegation: the callee's manifest check was skipped (%s).", exc)
 
 
 def _brief_callee(caller: Any, callee: Any, *, stage: str, round_index: int) -> None:
@@ -483,12 +521,23 @@ def _hand_over_the_record(caller: Any, callee: Any, *, still_running: bool = Tru
                 path=str(row.get("path", "")),
             )
         )
-    caller.validation_retries += int(retries or 0)
-    for code, count in (fed_back or {}).items():
-        caller.validation_fed_back[code] = caller.validation_fed_back.get(code, 0) + int(count)
+    # The two counters are read-modify-write and this runs on an executor
+    # thread, so they go under the caller's own lock — the same one the meter's
+    # rows take.
+    with _the_caller_s_lock(caller):
+        caller.validation_retries += int(retries or 0)
+        for code, count in (fed_back or {}).items():
+            caller.validation_fed_back[code] = caller.validation_fed_back.get(code, 0) + int(count)
     for code in not_run:
         if code not in caller.validation_not_run:
             caller.validation_not_run.append(code)
+
+
+def _the_caller_s_lock(caller: Any) -> Any:
+    """The caller's lock for its read-modify-write counters, or nothing."""
+    import contextlib
+
+    return getattr(caller, "_meter_lock", None) or contextlib.nullcontext()
 
 
 def _drain_budget_rows(callee: Any) -> list[dict[str, Any]]:

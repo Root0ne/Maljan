@@ -613,11 +613,15 @@ class TestOneAgentDoesOneThingAtATime:
         return thread
 
     def _held_by_another_thread(self, agent: Any) -> tuple[threading.Event, threading.Thread]:
-        """The agent's lock, taken on a thread of its own and let go on demand."""
+        """The agent's own-work lock, taken on a thread of its own."""
+        return self._held_by_another_thread_on(agent.delegation_lock)
+
+    def _held_by_another_thread_on(self, lock: Any) -> tuple[threading.Event, threading.Thread]:
+        """``lock``, taken on a thread of its own and let go on demand."""
         taken, release = threading.Event(), threading.Event()
 
         def _hold() -> None:
-            with agent.delegation_lock:
+            with lock:
                 taken.set()
                 release.wait(timeout=10)
 
@@ -659,6 +663,34 @@ class TestOneAgentDoesOneThingAtATime:
         release.set()
         stage.join(timeout=5)
         assert ran == ["its own stage"]
+
+    def test_a_caller_s_second_ask_waits_for_its_first(self) -> None:
+        """Two ``ask_*`` calls in one turn are gathered concurrently by langgraph.
+
+        Two nested loops against one llama-server slot clobber its recurrent
+        state and every step then re-processes the whole prompt, which is the
+        timeout this project has already diagnosed once.
+        """
+        container = _team([], [])
+        boss = container.get_agent("boss")
+        release, holder = self._held_by_another_thread_on(boss.asks_lock)
+        done: list[str] = []
+
+        thread = self._ask_from_a_thread(container, done)
+        thread.join(timeout=0.3)
+        assert done == [], "the second ask is waiting on the first"
+
+        release.set()
+        holder.join(timeout=5)
+        thread.join(timeout=5)
+        assert done == ["answered"]
+
+    def test_the_caller_s_lock_is_not_the_callee_s_so_an_ask_still_nests(self) -> None:
+        container = _team([], [])
+        boss, helper = container.get_agent("boss"), container.get_agent("helper")
+
+        assert boss.asks_lock is not helper.asks_lock
+        assert boss.asks_lock is not boss.delegation_lock
 
     def test_a_callee_that_never_frees_up_is_refused_in_words_the_model_reads(self) -> None:
         container = _team([], [])
