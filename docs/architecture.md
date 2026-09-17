@@ -129,6 +129,34 @@ reason recorded, when `triage.enabled` is off, when the stage withholds the
 built-in tools, or when there is no sample on disk to read. The `measurement`
 baseline has no triage stage at all.
 
+**Every model reads it.** `triage_pack.render_pack` turns the entries into one
+line each — `[ev_0001] identity: pe windows, 4,486,656 bytes, …`,
+`[ev_0003] signature: none`, `[ev_0007] yara: 2 hits of 30 rules (…)`,
+`[ev_0008] capa: 6 capabilities, ATT&CK T1027, T1055 (rule-asserted)`,
+`[ev_0017] reputation: VirusTotal 31/75 malicious, labels Filisto` — cut at
+`reporting.upstream_findings_max_chars` with a last line saying how many
+entries were left out and that their full output is a tool call away. Under
+the heading *Facts established before analysis (ledger ids in brackets; cite
+them)* the block leads every analyst's first human turn (analysis and
+revision alike), the mediator's and the verdict's human turns, the narrative
+prompt and every composer section. The report's identity block and signature
+rows come from the same entries when no model cited them. And because every
+agent was shown the pack, the pack's ids are citable by every agent:
+`isr.ungrounded_technique` no longer exempts an analyst whose own ledger is
+empty when a pack is present — only a run with nothing citable at all (the
+measurement baseline) is exempt.
+
+**The run-state block.** `pipeline/run_state.py` derives a dozen lines from the
+state — the sample, the identity, hashes, signature and reputation lines out
+of the pack, which stages ran or were skipped and why, how many ledger entries
+exist and which tools failed, and the steps and seconds a tool loop has left —
+and puts them in the system turn between `=== RUN STATE … ===` markers. It is
+regenerated on every model turn of a tool loop (the executor's prompt hook
+rewrites the budget line) and replaced rather than appended, so a prompt
+carries exactly one block; the forced-synthesis trim keeps the system turn and
+the first human turn, so neither the block nor the pack is ever what gets cut.
+It is read-only to the model: nothing a model says is written into it.
+
 Agents exchange structured `AgentISR` objects — claims with an `evidence_ref`
 and a confidence — rather than raw text. Objects are built and cached in one
 composition root (`src/maljan/core/container.py`), and agents are discovered
@@ -163,7 +191,13 @@ Two producers use it:
   attack-pattern with an unresolvable id, a severity outside the enum, and a
   family named with no evidence ids. An ungrounded indicator that survives the
   retry is dropped, because a STIX consumer has no way to read a caveat — and
-  recorded, because the false positive is a fact about the run.
+  recorded, because the false positive is a fact about the run. Two symmetric
+  rules ask what a verdict over zero analyst claims rests on:
+  `verdict.unsupported_benign` asks for the entry that establishes Benign (a
+  signature is the usual one) and `verdict.unsupported_malware` for the entries
+  that establish Malware (a reputation entry, a rule hit); either way the
+  alternative offered is Suspicious with an inconclusive rationale, the judge
+  is asked once, and the second answer is kept as given.
 
 What the judge decides is the judge's: `severity` (with its rationale),
 `malware_category` and `family` come back on the bundle under
@@ -185,6 +219,17 @@ Two metrics record the outcome:
 A degraded run is not capped. The judge is told in the prompt why the run is
 thin — no sandbox report, an analyst that failed, a container nothing could
 open — and sets its own confidence; the report header states the same reasons.
+
+One more repair belongs here because it decides whether an analyst's answer
+exists at all. A tool loop that ends on a turn that is not a report is asked
+once more for one (the final-answer nudge). A live loop ended on an assistant
+turn whose tool call carried arguments that never parsed; no tool ran, and
+sending that turn back made the server fail rendering it ("Failed to parse
+tool call arguments as JSON", HTTP 500). The nudge and the forced synthesis now
+send the transcript without such a call — the turn's own words stay — and when
+the plain request still fails, the nudge asks once more with the loop's tools
+bound and `tool_choice="none"`, the one other shape the server accepts.
+`run_summary.nudge.retry_mode` names which analysts needed which repair.
 
 ## Agents and teams
 

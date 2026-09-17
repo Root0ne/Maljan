@@ -31,6 +31,25 @@ change landed on `main`.
   `{entries, failed, duration_ms}`. Settings: `triage.enabled`,
   `triage.strings_head` (300) and `triage.reputation` (`auto` | `off`); the
   console's stage editor offers the kind.
+- **Every model reads the pack, and a run-state block, on every turn.**
+  `render_pack` turns the pack into one line per entry with its ledger id in
+  brackets, cut at `reporting.upstream_findings_max_chars` with a line saying
+  how many entries were left out; under the heading *Facts established before
+  analysis (ledger ids in brackets; cite them)* it leads every analyst's first
+  human turn, the mediator's and the verdict's prompts, the narrative prompt
+  and every composer section, and the report's identity and signature rows
+  come from the same entries when no model cited them. `pipeline/run_state.py`
+  derives a compact block from the state — sample, identity, signature,
+  reputation, stages run or skipped and why, ledger count, failed tools,
+  remaining steps and seconds — and puts it in the system turn between
+  markers, regenerated on every model turn of a tool loop and never trimmed.
+  With a pack present, `isr.ungrounded_technique` no longer exempts an analyst
+  whose own ledger is empty: the pack's ids are citable by every agent.
+- **A Malware verdict over a run nobody analysed is challenged, like Benign.**
+  `verdict.unsupported_malware` asks the judge to cite the entries that
+  establish it — a reputation entry, a YARA or capa hit — or to return
+  Suspicious with an inconclusive rationale; one retry, the survivor recorded,
+  nothing rewritten.
 - **VirusTotal's own MCP server ships as a built-in tool server.**
   `virustotal` is seeded in `_builtin_servers()` on the streamable-HTTP
   endpoint `https://ai.virustotal.com/mcp`, disabled until an operator
@@ -310,6 +329,15 @@ change landed on `main`.
   and size where known, file name, type and platform — and the lookup sentence
   names the sha256. A run whose analysts produced no prose left the judge with
   no hash anywhere in its conversation.
+
+- **The final-answer nudge survives a tool call the server cannot render.** A
+  live static loop ended on an assistant turn whose tool call carried
+  arguments that never parsed; the nudge sent the turn back and the server
+  answered 500 ("Failed to parse tool call arguments as JSON"). The nudge and
+  the forced synthesis now send the transcript without such a call, and when
+  the plain request still fails the nudge asks once more with the loop's tools
+  bound and `tool_choice="none"`; `run_summary.nudge.retry_mode` names which
+  analysts needed which repair.
 
 - **A Benign verdict over a run nobody analysed is challenged.**
   `verdict.unsupported_benign` asks the judge to cite the entry that

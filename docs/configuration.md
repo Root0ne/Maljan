@@ -546,6 +546,16 @@ Injection never changes whether a stage has data. An agent whose loaders
 produced nothing but a "no data available" placeholder is still skipped, with
 or without a block to read.
 
+Two blocks every agent reads regardless of `inject_upstream`: the triage pack,
+one line per fact with its ledger id, at the head of the agent's first human
+turn under *Facts established before analysis*, cut at the same
+`core.reporting.upstream_findings_max_chars`; and the run-state block in the
+system turn — sample, identity, signature, reputation, stages run or skipped,
+ledger count, failed tools, remaining steps and seconds — regenerated on every
+turn. Neither is a setting of the stage: a team without a triage stage has no
+pack and its agents see only the run state. See *The triage pack* in
+[architecture.md](architecture.md).
+
 Which slice of the job an agent reads is its own setting,
 `agents.definitions.<key>.data_sources`. Empty means the slice the agent's
 *role* has always read: the parsed sample for a static analyst without a
