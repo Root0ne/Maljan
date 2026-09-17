@@ -74,7 +74,8 @@ change landed on `main`.
   the end of each tool loop; `stage_ended_at_cap` when a cap ended the work
   (`steps`, `time`, `repeats`, or the triage pack's `budget_seconds`);
   `run_summary.budget` per agent (loops, steps, seconds, delegated steps, the
-  caps hit); the console's pipeline panel names the cap beside the step.
+  caps hit); the console's conversation names the cap that ended an agent's
+  work where it ended.
 - **An agent can ask another agent, as a tool call.** `ToolRef(kind="agent",
   agent=<key>)` on a definition binds a tool `ask_<key>` (`task`, optional
   `context`) described from the callee's label and role. Calling it runs the
@@ -436,6 +437,36 @@ change landed on `main`.
   made when the result parses; a trailing comma, a key with no value or a
   missing colon is still left to the path that drops it. The ledger entry
   carries `args_repaired` and `args_raw` (revision `20260923000000`).
+- **The run, as one conversation.** A new CONVERSATION tab on an analysis
+  (`/analysis/{id}/conversation`) draws a run as the group exchange it is,
+  live and replayed by the same view: participants named by the label their
+  operator gave them, messages grouped by stage and round, tool calls as one
+  line each with the ledger id their result is filed under, validator
+  corrections and cap notices as room notes, the judge's questions and
+  delegated asks and answers with an arrow to the agent addressed, the verdict
+  as a closing card, and streamed text appending into the speaker's open
+  bubble until the message that closes the turn replaces it. Filters narrow it
+  by participant and by kind; the stream follows the newest message while the
+  reader is at the bottom of it and offers a way back when they are not.
+- **One store and one socket per run.** `apps/web/src/lib/runStore.ts` holds a
+  run's events, roster, stages, connection and cursor in a module-level map
+  keyed by job id, opens the single socket a job gets, back-fills from
+  `GET /api/v1/jobs/{id}/events` and resumes with `?since=<last seq>`. Leaving
+  the analysis and coming back re-renders from what is already held instead of
+  redialling and re-reading; the socket outlives the page by a grace period.
+  Events order and dedupe on the publisher's `seq`, and a run recorded before
+  the numbering existed keeps the order its events arrived in.
+
+### Changed
+
+- **The LIVE and PROCESS tabs are gone**, along with their duplicate socket,
+  duplicate back-fill and second status poll. `/live`, `/process`, `/agents`,
+  `/pipeline` and `/timeline` redirect to CONVERSATION, the per-agent results
+  table sits under the conversation with its tool counts taken from the run's
+  own feed, and the stage strip moved to the analysis header, where every tab
+  reads the same one. The Pipeline and Timeline panels are removed: the
+  discussion history, the confidence history and the agent reports they held
+  are the conversation itself, drawn in the order they happened.
 
 ### Fixed
 
