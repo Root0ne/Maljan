@@ -586,6 +586,25 @@ class TestTheKeyShapesARunOfWordCharactersMisses:
         for algorithm in ("md5", "sha1", "sha256"):
             assert ev.scrub(_digest(algorithm)) == _digest(algorithm), algorithm
 
+    def test_an_identifier_this_system_issues_travels_whole(self) -> None:
+        """A job, a report and a sample are named by a UUID everywhere.
+
+        The same reason a digest is exempt: the id is on the job, on the
+        report and on the event that announced it, and a payload reading
+        ``report_id=***`` is a console that cannot open the report it is
+        announcing. An argument *named* like a credential is still replaced by
+        name, which is what covers a session id written in this shape.
+        """
+        import uuid
+
+        for _ in range(4):
+            identifier = str(uuid.uuid4())
+            assert ev.scrub(identifier) == identifier, identifier
+        assert ev.summarize_args({"report_id": str(uuid.UUID(int=1))}) == (
+            "report_id=00000000-0000-0000-0000-000000000001"
+        )
+        assert ev.summarize_args({"session_id": str(uuid.UUID(int=1))}) == "session_id=***"
+
     def test_a_mime_type_still_travels_whole(self) -> None:
         """Long enough for the base64 rule, and the one shape that must survive it."""
         for value in (

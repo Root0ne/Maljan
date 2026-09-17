@@ -409,6 +409,16 @@ _JWT_RUN = re.compile(r"\A[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]
 # a second separator: ``/wJalrXUtnFEMIK7MDENG`` is a key that begins with a
 # slash, not a directory.
 _MIME_TYPE = re.compile(r"\A[a-z]+/[a-z0-9][a-z0-9.+_\-]*\Z")
+# The identifier this system issues for a job, a report, a sample and a
+# message. Exempt for the reason a digest is: it is on the job, on the report
+# and on the event that announced it, and an event reading ``report_id=***``
+# is a console that cannot open the report it is announcing. Exact shape, not
+# "any long run of hex and dashes", and an argument *named* like a credential
+# is still replaced by name — which is what covers a session id written this
+# way.
+_IDENTIFIER = re.compile(
+    r"\A[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\Z"
+)
 _PATH_SHAPED = re.compile(r"\A(?:/|\./|\.\./|~/|[A-Za-z]:/)[^/]*/")
 # The three digests a malware analysis is *about*, which the rule above would
 # otherwise take for keys: md5, sha1 and sha256. A sample hash is not a secret
@@ -571,7 +581,12 @@ def _is_a_token(run: str) -> bool:
 
 def _looks_like_a_credential(token: str) -> bool:
     """Whether this run of characters is a key rather than a word or a digest."""
-    if _DIGEST.match(token) or _MIME_TYPE.match(token) or _PATH_SHAPED.match(token):
+    if (
+        _DIGEST.match(token)
+        or _IDENTIFIER.match(token)
+        or _MIME_TYPE.match(token)
+        or _PATH_SHAPED.match(token)
+    ):
         return False
     lowered = token.lower()
     if any(lowered.startswith(prefix) for prefix in _CREDENTIAL_PREFIXES):

@@ -528,7 +528,12 @@ change landed on `main`.
   event reaches Redis, the socket and the table; the transcript recorder's copy
   is scrubbed with it, so a replayed run reads exactly as the live one did.
   Prose keeps its own line breaks and indentation (`scrub_keeping_layout`), so
-  a report is not flattened into a wall of text on its way out.
+  a report is not flattened into a wall of text on its way out. A canonical
+  UUID is exempt from the credential rule for the reason a digest is: the id of
+  a job, a report or a sample is on the job and on the event that announced it,
+  and a `completed` event reading `report_id=***` is a console that cannot open
+  the report it is announcing. An argument *named* like a credential is still
+  replaced by name.
 - **A published failure says what kind it was, never what it said.** Five
   handlers in `pipeline/nodes.py` put `str(exc)` into an `agent_message` — the
   analyst failure and crash paths, the mediator, the revision hand-back and the
