@@ -220,7 +220,10 @@ stored row.
 the run can reach — the agents its team's stages name, and every agent those
 can ask through `ask_<key>`, and so on — and refuses with 422 when one of them
 has no passing row, naming the agent, the model, the endpoint and the probe's
-last message. Saving a per-agent model (`core.llm.agents.*`) is refused with
+last message. The endpoint appears there as its label — scheme and host — and
+never as the value a call is made with: that refusal is read by whoever
+submitted the job, not only by an admin, and a base URL configured with
+userinfo would otherwise show them the endpoint's credentials. Saving a per-agent model (`core.llm.agents.*`) is refused with
 the same sentence, because an operator who saves a model nothing can reach has
 made the mistake the gate is about and the settings page is where it can be
 fixed. The console shows the sentence as written in both places.
@@ -228,7 +231,11 @@ fixed. The console shows the sentence as written in both places.
 The pair is also the invalidation. A changed endpoint or a changed model is a
 different question, finds no row, and is refused until it is probed: nothing
 has to expire a result, because a result is never read for a pair it was not
-taken against.
+taken against. The endpoint half of the pair is folded the way a URL folds —
+lower-case scheme and host, the scheme's default port dropped, no trailing
+slash — so one server typed four ways is one key rather than four. A row
+written before that folding existed is filed under the spelling of the day it
+was taken; re-run the probe if the gate refuses a model you have tested.
 
 `core.llm.require_probe` is on, and turning it off is the only way past the
 gate — neither a job nor a save can ask to skip it. It is there for an

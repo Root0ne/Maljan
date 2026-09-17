@@ -439,6 +439,24 @@ change landed on `main`.
 
 ### Fixed
 
+- **A probe refusal names the server, not its credentials.** The sentence the
+  submit gate answers a job with interpolated the endpoint as configured, and
+  that 422 is reachable by any authenticated user — so a base URL such as
+  `http://user:pw@llm.internal:8080/v1`, the ordinary shape for a llama.cpp
+  behind basic auth, showed a non-admin the endpoint's credentials. It now uses
+  the endpoint's label (scheme and host), which has moved to
+  `maljan.core.model_assignments` beside the endpoint it labels. The label also
+  cuts an address typed without a scheme instead of handing it back whole, and
+  answers `(unparseable endpoint)` for something that is no address at all.
+- **One server, one probe key.** `normalised_endpoint` trimmed and dropped a
+  trailing slash, so `HTTP://BOX:8080/v1`, `http://box:8080/v1`,
+  `http://box:80/v1` and `http://box/v1` were four keys for one server and a
+  probe filed under one did not satisfy the gate under another. It now folds
+  the way a URL folds: lower-case scheme and host, the scheme's default port
+  dropped, trailing slash removed, with the path and any userinfo kept exactly
+  as typed — this value is the address a call is made to. The failure was
+  always closed (a spurious refusal, never a bypass); a row written under an
+  old spelling needs its probe re-run.
 - **The analysis socket checks the account, at the handshake and while it
   streams.** `/ws/analysis/{job_id}` decoded the token and went straight to the
   ownership query, so it never read the `User` row and never saw `is_active` —

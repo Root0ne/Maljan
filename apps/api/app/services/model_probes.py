@@ -30,7 +30,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.core.model_assignments import ModelAssignment, assignments_for
+from maljan.core.model_assignments import (
+    ModelAssignment,
+    assignments_for,
+    endpoint_label,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -106,10 +110,17 @@ async def _results(db: AsyncSession, pairs: set[tuple[str, str]]) -> dict[tuple[
 
 
 def _sentence(assignment: ModelAssignment, detail: str) -> str:
-    """One refusal, naming the agent, the model and what the probe last said."""
+    """One refusal, naming the agent, the model and what the probe last said.
+
+    The endpoint appears as its label — scheme and host — not as the value the
+    call is made with. This sentence is the body of the 422 ``create_job``
+    answers, which any authenticated user can reach, and a base URL configured
+    with userinfo (the ordinary shape for a llama.cpp behind basic auth) would
+    otherwise show them the endpoint's credentials.
+    """
     return (
         f"agent {assignment.agent!r} names model {assignment.model!r} at "
-        f"{assignment.endpoint}: {detail}"
+        f"{endpoint_label(assignment.endpoint)}: {detail}"
     )
 
 
