@@ -196,7 +196,8 @@ export default function AttackTab() {
                         {/* What the run itself recorded for this id, kept apart
                             from the matrix so the two can be compared rather
                             than conflated. */}
-                        {corroborationSources(corroboration, tech.id).length > 0 && (
+                        {(corroborationSources(corroboration, tech.id).length > 0 ||
+                          associatedBy(corroboration, tech.id).length > 0) && (
                           <details className="mt-1">
                             <summary className="text-[10px] uppercase tracking-wider text-text-muted cursor-pointer">
                               Asserted by {lists.asserted_by.length}
