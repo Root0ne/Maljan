@@ -10,6 +10,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
+from maljan.core.model_assignments import endpoint_label
 from maljan.core.settings_annotations import GROUP_DESCRIPTIONS, GROUP_ORDER
 from maljan.core.virustotal import SERVER_KEY as VIRUSTOTAL_SERVER_KEY
 from maljan.pipeline.conditions import validate_condition
@@ -427,11 +428,69 @@ async def _probe_response(coro: Awaitable[Any]) -> ProbeResponse:
     return ProbeResponse(**vars(result))
 
 
+# The words that mark a staged value as an address. A probe is *pointed* at
+# one of these, and that is the part of a probe worth writing down.
+_ADDRESS_WORDS = ("url", "endpoint", "dsn", "host")
+
+
+def _endpoints_reached(values: dict[str, Any], details: dict[str, Any] | None) -> list[str]:
+    """Every endpoint this probe was pointed at, as labels rather than values.
+
+    Two sources, because two kinds of probe answer differently: the pairs an
+    LLM or agent probe reports having called, and the staged values that named
+    an address for every other one. Each goes through ``endpoint_label``, so
+    the row names the server and never the credential in front of it.
+    """
+    found: list[str] = []
+    for pair in (details or {}).get("completions") or []:
+        if isinstance(pair, dict):
+            found.append(endpoint_label(str(pair.get("endpoint") or "")))
+    for key, value in (values or {}).items():
+        leaf = str(key).rsplit(".", 1)[-1].lower()
+        if isinstance(value, str) and any(word in leaf for word in _ADDRESS_WORDS):
+            found.append(endpoint_label(value))
+    return sorted({label for label in found if label})
+
+
+async def _record_the_probe(
+    request: Request,
+    user: User,
+    probe: str,
+    body: ProbeRequest,
+    response: ProbeResponse,
+    **extra: Any,
+) -> None:
+    """One audit row per probe, naming what it was pointed at.
+
+    A probe backfills every input the caller did not stage from the decrypted
+    store, so a staged endpoint is sent the *stored* credential — a secret the
+    console never shows in the clear. Saving that endpoint is audited and
+    gated; pointing a probe at it was neither, and this is the record that
+    closes it. The staged keys are named so a reader can see the endpoint did
+    not come from the store; their values are not.
+    """
+    await audit_record(
+        "settings.probe",
+        resource_type="settings",
+        resource_id=probe,
+        user_id=user.id,
+        details={
+            "probe": probe,
+            "endpoints": _endpoints_reached(body.values, response.details),
+            "staged": sorted(body.values or {}),
+            "ok": bool(response.ok),
+            **extra,
+        },
+        ip=_client_ip(request),
+    )
+
+
 @router.post("/test/mcp", response_model=ProbeResponse)
 async def test_mcp_server(
     body: ProbeRequest,
+    request: Request,
     server: str = Query(..., description="key in mcp.servers"),
-    _: User = Depends(require_admin),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> ProbeResponse:
     """Launch one configured MCP server and report the tools it offers.
@@ -442,7 +501,9 @@ async def test_mcp_server(
     ``/test/{probe}`` so the fixed path wins the match.
     """
     stored = await SettingsService(db).load_overrides()
-    return await _probe_response(run_mcp_probe(server, body.values, stored))
+    response = await _probe_response(run_mcp_probe(server, body.values, stored))
+    await _record_the_probe(request, user, "mcp", body, response, server=server)
+    return response
 
 
 @router.post("/virustotal/register", response_model=VirustotalRegisterResponse)
@@ -533,8 +594,9 @@ async def _write_down_what_was_reached(db: AsyncSession, pairs: list[dict[str, A
 @router.post("/test/agent", response_model=ProbeResponse)
 async def test_agent(
     body: ProbeRequest,
+    request: Request,
     name: str = Query(..., description="key in agents.definitions"),
-    _: User = Depends(require_admin),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> ProbeResponse:
     """Resolve one agent definition and report what it would get.
@@ -552,6 +614,7 @@ async def test_agent(
     stored = await SettingsService(db).load_overrides()
     response = await _probe_response(run_agent_probe(name, body.values, stored))
     await _write_down_what_was_reached(db, (response.details or {}).get("completions") or [])
+    await _record_the_probe(request, user, "agent", body, response, agent=name)
     return response
 
 
@@ -559,7 +622,8 @@ async def test_agent(
 async def test_probe(
     probe: str,
     body: ProbeRequest,
-    _: User = Depends(require_admin),
+    request: Request,
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> ProbeResponse:
     if probe not in PROBES:
@@ -568,6 +632,7 @@ async def test_probe(
     response = await _probe_response(run_probe(probe, body.values, stored))
     if probe == "llm":
         await _write_down_what_was_reached(db, (response.details or {}).get("completions") or [])
+    await _record_the_probe(request, user, probe, body, response)
     return response
 
 

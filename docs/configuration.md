@@ -167,6 +167,15 @@ Thirteen probes back the "Test" buttons
 that fails answers 200 with the failure as data — a connection test that fails
 is an answer, not an error.
 
+A probe runs against the staged values on top of the stored ones, so an input
+the caller did not stage comes from the store — including the credential. That
+means a staged endpoint is sent the stored key for that provider, which is a
+secret the console never shows in the clear. Every probe therefore writes one
+audit row (`settings.probe`) naming the probe, the endpoints it was pointed at
+(as labels: scheme and host), the keys that were staged for it and whether it
+succeeded. The values themselves are never in the row. The routes are
+admin-only, as they have always been; what was missing was the record.
+
 ### A model is probed before a job may name it
 
 **What the probe does.** Both the `llm` and the `agent` probe end by asking for
@@ -198,9 +207,10 @@ and one row. The judge model is listed and never called, so it is not filed.
 The `agent` probe files the one pair its agent would use.
 
 Where a call goes is worked out in one place (`maljan.core.model_assignments`)
-for the probe and for the gate alike, trailing slash and all, so a base URL
-typed `http://box:8080/v1/` files and resolves under the same spelling as the
-same URL typed without it.
+for the probe and for the gate alike, and folded there the way a URL folds —
+lower-case scheme and host, the scheme's default port dropped, no trailing
+slash — so `http://box:8080/v1/`, `HTTP://BOX:8080/v1` and `http://box:80/v1`
+file and resolve under one spelling instead of four.
 
 A call that ran out of time leaves **no** row at all — neither a pass nor a
 failure. Nothing was learned about that pair, and writing a cold model down as

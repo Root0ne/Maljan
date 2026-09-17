@@ -439,6 +439,14 @@ change landed on `main`.
 
 ### Fixed
 
+- **Every probe leaves an audit row.** `run_probe` backfills any input the
+  caller did not stage from the decrypted store, so `POST /settings/test/llm`
+  with a staged `base_url` sends the stored API key to whatever host the caller
+  named — a secret the console deliberately never shows in the clear — and
+  `/settings/test/*` wrote nothing, unlike `save` and `import`. Each of the
+  three probe routes now writes one `settings.probe` row naming the probe, the
+  endpoints it was pointed at (as labels: scheme and host), the keys that were
+  staged and whether it succeeded. No staged value is in the row.
 - **A probe refusal names the server, not its credentials.** The sentence the
   submit gate answers a job with interpolated the endpoint as configured, and
   that 422 is reachable by any authenticated user — so a base URL such as
