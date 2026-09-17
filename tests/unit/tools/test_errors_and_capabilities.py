@@ -300,7 +300,8 @@ class TestTheThreatIntelSidecarAnswersAFailureAsOne:
     """
 
     @pytest.fixture(scope="class")
-    def server(self) -> Any:
+    @classmethod
+    def server(cls) -> Any:
         import importlib.util
         from pathlib import Path
 
