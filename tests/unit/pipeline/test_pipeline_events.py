@@ -206,7 +206,10 @@ class TestAnalystNodeEmits:
 
         message = rec.messages()[0]
         assert message["status"] == "failed"
-        assert "ghidra died" in message["text"]
+        # The type, never the message: this line reaches every browser and the
+        # ``job_events`` table, and a message is where a host path travels.
+        assert "RuntimeError" in message["text"]
+        assert "ghidra died" not in message["text"]
 
     def test_claims_reach_the_transcript(self) -> None:
         rec = Recorder()

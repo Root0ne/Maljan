@@ -29,6 +29,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from maljan.core.paths import resolve_data
 from maljan.tools import binary as binary_tools
 from maljan.tools import identify as identify_tools
 from maljan.tools import rules as rule_tools
@@ -36,10 +37,12 @@ from maljan.tools import strings as string_tools
 from maljan.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, manifest, module
 from maljan.tools.errors import (
     BAD_ARGUMENT,
+    PATH_OUTSIDE_ROOTS,
     code_for_exception,
     normalise_error,
     tool_error,
 )
+from maljan.tools.roots import PathOutsideRoots, resolve_under_roots
 from maljan.tools.strings import DEFAULT_STRINGS_LIMIT
 
 mcp = FastMCP("AnalysisMCP")
@@ -86,9 +89,12 @@ CAPABILITIES = manifest("analysis", TOOL_NEEDS)
 # Chunked uploads in flight, keyed by upload id. Bounded by the number of
 # concurrent stagers, which is the number of agents in a profile — but a
 # ``put_sample_begin`` whose caller vanished would otherwise hold its chunks
-# for the process lifetime, so they are evicted by age as well.
+# for the process lifetime, so they are evicted by age as well, and by count:
+# each entry is cheap, and fifteen minutes of them is a long time to admit
+# 2 GiB of chunks apiece.
 _UPLOADS: dict[str, dict[str, Any]] = {}
 _UPLOAD_TTL_SECONDS = 15 * 60
+_MAX_UPLOADS = 32
 
 # A chunk larger than this is refused rather than buffered: the convention
 # splits at 8 MiB and a caller sending more is not speaking it.
@@ -97,6 +103,20 @@ _MAX_CHUNK_BYTES = 16 * 1024 * 1024
 # reachable over HTTP is a place to post arbitrary bytes, and an unbounded
 # accept is an unbounded write.
 _MAX_SAMPLE_BYTES = 2 * 1024 * 1024 * 1024
+
+
+def _too_long_to_decode(encoded: str, limit: int) -> bool:
+    """Whether this base64 argument would exceed ``limit`` once decoded.
+
+    Asked before decoding, not after. Base64 is four characters to three
+    bytes, so the length of the argument bounds the length of the blob without
+    materialising it — and materialising it was the problem: a 4 GiB argument
+    was held as a string and again as bytes before the ceiling below refused
+    it. The bound is generous by the padding and any whitespace, which costs
+    nothing: what is being prevented is the order of magnitude.
+    """
+    return (len(encoded) // 4) * 3 > limit
+
 
 # How long a staged sample is kept. Every ``put_sample*`` call prunes, so a
 # long-lived server does not accumulate malware bytes without bound.
@@ -117,6 +137,21 @@ _DEFAULT_STAGING_TTL_HOURS = 24.0
 # named "" was created for it.
 _ABSENT_WORDS = frozenset({"null", "None"})
 _ABSENT_CHARACTERS = " \t\r\n\"'"
+
+
+def _within(asked: Any, declared: int) -> int:
+    """One tool's wall clock, held to the value its own manifest declares.
+
+    A model that asks for a day gets the minute the manifest promised: the
+    declared value is what every reader of ``capabilities`` was told, and a
+    tool that quietly took more would make that structure untrue. Asking for
+    less is allowed — a caller in a hurry is entitled to be.
+    """
+    try:
+        wanted = int(asked)
+    except (TypeError, ValueError):
+        return declared
+    return max(1, min(wanted, declared))
 
 
 def _optional_string_params(call: Any) -> frozenset[str]:
@@ -151,6 +186,40 @@ def _read_absent_words(call: Any, kwargs: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# The arguments that name a file on this host. Held to the allowed roots in
+# ``_guard`` rather than in each tool, so a tool added later is confined by
+# having gone through the guard every tool here already goes through.
+_PATH_ARGUMENTS = ("path", "pcap_path")
+
+# The argument that names a rule corpus rather than a sample. It is a path
+# too, and it is chosen by the same model, but the directories it may name are
+# the rule directories rather than the sample ones — so it is held to
+# ``rule_tools.corpus_roots()`` instead. ``default`` and the empty string name
+# the shipped corpus and are not paths at all.
+_CORPUS_ARGUMENT = "ruleset"
+_CORPUS_WORDS = ("", "default")
+
+
+def _confined(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """``kwargs`` with every path argument resolved inside the allowed roots.
+
+    The resolved path replaces the one the caller passed, so the tool opens
+    the file the check was made about rather than resolving the argument a
+    second time. A ruleset is checked where it stands: the tool resolves that
+    one itself, against the roots it was checked against.
+    """
+    out = dict(kwargs)
+    for name in _PATH_ARGUMENTS:
+        value = out.get(name)
+        if not isinstance(value, str) or not value.strip():
+            continue
+        out[name] = str(resolve_under_roots(value, extra_roots=(_staging_base(),)))
+    corpus = out.get(_CORPUS_ARGUMENT)
+    if isinstance(corpus, str) and corpus not in _CORPUS_WORDS:
+        resolve_under_roots(resolve_data(corpus), extra_roots=rule_tools.corpus_roots())
+    return out
+
+
 def _guard(tool: str, call: Any, **kwargs: Any) -> dict[str, Any]:
     """Run one tool call, turning any exception into a returned error.
 
@@ -161,9 +230,16 @@ def _guard(tool: str, call: Any, **kwargs: Any) -> dict[str, Any]:
     error carries a code and a remediation (``maljan.tools.errors``), and an
     implementation's flat ``{"error": "<text>"}`` is rewritten into the same
     shape on the way out.
+
+    A path argument is held to the allowed roots first, and a refusal is
+    answered in that same shape — the sample is adversary-authored content
+    that this model reads, so the path it asks for is the one argument that
+    may have been written by the sample's author.
     """
     try:
-        return dict(normalise_error(dict(call(**_read_absent_words(call, kwargs)))))
+        return dict(normalise_error(dict(call(**_confined(_read_absent_words(call, kwargs))))))
+    except PathOutsideRoots as refusal:
+        return tool_error(PATH_OUTSIDE_ROOTS, str(refusal), tool=tool)
     except Exception as exc:  # noqa: BLE001 — a tool server answers, it does not raise
         return tool_error(code_for_exception(exc), f"{type(exc).__name__}: {exc}", tool=tool)
 
@@ -352,7 +428,13 @@ def _carve_under_staging(path: str) -> dict[str, Any]:
     target = Path(path)
     if not target.is_file():
         return {"error": f"no such file: {path}", "tool": "carve_payloads"}
-    digest = hashlib.sha256(target.read_bytes()).hexdigest()
+    # Read in pieces rather than whole: this runs on live samples, and the
+    # upload ceiling above admits 2 GiB of them.
+    hasher = hashlib.sha256()
+    with target.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            hasher.update(block)
+    digest = hasher.hexdigest()
     destination = _staging_dir() / "carved"
     for directory in (destination, destination / digest):
         directory.mkdir(mode=0o700, exist_ok=True)
@@ -390,7 +472,7 @@ def yara_scan(
         path=path or None,
         text=text or None,
         ruleset=ruleset,
-        timeout_s=timeout_s,
+        timeout_s=_within(timeout_s, YARA_TIMEOUT_S),
     )
 
 
@@ -411,7 +493,13 @@ def sigma_match_sandbox(report: dict[str, Any], ruleset: str = "default") -> dic
 @mcp.tool()
 def capa(path: str, timeout_s: int = CAPA_TIMEOUT_S, backend: str = "auto") -> dict[str, Any]:
     """Run capa and report the capabilities it finds, with ATT&CK and MBC metadata."""
-    return _guard("capa", rule_tools.capa, path=path, timeout_s=timeout_s, backend=backend)
+    return _guard(
+        "capa",
+        rule_tools.capa,
+        path=path,
+        timeout_s=_within(timeout_s, CAPA_TIMEOUT_S),
+        backend=backend,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -429,6 +517,17 @@ def _staging_ttl_seconds() -> float:
     return hours * 3600.0
 
 
+def _staging_base() -> Path:
+    """The staging path this server is configured for, created or not.
+
+    Separate from ``_staging_dir`` because every read goes through the root
+    check and a read must not create a directory, validate one or fail on a
+    staging path that is wrong in a way only an upload would care about.
+    """
+    configured = os.environ.get("MALJAN_STAGING_DIR", "").strip()
+    return Path(configured) if configured else Path(tempfile.gettempdir()) / "maljan-analysis-mcp"
+
+
 def _staging_dir() -> Path:
     """Where uploaded samples land: ``MALJAN_STAGING_DIR`` or a private temp dir.
 
@@ -439,8 +538,7 @@ def _staging_dir() -> Path:
     at that path and receive live malware into a location of their choosing —
     and the chmod would then be applied to their target.
     """
-    configured = os.environ.get("MALJAN_STAGING_DIR", "").strip()
-    base = Path(configured) if configured else Path(tempfile.gettempdir()) / "maljan-analysis-mcp"
+    base = _staging_base()
     try:
         base.mkdir(mode=0o700, parents=True, exist_ok=True)
     except FileExistsError as exc:  # a non-directory already sits at that path
@@ -523,6 +621,10 @@ def _write_sample(filename: str, blob: bytes, sha256: str) -> dict[str, Any]:
 def put_sample(filename: str, content_b64: str, sha256: str = "") -> dict[str, Any]:
     """Upload a sample in one call and get back the path to analyse it at."""
     _evict_stale_uploads()
+    if _too_long_to_decode(content_b64, _MAX_SAMPLE_BYTES):
+        return tool_error(
+            BAD_ARGUMENT, f"sample exceeds {_MAX_SAMPLE_BYTES} bytes", tool="put_sample"
+        )
     try:
         blob = base64.b64decode(content_b64, validate=True)
     except Exception as exc:  # noqa: BLE001
@@ -541,6 +643,13 @@ def put_sample_begin(filename: str, sha256: str, size: int) -> dict[str, Any]:
         return tool_error(
             BAD_ARGUMENT,
             f"declared size must be between 0 and {_MAX_SAMPLE_BYTES} bytes",
+            tool="put_sample_begin",
+        )
+    if len(_UPLOADS) >= _MAX_UPLOADS:
+        return tool_error(
+            BAD_ARGUMENT,
+            f"too many uploads in flight (limit {_MAX_UPLOADS}); finish one before starting "
+            "another",
             tool="put_sample_begin",
         )
     upload_id = uuid.uuid4().hex
@@ -562,6 +671,10 @@ def put_sample_chunk(upload_id: str, seq: int, content_b64: str) -> dict[str, An
     upload = _UPLOADS.get(upload_id)
     if upload is None:
         return tool_error(BAD_ARGUMENT, f"unknown upload_id {upload_id!r}", tool="put_sample_chunk")
+    if _too_long_to_decode(content_b64, _MAX_CHUNK_BYTES):
+        return tool_error(
+            BAD_ARGUMENT, f"chunk exceeds {_MAX_CHUNK_BYTES} bytes", tool="put_sample_chunk"
+        )
     try:
         blob = base64.b64decode(content_b64, validate=True)
     except Exception as exc:  # noqa: BLE001

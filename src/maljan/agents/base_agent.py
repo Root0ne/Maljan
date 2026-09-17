@@ -700,8 +700,15 @@ async def retry_on_connection_error(
     raise AssertionError("unreachable")  # pragma: no cover
 
 
-def describe_exception(exc: BaseException) -> str:
-    """Return a non-empty, diagnosable description of ``exc``.
+def describe_exception_for_log(exc: BaseException) -> str:
+    """Return a non-empty, diagnosable description of ``exc``, for the log.
+
+    For the log and for nothing else, which is what the name says: it keeps
+    the exception's *message*, and a message names the host path an ``OSError``
+    could not read, the URL a transport error was given and the credential a
+    base URL was configured with. That is the operator's to read, on the
+    operator's host. What a published event may say about a failure is
+    ``maljan.pipeline.events.describe_exception``, which never carries one.
 
     Analyst failures were logged as
     ``"dynamic ISR analysis failed: "`` — an empty tail — because several
@@ -714,7 +721,7 @@ def describe_exception(exc: BaseException) -> str:
     text = str(exc).strip()
     inner = getattr(exc, "exceptions", None)
     if not text and isinstance(inner, list | tuple) and inner:
-        parts = [describe_exception(sub) for sub in inner[:3]]
+        parts = [describe_exception_for_log(sub) for sub in inner[:3]]
         return f"{type(exc).__name__}({'; '.join(p for p in parts if p)})"
     if text:
         return f"{type(exc).__name__}: {text}"
@@ -2086,7 +2093,9 @@ class BaseAnalyst(BudgetMeter, ABC):
                 )
             except Exception as exc:  # noqa: BLE001 — teardown never propagates
                 self.logger.warning(
-                    "Tool cleanup for %s failed (non-fatal): %s", self.name, describe_exception(exc)
+                    "Tool cleanup for %s failed (non-fatal): %s",
+                    self.name,
+                    describe_exception_for_log(exc),
                 )
 
         # Drop the references regardless, so a retained agent cannot keep a
@@ -2121,7 +2130,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             self.logger.warning(
                 "%s MCP initialization failed (graceful degradation, continuing without tools): %s",
                 self.name,
-                describe_exception(exc),
+                describe_exception_for_log(exc),
             )
             return False
 
@@ -3240,8 +3249,10 @@ class BaseAnalyst(BudgetMeter, ABC):
         except AnalystError:
             raise
         except Exception as e:
-            self.logger.error("ISR analysis failed: %s", describe_exception(e))
-            raise AnalystError(f"{self.name} ISR analysis failed: {describe_exception(e)}") from e
+            self.logger.error("ISR analysis failed: %s", describe_exception_for_log(e))
+            raise AnalystError(
+                f"{self.name} ISR analysis failed: {describe_exception_for_log(e)}"
+            ) from e
 
     def safe_analyze_isr_chunked(self, chunks: list) -> AgentISR:
         """Analyze a list of TextChunk objects, merging their ISRs.
@@ -3414,9 +3425,11 @@ class BaseAnalyst(BudgetMeter, ABC):
         except AnalystError:
             raise
         except Exception as e:
-            self.logger.error("View-decomposition ISR analysis failed: %s", describe_exception(e))
+            self.logger.error(
+                "View-decomposition ISR analysis failed: %s", describe_exception_for_log(e)
+            )
             raise AnalystError(
-                f"{self.name} view-decomposition failed: {describe_exception(e)}"
+                f"{self.name} view-decomposition failed: {describe_exception_for_log(e)}"
             ) from e
 
     # ------------------------------------------------------------------
@@ -3507,9 +3520,11 @@ class BaseAnalyst(BudgetMeter, ABC):
         except AnalystError:
             raise
         except Exception as e:
-            self.logger.error("Tier-wise reasoning ISR analysis failed: %s", describe_exception(e))
+            self.logger.error(
+                "Tier-wise reasoning ISR analysis failed: %s", describe_exception_for_log(e)
+            )
             raise AnalystError(
-                f"{self.name} tier-wise reasoning failed: {describe_exception(e)}"
+                f"{self.name} tier-wise reasoning failed: {describe_exception_for_log(e)}"
             ) from e
 
     # ------------------------------------------------------------------

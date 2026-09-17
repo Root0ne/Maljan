@@ -6,7 +6,8 @@ pipeline, so there is one implementation and no copy to drift.
 
 Launched by `maljan.core.config._builtin_servers()` as the `analysis` server —
 `sys.executable services/analysis-mcp/server.py`, cwd `services/analysis-mcp`,
-with only `MALJAN_STAGING_DIR` and `MALJAN_STAGING_TTL_HOURS` passed through.
+with only `MALJAN_STAGING_DIR`, `MALJAN_STAGING_TTL_HOURS` and
+`MALJAN_SAMPLE_ROOTS` passed through.
 It is registered with `agents: []` and reaches the static analyst solely
 through the `ToolRef`s in the built-in agent definitions, so a definition that
 drops the reference really runs without these tools.
@@ -70,14 +71,29 @@ behind an HTTP transport. See the "Tool servers on another host" section of
 | --- | --- | --- |
 | `MALJAN_STAGING_DIR` | a `maljan-analysis-mcp` directory under the system temp dir | where uploads land |
 | `MALJAN_STAGING_TTL_HOURS` | `24` | how long a staged sample is kept; `0` disables pruning |
+| `MALJAN_SAMPLE_ROOTS` | empty | the other directories a path argument may name, separated by `:` |
+
+Every `path` argument is resolved (symlinks followed) and refused unless it
+lands inside the staging directory or one of `MALJAN_SAMPLE_ROOTS`; `ruleset`
+is held the same way to the `data` tree and to `MALJAN_YARA_RULES_DIR` /
+`MALJAN_SIGMA_RULES_DIR`. A refusal is `{"error": {"code":
+"path_outside_roots", ...}}` and names no host path. The worker exports the
+directories it puts samples in, so a default deployment sets nothing; see
+"Which directories a sidecar may read" in `docs/configuration.md`.
 
 The directory is created with mode 0o700 and refused if what is already at that
 path is a symlink or is owned by another user — the default name is predictable
 and the system temp directory is shared with every other local account. Files
 are created with `O_CREAT|O_EXCL|O_NOFOLLOW` at 0o600 rather than written and
-then chmodded, uploads are capped at 2 GiB, an unfinished chunked upload is
-evicted after fifteen minutes, and every `put_sample*` call prunes staged files
-past the TTL.
+then chmodded, uploads are capped at 2 GiB — measured on the encoded argument
+before it is decoded, so an oversized one is refused rather than materialised
+twice — at most 32 chunked uploads may be in flight at once, an unfinished one
+is evicted after fifteen minutes, and every `put_sample*` call prunes staged
+files past the TTL.
+
+`timeout_s` on `yara_scan` and `capa` is a request, not an instruction: the
+value the `capabilities` manifest declares (60 s and 300 s) is the ceiling, so
+a caller asking for more is given that. Asking for less is honoured.
 
 ### Capabilities
 

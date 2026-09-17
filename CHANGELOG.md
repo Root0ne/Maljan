@@ -473,10 +473,7 @@ change landed on `main`.
   notice instead of adding a participant the operator never composed; the
   judge publishes under its agent key with its configured `display_name`,
   which is the key its roster entry carries, so a run draws one judge rather
-  than two. A failure on any of the three published paths — the judge, the
-  mediator and an analyst's revision — names the class of the exception and
-  never its message: the log keeps the words for an operator, and an
-  exception's text can carry a path, a host or a credential.
+  than two.
 - **An analysis offers only the tabs the run filled.** A tab is drawn when the
   report carries what it draws — a ledger section routed to it, or its own
   typed block — so twelve tabs no longer stand ready for ten of them to
@@ -535,8 +532,378 @@ change landed on `main`.
   discussion history, the confidence history and the agent reports they held
   are the conversation itself, drawn in the order they happened.
 
+
+- **The report's capability profile is the pack's `api_capability` entry,
+  cited by id.** `StaticAnalysis.api_capabilities` is counted from the entry's
+  rows and `api_capabilities_evidence_ids` names the entry; the Markdown
+  profile line, the console and the narrative prompt show the id. A technique
+  rule from that entry is a row under the derived-technique table only when
+  the APIs it matched clear its floor, with the entry id beside it, and the
+  YARA draft takes its import strings from those rows as bare names. capa's
+  namespaces are no longer counted as import capabilities; its technique hits
+  stay. The family-feature profile carries the import names in the binary's
+  order; a fingerprint catalogue built against the old vocabulary needs a
+  rebuild with `scripts/knowledge/build_family_feature_kb.py`.
+- **A debate hands over to exactly one node, and the settings say so.** A team
+  whose debate feeds two stages — or one parallel analysis stage with two
+  agents, which is two nodes — is refused when it is saved, per stage, instead
+  of building cleanly and then failing every job in the graph builder after the
+  sample was uploaded and detonated. The builder still refuses it, as the
+  backstop for a document that reached it out of band.
+- **The debate stage's consensus threshold decides something.** It was
+  validated, migrated, round-tripped and editable, and nothing read it: the
+  mediator used the global `negotiation.consensus_threshold`. A stage that sets
+  one now argues to its own bar, and a stage that sets none still uses the
+  global one it was seeded from.
+- **A migrated team keeps following the global analyst-mode and round-limit
+  keys.** The alembic revision marks the stages it writes as derived, so a
+  database that was migrated and a fresh install produce the same team. Without
+  the mark a team froze whatever those keys said on migration day, and an
+  operator moving from a hosted API back to the single-slot local model would
+  have kept running analysts in parallel. The console clears the mark on the
+  first stage edit.
+- **The settings console edits teams, not profiles.** `StagesEditor` replaces
+  `ProfilesEditor`: a card per team, a card per stage, with the key, kind,
+  agents, dependencies, condition, run mode, upstream setting, debate options
+  and built-in tool switch on each, and move up/down that refuses a move which
+  would put a stage above something it depends on. The setup guide's last step
+  is "Add to a stage". `20260916000000_migrate_profiles_to_stages` gives every
+  stored profile the stage list its analysts have always meant, using the
+  stored `llm.parallel_analysts` and `negotiation.max_iterations`, and keeps
+  the analyst list so the downgrade can put it back.
+- **A degraded run is explained to the judge instead of capped afterwards.**
+  The reasons a run is thin — no sandbox report, a failed analyst, a container
+  nothing could open, anti-emulation behaviour — go into the verdict prompt and
+  the judge sets its own confidence. The fixed 0.60 ceiling the report node
+  applied afterwards is gone: it made every kind of thinness look identical and
+  told the judge nothing.
+- **The capability matrix is a pure projection.** It is built from the judge's
+  technique list and the analysts' claims, and carries each source's own
+  confidence. The cap that halved an obfuscation or injection claim whose
+  supporting static evidence the module could not find is gone; an analyst that
+  over-claims is told so in its own loop.
+- **The indicator corpus check is feedback, not a filter.** An indicator whose
+  pattern names a value no tool in the run saw comes back to the judge as
+  `stix.ungrounded_indicator`, with the reason in words. Only what survives the
+  retry is dropped, and the drop is recorded in
+  `run_summary.validation.unresolved` — an ungrounded IOC in a STIX bundle is a
+  false positive a reader is entitled to see.
+- **The FP linter's C6, and a new C7.** C6 was "the Sigma/YARA platform filter
+  reported no counters"; it is now "a report section or TTP row with neither an
+  evidence id nor a tool entry behind it". C7 names technique ids the validation
+  loop could not get resolved.
+- **The rule corpora are configured on the `analysis` tool server.**
+  `MALJAN_SIGMA_RULES_DIR` and `MALJAN_YARA_RULES_DIR` in that server's `env`
+  replace `analysis.sigma_rules_dir`; a stored override for the old key moves
+  automatically on upgrade.
+- **Parsers format and nothing else.** The dynamic parser no longer labels an
+  observation `[HIGH]`/`[MEDIUM]` from a keyword table, nor tells the analyst to
+  emit a T1497 claim, and the network parser no longer prints a `[Suspicious]`
+  verdict beside a DNS query. Both state what the sandbox recorded; what it
+  means is the analyst's reading.
+
+- **The report is built from the ledger, not recomputed beside it.**
+  `MalwareReportBuilder` no longer calls an extractor per section. Identity
+  comes from the `identify_file` and `hashes` calls when they ran and from the
+  routing minimum when they did not; `static`, `dynamic`, `network` and
+  `persistence` are projections of the same ledger
+  (`reporting/ledger_projection.py`) and stay empty when the matching tool was
+  never called. A typed section nobody filled is left out of the rendered
+  report rather than printed as an apology.
+- **capa and YARA reach the report as tool calls.** The evidence-only static
+  provider writes its own ledger entries (`agent="capa_yara"`), so its rule hits
+  print as sections like any other tool's and its capability counters still
+  reach the layers that read `report.static`.
+- **The static analyst's head chunk carries context, not a paste.** It keeps the
+  analysis path, the host path, the toolchain and the routing verdict, and drops
+  the pre-parsed section table, imports and strings — the analyst calls
+  `pe_info` and `strings` for those, and the ids their results carry are what
+  the report cites.
+- **The provider goldens freeze the sandbox tools' answers** over the same
+  98-report CAPE corpus, rather than the extractors' output, because that is the
+  normalisation contract now: what an agent sees when it asks.
+- **Tool-argument path pinning is shared.** The bare-filename guard moved from
+  `ConfigurableAnalyst` to `agents/tool_pinning.pin_paths`, called by every
+  analyst through `BaseAnalyst`, and now substitutes a different path per
+  server. It matches three spellings of the sample — the worker path, its
+  basename, and the basename of the staged copy — because a server that stored
+  the sample under a name of its own would otherwise only be corrected for a
+  name the model was never shown. `ServerRegistry.merge_tools` stamps each tool
+  with the server it came from so the right path can be chosen.
+- **The string and IOC scan moved** from `extractors/pe_extractor` to
+  `maljan.tools.strings`; the extractor imports it and its output is unchanged.
+
+- **Per-format sandbox submission options.** `sandbox.cape2.package_by_format`
+  maps a detected file type to a CAPE analysis package (`*` is the fallback)
+  and `sandbox.cape2.submit_options` is sent verbatim as further form fields;
+  `sandbox.triage.profile_by_format` picks a Triage VM profile per format with
+  `sandbox.triage.profile` behind it; `sandbox.rest.submit.submit_fields`
+  passes extra multipart fields through the REST DSL. The CAPE guest platform
+  is sent when CAPE has a name for it and left unset otherwise.
+- **ATT&CK Mobile and ICS.** `data/attck_valid_ids.json` carries one technique
+  id list per domain and the loader downloads and caches the Mobile and ICS
+  STIX bundles beside Enterprise, exposing `valid_ids`, `domain_of` and
+  `platforms_for`. A Mobile technique id now validates instead of being
+  reported as a hallucination. Enterprise is required; the other two are
+  additive and their absence costs coverage, not a run.
+- **Open sandbox report channels.** `SandboxReport.channels` keeps what the
+  schema has no field for, namespaced by platform (`android.permissions`,
+  `linux.systemd`, `macos.launchd`). CAPE's non-Windows blocks are lifted into
+  it, and the REST DSL gains `mapping.channels`, an operator-named
+  name-to-JSONPath map.
+
+- **A per-agent LLM base URL.** `llm.agents.<agent>.base_url` points one agent
+  at its own OpenAI-compatible or Ollama server while the rest keep the global
+  endpoint, with the provider's API key still shared.
+- **Dependency submission for `uv.lock`.** A workflow posts the resolved Python
+  packages to GitHub's dependency graph on every push to `main`, so Dependabot
+  alerts close when the lockfile moves instead of lingering on the first parse.
+- **Repository security posture.** CodeQL (Python, TypeScript, Actions;
+  `security-extended`), dependency review on pull requests, OpenSSF Scorecard,
+  Dependabot updates for every dependency surface, actions pinned by commit,
+  `SECURITY.md` with private vulnerability reporting, `CONTRIBUTING.md`,
+  code owners, issue and pull request templates. Secret scanning with push
+  protection and Dependabot security updates are enabled on the repository.
+- **Environment-free configuration.** Every application setting — LLM
+  provider, sandbox, static analyst, tool servers, agents, rate limits,
+  enrichment, memory — now lives in the settings store and is edited from
+  Settings → Configuration. The catalog carries each entry's type, bounds,
+  choices, description and when it takes effect, and a read-only Deployment
+  group shows the values the process was started with
+  ([#31](https://github.com/Root0ne/Maljan/pull/31),
+  [#32](https://github.com/Root0ne/Maljan/pull/32),
+  [#33](https://github.com/Root0ne/Maljan/pull/33)).
+- **A bootstrap contract, validated once.** The API and the worker read a small
+  fixed set of process-environment variables — database, Redis, MinIO, the two
+  secrets, a handful of mount paths — documented in `bootstrap.env.example`.
+  Validation happens at startup and reports every problem in one
+  `bootstrap: ...` line instead of failing on whichever one an import reached
+  first ([#31](https://github.com/Root0ne/Maljan/pull/31)).
+- **Configuration export and import.** `GET /api/v1/settings/export` produces a
+  `maljan-settings/1` JSON document and `POST /api/v1/settings/import` accepts
+  it, with a preview in the console. The document carries no credential:
+  secrets are skipped, masks nested inside composite settings are stripped at
+  any depth, server `env` values are masked, and everything omitted is listed
+  in `secrets_omitted` ([#32](https://github.com/Root0ne/Maljan/pull/32)).
+- **Secret storage for nested credentials.** An MCP server's `auth_token` and a
+  frontier arm's `api_key` are stored as their own Fernet-encrypted rows rather
+  than inside the composite value, and are merged back on read; a startup
+  repair moves any that an older version left inline
+  ([#33](https://github.com/Root0ne/Maljan/pull/33)).
+
+
+- **Built-in analysts honour a definition's own prompt.** The static, dynamic and
+  network analysts now take their system prompt from the resolved agent
+  definition on every run, so an operator's explicit `prompt` on a built-in
+  role applies, and the format fragment for the sample's platform reaches the
+  model. The module constants remain only as the neutral fallback.
+- **The platform vocabulary is open.** `reporting.models.Platform` is a plain
+  string with `KNOWN_PLATFORMS` beside it — `windows`, `linux`, `macos`,
+  `android`, `ios`, `multi`, `unknown` — rather than a three-value literal.
+  File-type detection recognises Mach-O, APK, DEX, JAR, IPA, OLE2, OOXML, PDF,
+  LNK, the script formats and the archive formats, and returns lowercase
+  routing labels. The persistence extractor selects its platform scanners
+  positively, so the Windows registry sweep no longer runs for an Android or
+  macOS sample.
+- **Analyst prompts are platform-neutral plus a format fragment.** The built-in
+  heads no longer name Windows artefacts; `agents/prompt_fragments` supplies
+  the paragraph naming what to look for on the sample actually in hand, and
+  `composition.builtin_prompt` assembles head, format fragment, provider
+  fragment and tail for every built-in role.
+
+- **PyJWT signs and verifies the API's tokens.** `python-jose` is gone from both
+  projects; it was the only route by which `ecdsa` (an unfixed timing-attack
+  advisory) reached the lockfile. Token format, claims and the dual-secret
+  rotation window are unchanged.
+- **Request-derived values are sanitised before they are logged.** Every job,
+  sample, report and audit identifier that reaches a log line from a path, a
+  query string or a request body now passes through `log_safe`, which escapes
+  newlines and other control characters and bounds the length, so a caller
+  cannot forge a second log record. The container images pin their bases by
+  digest and the console's Node line moves to 22 across the images and CI.
+- **Dependencies brought current.** The uv workspace is relocked to today's
+  releases (cryptography 50, starlette 1.6, langchain-core 1.6, mcp 1.30 with
+  2.x held back as a separate migration, pillow 12.3, pyjwt 2.14, urllib3 2.7,
+  weasyprint 70 and the rest), and the console moves to Next.js 16.3.5 and
+  vitest 4 with a regenerated lockfile. This clears every Dependabot alert
+  that has a fix; the two without one (`ecdsa`, `diskcache`) are recorded in
+  the alert list with the reason.
+- The process refuses to start without a valid `SETTINGS_ENCRYPTION_KEY`, so
+  there is no mode in which stored secrets sit unencrypted
+  ([#31](https://github.com/Root0ne/Maljan/pull/31)).
+- `APISettings` no longer discovers or reads a `.env` file; configuration comes
+  from the process environment alone
+  ([#31](https://github.com/Root0ne/Maljan/pull/31)).
+- Pytest detection no longer consults the environment, so no variable can hand
+  a real deployment the published test secret
+  ([#33](https://github.com/Root0ne/Maljan/pull/33)).
+- A settings reset in the console waits for its own page before touching the
+  header, fixing a flaky interaction in the group editors
+  ([#35](https://github.com/Root0ne/Maljan/pull/35)).
+- Documentation is now a maintained set under `docs/`, and the historical
+  design record — the former `docs/plans`, `docs/specs` and `docs/superpowers`
+  trees — is read from git history instead of the working tree
+  ([#38](https://github.com/Root0ne/Maljan/pull/38)).
+
 ### Fixed
 
+- **Semgrep covers the frontend.** The scan ran over `src/ apps/api/ services/
+  scripts/` with `.semgrepignore` excluding `apps/web/`, so every file of the
+  console was outside it and covered by CodeQL alone. The job and `make
+  semgrep` now add `apps/web/src/` with the `p/typescript` and `p/react`
+  rulesets; `.semgrepignore` keeps out only what is not source — build output,
+  the Playwright suite (`apps/web/e2e/*.spec.ts`) and the vitest specs
+  (`__tests__/*.test.ts`), which are named differently and so are excluded
+  separately. 287 rules over 416 files, no findings.
+- **The `readonly` role is documented as the label it is.** It is enforced
+  nowhere — no route distinguishes it from `analyst`, so such an account can
+  upload a sample, submit a job and cancel its own — and `docs/security.md` and
+  the model now say so instead of listing it beside the two roles that decide
+  something. It is not removed: a stored row carrying the value would not load
+  against an enum without it, and dropping it silently would widen those
+  accounts rather than narrow them.
+- **Three API responses that could carry a connection string.** The probe
+  route's outer fence, the LTM purge's memory-store failure and the enrichment
+  queue's 503 each answered with `f"{type(exc).__name__}: {exc}"`, and the
+  exceptions that reach them come from arq, Redis and Qdrant, which name the
+  DSN they were configured with — password included. All three go through
+  `redact_url`, which the probe's own transport paths have always used.
+- **A sidecar decides what it will read before it reads it.** `put_sample`
+  base64-decoded its whole argument and then applied the 2 GiB ceiling, so an
+  oversized upload was materialised twice before being refused; the encoded
+  length is now checked first, and so is a chunk's. At most 32 chunked uploads
+  may be in flight. `yara_scan` and `capa` clamp `timeout_s` to the value their
+  own `capabilities` manifest declares, so the structure whose premise is that
+  it was computed stays true. Every `network` tool takes a `packet_limit` and
+  holds it to 5000, where `extract_dns` and `extract_http` used to call
+  `rdpcap` with no count and read the whole capture into memory. The digest
+  that names a carve directory is read in 1 MiB blocks rather than whole.
+- **Every probe leaves an audit row.** `run_probe` backfills any input the
+  caller did not stage from the decrypted store, so `POST /settings/test/llm`
+  with a staged `base_url` sends the stored API key to whatever host the caller
+  named — a secret the console deliberately never shows in the clear — and
+  `/settings/test/*` wrote nothing, unlike `save` and `import`. Each of the
+  three probe routes now writes one `settings.probe` row naming the probe, the
+  endpoints it was pointed at (as labels: scheme and host), the keys that were
+  staged and whether it succeeded. No staged value is in the row.
+- **A probe refusal names the server, not its credentials.** The sentence the
+  submit gate answers a job with interpolated the endpoint as configured, and
+  that 422 is reachable by any authenticated user — so a base URL such as
+  `http://user:pw@llm.internal:8080/v1`, the ordinary shape for a llama.cpp
+  behind basic auth, showed a non-admin the endpoint's credentials. It now uses
+  the endpoint's label (scheme and host), which has moved to
+  `maljan.core.model_assignments` beside the endpoint it labels. The label also
+  cuts an address typed without a scheme instead of handing it back whole, and
+  answers `(unparseable endpoint)` for something that is no address at all.
+- **One server, one probe key.** `normalised_endpoint` trimmed and dropped a
+  trailing slash, so `HTTP://BOX:8080/v1`, `http://box:8080/v1`,
+  `http://box:80/v1` and `http://box/v1` were four keys for one server and a
+  probe filed under one did not satisfy the gate under another. It now folds
+  the way a URL folds: lower-case scheme and host, the scheme's default port
+  dropped, trailing slash removed, with the path and any userinfo kept exactly
+  as typed — this value is the address a call is made to. The failure was
+  always closed (a spurious refusal, never a bypass); a row written under an
+  old spelling needs its probe re-run.
+- **The analysis socket checks the account, at the handshake and while it
+  streams.** `/ws/analysis/{job_id}` decoded the token and went straight to the
+  ownership query, so it never read the `User` row and never saw `is_active` —
+  an account an admin had just deactivated kept the full live feed of its own
+  jobs until the access token expired half an hour later. The handshake now
+  reads the account first, before it says anything about the job, and closes
+  with 1008 when it is missing or deactivated; a streaming socket re-reads it
+  every 60 seconds and closes the same way. The job id is canonicalised
+  directly after it is parsed, so a socket opened with the uppercase or
+  unhyphenated spelling of a job id shares the bucket, the listener and the
+  Redis connection of the one the publisher writes to instead of getting its
+  own and receiving nothing.
+- **A delegation guard that reads both ways an agent is bound to a server.**
+  `servers_withheld_from` computed what a callee brings from the `mcp`
+  references on its definition alone, but the shipped binding mechanism is the
+  other one — `core.mcp.servers.<key>.agents` naming the agent, which is how
+  the default map binds every built-in. A stage with `builtin_tools=False`
+  could therefore ask a stage-less specialist and get back a `knowledge`,
+  `network` or `threatintel` answer, which is the guarantee
+  `docs/architecture.md` states. The callee's effective set is now the union of
+  both, minus what the profile withholds from the callee itself; a disabled
+  server brings nothing.
+- **The publisher scrubs every event, so a producer that forgets cannot leak.**
+  `scrub` was applied by two of the seven producers, so
+  `agent_message.text`/`report`, `validation_feedback.message` and
+  `stage_ended_at_cap.detail` went out untouched — a credential the model
+  echoed was redacted while it streamed as a delta and then published in the
+  clear in the closing message, its `job_events` row and the stored transcript.
+  `_publish_event` now applies it once to every string field of every payload,
+  recursively through nested lists and dicts and leaving keys alone, before the
+  event reaches Redis, the socket and the table; the transcript recorder's copy
+  is scrubbed where that copy is taken, so a replayed run reads exactly as the
+  live one did even when the publish never happens.
+  Prose keeps its own line breaks and indentation (`scrub_keeping_layout`), so
+  a report is not flattened into a wall of text on its way out. The fields that
+  *name* something rather than say something — the ids this system issues, the
+  agent, stage, server and tool keys, the labels an operator typed and the
+  words the console switches on — are exempt by **field name** in the
+  publisher, so a `completed` event can still be opened by its `report_id` and
+  a long agent key still speaks under its own name. Nothing is exempt for the
+  shape of its value beyond a digest and a canonical UUID: a lowercase run is a
+  credential like any other.
+- **A published failure says what kind it was, never what it said.** Every
+  failure handler in `pipeline/nodes.py` put `str(exc)` into an `agent_message`
+  — the analyst failure and crash paths, the mediator, the revision hand-back
+  and the judge's verdict, whose own `judge_report` carried it into the report
+  as well — and that message reaches every connected browser, the Redis stream
+  and the `job_events` table for the whole retention window. An `OSError`
+  names the sample's host path, a transport error names the request URL, and a
+  base URL configured with userinfo carries the credential into the text.
+  Every one of them now goes through `events.describe_exception`, which says
+  the exception's class (qualified with its module where the bare name is
+  ambiguous), the remedy when the failure carries one, and nothing else. So
+  does the reason a custom analyst records when its loop fails, which is both a
+  degradation reason on the run summary and that agent's own report. The
+  operator's log still gets the message — through
+  `base_agent.describe_exception_for_log`,
+  renamed so the two cannot be confused, since the wrong import fails open —
+  and the ledger still keeps the verbatim text behind the report's ownership
+  check.
+- **Three runs the scrubber ended in the middle of a value.** A UNC path
+  carrying credentials (`\\user:pass@server\share\x`) travelled whole,
+  because the marker did not admit `:` or `@` in its host; a URL whose
+  userinfo held a `;` had its run cut in front of the `@`, so the user was
+  read as the host and the real host, the fragment and the password stayed in
+  the text; and a path with a punctuated directory in the middle
+  (`/home/op/a;b/c/x.exe`) lost its prefix and kept a tail naming the
+  directories in between. The authority of a URL now ends where an authority
+  ends, a path run ends only at whitespace or a quoting character, and a UNC
+  path loses everything in front of its last `@`. A run that is a single
+  rootless word is no longer treated as a path at all: `</token>` in a tool
+  result was being rewritten to `<token>`, corrupting the XML the model read
+  back.
+- **Four key shapes the event scrubber could not see.** A credential run was
+  anchored to `[A-Za-z0-9_-]`, so a standard base64 key (`+` and `/` in the
+  alphabet), a bare JWT — this project's own access-token shape — a key behind
+  the `\"` of nested JSON and one behind a Unicode dash or quotation mark all
+  travelled verbatim in `args_summary` and `summary`. The value run now ends at
+  a backslash and at anything outside ASCII, the length rule reads the standard
+  base64 alphabet, and a three-segment run whose head really is a JOSE header
+  is replaced. Digests, MIME types and host paths are unchanged: a digest is
+  what the analysis is about, a MIME type is long enough for the widened rule
+  (`application/octet-stream` is exactly 24 characters), and a path is still
+  cut to the file name a reader needs rather than replaced outright.
+- **A tool server reads the sample it was given, and nothing else on the host.**
+  Every `path`, `pcap_path` and `ruleset` argument of the `analysis` and
+  `network` sidecars is now resolved with symlinks followed and refused unless
+  it lands inside the staging directory or one of the directories
+  `MALJAN_SAMPLE_ROOTS` names (`:`-separated, empty by default); a `ruleset` is
+  held to the `data` tree and the two rule-directory variables instead. A
+  sample is adversary-authored content that the analyst model reads, so an
+  instruction inside it could point `iocs_from_file` — a tool whose purpose is
+  extracting typed secrets — at any file the sidecar could open, and the answer
+  went to the ledger, the report and the event feed. A refusal is the ordinary
+  structured error with the code `path_outside_roots` and a remedy, and it
+  names no host path. The worker exports the directories it writes samples to
+  (the download directory, each static provider's mirror and the directory a
+  sandbox capture is fetched to), so a default deployment configures nothing;
+  a sample that lives anywhere else needs the variable. `put_sample` and the
+  carve destination keep their own write confinement.
 - **The capability manifest says only what it knows about this host.** A
   missing module is reported in the import's own words; a broken install or a
   shared library that will not load is reported by exception type alone, so no
@@ -918,220 +1285,14 @@ change landed on `main`.
   and the count is exposed as `SigmaLayer.last_rule_errors`, as `rule_errors`
   in the `sigma_match` tool, and logged once per scan.
 
-### Changed
 
-- **The report's capability profile is the pack's `api_capability` entry,
-  cited by id.** `StaticAnalysis.api_capabilities` is counted from the entry's
-  rows and `api_capabilities_evidence_ids` names the entry; the Markdown
-  profile line, the console and the narrative prompt show the id. A technique
-  rule from that entry is a row under the derived-technique table only when
-  the APIs it matched clear its floor, with the entry id beside it, and the
-  YARA draft takes its import strings from those rows as bare names. capa's
-  namespaces are no longer counted as import capabilities; its technique hits
-  stay. The family-feature profile carries the import names in the binary's
-  order; a fingerprint catalogue built against the old vocabulary needs a
-  rebuild with `scripts/knowledge/build_family_feature_kb.py`.
-- **A debate hands over to exactly one node, and the settings say so.** A team
-  whose debate feeds two stages — or one parallel analysis stage with two
-  agents, which is two nodes — is refused when it is saved, per stage, instead
-  of building cleanly and then failing every job in the graph builder after the
-  sample was uploaded and detonated. The builder still refuses it, as the
-  backstop for a document that reached it out of band.
-- **The debate stage's consensus threshold decides something.** It was
-  validated, migrated, round-tripped and editable, and nothing read it: the
-  mediator used the global `negotiation.consensus_threshold`. A stage that sets
-  one now argues to its own bar, and a stage that sets none still uses the
-  global one it was seeded from.
-- **A migrated team keeps following the global analyst-mode and round-limit
-  keys.** The alembic revision marks the stages it writes as derived, so a
-  database that was migrated and a fresh install produce the same team. Without
-  the mark a team froze whatever those keys said on migration day, and an
-  operator moving from a hosted API back to the single-slot local model would
-  have kept running analysts in parallel. The console clears the mark on the
-  first stage edit.
-- **The settings console edits teams, not profiles.** `StagesEditor` replaces
-  `ProfilesEditor`: a card per team, a card per stage, with the key, kind,
-  agents, dependencies, condition, run mode, upstream setting, debate options
-  and built-in tool switch on each, and move up/down that refuses a move which
-  would put a stage above something it depends on. The setup guide's last step
-  is "Add to a stage". `20260916000000_migrate_profiles_to_stages` gives every
-  stored profile the stage list its analysts have always meant, using the
-  stored `llm.parallel_analysts` and `negotiation.max_iterations`, and keeps
-  the analyst list so the downgrade can put it back.
-- **A degraded run is explained to the judge instead of capped afterwards.**
-  The reasons a run is thin — no sandbox report, a failed analyst, a container
-  nothing could open, anti-emulation behaviour — go into the verdict prompt and
-  the judge sets its own confidence. The fixed 0.60 ceiling the report node
-  applied afterwards is gone: it made every kind of thinness look identical and
-  told the judge nothing.
-- **The capability matrix is a pure projection.** It is built from the judge's
-  technique list and the analysts' claims, and carries each source's own
-  confidence. The cap that halved an obfuscation or injection claim whose
-  supporting static evidence the module could not find is gone; an analyst that
-  over-claims is told so in its own loop.
-- **The indicator corpus check is feedback, not a filter.** An indicator whose
-  pattern names a value no tool in the run saw comes back to the judge as
-  `stix.ungrounded_indicator`, with the reason in words. Only what survives the
-  retry is dropped, and the drop is recorded in
-  `run_summary.validation.unresolved` — an ungrounded IOC in a STIX bundle is a
-  false positive a reader is entitled to see.
-- **The FP linter's C6, and a new C7.** C6 was "the Sigma/YARA platform filter
-  reported no counters"; it is now "a report section or TTP row with neither an
-  evidence id nor a tool entry behind it". C7 names technique ids the validation
-  loop could not get resolved.
-- **The rule corpora are configured on the `analysis` tool server.**
-  `MALJAN_SIGMA_RULES_DIR` and `MALJAN_YARA_RULES_DIR` in that server's `env`
-  replace `analysis.sigma_rules_dir`; a stored override for the old key moves
-  automatically on upgrade.
-- **Parsers format and nothing else.** The dynamic parser no longer labels an
-  observation `[HIGH]`/`[MEDIUM]` from a keyword table, nor tells the analyst to
-  emit a T1497 claim, and the network parser no longer prints a `[Suspicious]`
-  verdict beside a DNS query. Both state what the sandbox recorded; what it
-  means is the analyst's reading.
-
-- **The report is built from the ledger, not recomputed beside it.**
-  `MalwareReportBuilder` no longer calls an extractor per section. Identity
-  comes from the `identify_file` and `hashes` calls when they ran and from the
-  routing minimum when they did not; `static`, `dynamic`, `network` and
-  `persistence` are projections of the same ledger
-  (`reporting/ledger_projection.py`) and stay empty when the matching tool was
-  never called. A typed section nobody filled is left out of the rendered
-  report rather than printed as an apology.
-- **capa and YARA reach the report as tool calls.** The evidence-only static
-  provider writes its own ledger entries (`agent="capa_yara"`), so its rule hits
-  print as sections like any other tool's and its capability counters still
-  reach the layers that read `report.static`.
-- **The static analyst's head chunk carries context, not a paste.** It keeps the
-  analysis path, the host path, the toolchain and the routing verdict, and drops
-  the pre-parsed section table, imports and strings — the analyst calls
-  `pe_info` and `strings` for those, and the ids their results carry are what
-  the report cites.
-- **The provider goldens freeze the sandbox tools' answers** over the same
-  98-report CAPE corpus, rather than the extractors' output, because that is the
-  normalisation contract now: what an agent sees when it asks.
-- **Tool-argument path pinning is shared.** The bare-filename guard moved from
-  `ConfigurableAnalyst` to `agents/tool_pinning.pin_paths`, called by every
-  analyst through `BaseAnalyst`, and now substitutes a different path per
-  server. It matches three spellings of the sample — the worker path, its
-  basename, and the basename of the staged copy — because a server that stored
-  the sample under a name of its own would otherwise only be corrected for a
-  name the model was never shown. `ServerRegistry.merge_tools` stamps each tool
-  with the server it came from so the right path can be chosen.
-- **The string and IOC scan moved** from `extractors/pe_extractor` to
-  `maljan.tools.strings`; the extractor imports it and its output is unchanged.
-
-- **Per-format sandbox submission options.** `sandbox.cape2.package_by_format`
-  maps a detected file type to a CAPE analysis package (`*` is the fallback)
-  and `sandbox.cape2.submit_options` is sent verbatim as further form fields;
-  `sandbox.triage.profile_by_format` picks a Triage VM profile per format with
-  `sandbox.triage.profile` behind it; `sandbox.rest.submit.submit_fields`
-  passes extra multipart fields through the REST DSL. The CAPE guest platform
-  is sent when CAPE has a name for it and left unset otherwise.
-- **ATT&CK Mobile and ICS.** `data/attck_valid_ids.json` carries one technique
-  id list per domain and the loader downloads and caches the Mobile and ICS
-  STIX bundles beside Enterprise, exposing `valid_ids`, `domain_of` and
-  `platforms_for`. A Mobile technique id now validates instead of being
-  reported as a hallucination. Enterprise is required; the other two are
-  additive and their absence costs coverage, not a run.
-- **Open sandbox report channels.** `SandboxReport.channels` keeps what the
-  schema has no field for, namespaced by platform (`android.permissions`,
-  `linux.systemd`, `macos.launchd`). CAPE's non-Windows blocks are lifted into
-  it, and the REST DSL gains `mapping.channels`, an operator-named
-  name-to-JSONPath map.
-
-- **A per-agent LLM base URL.** `llm.agents.<agent>.base_url` points one agent
-  at its own OpenAI-compatible or Ollama server while the rest keep the global
-  endpoint, with the provider's API key still shared.
-- **Dependency submission for `uv.lock`.** A workflow posts the resolved Python
-  packages to GitHub's dependency graph on every push to `main`, so Dependabot
-  alerts close when the lockfile moves instead of lingering on the first parse.
-- **Repository security posture.** CodeQL (Python, TypeScript, Actions;
-  `security-extended`), dependency review on pull requests, OpenSSF Scorecard,
-  Dependabot updates for every dependency surface, actions pinned by commit,
-  `SECURITY.md` with private vulnerability reporting, `CONTRIBUTING.md`,
-  code owners, issue and pull request templates. Secret scanning with push
-  protection and Dependabot security updates are enabled on the repository.
-- **Environment-free configuration.** Every application setting — LLM
-  provider, sandbox, static analyst, tool servers, agents, rate limits,
-  enrichment, memory — now lives in the settings store and is edited from
-  Settings → Configuration. The catalog carries each entry's type, bounds,
-  choices, description and when it takes effect, and a read-only Deployment
-  group shows the values the process was started with
-  ([#31](https://github.com/Root0ne/Maljan/pull/31),
-  [#32](https://github.com/Root0ne/Maljan/pull/32),
-  [#33](https://github.com/Root0ne/Maljan/pull/33)).
-- **A bootstrap contract, validated once.** The API and the worker read a small
-  fixed set of process-environment variables — database, Redis, MinIO, the two
-  secrets, a handful of mount paths — documented in `bootstrap.env.example`.
-  Validation happens at startup and reports every problem in one
-  `bootstrap: ...` line instead of failing on whichever one an import reached
-  first ([#31](https://github.com/Root0ne/Maljan/pull/31)).
-- **Configuration export and import.** `GET /api/v1/settings/export` produces a
-  `maljan-settings/1` JSON document and `POST /api/v1/settings/import` accepts
-  it, with a preview in the console. The document carries no credential:
-  secrets are skipped, masks nested inside composite settings are stripped at
-  any depth, server `env` values are masked, and everything omitted is listed
-  in `secrets_omitted` ([#32](https://github.com/Root0ne/Maljan/pull/32)).
-- **Secret storage for nested credentials.** An MCP server's `auth_token` and a
-  frontier arm's `api_key` are stored as their own Fernet-encrypted rows rather
-  than inside the composite value, and are merged back on read; a startup
-  repair moves any that an older version left inline
-  ([#33](https://github.com/Root0ne/Maljan/pull/33)).
-
-### Changed
-
-- **Built-in analysts honour a definition's own prompt.** The static, dynamic and
-  network analysts now take their system prompt from the resolved agent
-  definition on every run, so an operator's explicit `prompt` on a built-in
-  role applies, and the format fragment for the sample's platform reaches the
-  model. The module constants remain only as the neutral fallback.
-- **The platform vocabulary is open.** `reporting.models.Platform` is a plain
-  string with `KNOWN_PLATFORMS` beside it — `windows`, `linux`, `macos`,
-  `android`, `ios`, `multi`, `unknown` — rather than a three-value literal.
-  File-type detection recognises Mach-O, APK, DEX, JAR, IPA, OLE2, OOXML, PDF,
-  LNK, the script formats and the archive formats, and returns lowercase
-  routing labels. The persistence extractor selects its platform scanners
-  positively, so the Windows registry sweep no longer runs for an Android or
-  macOS sample.
-- **Analyst prompts are platform-neutral plus a format fragment.** The built-in
-  heads no longer name Windows artefacts; `agents/prompt_fragments` supplies
-  the paragraph naming what to look for on the sample actually in hand, and
-  `composition.builtin_prompt` assembles head, format fragment, provider
-  fragment and tail for every built-in role.
-
-- **PyJWT signs and verifies the API's tokens.** `python-jose` is gone from both
-  projects; it was the only route by which `ecdsa` (an unfixed timing-attack
-  advisory) reached the lockfile. Token format, claims and the dual-secret
-  rotation window are unchanged.
-- **Request-derived values are sanitised before they are logged.** Every job,
-  sample, report and audit identifier that reaches a log line from a path, a
-  query string or a request body now passes through `log_safe`, which escapes
-  newlines and other control characters and bounds the length, so a caller
-  cannot forge a second log record. The container images pin their bases by
-  digest and the console's Node line moves to 22 across the images and CI.
-- **Dependencies brought current.** The uv workspace is relocked to today's
-  releases (cryptography 50, starlette 1.6, langchain-core 1.6, mcp 1.30 with
-  2.x held back as a separate migration, pillow 12.3, pyjwt 2.14, urllib3 2.7,
-  weasyprint 70 and the rest), and the console moves to Next.js 16.3.5 and
-  vitest 4 with a regenerated lockfile. This clears every Dependabot alert
-  that has a fix; the two without one (`ecdsa`, `diskcache`) are recorded in
-  the alert list with the reason.
-- The process refuses to start without a valid `SETTINGS_ENCRYPTION_KEY`, so
-  there is no mode in which stored secrets sit unencrypted
-  ([#31](https://github.com/Root0ne/Maljan/pull/31)).
-- `APISettings` no longer discovers or reads a `.env` file; configuration comes
-  from the process environment alone
-  ([#31](https://github.com/Root0ne/Maljan/pull/31)).
-- Pytest detection no longer consults the environment, so no variable can hand
-  a real deployment the published test secret
-  ([#33](https://github.com/Root0ne/Maljan/pull/33)).
-- A settings reset in the console waits for its own page before touching the
-  header, fixing a flaky interaction in the group editors
-  ([#35](https://github.com/Root0ne/Maljan/pull/35)).
-- Documentation is now a maintained set under `docs/`, and the historical
-  design record — the former `docs/plans`, `docs/specs` and `docs/superpowers`
-  trees — is read from git history instead of the working tree
-  ([#38](https://github.com/Root0ne/Maljan/pull/38)).
+- **No fragment of the LangSmith API key is logged.** Enabling tracing logged
+  the key's last four characters; it now records only that tracing is on and
+  which project it writes to.
+- **The Ghidra connection test proves the token.** The probe read the
+  unauthenticated health endpoint, so a wrong bearer token passed the test and
+  every job then failed with 401 on the tool schema. It now fetches the schema
+  itself and lists the tools it found.
 
 ### Removed
 
@@ -1241,16 +1402,6 @@ change landed on `main`.
 - Process tags in source comments — dated audit identifiers, ticket numbers and
   phase labels. The reasoning stays, the bookkeeping goes
   ([#38](https://github.com/Root0ne/Maljan/pull/38)).
-
-### Fixed
-
-- **No fragment of the LangSmith API key is logged.** Enabling tracing logged
-  the key's last four characters; it now records only that tracing is on and
-  which project it writes to.
-- **The Ghidra connection test proves the token.** The probe read the
-  unauthenticated health endpoint, so a wrong bearer token passed the test and
-  every job then failed with 401 on the tool schema. It now fetches the schema
-  itself and lists the tools it found.
 
 ### Upgrading
 

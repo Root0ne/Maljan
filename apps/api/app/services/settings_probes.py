@@ -9,13 +9,12 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
 import httpx
 from maljan.core import virustotal
 from maljan.core.config import MCPServerConfig
 from maljan.core.logger import logger
-from maljan.core.model_assignments import endpoint_for, endpoint_where
+from maljan.core.model_assignments import endpoint_for, endpoint_label, endpoint_where
 from maljan.core.paths import resolve_data
 from maljan.core.settings_overrides import build_settings, redact_url, split_key
 from maljan.providers.errors import ProviderConfigurationError
@@ -111,25 +110,6 @@ COMPLETION_TIMEOUT = 90.0
 # in the answer and files no row: it was not tried, which is neither a pass nor
 # a failure, and pressing Test again asks it.
 LLM_PROBE_BUDGET_SECONDS = 300.0
-
-
-def endpoint_label(endpoint: str) -> str:
-    """The endpoint as an operator reads it: its scheme and host, nothing else.
-
-    A label goes into the sentence the console prints and the row the store
-    keeps, where the part that names the server is all that is wanted. A base
-    URL may carry credentials in front of the host, and a path or a query says
-    nothing about which server answered. Anything that is not a URL — a vendor
-    API's own name — is its own label.
-    """
-    parts = urlsplit(str(endpoint or ""))
-    if not parts.scheme or not parts.hostname:
-        return str(endpoint or "")
-    try:
-        port = f":{parts.port}" if parts.port else ""
-    except ValueError:
-        port = ""
-    return f"{parts.scheme}://{parts.hostname}{port}"
 
 
 async def complete_one_turn(

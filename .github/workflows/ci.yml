@@ -64,8 +64,14 @@ jobs:
           enable-cache: true
       # The Makefile's `make semgrep` form: uv resolves the pinned version into
       # an ephemeral environment, so no unpinned `pip install` runs in CI.
+      #
+      # apps/web/src is in the target list and the TypeScript and React
+      # rulesets are in the config list: the console is application code that
+      # reads a live event feed, and leaving it to CodeQL alone made every file
+      # of it single-tool. What stays out of the scan is what is not source —
+      # build output, the end-to-end suite, the unit specs (`.semgrepignore`).
       - name: Scan
-        run: uv run --with semgrep==1.176.0 semgrep scan --config p/python --config p/security-audit --error --metrics=off src/ apps/api/ services/ scripts/
+        run: uv run --with semgrep==1.176.0 semgrep scan --config p/python --config p/security-audit --config p/typescript --config p/react --error --metrics=off src/ apps/api/ services/ scripts/ apps/web/src/
 
   test:
     name: Test Suite (Python ${{ matrix.python-version }})

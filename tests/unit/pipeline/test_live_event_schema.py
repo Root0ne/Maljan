@@ -16,6 +16,13 @@ import hashlib
 from typing import Any
 
 from maljan.pipeline import events as ev
+from tests.credential_shapes import (
+    jwt,
+    lowercase_base64_blob,
+    lowercase_body,
+    prefixed_key,
+    standard_base64_key,
+)
 
 # Credential-shaped values are assembled rather than written down. What these
 # tests need is the *shape* each rule reads — a vendor prefix, an unbroken run
@@ -510,6 +517,196 @@ class TestArgumentSummaries:
     def test_a_failure_with_no_remediation_still_says_nothing_raw(self) -> None:
         summary = ev.summarize_result("Traceback: /etc/maljan/secrets.env", ok=False)
         assert summary == "the call failed"
+
+
+class TestTheKeyShapesARunOfWordCharactersMisses:
+    """Four shapes a key really arrives in that a ``[A-Za-z0-9_-]`` run cannot see.
+
+    Each one was confirmed travelling verbatim through ``scrub``: the two
+    characters standard base64 adds, the dots a JWT is made of, the backslash
+    an escaped JSON quote leaves against the value, and the punctuation a model
+    writes prose with.
+    """
+
+    def test_a_standard_base64_key_is_replaced(self) -> None:
+        """``+`` and ``/`` are in the alphabet; a run of word characters is not."""
+        key = standard_base64_key()
+
+        assert ev.scrub(f"secret={key}") == "secret=***"
+        assert ev.summarize_args({"value": key}) == "value=***"
+
+    def test_a_base64_key_with_its_padding_is_replaced(self) -> None:
+        key = _opaque_run(26) + "aZ9" + "=="
+
+        assert ev.scrub(f"token {key} there") == "token *** there"
+
+    def test_a_bare_jwt_is_replaced(self) -> None:
+        """The platform's own access-token shape, which travels with no prefix."""
+        token = jwt()
+
+        assert token.startswith("eyJ"), "the prefix rule is the one under test here"
+        assert ev.scrub(f"the socket sent {token}") == "the socket sent ***"
+
+    def test_a_jwt_is_recognised_by_what_its_head_decodes_to(self) -> None:
+        """A dotted run is only a token when its first part is a JSON header.
+
+        A header whose JSON starts with a space encodes to something that is
+        not ``eyJ``, so the prefix shortcut cannot answer and the rule has to
+        decode the head to find the object it begins.
+        """
+        token = jwt(header=b'{ "alg":"HS256"}')
+
+        assert not token.startswith("eyJ"), "the shortcut would answer instead"
+        assert ev.scrub(token) == "***"
+
+    def test_a_dotted_run_that_is_not_a_token_survives(self) -> None:
+        for value in (
+            "maljan.pipeline.events",
+            "subdomain.exampledomain.technology",
+            "application/x-msdownload",
+        ):
+            assert ev.scrub(value) == value, value
+
+    def test_an_escaped_json_quote_ends_a_value(self) -> None:
+        """The ordinary MCP result shape: JSON inside a JSON string.
+
+        The trailing backslash used to sit inside the value run and break the
+        whole-run anchor, so the key travelled while the same key passed as a
+        bare argument was replaced.
+        """
+        key = _vendor_key(body="A" * 30)
+        body = '{"body": "{' + chr(92) + '"apiKey' + chr(92) + '":' + chr(92) + '"' + key
+        body += chr(92) + '"}"}'
+
+        assert key not in ev.scrub(body)
+
+    def test_a_unicode_dash_ends_a_value(self) -> None:
+        key = _opaque_run(32)
+
+        assert ev.scrub(f"authorization —{key}") == "authorization —***"
+
+    def test_a_unicode_quote_ends_a_value(self) -> None:
+        key = _opaque_run(32)
+
+        assert ev.scrub(f"“{key}”") == "“***”"
+
+    def test_a_path_behind_a_unicode_quote_is_still_cut(self) -> None:
+        assert ev.scrub("the sample is at “/home/op/x/evil.exe”") == ("the sample is at “evil.exe”")
+
+    def test_a_digest_is_still_the_subject_of_the_analysis(self) -> None:
+        for algorithm in ("md5", "sha1", "sha256"):
+            assert ev.scrub(_digest(algorithm)) == _digest(algorithm), algorithm
+
+    def test_an_identifier_this_system_issues_travels_whole(self) -> None:
+        """A job, a report and a sample are named by a UUID everywhere.
+
+        The same reason a digest is exempt: the id is on the job, on the
+        report and on the event that announced it, and a payload reading
+        ``report_id=***`` is a console that cannot open the report it is
+        announcing. An argument *named* like a credential is still replaced by
+        name, which is what covers a session id written in this shape.
+        """
+        import uuid
+
+        for _ in range(4):
+            identifier = str(uuid.uuid4())
+            assert ev.scrub(identifier) == identifier, identifier
+        assert ev.summarize_args({"report_id": str(uuid.UUID(int=1))}) == (
+            "report_id=00000000-0000-0000-0000-000000000001"
+        )
+        assert ev.summarize_args({"session_id": str(uuid.UUID(int=1))}) == "session_id=***"
+
+    def test_a_lowercase_key_is_a_key(self) -> None:
+        """Lowercase is not a shape that makes a run safe.
+
+        Four real key formats carry nothing but lowercase letters, digits and
+        a dash or underscore, and a run of them is a credential whatever it
+        reads like. The names an event carries are exempted where their names
+        are known — in the publisher, by key — and never here, by shape.
+        """
+        for value in (
+            prefixed_key("key-"),
+            prefixed_key("gocspx-", 24),
+            prefixed_key("ghs_", 36),
+            lowercase_body(32),
+            lowercase_base64_blob(),
+        ):
+            assert ev.scrub(value) == "***", value
+
+    def test_a_lowercase_key_inside_a_tool_result_is_replaced(self) -> None:
+        """The shape the audit's own scenario produces: a result quoting one."""
+        summary = ev.summarize_result('{"secrets":["' + prefixed_key("key-") + '"],"count":1}')
+
+        assert summary == '{"secrets":["***"],"count":1}'
+
+    def test_a_long_hex_run_is_still_a_key(self) -> None:
+        """Not every hex run is a digest: these two are the wrong lengths."""
+        assert ev.scrub("d" * 48) == "***"
+        assert ev.scrub(_digest("sha256")[:36]) == "***"
+
+    def test_a_mime_type_still_travels_whole(self) -> None:
+        """Long enough for the base64 rule, and the one shape that must survive it."""
+        for value in (
+            "application/octet-stream",
+            "application/x-msdownload",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.api+json",
+        ):
+            assert ev.scrub(value) == value, value
+
+    def test_a_host_path_is_still_cut_rather_than_replaced(self) -> None:
+        """A reader needs the file name; a path with no dot in it is not a key."""
+        assert ev.scrub("/home/operator/samples/ab12cd34ef56") == "ab12cd34ef56"
+        assert ev.scrub("/opt/maljan/data/samples/dropper") == "dropper"
+
+
+class TestTheRunsThatEndedTooEarly:
+    """A value that carries one of the run's own terminators in the middle.
+
+    Each of these was confirmed leaving ``scrub`` with the part after the
+    terminator standing: a UNC path with credentials in front of its host, a
+    URL whose userinfo carries a semicolon, and a host path with a punctuated
+    directory in the middle of it.
+    """
+
+    def test_a_unc_path_with_credentials_loses_them(self) -> None:
+        unc = chr(92) * 2 + "user:pass@server" + chr(92) + "share" + chr(92) + "secret.txt"
+
+        assert ev.scrub(unc) == "secret.txt"
+
+    def test_a_plain_unc_path_is_still_cut_to_its_file(self) -> None:
+        assert ev.scrub(r"\\fileserver\share\sample.exe") == "sample.exe"
+
+    def test_a_url_whose_userinfo_carries_a_semicolon_still_loses_it(self) -> None:
+        said = "http://" + "u" + ":" + "p;x" + "@host.example.com/a#frag"
+
+        scrubbed = ev.scrub(said)
+
+        assert scrubbed == "http://host.example.com/…"
+
+    def test_a_password_never_survives_the_authority(self) -> None:
+        said = _url_with_userinfo("operator", "hunter2;now", "db.internal:5432/maljan")
+
+        assert "hunter2" not in ev.scrub(said)
+
+    def test_a_url_still_ends_where_it_used_to(self) -> None:
+        assert ev.scrub("https://h/x;") == "https://h/…;"
+        assert ev.scrub("<https://h/x>") == "<https://h/…>"
+        assert ev.scrub("https://h:8080/x") == "https://h:8080/…"
+        assert ev.scrub("file:///home/op/samples/x.exe") == "file:///…"
+
+    def test_a_path_with_a_punctuated_directory_keeps_no_tail(self) -> None:
+        for value in ("/home/operator/a;b/c/x.exe", "/srv/maljan,prod/data/x.exe"):
+            assert ev.scrub(value) == "x.exe", value
+
+    def test_a_closing_tag_is_not_a_path(self) -> None:
+        """``</token>`` was rewritten to ``<token>``, which corrupts the XML a
+        model then reads back."""
+        assert ev.scrub("<token>value</token>") == "<token>value</token>"
+        assert ev.scrub("</Data></EventData>") == "</Data></EventData>"
+
+    def test_a_multi_segment_path_with_no_dot_is_still_cut(self) -> None:
+        assert ev.scrub("key:/var/lib/x/y") == "key:y"
 
 
 class TestValidationFeedback:

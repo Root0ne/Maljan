@@ -41,16 +41,30 @@ build context. Never enable it outside a trusted local environment.
 
 **WebSocket.** `/ws/analysis/{job_id}` authenticates the same access token and
 refuses anything that is not one, closing with code 1008 rather than serving
-events.
+events. It reads the account the token names before it says anything about the
+job and refuses a missing or deactivated one, and it reads that account again
+every 60 seconds while it streams, so a deactivation closes the socket instead
+of waiting out the access token.
 
 ## Roles
 
-Three roles: `admin`, `analyst` (the role a registration gets) and `readonly`.
+Two roles are enforced: `admin` and `analyst` (the role a registration gets).
 Admin gates the configuration surface — the settings schema, values, patches,
 resets, export and import — plus the audit log and API-key management. A
 refusal names the caller's actual role so the console can hide admin-only
 navigation rather than guess. There is no endpoint that grants admin; the first
 one is promoted in the database.
+
+`readonly` is a third value of the role column and **is enforced nowhere**: no
+route distinguishes it from `analyst`, so an account holding it can upload a
+sample, submit an analysis job — spending LLM and sandbox budget — and cancel
+its own jobs. Read it as a label, not as a permission. It is recorded here
+rather than removed because a row already carrying the value would not load
+against an enum without it, and dropping the value silently would widen those
+accounts rather than narrow them; enforcing it is a behaviour change with a
+migration behind it, not a documentation fix. Do not hand out `readonly`
+expecting it to restrict anything: the boundary that does hold is `admin`
+against everyone else, and `is_active` against a closed account.
 
 ## Secret storage
 

@@ -121,6 +121,16 @@ socket with `?since=<the last seq it holds>`, so a resume costs the events it
 missed rather than a re-read of the window. The access token travels as the
 `maljan.v1.<token>` subprotocol and never in the URL.
 
+What the conversation draws as prose — a message's text and its report, a
+correction, a tool call's arguments and its result — is scrubbed by the
+publisher before it reaches the socket, the stream or the stored transcript: a
+credential shape is replaced, a URL keeps its scheme and host, a host path is
+cut to its file name. The names it joins on are not: the agent, stage and tool
+keys, the labels, the ids and the words it switches on are exempt by field
+name, so what the console reads to place a line is always what the run called
+it. The arguments and the output as they were are on the evidence ledger,
+behind the report's ownership check.
+
 Every event carries a job-wide `seq`, which is the ordering key, the dedupe
 identity and the resume cursor. A run recorded before the numbering existed
 keeps the order its events arrived in. A run whose feed has passed the

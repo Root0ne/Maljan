@@ -615,6 +615,85 @@ class TestTheGuards:
 
         assert why is not None and "knowledge" in why
 
+    def test_an_ask_cannot_reach_a_server_the_callee_is_bound_to_by_the_server_map(
+        self,
+    ) -> None:
+        """The other binding mechanism, and the one the built-ins actually use.
+
+        A definition's ``ToolRef(kind="mcp")`` is one way an agent reaches a
+        server; ``core.mcp.servers.<key>.agents`` naming the agent is the
+        other, and it is how the default map binds ``network``,
+        ``threatintel`` and the rest. A guard that read only the first said a
+        stage-less specialist brought nothing, so a stage told to read what it
+        was handed reached every built-in server through it.
+        """
+        container = _Container(
+            _settings(
+                definitions={
+                    "helper": {"role": "generic", "prompt": "You help.", "tools": []},
+                },
+                profiles={
+                    "led": {
+                        "stages": [
+                            {
+                                "key": "lead",
+                                "kind": "analysis",
+                                "agents": ["boss"],
+                                "builtin_tools": False,
+                            },
+                            {
+                                "key": "verdict",
+                                "kind": "verdict",
+                                "agents": ["judge"],
+                                "depends_on": ["lead"],
+                            },
+                        ]
+                    }
+                },
+            ),
+            models={},
+            tools={},
+        )
+        container.config.mcp.servers["knowledge"].agents = ["helper"]
+
+        why = refusal(container, container.get_agent("boss"), "helper")
+
+        assert why is not None and "knowledge" in why and "stage 'lead'" in why
+
+    def test_a_server_the_map_binds_to_a_disabled_server_is_not_brought(self) -> None:
+        """A server that is off brings nothing, so it is nothing to refuse over."""
+        container = _Container(
+            _settings(
+                definitions={
+                    "helper": {"role": "generic", "prompt": "You help.", "tools": []},
+                },
+                profiles={
+                    "led": {
+                        "stages": [
+                            {
+                                "key": "lead",
+                                "kind": "analysis",
+                                "agents": ["boss"],
+                                "builtin_tools": False,
+                            },
+                            {
+                                "key": "verdict",
+                                "kind": "verdict",
+                                "agents": ["judge"],
+                                "depends_on": ["lead"],
+                            },
+                        ]
+                    }
+                },
+            ),
+            models={},
+            tools={},
+        )
+        container.config.mcp.servers["knowledge"].agents = ["helper"]
+        container.config.mcp.servers["knowledge"].enabled = False
+
+        assert refusal(container, container.get_agent("boss"), "helper") is None
+
     def test_a_profile_with_nothing_to_call_binds_no_ask_tool(self) -> None:
         """``exclude_servers: ['*']`` is the tool-free baseline, delegation included."""
         from maljan.agents.composition import _agent_tools

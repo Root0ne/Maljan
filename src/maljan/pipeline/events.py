@@ -23,6 +23,8 @@ Deliberately minimal, and deliberately not async:
 
 from __future__ import annotations
 
+import base64
+import binascii
 import re
 from collections.abc import Callable
 from typing import Any
@@ -347,7 +349,13 @@ _CREDENTIAL_PREFIXES = ("sk-", "sk_", "nvapi-", "ghp_", "gho_", "xoxb-")
 # while the credential pass beside it was splitting the same punctuation off
 # cleanly. Admitting a character here only lets a match *begin*; every marker
 # requirement below still has to be met.
-_AFTER = r"(?:\A|(?<=[\s\"'`<>=:,{\[(]))"
+#
+# A backslash is here because a tool result is JSON inside JSON: the value a
+# rule has to find arrives as ``\"sk-…\"``, and the escape sits against it on
+# both sides. Everything outside ASCII is here because a model writes prose
+# with the punctuation its own language uses — an em dash, a curly quote —
+# and a key or a path written after one of those is a key or a path.
+_AFTER = r"(?:\A|(?<=[\s\"'`<>=:,{\[(\\]|[^\x00-\x7f]))"
 # Where such a run ends: the next separator that cannot be part of a path, a
 # URL or a key.
 #
@@ -361,6 +369,19 @@ _AFTER = r"(?:\A|(?<=[\s\"'`<>=:,{\[(]))"
 # starts the next run after it.
 _UNTIL_CHARS = r"[^\s\"'`<>;,)\]}]"
 _UNTIL = _UNTIL_CHARS + r"*"
+# A URL's authority, which ends only where the authority ends: at the ``/`` of
+# the path, the ``?`` of the query, the ``#`` of a fragment, or a character no
+# URL can carry at all. A semicolon is legal in userinfo and a password
+# containing one used to end the run in front of the ``@`` — which handed
+# ``_shorten_url`` the *user* as the host and left the real host, the fragment
+# and the password standing in the text.
+_AUTHORITY = r"[^\s\"'`<>,)\]}/?#]*"
+# A path run ends later than any other run. A directory name may carry a
+# semicolon or a comma, and stopping at one cut the *prefix* off and left the
+# rest of the path — the intermediate directories — standing where the whole
+# point was to remove them. Whitespace and the quoting characters still end
+# it: a path with a space in it cannot be told from a path followed by prose.
+_PATH_UNTIL = r"[^\s\"'`<>)\]}]*"
 # An authorization scheme and the secret after it, which no per-value rule can
 # see as one thing: "Bearer" is a word and the secret is the next one, however
 # short it is. Bounded by the same separators as every other run rather than
@@ -368,8 +389,37 @@ _UNTIL = _UNTIL_CHARS + r"*"
 # by the same *constant*, so the two cannot drift apart again.
 _SCHEME_AND_SECRET = re.compile(r"(?i)\b(bearer|basic|token)\s+" + _UNTIL_CHARS + r"+")
 # 24 is above a CRC, a short hash prefix and a ledger id, and below every API
-# key shape this has met.
-_CREDENTIAL_RUN = re.compile(r"(?:[A-Fa-f0-9]{24,}|[A-Za-z0-9_\-]{24,}={0,2})\Z")
+# key shape this has met. The second alternative is the *standard* base64
+# alphabet, not the URL-safe one alone: an AWS secret key, a PKCS blob and
+# anything a server base64-encodes carry ``+`` and ``/``, and a rule that
+# stopped at ``[A-Za-z0-9_-]`` read the run as ending at the first of them and
+# then failed its own whole-run anchor.
+_CREDENTIAL_RUN = re.compile(r"(?:[A-Fa-f0-9]{24,}|[A-Za-z0-9+/_\-]{24,}={0,2})\Z")
+# A JSON Web Token, which no length rule can see: it is three base64url runs
+# with dots between them, and this project's own access token is one. The
+# segments are held to a floor so that a dotted module name or a hostname is
+# not a candidate, and the head still has to *be* a header — see
+# ``_is_a_token``.
+_JWT_RUN = re.compile(r"\A[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}={0,2}\Z")
+# What the base64 alternative must not take for a key. A MIME type is long
+# enough for it (``application/octet-stream`` is exactly 24 characters) and is
+# the subject of half the tool answers in a run; a path is cut to its file
+# name by the pass below, which is what a reader needs, and reading it as a
+# key would replace the file name too. A path here is one with a marker *and*
+# a second separator: ``/wJalrXUtnFEMIK7MDENG`` is a key that begins with a
+# slash, not a directory.
+_MIME_TYPE = re.compile(r"\A[a-z]+/[a-z0-9][a-z0-9.+_\-]*\Z")
+# The identifier this system issues for a job, a report, a sample and a
+# message. Exempt for the reason a digest is: it is on the job, on the report
+# and on the event that announced it, and an event reading ``report_id=***``
+# is a console that cannot open the report it is announcing. Exact shape, not
+# "any long run of hex and dashes", and an argument *named* like a credential
+# is still replaced by name — which is what covers a session id written this
+# way.
+_IDENTIFIER = re.compile(
+    r"\A[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\Z"
+)
+_PATH_SHAPED = re.compile(r"\A(?:/|\./|\.\./|~/|[A-Za-z]:/)[^/]*/")
 # The three digests a malware analysis is *about*, which the rule above would
 # otherwise take for keys: md5, sha1 and sha256. A sample hash is not a secret
 # — it is on the job, on the report and in ``pipeline_started`` already — and a
@@ -382,7 +432,9 @@ _CREDENTIAL_RUN = re.compile(r"(?:[A-Fa-f0-9]{24,}|[A-Za-z0-9_\-]{24,}={0,2})\Z"
 _DIGEST = re.compile(r"\A[A-Fa-f0-9]{32}\Z|\A[A-Fa-f0-9]{40}\Z|\A[A-Fa-f0-9]{64}\Z")
 # A URL, wherever it starts. Found before the path pass, so the slashes in
 # ``https://host/x`` are never read as a path.
-_URL_RUN = re.compile(_AFTER + r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.\-]*)://(?P<rest>" + _UNTIL + r")")
+_URL_RUN = re.compile(
+    _AFTER + r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.\-]*)://(?P<rest>" + _AUTHORITY + _UNTIL + r")"
+)
 # One value, for the credential test. Delimited rather than whitespace-split,
 # because a key a tool server echoes arrives as ``{"api_key":"sk-…"}`` with no
 # spaces in it at all.
@@ -397,7 +449,13 @@ _URL_RUN = re.compile(_AFTER + r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.\-]*)://(?P<rest
 # one — a run either rule can fire on is made of ``[A-Za-z0-9_-]`` and nothing
 # else — and the pieces a split leaves behind (``api_key``, ``C``, ``https``)
 # are far too short to match anything.
-_VALUE_RUN = re.compile(r"[^\s\"'`<>;:{}\[\](),=]+")
+# The backslash and the non-ASCII range split for the same reasons ``_AFTER``
+# admits them: an escaped quote is what a key inside nested JSON sits against,
+# and a dash or a quotation mark a model typed is the end of the value in
+# front of it. A colon is already outside the class, so a JWT's dots are the
+# one separator left inside it — which is what lets the whole token be seen as
+# one run.
+_VALUE_RUN = re.compile(r"[^\s\"'`<>;:{}\[\](),=\\\x80-\U0010ffff]+")
 # A filesystem path, wherever it starts. A slash alone is not the signal: a
 # MIME type (``application/x-msdownload``), a sub-technique id
 # (``T1055/012``), a date (``2026/09/17``) and a ratio all carry one, and
@@ -421,9 +479,17 @@ _VALUE_RUN = re.compile(r"[^\s\"'`<>;:{}\[\](),=]+")
 # marker cut ``"\\d+"`` — a regex argument — down to ``d+``. Two or more
 # backslashes are accepted at each separator because the whole path arrives
 # doubled when the tool serialised it as JSON.
-_UNC = r"\\{2,}[A-Za-z0-9._-]+\\+."
+# The host segment admits ``:`` and ``@`` because a UNC path carries
+# credentials in front of its host exactly as a URL does, and one that did
+# not match the marker was left in the text whole — password included.
+_UNC = r"\\{2,}[A-Za-z0-9._:@-]+\\+."
 _PATH_RUN = re.compile(
-    _AFTER + r"(?P<run>(?:/(?!/)|\./|\.\./|~/|[A-Za-z]:(?:\\|/(?!/))|" + _UNC + r")" + _UNTIL + r")"
+    _AFTER
+    + r"(?P<run>(?:/(?!/)|\./|\.\./|~/|[A-Za-z]:(?:\\|/(?!/))|"
+    + _UNC
+    + r")"
+    + _PATH_UNTIL
+    + r")"
 )
 # One argument's value, and the whole summary. Short on purpose: this is the
 # line under a chat bubble that says which call is running, not a record of it.
@@ -493,14 +559,51 @@ def _is_secret_argument(name: str) -> bool:
     return False
 
 
+def _is_a_token(run: str) -> bool:
+    """Whether this dotted run is a JWT rather than three words with dots in them.
+
+    The shape alone is not enough — a long enough hostname has it — so the
+    first segment has to be a JOSE header: either the ``eyJ`` every
+    base64url-encoded ``{"`` begins with, or something that really decodes to
+    the start of a JSON object.
+    """
+    if not _JWT_RUN.match(run):
+        return False
+    head = run.split(".", 1)[0]
+    if head.startswith("eyJ"):
+        return True
+    try:
+        decoded = base64.urlsafe_b64decode(head + "=" * (-len(head) % 4))
+    except (ValueError, binascii.Error):
+        return False
+    return decoded.lstrip().startswith(b"{")
+
+
 def _looks_like_a_credential(token: str) -> bool:
-    """Whether this run of characters is a key rather than a word or a digest."""
-    if _DIGEST.match(token):
+    """Whether this run of characters is a key rather than a word or a digest.
+
+    In this order, and the order is the argument. A digest and an identifier
+    are what the analysis is *about*. A vendor prefix is a key however short
+    it is and whatever else its shape reads as, so it is asked before the
+    shapes that are exempt. What is left is exempt when it is a MIME type or a
+    path, and a credential when it is long enough to be one or is a token.
+
+    Nothing is exempt for being lowercase. Four real key formats — Mailgun's
+    ``key-…``, Google's ``gocspx-…``, GitHub's ``ghs_…`` and a base64url blob
+    that happens to have no capitals in it — are nothing but lowercase
+    letters, digits and a separator, so a shape test written around the keys
+    *this* system issues let every one of them through. The names an event
+    carries are exempted where their names are known, by key, in the
+    publisher (``analysis_worker.scrubbed``); they are not guessed at here.
+    """
+    if _DIGEST.match(token) or _IDENTIFIER.match(token):
         return False
     lowered = token.lower()
     if any(lowered.startswith(prefix) for prefix in _CREDENTIAL_PREFIXES):
         return True
-    return bool(_CREDENTIAL_RUN.match(token))
+    if _MIME_TYPE.match(token) or _PATH_SHAPED.match(token):
+        return False
+    return bool(_CREDENTIAL_RUN.match(token)) or _is_a_token(token)
 
 
 def _shorten_url(found: re.Match[str]) -> str:
@@ -526,9 +629,27 @@ def _shorten_path(found: re.Match[str]) -> str:
     identifier and whose prefix is wherever this deployment happens to be
     installed, and neither belongs in a payload that a browser and a
     long-lived table both keep; the file name is the part a reader is reading.
+
+    Two things the marker alone does not decide. A UNC path can carry
+    credentials in front of its host, exactly like a URL, and they are the
+    whole reason that path must not travel — so they go whatever else happens.
+    And a single rootless word is not a path at all: ``</token>`` in a tool
+    result matched the marker and was rewritten to ``<token>``, silently
+    corrupting the XML the model then read back. A run is cut when it has more
+    than one segment or a segment with a dot in it, which every real path has
+    and a closing tag does not.
     """
     run = found.group("run")
-    return run.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1] or run
+    flat = run.replace("\\", "/").rstrip("/")
+    credentialed = "@" in flat
+    if credentialed:
+        flat = flat.rsplit("@", 1)[1]
+    segments = [segment for segment in flat.split("/") if segment]
+    if not segments:
+        return run
+    if not credentialed and len(segments) < 2 and not any("." in s for s in segments):
+        return run
+    return segments[-1]
 
 
 def _hide_credentials(found: re.Match[str]) -> str:
@@ -554,11 +675,72 @@ def scrub(text: Any) -> str:
     with the key, the URL and the host path all inside it, and a rule anchored
     to the start of a word found none of them.
     """
-    flat = " ".join(str(text or "").split())
-    flat = _SCHEME_AND_SECRET.sub(lambda m: f"{m.group(1)} {_REDACTED}", flat)
-    flat = _URL_RUN.sub(_shorten_url, flat)
-    flat = _VALUE_RUN.sub(_hide_credentials, flat)
-    return _PATH_RUN.sub(_shorten_path, flat)
+    return _scrub_line(" ".join(str(text or "").split()))
+
+
+def _scrub_line(line: str) -> str:
+    """The four passes, over text that is already one line."""
+    line = _SCHEME_AND_SECRET.sub(lambda m: f"{m.group(1)} {_REDACTED}", line)
+    line = _URL_RUN.sub(_shorten_url, line)
+    line = _VALUE_RUN.sub(_hide_credentials, line)
+    return _PATH_RUN.sub(_shorten_path, line)
+
+
+def scrub_keeping_layout(text: Any) -> str:
+    """The same four passes, with the text's own lines and indentation kept.
+
+    For a field a reader reads as prose rather than skims as a summary — an
+    analyst's report, a correction, a failure's detail. ``scrub`` collapses
+    whitespace because a one-line summary has no use for any of it; doing that
+    to a written report turns it into a wall of text and flattens the lists
+    and code blocks in it. Every rule is applied to each line on its own,
+    which is exactly what ``scrub`` does to the single line it makes.
+    """
+    return "\n".join(_scrub_line(line) for line in str(text or "").splitlines())
+
+
+def describe_exception(exc: BaseException) -> str:
+    """What a failure may be called on the wire: its type, and its remedy.
+
+    Never its message. A published failure reaches every connected browser,
+    the Redis stream and the ``job_events`` table for the whole retention
+    window, and the message is the part that names the things a reader of that
+    feed has no business seeing: an ``OSError`` names the host path of the
+    sample, an ``httpx`` transport error names the request URL, and a base URL
+    configured with userinfo carries the credential into the text. The
+    verbatim text is on the ledger and in the log, behind the report's
+    ownership check, which is where it belongs.
+
+    A failure that carries a ``remediation`` — the shape
+    ``maljan.tools.errors`` uses, and what a refusal is made of — says it,
+    because a remedy is authored text about what the reader should do rather
+    than a report of what went wrong. It is scrubbed like anything else.
+
+    The class alone is not always enough to tell two failures apart:
+    ``concurrent.futures.CancelledError`` and ``asyncio.CancelledError`` print
+    the same word and only one of them is an ``Exception``, so a class outside
+    the builtins is qualified with its module. A group names what is inside
+    it, because an MCP connection error inside a task group is otherwise a
+    bare ``ExceptionGroup``.
+
+    This is not ``maljan.agents.base_agent.describe_exception``, which keeps
+    the message on purpose: that one writes the operator's log, where the
+    detail is the whole value and the reader is the operator.
+    """
+    inner = getattr(exc, "exceptions", None)
+    if isinstance(inner, list | tuple) and inner:
+        parts = [describe_exception(sub) for sub in inner[:3]]
+        return f"{_qualified(exc)}({'; '.join(part for part in parts if part)})"
+    remedy = scrub(getattr(exc, "remediation", "") or "")
+    return f"{_qualified(exc)}: {remedy}" if remedy else _qualified(exc)
+
+
+def _qualified(exc: BaseException) -> str:
+    """The exception's class, with its module when the name alone is ambiguous."""
+    module = type(exc).__module__
+    if module and module not in ("builtins", "__main__"):
+        return f"{module}.{type(exc).__name__}"
+    return type(exc).__name__
 
 
 def _summarize_value(value: Any) -> str:

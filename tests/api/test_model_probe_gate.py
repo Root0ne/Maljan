@@ -106,6 +106,138 @@ class TestWhereACallWouldGo:
         assert endpoint_for(_settings(), "openai") == "https://api.openai.com/v1"
 
 
+class TestHowAnEndpointIsNamedToAReader:
+    """A refusal is read by any authenticated user, not only by an admin.
+
+    ``POST /jobs`` answers the gate's sentence as a 422, so whatever is in it
+    is shown to whoever submitted the job. A base URL may carry credentials in
+    front of its host — the ordinary shape for a llama.cpp behind basic auth —
+    and the sentence's job is to name the server, which is scheme and host.
+    """
+
+    def test_a_label_is_the_scheme_and_the_host(self) -> None:
+        from maljan.core.model_assignments import endpoint_label
+
+        assert endpoint_label("http://box:8080/v1") == "http://box:8080"
+        assert endpoint_label("https://api.example.com/v1/chat") == "https://api.example.com"
+
+    def test_userinfo_never_reaches_a_label(self) -> None:
+        from maljan.core.model_assignments import endpoint_label
+
+        secret = "hunter2"
+        assert secret not in endpoint_label("http://user:" + secret + "@llm.internal:8080/v1")
+        assert endpoint_label("http://user:" + secret + "@llm.internal:8080/v1") == (
+            "http://llm.internal:8080"
+        )
+
+    def test_a_scheme_less_address_is_still_cut(self) -> None:
+        """``urlsplit`` finds no host without a scheme, and returning the input
+        put the credential straight back into the sentence."""
+        from maljan.core.model_assignments import endpoint_label
+
+        secret = "hunter2"
+        assert endpoint_label("user:" + secret + "@llm.internal:8080/v1") == "llm.internal:8080"
+        assert endpoint_label("//user:" + secret + "@host/v1") == "host"
+
+    def test_a_vendor_api_is_its_own_label(self) -> None:
+        from maljan.core.model_assignments import endpoint_label
+
+        assert endpoint_label("the Anthropic API") == "the Anthropic API"
+        assert endpoint_label("ollama") == "ollama"
+
+    def test_something_that_is_no_address_at_all_says_so(self) -> None:
+        from maljan.core.model_assignments import endpoint_label
+
+        assert endpoint_label("@") == "(unparseable endpoint)"
+        assert endpoint_label("") == ""
+
+    @pytest.mark.asyncio
+    async def test_the_refusal_names_the_server_and_not_its_credentials(self) -> None:
+        secret = "hunter2"
+        settings = _settings(
+            provider="openai",
+            openai={
+                "expert_model": "qwen3-coder",
+                "base_url": "http://user:" + secret + "@llm.internal:8080/v1",
+            },
+        )
+
+        refusals = await unprobed_models(_Db([]), settings, ["static"])
+
+        assert refusals and secret not in refusals[0]
+        assert "llm.internal:8080" in refusals[0]
+
+    @pytest.mark.asyncio
+    async def test_the_row_is_still_filed_under_the_endpoint_itself(self) -> None:
+        """The label is for the sentence; the key a probe is filed under is the
+        address a call would really go to."""
+        settings = _settings(
+            provider="openai",
+            openai={"expert_model": "qwen3-coder", "base_url": "http://box:8080/v1"},
+        )
+        rows = [_Row("http://box:8080/v1", "qwen3-coder", True, "ok")]
+
+        assert await unprobed_models(_Db(rows), settings, ["static"]) == []
+
+
+class TestOneSpellingOfOneServer:
+    """A probe filed under one spelling has to satisfy the gate under another.
+
+    Folding was trim-and-trailing-slash only, so ``HTTP://BOX:8080/v1``,
+    ``http://box:8080/v1`` and ``http://box/v1`` were four keys for one
+    server. It fails closed — a spurious refusal, never a bypass — which makes
+    it a usability defect rather than an authorisation one.
+    """
+
+    def test_the_scheme_and_the_host_fold_to_lower_case(self) -> None:
+        from maljan.core.model_assignments import normalised_endpoint
+
+        assert normalised_endpoint("HTTP://BOX:8080/v1") == "http://box:8080/v1"
+
+    def test_the_default_port_of_the_scheme_is_dropped(self) -> None:
+        from maljan.core.model_assignments import normalised_endpoint
+
+        assert normalised_endpoint("http://box:80/v1") == "http://box/v1"
+        assert normalised_endpoint("https://box:443/v1") == "https://box/v1"
+        assert normalised_endpoint("http://box:8080/v1") == "http://box:8080/v1"
+
+    def test_a_trailing_slash_still_goes(self) -> None:
+        from maljan.core.model_assignments import normalised_endpoint
+
+        assert normalised_endpoint("  http://box:8080/v1/  ") == "http://box:8080/v1"
+
+    def test_the_path_and_the_credential_are_left_alone(self) -> None:
+        """This value is the address a call is made to, not a label: cutting
+        the path off it would send the call somewhere else."""
+        from maljan.core.model_assignments import normalised_endpoint
+
+        secret = "hunter2"
+        assert normalised_endpoint("http://u:" + secret + "@box:8080/v1") == (
+            "http://u:" + secret + "@box:8080/v1"
+        )
+
+    def test_a_vendor_name_is_untouched(self) -> None:
+        from maljan.core.model_assignments import normalised_endpoint
+
+        assert normalised_endpoint("the Anthropic API") == "the Anthropic API"
+        assert normalised_endpoint(None) == ""
+
+    def test_an_ipv6_host_keeps_its_brackets(self) -> None:
+        from maljan.core.model_assignments import normalised_endpoint
+
+        assert normalised_endpoint("http://[::1]:8080/v1") == "http://[::1]:8080/v1"
+
+    @pytest.mark.asyncio
+    async def test_a_probe_of_the_same_server_spelled_differently_counts(self) -> None:
+        settings = _settings(
+            provider="openai",
+            openai={"expert_model": "qwen3-coder", "base_url": "HTTP://BOX:80/v1/"},
+        )
+        rows = [_Row("http://box/v1", "qwen3-coder", True, "ok")]
+
+        assert await unprobed_models(_Db(rows), settings, ["static"]) == []
+
+
 class TestTheGate:
     @pytest.mark.asyncio
     async def test_a_model_nothing_has_probed_is_refused_naming_agent_and_model(self) -> None:

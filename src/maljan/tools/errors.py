@@ -33,6 +33,7 @@ MISSING_DEPENDENCY = "missing_dependency"
 TIMEOUT = "timeout"
 BAD_ARGUMENT = "bad_argument"
 NO_SUCH_FILE = "no_such_file"
+PATH_OUTSIDE_ROOTS = "path_outside_roots"
 UNSUPPORTED_FORMAT = "unsupported_format"
 NOT_CONFIGURED = "not_configured"
 TOOL_FAILED = "tool_failed"
@@ -53,6 +54,10 @@ REMEDIATIONS: dict[str, str] = {
     NO_SUCH_FILE: (
         "pass the absolute sample path the prompt names; a bare file name resolves "
         "against the server's own working directory"
+    ),
+    PATH_OUTSIDE_ROOTS: (
+        "pass the sample path the prompt names, or a path this server handed back from "
+        "put_sample; this server reads only the directories its operator gave it"
     ),
     UNSUPPORTED_FORMAT: (
         "this tool reads another format; call identify_file and use the tool for the "

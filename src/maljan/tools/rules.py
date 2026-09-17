@@ -48,6 +48,25 @@ _YARA_RULES_ENV = "MALJAN_YARA_RULES_DIR"
 _SIGMA_RULES_ENV = "MALJAN_SIGMA_RULES_DIR"
 
 
+def corpus_roots() -> tuple[Path, ...]:
+    """Where a rule corpus may live: the shipped ``data`` tree, and the operator's own.
+
+    The operator's are whatever the two environment names point at, because
+    those are set on the server rather than passed to it — the same
+    distinction ``resolve_data`` draws when it leaves an absolute path alone.
+
+    Exported for the tool server, which holds a model-chosen ``ruleset`` to
+    them. An in-process caller passes its own corpus and is not held to
+    anything: the trust boundary is the server, not this module.
+    """
+    roots = [resolve_data("data")]
+    for env_var in (_YARA_RULES_ENV, _SIGMA_RULES_ENV):
+        override = os.environ.get(env_var, "").strip()
+        if override:
+            roots.append(resolve_data(override))
+    return tuple(roots)
+
+
 def _resolve_ruleset(ruleset: str, default: str, env_var: str = "") -> Path:
     """The corpus path for a ``ruleset`` argument.
 

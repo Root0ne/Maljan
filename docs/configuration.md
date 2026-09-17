@@ -167,6 +167,15 @@ Thirteen probes back the "Test" buttons
 that fails answers 200 with the failure as data — a connection test that fails
 is an answer, not an error.
 
+A probe runs against the staged values on top of the stored ones, so an input
+the caller did not stage comes from the store — including the credential. That
+means a staged endpoint is sent the stored key for that provider, which is a
+secret the console never shows in the clear. Every probe therefore writes one
+audit row (`settings.probe`) naming the probe, the endpoints it was pointed at
+(as labels: scheme and host), the keys that were staged for it and whether it
+succeeded. The values themselves are never in the row. The routes are
+admin-only, as they have always been; what was missing was the record.
+
 ### A model is probed before a job may name it
 
 **What the probe does.** Both the `llm` and the `agent` probe end by asking for
@@ -198,9 +207,10 @@ and one row. The judge model is listed and never called, so it is not filed.
 The `agent` probe files the one pair its agent would use.
 
 Where a call goes is worked out in one place (`maljan.core.model_assignments`)
-for the probe and for the gate alike, trailing slash and all, so a base URL
-typed `http://box:8080/v1/` files and resolves under the same spelling as the
-same URL typed without it.
+for the probe and for the gate alike, and folded there the way a URL folds —
+lower-case scheme and host, the scheme's default port dropped, no trailing
+slash — so `http://box:8080/v1/`, `HTTP://BOX:8080/v1` and `http://box:80/v1`
+file and resolve under one spelling instead of four.
 
 A call that ran out of time leaves **no** row at all — neither a pass nor a
 failure. Nothing was learned about that pair, and writing a cold model down as
@@ -220,7 +230,11 @@ stored row.
 the run can reach — the agents its team's stages name, and every agent those
 can ask through `ask_<key>`, and so on — and refuses with 422 when one of them
 has no passing row, naming the agent, the model, the endpoint and the probe's
-last message. Saving a per-agent model (`core.llm.agents.*`) is refused with
+last message. The endpoint appears there as its label — scheme and host — and
+never as the value a call is made with: that refusal is read by whoever
+submitted the job, not only by an admin, and a base URL configured with
+userinfo would otherwise show them the endpoint's credentials. Saving a
+per-agent model (`core.llm.agents.*`) is refused with
 the same sentence, because an operator who saves a model nothing can reach has
 made the mistake the gate is about and the settings page is where it can be
 fixed. The console shows the sentence as written in both places.
@@ -228,7 +242,11 @@ fixed. The console shows the sentence as written in both places.
 The pair is also the invalidation. A changed endpoint or a changed model is a
 different question, finds no row, and is refused until it is probed: nothing
 has to expire a result, because a result is never read for a pair it was not
-taken against.
+taken against. The endpoint half of the pair is folded the way a URL folds —
+lower-case scheme and host, the scheme's default port dropped, no trailing
+slash — so one server typed four ways is one key rather than four. A row
+written before that folding existed is filed under the spelling of the day it
+was taken; re-run the probe if the gate refuses a model you have tested.
 
 `core.llm.require_probe` is on, and turning it off is the only way past the
 gate — neither a job nor a save can ask to skip it. It is there for an
@@ -800,8 +818,9 @@ name the prompt showed it.
 
 The built-in `analysis` sidecar implements `put_sample*` even though it ships as
 a stdio server, because an operator may run that same file behind an HTTP
-transport on another host. Two environment variables configure it, and they are
-the only ones it is allowed to see:
+transport on another host. Two environment variables configure that, and with
+`MALJAN_SAMPLE_ROOTS` — defined once in the next section, and seen by the
+`network` sidecar as well — they are the only ones it is allowed to see:
 
 | variable | default | meaning |
 | :-- | :-- | :-- |
@@ -814,6 +833,39 @@ and the system temp directory is shared. Each file is created with
 `O_CREAT|O_EXCL|O_NOFOLLOW` at 0o600 rather than written and then chmodded, and
 every `put_sample*` call prunes entries past the TTL, so a long-lived server
 does not accumulate samples without bound.
+
+### Which directories a sidecar may read
+
+A sample is adversary-authored content and the analyst model reads it, so the
+path a tool is asked for is a path the sample's author may have written. Both
+file-reading sidecars — `analysis` and `network` — therefore resolve every
+`path`, `pcap_path` and `ruleset` argument (symlinks followed) and refuse
+anything that lands outside the directories they were given:
+
+* the staging directory `MALJAN_STAGING_DIR` names, where their own uploads
+  land, and
+* every directory in `MALJAN_SAMPLE_ROOTS`.
+
+| variable | default | meaning | seen by |
+| :-- | :-- | :-- | :-- |
+| `MALJAN_SAMPLE_ROOTS` | empty | the directories a `path`, `pcap_path` or delivered sample may be read in, separated by `:` | `analysis`, `network` |
+| `MALJAN_STAGING_DIR` | a `maljan-analysis-mcp` directory under the system temp dir | where a delivered sample lands, and a root for both | `analysis`, `network` |
+
+Those two, plus `MALJAN_STAGING_TTL_HOURS` above, are the whole of what the
+`analysis` sidecar's `env_allow` carries; the `network` sidecar's carries the
+two in this table and nothing else. Neither sees a credential of any kind.
+
+A refusal is the ordinary structured error with the code `path_outside_roots`
+and a remedy, and it names no host path.
+
+The worker fills `MALJAN_SAMPLE_ROOTS` in for itself: its download directory
+(`UPLOAD_TEMP_DIR`), the sample mirrors under `SAMPLES_DIR` and the directory a
+sandbox capture is fetched to are exported before any sidecar starts, so a
+default deployment needs no configuration. Set the variable when a sample lives
+somewhere the worker did not put it — a corpus directory an operator points the
+CLI at, or an HTTP sidecar on another host that is handed paths rather than
+uploads. `ruleset` is held to the rule corpora instead: the repository's `data`
+tree and whatever `MALJAN_YARA_RULES_DIR` and `MALJAN_SIGMA_RULES_DIR` name.
 
 ## Writing a tool server
 

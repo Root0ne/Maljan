@@ -14,6 +14,11 @@ import uuid
 from typing import Any
 
 import pytest
+from tests.credential_shapes import (
+    lowercase_base64_blob,
+    lowercase_body,
+    prefixed_key,
+)
 
 from app.services.job_events import read_events
 from app.worker.analysis_worker import _JobEventBuffer, _publish_event, _start_event_feed
@@ -440,3 +445,314 @@ class TestTheEventsEndpoint:
         )
         assert seen == {"since": 8, "limit": 10}
         assert body["count"] == 1
+
+
+class TestThePublisherIsTheGuarantee:
+    """Every string on the wire is scrubbed once, where the wire begins.
+
+    Seven producers build these payloads and two of them scrubbed. A delta and
+    the ``agent_message`` that closes the same turn carry the same model text,
+    so a credential the model echoed was redacted while it streamed and then
+    published in the clear in the closing message, its ``job_events`` row and
+    the stored transcript. A producer may still scrub — this is the guarantee
+    that one which forgets cannot leak.
+    """
+
+    SECRET = "sk-" + "P" * 32
+    HOST_PATH = "/home/operator/maljan/data/samples/ab12/evil.exe"
+
+    def _published(self, redis_conn: _FakeRedis) -> list[dict[str, Any]]:
+        return [json.loads(message) for _channel, message in redis_conn.published]
+
+    def _publish(self, event_type: str, data: dict[str, Any]) -> tuple[Any, _Session]:
+        redis_conn = _FakeRedis()
+        session = _Session()
+        job_id = str(uuid.uuid4())
+        _start_event_feed(job_id, _factory(session))
+
+        async def run() -> None:
+            await _publish_event(redis_conn, job_id, event_type, data)
+            await stop_feed(job_id)
+
+        asyncio.run(run())
+        return redis_conn, session
+
+    def test_an_agent_message_loses_the_key_and_the_path_everywhere(self) -> None:
+        redis_conn, session = self._publish(
+            "agent_message",
+            {
+                "speaker": "static",
+                "text": f"the key is {self.SECRET}",
+                "report": f"I read {self.HOST_PATH} and found it packed",
+            },
+        )
+
+        (published,) = self._published(redis_conn)
+        assert self.SECRET not in json.dumps(published)
+        assert "/home/operator" not in json.dumps(published)
+        assert published["data"]["text"] == "the key is ***"
+        assert published["data"]["report"] == "I read evil.exe and found it packed"
+        # The same payload, in the table that outlives the stream.
+        (row,) = session.added
+        assert self.SECRET not in json.dumps(row.payload)
+        assert "/home/operator" not in json.dumps(row.payload)
+
+    def test_a_validation_feedback_message_is_scrubbed(self) -> None:
+        redis_conn, _session = self._publish(
+            "validation_feedback",
+            {"stage": "analysis", "code": "ungrounded", "message": f"see {self.HOST_PATH}"},
+        )
+
+        (published,) = self._published(redis_conn)
+        assert published["data"]["message"] == "see evil.exe"
+
+    def test_a_cap_detail_is_scrubbed(self) -> None:
+        redis_conn, _session = self._publish(
+            "stage_ended_at_cap",
+            {"stage": "analysis", "cap": "time", "detail": f"gave up reading {self.HOST_PATH}"},
+        )
+
+        (published,) = self._published(redis_conn)
+        assert published["data"]["detail"] == "gave up reading evil.exe"
+
+    def test_it_reaches_into_nested_structures(self) -> None:
+        redis_conn, _session = self._publish(
+            "agent_message",
+            {
+                "speaker": "static",
+                "claims": [
+                    {"claim": f"it reads {self.HOST_PATH}", "evidence_ref": self.SECRET},
+                    {"claim": "nothing here"},
+                ],
+                "nested": {"deep": {"deeper": [self.SECRET]}},
+            },
+        )
+
+        (published,) = self._published(redis_conn)
+        blob = json.dumps(published)
+        assert self.SECRET not in blob
+        assert "/home/operator" not in blob
+        assert published["data"]["claims"][0]["claim"] == "it reads evil.exe"
+        assert published["data"]["claims"][1]["claim"] == "nothing here"
+
+    def test_keys_are_left_alone(self) -> None:
+        """A key is a field name the console reads; only values are text."""
+        redis_conn, _session = self._publish(
+            "roster", {"agents": [{"key": "static", "label": "Static"}]}
+        )
+
+        (published,) = self._published(redis_conn)
+        assert published["data"]["agents"][0]["key"] == "static"
+        assert set(published["data"]["agents"][0]) == {"key", "label"}
+
+    def test_numbers_and_flags_keep_their_type(self) -> None:
+        redis_conn, _session = self._publish(
+            "tool_call_finished",
+            {"tool": "strings", "ok": False, "duration_ms": 1234, "confidence": 0.5, "x": None},
+        )
+
+        (published,) = self._published(redis_conn)
+        data = published["data"]
+        assert data["ok"] is False
+        assert data["duration_ms"] == 1234
+        assert data["confidence"] == 0.5
+        assert data["x"] is None
+        assert data["seq"] == 1
+
+    def test_the_recorders_copy_is_numbered_here_and_scrubbed_elsewhere(self) -> None:
+        """The number is the publisher's; the scrub is the sink's.
+
+        The copy is taken and scrubbed on the pipeline's thread, before this
+        coroutine is scheduled — see ``_make_event_sink`` and
+        ``tests/integration/test_transcript_persistence.py``. All this does to
+        it is give it the number its event went out under, so a stored row and
+        the live message it replaces collapse to one.
+        """
+        redis_conn = _FakeRedis()
+        job_id = str(uuid.uuid4())
+        recorded: dict[str, Any] = {"text": "the key is ***"}
+
+        async def run() -> None:
+            await _publish_event(
+                redis_conn,
+                job_id,
+                "agent_message",
+                {"text": f"the key is {self.SECRET}"},
+                stamp=recorded,
+            )
+
+        asyncio.run(run())
+
+        assert recorded["seq"] == 1
+        assert recorded["text"] == "the key is ***"
+        (published,) = self._published(redis_conn)
+        assert published["data"]["seq"] == 1
+        assert self.SECRET not in json.dumps(published)
+
+
+class TestWhatTheScrubMustNotTouchAndWhatItMust:
+    """A name is exempted because it is a name, not because of its shape.
+
+    Exempting by shape — "a lowercase run is a key this system issues" — let
+    every lowercase credential format through: Mailgun's ``key-…``, Google's
+    ``gocspx-…``, GitHub's ``ghs_…`` and any base64url blob without capitals in
+    it. The publisher is the one place that knows which *field* a string sits
+    in, so the identity fields are named here and everything else goes through
+    the credential rules whatever it looks like.
+    """
+
+    AGENT_KEY = "windows_pe_static_reverse_engineer"
+    LABEL = "StaticBinaryReverseEngineer"
+
+    def _publish(self, event_type: str, data: dict[str, Any]) -> dict[str, Any]:
+        redis_conn = _FakeRedis()
+
+        async def run() -> None:
+            await _publish_event(redis_conn, str(uuid.uuid4()), event_type, data)
+
+        asyncio.run(run())
+        (published,) = [json.loads(message) for _channel, message in redis_conn.published]
+        return dict(published["data"])
+
+    @pytest.mark.parametrize(
+        "secret",
+        [
+            prefixed_key("key-"),
+            prefixed_key("gocspx-", 24),
+            prefixed_key("ghs_", 36),
+            lowercase_body(32),
+            lowercase_base64_blob(),
+        ],
+    )
+    def test_a_lowercase_key_in_a_tool_result_is_replaced(self, secret: str) -> None:
+        data = self._publish(
+            "tool_call_finished",
+            {
+                "stage": "analysis",
+                "agent": self.AGENT_KEY,
+                "tool": "iocs_from_file",
+                "summary": '{"secrets":["' + secret + '"],"count":1}',
+            },
+        )
+
+        assert secret not in json.dumps(data), data
+        assert data["summary"] == '{"secrets":["***"],"count":1}'
+
+    def test_the_names_around_it_are_left_as_they_are(self) -> None:
+        data = self._publish(
+            "tool_call_finished",
+            {
+                "stage": "analysis",
+                "agent": self.AGENT_KEY,
+                "tool": "iocs_from_file",
+                "server": "analysis-mcp-on-the-second-host",
+                "evidence_id": "ev_0007",
+                "summary": "ok",
+            },
+        )
+
+        assert data["agent"] == self.AGENT_KEY
+        assert data["server"] == "analysis-mcp-on-the-second-host"
+        assert data["evidence_id"] == "ev_0007"
+
+    def test_a_long_custom_agent_key_still_speaks(self) -> None:
+        data = self._publish(
+            "agent_message",
+            {
+                "speaker": self.AGENT_KEY,
+                "role": "analyst",
+                "kind": "says",
+                "status": "complete",
+                "display_name": self.LABEL,
+                "addressed_to": self.AGENT_KEY,
+                "stage": "analysis",
+                "text": "the sample is packed",
+            },
+        )
+
+        assert data["speaker"] == self.AGENT_KEY
+        assert data["addressed_to"] == self.AGENT_KEY
+        assert data["display_name"] == self.LABEL
+
+    def test_a_report_id_survives_and_so_does_a_digest(self) -> None:
+        import hashlib
+
+        report_id = str(uuid.uuid4())
+        digest = hashlib.sha256(b"a sample").hexdigest()
+
+        data = self._publish(
+            "completed",
+            {
+                "status": "completed",
+                "verdict": "Malicious",
+                "report_id": report_id,
+                "job_id": str(uuid.uuid4()),
+                "sha256": digest,
+            },
+        )
+
+        assert data["report_id"] == report_id
+        assert data["sha256"] == digest
+        assert uuid.UUID(data["job_id"])
+
+    def test_a_roster_keeps_every_name_it_carries(self) -> None:
+        data = self._publish(
+            "roster",
+            {
+                "agents": [
+                    {
+                        "key": self.AGENT_KEY,
+                        "label": self.LABEL,
+                        "role": "analyst",
+                        "stages": ["analysis"],
+                        "via": ["lead"],
+                    }
+                ],
+                "stages": [
+                    {
+                        "key": "analysis",
+                        "label": "Analysis",
+                        "kind": "analysis",
+                        "agents": [self.AGENT_KEY],
+                    }
+                ],
+            },
+        )
+
+        assert data["agents"][0]["key"] == self.AGENT_KEY
+        assert data["agents"][0]["label"] == self.LABEL
+        assert data["agents"][0]["via"] == ["lead"]
+        assert data["stages"][0]["agents"] == [self.AGENT_KEY]
+
+    def test_an_identity_field_exempts_a_name_and_not_a_sentence(self) -> None:
+        """The exemption reaches a string and a list of strings under that key,
+        never a structure nested below one."""
+        secret = prefixed_key("key-")
+
+        data = self._publish(
+            "agent_message",
+            {
+                "speaker": "static",
+                "claims": [{"claim": f"it posts {secret}", "evidence_ref": "ev_0001"}],
+                "report": f"the config held {secret}",
+                "text": f"found {secret}",
+            },
+        )
+
+        blob = json.dumps(data)
+        assert secret not in blob, blob
+        assert data["claims"][0]["evidence_ref"] == "ev_0001"
+
+    def test_a_sample_filename_is_not_a_name_this_system_gave(self) -> None:
+        """The uploader chose it, so it is scrubbed like any other text."""
+        data = self._publish(
+            "pipeline_started",
+            {
+                "agents": ["static"],
+                "sample_filename": prefixed_key("key-"),
+                "sha256": "ab12" + "0" * 12 + "...",
+            },
+        )
+
+        assert data["sample_filename"] == "***"
+        assert data["agents"] == ["static"]

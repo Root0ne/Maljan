@@ -42,6 +42,7 @@ from maljan.pipeline.conditions import (
 )
 from maljan.pipeline.events import (
     claims_to_payload,
+    describe_exception,
     emit,
     emit_agent_message,
     emit_stage_ended_at_cap,
@@ -1833,7 +1834,7 @@ def make_stage_agent_node(
                     "error_type": type(e).__name__,
                 },
             )
-            failed_text = f"[ERROR] {agent_name} analysis failed: {e}"
+            failed_text = f"[ERROR] {agent_name} analysis failed: {describe_exception(e)}"
             emit_agent_message(
                 container.event_sink,
                 speaker=agent_name,
@@ -1870,7 +1871,7 @@ def make_stage_agent_node(
                     "fatal": True,
                 },
             )
-            crashed_text = f"[ERROR] {agent_name} crashed: {e}"
+            crashed_text = f"[ERROR] {agent_name} crashed: {describe_exception(e)}"
             emit_agent_message(
                 container.event_sink,
                 speaker=agent_name,
@@ -2208,6 +2209,14 @@ def make_negotiation_node(
                 logger.debug("evidence ledger read skipped for the judges: %s", exc)
                 return []
 
+        # Two descriptions of one failure, and the difference is who reads
+        # them. The log gets the message — that is the operator's line, on the
+        # operator's host. The event gets the type and nothing else: it is
+        # fanned out to every browser and kept in a table. Imported before the
+        # ``try``, so the handler still has both names when the failure is the
+        # first line inside it.
+        from maljan.agents.base_agent import describe_exception_for_log, run_on_agent_loop
+
         try:
             judge = container.get_judge_agent(role="expert")
             # Mediation is this debate stage's work, so the tool calls it makes
@@ -2225,7 +2234,6 @@ def make_negotiation_node(
             # the reasoning call, then the bounded structured-output retries),
             # so the outer cap covers both phases plus the house +30s of decode
             # headroom rather than truncating a mediation that is still working.
-            from maljan.agents.base_agent import describe_exception, run_on_agent_loop
             from maljan.core.config import get_settings
 
             mediation_timeout = float(get_settings().react_agent_timeout) * 2 + 30
@@ -2320,15 +2328,18 @@ def make_negotiation_node(
             # scoreable result instead of aborting an entire batch on one blip.
             label = "timed out" if isinstance(e, TimeoutError) else "failed"
             status = "timeout" if isinstance(e, TimeoutError) else "failed"
-            logger.error("Negotiation %s: %s", label, describe_exception(e))
+            logger.error("Negotiation %s: %s", label, describe_exception_for_log(e))
             emit_agent_message(
                 container.event_sink,
                 speaker=ROOM_SPEAKER,
                 role="negotiator",
                 # The class of the failure, never its message: an exception's
                 # text can carry a path, a host or a credential, and this line
-                # is published to every reader of the run.
-                text=f"Mediator: [ERROR] Mediation {label} ({type(e).__name__}).",
+                # is published to every reader of the run. One helper decides
+                # what that class is called, here and at every other published
+                # failure, so a group names what is inside it and a refusal
+                # keeps its remedy.
+                text=f"Mediator: [ERROR] Mediation {label} ({describe_exception(e)}).",
                 round_index=iteration + 1,
                 status=status,
                 stage=stage_key_of(stage, "debate"),
@@ -2501,8 +2512,10 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     # and the mediator already say it. The log above keeps the
                     # exception's own words for an operator; this line goes to
                     # every reader of the run, and an exception's text can
-                    # carry a path, a host or a credential.
-                    text=f"[ERROR] {name} revision failed ({type(result).__name__}).",
+                    # carry a path, a host or a credential. One helper decides
+                    # what that class is called, so a group names what is
+                    # inside it and a refusal keeps its remedy.
+                    text=f"[ERROR] {name} revision failed: {describe_exception(result)}",
                     round_index=iteration,
                     status="failed",
                     stage=stage_key_of(stage, "debate"),
@@ -3239,7 +3252,7 @@ def make_judge_node(
                 # goes to every reader of the run, and an exception's text can
                 # carry a path, a host or a credential.
                 text=(
-                    f"[ERROR] Judge failed ({type(e).__name__}). "
+                    f"[ERROR] Judge failed ({describe_exception(e)}). "
                     "Falling back to a conservative Suspicious verdict; the run is "
                     "marked degraded and the report says why."
                 ),
@@ -3261,7 +3274,7 @@ def make_judge_node(
                         reason=f"judge failed ({type(e).__name__})",
                     ),
                     "final_decision": "Suspicious",
-                    "judge_report": f"[ERROR] Judge failed ({type(e).__name__}): {e or ''}",
+                    "judge_report": f"[ERROR] Judge failed ({describe_exception(e)}).",
                     "stix_output": {},
                     "degraded_mode": True,
                     "degradation_reasons": [f"judge failed ({type(e).__name__})"],

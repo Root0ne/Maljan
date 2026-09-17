@@ -211,6 +211,20 @@ def mirror_static_samples(
                 continue
             host_mirror, container_path = target
             mirror_target_path = host_mirror
+            # This job's mirror directory is a directory the sidecars may
+            # read a path in. Named here as well as at startup because the
+            # job's settings decide which subdirectory a provider mirrors into,
+            # and startup only knows the ones its own settings named.
+            #
+            # It has to be named *before* a sidecar starts, not merely before
+            # the path is used: ``child_env`` copies the environment into the
+            # child at spawn, so a root added afterwards never reaches a server
+            # that is already running. That holds here because the mirror runs
+            # in ``run_analysis`` and every sidecar is opened later, inside
+            # ``MaljanApp.arun``.
+            from maljan.tools.roots import add_sample_root
+
+            add_sample_root(host_mirror.parent)
             if host_mirror not in copied_host_paths:
                 copy_fn(Path(temp_path), host_mirror)
                 host_mirrors.append(host_mirror)
@@ -409,6 +423,84 @@ async def _next_seq(redis_conn: aioredis.Redis, job_id: str) -> int:
     return seq
 
 
+# The fields of an event that *name* something rather than say something: an
+# identifier this system issued, a key one of its own patterns produced, a
+# label an operator typed, or a word the console switches on. None of them is
+# text a model or a sample author wrote, and each of them is read rather than
+# skimmed — a speaker replaced by ``***`` is a conversation the console cannot
+# group under anybody, and a ``report_id`` replaced by ``***`` is a completion
+# nobody can open.
+#
+# Named here, in the one place that knows which field a string sits in, rather
+# than guessed at from the shape of the value. A shape test around "the keys
+# this system issues are lowercase" let four real credential formats through —
+# ``key-…``, ``gocspx-…``, ``ghs_…`` and any base64url blob without capitals —
+# and a credential does not become safe by sitting in a field with a friendly
+# name, which is why ``text``, ``report``, ``summary``, ``message``,
+# ``detail``, ``reason``, ``claim``, ``evidence_ref`` and the sample's own
+# filename are deliberately absent from this list.
+IDENTITY_FIELDS = frozenset(
+    {
+        # What this system issued.
+        "report_id",
+        "job_id",
+        "sample_id",
+        "error_id",
+        "evidence_id",
+        "technique_id",
+        # Who and where: agent, stage, server and tool keys, in the singular
+        # and in the lists an event carries them in.
+        "speaker",
+        "agent",
+        "agents",
+        "addressed_to",
+        "stage",
+        "stages",
+        "via",
+        "server",
+        "tool",
+        "key",
+        "profile",
+        # What an operator called them.
+        "label",
+        "display_name",
+        # The words the console switches on.
+        "role",
+        "kind",
+        "status",
+        "phase",
+        "cap",
+        "code",
+        "verdict",
+    }
+)
+
+
+def scrubbed(value: Any, *, field: str = "") -> Any:
+    """``value`` with every string inside it scrubbed, however deeply it sits.
+
+    Keys are left as they are: a key is a field name the console switches on,
+    not text somebody wrote. Numbers, booleans and ``None`` keep their type,
+    so a payload that goes through this is still the payload the reader
+    expects — only its prose has been through ``maljan.pipeline.events.scrub``.
+
+    A value sitting directly under one of ``IDENTITY_FIELDS`` is left alone,
+    and so is each string of a list under one — ``agents: ["static", …]`` is
+    the same kind of thing as ``agent: "static"``. The exemption stops there:
+    a dict below an identity field is walked like any other, so its own fields
+    are judged by their own names.
+    """
+    from maljan.pipeline.events import scrub_keeping_layout
+
+    if isinstance(value, str):
+        return value if field in IDENTITY_FIELDS else scrub_keeping_layout(value)
+    if isinstance(value, dict):
+        return {key: scrubbed(item, field=str(key)) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [scrubbed(item, field=field) for item in value]
+    return value
+
+
 async def _publish_event(
     redis_conn: aioredis.Redis,
     job_id: str,
@@ -452,7 +544,14 @@ async def _publish_event(
     seq = await _next_seq(redis_conn, job_id)
     if stamp is not None:
         stamp["seq"] = seq
-    stamped = {**(data or {}), "seq": seq}
+    # Scrubbed here, once, for all three sinks. Seven producers build these
+    # payloads and a new one cannot be relied on to remember; the publisher is
+    # where the wire begins, so it is where the guarantee belongs. Producers
+    # may still scrub — doing it twice changes nothing. The recorder's copy is
+    # scrubbed where it is taken (``_make_event_sink``), not here: it is taken
+    # before this coroutine is even scheduled, and on the paths the recorder
+    # exists for this coroutine never runs.
+    stamped = {**scrubbed(data or {}), "seq": seq}
     ts = datetime.now(UTC).isoformat()
     payload = {
         "type": event_type,
@@ -531,6 +630,13 @@ def _make_event_sink(
     second, subtly different account of it. Appending on the calling thread also
     means a Redis outage cannot cost us the record: publishing is best-effort,
     persistence is not.
+
+    The copy is scrubbed as it is taken, for that same reason: the publish that
+    scrubs what goes on the wire is fire-and-forget, and on the two paths the
+    recorder is here for — a loop that has already closed, and a run whose last
+    messages are still queued when the transcript is written — it never runs.
+    A record that is more revealing than the feed it is a record of would be
+    one conversation told two ways.
     """
 
     # Deferred like every other ``maljan`` import in this module — the core
@@ -541,7 +647,7 @@ def _make_event_sink(
         recorded: dict[str, Any] | None = None
         if recorder is not None and event_type == AGENT_MESSAGE:
             try:
-                recorded = {**data, "ts": datetime.now(UTC).isoformat()}
+                recorded = {**scrubbed(data), "ts": datetime.now(UTC).isoformat()}
                 recorder.append(recorded)
             except Exception as exc:  # noqa: BLE001 — recording must not fail a run
                 recorded = None
@@ -1853,6 +1959,11 @@ async def startup(ctx: dict) -> None:
         # minus the environment read.
         core = build_settings({})
         sample_files.sweep(mirror_dir=core.static.r2.mirror_dir)
+        # The directories this worker hands a sidecar a path into. A tool
+        # server reads a path argument only inside the roots it was given, and
+        # these are the ones the worker itself writes a sample to; without
+        # them a sidecar would refuse the sample it was started for.
+        sample_files.export_sample_roots(core.static.r2.mirror_dir)
     except OSError as exc:
         logger.warning(
             "Startup sample sweep failed (non-fatal): %s",
