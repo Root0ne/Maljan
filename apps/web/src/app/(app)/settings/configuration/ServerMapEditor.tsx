@@ -264,6 +264,10 @@ export function ServerDetail({
 
   const result = probe.result;
   const manifest = result && result !== "running" ? result.tools : null;
+  /* Read once: the list is derived from the probe result and this component
+     re-renders on every keystroke in the editor beside it. */
+  const unavailable =
+    result && result !== "running" ? unavailableTools(result) : [];
   const allowed = server.tools;
   const detailError = Object.entries(errors).find(
     ([k]) => k === `${entryKey}.${serverKey}` || k.startsWith(`${entryKey}.${serverKey}.`)
@@ -297,9 +301,9 @@ export function ServerDetail({
       )}
       {/* What the server cannot do on its host, said before any run: each
           tool the manifest marks unavailable, with the reason and the remedy. */}
-      {result && result !== "running" && unavailableTools(result).length > 0 && (
+      {unavailable.length > 0 && (
         <ul className="text-[11px] text-text-secondary space-y-0.5" aria-label="unavailable tools">
-          {unavailableTools(result).map((cell) => (
+          {unavailable.map((cell) => (
             <li key={cell.name}>
               <span className="font-mono text-status-orange">{cell.name}</span>
               {" — "}

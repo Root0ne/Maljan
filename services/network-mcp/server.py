@@ -1,3 +1,4 @@
+import copy
 import json
 import os
 from typing import Any
@@ -27,9 +28,15 @@ try:
     )
 
     _SCAPY_MISSING: str | None = None
-except ImportError as exc:  # pragma: no cover - depends on the host
+except ModuleNotFoundError as exc:  # pragma: no cover - depends on the host
     DNSQR = IP = TCP = UDP = rdpcap = None  # type: ignore[assignment]
     _SCAPY_MISSING = f"scapy is not installed ({exc})"
+except ImportError as exc:  # pragma: no cover - depends on the host
+    # A broken install rather than an absent one. Its message names absolute
+    # paths on this host, and this reason travels to a probe response, the
+    # console and the judge's prompt, so only the type crosses.
+    DNSQR = IP = TCP = UDP = rdpcap = None  # type: ignore[assignment]
+    _SCAPY_MISSING = f"scapy is not installed ({type(exc).__name__})"
 
 mcp = FastMCP("NetworkMCP")
 
@@ -53,7 +60,9 @@ def capabilities() -> dict[str, Any]:
 
     Each tool, its optional dependency, and whether it is available.
     """
-    return dict(CAPABILITIES)
+    # Deep, so "computed once when the server started" also means a
+    # caller cannot reach in and change what it says.
+    return copy.deepcopy(CAPABILITIES)
 
 
 @mcp.tool()

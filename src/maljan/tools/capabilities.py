@@ -44,13 +44,24 @@ class Requirement:
     name: str
 
     def probe(self) -> str | None:
-        """``None`` when present, else the reason it is not."""
+        """``None`` when present, else the reason it is not.
+
+        A missing module says so in the import's own words, which name the
+        module and nothing else. Anything further — a broken install, a shared
+        library that will not load — is reported by exception type alone: those
+        messages carry absolute paths off the host, and this reason travels to
+        a probe response, the console, the run summary and the judge's prompt.
+        The type is what a reader acts on; the path is what they must not be
+        handed.
+        """
         if self.kind == "module":
             try:
                 importlib.import_module(self.name)
-            except Exception as exc:  # noqa: BLE001 — a broken import is as absent as a missing one
+            except ModuleNotFoundError as exc:
                 detail = str(exc).strip()
                 return f"{self.name} is not installed" + (f" ({detail})" if detail else "")
+            except Exception as exc:  # noqa: BLE001 — a broken import is as absent as a missing one
+                return f"{self.name} is not installed ({type(exc).__name__})"
             return None
         if self.kind == "binary":
             return None if shutil.which(self.name) else f"{self.name} is not on PATH"
@@ -84,17 +95,21 @@ class ToolNeeds:
 
 
 def _cell(tool: ToolNeeds) -> dict[str, Any]:
-    reasons = [reason for reason in (req.probe() for req in tool.requires) if reason]
+    # Probed once per requirement. The reason and the code both need the
+    # answer, and probing twice re-runs an import, a ``which`` and a read of
+    # the environment for every cell of every manifest.
+    probed = [(req, req.probe()) for req in tool.requires]
+    missing = [(req, reason) for req, reason in probed if reason]
     dependency = ", ".join(req.name for req in tool.requires) or None
     cell: dict[str, Any] = {
         "name": tool.name,
         "optional_dependency": dependency,
-        "available": not reasons,
-        "reason": "; ".join(reasons) if reasons else None,
+        "available": not missing,
+        "reason": "; ".join(reason for _req, reason in missing) if missing else None,
         "timeout_s": tool.timeout_s,
     }
-    if reasons:
-        kinds = {req.kind for req in tool.requires if req.probe()}
+    if missing:
+        kinds = {req.kind for req, _reason in missing}
         code = NOT_CONFIGURED if kinds == {"env"} else MISSING_DEPENDENCY
         cell["remediation"] = REMEDIATIONS[code]
         if tool.without:
@@ -131,8 +146,16 @@ class Unavailable:
 
     @property
     def degradation_reason(self) -> str:
-        """``server.<key>.<tool>_unavailable(<reason>)``, with the remedy after it."""
+        """``server.<key>.<tool>_unavailable(<reason>)``, with what it still does and the remedy.
+
+        A tool that answers less is not a tool that does not answer, and the
+        difference is what a reader of the degraded block needs: ``apk_info``
+        without androguard still reads the zip, and saying only that it is
+        unavailable overstates what was lost.
+        """
         text = f"server.{self.server}.{self.tool}_unavailable({self.reason})"
+        if self.without:
+            text += f"; still answers {self.without}"
         if self.remediation:
             text += f"; {self.remediation}"
         return text

@@ -13,6 +13,7 @@ reason this is a long-lived server and not a script.
 
 from __future__ import annotations
 
+import copy
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -51,7 +52,9 @@ def capabilities() -> dict[str, Any]:
 
     Each tool, its optional dependency, and whether it is available.
     """
-    return dict(CAPABILITIES)
+    # Deep, so "computed once when the server started" also means a
+    # caller cannot reach in and change what it says.
+    return copy.deepcopy(CAPABILITIES)
 
 
 @mcp.tool()

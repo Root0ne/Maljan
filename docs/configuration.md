@@ -748,7 +748,8 @@ answers what the server can do on the host it runs on:
 {"server": "analysis", "version": "1.0.0",
  "tools": [{"name": "document_info", "optional_dependency": "olefile",
             "available": false, "reason": "olefile is not installed",
-            "timeout_s": null, "remediation": "install the optional tool libraries: uv sync --extra tools",
+            "timeout_s": null,
+            "remediation": "install the optional tool libraries on the host that runs this server: uv sync --extra tools",
             "without": "the PDF and OOXML halves"}]}
 ```
 
@@ -758,11 +759,14 @@ does that for a list of `ToolNeeds` and is what the sidecars use. The registry
 reads the manifest once per job when it attaches the server and keeps it on
 the server's entry; the connection test (`POST /api/v1/settings/test/mcp`)
 returns it under `details.capabilities`, and the console's server card lists
-the unavailable tools with their reason before any run. When a stage starts,
-each tool an agent binds that its server's manifest marks unavailable is
-recorded once as `server.<key>.<tool>_unavailable(<reason>); <remediation>`
+the unavailable tools with their reason before any run. When an analysis
+stage's agent starts, each tool it binds that its server's manifest marks
+unavailable is recorded once as
+`server.<key>.<tool>_unavailable(<reason>); still answers <without>; <remediation>`
 in the run's degradation reasons, instead of being discovered by a failed call
-mid-run. An unavailable tool does not make the run degraded on its own; a
+mid-run. `timeout_s` is the tool's real timeout, taken from the constant the
+tool itself uses, so a manifest cannot say a call has none when it gives up
+after fifteen seconds. An unavailable tool does not make the run degraded on its own; a
 server that could not be attached still does.
 
 **Errors that name their remedy.** A tool that cannot answer returns, never

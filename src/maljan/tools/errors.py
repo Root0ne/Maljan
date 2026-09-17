@@ -80,12 +80,22 @@ REMEDIATIONS: dict[str, str] = {
 _CODE_BY_TEXT: tuple[tuple[str, re.Pattern[str]], ...] = (
     (MISSING_DEPENDENCY, re.compile(r"is not installed|No module named|ModuleNotFoundError", re.I)),
     (TIMEOUT, re.compile(r"timed? ?out|within its budget|TimeoutExpired|TimeoutError", re.I)),
-    (NO_SUCH_FILE, re.compile(r"no such file|not found|does not exist|FileNotFoundError", re.I)),
+    # Before the file patterns, because a bare "not found" is as often about a
+    # credential as about a path, and reading "API key not found" as a missing
+    # file hands the model the remedy for the wrong problem.
+    (
+        NOT_CONFIGURED,
+        re.compile(r"not configured|api key|missing api key|no token|credential", re.I),
+    ),
+    # Narrow on purpose: the words have to be about a file.
+    (
+        NO_SUCH_FILE,
+        re.compile(r"no such file|file not found|does not exist|FileNotFoundError", re.I),
+    ),
     (
         UNSUPPORTED_FORMAT,
         re.compile(r"\bnot an? [A-Za-z0-9\-]+ file\b|unsupported|no MZ magic|wrong magic", re.I),
     ),
-    (NOT_CONFIGURED, re.compile(r"not configured|no api key|missing api key|no token", re.I)),
     (
         BAD_ARGUMENT,
         re.compile(r"^(?:TypeError|ValueError|KeyError|ValidationError)\b|invalid argument", re.I),

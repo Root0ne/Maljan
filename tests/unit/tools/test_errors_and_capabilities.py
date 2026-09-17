@@ -8,13 +8,14 @@ reason the import gave.
 
 from __future__ import annotations
 
-import builtins
 import json
 import sys
+from typing import Any
 
 import pytest
 
 from maljan.tools import capabilities as caps
+from maljan.tools import errors
 from maljan.tools.errors import (
     BAD_ARGUMENT,
     MISSING_DEPENDENCY,
@@ -126,26 +127,48 @@ class TestTheManifest:
             ],
         }
 
-    def test_a_missing_module_is_reported_with_the_import_s_own_words(self, monkeypatch) -> None:
-        real_import = builtins.__import__
+    def _cell_for_a_failing_import(self, monkeypatch, raised: Exception) -> dict:
+        real_import = caps.importlib.import_module
 
         def _import(name, *args, **kwargs):
             if name == "olefile":
-                raise ImportError("No module named 'olefile'")
+                raise raised
             return real_import(name, *args, **kwargs)
 
-        monkeypatch.setattr(builtins, "__import__", _import)
+        monkeypatch.setattr(caps.importlib, "import_module", _import)
         monkeypatch.delitem(sys.modules, "olefile", raising=False)
-        cell = caps.manifest(
+        return caps.manifest(
             "analysis",
             [caps.ToolNeeds("document_info", (caps.module("olefile"),), without="the PDF half")],
             version="1",
         )["tools"][0]
+
+    def test_a_missing_module_is_reported_with_the_import_s_own_words(self, monkeypatch) -> None:
+        cell = self._cell_for_a_failing_import(
+            monkeypatch, ModuleNotFoundError("No module named 'olefile'")
+        )
         assert cell["available"] is False
         assert cell["optional_dependency"] == "olefile"
         assert cell["reason"] == "olefile is not installed (No module named 'olefile')"
         assert cell["remediation"] == REMEDIATIONS[MISSING_DEPENDENCY]
         assert cell["without"] == "the PDF half"
+
+    def test_a_broken_import_names_its_type_and_no_path_on_this_host(self, monkeypatch) -> None:
+        """This reason reaches a probe response, the console and the judge's prompt."""
+        cell = self._cell_for_a_failing_import(
+            monkeypatch,
+            ImportError("cannot import name x from y (/tmp/secretpath/y.py)"),
+        )
+        assert cell["available"] is False
+        assert cell["reason"] == "olefile is not installed (ImportError)"
+        assert "/" not in str(cell["reason"])
+
+    def test_a_shared_library_that_will_not_load_leaks_nothing_either(self, monkeypatch) -> None:
+        cell = self._cell_for_a_failing_import(
+            monkeypatch, OSError("libyara.so.4: cannot open shared object file: /usr/lib/x")
+        )
+        assert cell["reason"] == "olefile is not installed (OSError)"
+        assert "/" not in str(cell["reason"])
 
     def test_a_present_module_is_available(self) -> None:
         cell = caps.manifest("x", [caps.ToolNeeds("j", (caps.module("json"),))], version="1")
@@ -239,3 +262,121 @@ class TestServerCapabilities:
         registered = {t.name for t in module.mcp._tool_manager.list_tools()}
         assert names == registered - {caps.CAPABILITIES_TOOL}, (server, names ^ registered)
         assert declared >= names
+        self._timeouts_match_the_tools(module, manifest, server)
+
+    def _timeouts_match_the_tools(self, module: Any, manifest: dict, server: str) -> None:
+        """What the manifest declares is what the tool actually gives itself.
+
+        Two shapes of real timeout. A tool that takes one as an argument
+        declares that argument's default; a server whose every tool reaches
+        the network under one client budget declares that budget. A cell that
+        says ``null`` for a tool that gives up after a minute is the one
+        structure whose premise is that it was computed lying about it.
+        """
+        import inspect
+
+        declared = {cell["name"]: cell["timeout_s"] for cell in manifest["tools"]}
+        shared = getattr(module, "HTTP_TIMEOUT_S", None)
+        for name, said in declared.items():
+            tool = getattr(module, name, None)
+            if tool is None:
+                continue
+            parameter = inspect.signature(tool).parameters.get("timeout_s")
+            if parameter is not None and parameter.default is not inspect.Parameter.empty:
+                assert said == parameter.default, (server, name, said, parameter.default)
+            elif shared is not None and "check_" in name:
+                assert said == shared, (server, name, said, shared)
+            else:
+                assert said is None, (server, name, said)
+
+
+class TestTheThreatIntelSidecarAnswersAFailureAsOne:
+    """A lookup that timed out is not an answer that happens to say "timeout".
+
+    These four tools answer with prose, so a failure written as prose reads to
+    every consumer as a successful call: it never reaches the run summary's
+    failures, the report header or the console's failed row. The structured
+    shape is what tells them apart.
+    """
+
+    @pytest.fixture(scope="class")
+    def server(self) -> Any:
+        import importlib.util
+        from pathlib import Path
+
+        path = Path(__file__).resolve().parents[3] / "services" / "threatintel-mcp" / "server.py"
+        spec = importlib.util.spec_from_file_location("threatintel_mcp_server", path)
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        return module
+
+    def _raising(self, server: Any, monkeypatch, exc: Exception) -> None:
+        class _Client:
+            def __init__(self, **_: Any) -> None:
+                pass
+
+            def __enter__(self) -> Any:
+                return self
+
+            def __exit__(self, *_: Any) -> None:
+                return None
+
+            def get(self, *_: Any, **__: Any) -> Any:
+                raise exc
+
+        monkeypatch.setattr(server.httpx, "Client", _Client)
+
+    def test_a_timeout_is_a_structured_failure_with_its_remedy(
+        self, server: Any, monkeypatch
+    ) -> None:
+        import httpx
+
+        self._raising(server, monkeypatch, httpx.TimeoutException("slow"))
+
+        answer = errors.error_parts(server._vt_hash_lookup("ab" * 32))
+
+        assert answer is not None
+        code, message, remediation = answer
+        assert code == errors.TIMEOUT
+        assert "VirusTotal did not answer" in message and remediation
+
+    def test_a_bad_status_is_a_structured_failure(self, server: Any, monkeypatch) -> None:
+        import httpx
+
+        request = httpx.Request("GET", "https://example.test")
+        response = httpx.Response(429, request=request)
+        self._raising(
+            server, monkeypatch, httpx.HTTPStatusError("x", request=request, response=response)
+        )
+
+        answer = errors.error_parts(server._abuseipdb_lookup("1.2.3.4"))
+
+        assert answer is not None
+        assert answer[0] == errors.TOOL_FAILED and "429" in answer[1]
+
+    def test_a_lookup_that_found_nothing_is_still_an_answer(self, server: Any, monkeypatch) -> None:
+        """VirusTotal having nothing on a hash is a result, not a failed call."""
+
+        class _Client:
+            def __init__(self, **_: Any) -> None:
+                pass
+
+            def __enter__(self) -> Any:
+                return self
+
+            def __exit__(self, *_: Any) -> None:
+                return None
+
+            def get(self, *_: Any, **__: Any) -> Any:
+                import httpx
+
+                return httpx.Response(404, request=httpx.Request("GET", "https://example.test"))
+
+        monkeypatch.setattr(server.httpx, "Client", _Client)
+
+        text = server._vt_hash_lookup("ab" * 32)
+
+        assert errors.error_parts(text) is None
+        assert "not found in VirusTotal" in text
