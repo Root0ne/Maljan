@@ -101,6 +101,9 @@ class ValidationMetrics:
     retries: int = 0
     by_code: dict[str, int] = field(default_factory=dict)
     unresolved: list[dict[str, str]] = field(default_factory=list)
+    # The checks that could not run at all, by code. A check that ran and
+    # found nothing and a check that never ran are different facts.
+    not_run: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -215,7 +218,9 @@ class RunSummary:
     agent_stats: list[ISRAgentStats]
     validation: ValidationMetrics | None
     elapsed_seconds: float
-    corroboration: dict[str, list[str]] = field(default_factory=dict)
+    # Per technique id, ``{asserted_by: [deterministic sources], claimed_by:
+    # [agents]}``. Two flat lists and no score.
+    corroboration: dict[str, dict[str, list[str]]] = field(default_factory=dict)
     tokens: TokenUsageMetrics | None = None
     truncation: TruncationMetrics | None = None
     timestamp: float = field(default_factory=time.time)
@@ -319,16 +324,20 @@ class RunSummary:
             lines += [
                 "## Corroboration",
                 "",
-                "Which sources named each technique. A count of sources, not a combined",
-                "confidence: nothing here multiplies one layer's number by another's.",
+                "Which sources named each technique: the deterministic sources that carry",
+                "their own ATT&CK ids, and the agents. Two lists, not a combined confidence:",
+                "nothing here multiplies one layer's number by another's.",
                 "",
-                "| Technique | Sources |",
-                "|---|---|",
+                "| Technique | Asserted by | Claimed by |",
+                "|---|---|---|",
             ]
             for tid, sources in sorted(
-                self.corroboration.items(), key=lambda item: (-len(item[1]), item[0])
+                self.corroboration.items(),
+                key=lambda item: (-len(_corroboration_sources(item[1])), item[0]),
             ):
-                lines.append(f"| {tid} | {', '.join(sources)} |")
+                asserted = ", ".join(sources.get("asserted_by") or []) or "—"
+                claimed = ", ".join(sources.get("claimed_by") or []) or "—"
+                lines.append(f"| {tid} | {asserted} | {claimed} |")
             lines.append("")
             if self.techniques_by_layer:
                 lines.append("**Per-source attribution:**")
@@ -459,7 +468,10 @@ class RunSummary:
                 for s in self.agent_stats
             ],
             "validation": None,
-            "corroboration": {k: list(v) for k, v in sorted(self.corroboration.items())},
+            "corroboration": {
+                k: {"asserted_by": list(v["asserted_by"]), "claimed_by": list(v["claimed_by"])}
+                for k, v in sorted(self.corroboration.items())
+            },
             "tokens": None,
             "degraded_mode": self.degraded_mode,
             "degradation_reasons": list(self.degradation_reasons),
@@ -476,6 +488,7 @@ class RunSummary:
                 "retries": self.validation.retries,
                 "by_code": dict(sorted(self.validation.by_code.items())),
                 "unresolved": [dict(row) for row in self.validation.unresolved],
+                "not_run": list(self.validation.not_run),
             }
 
         if self.tokens:
@@ -539,7 +552,7 @@ class RunSummaryBuilder:
         self._negotiation: NegotiationMetrics | None = None
         self._agent_stats: list[ISRAgentStats] = []
         self._validation: ValidationMetrics | None = None
-        self._corroboration: dict[str, list[str]] = {}
+        self._corroboration: dict[str, dict[str, list[str]]] = {}
         self._degraded_mode: bool = False
         self._degradation_reasons: list[str] = []
         self._failed_analysts: list[str] = []
@@ -758,15 +771,31 @@ class RunSummaryBuilder:
             retries=int(metrics.get("retries") or 0),
             by_code=dict(metrics.get("by_code") or {}),
             unresolved=[dict(row) for row in metrics.get("unresolved") or []],
+            not_run=[str(code) for code in metrics.get("not_run") or []],
         )
         return self
 
-    def set_corroboration(self, corroboration: dict[str, list[str]] | None) -> RunSummaryBuilder:
-        """Record which sources named each technique, and count them per source."""
-        self._corroboration = {tid: list(sources) for tid, sources in (corroboration or {}).items()}
+    def set_corroboration(self, corroboration: dict[str, Any] | None) -> RunSummaryBuilder:
+        """Record who asserted and who claimed each technique, and count per source.
+
+        A flat list of sources — the shape stored before the two lists — is
+        read as claimed by all of them, so an older summary still builds.
+        """
+        self._corroboration = {}
+        for tid, row in (corroboration or {}).items():
+            if isinstance(row, dict):
+                self._corroboration[tid] = {
+                    "asserted_by": [str(x) for x in row.get("asserted_by") or []],
+                    "claimed_by": [str(x) for x in row.get("claimed_by") or []],
+                }
+            else:
+                self._corroboration[tid] = {
+                    "asserted_by": [],
+                    "claimed_by": [str(x) for x in (row or [])],
+                }
         counts: dict[str, int] = {}
-        for sources in self._corroboration.values():
-            for source in sources:
+        for row in self._corroboration.values():
+            for source in _corroboration_sources(row):
                 counts[str(source)] = counts.get(str(source), 0) + 1
         self._techniques_by_layer = counts
         return self
@@ -809,6 +838,13 @@ class RunSummaryBuilder:
 # ---------------------------------------------------------------------------
 # Pure-Python helper (avoids importing from routing to prevent circular deps)
 # ---------------------------------------------------------------------------
+
+
+def _corroboration_sources(row: Any) -> list[str]:
+    """Every source of one corroboration row, whichever shape it has."""
+    if isinstance(row, dict):
+        return [*(row.get("asserted_by") or []), *(row.get("claimed_by") or [])]
+    return [str(s) for s in (row or [])]
 
 
 def _rolling_std(values: list[float]) -> float:

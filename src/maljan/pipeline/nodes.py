@@ -64,6 +64,8 @@ from maljan.pipeline.validation import (
     ValidationTally,
     Violation,
     corroboration,
+    corroboration_sources,
+    technique_check_note,
     ungrounded_technique_note,
     validation_metrics,
 )
@@ -215,6 +217,15 @@ def _validation_update(agent: Any, agent_name: str) -> dict[str, Any]:
         update["validation_retries"] = retries
     if fed_back:
         update["validation_fed_back"] = dict(fed_back)
+    drain_not_run = getattr(agent, "drain_validation_not_run", None)
+    if drain_not_run is not None:
+        try:
+            not_run = [str(code) for code in (drain_not_run() or [])]
+        except Exception as exc:  # noqa: BLE001 — a metric is never worth a lost run
+            logger.debug("validation not-run read skipped for %s: %s", agent_name, exc)
+            not_run = []
+        if not_run:
+            update["validation_not_run"] = not_run
     return update
 
 
@@ -885,6 +896,12 @@ def brief_agent(agent: Any, state: AnalysisState, container: ServiceContainer) -
     agent.facts_block = pack_text(state, container)
     agent.pack_ledger_ids = pack_ledger_ids(state)
     agent.run_state_block = render_run_state(state)
+    # The routed format, so the platform check compares the agent's
+    # techniques against the sample it is looking at.
+    agent.sample_format = (
+        str(state.get("file_type") or "unknown"),
+        str(state.get("platform") or "unknown"),
+    )
 
 
 def stage_context(state: AnalysisState) -> StageContext:
@@ -1118,6 +1135,8 @@ def _amended_validation(run_summary: Any, tally: ValidationTally) -> dict[str, A
     merged_unresolved = [*(block.get("unresolved") or []), *tally.unresolved]
     if merged_unresolved:
         block["unresolved"] = merged_unresolved
+    # A block from before the row existed reads as a run whose checks all ran.
+    block.setdefault("not_run", [])
     return block
 
 
@@ -2339,8 +2358,18 @@ def make_judge_node(
             # what the judge weighs; nothing here combines the numbers.
             _corroboration = corroboration(isr_reports, _ledger)
             _technique_count = len(_corroboration)
-            _corroborated = sum(1 for sources in _corroboration.values() if len(sources) > 1)
+            _corroborated = sum(
+                1 for row in _corroboration.values() if len(corroboration_sources(row)) > 1
+            )
             evidence_summary = summarise(isr_reports, _ledger)
+            # What the technique check questioned and the analysts kept, put
+            # in front of the judge beside the evidence summary: the domain,
+            # the platforms, the index's candidates, in the analysts' own rows.
+            _check_note = technique_check_note(state.get("validation_findings"))
+            if _check_note:
+                evidence_summary = (
+                    f"{evidence_summary}\n\n{_check_note}" if evidence_summary else _check_note
+                )
 
             start_time = time.time()
 
@@ -2513,6 +2542,15 @@ def make_judge_node(
             _ungrounded_note = ungrounded_technique_note(state.get("validation_findings"))
             if _ungrounded_note:
                 _degradation_reasons.append(_ungrounded_note)
+            # A check that could not run is a fact about the run, not a
+            # finding about the sample: it is said here and listed under
+            # ``validation.not_run``.
+            _not_run = sorted({str(code) for code in (state.get("validation_not_run") or [])})
+            if _not_run:
+                _degradation_reasons.append(
+                    "the ATT&CK catalogue could not be read; technique ids were not checked "
+                    f"({', '.join(_not_run)})"
+                )
             if _anti_emu_hits:
                 _short = _anti_emu_hits[0]
                 _suffix = f" (+{len(_anti_emu_hits) - 1} more)" if len(_anti_emu_hits) > 1 else ""
@@ -2626,7 +2664,9 @@ def make_judge_node(
                     .set_verdict(decision, len(bundle.objects) if isinstance(bundle, Bundle) else 0)
                     .set_negotiation(negotiation_state, max_iterations=max_iters)
                     .set_isr_stats(isr_reports, no_data=_no_data_analysts)
-                    .set_validation(validation_metrics(_retries, _unresolved, _fed_back))
+                    .set_validation(
+                        validation_metrics(_retries, _unresolved, _fed_back, not_run=_not_run)
+                    )
                     .set_corroboration(_corroboration)
                     .set_degraded_mode(_degraded_mode, _degradation_reasons)
                     .set_failed_analysts(_failed_analysts)

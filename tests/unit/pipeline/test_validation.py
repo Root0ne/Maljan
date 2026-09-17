@@ -431,8 +431,8 @@ class TestMetrics:
         ]
 
         assert corroboration(isrs, ledger) == {
-            "T1055": ["capa", "dynamic", "static"],
-            "T1071": ["capa"],
+            "T1055": {"asserted_by": ["capa"], "claimed_by": ["dynamic", "static"]},
+            "T1071": {"asserted_by": ["capa"], "claimed_by": []},
         }
 
     def test_a_claim_whose_id_failed_validation_does_not_corroborate(self):

@@ -99,6 +99,7 @@ _PREFIX_GROUPS: list[tuple[str, str]] = [
     ("analysis", "analysis"),
     ("preprocessing", "analysis"),
     ("triage", "analysis"),
+    ("validation", "analysis"),
     ("static", "static"),
     ("mcp", "mcp"),
     ("reporting", "reporting"),
@@ -957,6 +958,35 @@ ANNOTATIONS: dict[str, Annotation] = {
             "after it is spent is recorded as not run rather than started."
         ),
         "subgroup": "Triage pack",
+    },
+    "validation.alignment_gate": {
+        "title": "Technique alignment gate",
+        "description": (
+            "Whether an analyst's technique claims are ranked against the ATT&CK index "
+            "as a check ('auto') or not at all ('off'). 'auto' runs the check only when "
+            "this worker has already built the index; the result is a violation the "
+            "analyst answers once and a ranking the judge and the report see. No id is "
+            "ever replaced."
+        ),
+        "subgroup": "Technique check",
+    },
+    "validation.alignment_gate_build": {
+        "title": "Build the ATT&CK index for the gate",
+        "description": (
+            "Lets the first run that needs the alignment gate build the ATT&CK index in "
+            "the background, once per worker; that run skips the gate and the runs after "
+            "it have it. Off leaves the gate to workers that built the index for another "
+            "reason. The build takes seconds and hundreds of megabytes."
+        ),
+        "subgroup": "Technique check",
+    },
+    "validation.alignment_threshold": {
+        "title": "Alignment gate threshold",
+        "description": (
+            "The TF-IDF gate score below which a claimed technique the index did not "
+            "rank among its candidates is questioned. The paper's gate."
+        ),
+        "subgroup": "Technique check",
     },
     "react_agent_max_steps": {
         "title": "ReAct agent default max steps",

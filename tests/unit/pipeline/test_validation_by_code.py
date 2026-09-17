@@ -36,6 +36,7 @@ class TestTheMetric:
             "retries": 1,
             "by_code": {"verdict.not_json": 1},
             "unresolved": [],
+            "not_run": [],
         }
 
     def test_an_unresolved_one_is_added_on_top(self) -> None:
@@ -164,6 +165,7 @@ class TestTheReportRoundIsFoldedIn:
                 "verdict.not_json": 1,
             },
             "unresolved": [],
+            "not_run": [],
         }
 
     def test_a_clean_report_round_amends_nothing(self) -> None:

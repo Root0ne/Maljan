@@ -73,9 +73,12 @@ def _default_profile_summary() -> RunSummary:
             "unresolved": [
                 {"agent": "static", "code": "attck.unknown_id", "message": "no such id"}
             ],
+            "not_run": ["attck.unknown_id"],
         }
     )
-    builder.set_corroboration({"T1055": ["static", "dynamic", "network"]})
+    builder.set_corroboration(
+        {"T1055": {"asserted_by": ["capa"], "claimed_by": ["static", "dynamic", "network"]}}
+    )
     builder.set_profile("default", analysts, [])
     builder.set_stages(
         [

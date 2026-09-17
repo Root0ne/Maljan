@@ -6,6 +6,7 @@ import { useReport } from "../layout";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import {
+  corroborationLists,
   corroborationSources,
   isCorroborated,
   orderedTactics,
@@ -194,15 +195,38 @@ export default function AttackTab() {
                       {corroborationSources(corroboration, tech.id).length > 0 && (
                         <details className="mt-1">
                           <summary className="text-[10px] uppercase tracking-wider text-text-muted cursor-pointer">
-                            Named by {corroborationSources(corroboration, tech.id).length}
+                            Asserted by {corroborationLists(corroboration, tech.id).asserted_by.length}
+                            , claimed by {corroborationLists(corroboration, tech.id).claimed_by.length}
                           </summary>
-                          <ul className="mt-1 space-y-0.5">
-                            {corroborationSources(corroboration, tech.id).map((source) => (
-                              <li key={source} className="text-[11px] font-mono text-text-secondary">
-                                {source}
-                              </li>
-                            ))}
-                          </ul>
+                          <div className="mt-1 space-y-1">
+                            <div>
+                              <span className="text-[10px] uppercase tracking-wider text-text-muted">
+                                Asserted by
+                              </span>
+                              <ul className="space-y-0.5">
+                                {corroborationLists(corroboration, tech.id).asserted_by.length === 0 && (
+                                  <li className="text-[11px] text-text-muted">no deterministic source</li>
+                                )}
+                                {corroborationLists(corroboration, tech.id).asserted_by.map((source) => (
+                                  <li key={`a-${source}`} className="text-[11px] font-mono text-text-secondary">
+                                    {source}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                            <div>
+                              <span className="text-[10px] uppercase tracking-wider text-text-muted">
+                                Claimed by
+                              </span>
+                              <ul className="space-y-0.5">
+                                {corroborationLists(corroboration, tech.id).claimed_by.map((source) => (
+                                  <li key={`c-${source}`} className="text-[11px] font-mono text-text-secondary">
+                                    {source}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          </div>
                         </details>
                       )}
                     </div>

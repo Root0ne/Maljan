@@ -2367,6 +2367,23 @@ class TriageConfig(BaseModel):
     budget_seconds: Annotated[int, Field(ge=1)] = 1200
 
 
+class ValidationConfig(BaseModel):
+    """The technique check's one heuristic part, and when it is allowed to run.
+
+    Validity, platform consistency and corroboration are exact and always on.
+    The alignment gate ranks a claim's text against the ATT&CK index, and the
+    index costs seconds and hundreds of megabytes to build. ``auto`` runs the
+    gate only when this worker already built the index; ``alignment_gate_build``
+    lets the first run that needs it build it once, in a thread, for the runs
+    after. ``alignment_threshold`` is the paper's gate: a claimed id below it
+    that the index also did not rank among its candidates is questioned.
+    """
+
+    alignment_gate: Literal["auto", "off"] = "auto"
+    alignment_gate_build: bool = False
+    alignment_threshold: Annotated[float, Field(ge=0.0, le=1.0)] = 0.05
+
+
 # ---------------------------------------------------------------------------
 # Root Settings
 # ---------------------------------------------------------------------------
@@ -2437,6 +2454,7 @@ class Settings(BaseSettings):
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     reporting: ReportingConfig = Field(default_factory=ReportingConfig)
     triage: TriageConfig = Field(default_factory=TriageConfig)
+    validation: ValidationConfig = Field(default_factory=ValidationConfig)
     # Which analysts exist, in what order, and what each one gets. The
     # ``default`` profile is the architecture this project measured itself on.
     agents: AgentsConfig = Field(default_factory=AgentsConfig)

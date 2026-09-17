@@ -83,10 +83,36 @@ def lint_report(report: Any, sample_platform: str | None) -> list[FPWarning]:
 
     capability_ids = _capability_technique_ids(report)
 
-    # C1 — platform-mismatched capability_matrix entries.
+    # C1 — platform-mismatched capability_matrix entries. The cell's scope is
+    # the catalogue's own domain and platforms, filled by the matrix builder;
+    # a cell without one has nothing to compare and is left alone.
     if sp and sp != "unknown":
+        from maljan.pipeline.validation import expected_technique_scope
+
+        expected_domain, _expected_platforms = expected_technique_scope({"platform": sp})
         for cell in getattr(report, "capability_matrix", None) or []:
             tid = getattr(cell, "technique_id", None)
+            cell_domain = str(getattr(cell, "domain", "") or "").lower()
+            if expected_domain and cell_domain and cell_domain != expected_domain:
+                warnings.append(
+                    FPWarning(
+                        rule="C1",
+                        severity="warn",
+                        message=(
+                            f"Capability {tid} is in the matrix but belongs to the ATT&CK "
+                            f"{cell_domain} domain; the sample ({sp}) is {expected_domain}."
+                        ),
+                        field=f"capability_matrix.{tid}",
+                        explanation=(
+                            "A technique from another ATT&CK domain is in the report. "
+                            "Either the sample's platform was inferred wrongly, or an "
+                            "agent claimed a technique the sample has no way to perform. "
+                            "Nothing drops it — the claim belongs to whoever made it — so "
+                            "read it here."
+                        ),
+                    )
+                )
+                continue
             # Populated only when the builder filled it.
             cell_platforms = getattr(cell, "platforms", None)
             if not cell_platforms:

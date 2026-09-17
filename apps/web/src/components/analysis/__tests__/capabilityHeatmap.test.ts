@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  corroborationLists,
   corroborationSources,
   isCorroborated,
   orderedTactics,
@@ -122,6 +123,17 @@ describe("the columns", () => {
 
 describe("what the run summary recorded", () => {
   it("is the sources it listed for that technique", () => {
+    expect(
+      corroborationLists({ T1055: { asserted_by: ["capa"], claimed_by: ["static"] } }, "T1055")
+    ).toEqual({ asserted_by: ["capa"], claimed_by: ["static"] });
+    expect(
+      corroborationSources({ T1055: { asserted_by: ["capa"], claimed_by: ["static"] } }, "T1055")
+    ).toEqual(["capa", "static"]);
+    // A summary stored before the two lists is read as claimed by all of them.
+    expect(corroborationLists({ T1055: ["static", "dynamic"] }, "T1055")).toEqual({
+      asserted_by: [],
+      claimed_by: ["static", "dynamic"],
+    });
     expect(corroborationSources({ T1055: ["static", "dynamic"] }, "T1055")).toEqual([
       "static",
       "dynamic",

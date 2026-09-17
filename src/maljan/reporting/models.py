@@ -425,6 +425,12 @@ class CapabilityCell(BaseModel):
     # the marker beside it. Defaults ``True`` so rows persisted before the flag
     # existed keep their meaning.
     technique_id_valid: bool = True
+    # The catalogue's own scope for the technique: the ATT&CK domain that owns
+    # it and the platforms it declares. Filled from the catalogue by the
+    # matrix builder; empty when the catalogue had nothing to say. The FP
+    # linter's platform check reads them.
+    platforms: list[str] = Field(default_factory=list)
+    domain: str = ""
 
 
 class TTPMapping(BaseModel):

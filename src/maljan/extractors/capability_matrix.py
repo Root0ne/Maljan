@@ -108,6 +108,7 @@ def build_capability_matrix(
             continue
 
         tactic_id, tactic_name = _resolve_tactic(index, tactic_slug)
+        scope = _catalogue_scope(tid)
         cells.append(
             CapabilityCell(
                 tactic=tactic_id or "TA0000",
@@ -118,6 +119,8 @@ def build_capability_matrix(
                 confidence=max(0.0, min(1.0, confidence)),
                 contributing_layers=layers,
                 technique_id_valid=valid,
+                platforms=scope[1],
+                domain=scope[0],
             )
         )
         mappings.append(
@@ -146,6 +149,28 @@ def build_capability_matrix(
 # analysts rather than the sample, so counting it would turn one analyst's
 # claim into two agreeing sources.
 _JUDGE_SOURCE = "judge"
+
+
+def _catalogue_scope(technique_id: str) -> tuple[str, list[str]]:
+    """``(domain, platforms)`` the catalogue declares for the id; empty when it cannot say.
+
+    The FP linter's platform check reads these off the cell. Never raises:
+    a catalogue that cannot be read leaves the cell without a scope, which
+    the linter reads as nothing to check rather than as a mismatch.
+    """
+    try:
+        from maljan.tools import knowledge
+
+        answer = knowledge.attck_lookup(technique_id)
+    except Exception as exc:  # noqa: BLE001 — a knowledge lookup degrades, never raises
+        logger.debug("capability_matrix: no catalogue scope for %s (%s)", technique_id, exc)
+        return "", []
+    if not isinstance(answer, dict):
+        return "", []
+    return (
+        str(answer.get("domain") or ""),
+        [str(p) for p in (answer.get("platforms") or []) if str(p).strip()],
+    )
 
 
 def _unknown_to_the_catalogue(ids: list[str]) -> set[str]:

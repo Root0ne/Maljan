@@ -252,6 +252,11 @@ class AnalysisState(TypedDict):
     # Append-only: two analysts running in parallel each add their own.
     validation_retries: Annotated[int, operator.add]
 
+    # The checks that could not run on this run, by code — the validity
+    # check on a box with no ATT&CK catalogue. Append-only; the judge reads
+    # the distinct codes into ``run_summary.validation.not_run``.
+    validation_not_run: Annotated[list[str], operator.add]
+
     # Every violation a producer was *shown*, by code. A violation the retry
     # fixed leaves no other trace on the run, and ``by_code`` built from the
     # leftovers alone reported ``{}`` beside a non-zero retry count. Counts

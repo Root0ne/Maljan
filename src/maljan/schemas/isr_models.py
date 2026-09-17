@@ -12,7 +12,7 @@ Literature basis:
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -56,6 +56,15 @@ class ClaimEvidence(BaseModel):
     technique_id_valid: bool = Field(
         default=True,
         description="False when the technique id is not in the ATT&CK catalogue.",
+    )
+    # What the ATT&CK index made of the claim text against the id the analyst
+    # chose: the id's own gate score and the index's top candidates with
+    # theirs. Recorded by ``pipeline.validation`` when the index was warm, so
+    # the judge and the report can see the ranking beside the choice. The id
+    # itself is never replaced by any of the candidates.
+    alignment: dict[str, Any] | None = Field(
+        default=None,
+        description="The index's gate score for the claimed id and its top candidates.",
     )
 
 

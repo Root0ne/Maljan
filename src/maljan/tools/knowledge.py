@@ -99,6 +99,81 @@ def _hybrid_index() -> tuple[Any, str]:
     return index, ""
 
 
+def index_is_warm() -> bool:
+    """Whether this process has already built the hybrid ATT&CK index."""
+    with _INDEX_LOCK:
+        return _HYBRID_INDEX is not None
+
+
+_WARMING = threading.Event()
+
+
+def warm_index_in_background() -> bool:
+    """Start building the hybrid index on a daemon thread, once per process.
+
+    For the caller that may not wait: the alignment gate on a worker that has
+    not built the index yet. ``True`` when a build was started by this call,
+    ``False`` when one is already running or the index is already there. A
+    build that fails is remembered the way a foreground failure is, so the
+    next caller is told rather than made to wait again.
+    """
+    if index_is_warm() or _WARMING.is_set():
+        return False
+    _WARMING.set()
+
+    def _build() -> None:
+        try:
+            _hybrid_index()
+        finally:
+            _WARMING.clear()
+
+    threading.Thread(target=_build, name="maljan-attck-index", daemon=True).start()
+    return True
+
+
+def catalogue_available() -> bool:
+    """Whether the vendored technique universe could be read at all.
+
+    The validity check answers from it, and a check that answers "nothing
+    unknown" because it had no universe to compare against did not run.
+    """
+    from maljan.memory.attck_loader import valid_ids
+
+    try:
+        return bool(valid_ids())
+    except Exception as exc:  # noqa: BLE001 — an unreadable universe is an absent one
+        logger.warning("knowledge: the ATT&CK id universe is unavailable (%s).", exc)
+        return False
+
+
+def technique_alignment(text: str, technique_id: str, k: int = 5) -> dict[str, Any] | None:
+    """The index's gate score for ``technique_id`` against ``text``, and its candidates.
+
+    ``None`` when the index is not built in this process: this never builds
+    it, because the caller is an analyst's validation turn and a build there
+    would cost every run on a cold worker seconds it did not budget. The
+    ranking is the same ``resolve_technique`` gives; the one addition is the
+    claimed id's own ``score_gate``, whether or not the index ranked it.
+    """
+    if not index_is_warm():
+        return None
+    index, _reason = _hybrid_index()
+    if index is None:
+        return None
+    tid = (technique_id or "").strip().upper()
+    answer = resolve_technique(text, k=k)
+    candidates = [
+        {"technique_id": c["technique_id"], "score_gate": c["score_gate"], "score": c["score"]}
+        for c in answer.get("candidates") or []
+    ]
+    try:
+        gate_score = round(float(index.validate_and_score(tid, text)), 4)
+    except Exception as exc:  # noqa: BLE001 — an id the index cannot score scores nothing
+        logger.debug("knowledge: no gate score for %s (%s).", tid, exc)
+        gate_score = 0.0
+    return {"technique_id": tid, "gate_score": gate_score, "candidates": candidates}
+
+
 # ---------------------------------------------------------------------------
 # ATT&CK
 # ---------------------------------------------------------------------------

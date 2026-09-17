@@ -914,15 +914,43 @@ class MarkdownRenderer:
             lines.append(f"- Report sections with no evidence: {ungrounded}")
         corroboration = run_summary.get("corroboration") or {}
         if corroboration:
-            multi = sum(1 for sources in corroboration.values() if len(sources) > 1)
-            lines.append(f"- TTPs: {len(corroboration)} named, {multi} by more than one source")
+            from maljan.pipeline.validation import corroboration_sources
+
+            multi = sum(1 for row in corroboration.values() if len(corroboration_sources(row)) > 1)
+            asserted = sum(
+                1
+                for row in corroboration.values()
+                if isinstance(row, dict) and row.get("asserted_by")
+            )
+            lines.append(
+                f"- TTPs: {len(corroboration)} named, {multi} by more than one source, "
+                f"{asserted} asserted by a deterministic source"
+            )
+            lines.append("")
+            lines.append("| Technique | Asserted by | Claimed by |")
+            lines.append("|---|---|---|")
+            for tid, row in sorted(corroboration.items()):
+                if isinstance(row, dict):
+                    asserted_by = ", ".join(row.get("asserted_by") or []) or "—"
+                    claimed_by = ", ".join(row.get("claimed_by") or []) or "—"
+                else:
+                    asserted_by, claimed_by = "—", ", ".join(str(s) for s in row) or "—"
+                lines.append(f"| {tid} | {asserted_by} | {claimed_by} |")
+            lines.append("")
         validation = run_summary.get("validation") or {}
         if validation:
             unresolved = validation.get("unresolved") or []
+            not_run = validation.get("not_run") or []
             lines.append(
                 f"- Validation: {validation.get('retries', 0)} feedback retries, "
                 f"{len(unresolved)} finding(s) left unresolved"
+                + (f", checks that could not run: {', '.join(not_run)}" if not_run else "")
             )
+            for row in unresolved:
+                if not isinstance(row, dict):
+                    continue
+                message = " ".join(str(row.get("message") or "").split())
+                lines.append(f"  - `{row.get('code', '')}` ({row.get('agent', '')}): {message}")
         return "\n".join(lines)
 
     # ------------------------------------------------------------------

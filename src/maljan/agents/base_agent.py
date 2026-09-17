@@ -34,11 +34,13 @@ from maljan.core.exceptions import AgentLoopCancelled, AnalystError
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger, record_response_usage
 from maljan.pipeline.validation import (
+    VALIDITY_CODE,
     ValidationTally,
     Violation,
     mark_invalid_technique_ids,
     retry_with_feedback_sync,
     validate_isr,
+    validity_check_available,
 )
 from maljan.schemas.evidence import ENTRY_ID_RE, EvidenceCounter, LedgerEntry, apply_budget
 from maljan.schemas.isr_models import AgentISR, Artifact, ClaimEvidence, Finding
@@ -1462,6 +1464,39 @@ class _PriorAnswer:
         self.content = isr.to_text_summary()
 
 
+def alignment_gate(knowledge: Any, cfg_validation: Any, log: Any, name: str) -> Any | None:
+    """The alignment gate for one validation turn, or ``None`` when it does not run.
+
+    ``auto`` runs it only on a worker whose ATT&CK index is already built;
+    with ``alignment_gate_build`` the first run that wanted it starts the
+    build on a thread and goes without, so no analyst's validation turn ever
+    pays for the build. ``off`` never runs it. A knowledge module without the
+    question — a stub — has no gate. A function rather than a method so a
+    duck-typed analyst that borrows ``_validate_isr`` alone still gets it.
+    """
+    mode = str(getattr(cfg_validation, "alignment_gate", "auto") or "auto")
+    if mode != "auto":
+        return None
+    warm = getattr(knowledge, "index_is_warm", None)
+    gate = getattr(knowledge, "technique_alignment", None)
+    if warm is None or gate is None:
+        return None
+    try:
+        if warm():
+            return gate
+        if bool(getattr(cfg_validation, "alignment_gate_build", False)):
+            started = getattr(knowledge, "warm_index_in_background", lambda: False)()
+            if started:
+                log.info(
+                    "%s: the ATT&CK index is being built for the alignment gate; "
+                    "this run goes without it.",
+                    name,
+                )
+    except Exception as exc:  # noqa: BLE001 — a gate that cannot start is no gate
+        log.debug("%s: alignment gate unavailable (%s).", name, exc)
+    return None
+
+
 class BaseAnalyst(ABC):
     """Abstract base class for expert agents."""
 
@@ -1549,6 +1584,13 @@ class BaseAnalyst(ABC):
         # by the analyst node onto the state's validation channels.
         self.validation_findings: list[Violation] = []
         self.validation_retries: int = 0
+        # The checks that could not run on this analyst's answers — the
+        # validity check on a box with no catalogue — by code, once each.
+        # Drained by the node like the findings are.
+        self.validation_not_run: list[str] = []
+        # The routed ``(file_type, platform)`` of the sample this agent is
+        # working on, set by the node; the platform check reads it.
+        self.sample_format: tuple[str, str] = ("unknown", "unknown")
         # Every violation this analyst was *shown*, by code. A violation the
         # retry fixed leaves no other trace, and a run summary that counts only
         # the leftovers cannot say what the retry was for.
@@ -2925,8 +2967,36 @@ class BaseAnalyst(ABC):
             str(i) for i in (getattr(self, "pack_ledger_ids", None) or []) if str(i).strip()
         )
 
+        # The validity check answers from the vendored id universe; a box
+        # without it cannot check anything, and says so in the run summary
+        # instead of reporting every id as fine.
+        if not validity_check_available(knowledge):
+            not_run = getattr(self, "validation_not_run", None)
+            if not_run is None:
+                not_run = []
+                self.validation_not_run = not_run
+            if VALIDITY_CODE not in not_run:
+                not_run.append(VALIDITY_CODE)
+            self.logger.warning(
+                "%s: the ATT&CK catalogue is unavailable; technique ids are not checked.",
+                self.name,
+            )
+
+        file_type, platform = getattr(self, "sample_format", ("unknown", "unknown"))
+        sample = {"file_type": file_type, "platform": platform}
+        cfg_validation = getattr(get_settings(), "validation", None)
+        gate = alignment_gate(knowledge, cfg_validation, self.logger, self.name)
+        threshold = float(getattr(cfg_validation, "alignment_threshold", 0.05) or 0.05)
+
         def _validator(candidate: AgentISR) -> list[Violation]:
-            return validate_isr(candidate, attck=knowledge, ledger_ids=ledger_ids)
+            return validate_isr(
+                candidate,
+                attck=knowledge,
+                ledger_ids=ledger_ids,
+                sample=sample,
+                alignment=gate,
+                alignment_threshold=threshold,
+            )
 
         try:
             if not _validator(isr):
@@ -3002,6 +3072,16 @@ class BaseAnalyst(ABC):
                 ", ".join(sorted({v.code for v in violations})),
             )
         return revised
+
+    def _alignment_gate(self, knowledge: Any, cfg_validation: Any) -> Any | None:
+        """The alignment gate for this run, or ``None``; see :func:`alignment_gate`."""
+        return alignment_gate(knowledge, cfg_validation, self.logger, self.name)
+
+    def drain_validation_not_run(self) -> list[str]:
+        """The checks that could not run, handed over once."""
+        codes = list(getattr(self, "validation_not_run", None) or [])
+        self.validation_not_run = []
+        return codes
 
     def _revalidate(
         self, isr: AgentISR, validator: Callable[[AgentISR], list[Violation]]
