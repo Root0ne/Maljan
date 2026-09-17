@@ -49,6 +49,7 @@ from maljan.schemas.evidence import LedgerEntry, apply_budget
 from maljan.tools import binary, identify, knowledge, pcap, rules, strings
 
 __all__ = [
+    "PACK_HEADING",
     "PIPELINE",
     "CapaSettings",
     "PackInputs",
@@ -56,6 +57,9 @@ __all__ = [
     "ReputationLookup",
     "failure_reason",
     "malicious_count",
+    "pack_block",
+    "pack_entries",
+    "render_pack",
     "run_pack",
 ]
 
@@ -521,3 +525,496 @@ def _capture_path(report: dict[str, Any]) -> str:
     if isinstance(path, str) and path and Path(path).is_file():
         return path
     return ""
+
+
+# ---------------------------------------------------------------------------
+# Rendering the pack for a prompt
+# ---------------------------------------------------------------------------
+
+# The heading every agent sees above the rendered pack. It says what the block
+# is and what to do with it, and nothing else: the facts speak for themselves.
+PACK_HEADING = "Facts established before analysis (ledger ids in brackets; cite them)"
+
+# The tail of a cut block. It names what was left out and where the rest is,
+# so a model that wants more than the head knows the head is not all there is.
+_LEFT_OUT = (
+    "{n} more pack entries not shown here; every entry's full output is reachable by tool call."
+)
+
+# How many named items a line lists before it says how many more there are.
+_LIST_HEAD = 6
+# How many characters of a hash a line carries.
+_HASH_HEAD = 16
+# How many characters of a failure or a prose answer a line keeps.
+_TEXT_HEAD = 120
+
+
+def pack_entries(rows: Any) -> list[LedgerEntry]:
+    """The pack's entries out of the run's ledger rows, in ledger order.
+
+    Read off ``agent`` rather than ``server``: the reputation call is
+    recorded under the server it was made to and is still the pack's.
+    """
+    out: list[LedgerEntry] = []
+    for row in rows or []:
+        try:
+            entry = row if isinstance(row, LedgerEntry) else LedgerEntry.model_validate(row)
+        except Exception:  # noqa: BLE001 — one unreadable row is not a lost block
+            continue
+        if entry.agent == PIPELINE:
+            out.append(entry)
+    out.sort(key=lambda entry: entry.seq)
+    return out
+
+
+def render_pack(entries: list[LedgerEntry], max_chars: int) -> str:
+    """The pack as one line per entry, ``[ev_id] group: facts``, cut at ``max_chars``.
+
+    Facts only: counts, names, the values the tools returned. A cut block
+    ends with a line saying how many entries it left out and that their full
+    output is a tool call away. ``max_chars`` at or below zero means no cut.
+    """
+    lines = [_pack_line(entry) for entry in entries]
+    if max_chars <= 0:
+        return "\n".join(lines)
+    kept: list[str] = []
+    used = 0
+    for index, line in enumerate(lines):
+        left_out = len(lines) - index
+        tail = len(_LEFT_OUT.format(n=left_out)) + 1 if left_out > 1 else 0
+        if used + len(line) + 1 + tail > max_chars and kept:
+            kept.append(_LEFT_OUT.format(n=left_out))
+            return "\n".join(kept)
+        kept.append(line)
+        used += len(line) + 1
+    return "\n".join(kept)
+
+
+def pack_block(entries: list[LedgerEntry], max_chars: int) -> str:
+    """The heading and the rendered pack, or ``""`` when there is no pack."""
+    if not entries:
+        return ""
+    return f"{PACK_HEADING}\n{render_pack(entries, max_chars)}"
+
+
+def _pack_line(entry: LedgerEntry) -> str:
+    """One entry as one line. Never raises: an unreadable answer is named as such."""
+    label = _GROUP_LABELS.get(entry.tool, entry.tool)
+    if not entry.ok:
+        return f"[{entry.id}] {label}: failed ({_short(entry.error or entry.output)})"
+    data = entry.structured if isinstance(entry.structured, dict) else None
+    render = _RENDERERS.get(entry.tool)
+    if entry.tool in ("get_file_report", "check_hash"):
+        return f"[{entry.id}] reputation: {_reputation_facts(entry)}"
+    if render is None or data is None:
+        return f"[{entry.id}] {label}: {_short(entry.output) or 'recorded'}"
+    try:
+        return f"[{entry.id}] {label}: {render(data)}"
+    except Exception as exc:  # noqa: BLE001 — a renderer must never cost the block
+        logger.debug("pack line for %s could not be rendered (%s).", entry.tool, exc)
+        return f"[{entry.id}] {label}: recorded"
+
+
+def _short(text: str | None, limit: int = _TEXT_HEAD) -> str:
+    flat = " ".join(str(text or "").split())
+    return flat if len(flat) <= limit else flat[: limit - 1] + "…"
+
+
+def _names(values: Any, head: int = _LIST_HEAD) -> str:
+    items = [str(v) for v in (values or []) if str(v).strip()]
+    if not items:
+        return ""
+    shown = ", ".join(items[:head])
+    return shown if len(items) <= head else f"{shown} (+{len(items) - head} more)"
+
+
+def _n(value: Any) -> str:
+    try:
+        return f"{int(value):,}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _identity(data: dict[str, Any]) -> str:
+    parts = [
+        " ".join(
+            p for p in (str(data.get("file_type") or ""), str(data.get("platform") or "")) if p
+        )
+        or "unknown format"
+    ]
+    if data.get("size") is not None:
+        parts.append(f"{_n(data['size'])} bytes")
+    if data.get("mime"):
+        parts.append(f"mime {data['mime']}")
+    if data.get("category"):
+        parts.append(f"category {data['category']}")
+    return ", ".join(parts)
+
+
+def _hashes(data: dict[str, Any]) -> str:
+    parts = []
+    for key in ("sha256", "md5", "sha1", "imphash", "ssdeep", "tlsh", "telfhash"):
+        value = data.get(key)
+        if value:
+            text = str(value)
+            parts.append(
+                f"{key} {text[:_HASH_HEAD]}…" if len(text) > _HASH_HEAD else f"{key} {text}"
+            )
+    return ", ".join(parts) or "none computed"
+
+
+def _signature(data: dict[str, Any]) -> str:
+    present = []
+    auth = data.get("authenticode") or {}
+    if isinstance(auth, dict) and auth.get("present"):
+        who = ", ".join(f"{k} {auth[k]}" for k in ("subject", "issuer") if auth.get(k))
+        present.append(f"authenticode present{f' ({who})' if who else ''}")
+    apk = data.get("apk") or {}
+    if isinstance(apk, dict) and apk.get("present"):
+        present.append(f"apk {', '.join(str(s) for s in apk.get('schemes') or []) or 'present'}")
+    macho = data.get("macho") or {}
+    if isinstance(macho, dict) and macho.get("present"):
+        present.append("mach-o code signature present")
+    return "; ".join(present) or "none"
+
+
+def _imports_summary(data: dict[str, Any]) -> str:
+    rows = [r for r in (data.get("imports") or []) if isinstance(r, dict)]
+    delayed = [r for r in (data.get("delay_imports") or []) if isinstance(r, dict)]
+    libraries = sorted({str(r.get("dll") or "") for r in [*rows, *delayed] if r.get("dll")})
+    text = f"{len(rows)} imports from {len(libraries)} libraries"
+    if delayed:
+        text += f", {len(delayed)} delay-loaded"
+    if libraries:
+        text += f" ({_names(libraries)})"
+    return text
+
+
+def _sections_summary(data: dict[str, Any]) -> str:
+    sections = [s for s in (data.get("sections") or []) if isinstance(s, dict)]
+    if not sections:
+        return "no section table"
+    top = max(sections, key=lambda s: float(s.get("entropy") or 0))
+    return (
+        f"{len(sections)} sections, highest entropy {float(top.get('entropy') or 0):.2f}"
+        f" ({str(top.get('name') or '').strip() or '?'})"
+    )
+
+
+def _pe(data: dict[str, Any]) -> str:
+    parts = [f"{'dll' if data.get('is_dll') else 'executable'}, machine {data.get('machine')}"]
+    parts.append(_sections_summary(data))
+    parts.append(_imports_summary(data))
+    if data.get("exports"):
+        parts.append(f"{len(data['exports'])} exports")
+    if data.get("linker_version"):
+        parts.append(f"linker {data['linker_version']}")
+    if data.get("import_table_damaged"):
+        parts.append("import table damaged")
+    packers = [
+        p.get("name", p) if isinstance(p, dict) else p for p in data.get("packer_signatures") or []
+    ]
+    parts.append(f"packer signatures {_names(packers) or 'none'}")
+    overlay = data.get("overlay") or {}
+    if isinstance(overlay, dict) and overlay.get("present"):
+        parts.append(f"overlay {_n(overlay.get('size'))} bytes")
+    if data.get("pdb_path"):
+        parts.append(f"pdb {data['pdb_path']}")
+    return ", ".join(parts)
+
+
+def _elf(data: dict[str, Any]) -> str:
+    parts = [f"{data.get('bitness')}-bit {data.get('endianness')}-endian"]
+    if data.get("interpreter"):
+        parts.append(f"interpreter {data['interpreter']}")
+    needed = data.get("needed") or data.get("dt_needed") or []
+    if needed:
+        parts.append(f"needs {_names(needed)}")
+    parts.append(_sections_summary(data))
+    parts.append(_imports_summary(data))
+    return ", ".join(parts)
+
+
+def _macho(data: dict[str, Any]) -> str:
+    parts = []
+    if data.get("filetype"):
+        parts.append(f"filetype {data['filetype']}")
+    commands = data.get("load_commands") or []
+    parts.append(f"{len(commands)} load commands")
+    dylibs = data.get("dylibs") or []
+    if dylibs:
+        parts.append(f"dylibs {_names(dylibs)}")
+    if "entitlements_present" in data:
+        parts.append(f"entitlements {'present' if data['entitlements_present'] else 'absent'}")
+    return ", ".join(parts)
+
+
+def _apk(data: dict[str, Any]) -> str:
+    parts = []
+    if data.get("package"):
+        parts.append(f"package {data['package']}")
+    if data.get("degraded"):
+        parts.append(str(data["degraded"]))
+    for key in ("permissions", "activities", "services", "receivers", "providers"):
+        if data.get(key):
+            parts.append(f"{len(data[key])} {key}")
+    if data.get("permissions"):
+        parts.append(f"permissions {_names(data['permissions'])}")
+    if data.get("dex_count") is not None:
+        parts.append(f"{data['dex_count']} dex")
+    if data.get("abis"):
+        parts.append(f"abis {_names(data['abis'])}")
+    if data.get("cert_files"):
+        parts.append(f"cert files {_names(data['cert_files'])}")
+    return ", ".join(parts) or "zip-level facts only"
+
+
+def _document(data: dict[str, Any]) -> str:
+    parts = [str(data.get("format") or "document")]
+    for key, value in data.items():
+        if key in ("format", "tool", "size") or value in (None, "", [], {}, False, 0):
+            continue
+        if isinstance(value, dict):
+            parts.append(
+                f"{key} {', '.join(f'{k} {v}' for k, v in list(value.items())[:_LIST_HEAD])}"
+            )
+        elif isinstance(value, list):
+            parts.append(f"{len(value)} {key}")
+        else:
+            parts.append(f"{key} {value}")
+    return ", ".join(parts)
+
+
+def _archive(data: dict[str, Any]) -> str:
+    members = [m for m in (data.get("members") or []) if isinstance(m, dict)]
+    names = [str(m.get("name") or "") for m in members]
+    text = f"{data.get('format') or 'archive'}, {data.get('total', len(members))} members"
+    return f"{text} ({_names(names)})" if names else text
+
+
+def _strings(data: dict[str, Any]) -> str:
+    rows = data.get("strings") or []
+    total = data.get("total")
+    text = f"{len(rows)} of {_n(total)} runs recorded" if total is not None else f"{len(rows)} runs"
+    return f"{text} (min length {STRINGS_MIN_LEN})"
+
+
+def _iocs(data: dict[str, Any]) -> str:
+    rows = [r for r in (data.get("iocs") or []) if isinstance(r, dict)]
+    if not rows:
+        return "none"
+    counts: dict[str, int] = {}
+    for row in rows:
+        kind = str(row.get("kind") or "other")
+        counts[kind] = counts.get(kind, 0) + 1
+    summary = ", ".join(f"{n} {kind}" for kind, n in sorted(counts.items()))
+    first = _names([str(r.get("value") or "") for r in rows], head=3)
+    return f"{summary} ({first})"
+
+
+def _yara(data: dict[str, Any]) -> str:
+    matches = [m for m in (data.get("matches") or []) if isinstance(m, dict)]
+    names = [str(m.get("rule") or m.get("name") or "") for m in matches]
+    text = f"{len(matches)} hits of {data.get('rule_count', '?')} rules"
+    return f"{text} ({_names(names)})" if names else text
+
+
+def _capa(data: dict[str, Any]) -> str:
+    rows = [r for r in (data.get("capabilities") or []) if isinstance(r, dict)]
+    techniques: list[str] = []
+    for row in rows:
+        for found in re.findall(r"\bT\d{4}(?:\.\d{3})?\b", str(row.get("attck") or "")):
+            if found not in techniques:
+                techniques.append(found)
+    text = f"{len(rows)} capabilities"
+    if rows:
+        text += f" ({_names([str(r.get('rule') or '') for r in rows])})"
+    if techniques:
+        text += f", ATT&CK {_names(techniques)} (rule-asserted)"
+    return text
+
+
+def _sigma(data: dict[str, Any]) -> str:
+    matches = [m for m in (data.get("matches") or []) if isinstance(m, dict)]
+    names = [str(m.get("title") or m.get("rule") or "") for m in matches]
+    text = f"{len(matches)} hits over {data.get('event_count', '?')} events"
+    return f"{text} ({_names(names)})" if names else text
+
+
+def _api_capability(data: dict[str, Any]) -> str:
+    rows = [r for r in (data.get("capabilities") or []) if isinstance(r, dict)]
+    catalogued = [r for r in rows if r.get("category")]
+    behaviours = sorted({str(r.get("category")) for r in catalogued})
+    techniques: list[str] = []
+    for row in rows:
+        for cited in row.get("techniques") or []:
+            tid = str(cited.get("technique_id") or "") if isinstance(cited, dict) else ""
+            if tid and tid not in techniques:
+                techniques.append(tid)
+    text = f"{len(catalogued)} of {len(rows)} APIs in the catalogue"
+    if behaviours:
+        text += f", behaviours {_names(behaviours)}"
+    if techniques:
+        text += f", technique rules cited {_names(techniques)}"
+    return text
+
+
+def _lolbin(data: dict[str, Any]) -> str:
+    hits = [h for h in (data.get("hits") or []) if isinstance(h, dict)]
+    text = f"{len(hits)} hits over {data.get('checked', '?')} command lines"
+    if hits:
+        text += " (" + _names([f"{h.get('binary')} {h.get('technique_id')}" for h in hits]) + ")"
+    return text
+
+
+def _sandbox_processes(data: dict[str, Any]) -> str:
+    rows = [r for r in (data.get("processes") or []) if isinstance(r, dict)]
+    names = [str(r.get("name") or "") for r in rows]
+    text = f"{data.get('total', len(rows))} processes"
+    return f"{text} ({_names(names)})" if names else text
+
+
+def _sandbox_network(data: dict[str, Any]) -> str:
+    parts = [
+        f"{key} {len(data[key])}"
+        for key in ("dns", "hosts", "http", "tcp", "udp", "tls")
+        if data.get(key)
+    ]
+    return ", ".join(parts) or "no network activity recorded"
+
+
+def _sandbox_signatures(data: dict[str, Any]) -> str:
+    rows = [r for r in (data.get("signatures") or []) if isinstance(r, dict)]
+    names = [str(r.get("name") or "") for r in rows]
+    text = f"{len(rows)} signatures"
+    return f"{text} ({_names(names)})" if names else text
+
+
+def _sandbox_dropped(data: dict[str, Any]) -> str:
+    rows = data.get("dropped") or data.get("files") or []
+    return f"{data.get('total', len(rows))} files"
+
+
+def _sandbox_channels(data: dict[str, Any]) -> str:
+    channels = data.get("channels") or []
+    return _names(channels) or "none"
+
+
+def _pcap(data: dict[str, Any]) -> str:
+    if data.get("empty"):
+        return "empty capture"
+    return _short(
+        str(data.get("summary") or "").splitlines()[0] if data.get("summary") else "recorded"
+    )
+
+
+def _function_matches(data: dict[str, Any]) -> str:
+    rows = [r for r in (data.get("matches") or []) if isinstance(r, dict)]
+    families = sorted({str(r.get("family") or "") for r in rows if r.get("family")})
+    text = f"{len(rows)} shared function hashes"
+    return f"{text} (families {_names(families)})" if families else text
+
+
+def _reputation_facts(entry: LedgerEntry) -> str:
+    """What the reputation service said, as counts and labels.
+
+    VirusTotal's answer is read for its engine counts and its popular threat
+    labels; the threat-intel sidecar answers in prose and the first sentence
+    of that is the fact. Neither is graded here.
+    """
+    service = "VirusTotal" if entry.server == "virustotal" else str(entry.server or "reputation")
+    data = entry.structured if isinstance(entry.structured, dict) else None
+    if data is not None:
+        stats = _find_key(data, "last_analysis_stats")
+        if isinstance(stats, dict):
+            total = sum(int(v) for v in stats.values() if isinstance(v, int))
+            parts = [f"{service} {int(stats.get('malicious') or 0)}/{total} malicious"]
+            labels: list[str] = []
+            classification = _find_key(data, "popular_threat_classification")
+            if isinstance(classification, dict):
+                label = classification.get("suggested_threat_label")
+                if label:
+                    labels.append(str(label))
+                for key in ("popular_threat_name", "popular_threat_category"):
+                    for row in classification.get(key) or []:
+                        value = row.get("value") if isinstance(row, dict) else row
+                        if value and str(value) not in labels:
+                            labels.append(str(value))
+            if labels:
+                parts.append(f"labels {_names(labels)}")
+            return ", ".join(parts)
+    count = malicious_count(entry.output)
+    text = _short(entry.output)
+    return f"{service} {count} malicious ({text})" if count is not None else f"{service}: {text}"
+
+
+def _find_key(value: Any, key: str) -> Any:
+    if isinstance(value, dict):
+        if key in value:
+            return value[key]
+        for child in value.values():
+            found = _find_key(child, key)
+            if found is not None:
+                return found
+    elif isinstance(value, list):
+        for child in value:
+            found = _find_key(child, key)
+            if found is not None:
+                return found
+    return None
+
+
+_GROUP_LABELS: dict[str, str] = {
+    "identify_file": "identity",
+    "hashes": "hashes",
+    "signing_info": "signature",
+    "pe_info": "pe",
+    "elf_info": "elf",
+    "macho_info": "mach-o",
+    "apk_info": "apk",
+    "document_info": "document",
+    "archive_list": "archive",
+    "strings": "strings",
+    "iocs_from_file": "iocs",
+    "yara_scan": "yara",
+    "capa": "capa",
+    "sigma_match_sandbox": "sigma",
+    "api_capability": "api catalogue",
+    "lolbin_lookup": "lolbin",
+    "sandbox_processes": "sandbox processes",
+    "sandbox_network": "sandbox network",
+    "sandbox_signatures": "sandbox signatures",
+    "sandbox_dropped_files": "sandbox dropped files",
+    "sandbox_channels": "sandbox channels",
+    "pcap_summary": "pcap",
+    "reputation": "reputation",
+    "get_file_report": "reputation",
+    "check_hash": "reputation",
+    "function_matches": "function matches",
+}
+
+_RENDERERS: dict[str, Callable[[dict[str, Any]], str]] = {
+    "identify_file": _identity,
+    "hashes": _hashes,
+    "signing_info": _signature,
+    "pe_info": _pe,
+    "elf_info": _elf,
+    "macho_info": _macho,
+    "apk_info": _apk,
+    "document_info": _document,
+    "archive_list": _archive,
+    "strings": _strings,
+    "iocs_from_file": _iocs,
+    "yara_scan": _yara,
+    "capa": _capa,
+    "sigma_match_sandbox": _sigma,
+    "api_capability": _api_capability,
+    "lolbin_lookup": _lolbin,
+    "sandbox_processes": _sandbox_processes,
+    "sandbox_network": _sandbox_network,
+    "sandbox_signatures": _sandbox_signatures,
+    "sandbox_dropped_files": _sandbox_dropped,
+    "sandbox_channels": _sandbox_channels,
+    "pcap_summary": _pcap,
+    "function_matches": _function_matches,
+}
