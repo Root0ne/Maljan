@@ -199,13 +199,21 @@ def build_entry(
 ) -> LedgerEntry:
     """One entry, with the output trimmed and parsed the same way every time.
 
+    ``structured`` is parsed from the whole result and ``output`` is the text
+    cut at ``max_chars``: the cut is for what a model reads, and a reader of
+    the record — corroboration, the projections, the evidence sections — needs
+    the result the tool gave, not the first six thousand characters of it.
+    What bounds the stored size is the per-agent evidence byte budget
+    (``apply_budget``).
+
     ``repeated_of`` names the earlier call this one repeats. Such an entry
     carries the note the model was given rather than a tool result, so it is
     never parsed into ``structured``: nothing downstream should read a
     reference to another entry as data.
     """
     safe_args = dict(args) if isinstance(args, dict) else {}
-    text = trim_output(str(output or ""), max_chars)
+    full = str(output or "")
+    text = trim_output(full, max_chars)
     return LedgerEntry(
         id=entry_id,
         stage=stage,
@@ -217,12 +225,28 @@ def build_entry(
         ok=ok,
         error=error,
         output=text,
-        structured=None if repeated_of else parse_structured(text),
+        structured=None if repeated_of else parse_structured(full),
         repeated_of=repeated_of,
         started_at=started_at,
         duration_ms=max(0, int(duration_ms)),
         seq=seq,
     )
+
+
+def stored_bytes(entry: LedgerEntry) -> int:
+    """What the entry keeps: the full parsed result when there is one, else the text.
+
+    The text is a prefix of the result's JSON, so the larger of the two is the
+    size of what is stored, not their sum.
+    """
+    text = len(entry.output.encode("utf-8", errors="ignore"))
+    if entry.structured is None:
+        return text
+    try:
+        parsed = len(json.dumps(entry.structured, ensure_ascii=False).encode("utf-8"))
+    except (TypeError, ValueError):
+        return text
+    return max(text, parsed)
 
 
 def apply_budget(
@@ -244,7 +268,7 @@ def apply_budget(
     spent = max(0, already_spent)
     trimmed = 0
     for entry in entries:
-        size = len(entry.output.encode("utf-8", errors="ignore"))
+        size = stored_bytes(entry)
         if spent + size <= budget_bytes:
             spent += size
             continue
