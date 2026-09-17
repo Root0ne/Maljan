@@ -215,3 +215,45 @@ class TestTheVirustotalServer:
 
         assert result.ok is True
         assert _Handle.made[-1].config.url == "https://ai.virustotal.com/mcp"
+
+
+class _HandleWithManifest(_Handle):
+    """A server that also answers ``capabilities``, as the registry keeps it."""
+
+    async def aopen(self, job_id, **kw):
+        from maljan.tools.capabilities import ServerCapabilities
+
+        self.capabilities = ServerCapabilities.from_payload(
+            self.name,
+            {
+                "server": self.name,
+                "version": "1.0",
+                "tools": [
+                    {"name": "open_file", "available": True, "reason": None},
+                    {
+                        "name": "analyze",
+                        "available": False,
+                        "reason": "olefile is not installed",
+                        "remediation": "uv sync --extra tools",
+                    },
+                ],
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_the_probe_returns_the_manifest_and_counts_the_unavailable(monkeypatch):
+    monkeypatch.setattr("app.services.settings_probes.ServerHandle", _HandleWithManifest)
+    result = await probe_mcp({"name": "analysis", "entry": {"enabled": True, "command": "x"}})
+    assert result.ok is True
+    assert result.details is not None
+    manifest = result.details["capabilities"]
+    assert manifest["version"] == "1.0"
+    assert [c["name"] for c in manifest["tools"] if not c["available"]] == ["analyze"]
+    assert "1 unavailable on this host" in result.detail
+
+
+@pytest.mark.asyncio
+async def test_a_server_without_a_manifest_has_no_details():
+    result = await probe_mcp({"name": "r2custom", "entry": {"enabled": True, "command": "r2mcp"}})
+    assert result.ok is True and result.details is None

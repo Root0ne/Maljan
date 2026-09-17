@@ -392,7 +392,17 @@ def _detach_cleanup(coro: Any, label: str) -> None:
 
 
 async def handshake_tools(config: MCPServerConfig, name: str) -> list[str]:
+    """Attach ``config`` long enough to read its tool names, then let go."""
+    names, _capabilities = await handshake(config, name)
+    return names
+
+
+async def handshake(config: MCPServerConfig, name: str) -> tuple[list[str], dict[str, Any] | None]:
     """Attach ``config`` long enough to read its manifest, then let go.
+
+    Returns the tool names and, when the server offers ``capabilities``, that
+    manifest as a plain dict — which tools are available on the server's host
+    and why the others are not — so the console can say so before a run.
 
     The only stdio handshake in the project besides a job's own: it is
     ``ServerHandle``, so a server that answers here answers the same way in a
@@ -413,11 +423,13 @@ async def handshake_tools(config: MCPServerConfig, name: str) -> list[str]:
     """
     handle = ServerHandle(name, config)
 
-    async def _run() -> list[str]:
+    async def _run() -> tuple[list[str], dict[str, Any] | None]:
         await handle.aopen(f"probe-{name}")
-        return handle.all_tool_names()
+        capabilities = getattr(handle, "capabilities", None)
+        to_dict = getattr(capabilities, "to_dict", None)
+        return handle.all_tool_names(), (to_dict() if callable(to_dict) else None)
 
-    task: asyncio.Task[list[str]] = asyncio.ensure_future(_run())
+    task: asyncio.Task[tuple[list[str], dict[str, Any] | None]] = asyncio.ensure_future(_run())
     done, _pending = await asyncio.wait({task}, timeout=PROBE_BUDGET_SECONDS)
     if task not in done:
         # Ask it to stop, but do not wait for that to finish here — that wait
@@ -469,7 +481,7 @@ async def probe_mcp(v: dict[str, Any]) -> ProbeResult:
     if name == virustotal.SERVER_KEY and not config.auth_token.get_secret_value():
         return ProbeResult(False, _ms(t0), virustotal.NO_TOKEN_DETAIL)
     try:
-        names = await handshake_tools(config, name)
+        names, capabilities = await handshake(config, name)
     except TimeoutError:
         return ProbeResult(False, _ms(t0), f"no MCP handshake within {PROBE_BUDGET_SECONDS:.0f} s")
     except FileNotFoundError as exc:
@@ -477,7 +489,16 @@ async def probe_mcp(v: dict[str, Any]) -> ProbeResult:
     except Exception as exc:  # noqa: BLE001 — reported to the operator, never raised
         return ProbeResult(False, _ms(t0), f"{type(exc).__name__}: {exc}")
     listed = ", ".join(names[:8]) + ("…" if len(names) > 8 else "")
-    return ProbeResult(True, _ms(t0), f"{len(names)} tools: {listed}", None, names)
+    detail = f"{len(names)} tools: {listed}"
+    details: dict[str, Any] | None = None
+    if capabilities is not None:
+        unavailable = [
+            cell for cell in capabilities.get("tools", []) if not cell.get("available", True)
+        ]
+        if unavailable:
+            detail += f"; {len(unavailable)} unavailable on this host"
+        details = {"capabilities": capabilities}
+    return ProbeResult(True, _ms(t0), detail, None, names, details)
 
 
 # settings_service.py's mask for a stored secret the editor never receives in

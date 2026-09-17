@@ -1335,6 +1335,43 @@ def make_join_node(stage: Any, container: ServiceContainer, finishes: tuple[str,
     return node_fn
 
 
+def note_unavailable_tools(container: ServiceContainer, agent: Any) -> list[str]:
+    """Record, once, each bound tool the server's manifest says cannot answer here.
+
+    Read at stage start from the capability manifests the registry kept when
+    it attached the servers, so an operator sees ``document_info`` is missing
+    its library before the analyst spends a step discovering it. The reason
+    is ``server.<key>.<tool>_unavailable(<why>)`` with the remedy after it; it
+    goes on the registry's list, which the judge reads into the run summary,
+    and is written there once however many agents bind the tool.
+    """
+    from maljan.agents.tool_pinning import server_of
+
+    registry = getattr(container, "_server_registry_cache", None)
+    if registry is None:
+        return []
+    by_server: dict[str, list[str]] = {}
+    for tool in list(getattr(agent, "tools", None) or []):
+        key = server_of(tool)
+        if key:
+            by_server.setdefault(key, []).append(str(getattr(tool, "name", "")))
+    noted: list[str] = []
+    for key, names in by_server.items():
+        try:
+            manifest = registry.get(key).capabilities
+        except Exception:  # noqa: BLE001 — a server that is gone has no manifest
+            continue
+        if manifest is None:
+            continue
+        for missing in manifest.unavailable(names):
+            reason = missing.degradation_reason
+            noted.append(reason)
+            if reason not in registry.degradation_reasons:
+                registry.degradation_reasons.append(reason)
+                logger.info("stage start: %s", reason)
+    return noted
+
+
 def make_stage_agent_node(
     stage: Any,
     agent_name: str,
@@ -1431,6 +1468,7 @@ def make_stage_agent_node(
             agent = container.get_agent(agent_name)
             bound_agent = agent
             role = container.agent_role(agent_name)
+            note_unavailable_tools(container, agent)
 
             agent.pipeline_stage = stage.key
             # What the pipeline established before this analyst, and the run

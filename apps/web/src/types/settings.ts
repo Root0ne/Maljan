@@ -253,6 +253,26 @@ export interface ImportRequest {
   values: Record<string, unknown>;
 }
 
+/** One tool of a server's capability manifest: what it needs on the server's
+ *  host and whether it is there. `without` names what the tool still does
+ *  when its dependency is missing. */
+export interface CapabilityCell {
+  name: string;
+  optional_dependency: string | null;
+  available: boolean;
+  reason: string | null;
+  timeout_s: number | null;
+  remediation?: string;
+  without?: string;
+}
+
+/** A server's `capabilities()` answer, computed on its host when it started. */
+export interface CapabilityManifest {
+  server: string;
+  version: string;
+  tools: CapabilityCell[];
+}
+
 export interface ProbeResult {
   ok: boolean;
   latency_ms: number;
@@ -260,8 +280,19 @@ export interface ProbeResult {
   models: string[] | null;
   /** The probed server's whole manifest, for the allow-list tick boxes. */
   tools: string[] | null;
-  /** Probe-specific structured facts; the agent probe fills this in. */
-  details: AgentProbeDetails | Record<string, unknown> | null;
+  /** Probe-specific structured facts; the agent probe fills this in, and an
+   *  MCP probe of a server that offers `capabilities` puts the manifest under
+   *  `capabilities`. */
+  details: AgentProbeDetails | { capabilities: CapabilityManifest } | Record<string, unknown> | null;
+}
+
+/** The unavailable tools of a probe result, or none when the server offers no
+ *  manifest. */
+export function unavailableTools(result: ProbeResult | null | undefined): CapabilityCell[] {
+  const details = result?.details as { capabilities?: CapabilityManifest } | null | undefined;
+  const cells = details?.capabilities?.tools;
+  if (!Array.isArray(cells)) return [];
+  return cells.filter((cell) => cell && cell.available === false);
 }
 
 /** What `POST /settings/virustotal/register` answers with. The token never

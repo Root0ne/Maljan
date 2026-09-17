@@ -4,6 +4,7 @@ import { useState } from "react";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import type { CatalogEntry, McpServerEntry, ProbeResult, SettingValue } from "@/types/settings";
+import { unavailableTools } from "@/types/settings";
 import Dot from "./Dot";
 import { deepEqual, mapKeyError, putEntry, removeEntry } from "./mapEditorHelpers";
 import SecretField, { type SecretStatus } from "./SecretField";
@@ -293,6 +294,21 @@ export function ServerDetail({
         >
           {result.ok ? "ok" : "failed"} · {result.latency_ms} ms · {result.detail}
         </p>
+      )}
+      {/* What the server cannot do on its host, said before any run: each
+          tool the manifest marks unavailable, with the reason and the remedy. */}
+      {result && result !== "running" && unavailableTools(result).length > 0 && (
+        <ul className="text-[11px] text-text-secondary space-y-0.5" aria-label="unavailable tools">
+          {unavailableTools(result).map((cell) => (
+            <li key={cell.name}>
+              <span className="font-mono text-status-orange">{cell.name}</span>
+              {" — "}
+              {cell.reason ?? "unavailable"}
+              {cell.without ? ` (still answers ${cell.without})` : ""}
+              {cell.remediation ? `; ${cell.remediation}` : ""}
+            </li>
+          ))}
+        </ul>
       )}
       {detailError && (
         <p className="text-[11px] text-status-red" role="alert">

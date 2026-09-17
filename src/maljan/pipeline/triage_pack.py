@@ -110,6 +110,7 @@ def failure_reason(tool: str) -> str:
 ESSENTIAL_TOOLS: frozenset[str] = frozenset({"identify_file", "hashes", "pack"})
 
 _REASON_RE = re.compile(r"^triage\.(?P<tool>.+)_failed$")
+_UNAVAILABLE_RE = re.compile(r"^server\.[^.]+\.[^.(]+_unavailable\(")
 
 
 def is_pack_reason(reason: str) -> bool:
@@ -123,6 +124,17 @@ def degrades_run(reason: str) -> bool:
     return bool(match and match.group("tool") in ESSENTIAL_TOOLS)
 
 
+def is_unavailable_tool_reason(reason: str) -> bool:
+    """Whether ``reason`` says one tool of a server is missing on its host.
+
+    ``server.<key>.<tool>_unavailable(<why>)`` is recorded at stage start from
+    the server's capability manifest. Like an optional tool of the pack that
+    failed, it is an absence the reader is told about, not a reason to call
+    the whole run degraded: the server attached and every other tool answered.
+    """
+    return bool(_UNAVAILABLE_RE.match(str(reason or "")))
+
+
 def run_is_degraded(reasons: Sequence[str]) -> bool:
     """Whether a run's degradation reasons make it degraded.
 
@@ -131,7 +143,10 @@ def run_is_degraded(reasons: Sequence[str]) -> bool:
     that ran out of budget is an absence the judge is told about, not a
     degraded run.
     """
-    return any(degrades_run(reason) if is_pack_reason(reason) else True for reason in reasons or [])
+    return any(
+        degrades_run(reason) if is_pack_reason(reason) else not is_unavailable_tool_reason(reason)
+        for reason in reasons or []
+    )
 
 
 # The reputation tools, whichever server answered: their failure is one
