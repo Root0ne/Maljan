@@ -1,60 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect } from "react";
+import { useParams, useRouter } from "next/navigation";
 
-import AgentsPanel from "@/components/analysis/AgentsPanel";
-import PipelinePanel from "@/components/analysis/PipelinePanel";
-import TimelinePanel from "@/components/analysis/TimelinePanel";
-import TranscriptView from "./TranscriptView";
+/* The run is one conversation now, live and replayed by the same view, so
+ * this route has nothing of its own left to draw. It stays so a bookmarked or
+ * linked URL lands on the tab that answers what it used to answer. */
+export default function ProcessRedirect() {
+  const router = useRouter();
+  const params = useParams();
+  const id = params.id as string;
 
-/**
- * Unified "Process" tab.
- *
- * AGENTS, PIPELINE and TIMELINE all describe the same thing — how the
- * multi-agent run produced the verdict — and read the same post-analysis data
- * (agent_findings, negotiation_log). They are merged here under one tab with
- * switchable sub-views so the advanced tab bar isn't crowded.
- *
- * TRANSCRIPT is the default: the other three summarise and chart the run,
- * which only helps once you already know what was said. Reading the exchange
- * comes first, and it is the same component the LIVE tab uses while the
- * pipeline is still running.
- */
-type SubView = "transcript" | "agents" | "pipeline" | "timeline";
-
-const SUBVIEWS: { key: SubView; label: string; hint: string }[] = [
-  { key: "transcript", label: "Transcript", hint: "What each agent reported, in order" },
-  { key: "agents", label: "Agents", hint: "Per-agent findings summary" },
-  { key: "pipeline", label: "Pipeline", hint: "Execution flow & negotiation" },
-  { key: "timeline", label: "Timeline", hint: "Confidence convergence & debate" },
-];
-
-export default function ProcessTab() {
-  const [view, setView] = useState<SubView>("transcript");
+  useEffect(() => {
+    if (id) router.replace(`/analysis/${id}/conversation`);
+  }, [id, router]);
 
   return (
-    <div className="space-y-4">
-      <div className="flex gap-1 flex-wrap">
-        {SUBVIEWS.map((s) => (
-          <button
-            key={s.key}
-            onClick={() => setView(s.key)}
-            title={s.hint}
-            className={`text-[11px] uppercase tracking-wider px-3 py-1 rounded border transition-colors ${
-              view === s.key
-                ? "border-accent text-accent"
-                : "border-border text-text-secondary hover:text-text-primary"
-            }`}
-          >
-            {s.label}
-          </button>
-        ))}
-      </div>
-
-      {view === "transcript" && <TranscriptView />}
-      {view === "agents" && <AgentsPanel />}
-      {view === "pipeline" && <PipelinePanel />}
-      {view === "timeline" && <TimelinePanel />}
+    <div className="p-4 text-sm text-text-secondary">
+      Redirecting to the CONVERSATION tab&hellip;
     </div>
   );
 }

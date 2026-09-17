@@ -5,31 +5,33 @@ import { usePathname, useParams } from "next/navigation";
 import { useEffect, useRef, useState, createContext, useContext } from "react";
 import { api } from "@/lib/api";
 import type { ReportDetailDTO, JobDTO } from "@/lib/api";
-import { useWebSocket } from "@/lib/useWebSocket";
+import PipelineStrip from "@/components/analysis/PipelineStrip";
+import {
+  hydrateRunTranscript,
+  setRunRoster,
+  setRunStoredStages,
+} from "@/lib/runStore";
+import { useRun } from "@/lib/useRun";
 import { formatDateTime, formatDuration } from "@/lib/report-utils";
 import { verdictBucket, verdictLabel } from "@/lib/verdict";
 import { getErrorMessage, isApiStatus } from "@/lib/errors";
 import type { VerdictBucket } from "@/lib/verdict";
-import type { WSEvent } from "@/types";
 
 /* ── Report Context (shared with child tabs) ─────────── */
 interface ReportCtx {
   report: ReportDetailDTO | null;
   job: JobDTO | null;
   loading: boolean;
-  /* Live pipeline events. The layout already holds the only WebSocket on this
-   * page; sharing them means a child tab can show a run in progress without
-   * opening a second socket. Necessary because a running job has events and no
-   * persisted report at all — the transcript would otherwise be empty for the
-   * entire duration of every analysis. */
-  events: WSEvent[];
 }
 
+/* The run's events are deliberately absent here. They live in the run store,
+ * keyed by job id, where they survive a route change and a second reader —
+ * a tab that needs them subscribes with `useRun` rather than being handed a
+ * copy that dies with this layout. */
 const ReportContext = createContext<ReportCtx>({
   report: null,
   job: null,
   loading: true,
-  events: [],
 });
 export function useReport() {
   return useContext(ReportContext);
@@ -74,12 +76,13 @@ interface TabDef {
   key: string;
   label: string;
   group: "overview" | "analysis" | "intel" | "advanced";
-  // LIVE is only meaningful while the job runs.
-  liveOnly?: boolean;
 }
 
 const TABS: TabDef[] = [
   { key: "", label: "SUMMARY", group: "overview" },
+  // The run as it happens and as it happened: one route for both, which is
+  // what replaced the old LIVE and PROCESS pair.
+  { key: "/conversation", label: "CONVERSATION", group: "overview" },
   { key: "/identity", label: "IDENTITY", group: "overview" },
   { key: "/static", label: "STATIC", group: "analysis" },
   { key: "/dynamic", label: "DYNAMIC", group: "analysis" },
@@ -91,13 +94,9 @@ const TABS: TabDef[] = [
   // STIX export bundle in as a third section.
   { key: "/detection", label: "DETECTION", group: "intel" },
   { key: "/defense", label: "DEFENSE", group: "intel" },
-  // AGENTS + PIPELINE + TIMELINE merged into one PROCESS tab.
-  { key: "/process", label: "PROCESS", group: "advanced" },
-  // The ledger every other tab cites. Its own tab rather than a section of
-  // PROCESS: a citation chip anywhere in the report links straight to a row.
+  // The ledger every other tab cites. A citation chip anywhere in the report
+  // links straight to one of its rows.
   { key: "/evidence", label: "EVIDENCE", group: "advanced" },
-  // LIVE shown only while the job is running (see filter below).
-  { key: "/live", label: "LIVE", group: "advanced", liveOnly: true },
 ];
 
 const TAB_GROUP_ORDER: TabDef["group"][] = ["overview", "analysis", "intel", "advanced"];
@@ -182,17 +181,23 @@ export default function AnalysisLayout({
     return () => { cancelled = true; };
   }, [id]);
 
-  /* WS listener — react to enrichment_complete (and late completed) without
-   * waiting for polling to come back. */
-  /* No socket for a job the API has already said does not exist: the page used
-   * to retry the handshake five times against a confirmed 404. The socket also
-   * waits for that first answer rather than dialling on mount, which is the
-   * only way "the job exists" can be known before the dial. */
-  const { events } = useWebSocket(loading || notFound ? null : id);
-  const lastWsCursor = useRef(0);
+  /* The run's feed, from the store that owns it.
+   *
+   * Nothing is subscribed for a job the API has already said does not exist:
+   * the page used to retry the handshake five times against a confirmed 404.
+   * The subscription also waits for that first answer rather than dialling on
+   * mount, which is the only way "the job exists" can be known before the
+   * dial. */
+  const run = useRun(loading || notFound ? null : id);
+  const events = run.events;
+
+  /* What the layout itself needs from the feed: a report to refetch when
+   * enrichment lands or when the run finishes, without waiting for the poll
+   * to come back round. */
+  const lastEventCursor = useRef(0);
   useEffect(() => {
-    if (events.length <= lastWsCursor.current) return;
-    for (let i = lastWsCursor.current; i < events.length; i++) {
+    if (events.length <= lastEventCursor.current) return;
+    for (let i = lastEventCursor.current; i < events.length; i++) {
       const e = events[i];
       if (e.type === "enrichment_complete" || e.type === "completed") {
         refetchRef.current?.();
@@ -202,8 +207,24 @@ export default function AnalysisLayout({
         }
       }
     }
-    lastWsCursor.current = events.length;
+    lastEventCursor.current = events.length;
   }, [events]);
+
+  /* Everything the store cannot learn from the feed alone: the roster a job
+   * carries for a reader who opens it after the fact, the stage rollup that
+   * knows about stages the run has not reached, and the recorded conversation
+   * of a run whose feed predates the event recording. */
+  useEffect(() => {
+    if (job?.roster) setRunRoster(id, job.roster);
+  }, [id, job?.roster]);
+
+  useEffect(() => {
+    setRunStoredStages(id, report?.run_summary?.stages ?? null);
+  }, [id, report?.run_summary?.stages]);
+
+  useEffect(() => {
+    hydrateRunTranscript(id, report?.transcript);
+  }, [id, report?.transcript]);
 
   /* Derive header data strictly from real API data — no mock fallback */
   const verdict = verdictBucket(report?.verdict);
@@ -265,7 +286,7 @@ export default function AnalysisLayout({
   }
 
   return (
-    <ReportContext.Provider value={{ report, job, loading, events }}>
+    <ReportContext.Provider value={{ report, job, loading }}>
       <div>
         {!apiAvailable && !loading && (
           <div role="alert" className="mb-4 p-2.5 text-xs text-status-orange bg-status-orange/10 border border-status-orange/20 rounded">
@@ -353,6 +374,9 @@ export default function AnalysisLayout({
                   {analyzedAt}
                 </div>
               </div>
+
+              {/* The shape of the run, in the one place every tab can see it. */}
+              <PipelineStrip stages={run.stages} />
             </div>
           </div>
         </div>
@@ -360,13 +384,7 @@ export default function AnalysisLayout({
         {/* Tab Bar — grouped by section with thin separators */}
         <div className="flex flex-wrap items-end border-b border-border mb-4">
           {TAB_GROUP_ORDER.map((group, gi) => {
-            const groupTabs = TABS.filter(
-              (t) =>
-                t.group === group &&
-                (!t.liveOnly ||
-                  job?.status === "running" ||
-                  job?.status === "pending"),
-            );
+            const groupTabs = TABS.filter((t) => t.group === group);
             if (groupTabs.length === 0) return null;
             return (
               <div key={group} className="flex items-end">

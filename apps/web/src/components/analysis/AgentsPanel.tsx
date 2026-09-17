@@ -1,8 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useParams } from "next/navigation";
 import { useReport } from "@/app/(app)/analysis/[id]/layout";
 import { api } from "@/lib/api";
+import { toolCallsFromFeed } from "@/lib/conversation";
+import { useRun } from "@/lib/useRun";
 import type { AgentFindingStatus } from "@/types";
 import { toolCallsByAgent } from "./stageTimeline";
 
@@ -69,34 +72,41 @@ function confidenceToSignal(confidence: number): string {
 }
 
 export default function AgentsTab() {
+  const params = useParams();
   const { report, job, loading } = useReport();
-  const jobId = report?.job_id ?? "";
-  // How many calls each agent made. Read from the ledger rather than from the
-  // findings, because a finding says what an agent concluded and the ledger
-  // says what it did — an agent with a confident conclusion and no calls
-  // behind it is exactly the thing worth seeing here.
-  const [toolCalls, setToolCalls] = useState<Record<string, number>>({});
+  const jobId = (typeof params?.id === "string" ? params.id : report?.job_id) ?? "";
+  /* How many calls each agent made. Counted from the run's own feed, which
+   * the store already holds for this job — an agent with a confident
+   * conclusion and no calls behind it is exactly the thing worth seeing here,
+   * and asking the ledger for it again would be a second read of a fact the
+   * page has. The ledger answers for a run recorded before the feed carried
+   * tool calls, and only then. */
+  const run = useRun(jobId || null);
+  const fromFeed = toolCallsFromFeed(run.events);
+  const [fromLedger, setFromLedger] = useState<Record<string, number>>({});
   const [ledgerTotal, setLedgerTotal] = useState(0);
+  const feedHasCalls = Object.keys(fromFeed).length > 0;
+  const toolCalls = feedHasCalls ? fromFeed : fromLedger;
 
   useEffect(() => {
-    if (!jobId) return;
+    if (!jobId || feedHasCalls) return;
     let cancelled = false;
     api
       .getJobEvidence(jobId, { pageSize: LEDGER_SAMPLE })
       .then((response) => {
         if (cancelled) return;
-        setToolCalls(toolCallsByAgent(response.entries));
+        setFromLedger(toolCallsByAgent(response.entries));
         setLedgerTotal(response.total);
       })
       .catch(() => {
-        // The findings table is the point of this tab; a ledger the browser
-        // could not read leaves the column empty rather than the tab broken.
-        if (!cancelled) setToolCalls({});
+        // The findings table is the point of this panel; a ledger the browser
+        // could not read leaves the column empty rather than the panel broken.
+        if (!cancelled) setFromLedger({});
       });
     return () => {
       cancelled = true;
     };
-  }, [jobId]);
+  }, [jobId, feedHasCalls]);
 
   if (loading) {
     return <div className="p-4 text-sm text-text-secondary">Loading...</div>;
@@ -145,7 +155,7 @@ export default function AgentsTab() {
   });
 
   const completedCount = agents.filter((a) => a.status === "complete").length;
-  const partialLedger = ledgerTotal > LEDGER_SAMPLE;
+  const partialLedger = !feedHasCalls && ledgerTotal > LEDGER_SAMPLE;
 
   // Which stage ran each agent, from the run's own stage rollup. An agent the
   // rollup does not mention is grouped on its own rather than filed under a
@@ -270,7 +280,9 @@ export default function AgentsTab() {
                       title={
                         partialLedger
                           ? `Counted over the first ${LEDGER_SAMPLE} of ${ledgerTotal} ledger entries`
-                          : "Tool calls this agent made, from the evidence ledger"
+                          : feedHasCalls
+                            ? "Tool calls this agent made, from the run's event feed"
+                            : "Tool calls this agent made, from the evidence ledger"
                       }
                     >
                       {toolCalls[agent.name] ?? 0}
