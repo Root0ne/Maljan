@@ -526,8 +526,10 @@ async def test_agent(
     """Resolve one agent definition and report what it would get.
 
     Takes staged values so an operator can resolve a definition they have not
-    saved yet — the same contract every other probe has. No LLM call is made:
-    this reports the model that *would* be used, never a completion.
+    saved yet — the same contract every other probe has. It ends by asking that
+    agent's model for one short answer at the endpoint the agent would call,
+    because the row this files is what refuses a job later and a gate has to
+    rest on a call that was made.
 
     What it reached is written down against the endpoint and the model it
     named, so submitting a job can refuse a team whose agents name a model

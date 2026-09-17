@@ -633,12 +633,12 @@ async def run_mcp_probe(server: str, values: dict[str, Any], stored: dict[str, A
 async def probe_agent(v: dict[str, Any]) -> ProbeResult:
     """Resolve one agent definition against the given settings, without running it.
 
-    A dry resolution: the prompt is assembled, the tool servers are opened on
-    the ordinary probe budget and their manifests read, and the LLM is
-    *named* rather than built — the whole point of a probe is that an operator
-    can see what an agent would get before paying for a job. ``aresolve_agent``
-    is the same function a run calls, so what this reports is what that run
-    receives.
+    The prompt is assembled, the tool servers are opened on the ordinary probe
+    budget and their manifests read, and the model is asked for one short
+    answer at the endpoint this agent would call. ``aresolve_agent`` is the
+    same function a run calls, so what this reports is what that run receives;
+    the completion is there because submitting a job is refused on the
+    strength of this probe, and a gate has to rest on a call that was made.
     """
     import hashlib
 
