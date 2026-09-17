@@ -439,6 +439,13 @@ change landed on `main`.
 
 ### Fixed
 
+- **The `readonly` role is documented as the label it is.** It is enforced
+  nowhere — no route distinguishes it from `analyst`, so such an account can
+  upload a sample, submit a job and cancel its own — and `docs/security.md` and
+  the model now say so instead of listing it beside the two roles that decide
+  something. It is not removed: a stored row carrying the value would not load
+  against an enum without it, and dropping it silently would widen those
+  accounts rather than narrow them.
 - **Three API responses that could carry a connection string.** The probe
   route's outer fence, the LTM purge's memory-store failure and the enrichment
   queue's 503 each answered with `f"{type(exc).__name__}: {exc}"`, and the
