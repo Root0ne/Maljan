@@ -17,7 +17,10 @@ a verdict and a report — and each stage runs the agents it names over the tool
 they are given: signature scanners, rule engines, binary and capture readers, a
 sandbox, an ATT&CK catalogue. A stage carries a condition, so a team applies to
 a sample rather than being written for one; a stage that declines says why. The
-output is a report against MITRE ATT&CK and a STIX 2.1 bundle.
+facts about a sample — what it is, its hashes and signature, what the rule
+engines and the reputation services say — are established by code before any
+agent starts and are cited by id; the decisions are the team's. The output is a
+report against MITRE ATT&CK and a STIX 2.1 bundle.
 
 The organising rule is that **the agent decides and the code says what is wrong
 with the decision.** Nothing rewrites a claim, a technique id, a confidence or

@@ -8,6 +8,16 @@ change landed on `main`.
 
 ### Added
 
+- **The ATT&CK platform map ships beside the id catalogue.**
+  `data/attck_platforms.json` carries, per technique, its domain and MITRE
+  platforms, written by `scripts/knowledge/prepare_attck_malware_fixtures.py`
+  from the same bundles as `data/attck_valid_ids.json`. `attck_loader.platforms_for`
+  answers from it and consults the cached bundles only for a real id the map
+  lacks; `tools.knowledge.attck_scope` gives a technique's domain and platforms
+  from the two vendored files alone, and `attck.platform_mismatch` asks it, so
+  a validation turn loads no STIX bundle and touches no network. A technique
+  whose only platform is `PRE` is exempt from the platform half of the check.
+  Both vendored files now come from ATT&CK 19.2.
 - **The triage pack: the deterministic facts exist before any analyst starts.**
   A new stage kind `triage` runs the tools in `src/maljan/tools` in-process
   over the sample and writes each result to the evidence ledger as an ordinary
@@ -287,6 +297,32 @@ change landed on `main`.
 
 ### Fixed
 
+- **Corroboration reads the ids capa and Sigma really write.** The extractor
+  behind `asserted_by` matched a whole string against `T1234`, so capa's
+  decorated `attck` strings and a Sigma match's `attack.t1055.012` tags never
+  counted and two of the four sources the table names could not appear in it.
+  One reader, `analysis.technique_ids`, takes the shapes as the tools emit
+  them, and the corroboration table, the persistence projection, the evidence
+  sections and the pack's capa line go through it. The Sigma ledger fixture
+  carried an invented `meta.technique_ids` key and now carries the `tags`
+  `sigma_match` writes.
+- **`api_capability` matches the import set as a whole.** Every rule in the
+  vendored API-to-technique map needs two or more APIs and the tool matched one
+  name at a time, so no rule could ever fire and the pack's entry listed no
+  technique on any sample. Each API's row now cites the rules the set clears
+  whose evidence includes it, with the APIs matched and the rule's floor.
+- **A corroboration row is read in one place, in either shape.** The CLI
+  counted a row's keys as its sources, and a summary stored before the two
+  lists crashed `to_markdown` and `to_dict` when the CLI rebuilt it directly;
+  `corroboration_row` normalises on construction and every reader goes through
+  it. From the same review: the judge node records its own unchecked
+  attack-patterns under `validation.not_run`; the index warmer checks and sets
+  under one lock and remembers a failed build; a reputation lookup that was
+  skipped renders as not done and one that broke as failed; the alignment gate
+  ranks the claim's own words; the judge's platform message drops its
+  duplicated subject; the report's corroboration table sits under its own
+  heading; a node-level test shows a capa failure alone leaves a run
+  undegraded.
 - **Carved payloads land under the sidecar's staging directory, never where the
   model says.** `carve_payloads` took a model-chosen `out_dir`, so a tool could
   write live malware anywhere the analysis sidecar could write; a live run
@@ -507,6 +543,17 @@ change landed on `main`.
 
 ### Changed
 
+- **The report's capability profile is the pack's `api_capability` entry,
+  cited by id.** `StaticAnalysis.api_capabilities` is counted from the entry's
+  rows and `api_capabilities_evidence_ids` names the entry; the Markdown
+  profile line, the console and the narrative prompt show the id. A technique
+  rule from that entry is a row under the derived-technique table only when
+  the APIs it matched clear its floor, with the entry id beside it, and the
+  YARA draft takes its import strings from those rows as bare names. capa's
+  namespaces are no longer counted as import capabilities; its technique hits
+  stay. The family-feature profile carries the import names in the binary's
+  order; a fingerprint catalogue built against the old vocabulary needs a
+  rebuild with `scripts/knowledge/build_family_feature_kb.py`.
 - **A debate hands over to exactly one node, and the settings say so.** A team
   whose debate feeds two stages — or one parallel analysis stage with two
   agents, which is two nodes — is refused when it is saved, per stage, instead
@@ -711,6 +758,21 @@ change landed on `main`.
 
 ### Removed
 
+- **The in-process case-prior retrieval in the judge node.** The block that
+  retrieved ATT&CK techniques from similar prior cases inside the judge node,
+  the `attck_case_candidates` state channel and `FamilyAttribution` field, the
+  advisory table in the report and on the console, and the row helper only it
+  used. Prior cases remain reachable through the knowledge tool
+  `similar_cases`, which an analyst calls and cites.
+- **Import labelling in the extractor.** `pe_extractor.classify_import`, the
+  hand-picked suspicious-import table, the ELF list, `ImportRow.is_suspicious`
+  and `ImportRow.category`, the extractor-built capability counter, the
+  Markdown "Suspicious Imports" table, the narrative prompt's suspicious-import
+  list and the console's "suspicious only" filter. A report written while the
+  labels existed still loads: `ImportRow` and `FamilyAttribution` ignore the
+  retired keys. Settings `preprocessing.use_api_behaviour_map` and
+  `preprocessing.api_behaviour_map_path` go with them; the knowledge tool
+  reads the catalogue directly.
 - **The three-layer TTP cascade** (`analysis/ttp_cascade.py`). It weighted every
   claim by a table of per-layer constants and cross-layer multipliers nobody
   could derive from anything, handed the judge one number per technique, and the

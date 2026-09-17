@@ -204,10 +204,17 @@ Each sandbox is asked for the options its format needs:
 
 The technique universe spans all three ATT&CK domains. `data/attck_valid_ids.json`
 carries one sorted id list per domain (`enterprise`, `mobile`, `ics`), and
+`data/attck_platforms.json` carries, per technique id, its domain and MITRE
+platforms. The two files come from the same bundles and the same script, so
+they never disagree about which domain an id belongs to. Between them they
+answer the validity and the domain-and-platform halves of the technique check
+with no network and no bundle load (`tools.knowledge.attck_scope`);
 `src/maljan/memory/attck_loader.py` downloads and caches each domain's STIX
-bundle under `~/.cache/maljan/attck/` (or `MALJAN_ATTCK_CACHE`). Enterprise is
-required; Mobile and ICS are additive, and a box that can reach neither keeps
-working with a narrower catalog. Regenerate the id lists with
+bundle under `~/.cache/maljan/attck/` (or `MALJAN_ATTCK_CACHE`) for the names,
+the tactics and the index, and consults it for platforms only when a real id is
+missing from the vendored map. Enterprise is required; Mobile and ICS are
+additive, and a box that can reach neither keeps working with a narrower
+catalog. Regenerate both files with
 `uv run python scripts/knowledge/prepare_attck_malware_fixtures.py`.
 
 ### Rule corpora

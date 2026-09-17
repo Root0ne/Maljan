@@ -206,6 +206,20 @@ Four parts, all in `pipeline/validation.py` and `tools/knowledge.py`, none of
 them a rewrite: the check produces violations and annotations, and the id an
 analyst wrote stays the id in the report.
 
+This is a change of method from the tree the paper was evaluated on (tag
+`paper-2026-09`). That tree carried a re-grounding pass,
+`ATTCKValidator.correct_isr_reports`, which replaced an analyst's technique id
+with the alignment index's best candidate whenever the gate disagreed, so the
+identifiers in a report were valid because the pass had made them so. Here
+identifier validity holds by construction in a narrower sense — every id is
+checked against the vendored catalogue, and one the catalogue lacks is
+reported, flagged `technique_id_valid=False` and kept as written — and the
+technique choice is the model's, made under deterministic challenges: an id
+the catalogue does not have, a domain or platform the sample cannot have, an
+alignment the index disputes, and a corroboration count that says who else
+named the technique. The gate is one of those challenges; it no longer
+decides.
+
 1. **Validity** (`attck.unknown_id`, exact). Every id against the vendored
    catalogue. When the catalogue cannot be read the check says so instead of
    answering "nothing unknown": `run_summary.validation.not_run` lists
