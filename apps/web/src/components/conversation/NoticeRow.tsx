@@ -30,9 +30,11 @@ export default function NoticeRow({ item }: { item: ConversationItem }) {
           <>
             <span className="font-mono">{item.code}</span>
             {item.retryIndex ? <span>retry {item.retryIndex}</span> : null}
-            {item.displayName && <span className="text-text-secondary">{item.displayName}</span>}
           </>
         )}
+        {/* A notice still comes from somewhere, and which validator or which
+          * watcher raised it is the first thing a reader wants. */}
+        {item.displayName && <span className="text-text-primary">{item.displayName}</span>}
         <span className="text-text-secondary">{item.text}</span>
       </div>
     </div>

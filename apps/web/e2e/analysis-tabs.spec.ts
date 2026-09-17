@@ -4,7 +4,7 @@ import { COMPLETED_JOB, JOB_ID, REPORT, REPORT_ID } from "./report-fixture";
 /**
  * Every analysis tab, loaded once against one complete report.
  *
- * Only `/process` had coverage; the other eleven had never been rendered by a
+ * Only the process tab had coverage; the other eleven had never been rendered by a
  * test. That matters more here than on a list page, because there is **no error
  * boundary anywhere in `src/`** — a TypeError in one of these tabs is not a
  * caught error state, it takes the route down. The Summary tab in particular
@@ -61,7 +61,16 @@ const TABS: Tab[] = [
       ).toBeVisible();
     },
   },
-  { path: "/process", expect: heading(/Agent Transcript/i) },
+  {
+    path: "/conversation",
+    // No heading of its own: the tab bar names it, and the stream is the
+    // content. The recorded conversation is what a completed run draws.
+    expect: async (page) => {
+      await expect(page.getByTestId("conversation-stream")).toContainText(
+        "Final verdict: Malicious.",
+      );
+    },
+  },
 ];
 
 test.describe("Analysis tabs", () => {
@@ -245,37 +254,16 @@ test.describe("Analysis tabs", () => {
     await expect(page.getByText("no process activity recorded")).toBeVisible();
   });
 
-  test("/live renders the running view", async ({ sessionPage: page }) => {
-    /* Not in the table above because it is the one tab that needs the opposite
-     * job state: on a completed run it deliberately says there is nothing live
-     * to show. It also mounts a second WebSocket of its own on top of the
-     * layout's, which is why the tab walk uses /process instead. */
-    await page.route(`**/api/v1/jobs/${JOB_ID}`, (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ ...COMPLETED_JOB, status: "running", completed_at: null }),
-      })
-    );
-    await page.route(`**/api/v1/reports/job/${JOB_ID}`, (route) =>
-      route.fulfill({ status: 404, body: JSON.stringify({ detail: "Not found" }) })
-    );
-
-    await page.goto(`/analysis/${JOB_ID}/live`);
-
-    await expect(page.getByRole("heading", { name: "Agent Status" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Event Log" })).toBeVisible();
-    await expect(
-      page.getByText(/Analysis already completed/)
-    ).toHaveCount(0);
-    await expect(alerts(page)).toHaveCount(0);
-  });
-
-  test("the LIVE tab is offered only while the job is running", async ({
+  test("the conversation is offered whatever state the job is in", async ({
     sessionPage: page,
   }) => {
+    /* The tab bar used to change shape when a run finished: LIVE was offered
+     * only while it ran, so leaving a completed run and coming back to it
+     * landed somewhere structurally different. One tab answers both now. */
     await page.goto(`/analysis/${JOB_ID}`);
+    await expect(page.getByRole("link", { name: /^CONVERSATION$/i })).toBeVisible();
     await expect(page.getByRole("link", { name: /^LIVE$/i })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: /^PROCESS$/i })).toHaveCount(0);
 
     await page.route(`**/api/v1/jobs/${JOB_ID}`, (route) =>
       route.fulfill({
@@ -288,21 +276,23 @@ test.describe("Analysis tabs", () => {
       route.fulfill({ status: 404, body: JSON.stringify({ detail: "Not found" }) })
     );
     await page.goto(`/analysis/${JOB_ID}`);
-    await expect(page.getByRole("link", { name: /^LIVE$/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /^CONVERSATION$/i })).toBeVisible();
   });
 
-  /* The 2026-07-26 audit folded seven routes into three. They are kept as
-   * redirect stubs precisely so bookmarks and links in already-issued reports do
-   * not 404 — which is only true for as long as something checks.
+  /* Twelve routes folded into five. They are kept as redirect stubs precisely
+   * so bookmarks and links in already-issued reports do not 404 — which is
+   * only true for as long as something checks.
    *
    * One test per redirect rather than a loop: seven navigations in a single test
    * overran the 30 s test timeout under `next dev`, which reads as a broken
    * redirect when it is only a slow first compile. */
   const REDIRECTS: [string, string][] = [
     ["/ttps", "/capabilities"],
-    ["/agents", "/process"],
-    ["/pipeline", "/process"],
-    ["/timeline", "/process"],
+    ["/agents", "/conversation"],
+    ["/pipeline", "/conversation"],
+    ["/timeline", "/conversation"],
+    ["/live", "/conversation"],
+    ["/process", "/conversation"],
     ["/rules", "/detection"],
     ["/signatures", "/detection"],
     ["/stix", "/detection"],

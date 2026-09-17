@@ -59,6 +59,11 @@ export interface RunEvent {
   seq?: number;
   /** Arrival order, which is what orders a run that has no numbers. */
   order: number;
+  /** What the store sorts on: the publisher's number when there is one, and
+   *  otherwise a position just past the last number held when this arrived —
+   *  so an unnumbered line stays where it turned up rather than being swept
+   *  to the end of a run that has numbers elsewhere. */
+  sortKey: number;
 }
 
 export interface RunState {
@@ -248,11 +253,6 @@ function identity(event: RunEvent): string {
   return `k${event.type}|${event.ts}|${JSON.stringify(event.data)}`;
 }
 
-/** Events without a number sort after every numbered one, in arrival order. */
-function sortKey(event: RunEvent): number {
-  return event.seq ?? Number.MAX_SAFE_INTEGER;
-}
-
 /* ── Writing ───────────────────────────────────────────── */
 
 /**
@@ -265,22 +265,26 @@ export function applyRunEvents(jobId: string, incoming: IncomingEvent[]): void {
   const entry = entryFor(jobId);
   const added: RunEvent[] = [];
 
+  let anchor = entry.state.lastSeq;
   for (const raw of incoming) {
     if (!raw || typeof raw.type !== "string") continue;
     if (raw.type === "heartbeat" || raw.type === "pong") continue;
     const data = (raw.data ?? {}) as Record<string, unknown>;
+    const seq = asSeq(data.seq);
     const event: RunEvent = {
       type: raw.type,
       data,
       ts: typeof raw.ts === "string" ? raw.ts : "",
       stream_id: raw.stream_id,
-      seq: asSeq(data.seq),
+      seq,
       order: entry.arrivals,
+      sortKey: seq ?? anchor + (entry.arrivals + 1) / 1e9,
     };
     const key = identity(event);
     if (entry.seen.has(key)) continue;
     entry.seen.add(key);
     entry.arrivals += 1;
+    if (seq !== undefined && seq > anchor) anchor = seq;
     added.push(event);
   }
 
@@ -291,13 +295,13 @@ export function applyRunEvents(jobId: string, incoming: IncomingEvent[]): void {
    * a live event after everything already held — at the cost of one compare. */
   let ordered = true;
   for (let i = 1; i < events.length; i += 1) {
-    if (sortKey(events[i]) < sortKey(events[i - 1])) {
+    if (events[i].sortKey < events[i - 1].sortKey) {
       ordered = false;
       break;
     }
   }
   if (!ordered) {
-    events = [...events].sort((a, b) => sortKey(a) - sortKey(b) || a.order - b.order);
+    events = [...events].sort((a, b) => a.sortKey - b.sortKey || a.order - b.order);
   }
 
   let lastSeq = entry.state.lastSeq;

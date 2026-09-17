@@ -140,14 +140,15 @@ test("a section covering a typed panel replaces it rather than repeating it", as
   await expect(page.getByRole("heading", { name: /^Imports \(/ })).toHaveCount(0);
 });
 
-test("the process tab draws the run as its stages", async ({ authenticatedPage: page }) => {
-  await page.goto(`/analysis/${JOB_ID}/process`);
-  await page.getByRole("button", { name: "Pipeline" }).click();
-  await expect(page.getByRole("heading", { name: "Stages" })).toBeVisible();
-  await expect(page.getByText("analysis", { exact: true }).first()).toBeVisible();
+test("the analysis header draws the run as its stages", async ({ authenticatedPage: page }) => {
+  // On the header, so the shape of the run is the same fact on every tab.
+  await page.goto(`/analysis/${JOB_ID}/conversation`);
+  const strip = page.getByTestId("pipeline-strip");
+  await expect(strip).toContainText("analysis");
   // The stage that declined names the condition it failed, rather than being
-  // left out of the list.
+  // left out of the strip.
+  await expect(strip).toContainText("debate");
   await expect(
-    page.getByText("condition not met: stages.analysis.claim_count > 3", { exact: true })
+    page.getByTitle("condition not met: stages.analysis.claim_count > 3")
   ).toBeVisible();
 });

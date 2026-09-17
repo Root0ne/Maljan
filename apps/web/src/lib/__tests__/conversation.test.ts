@@ -23,12 +23,12 @@ import type { JobRoster } from "@/types";
 let seq = 0;
 function event(type: string, data: Record<string, unknown> = {}): RunEvent {
   seq += 1;
-  return { type, data, ts: "2026-09-17T10:00:00Z", seq, order: seq };
+  return { type, data, ts: "2026-09-17T10:00:00Z", seq, order: seq, sortKey: seq };
 }
 
 function unnumbered(type: string, data: Record<string, unknown> = {}): RunEvent {
   seq += 1;
-  return { type, data, ts: "", order: seq };
+  return { type, data, ts: "", order: seq, sortKey: seq / 1e9 };
 }
 
 const ROSTER: JobRoster = {
@@ -265,6 +265,15 @@ describe("participants", () => {
 
     expect(participants.map((p) => p.key)).toContain("mehmet");
     expect(participants.find((p) => p.key === "mehmet")?.name).toBe("Mehmet");
+  });
+
+  it("leaves a speaker that already reads as a name alone", () => {
+    const { participants } = buildConversation(
+      [event("agent_message", { speaker: "Sycophancy detector", role: "system", kind: "system", text: "flagged" })],
+      null,
+    );
+
+    expect(participants[0].name).toBe("Sycophancy detector");
   });
 
   it("falls back to a readable name when nothing carries a label", () => {

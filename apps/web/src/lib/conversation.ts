@@ -197,13 +197,19 @@ export function groupOf(kind: ItemKind): ItemGroup {
   return "says";
 }
 
-/** A registry key made readable, for a speaker no roster names. */
+/**
+ * A registry key made readable, for a speaker no roster names.
+ *
+ * Only a key is rewritten. A speaker that already reads as a name — anything
+ * carrying a capital or a space, which is how the pipeline's own
+ * "Sycophancy detector" and "Mediator" arrive — is left exactly as it was
+ * written: re-casing somebody's name is not a formatting improvement.
+ */
 export function prettyName(key: string): string {
   const trimmed = key.trim();
   if (!trimmed) return "Unknown";
-  return trimmed
-    .replace(/[_-]+/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
+  if (/[A-Z\s]/.test(trimmed)) return trimmed;
+  return trimmed.replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function text(value: unknown): string {

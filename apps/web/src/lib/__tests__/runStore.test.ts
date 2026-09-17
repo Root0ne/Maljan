@@ -108,13 +108,22 @@ describe("ordering and identity", () => {
     expect(getRun(JOB).events).toHaveLength(2);
   });
 
-  it("holds a numbered and an unnumbered event together without losing either", () => {
+  it("leaves an unnumbered line where it arrived among numbered ones", () => {
+    /* The stored conversation of an older run numbers its rows from zero, and
+     * zero means "no number" — so the first line of such a run arrives without
+     * one while the rest carry the publisher's. It belongs at the front, where
+     * it happened, not at the end. */
     applyRunEvents(JOB, [
-      event("agent_message", { text: "no number" }),
-      event("agent_message", { seq: 2, text: "numbered" }),
+      event("agent_message", { seq: 0, text: "opening" }),
+      event("agent_message", { seq: 1, text: "answer" }),
+      event("agent_message", { seq: 2, text: "verdict" }),
     ]);
 
-    expect(getRun(JOB).events.map((e) => e.data.text)).toEqual(["numbered", "no number"]);
+    expect(getRun(JOB).events.map((e) => e.data.text)).toEqual([
+      "opening",
+      "answer",
+      "verdict",
+    ]);
   });
 
   it("drops the heartbeat, which is not part of the feed", () => {
