@@ -14,7 +14,9 @@ the ledger and the log, behind the report's ownership check.
 
 from __future__ import annotations
 
+import ast
 import asyncio
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -68,6 +70,141 @@ def _assert_nothing_leaked(recorder: _Recorder) -> None:
     assert SECRET not in said, said
     assert "/home/operator" not in said, said
     assert "llm.internal" not in said, said
+
+
+class TestOnlyTheSafeHelperReachesAPublishSite:
+    """The two descriptions of a failure are told apart by name, and checked.
+
+    ``base_agent.describe_exception_for_log`` keeps the exception's message,
+    because a log line on the operator's own host is what the message is for.
+    ``events.describe_exception`` never does. The two used to share a name, and
+    the wrong import fails *open* — a verbose event rather than a broken one,
+    which nothing else in the suite would notice. So the names differ and this
+    walks the source to say that no publish site calls the log one.
+    """
+
+    # What puts text on the wire or into the transcript: the event
+    # constructors, the sink itself, and the argument a mediator's round is
+    # recorded as.
+    PUBLISHERS = frozenset(
+        {
+            "emit",
+            "emit_agent_message",
+            "emit_agent_message_delta",
+            "emit_budget_tick",
+            "emit_judge_question",
+            "emit_roster",
+            "emit_stage_ended_at_cap",
+            "emit_tool_call_finished",
+            "emit_tool_call_started",
+            "emit_validation_feedback",
+            "AgentArgument",
+        }
+    )
+    UNSAFE = "describe_exception_for_log"
+
+    @staticmethod
+    def _calls(node: ast.AST) -> set[str]:
+        """Every function name called anywhere inside ``node``."""
+        names: set[str] = set()
+        for child in ast.walk(node):
+            if isinstance(child, ast.Call):
+                func = child.func
+                names.add(func.id if isinstance(func, ast.Name) else getattr(func, "attr", ""))
+        return names
+
+    @staticmethod
+    def _names(node: ast.AST) -> set[str]:
+        """Every local this expression reads."""
+        return {child.id for child in ast.walk(node) if isinstance(child, ast.Name)}
+
+    def _offenders(self, tree: ast.AST) -> list[int]:
+        """The publish sites in ``tree`` whose text describes a failure for the log.
+
+        A node builds its line into a local as often as it writes it inline —
+        ``crashed_text = f"…{describe_exception(e)}"`` and then
+        ``text=crashed_text`` — so the locals that were built from the unsafe
+        helper are collected first and a publisher reading one of them counts
+        the same as a publisher calling it.
+        """
+        tainted = {
+            target.id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Assign) and self.UNSAFE in self._calls(node.value)
+            for target in node.targets
+            if isinstance(target, ast.Name)
+        }
+        found: list[int] = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+            if name not in self.PUBLISHERS:
+                continue
+            for argument in [*node.args, *(kw.value for kw in node.keywords)]:
+                if self.UNSAFE in self._calls(argument) or tainted & self._names(argument):
+                    found.append(node.lineno)
+        return found
+
+    def _publishers_in(self, tree: ast.AST) -> int:
+        return sum(
+            1
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and (
+                node.func.id if isinstance(node.func, ast.Name) else getattr(node.func, "attr", "")
+            )
+            in self.PUBLISHERS
+        )
+
+    def test_no_publish_site_describes_an_exception_for_the_log(self) -> None:
+        source_root = Path(ev.__file__).resolve().parents[1]
+        offenders: list[str] = []
+        publishes = 0
+
+        for path in sorted(source_root.rglob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            publishes += self._publishers_in(tree)
+            offenders += [f"{path.name}:{line}" for line in self._offenders(tree)]
+
+        assert publishes > 20, "the walk found no publish sites, so it proves nothing"
+        assert offenders == [], offenders
+
+    def test_the_walk_sees_a_line_built_into_a_local(self) -> None:
+        """The check that the check works: the shape four of the six sites use."""
+        written_inline = ast.parse(
+            "emit_agent_message(sink, text=f'x {describe_exception_for_log(e)}')"
+        )
+        built_first = ast.parse(
+            "def n():\n"
+            "    said = f'x {describe_exception_for_log(e)}'\n"
+            "    emit_agent_message(sink, text=said)\n"
+        )
+        safe = ast.parse(
+            "def n():\n"
+            "    said = f'x {describe_exception(e)}'\n"
+            "    logger.error('%s', describe_exception_for_log(e))\n"
+            "    emit_agent_message(sink, text=said)\n"
+        )
+
+        assert self._offenders(written_inline) == [1]
+        assert self._offenders(built_first) == [3]
+        assert self._offenders(safe) == []
+
+    def test_the_two_helpers_do_not_share_a_name(self) -> None:
+        from maljan.agents import base_agent
+
+        assert not hasattr(base_agent, "describe_exception")
+        assert hasattr(base_agent, self.UNSAFE)
+
+    def test_they_disagree_about_the_message_on_purpose(self) -> None:
+        from maljan.agents.base_agent import describe_exception_for_log
+
+        said = describe_exception_for_log(ValueError(LOUD))
+
+        assert SECRET in said, "the log helper is the one that keeps the detail"
+        assert SECRET not in ev.describe_exception(ValueError(LOUD))
 
 
 class TestTheHelper:

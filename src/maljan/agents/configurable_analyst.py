@@ -23,9 +23,14 @@ from dataclasses import dataclass
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from maljan.agents.base_agent import BaseAnalyst, describe_exception, revision_messages
+from maljan.agents.base_agent import (
+    BaseAnalyst,
+    describe_exception_for_log,
+    revision_messages,
+)
 from maljan.agents.composition import ResolvedAgent
 from maljan.agents.prompt_fragments import CLAIM_FORMAT_FRAGMENT
+from maljan.pipeline.events import describe_exception
 from maljan.schemas.isr_models import AgentISR
 
 # Appended to the agent's own prompt on the ISR paths. The operator writes what
@@ -146,8 +151,14 @@ class ConfigurableAnalyst(BaseAnalyst):
         try:
             return _Run(text=str(self.execute_tool_loop(prompt_messages)), degraded=False)
         except Exception as exc:  # noqa: BLE001 — a custom analyst never fails a job
+            # The reason travels: it is appended to the run's degradation
+            # reasons and returned as this agent's report, which is published.
+            # So it says the kind of failure rather than what the failure said,
+            # and the log line beside it keeps the message.
             reason = f"agent '{self.name}': {describe_exception(exc)}"
-            self.logger.warning("%s failed during %s: %s", self.name, what, reason)
+            self.logger.warning(
+                "%s failed during %s: %s", self.name, what, describe_exception_for_log(exc)
+            )
             if reason not in self.degradation_reasons:
                 self.degradation_reasons.append(reason)
             return _Run(text=f"{_WARN_PREFIX} {reason}", degraded=True)

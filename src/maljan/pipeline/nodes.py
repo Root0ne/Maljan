@@ -2208,8 +2208,7 @@ def make_negotiation_node(
         # fanned out to every browser and kept in a table. Imported before the
         # ``try``, so the handler still has both names when the failure is the
         # first line inside it.
-        from maljan.agents.base_agent import describe_exception as exception_detail
-        from maljan.agents.base_agent import run_on_agent_loop
+        from maljan.agents.base_agent import describe_exception_for_log, run_on_agent_loop
 
         try:
             judge = container.get_judge_agent(role="expert")
@@ -2318,7 +2317,7 @@ def make_negotiation_node(
             # scoreable result instead of aborting an entire batch on one blip.
             label = "timed out" if isinstance(e, TimeoutError) else "failed"
             status = "timeout" if isinstance(e, TimeoutError) else "failed"
-            logger.error("Negotiation %s: %s", label, exception_detail(e))
+            logger.error("Negotiation %s: %s", label, describe_exception_for_log(e))
             emit_agent_message(
                 container.event_sink,
                 speaker="Mediator",

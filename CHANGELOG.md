@@ -545,9 +545,13 @@ change landed on `main`.
   base URL configured with userinfo carries the credential into the text. All
   five now go through `events.describe_exception`, which says the exception's
   class (qualified with its module where the bare name is ambiguous), the
-  remedy when the failure carries one, and nothing else. The operator's log
-  still gets the message, and the ledger still keeps the verbatim text behind
-  the report's ownership check.
+  remedy when the failure carries one, and nothing else. So does the reason a
+  custom analyst records when its loop fails, which is both a degradation
+  reason on the run summary and that agent's own report. The operator's log
+  still gets the message — through `base_agent.describe_exception_for_log`,
+  renamed so the two cannot be confused, since the wrong import fails open —
+  and the ledger still keeps the verbatim text behind the report's ownership
+  check.
 - **Three runs the scrubber ended in the middle of a value.** A UNC path
   carrying credentials (`\\user:pass@server\share\x`) travelled whole,
   because the marker did not admit `:` or `@` in its host; a URL whose
