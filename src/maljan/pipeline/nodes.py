@@ -52,9 +52,12 @@ from maljan.pipeline.triage_pack import (
     PIPELINE,
     CapaSettings,
     PackInputs,
+    degrades_run,
     failure_reason,
+    is_pack_reason,
     pack_block,
     pack_entries,
+    reason_sentence,
     run_pack,
 )
 from maljan.pipeline.validation import (
@@ -65,7 +68,7 @@ from maljan.pipeline.validation import (
     validation_metrics,
 )
 from maljan.reporting.ledger_report import section_is_grounded
-from maljan.schemas.evidence import LedgerEntry
+from maljan.schemas.evidence import LedgerEntry, apply_budget
 from maljan.schemas.isr_models import AgentISR
 from maljan.schemas.stix_models import Bundle
 
@@ -475,24 +478,42 @@ def _augment_static_chunks_with_path(
 REPUTATION_TIMEOUT_S = 60.0
 
 
-def _reputation_lookup(container: ServiceContainer, stage: Any) -> Any:
+def _withheld_servers(container: ServiceContainer) -> set[str] | None:
+    """The servers the active team withholds, or ``None`` when that cannot be read.
+
+    ``None`` rather than an empty set on a failure to read: a lookup that
+    sends the sample hash to a service the team meant to keep it from is the
+    disclosure the setting exists to prevent, so not knowing is treated as
+    withheld.
+    """
+    try:
+        return {str(name) for name in container.active_profile().exclude_servers}
+    except Exception as exc:  # noqa: BLE001 — unreadable exclusions withhold everything
+        logger.warning("triage pack: the team's exclude_servers could not be read (%s).", exc)
+        return None
+
+
+def _reputation_lookup(container: ServiceContainer, sha256: str) -> Any:
     """The pack's reputation step, bound to this job's servers and settings.
 
     Returns a callable the pack invokes with its recorder. The callable makes
     at most one call: ``get_file_report`` on VirusTotal's own server when it
     is enabled, else ``check_hash`` on the threat-intel sidecar when it is, and
-    otherwise writes the entry that says no reputation server is enabled. The
-    call goes through the tool server registry exactly as an agent's does and
-    is recorded under that server, so a run's ledger says which service was
-    asked, not only that something was.
+    otherwise writes the entry that says why there was none — no server
+    enabled, the setting off, the team withholding the server, no hash to ask
+    about. The call goes through the tool server registry exactly as an
+    agent's does and is recorded under that server, so a run's ledger says
+    which service was asked, not only that something was. A server the active
+    team lists in ``exclude_servers`` is never asked, for the same reason its
+    agents never see it.
     """
     from maljan.core import virustotal
-    from maljan.core.config import ToolRef
+    from maljan.core.config import ALL_SERVERS, ToolRef
 
     def _skip(recorder: Any, why: str) -> Any:
         return recorder.record(
             tool="reputation",
-            args={"sha256": container.sample_sha256},
+            args={"sha256": sha256},
             server=PIPELINE,
             output=why,
             ok=False,
@@ -503,20 +524,35 @@ def _reputation_lookup(container: ServiceContainer, stage: Any) -> Any:
     def lookup(recorder: Any) -> Any:
         if str(container.config.triage.reputation) == "off":
             return _skip(recorder, "core.triage.reputation is off; no lookup was made")
+        if not sha256:
+            return _skip(recorder, "the run has no sha256 to look up; no lookup was made")
         servers = container.config.mcp.servers
-        chosen: tuple[str, str, dict[str, Any]] | None = None
-        sha256 = container.sample_sha256
-        if getattr(servers.get(virustotal.SERVER_KEY), "enabled", False):
-            chosen = (virustotal.SERVER_KEY, "get_file_report", {"hash": sha256})
-        elif getattr(servers.get("threatintel"), "enabled", False):
-            chosen = ("threatintel", "check_hash", {"file_hash": sha256})
-        if chosen is None:
+        candidates: list[tuple[str, str, dict[str, Any]]] = [
+            (virustotal.SERVER_KEY, "get_file_report", {"hash": sha256}),
+            ("threatintel", "check_hash", {"file_hash": sha256}),
+        ]
+        enabled = [c for c in candidates if getattr(servers.get(c[0]), "enabled", False)]
+        if not enabled:
             return _skip(
                 recorder,
                 f"no reputation server is enabled ({virustotal.SERVER_KEY}, threatintel); "
                 "no lookup was made",
             )
-        server, tool_name, args = chosen
+        withheld = _withheld_servers(container)
+        usable = (
+            []
+            if withheld is None or ALL_SERVERS in withheld
+            else [c for c in enabled if c[0] not in withheld]
+        )
+        if not usable:
+            names = ", ".join(c[0] for c in enabled)
+            return _skip(
+                recorder,
+                f"{names} withheld by the team's exclude_servers; no lookup was made"
+                if withheld is not None
+                else f"{names} withheld because the team's exclusions could not be read",
+            )
+        server, tool_name, args = usable[0]
         from maljan.agents.base_agent import run_coro_blocking
 
         started, wall_clock = time.monotonic(), time.time()
@@ -694,6 +730,7 @@ def make_triage_node(
             ),
             sandbox_report=state.get("sandbox_report"),
             evidence_budget_bytes=int(getattr(cfg.reporting, "evidence_budget_bytes", 0) or 0),
+            budget_s=float(cfg.triage.budget_seconds),
         )
 
         def _elapsed_ms() -> int:
@@ -704,19 +741,23 @@ def make_triage_node(
                 run_pack,
                 recorder,
                 inputs,
-                reputation=_reputation_lookup(container, stage),
+                reputation=_reputation_lookup(container, inputs.sha256),
                 function_matches=_function_matches_step(container, state),
             )
         except Exception as exc:  # noqa: BLE001 — the pack never fails the job
             logger.warning(
                 "triage pack failed (%s: %s); the run goes on without it.", type(exc).__name__, exc
             )
+            # What was written before the crash is evidence and is kept, under
+            # the same budget a finished pack gets; the crash is the one
+            # failure this path counts.
             entries = list(recorder.entries)
+            apply_budget(entries, inputs.evidence_budget_bytes)
             update: dict[str, Any] = {
                 "triage_facts": {
                     **TriageFacts().to_dict(),
                     "entries": len(entries),
-                    "failed": len(entries),
+                    "failed": 1,
                     "duration_ms": _elapsed_ms(),
                     "degradation_reasons": [failure_reason("pack")],
                 },
@@ -746,9 +787,6 @@ def make_triage_node(
         }
         if result.entries:
             update["evidence_ledger"] = [e.model_dump(mode="json") for e in result.entries]
-            update["tool_evidence"] = {
-                PIPELINE: [e.to_captured().model_dump() for e in result.entries]
-            }
         if stage.key in finishes:
             announce_finished(container, state, (stage.key,), extra=update.get("stage_results"))
         return update
@@ -2408,7 +2446,9 @@ def make_judge_node(
                         _anti_emu_hits.append(_hit_name)
             # What the triage pack could not establish comes first: those
             # reasons were recorded before any analyst ran, and the judge is
-            # the one node that assembles the run's list.
+            # the one node that assembles the run's list. They stay tokens
+            # here, for the run summary; the prompt below gets them as
+            # sentences.
             _triage_facts = dict(state.get("triage_facts") or {})
             _degradation_reasons: list[str] = [
                 str(reason) for reason in (_triage_facts.get("degradation_reasons") or [])
@@ -2479,21 +2519,36 @@ def make_judge_node(
                 _degradation_reasons.append(
                     f"sandbox detected anti-emulation behaviour: {_short}{_suffix}"
                 )
-            _degraded_mode = bool(_degradation_reasons)
+            # A pack tool that did not answer is an absence the judge is told
+            # about; only the identity tools, or the pack itself, failing makes
+            # the run degraded on their own. Everything that is not the pack's
+            # keeps the weight it always had.
+            _degraded_mode = any(
+                degrades_run(reason) if is_pack_reason(reason) else True
+                for reason in _degradation_reasons
+            )
             if _degraded_mode:
                 logger.warning("Degraded run detected (%s).", "; ".join(_degradation_reasons))
 
             # The degradation, said to the judge in the prompt. What used to
             # happen instead was a fixed ceiling applied to the finished number
             # in the report node, which told the reader the confidence was
-            # capped and told the judge nothing at all.
+            # capped and told the judge nothing at all. The pack's tokens are
+            # rendered as sentences here and stay tokens in the run summary.
             degradation_note = ""
             if _degradation_reasons:
+                _sentences = "; ".join(reason_sentence(r) for r in _degradation_reasons)
                 degradation_note = (
-                    "RUN QUALITY — this analysis is degraded because "
-                    + "; ".join(_degradation_reasons)
-                    + ". Weigh your confidence accordingly: a verdict drawn from thin "
-                    "evidence should say so in its numbers, not only in its prose."
+                    (
+                        f"RUN QUALITY — this analysis is degraded because {_sentences}. "
+                        "Weigh your confidence accordingly: a verdict drawn from thin "
+                        "evidence should say so in its numbers, not only in its prose."
+                    )
+                    if _degraded_mode
+                    else (
+                        f"RUN QUALITY — {_sentences}. The rest of the pack ran; read a "
+                        "missing tool as an absence of that evidence, not as a finding."
+                    )
                 )
 
             verdict = await judge.give_verdict(

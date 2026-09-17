@@ -17,7 +17,6 @@ import asyncio
 import zipfile
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -312,7 +311,7 @@ class TestTheReputationStep:
         result = run_pack(
             self._recorder(),
             _inputs(_write(tmp_path, "s.exe", _pe()), "pe"),
-            reputation=_reputation_lookup(container, MagicMock(key="triage_pack")),
+            reputation=_reputation_lookup(container, "b" * 64),
         )
         skipped = result.entries[-1]
         assert skipped.tool == "reputation"
@@ -330,7 +329,7 @@ class TestTheReputationStep:
         result = run_pack(
             self._recorder(),
             _inputs(_write(tmp_path, "s.exe", _pe()), "pe"),
-            reputation=_reputation_lookup(container, MagicMock(key="triage_pack")),
+            reputation=_reputation_lookup(container, "b" * 64),
         )
         assert "core.triage.reputation is off" in (result.entries[-1].error or "")
         assert result.failed == []
@@ -432,6 +431,10 @@ class TestTheFactsAConditionReads:
         (problem,) = validate_condition("triage.verdict")
         assert "triage has no field 'verdict'" in problem
         assert validate_condition("triage.yara_hits > 0") == []
+        # The count is there to be compared to a number, and a save-time dry
+        # run against ``None`` used to refuse exactly that.
+        assert validate_condition("triage.reputation_malicious > 5") == []
+        assert validate_condition("triage.reputation_malicious >= 1 and triage.yara_hits > 0") == []
         assert evaluate("triage.capa_hits >= 0", StageContext()) is True
 
 
@@ -506,7 +509,7 @@ class TestTheNode:
         assert [row["id"] for row in ledger][:2] == ["ev_0001", "ev_0002"]
         assert all(row["agent"] == PIPELINE and row["stage"] == "triage_pack" for row in ledger)
         assert ledger[-1]["ok"] is False
-        assert update["tool_evidence"][PIPELINE][0]["tool_name"] == "identify_file"
+        assert "tool_evidence" not in update
 
         facts = update["triage_facts"]
         assert facts["entries"] == 10
@@ -553,3 +556,132 @@ class TestTheNode:
         assert record["reason"] == "triage pack failed: RuntimeError: the pack itself broke"
         assert update["triage_facts"]["degradation_reasons"] == ["triage.pack_failed"]
         assert update["triage_facts"]["entries"] == 0
+        assert update["triage_facts"]["failed"] == 1
+
+
+class TestTheReputationLookupHonoursTheTeam:
+    def _run(self, settings: Settings, sha256: str = "b" * 64, tmp_path: Path | None = None):
+        container = ServiceContainer(settings, mock=True)
+        recorder = EvidenceRecorder(PIPELINE, counter=EvidenceCounter(), stage="triage_pack")
+        path = _write(tmp_path, "s.exe", _pe())
+        return run_pack(
+            recorder,
+            _inputs(path, "pe", sha256=sha256),
+            reputation=_reputation_lookup(container, sha256),
+        )
+
+    def test_a_team_that_withholds_every_server_gets_a_skip_that_says_so(
+        self, tmp_path: Path
+    ) -> None:
+        settings = Settings(_env_file=None)
+        settings.agents.profile = "measurement"
+        result = self._run(settings, tmp_path=tmp_path)
+        last = result.entries[-1]
+        assert last.tool == "reputation" and last.server == PIPELINE and last.ok is False
+        assert "withheld by the team's exclude_servers" in (last.error or "")
+        assert result.failed == []
+
+    def test_a_team_that_withholds_the_one_enabled_server_gets_the_same(
+        self, tmp_path: Path
+    ) -> None:
+        settings = Settings(
+            _env_file=None,
+            agents={
+                "profiles": {"quiet": {"analysts": ["static"], "exclude_servers": ["threatintel"]}},
+                "profile": "quiet",
+            },
+        )
+        settings.mcp.servers["virustotal"].enabled = False
+        result = self._run(settings, tmp_path=tmp_path)
+        assert "threatintel withheld by the team's exclude_servers" in (
+            result.entries[-1].error or ""
+        )
+
+    def test_no_sha256_means_no_lookup_and_a_reason(self, tmp_path: Path) -> None:
+        result = self._run(Settings(_env_file=None), sha256="", tmp_path=tmp_path)
+        assert "no sha256 to look up" in (result.entries[-1].error or "")
+        assert result.failed == []
+
+
+class TestThePackBudget:
+    def test_steps_after_the_budget_are_recorded_as_not_run(self, tmp_path: Path) -> None:
+        result = _pack(_write(tmp_path, "s.exe", _pe()), "pe", budget_s=1e-9)
+        tools = _tools(result)
+        assert tools[0] == "identify_file"
+        assert result.entries[0].ok is True
+        later = result.entries[1:]
+        assert later and all(entry.ok is False for entry in later)
+        assert all("budget of 0 s was spent" in (entry.error or "") for entry in later)
+        assert "hashes" in result.failed
+
+    def test_no_budget_means_every_step_runs(self, tmp_path: Path) -> None:
+        result = _pack(_write(tmp_path, "s.exe", _pe()), "pe", budget_s=0)
+        assert all(entry.ok for entry in result.entries)
+
+
+class TestAReasonBesideNothingIsAFailure:
+    def test_api_capability_with_no_catalogue_is_a_failed_entry(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from maljan.tools import knowledge
+
+        monkeypatch.setattr(
+            knowledge,
+            "api_capability",
+            lambda names, **_: {
+                "capabilities": [
+                    {
+                        "api": n,
+                        "category": None,
+                        "behaviours": [],
+                        "techniques": [],
+                        "catalog_flags": [],
+                    }
+                    for n in names
+                ],
+                "reason": "the API behaviour catalog is not readable at x",
+            },
+        )
+        result = _pack(_write(tmp_path, "s.exe", _pe()), "pe")
+        (lookup,) = [e for e in result.entries if e.tool == "api_capability"]
+        assert lookup.ok is False
+        assert "not readable" in (lookup.error or "")
+        assert "triage.api_capability_failed" in result.degradation_reasons
+
+    def test_a_function_match_store_that_answered_nothing_is_timed_and_failed(
+        self, tmp_path: Path
+    ) -> None:
+        import time as _time
+
+        def step():
+            _time.sleep(0.02)
+            return {"func_hashes": ["h"]}, {"matches": [], "reason": "the store is unavailable"}
+
+        recorder = EvidenceRecorder(PIPELINE, counter=EvidenceCounter(), stage="triage_pack")
+        result = run_pack(
+            recorder, _inputs(_write(tmp_path, "s.exe", _pe()), "pe"), function_matches=step
+        )
+        (entry,) = [e for e in result.entries if e.tool == "function_matches"]
+        assert entry.ok is False
+        assert entry.duration_ms >= 10
+        assert entry.args == {"func_hashes": ["h"]}
+
+
+class TestWhichPackFailuresDegradeTheRun:
+    def test_only_the_identity_tools_and_the_pack_itself_do(self) -> None:
+        from maljan.pipeline.triage_pack import degrades_run, is_pack_reason, reason_sentence
+
+        assert degrades_run("triage.identify_file_failed")
+        assert degrades_run("triage.hashes_failed")
+        assert degrades_run("triage.pack_failed")
+        for optional in (
+            "capa",
+            "yara_scan",
+            "sigma_match_sandbox",
+            "reputation",
+            "function_matches",
+        ):
+            assert not degrades_run(f"triage.{optional}_failed"), optional
+        assert is_pack_reason("triage.capa_failed") and not is_pack_reason("analyst failures: x")
+        assert reason_sentence("triage.capa_failed") == "the triage pack could not run capa"
+        assert reason_sentence("no sandbox report") == "no sandbox report"

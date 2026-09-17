@@ -949,6 +949,15 @@ ANNOTATIONS: dict[str, Annotation] = {
         ),
         "subgroup": "Triage pack",
     },
+    "triage.budget_seconds": {
+        "title": "Triage pack budget (seconds)",
+        "description": (
+            "How long the whole triage pack may take. capa and YARA carry their own "
+            "budgets; this one is checked between steps, and a step that would start "
+            "after it is spent is recorded as not run rather than started."
+        ),
+        "subgroup": "Triage pack",
+    },
     "react_agent_max_steps": {
         "title": "ReAct agent default max steps",
         "description": (

@@ -376,9 +376,11 @@ def validate_condition(expr: str) -> list[str]:
         return [str(exc)]
     # Parsing proves the grammar; a dry run against a dummy context proves the
     # names resolve and the comparisons are between comparable types, which is
-    # the other half of what an operator gets wrong.
+    # the other half of what an operator gets wrong. The dummy carries a
+    # reputation count, because ``None`` compares to nothing and the field is
+    # there to be compared to a number.
     try:
-        _resolve(tree, StageContext())
+        _resolve(tree, StageContext(triage=TriageFacts(reputation_malicious=0)))
     except ConditionError as exc:
         return [str(exc)]
     except Exception as exc:  # noqa: BLE001 — an unexpected failure is still the operator's

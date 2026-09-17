@@ -49,14 +49,18 @@ from maljan.schemas.evidence import LedgerEntry, apply_budget
 from maljan.tools import binary, identify, knowledge, pcap, rules, strings
 
 __all__ = [
+    "ESSENTIAL_TOOLS",
     "PACK_HEADING",
     "PIPELINE",
     "CapaSettings",
     "PackInputs",
     "PackResult",
     "ReputationLookup",
+    "degrades_run",
     "failure_reason",
+    "is_pack_reason",
     "malicious_count",
+    "reason_sentence",
     "pack_block",
     "pack_entries",
     "render_pack",
@@ -96,6 +100,43 @@ def failure_reason(tool: str) -> str:
     return f"triage.{tool}_failed"
 
 
+# The two tools whose failure leaves the run without its identity. Every other
+# tool in the pack is an optional source: a capa that ran out of budget or a
+# reputation server that did not answer is an absence the judge is told about,
+# not a reason to call the whole run degraded.
+ESSENTIAL_TOOLS: frozenset[str] = frozenset({"identify_file", "hashes", "pack"})
+
+_REASON_RE = re.compile(r"^triage\.(?P<tool>.+)_failed$")
+
+
+def is_pack_reason(reason: str) -> bool:
+    """Whether ``reason`` is one of the pack's ``triage.<tool>_failed`` tokens."""
+    return bool(_REASON_RE.match(str(reason or "")))
+
+
+def degrades_run(reason: str) -> bool:
+    """Whether one of the pack's reasons makes the run degraded on its own."""
+    match = _REASON_RE.match(str(reason or ""))
+    return bool(match and match.group("tool") in ESSENTIAL_TOOLS)
+
+
+def reason_sentence(reason: str) -> str:
+    """A pack reason as a sentence for a prompt; any other reason as it is.
+
+    The tokens stay in the run summary, where a consumer keys on them; the
+    judge reads prose.
+    """
+    match = _REASON_RE.match(str(reason or ""))
+    if not match:
+        return str(reason)
+    tool = match.group("tool")
+    if tool == "pack":
+        return "the triage pack itself failed before it finished"
+    if tool == "reputation":
+        return "the triage pack's reputation lookup did not answer"
+    return f"the triage pack could not run {tool}"
+
+
 @dataclass(frozen=True)
 class CapaSettings:
     """What ``capa`` is run with: the operator's rule sources and budget."""
@@ -108,7 +149,12 @@ class CapaSettings:
 
 @dataclass(frozen=True)
 class PackInputs:
-    """Everything the pack reads, gathered by the node so the pack itself is a function."""
+    """Everything the pack reads, gathered by the node so the pack itself is a function.
+
+    ``budget_s`` bounds the whole pack: a step that would start after the
+    budget is spent is recorded as not run rather than started. Zero means no
+    bound.
+    """
 
     sample_path: str
     sha256: str
@@ -117,6 +163,7 @@ class PackInputs:
     capa: CapaSettings
     sandbox_report: dict[str, Any] | None = None
     evidence_budget_bytes: int = 0
+    budget_s: float = 0.0
 
 
 # The one reputation call, made by the node through the tool server. It takes
@@ -178,21 +225,17 @@ def malicious_count(output: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
-def _stats_malicious(value: Any) -> int | None:
+# How deep a server's answer is walked for one key. A reputation answer nests
+# its facts a handful of levels down; a walk with no bound is a walk a hostile
+# answer decides the length of.
+_WALK_DEPTH = 8
+
+
+def _stats_malicious(value: Any, depth: int = _WALK_DEPTH) -> int | None:
     """``last_analysis_stats.malicious`` wherever it sits in a VirusTotal answer."""
-    if isinstance(value, dict):
-        stats = value.get("last_analysis_stats")
-        if isinstance(stats, dict) and isinstance(stats.get("malicious"), int):
-            return int(stats["malicious"])
-        for child in value.values():
-            found = _stats_malicious(child)
-            if found is not None:
-                return found
-    elif isinstance(value, list):
-        for child in value:
-            found = _stats_malicious(child)
-            if found is not None:
-                return found
+    stats = _find_key(value, "last_analysis_stats", depth)
+    if isinstance(stats, dict) and isinstance(stats.get("malicious"), int):
+        return int(stats["malicious"])
     return None
 
 
@@ -212,6 +255,8 @@ class _Pack:
         self.reputation = reputation
         self.function_matches = function_matches
         self.result = PackResult()
+        self.started = time.monotonic()
+        self.steps_run = 0
         self.has_signature = False
         self.yara_hits = 0
         self.capa_hits = 0
@@ -219,16 +264,51 @@ class _Pack:
 
     # -- recording --------------------------------------------------------
 
+    def _over_budget(self) -> float | None:
+        """The budget, when it is set and spent; ``None`` while a step may start.
+
+        Checked between steps, so the first step always runs: a budget exists
+        to stop a long pack from growing longer, not to record a pack that
+        never began.
+        """
+        budget = float(self.inputs.budget_s or 0)
+        if self.steps_run and budget > 0 and time.monotonic() - self.started > budget:
+            return budget
+        return None
+
     def record(
-        self, tool: str, args: dict[str, Any], call: Callable[[], Any]
+        self,
+        tool: str,
+        args: dict[str, Any],
+        call: Callable[[], Any],
+        *,
+        started: float | None = None,
     ) -> dict[str, Any] | None:
         """Run one tool, write its entry, and hand back its dict when it gave one.
 
         A tool that answers with an ``error`` key did not establish its fact,
         and is recorded as a failure exactly as one that raised: the output is
-        kept either way, because what the tool said is the evidence.
+        kept either way, because what the tool said is the evidence. A
+        ``reason`` beside no finding is read the same way, for the tools that
+        answer that shape. ``started`` is the clock a caller that already ran
+        the work hands in, so the entry's duration is the work's.
         """
-        started, wall_clock = time.monotonic(), time.time()
+        spent = self._over_budget()
+        if spent is not None:
+            message = f"not run: the pack's budget of {int(spent)} s was spent before this step"
+            entry = self.recorder.record(
+                tool=tool,
+                args=args,
+                server=PIPELINE,
+                output=message,
+                ok=False,
+                error=message,
+                started_at=time.time(),
+            )
+            self._failed(tool, entry)
+            return None
+        self.steps_run += 1
+        started, wall_clock = (started if started is not None else time.monotonic()), time.time()
         try:
             value = call()
         except Exception as exc:  # noqa: BLE001 — a failed tool is an entry, never a crash
@@ -246,6 +326,10 @@ class _Pack:
             self._failed(tool, entry)
             return None
         error = value.get("error") if isinstance(value, dict) else None
+        if not error and isinstance(value, dict) and value.get("reason"):
+            established = _ESTABLISHED.get(tool)
+            if established is not None and not established(value):
+                error = value.get("reason")
         entry = self.recorder.record(
             tool=tool,
             args=args,
@@ -420,6 +504,10 @@ class _Pack:
     def _function_matches(self) -> None:
         if self.function_matches is None:
             return
+        if self._over_budget() is not None:
+            self.record("function_matches", {"exclude_sample_id": self.inputs.sha256}, dict)
+            return
+        started = time.monotonic()
         try:
             args, value = self.function_matches()
         except Exception as exc:  # noqa: BLE001
@@ -432,12 +520,11 @@ class _Pack:
                 ok=False,
                 error=message,
                 started_at=time.time(),
+                duration_ms=int((time.monotonic() - started) * 1000),
             )
             self._failed("function_matches", entry)
             return
-        if "reason" in value and not value.get("matches"):
-            value = {**value, "error": value["reason"]}
-        self.record("function_matches", args, lambda: value)
+        self.record("function_matches", args, lambda: value, started=started)
 
 
 def run_pack(
@@ -948,20 +1035,34 @@ def _reputation_facts(entry: LedgerEntry) -> str:
     return f"{service} {count} malicious ({text})" if count is not None else f"{service}: {text}"
 
 
-def _find_key(value: Any, key: str) -> Any:
+def _find_key(value: Any, key: str, depth: int = _WALK_DEPTH) -> Any:
+    """The first value under ``key`` within ``depth`` levels, or ``None``."""
+    if depth <= 0:
+        return None
     if isinstance(value, dict):
         if key in value:
             return value[key]
         for child in value.values():
-            found = _find_key(child, key)
+            found = _find_key(child, key, depth - 1)
             if found is not None:
                 return found
     elif isinstance(value, list):
         for child in value:
-            found = _find_key(child, key)
+            found = _find_key(child, key, depth - 1)
             if found is not None:
                 return found
     return None
+
+
+# For the tools that answer ``reason`` beside their rows: whether the rows
+# establish anything. A ``reason`` beside nothing established is a failure.
+_ESTABLISHED: dict[str, Callable[[dict[str, Any]], bool]] = {
+    "function_matches": lambda value: bool(value.get("matches")),
+    "api_capability": lambda value: any(
+        isinstance(row, dict) and (row.get("category") or row.get("techniques"))
+        for row in value.get("capabilities") or []
+    ),
+}
 
 
 _GROUP_LABELS: dict[str, str] = {

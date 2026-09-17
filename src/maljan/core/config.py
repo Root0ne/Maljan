@@ -1159,6 +1159,31 @@ def stages_from_analysts(
 _DERIVED_FIELDS: tuple[str, ...] = ("mode", "debate")
 
 
+def _is_a_fixed_node_name(key: str) -> bool:
+    """Whether ``key`` would collide with a node the graph names itself.
+
+    A triage stage's node is its key; the judge, the report, the debate's two
+    nodes, every ``<agent>_analyst`` and every ``<stage>__join`` are names the
+    builder issues, and a stage that took one would break the build instead
+    of being refused at save time.
+    """
+    from maljan.pipeline.topology import (
+        JOIN_SUFFIX,
+        JUDGE_NODE,
+        NEGOTIATION_NODE,
+        REPORT_NODE,
+        REVISION_NODE,
+    )
+
+    return (
+        key in (JUDGE_NODE, REPORT_NODE, NEGOTIATION_NODE, REVISION_NODE)
+        or key.endswith("_analyst")
+        or key.endswith(JOIN_SUFFIX)
+        or key.endswith(f"__{NEGOTIATION_NODE}")
+        or key.endswith(f"__{REVISION_NODE}")
+    )
+
+
 def has_triage_stage(stages: list["StageDefinition"]) -> bool:
     """Whether a team runs the triage pack. Read off the kind, never the key."""
     return any(stage.kind == "triage" for stage in stages)
@@ -1324,6 +1349,11 @@ class ProfileDefinition(BaseModel):
                 raise ValueError(
                     f"stage {stage.key!r} is a triage stage and names an agent; the "
                     "pipeline runs it"
+                )
+            if stage.kind == "triage" and _is_a_fixed_node_name(stage.key):
+                raise ValueError(
+                    f"stage {stage.key!r} is a triage stage keyed like a graph node the "
+                    "pipeline names itself; choose another key"
                 )
             if stage.kind == "debate":
                 upstream = self._reachable(stage.key)
@@ -1706,7 +1736,7 @@ def _deep_static_stages() -> list[StageDefinition]:
 
 
 def convert_builtin_profile_document(name: str, entry: Any) -> Any:
-    """A built-in profile stored as a list of analysts, read as its seed's stages.
+    """A stored built-in profile, read with the pack choice its seed made.
 
     ``ProfileDefinition`` converts a bare analyst list with the triage pack
     in front, because every team gets the pack unless it says otherwise. The
@@ -1714,18 +1744,34 @@ def convert_builtin_profile_document(name: str, entry: Any) -> Any:
     cannot say so from inside a document that carries no stages. So a stored
     built-in without stages is converted here, by name, with the choice its
     seed made — and the identity check then compares like with like.
+
+    A stored built-in that carries derived stages is brought to the same
+    choice: a ``default`` written before the pack existed holds four stages
+    and the mark, and re-deriving it with the pack is what its seed would
+    have produced. Only a plain derivation is touched; stages someone wrote
+    are left as written for the identity check to judge.
     """
-    if not isinstance(entry, dict) or entry.get("stages"):
+    if not isinstance(entry, dict):
         return entry
-    analysts = entry.get("analysts")
     seed = _builtin_profiles().get(name)
+    analysts = entry.get("analysts")
     if seed is None or not isinstance(analysts, list) or not analysts:
         return entry
+    wanted = has_triage_stage(seed.stages)
+    stored = entry.get("stages")
+    if stored:
+        if not entry.get("derived_from_analysts"):
+            return entry
+        try:
+            typed = [StageDefinition.model_validate(stage) for stage in stored]
+        except ValueError:
+            return entry
+        if has_triage_stage(typed) == wanted or not stages_are_derived(list(analysts), typed):
+            return entry
     return {
         **entry,
         "stages": [
-            stage.model_dump()
-            for stage in stages_from_analysts(list(analysts), triage=has_triage_stage(seed.stages))
+            stage.model_dump() for stage in stages_from_analysts(list(analysts), triage=wanted)
         ],
         "derived_from_analysts": True,
     }
@@ -2307,12 +2353,18 @@ class TriageConfig(BaseModel):
     ``strings_head`` bounds the one open-ended tool in the pack; the rest read
     fixed structures or scan with their own budgets. ``reputation`` is the one
     network call the pack makes: ``auto`` asks whichever reputation server is
-    enabled, once, for the sample hash, and ``off`` records that it did not.
+    enabled and not withheld by the team, once, for the sample hash, and
+    ``off`` records that it did not. ``budget_seconds`` bounds the pack as a
+    whole, checked between steps.
     """
 
     enabled: bool = True
     strings_head: Annotated[int, Field(ge=1)] = 300
     reputation: Literal["auto", "off"] = "auto"
+    # The whole pack's wall clock. capa has its own subprocess budget and yara
+    # its own, and nothing else in the pack did; a step that would start after
+    # this many seconds is recorded as not run instead.
+    budget_seconds: Annotated[int, Field(ge=1)] = 1200
 
 
 # ---------------------------------------------------------------------------

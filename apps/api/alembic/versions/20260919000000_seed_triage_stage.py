@@ -132,7 +132,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Take every triage stage out again, wherever it sits."""
+    """Take every triage stage out again, wherever it sits.
+
+    Every one, including a hand-written pack the upgrade left alone: the
+    model this downgrades to has no ``triage`` kind, and a document that kept
+    one would not load there at all.
+    """
     conn = op.get_bind()
     profiles = _load_profiles(conn)
     if not profiles:

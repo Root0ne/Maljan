@@ -77,6 +77,63 @@ class TestTheConversion:
         assert settings.agents.profiles["default"].stages[0].kind == "triage"
         assert not any(s.kind == "triage" for s in settings.agents.profiles["measurement"].stages)
 
+    def test_a_stored_default_from_before_the_pack_heals_to_its_seed(self) -> None:
+        """A derived built-in carrying the four pre-pack stages constructs, with the pack."""
+        four = [
+            s.model_dump()
+            for s in stages_from_analysts(["static", "dynamic", "network"], triage=False)
+        ]
+        settings = Settings(
+            _env_file=None,
+            agents={
+                "profiles": {
+                    "default": {
+                        "label": "Default",
+                        "analysts": ["static", "dynamic", "network"],
+                        "derived_from_analysts": True,
+                        "stages": four,
+                    }
+                }
+            },
+        )
+        profile = settings.agents.profiles["default"]
+        assert profile.stages[0].kind == "triage"
+        assert profile.derived_from_analysts is True
+
+    def test_a_stored_default_that_was_written_by_hand_is_still_refused(self) -> None:
+        four = [
+            s.model_dump()
+            for s in stages_from_analysts(["static", "dynamic", "network"], triage=False)
+        ]
+        with pytest.raises(ValidationError, match="'default' is built in"):
+            Settings(
+                _env_file=None,
+                agents={
+                    "profiles": {
+                        "default": {
+                            "label": "Default",
+                            "analysts": ["static", "dynamic", "network"],
+                            "stages": four,
+                        }
+                    }
+                },
+            )
+
+    def test_a_triage_stage_may_not_take_a_node_name_the_graph_issues(self) -> None:
+        for key in ("judge", "report", "negotiation", "revision", "static_analyst", "x__join"):
+            with pytest.raises(ValidationError, match="keyed like a graph node"):
+                _settings(
+                    profiles={
+                        "own": {
+                            "stages": [
+                                {"key": key, "kind": "triage"},
+                                {"key": "a", "kind": "analysis", "agents": ["static"]},
+                                _verdict(["a"]),
+                            ]
+                        }
+                    }
+                )
+
     def test_a_stored_measurement_analyst_list_is_read_without_the_pack(self) -> None:
         """A document written before the pack existed loads against its seed."""
         settings = Settings(
