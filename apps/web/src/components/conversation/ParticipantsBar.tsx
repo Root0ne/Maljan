@@ -30,12 +30,29 @@ const STATE_DOT: Record<ParticipantState, string> = {
   done: "bg-status-green",
 };
 
+/** What this participant has done, in the fewest words that stay true. */
+function work(
+  participant: Participant,
+  toolCounts: Record<string, number>,
+  partial: boolean,
+): string {
+  const said = participant.messages;
+  const tools = toolCounts[participant.key] ?? 0;
+  const floor = partial ? "+" : "";
+  return `${said} said · ${tools}${floor} tool${tools === 1 && !partial ? "" : "s"}`;
+}
+
 export default function ParticipantsBar({
   participants,
+  toolCounts,
+  countsArePartial,
   selected,
   onToggle,
 }: {
   participants: Participant[];
+  /** Answered calls per agent, from the one selector that counts them. */
+  toolCounts: Record<string, number>;
+  countsArePartial: boolean;
   selected: ReadonlySet<string>;
   onToggle: (key: string) => void;
 }) {
@@ -66,6 +83,7 @@ export default function ParticipantsBar({
             }`}
           >
             <span
+              aria-hidden="true"
               className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[11px] font-semibold"
               style={{ borderColor: color, color }}
             >
@@ -82,9 +100,7 @@ export default function ParticipantsBar({
               <span className="flex items-center gap-1 text-[11px] text-text-muted">
                 {via.length > 0 && <CornerDownRight size={11} aria-hidden="true" />}
                 <span className="truncate">
-                  {via.length > 0
-                    ? `via ${via.join(", ")}`
-                    : `${participant.messages} said · ${participant.toolCalls} tools`}
+                  {via.length > 0 ? `via ${via.join(", ")}` : work(participant, toolCounts, countsArePartial)}
                 </span>
               </span>
             </span>

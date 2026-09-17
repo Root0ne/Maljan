@@ -1,18 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
 import { useReport } from "@/app/(app)/analysis/[id]/layout";
-import { api } from "@/lib/api";
-import { toolCallsFromFeed } from "@/lib/conversation";
-import { useRun } from "@/lib/useRun";
 import type { AgentFindingStatus } from "@/types";
-import { toolCallsByAgent } from "./stageTimeline";
-
-/** How much of the ledger the tool counts are taken from. Beyond this the
- *  count is shown as a floor, because a number that silently stops counting
- *  is worse than one that says where it stopped. */
-const LEDGER_SAMPLE = 200;
 
 /* Per-agent confidence tier. IMPORTANT: ``final_confidence`` is each agent's
  * confidence in its OWN claim \u2014 NOT a probability of maliciousness. A benign
@@ -71,42 +60,11 @@ function confidenceToSignal(confidence: number): string {
   return "low";
 }
 
+/* What each agent concluded. How much work it did is one line up, on the
+ * participants strip, and is not restated here: the same number in two places
+ * on one screen is the thing this view was built to remove. */
 export default function AgentsTab() {
-  const params = useParams();
   const { report, job, loading } = useReport();
-  const jobId = (typeof params?.id === "string" ? params.id : report?.job_id) ?? "";
-  /* How many calls each agent made. Counted from the run's own feed, which
-   * the store already holds for this job — an agent with a confident
-   * conclusion and no calls behind it is exactly the thing worth seeing here,
-   * and asking the ledger for it again would be a second read of a fact the
-   * page has. The ledger answers for a run recorded before the feed carried
-   * tool calls, and only then. */
-  const run = useRun(jobId || null);
-  const fromFeed = toolCallsFromFeed(run.events);
-  const [fromLedger, setFromLedger] = useState<Record<string, number>>({});
-  const [ledgerTotal, setLedgerTotal] = useState(0);
-  const feedHasCalls = Object.keys(fromFeed).length > 0;
-  const toolCalls = feedHasCalls ? fromFeed : fromLedger;
-
-  useEffect(() => {
-    if (!jobId || feedHasCalls) return;
-    let cancelled = false;
-    api
-      .getJobEvidence(jobId, { pageSize: LEDGER_SAMPLE })
-      .then((response) => {
-        if (cancelled) return;
-        setFromLedger(toolCallsByAgent(response.entries));
-        setLedgerTotal(response.total);
-      })
-      .catch(() => {
-        // The findings table is the point of this panel; a ledger the browser
-        // could not read leaves the column empty rather than the panel broken.
-        if (!cancelled) setFromLedger({});
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [jobId, feedHasCalls]);
 
   if (loading) {
     return <div className="p-4 text-sm text-text-secondary">Loading...</div>;
@@ -155,7 +113,6 @@ export default function AgentsTab() {
   });
 
   const completedCount = agents.filter((a) => a.status === "complete").length;
-  const partialLedger = !feedHasCalls && ledgerTotal > LEDGER_SAMPLE;
 
   // Which stage ran each agent, from the run's own stage rollup. An agent the
   // rollup does not mention is grouped on its own rather than filed under a
@@ -202,7 +159,6 @@ export default function AgentsTab() {
               <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-28">Signal</th>
               <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-24">Confidence</th>
               <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-16">Rounds</th>
-              <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-20">Tools</th>
               <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider">Key Finding</th>
             </tr>
           </thead>
@@ -210,7 +166,7 @@ export default function AgentsTab() {
           <tbody key={group.stage || "__ungrouped"} className="divide-y divide-border-light">
             {group.stage && (
               <tr className="bg-bg-deep">
-                <td colSpan={6} className="px-4 py-1.5">
+                <td colSpan={5} className="px-4 py-1.5">
                   <span className="text-[10px] uppercase tracking-wider text-text-muted font-mono">
                     stage {group.stage}
                   </span>
@@ -273,21 +229,6 @@ export default function AgentsTab() {
                   </td>
                   <td className="px-4 py-3">
                     <span className="text-xs text-text-muted font-mono">{agent.revision_rounds}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className="text-xs text-text-muted font-mono"
-                      title={
-                        partialLedger
-                          ? `Counted over the first ${LEDGER_SAMPLE} of ${ledgerTotal} ledger entries`
-                          : feedHasCalls
-                            ? "Tool calls this agent made, from the run's event feed"
-                            : "Tool calls this agent made, from the evidence ledger"
-                      }
-                    >
-                      {toolCalls[agent.name] ?? 0}
-                      {partialLedger ? "+" : ""}
-                    </span>
                   </td>
                   <td className="px-4 py-3">
                     <span className="text-xs text-text-secondary" title={agent.key_finding}>

@@ -459,12 +459,23 @@ change landed on `main`.
 
 ### Changed
 
+- **A run's watchers are no longer drawn as members of its team.** The
+  mediator and the sycophancy detector publish as `pipeline` with
+  `kind: "system"` and name themselves in the line, so the console draws a
+  notice instead of adding a participant the operator never composed; the
+  judge publishes under its agent key with its configured `display_name`,
+  which is the key its roster entry carries, so a run draws one judge rather
+  than two. A failure on either path names the class of the exception and
+  never its message — the log keeps the words for an operator, and an
+  exception's text can carry a path, a host or a credential.
 - **The LIVE and PROCESS tabs are gone**, along with their duplicate socket,
   duplicate back-fill and second status poll. `/live`, `/process`, `/agents`,
   `/pipeline` and `/timeline` redirect to CONVERSATION, the per-agent results
-  table sits under the conversation with its tool counts taken from the run's
-  own feed, and the stage strip moved to the analysis header, where every tab
-  reads the same one. The Pipeline and Timeline panels are removed: the
+  table sits under the conversation and states what each agent concluded while
+  the participants strip above it states how much work each one did — one
+  number, counted from the run's own feed and falling back to the ledger only
+  for a run recorded before the feed carried tool calls — and the stage strip
+  moved to the analysis header, where every tab reads the same one. The Pipeline and Timeline panels are removed: the
   discussion history, the confidence history and the agent reports they held
   are the conversation itself, drawn in the order they happened.
 

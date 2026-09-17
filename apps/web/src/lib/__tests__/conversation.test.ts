@@ -299,7 +299,7 @@ describe("participants", () => {
 
     const lead = participants.find((p) => p.key === "lead");
     const ahmet = participants.find((p) => p.key === "ahmet");
-    expect(lead).toMatchObject({ state: "done", messages: 1, toolCalls: 1 });
+    expect(lead).toMatchObject({ state: "done", messages: 1 });
     expect(ahmet?.state).toBe("working");
   });
 });

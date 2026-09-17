@@ -134,13 +134,18 @@ export interface Participant {
   /** The agents that can task this one, when no stage names it. */
   via: string[];
   state: ParticipantState;
+  /** Lines this participant has said. How many calls it made is counted from
+   *  the feed by `toolCallsFromFeed`, which is the one place that counts. */
   messages: number;
-  toolCalls: number;
 }
 
 export interface Conversation {
   participants: Participant[];
   stages: ConversationStage[];
+  /** Characters of text the conversation holds. A streamed turn grows this
+   *  without adding a line, which is how a reader following the tail knows
+   *  there is more to see. */
+  textLength: number;
 }
 
 /* ── Normalising ───────────────────────────────────────── */
@@ -229,344 +234,436 @@ interface StageDraft {
   round: number;
 }
 
-export function buildConversation(
-  events: readonly RunEvent[],
-  roster: JobRoster | null,
-): Conversation {
-  const stages = new Map<string, StageDraft>();
-  const order: string[] = [];
-  const names = new Map<string, string>();
-  const seenSpeakers = new Map<string, Participant>();
-  /* One open bubble per speaker and stage, which is where deltas land until
-   * the message that closes the turn replaces them. */
-  const streaming = new Map<string, ConversationItem>();
-  /* Started calls waiting for their result, oldest first per agent and tool. */
-  const pending = new Map<string, ConversationItem[]>();
+/** Where an item sits, so a later event can replace it without searching. */
+interface Slot {
+  stage: StageDraft;
+  index: number;
+}
 
+/**
+ * Everything the walk carries between events.
+ *
+ * Kept rather than rebuilt, because a run publishes its feed in pieces: the
+ * back-fill, then the socket's resume, then one frame at a time. Folding the
+ * whole run again on each of those is what made a long replay freeze the tab.
+ */
+interface BuilderState {
+  stages: Map<string, StageDraft>;
+  order: string[];
+  names: Map<string, string>;
+  participants: Map<string, Participant>;
+  streaming: Map<string, Slot>;
+  pending: Map<string, Slot[]>;
+  /** How many events of the array have been folded. */
+  consumed: number;
+  /** The last event folded, which is how a continuation is recognised. */
+  last: RunEvent | null;
+  /** Total characters of speech held, which is what a delta grows. */
+  textLength: number;
+}
+
+/** The pipeline itself, rather than a member of the team. A watcher nobody
+ *  composed — the mediator, the sycophancy detector — speaks under this key
+ *  and names itself in the line, so it is drawn as a notice to the room. */
+const ROOM_SPEAKER = "pipeline";
+
+function freshState(roster: JobRoster | null): BuilderState {
+  const state: BuilderState = {
+    stages: new Map(),
+    order: [],
+    names: new Map(),
+    participants: new Map(),
+    streaming: new Map(),
+    pending: new Map(),
+    consumed: 0,
+    last: null,
+    textLength: 0,
+  };
   for (const stage of roster?.stages ?? []) {
-    names.set(`stage:${stage.key}`, stage.label || stage.key);
+    state.names.set(`stage:${stage.key}`, stage.label || stage.key);
   }
   for (const agent of roster?.agents ?? []) {
-    names.set(agent.key, agent.label || prettyName(agent.key));
-    seenSpeakers.set(agent.key, {
+    const name = agent.label || prettyName(agent.key);
+    state.names.set(agent.key, name);
+    state.participants.set(agent.key, {
       key: agent.key,
-      name: agent.label || prettyName(agent.key),
+      name,
       role: agent.role,
       stages: agent.stages ?? [],
       via: agent.via ?? [],
       state: "waiting",
       messages: 0,
-      toolCalls: 0,
     });
   }
+  return state;
+}
 
-  function nameOf(key: string, given?: string): string {
-    if (given) {
-      names.set(key, given);
-      return given;
+function nameOf(state: BuilderState, key: string, given?: string): string {
+  if (given) {
+    state.names.set(key, given);
+    return given;
+  }
+  return state.names.get(key) ?? prettyName(key);
+}
+
+function participantOf(state: BuilderState, key: string, given?: string): Participant | null {
+  if (!key || key === ROOM_SPEAKER) return null;
+  const existing = state.participants.get(key);
+  if (existing) {
+    if (given) existing.name = given;
+    return existing;
+  }
+  const created: Participant = {
+    key,
+    name: nameOf(state, key, given),
+    role: "",
+    stages: [],
+    via: [],
+    state: "waiting",
+    messages: 0,
+  };
+  state.participants.set(key, created);
+  return created;
+}
+
+function draftOf(state: BuilderState, key: string): StageDraft {
+  const existing = state.stages.get(key);
+  if (existing) return existing;
+  const created: StageDraft = {
+    key,
+    label: state.names.get(`stage:${key}`) ?? (key ? prettyName(key) : ""),
+    kind: "",
+    state: key ? "pending" : "running",
+    reason: "",
+    durationMs: 0,
+    items: [],
+    round: 0,
+  };
+  state.stages.set(key, created);
+  state.order.push(key);
+  return created;
+}
+
+function push(state: BuilderState, stage: StageDraft, item: ConversationItem): Slot {
+  stage.items.push(item);
+  state.textLength += item.text.length;
+  return { stage, index: stage.items.length - 1 };
+}
+
+/** Swap one item for a changed copy. A new object, never a mutation: an item
+ *  a reader can still see is a rendered row, and a row only redraws when the
+ *  thing it draws is a different object. */
+function replace(state: BuilderState, slot: Slot, next: ConversationItem): void {
+  const previous = slot.stage.items[slot.index];
+  state.textLength += next.text.length - (previous?.text.length ?? 0);
+  slot.stage.items[slot.index] = next;
+}
+
+/** The room speaks as nobody: the line names its own watcher, and the console
+ *  draws it centred rather than adding a participant the team never had. */
+function speakerOf(raw: string): string {
+  return raw === ROOM_SPEAKER ? "" : raw;
+}
+
+function fold(state: BuilderState, event: RunEvent): void {
+  const data = event.data ?? {};
+  const stageKey = text(data.stage);
+  /* Keyed by the publisher's number, and by arrival order when a run has no
+   * numbers — never by position in the array, which moves when an earlier
+   * event arrives late and would remount every row after it. */
+  const id = event.seq !== undefined ? `seq:${event.seq}` : `n:${event.order}`;
+
+  if (
+    event.type === "stage_started" ||
+    event.type === "stage_skipped" ||
+    event.type === "stage_finished"
+  ) {
+    const stage = draftOf(state, stageKey);
+    stage.kind = text(data.kind) || stage.kind;
+    if (event.type === "stage_started") stage.state = "running";
+    if (event.type === "stage_skipped") {
+      stage.state = "skipped";
+      stage.reason = text(data.reason) || "did not run";
     }
-    return names.get(key) ?? prettyName(key);
+    if (event.type === "stage_finished") {
+      stage.state = "done";
+      stage.durationMs = Number(data.duration_ms ?? stage.durationMs) || 0;
+    }
+    return;
   }
 
-  function participant(key: string, given?: string): Participant | null {
-    if (!key) return null;
-    const existing = seenSpeakers.get(key);
-    if (existing) {
-      if (given) existing.name = given;
-      return existing;
+  if (event.type === "agent_progress") {
+    const who = participantOf(state, text(data.agent));
+    const phase = text(data.phase);
+    if (who) {
+      if (phase === "done") who.state = "done";
+      else if (phase === "analyzing") who.state = "working";
+      else who.state = "waiting";
     }
-    const created: Participant = {
-      key,
-      name: nameOf(key, given),
-      role: "",
-      stages: [],
-      via: [],
-      state: "waiting",
-      messages: 0,
-      toolCalls: 0,
+    return;
+  }
+
+  if (event.type === "agent_message_delta") {
+    const speaker = text(data.agent);
+    if (!speaker) return;
+    const stage = draftOf(state, stageKey);
+    const who = participantOf(state, speaker);
+    if (who) who.state = "working";
+    const openKey = `${stageKey}|${speaker}`;
+    const open = state.streaming.get(openKey);
+    if (open) {
+      const current = open.stage.items[open.index];
+      replace(state, open, { ...current, text: current.text + text(data.text_delta) });
+      return;
+    }
+    const item: ConversationItem = {
+      id,
+      kind: "says",
+      stage: stageKey,
+      round: stage.round,
+      speaker,
+      displayName: nameOf(state, speaker),
+      text: text(data.text_delta),
+      ts: event.ts,
+      seq: event.seq,
+      claims: [],
+      dissent: [],
+      streaming: true,
     };
-    seenSpeakers.set(key, created);
-    return created;
+    state.streaming.set(openKey, push(state, stage, item));
+    return;
   }
 
-  function draft(key: string): StageDraft {
-    const existing = stages.get(key);
-    if (existing) return existing;
-    const created: StageDraft = {
-      key,
-      label: names.get(`stage:${key}`) ?? (key ? prettyName(key) : ""),
-      kind: "",
-      state: key ? "pending" : "running",
-      reason: "",
-      durationMs: 0,
-      items: [],
-      round: 0,
-    };
-    stages.set(key, created);
-    order.push(key);
-    return created;
+  if (event.type === "agent_message") {
+    const raw = text(data.speaker);
+    const speaker = speakerOf(raw);
+    const stage = draftOf(state, stageKey);
+    const round = Number(data.round ?? 0) || 0;
+    stage.round = round;
+    const kind = kindOf(data.kind);
+    const openKey = `${stageKey}|${speaker}`;
+    const open = state.streaming.get(openKey);
+    if (open) {
+      /* The finished message replaces what was streamed: the publisher sends
+       * the whole line once the turn closes, and keeping both would show it
+       * twice. */
+      state.textLength -= open.stage.items[open.index]?.text.length ?? 0;
+      open.stage.items.splice(open.index, 1);
+      reindexAfter(state, open);
+      state.streaming.delete(openKey);
+    }
+    const who = participantOf(state, speaker, text(data.display_name) || undefined);
+    if (who) {
+      who.messages += 1;
+      /* A line that closes a turn leaves its speaker done; an ask, an answer
+       * or a tool line means it is still working. */
+      who.state = kind === "says" || kind === "verdict" ? "done" : "working";
+    }
+    const addressedTo = text(data.addressed_to) || undefined;
+    push(state, stage, {
+      id,
+      kind,
+      stage: stageKey,
+      round,
+      speaker,
+      displayName: speaker ? nameOf(state, speaker, text(data.display_name) || undefined) : "",
+      addressedTo,
+      addressedToName: addressedTo ? nameOf(state, addressedTo) : undefined,
+      text: text(data.text),
+      ts: event.ts,
+      seq: event.seq,
+      status: text(data.status) || undefined,
+      confidence: data.confidence === undefined ? undefined : Number(data.confidence),
+      claims: normalizeClaims(data.claims),
+      dissent: normalizeDissent(data.dissent),
+      report: text(data.report) || undefined,
+      reportTruncated: data.report_truncated === true || undefined,
+      ...(kind === "tool_call"
+        ? {
+            tool: {
+              name: text(data.tool) || text(data.text),
+              server: text(data.server) || null,
+              evidenceId: text(data.evidence_id),
+              /* A message that reports a result is a call that answered; only
+               * one that announces a call is still running. */
+              ok: data.kind === "tool_result" ? data.ok !== false : null,
+              durationMs: Number(data.duration_ms ?? 0) || 0,
+              summary: text(data.text),
+            },
+          }
+        : {}),
+    });
+    return;
   }
 
-  let index = 0;
-  for (const event of events) {
-    index += 1;
-    const data = event.data ?? {};
-    const stageKey = text(data.stage);
-    const id = event.seq !== undefined ? `seq:${event.seq}` : `n:${index}`;
-
-    if (event.type === "stage_started" || event.type === "stage_skipped" || event.type === "stage_finished") {
-      const stage = draft(text(data.stage));
-      stage.kind = text(data.kind) || stage.kind;
-      if (event.type === "stage_started") stage.state = "running";
-      if (event.type === "stage_skipped") {
-        stage.state = "skipped";
-        stage.reason = text(data.reason) || "did not run";
-      }
-      if (event.type === "stage_finished") {
-        stage.state = "done";
-        stage.durationMs = Number(data.duration_ms ?? stage.durationMs) || 0;
-      }
-      continue;
-    }
-
-    if (event.type === "agent_progress") {
-      const who = participant(text(data.agent));
-      const phase = text(data.phase);
-      if (who) {
-        if (phase === "done") who.state = "done";
-        else if (phase === "analyzing") who.state = "working";
-        else who.state = "waiting";
-      }
-      continue;
-    }
-
-    if (event.type === "agent_message_delta") {
-      const speaker = text(data.agent);
-      if (!speaker) continue;
-      const stage = draft(stageKey);
-      const who = participant(speaker);
-      if (who) who.state = "working";
-      const openKey = `${stageKey}|${speaker}`;
-      const open = streaming.get(openKey);
-      if (open) {
-        open.text += text(data.text_delta);
-        continue;
-      }
-      const item: ConversationItem = {
-        id,
-        kind: "says",
-        stage: stageKey,
-        round: stage.round,
-        speaker,
-        displayName: nameOf(speaker),
-        text: text(data.text_delta),
-        ts: event.ts,
-        seq: event.seq,
-        claims: [],
-        dissent: [],
-        streaming: true,
-      };
-      streaming.set(openKey, item);
-      stage.items.push(item);
-      continue;
-    }
-
-    if (event.type === "agent_message") {
-      const speaker = text(data.speaker);
-      const stage = draft(stageKey);
-      const round = Number(data.round ?? 0) || 0;
-      stage.round = round;
-      const kind = kindOf(data.kind);
-      const openKey = `${stageKey}|${speaker}`;
-      const open = streaming.get(openKey);
-      if (open) {
-        /* The finished message replaces what was streamed: the publisher sends
-         * the whole line once the turn closes, and keeping both would show it
-         * twice. */
-        stage.items.splice(stage.items.indexOf(open), 1);
-        streaming.delete(openKey);
-      }
-      const who = participant(speaker, text(data.display_name) || undefined);
-      if (who) {
-        who.messages += 1;
-        who.state = "done";
-      }
-      const addressedTo = text(data.addressed_to) || undefined;
-      stage.items.push({
-        id,
-        kind,
-        stage: stageKey,
-        round,
-        speaker,
-        displayName: nameOf(speaker, text(data.display_name) || undefined),
-        addressedTo,
-        addressedToName: addressedTo ? nameOf(addressedTo) : undefined,
-        text: text(data.text),
-        ts: event.ts,
-        seq: event.seq,
-        status: text(data.status) || undefined,
-        confidence: data.confidence === undefined ? undefined : Number(data.confidence),
-        claims: normalizeClaims(data.claims),
-        dissent: normalizeDissent(data.dissent),
-        report: text(data.report) || undefined,
-        reportTruncated: data.report_truncated === true || undefined,
-        ...(kind === "tool_call"
-          ? {
-              tool: {
-                name: text(data.tool) || text(data.text),
-                server: text(data.server) || null,
-                evidenceId: text(data.evidence_id),
-                ok: null,
-                durationMs: 0,
-                summary: text(data.text),
-              },
-            }
-          : {}),
-      });
-      continue;
-    }
-
-    if (event.type === "tool_call_started") {
-      const speaker = text(data.agent);
-      const stage = draft(stageKey);
-      const who = participant(speaker);
-      if (who) who.state = "working";
-      const item: ConversationItem = {
-        id,
-        kind: "tool_call",
-        stage: stageKey,
-        round: stage.round,
-        speaker,
-        displayName: nameOf(speaker),
-        text: text(data.args_summary),
-        ts: event.ts,
-        seq: event.seq,
-        claims: [],
-        dissent: [],
-        tool: {
-          name: text(data.tool),
-          server: text(data.server) || null,
-          evidenceId: "",
-          ok: null,
-          durationMs: 0,
-          summary: text(data.args_summary),
-        },
-      };
-      stage.items.push(item);
-      const key = `${stageKey}|${speaker}|${text(data.tool)}`;
-      const queue = pending.get(key) ?? [];
-      queue.push(item);
-      pending.set(key, queue);
-      continue;
-    }
-
-    if (event.type === "tool_call_finished") {
-      const speaker = text(data.agent);
-      const stage = draft(stageKey);
-      const who = participant(speaker);
-      if (who) who.toolCalls += 1;
-      const key = `${stageKey}|${speaker}|${text(data.tool)}`;
-      const queue = pending.get(key) ?? [];
-      const started = queue.shift();
-      pending.set(key, queue);
-      const detail: ToolDetail = {
+  if (event.type === "tool_call_started") {
+    const speaker = text(data.agent);
+    const stage = draftOf(state, stageKey);
+    const who = participantOf(state, speaker);
+    if (who) who.state = "working";
+    const slot = push(state, stage, {
+      id,
+      kind: "tool_call",
+      stage: stageKey,
+      round: stage.round,
+      speaker,
+      displayName: nameOf(state, speaker),
+      text: text(data.args_summary),
+      ts: event.ts,
+      seq: event.seq,
+      claims: [],
+      dissent: [],
+      tool: {
         name: text(data.tool),
         server: text(data.server) || null,
-        evidenceId: text(data.evidence_id),
-        ok: data.ok !== false,
-        durationMs: Number(data.duration_ms ?? 0) || 0,
-        summary: text(data.summary),
-      };
-      if (started) {
-        started.tool = detail;
-        started.text = detail.summary || started.text;
-        continue;
-      }
-      stage.items.push({
-        id,
-        kind: "tool_call",
-        stage: stageKey,
-        round: stage.round,
-        speaker,
-        displayName: nameOf(speaker),
-        text: detail.summary,
-        ts: event.ts,
-        seq: event.seq,
-        claims: [],
-        dissent: [],
-        tool: detail,
-      });
-      continue;
-    }
-
-    if (event.type === "validation_feedback") {
-      const speaker = text(data.agent);
-      const stage = draft(stageKey);
-      stage.items.push({
-        id,
-        kind: "validation_feedback",
-        stage: stageKey,
-        round: stage.round,
-        speaker,
-        displayName: nameOf(speaker),
-        text: text(data.message),
-        ts: event.ts,
-        seq: event.seq,
-        claims: [],
-        dissent: [],
-        code: text(data.code),
-        retryIndex: Number(data.retry_index ?? 0) || 0,
-      });
-      continue;
-    }
-
-    if (event.type === "judge_question") {
-      const stage = draft(stageKey);
-      const addressedTo = text(data.addressed_to) || undefined;
-      stage.items.push({
-        id,
-        kind: "judge_question",
-        stage: stageKey,
-        round: stage.round,
-        speaker: "judge",
-        displayName: nameOf("judge"),
-        addressedTo,
-        addressedToName: addressedTo ? nameOf(addressedTo) : undefined,
-        text: text(data.text),
-        ts: event.ts,
-        seq: event.seq,
-        claims: [],
-        dissent: [],
-      });
-      continue;
-    }
-
-    if (event.type === "stage_ended_at_cap") {
-      const stage = draft(stageKey);
-      const agent = text(data.agent);
-      stage.items.push({
-        id,
-        kind: "system",
-        stage: stageKey,
-        round: stage.round,
-        speaker: "",
-        displayName: "",
-        text: `${nameOf(agent)} stopped on its ${text(data.cap)} cap${
-          text(data.detail) ? ` — ${text(data.detail)}` : ""
-        }.`,
-        ts: event.ts,
-        seq: event.seq,
-        claims: [],
-        dissent: [],
-      });
-      continue;
-    }
+        evidenceId: "",
+        ok: null,
+        durationMs: 0,
+        summary: text(data.args_summary),
+      },
+    });
+    const key = `${stageKey}|${speaker}|${text(data.tool)}`;
+    const queue = state.pending.get(key) ?? [];
+    queue.push(slot);
+    state.pending.set(key, queue);
+    return;
   }
 
+  if (event.type === "tool_call_finished") {
+    const speaker = text(data.agent);
+    const stage = draftOf(state, stageKey);
+    participantOf(state, speaker);
+    const key = `${stageKey}|${speaker}|${text(data.tool)}`;
+    const queue = state.pending.get(key) ?? [];
+    const started = queue.shift();
+    state.pending.set(key, queue);
+    const detail: ToolDetail = {
+      name: text(data.tool),
+      server: text(data.server) || null,
+      evidenceId: text(data.evidence_id),
+      ok: data.ok !== false,
+      durationMs: Number(data.duration_ms ?? 0) || 0,
+      summary: text(data.summary),
+    };
+    if (started) {
+      const current = started.stage.items[started.index];
+      replace(state, started, {
+        ...current,
+        tool: detail,
+        text: detail.summary || current.text,
+      });
+      return;
+    }
+    push(state, stage, {
+      id,
+      kind: "tool_call",
+      stage: stageKey,
+      round: stage.round,
+      speaker,
+      displayName: nameOf(state, speaker),
+      text: detail.summary,
+      ts: event.ts,
+      seq: event.seq,
+      claims: [],
+      dissent: [],
+      tool: detail,
+    });
+    return;
+  }
+
+  if (event.type === "validation_feedback") {
+    const speaker = text(data.agent);
+    const stage = draftOf(state, stageKey);
+    push(state, stage, {
+      id,
+      kind: "validation_feedback",
+      stage: stageKey,
+      round: stage.round,
+      speaker,
+      displayName: nameOf(state, speaker),
+      text: text(data.message),
+      ts: event.ts,
+      seq: event.seq,
+      claims: [],
+      dissent: [],
+      code: text(data.code),
+      retryIndex: Number(data.retry_index ?? 0) || 0,
+    });
+    return;
+  }
+
+  if (event.type === "judge_question") {
+    const stage = draftOf(state, stageKey);
+    const addressedTo = text(data.addressed_to) || undefined;
+    push(state, stage, {
+      id,
+      kind: "judge_question",
+      stage: stageKey,
+      round: stage.round,
+      speaker: "judge",
+      displayName: nameOf(state, "judge"),
+      addressedTo,
+      addressedToName: addressedTo ? nameOf(state, addressedTo) : undefined,
+      text: text(data.text),
+      ts: event.ts,
+      seq: event.seq,
+      claims: [],
+      dissent: [],
+    });
+    return;
+  }
+
+  if (event.type === "stage_ended_at_cap") {
+    const stage = draftOf(state, stageKey);
+    const agent = text(data.agent);
+    push(state, stage, {
+      id,
+      kind: "system",
+      stage: stageKey,
+      round: stage.round,
+      speaker: "",
+      displayName: "",
+      text: `${nameOf(state, agent)} stopped on its ${text(data.cap)} cap${
+        text(data.detail) ? ` — ${text(data.detail)}` : ""
+      }.`,
+      ts: event.ts,
+      seq: event.seq,
+      claims: [],
+      dissent: [],
+    });
+  }
+}
+
+/** Pull back the slots that sat after one that was removed. */
+function reindexAfter(state: BuilderState, removed: Slot): void {
+  for (const slot of state.streaming.values()) {
+    if (slot.stage === removed.stage && slot.index > removed.index) slot.index -= 1;
+  }
+  for (const queue of state.pending.values()) {
+    for (const slot of queue) {
+      if (slot.stage === removed.stage && slot.index > removed.index) slot.index -= 1;
+    }
+  }
+}
+
+/** Consecutive items of one round, in the order they happened. A round is a
+ *  moment in the argument, so it marks time rather than sorting it. */
+function intoRounds(items: ConversationItem[]): ConversationRound[] {
+  const rounds: ConversationRound[] = [];
+  for (const item of items) {
+    const last = rounds[rounds.length - 1];
+    if (last && last.round === item.round) last.items.push(item);
+    else rounds.push({ round: item.round, items: [item] });
+  }
+  return rounds;
+}
+
+function snapshot(state: BuilderState): Conversation {
   return {
-    participants: [...seenSpeakers.values()],
-    stages: order.map((key) => {
-      const stage = stages.get(key) as StageDraft;
+    participants: [...state.participants.values()].map((p) => ({ ...p })),
+    textLength: state.textLength,
+    stages: state.order.map((key) => {
+      const stage = state.stages.get(key) as StageDraft;
       return {
         key: stage.key,
         label: stage.label,
@@ -580,16 +677,48 @@ export function buildConversation(
   };
 }
 
-/** Consecutive items of one round, in the order they happened. A round is a
- *  moment in the argument, so it marks time rather than sorting it. */
-function intoRounds(items: ConversationItem[]): ConversationRound[] {
-  const rounds: ConversationRound[] = [];
-  for (const item of items) {
-    const last = rounds[rounds.length - 1];
-    if (last && last.round === item.round) last.items.push(item);
-    else rounds.push({ round: item.round, items: [item] });
+/* One walk, continued rather than repeated.
+ *
+ * The store appends to its event array, so the usual call is the previous
+ * array plus a few events. The cache recognises that by identity — same
+ * roster, and the last event already folded still sitting where it was — and
+ * folds only what is new, which keeps every item object a reader is already
+ * looking at, so a memoised row does not redraw because somebody else spoke.
+ * Anything else starts again from the first event. */
+let cache: {
+  events: readonly RunEvent[];
+  roster: JobRoster | null;
+  state: BuilderState;
+  result: Conversation;
+} | null = null;
+
+export function buildConversation(
+  events: readonly RunEvent[],
+  roster: JobRoster | null,
+): Conversation {
+  if (cache && cache.events === events && cache.roster === roster) return cache.result;
+
+  const continues =
+    cache !== null &&
+    cache.roster === roster &&
+    events.length >= cache.state.consumed &&
+    (cache.state.consumed === 0 || events[cache.state.consumed - 1] === cache.state.last);
+  const state = continues && cache ? cache.state : freshState(roster);
+
+  for (let i = state.consumed; i < events.length; i += 1) {
+    fold(state, events[i]);
   }
-  return rounds;
+  state.consumed = events.length;
+  state.last = events.length > 0 ? events[events.length - 1] : null;
+
+  const result = snapshot(state);
+  cache = { events, roster, state, result };
+  return result;
+}
+
+/** Forget the walk in progress. The store's own tests share a module. */
+export function resetConversationCache(): void {
+  cache = null;
 }
 
 /* ── Filtering ─────────────────────────────────────────── */
@@ -625,16 +754,22 @@ export function filterConversation(
   return out;
 }
 
+/* The feed's own answer to "how much work did each agent do", held so that a
+ * re-render does not re-count a run that has not changed. */
+let counts: { events: readonly RunEvent[]; result: Record<string, number> } | null = null;
+
 /** How many tool calls each agent has made, from the run's own feed. */
 export function toolCallsFromFeed(events: readonly RunEvent[]): Record<string, number> {
-  const counts: Record<string, number> = {};
+  if (counts && counts.events === events) return counts.result;
+  const result: Record<string, number> = {};
   for (const event of events) {
     if (event.type !== "tool_call_finished") continue;
     const agent = text(event.data?.agent);
     if (!agent) continue;
-    counts[agent] = (counts[agent] ?? 0) + 1;
+    result[agent] = (result[agent] ?? 0) + 1;
   }
-  return counts;
+  counts = { events, result };
+  return result;
 }
 
 /** The last thing the run said about its own status. */

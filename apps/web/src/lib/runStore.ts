@@ -183,10 +183,19 @@ interface RunEntry {
   socket: RunSocket | null;
   readers: number;
   attempt: number;
-  backfilled: boolean;
+  /** Whether the recorded feed has been asked for. */
+  asked: boolean;
   retryTimer: ReturnType<typeof setTimeout> | null;
   closeTimer: ReturnType<typeof setTimeout> | null;
   arrivals: number;
+  /** The recorded conversation, held until the feed has had its say. */
+  transcript: TranscriptRow[] | null;
+  /** Whether the recorded feed has answered, however it answered. */
+  backfilled: boolean;
+  /** Frames that have arrived but are not folded in yet. */
+  pending: IncomingEvent[];
+  /** Whether a commit is already scheduled for those frames. */
+  flushing: boolean;
   /** When this run was last subscribed to, for eviction order. */
   touched: number;
 }
@@ -242,10 +251,14 @@ function entryFor(jobId: string): RunEntry {
     socket: null,
     readers: 0,
     attempt: 0,
+    asked: false,
     backfilled: false,
     retryTimer: null,
     closeTimer: null,
     arrivals: 0,
+    transcript: null,
+    pending: [],
+    flushing: false,
     touched: clock,
   };
   runs.set(jobId, created);
@@ -276,6 +289,41 @@ function identity(event: RunEvent): string {
 }
 
 /* ── Writing ───────────────────────────────────────────── */
+
+/**
+ * When a batch of frames becomes one commit.
+ *
+ * A resume arrives as a burst — the server replays a long run one frame at a
+ * time — and folding, copying and re-rendering once per frame is what made a
+ * three-thousand-event run freeze the tab it opened in. Frames are collected
+ * and committed together: once per animation frame in a browser, and once per
+ * microtask anywhere else, so a test sees the same batching without a clock.
+ */
+function scheduleFlush(run: () => void): void {
+  if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => run());
+  else queueMicrotask(run);
+}
+
+/**
+ * Hold one event for the next commit.
+ *
+ * Used by the socket, which is the only reader that arrives one frame at a
+ * time. The back-fill already has its whole answer and folds it in one call.
+ */
+function queueRunEvent(jobId: string, event: IncomingEvent): void {
+  const entry = entryFor(jobId);
+  entry.pending.push(event);
+  if (entry.flushing) return;
+  entry.flushing = true;
+  scheduleFlush(() => {
+    const current = runs.get(jobId);
+    if (!current) return;
+    current.flushing = false;
+    const batch = current.pending;
+    current.pending = [];
+    if (batch.length > 0) applyRunEvents(jobId, batch);
+  });
+}
 
 /**
  * Fold a batch of events into a run.
@@ -312,18 +360,17 @@ export function applyRunEvents(jobId: string, incoming: IncomingEvent[]): void {
 
   if (added.length === 0) return;
 
-  let events = [...entry.state.events, ...added];
-  /* Sorting only when something arrived out of order keeps the common case —
-   * a live event after everything already held — at the cost of one compare. */
-  let ordered = true;
-  for (let i = 1; i < events.length; i += 1) {
-    if (events[i].sortKey < events[i - 1].sortKey) {
-      ordered = false;
-      break;
-    }
+  /* The common case is a batch that belongs at the end, so only the batch and
+   * the seam it lands on are checked. Scanning the whole run for order on
+   * every commit was O(n) per frame on a feed that is already sorted. */
+  const held = entry.state.events;
+  let ordered = held.length === 0 || added[0].sortKey >= held[held.length - 1].sortKey;
+  for (let i = 1; ordered && i < added.length; i += 1) {
+    if (added[i].sortKey < added[i - 1].sortKey) ordered = false;
   }
+  const events = [...held, ...added];
   if (!ordered) {
-    events = [...events].sort((a, b) => a.sortKey - b.sortKey || a.order - b.order);
+    events.sort((a, b) => a.sortKey - b.sortKey || a.order - b.order);
   }
 
   let lastSeq = entry.state.lastSeq;
@@ -377,40 +424,19 @@ export function setRunStoredStages(jobId: string, stored: StageRow[] | null): vo
 }
 
 /**
- * Hydrate from the recorded conversation.
+ * Offer the recorded conversation.
  *
  * A run whose feed predates the event recording has no events to replay at
  * all, and its `agent_messages` rows are the only copy of what was said. They
- * carry the publisher's `seq` when the run had one and nothing when it did
- * not, which is exactly the ordering the event path already handles.
+ * are held rather than folded in: whether they are needed is a question only
+ * the feed can answer, and it answers when the back-fill returns.
  */
 export function hydrateRunTranscript(jobId: string, rows: TranscriptRow[] | null | undefined): void {
   if (!rows?.length) return;
   const entry = entryFor(jobId);
-  if (entry.state.events.some((event) => event.type === "agent_message")) return;
-  applyRunEvents(
-    jobId,
-    rows.map((row) => ({
-      type: "agent_message",
-      ts: row.ts ?? "",
-      data: {
-        speaker: row.speaker,
-        role: row.role,
-        round: row.round,
-        status: row.status,
-        text: row.text,
-        kind: row.role === "judge" ? "verdict" : row.role === "system" ? "system" : "says",
-        stage: row.stage ?? undefined,
-        addressed_to: row.addressed_to ?? undefined,
-        confidence: row.confidence ?? undefined,
-        claims: row.claims,
-        dissent: row.dissent,
-        report: row.report ?? undefined,
-        report_truncated: row.report_truncated,
-        ...(row.seq ? { seq: row.seq } : {}),
-      },
-    })),
-  );
+  if (entry.transcript) return;
+  entry.transcript = rows;
+  hydrate(entry);
 }
 
 /** Forget a run entirely, socket included. */
@@ -419,7 +445,10 @@ export function resetRun(jobId: string): void {
   if (!entry) return;
   if (entry.retryTimer) clearTimeout(entry.retryTimer);
   if (entry.closeTimer) clearTimeout(entry.closeTimer);
+  entry.pending = [];
+  entry.readers = 0;
   entry.socket?.close();
+  entry.socket = null;
   runs.delete(jobId);
 }
 
@@ -436,7 +465,7 @@ function dial(entry: RunEntry): void {
       patch(entry, { connection: "open" });
     },
     onEvent(event) {
-      applyRunEvents(jobId, [event]);
+      queueRunEvent(jobId, event);
     },
     onClose(code) {
       entry.socket = null;
@@ -460,8 +489,8 @@ function dial(entry: RunEntry): void {
 }
 
 async function backfill(entry: RunEntry): Promise<void> {
-  if (entry.backfilled) return;
-  entry.backfilled = true;
+  if (entry.asked) return;
+  entry.asked = true;
   const jobId = entry.state.jobId;
   try {
     /* No cursor on the first read: the whole run, from its first event, which
@@ -473,7 +502,46 @@ async function backfill(entry: RunEntry): Promise<void> {
     patch(entry, {
       feedError: `Earlier events could not be replayed (${getErrorMessage(error)}). The conversation starts from here.`,
     });
+  } finally {
+    entry.backfilled = true;
+    hydrate(entry);
   }
+}
+
+/**
+ * Fall back to the recorded conversation, once it is clear there is no feed.
+ *
+ * Only then: a run that still has its events replays from them, and stored
+ * rows laid over a feed would be the same conversation twice — a row numbered
+ * by an older scheme can even carry a number a live event is already using,
+ * which would shadow the real thing rather than merely repeat it.
+ */
+function hydrate(entry: RunEntry): void {
+  const rows = entry.transcript;
+  if (!rows?.length || !entry.backfilled || entry.state.events.length > 0) return;
+  entry.transcript = null;
+  applyRunEvents(
+    entry.state.jobId,
+    rows.map((row) => ({
+      type: "agent_message",
+      ts: row.ts ?? "",
+      data: {
+        speaker: row.speaker,
+        role: row.role,
+        round: row.round,
+        status: row.status,
+        text: row.text,
+        kind: row.role === "judge" ? "verdict" : row.role === "system" ? "system" : "says",
+        stage: row.stage ?? undefined,
+        addressed_to: row.addressed_to ?? undefined,
+        confidence: row.confidence ?? undefined,
+        claims: row.claims,
+        dissent: row.dissent,
+        report: row.report ?? undefined,
+        report_truncated: row.report_truncated,
+      },
+    })),
+  );
 }
 
 /**
@@ -495,8 +563,15 @@ export function subscribeRun(jobId: string, listener: () => void): () => void {
     clearTimeout(entry.closeTimer);
     entry.closeTimer = null;
   }
-  if (!entry.socket && !entry.retryTimer) {
-    void backfill(entry).then(() => dial(entry));
+  /* A credential the server rejected is not retried by coming back to the
+   * page: the token has to be replaced first, and redialling would resend the
+   * same one. */
+  if (!entry.socket && !entry.retryTimer && entry.state.connection !== "unauthorized") {
+    void backfill(entry).then(() => {
+      // The run may have been reset or evicted while the back-fill was in
+      // flight; the socket belongs to the entry that asked for it.
+      if (runs.get(jobId) === entry) dial(entry);
+    });
   }
 
   return () => {
@@ -517,8 +592,15 @@ export function subscribeRun(jobId: string, listener: () => void): () => void {
   };
 }
 
-/** The current snapshot for a run, created empty if nothing has arrived. */
+/**
+ * The current snapshot for a run.
+ *
+ * A read never creates anything: this is also the server snapshot, and a
+ * module-level map in a rendering process that only ever grows is a leak with
+ * no reader. A run the store has not been told about reads as the empty one
+ * until something subscribes to it.
+ */
 export function getRun(jobId: string | null): RunState {
   if (!jobId) return NO_RUN;
-  return entryFor(jobId).state;
+  return runs.get(jobId)?.state ?? NO_RUN;
 }

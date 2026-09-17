@@ -55,9 +55,17 @@ export default function ToolCallRow({
             running
           </span>
         ) : tool.ok ? (
-          <CircleCheck size={11} aria-hidden="true" className="self-center text-status-green" />
+          <span className="flex items-center gap-1 self-center text-status-green">
+            <CircleCheck size={11} aria-hidden="true" />
+            {/* The shape says it to a reader; this says it to a screen
+              * reader, which cannot see either the icon or its colour. */}
+            <span className="sr-only">succeeded</span>
+          </span>
         ) : (
-          <CircleX size={11} aria-hidden="true" className="self-center text-status-red" />
+          <span className="flex items-center gap-1 self-center text-status-red">
+            <CircleX size={11} aria-hidden="true" />
+            <span className="sr-only">failed</span>
+          </span>
         )}
         {took && <span className="font-mono text-text-muted">{took}</span>}
         {tool.evidenceId && (

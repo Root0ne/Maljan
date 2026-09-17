@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useState, useRef, useCallback, useEffect } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import type { SampleDTO, SandboxReportDTO } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
@@ -34,6 +34,7 @@ function formatSize(bytes: number): string {
 }
 
 function SamplesPageContent() {
+  const router = useRouter();
   const { staticProviders, sandboxProviders, profiles } = useProviderChoices();
   const [samples, setSamples] = useState<SampleRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -130,7 +131,10 @@ function SamplesPageContent() {
         sampleId,
         Object.keys(config).length > 0 ? config : undefined
       );
-      window.location.href = `/analysis/${job.id}/live`;
+      // Straight to the conversation, which is where a run is watched. A
+      // client-side push rather than a document load: the store, the session
+      // and the socket all survive it.
+      router.push(`/analysis/${job.id}/conversation`);
     } catch (err) {
       // The API's own sentence, shown as it was written: an unknown profile, a
       // disabled analyst, or a model whose probe has not passed — each names

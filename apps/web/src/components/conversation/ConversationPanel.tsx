@@ -13,7 +13,7 @@
  * somebody reading it is worse than making them press a button to come back.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ListFilter, Radio } from "lucide-react";
 
 import {
@@ -24,6 +24,7 @@ import {
   type ItemGroup,
 } from "@/lib/conversation";
 import type { RunConnection, RunEvent } from "@/lib/runStore";
+import { useToolCounts } from "@/lib/useToolCounts";
 import type { JobRoster } from "@/types";
 import { agentInitials } from "./agentIdentity";
 import MessageBubble from "./MessageBubble";
@@ -53,6 +54,7 @@ const TAIL_SLACK_PX = 64;
 export default function ConversationPanel({
   jobId,
   events,
+  lastSeq,
   roster,
   connection,
   feedError,
@@ -60,6 +62,8 @@ export default function ConversationPanel({
 }: {
   jobId: string;
   events: RunEvent[];
+  /** The number of the newest event held, which is half of "something new". */
+  lastSeq: number;
   roster: JobRoster | null;
   connection: RunConnection;
   feedError: string | null;
@@ -80,10 +84,21 @@ export default function ConversationPanel({
     [conversation.participants],
   );
 
+  const { counts, partial } = useToolCounts(jobId, events);
+
   const shown = stages.reduce(
     (total, stage) => total + stage.rounds.reduce((n, round) => n + round.items.length, 0),
     0,
   );
+
+  /* What "there is more to see" means.
+   *
+   * The number of the last event and the number of characters the
+   * conversation holds: a streamed turn appends into a bubble that is already
+   * on screen, so it moves the second and not the first, and a follow that
+   * watched the line count alone stopped following exactly during the turns
+   * the delta channel exists for. */
+  const tail = `${lastSeq}:${conversation.textLength}`;
 
   /* Follow the tail only while the run is talking. A finished run is opened to
    * be read from the start, and a replay that lands on its own last line hides
@@ -92,7 +107,7 @@ export default function ConversationPanel({
     if (!live || !pinned) return;
     const stream = streamRef.current;
     if (stream) stream.scrollTop = stream.scrollHeight;
-  }, [shown, pinned, live]);
+  }, [tail, pinned, live]);
 
   function onScroll() {
     const stream = streamRef.current;
@@ -122,6 +137,8 @@ export default function ConversationPanel({
     <section className="flex flex-col gap-3">
       <ParticipantsBar
         participants={conversation.participants}
+        toolCounts={counts}
+        countsArePartial={partial}
         selected={agents}
         onToggle={(key) => setAgents((current) => toggle(current, key))}
       />
@@ -134,7 +151,7 @@ export default function ConversationPanel({
             <button
               key={group.key}
               type="button"
-              aria-pressed={groups.has(group.key)}
+              aria-pressed={active}
               onClick={() => setGroups((current) => toggle(current, group.key))}
               className={`rounded border px-2 py-0.5 text-[11px] ${
                 active
@@ -182,6 +199,12 @@ export default function ConversationPanel({
           ref={streamRef}
           onScroll={onScroll}
           data-testid="conversation-stream"
+          /* A log rather than a region: a screen reader following a live run
+           * is told about the lines that arrive, and nothing else. */
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions text"
+          aria-label="Conversation"
           className="h-[62vh] min-h-80 space-y-3 overflow-y-auto rounded border border-border bg-bg-deep p-3"
         >
           {shown === 0 ? (
@@ -194,7 +217,7 @@ export default function ConversationPanel({
             </p>
           ) : (
             stages.map((stage) => (
-              <div key={stage.key || "run"} className="space-y-3">
+              <section key={stage.key || "run"} className="space-y-3">
                 {stage.key && (
                   <StageHeader
                     label={stage.label || stage.key}
@@ -211,18 +234,22 @@ export default function ConversationPanel({
                         {round.round === 0 ? "Opening" : `Round ${round.round}`}
                       </p>
                     )}
-                    {round.items.map((item, position) => (
-                      <Item
-                        key={item.id}
-                        item={item}
-                        jobId={jobId}
-                        initials={initials[item.speaker] ?? "?"}
-                        first={isFirstOfSpeaker(round.items, position)}
-                      />
-                    ))}
+                    {/* The exchange is a list, so it can be navigated as one. */}
+                    <ul className="space-y-2">
+                      {round.items.map((item, position) => (
+                        <li key={item.id}>
+                          <Item
+                            item={item}
+                            jobId={jobId}
+                            initials={initials[item.speaker] ?? "?"}
+                            first={isFirstOfSpeaker(round.items, position)}
+                          />
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 ))}
-              </div>
+              </section>
             ))
           )}
 
@@ -278,7 +305,12 @@ function isFirstOfSpeaker(items: ConversationItem[], position: number): boolean 
   );
 }
 
-function Item({
+/* One row, drawn once.
+ *
+ * Memoised on the item, which the conversation builder keeps identical for a
+ * line nothing has changed — so a three-thousand-line replay redraws the line
+ * that just arrived rather than every line before it. */
+const Item = memo(function Item({
   item,
   jobId,
   initials,
@@ -297,4 +329,4 @@ function Item({
     return <NoticeRow item={item} />;
   }
   return <MessageBubble item={item} initials={initials} showHeader={first} />;
-}
+});

@@ -182,26 +182,60 @@ describe("the roster and the stages", () => {
 });
 
 describe("the recorded conversation", () => {
-  it("hydrates a run whose feed predates the event recording", () => {
-    hydrateRunTranscript(JOB, [
-      { speaker: "static", role: "analyst", round: 0, status: "complete", text: "one claim" },
-      { speaker: "judge", role: "judge", round: 1, status: "complete", text: "Verdict: Malware" },
-    ]);
+  const ROWS = [
+    { speaker: "static", role: "analyst", round: 0, status: "complete", text: "one claim" },
+    { speaker: "judge", role: "judge", round: 1, status: "complete", text: "Verdict: Malware" },
+  ];
+
+  it("answers for a run whose feed predates the event recording", async () => {
+    const { transport } = fakeTransport();
+    configureRunTransport(transport);
+    hydrateRunTranscript(JOB, ROWS);
+    subscribeRun(JOB, () => {});
+    await vi.advanceTimersByTimeAsync(0);
 
     const events = getRun(JOB).events;
     expect(events).toHaveLength(2);
     expect(events[0].data.kind).toBe("says");
     expect(events[1].data.kind).toBe("verdict");
+    /* Never numbered, whatever the rows carried: an older run numbered its
+     * stored rows by position, and a position that looked like a publisher's
+     * number would shadow the event actually holding it. */
     expect(events.every((e) => e.seq === undefined)).toBe(true);
   });
 
-  it("leaves a run that already has its feed alone", () => {
-    applyRunEvents(JOB, [event("agent_message", { seq: 1, text: "live" })]);
-    hydrateRunTranscript(JOB, [
-      { seq: 1, speaker: "static", role: "analyst", round: 0, status: "complete", text: "live" },
-    ]);
+  it("stands down for a run that still has its feed", async () => {
+    const { transport } = fakeTransport([event("agent_message", { seq: 1, text: "live" })]);
+    configureRunTransport(transport);
+    hydrateRunTranscript(JOB, ROWS);
+    subscribeRun(JOB, () => {});
+    await vi.advanceTimersByTimeAsync(0);
 
-    expect(getRun(JOB).events).toHaveLength(1);
+    expect(getRun(JOB).events.map((e) => e.data.text)).toEqual(["live"]);
+  });
+
+  it("waits for the feed to answer before standing in for it", () => {
+    hydrateRunTranscript(JOB, ROWS);
+
+    // Nothing has asked the endpoint yet, so nothing is known about the feed.
+    expect(getRun(JOB).events).toEqual([]);
+  });
+
+  it("answers when the feed could not be read at all", async () => {
+    configureRunTransport({
+      async readEvents() {
+        throw new Error("stream unavailable");
+      },
+      connect() {
+        return { close() {} };
+      },
+    });
+    hydrateRunTranscript(JOB, ROWS);
+    subscribeRun(JOB, () => {});
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(getRun(JOB).events).toHaveLength(2);
+    expect(getRun(JOB).feedError).toContain("stream unavailable");
   });
 });
 
@@ -230,6 +264,7 @@ describe("the socket", () => {
 
     dials[0].handlers.onEvent(event("agent_message", { seq: 1, text: "first" }));
     dials[0].handlers.onEvent(event("agent_message", { seq: 2, text: "second" }));
+    await vi.advanceTimersByTimeAsync(0);
 
     expect(getRun(JOB).events.map((e) => e.data.text)).toEqual(["first", "second"]);
   });
@@ -241,6 +276,7 @@ describe("the socket", () => {
     await vi.advanceTimersByTimeAsync(0);
     dials[0].handlers.onOpen();
     dials[0].handlers.onEvent(event("agent_message", { seq: 9 }));
+    await vi.advanceTimersByTimeAsync(0);
 
     dials[0].handlers.onClose(1006);
     await vi.advanceTimersByTimeAsync(31_000);
@@ -320,7 +356,29 @@ describe("the socket", () => {
     const before = notifications;
 
     dials[0].handlers.onEvent(event("agent_message", { seq: 1 }));
+    await vi.advanceTimersByTimeAsync(0);
 
     expect(notifications).toBeGreaterThan(before);
+  });
+
+  it("commits a burst of frames once", async () => {
+    /* A resume arrives one frame at a time. Folding and publishing each one
+     * separately is what made a long replay freeze the page it opened in. */
+    const { transport, dials } = fakeTransport();
+    configureRunTransport(transport);
+    let notifications = 0;
+    subscribeRun(JOB, () => {
+      notifications += 1;
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    const before = notifications;
+
+    for (let seq = 1; seq <= 200; seq += 1) {
+      dials[0].handlers.onEvent(event("agent_message", { seq, text: `line ${seq}` }));
+    }
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(getRun(JOB).events).toHaveLength(200);
+    expect(notifications - before).toBe(1);
   });
 });

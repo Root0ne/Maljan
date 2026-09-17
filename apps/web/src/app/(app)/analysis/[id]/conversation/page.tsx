@@ -24,7 +24,10 @@ export default function ConversationPage() {
   const params = useParams();
   const jobId = params.id as string;
   const { report, job, loading } = useReport();
-  const run = useRun(jobId);
+  /* Nothing is subscribed until the API has said the job exists: a direct
+   * load of a job id that does not would otherwise dial a socket the server
+   * closes on the handshake. */
+  const run = useRun(job ? jobId : null);
 
   const live = job?.status === "running" || job?.status === "pending";
 
@@ -37,6 +40,7 @@ export default function ConversationPage() {
       <ConversationPanel
         jobId={jobId}
         events={run.events}
+        lastSeq={run.lastSeq}
         roster={run.roster}
         connection={run.connection}
         feedError={run.feedError}
