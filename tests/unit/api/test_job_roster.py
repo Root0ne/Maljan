@@ -227,3 +227,44 @@ async def test_no_exception_text_reaches_the_response(
     response = await get_job(job_id=uuid.uuid4(), user=_User(), svc=_Service(_Job()), db=_Session())
     assert response.roster.agents == []
     assert "hunter2" not in response.model_dump_json()
+
+
+def test_the_run_and_the_job_endpoint_describe_the_same_team() -> None:
+    """The worker's roster event and the job endpoint's roster are one shape.
+
+    Two readings of the same settings that drifted would show a live run one
+    set of names and the finished one another, which is the whole failure this
+    roster exists to prevent.
+    """
+    from maljan.core.config import Settings
+    from maljan.pipeline.events import roster_payload
+
+    from app.services.agent_map import effective_definitions, effective_profiles
+    from app.worker.analysis_worker import _roster_for
+
+    settings = Settings()
+
+    class _Container:
+        config = settings
+
+        def active_profile(self) -> Any:
+            return settings.agents.profiles[settings.agents.profile]
+
+    from_the_run = _roster_for(_Container())
+    from_the_store = roster_payload(
+        effective_profiles({})[settings.agents.profile], effective_definitions({})
+    )
+    assert from_the_run == from_the_store
+    assert [a["key"] for a in from_the_run["agents"]]
+
+
+def test_a_container_that_cannot_name_its_team_costs_no_run() -> None:
+    from app.worker.analysis_worker import _roster_for
+
+    class _Broken:
+        config = None
+
+        def active_profile(self) -> Any:
+            raise RuntimeError("no profile")
+
+    assert _roster_for(_Broken()) == {"agents": [], "stages": []}
