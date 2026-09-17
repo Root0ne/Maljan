@@ -8,8 +8,10 @@ agents are cached across samples; the run summary renders the channel as
 
 from __future__ import annotations
 
+import asyncio
+
 from maljan.analysis.run_summary import RunSummaryBuilder
-from maljan.pipeline.nodes import make_stage_agent_node
+from maljan.pipeline.nodes import make_revision_node, make_stage_agent_node
 from maljan.schemas.evidence import EvidenceCounter
 from tests.stages import ANALYSIS_STAGE
 from tests.unit.pipeline.test_evidence_ledger_channel import (
@@ -17,6 +19,7 @@ from tests.unit.pipeline.test_evidence_ledger_channel import (
     _Analyst,
     _Chunk,
     _container,
+    _revision_state,
 )
 
 
@@ -29,6 +32,18 @@ def test_the_node_hands_the_mode_over_once() -> None:
 
     assert update["nudge_retry_modes"] == {"static": "invalid_tool_calls_dropped"}
     assert agent._nudge_retry_mode is None
+
+
+def test_a_nudge_repaired_in_a_revision_round_belongs_to_that_round() -> None:
+    agent = _Analyst("static", EvidenceCounter())
+    container = _container({"static": agent}, {"static": [_Chunk("PE32 executable.")]})
+    make_stage_agent_node(ANALYSIS_STAGE, "static", container)(_analysis_state())
+    agent._nudge_retry_mode = "tool_choice_none"
+
+    revision = asyncio.run(make_revision_node(container)(_revision_state()))
+
+    assert revision["nudge_retry_modes"] == {"static": "tool_choice_none"}
+    assert agent.drain_nudge_retry_mode() is None
 
 
 def test_an_analyst_that_needed_no_repair_writes_nothing() -> None:

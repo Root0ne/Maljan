@@ -98,6 +98,25 @@ class TestWhatTheBlockSays:
     def test_an_empty_state_renders_nothing(self) -> None:
         assert render_run_state({}) == ""
 
+    def test_a_long_pack_line_is_cut_here_although_the_pack_keeps_it_whole(self) -> None:
+        long_subject = "S" * 400
+        state = {
+            **STATE,
+            "evidence_ledger": [
+                _row(
+                    "signing_info",
+                    {
+                        "authenticode": {"present": True, "subject": long_subject},
+                        "apk": {"present": False},
+                        "macho": {"present": False},
+                    },
+                    1,
+                )
+            ],
+        }
+        (line,) = [ln for ln in render_run_state(state).splitlines() if "signature" in ln]
+        assert len(line) == 240 and line.endswith("…")
+
     def test_the_block_is_facts_and_names_no_verdict(self) -> None:
         text = render_run_state(STATE).lower()
         for word in ("malicious", "benign", "suspicious", "likely", "probably"):
@@ -171,15 +190,67 @@ class _Analyst(BaseAnalyst):
 
 
 class TestThePerTurnRefresh:
-    def test_each_turn_rewrites_the_budget_line_and_nothing_accumulates(self) -> None:
+    def test_the_first_turn_reads_the_whole_budget_and_each_agent_step_takes_one(self) -> None:
+        """A step is a model turn: the framing and the tool results cost nothing."""
+        import re
+        import time
+
         agent = _Analyst()
         agent.run_state_block = "sample: c"
-        refresh = agent._run_state_refresher(max_steps=10, timeout=600.0, started=0.0)
+        refresh = agent._run_state_refresher(max_steps=10, timeout=600.0, started=time.monotonic())
         first = refresh({"messages": [SystemMessage(content="sys"), HumanMessage(content="t")]})
-        assert "budget remaining: 8 steps" in str(first[0].content)
-        later = refresh({"messages": [*first, AIMessage(content="a"), AIMessage(content="b")]})
-        assert "budget remaining: 6 steps" in str(later[0].content)
+        line = re.search(r"budget remaining: (\d+) steps, (\d+) s", str(first[0].content))
+        assert line is not None
+        assert int(line.group(1)) == 10
+        assert 590 <= int(line.group(2)) <= 600
+        later = refresh(
+            {
+                "messages": [
+                    *first,
+                    AIMessage(content="", tool_calls=[{"name": "t", "args": {}, "id": "1"}]),
+                    ToolMessage(content="r", tool_call_id="1"),
+                    AIMessage(content="b"),
+                ]
+            }
+        )
+        assert "budget remaining: 8 steps" in str(later[0].content)
         assert str(later[0].content).count(RUN_STATE_BEGIN) == 1
+
+    def test_a_real_executor_calls_the_refresher_before_the_model(self) -> None:
+        """The whole mechanism rides on langgraph's ``prompt`` hook; this pins it."""
+        import time
+
+        from langchain_core.language_models.chat_models import BaseChatModel
+        from langchain_core.outputs import ChatGeneration, ChatResult
+        from langgraph.prebuilt import create_react_agent
+
+        seen: list[list[Any]] = []
+
+        class _Model(BaseChatModel):
+            def _generate(self, messages: Any, stop: Any = None, run_manager: Any = None, **_: Any):
+                seen.append(list(messages))
+                return ChatResult(generations=[ChatGeneration(message=AIMessage(content="ok"))])
+
+            @property
+            def _llm_type(self) -> str:
+                return "fake"
+
+            def bind_tools(self, tools: Any, **_: Any) -> Any:
+                return self
+
+        agent = _Analyst()
+        agent.run_state_block = "sample: c"
+        executor = create_react_agent(
+            _Model(),
+            [],
+            prompt=agent._run_state_refresher(
+                max_steps=10, timeout=600.0, started=time.monotonic()
+            ),
+        )
+        executor.invoke({"messages": [SystemMessage(content="sys"), HumanMessage(content="t")]})
+        assert seen
+        system = str(seen[0][0].content)
+        assert RUN_STATE_BEGIN in system and "budget remaining: 10 steps" in system
 
     def test_an_agent_without_a_block_hands_the_turn_back_untouched(self) -> None:
         agent = _Analyst()

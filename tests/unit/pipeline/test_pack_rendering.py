@@ -180,7 +180,17 @@ class TestTheLines:
             ok=False,
             error="no reputation server is enabled (virustotal, threatintel); no lookup was made",
         )
-        assert render_pack([entry], 0).startswith("[ev_0001] reputation: failed (no reputation")
+        # A call the pipeline did not make is not a failure and is not called one.
+        assert render_pack([entry], 0).startswith("[ev_0001] reputation: not done (no reputation")
+
+    def test_a_step_the_budget_stopped_is_not_done_either(self) -> None:
+        entry = _entry(
+            "capa",
+            "not run: the pack's budget of 1200 s was spent before this step",
+            ok=False,
+            error="not run: the pack's budget of 1200 s was spent before this step",
+        )
+        assert render_pack([entry], 0).startswith("[ev_0001] capa: not done (not run:")
 
     def test_a_tool_the_renderer_does_not_know_still_gets_its_line(self) -> None:
         entry = _entry("some_new_tool", {"rows": [1, 2]})
@@ -208,6 +218,12 @@ class TestTheCut:
             "reachable by tool call."
         )
         assert lines[0].startswith("[ev_0001]")
+
+    def test_one_entry_left_out_is_said_in_the_singular(self) -> None:
+        entries = self._many(2)
+        one_line = len(render_pack(entries[:1], 0))
+        text = render_pack(entries, one_line + 20)
+        assert text.splitlines()[-1].startswith("1 more pack entry not shown here")
 
     def test_the_first_line_is_always_kept(self) -> None:
         text = render_pack(self._many(2), 10)

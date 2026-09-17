@@ -115,6 +115,15 @@ class TestTheTranscriptTheNudgeSends:
         assert turns[-1].content == "Let me search the strings."
         assert turns[-1].tool_calls == []
 
+    def test_a_turn_that_was_nothing_but_the_bad_call_is_left_out(self) -> None:
+        empty = AIMessage(
+            content="",
+            invalid_tool_calls=[{"name": "strings", "args": "{", "id": "bad", "error": "x"}],
+        )
+        turns, changed = nudge_turns([SystemMessage(content="s"), empty])
+        assert changed is True
+        assert [type(m).__name__ for m in turns] == ["SystemMessage"]
+
     def test_a_clean_transcript_is_sent_as_it_is(self) -> None:
         clean = _conversation()[:4]
         turns, changed = nudge_turns(clean)

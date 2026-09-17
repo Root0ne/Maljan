@@ -52,12 +52,11 @@ from maljan.pipeline.triage_pack import (
     PIPELINE,
     CapaSettings,
     PackInputs,
-    degrades_run,
     failure_reason,
-    is_pack_reason,
     pack_block,
     pack_entries,
     reason_sentence,
+    run_is_degraded,
     run_pack,
 )
 from maljan.pipeline.validation import (
@@ -181,6 +180,19 @@ def _violations_from_rows(rows: Any) -> list[Violation]:
                 )
             )
     return out
+
+
+def _nudge_mode(agent: Any) -> str | None:
+    """How this agent's last nudge had to be sent, read and cleared in one place."""
+    drain = getattr(agent, "drain_nudge_retry_mode", None)
+    if drain is None:
+        return None
+    try:
+        mode = drain()
+    except Exception as exc:  # noqa: BLE001 — a metric is never worth a lost run
+        logger.debug("nudge mode read skipped: %s", exc)
+        return None
+    return str(mode) if mode else None
 
 
 def _validation_update(agent: Any, agent_name: str) -> dict[str, Any]:
@@ -1008,6 +1020,9 @@ def stage_record(
     ).to_dict()
     if agent_reasons:
         entry["agent_reasons"] = dict(agent_reasons)
+    # A stage that ran and went wrong, said as a flag rather than inferred
+    # from a reason beside ``ran: true``: the console draws it as failed.
+    entry["failure"] = bool(ran and failure)
     entry["kind"] = str(getattr(stage, "kind", "analysis"))
     # The reducer adds durations up across a stage's nodes, which is right for
     # a chain and wrong for a fan-out; it needs the mode to tell them apart.
@@ -1160,6 +1175,7 @@ def stage_rollup(
                 "key": stage.key,
                 "kind": stage.kind,
                 "ran": bool(entry.get("ran", False)),
+                "failure": bool(entry.get("failure", False)),
                 "reason": str(entry.get("reason") or ("" if entry else "stage did not report")),
                 "agents": list(entry.get("agents") or stage.agents),
                 "duration_ms": int(entry.get("duration_ms") or 0),
@@ -1344,10 +1360,9 @@ def make_stage_agent_node(
                     agent_name: [e.to_captured().model_dump() for e in entries]
                 }
             update.update(_validation_update(bound_agent, agent_name))
-            mode = getattr(bound_agent, "_nudge_retry_mode", None)
+            mode = _nudge_mode(bound_agent)
             if mode:
-                update["nudge_retry_modes"] = {agent_name: str(mode)}
-                bound_agent._nudge_retry_mode = None
+                update["nudge_retry_modes"] = {agent_name: mode}
             return update
 
         try:
@@ -2207,6 +2222,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
         # makes anything the revised answer cites unresolvable. Built-in
         # analysts revise without tools; a composed agent does not.
         revision_ledger: list[dict[str, Any]] = []
+        revision_nudge_modes: dict[str, str] = {}
 
         # strict=True: agent_names and results MUST be equal length; mismatch
         # is a programming error and must surface, not be silently truncated.
@@ -2234,6 +2250,11 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     )
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("evidence ledger read skipped for %s: %s", name, exc)
+                # A nudge repaired in this round belongs to this round, not to
+                # the next analysis node that happens to drain the agent.
+                revision_mode = _nudge_mode(container.get_agent(name))
+                if revision_mode:
+                    revision_nudge_modes[name] = revision_mode
                 emit_agent_message(
                     container.event_sink,
                     speaker=name,
@@ -2253,6 +2274,8 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
         out: dict[str, Any] = {"revised_reports": revised, "isr_reports": revised_isrs}
         if revision_ledger:
             out["evidence_ledger"] = revision_ledger
+        if revision_nudge_modes:
+            out["nudge_retry_modes"] = revision_nudge_modes
         return out
 
     node_fn.__name__ = "revision_node"
@@ -2561,10 +2584,7 @@ def make_judge_node(
             # about; only the identity tools, or the pack itself, failing makes
             # the run degraded on their own. Everything that is not the pack's
             # keeps the weight it always had.
-            _degraded_mode = any(
-                degrades_run(reason) if is_pack_reason(reason) else True
-                for reason in _degradation_reasons
-            )
+            _degraded_mode = run_is_degraded(_degradation_reasons)
             if _degraded_mode:
                 logger.warning("Degraded run detected (%s).", "; ".join(_degradation_reasons))
 
@@ -3261,6 +3281,7 @@ def make_report_node(
                         report,
                         state.get("isr_reports"),
                         facts_block=pack_text(state, container),
+                        run_state=render_run_state(state),
                     ),
                     timeout=_NARRATIVE_TIMEOUT_SECONDS,
                 )
@@ -3304,7 +3325,10 @@ def make_report_node(
         if composer is not None:
             try:
                 await composer.compose(
-                    report, state.get("isr_reports"), facts_block=pack_text(state, container)
+                    report,
+                    state.get("isr_reports"),
+                    facts_block=pack_text(state, container),
+                    run_state=render_run_state(state),
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning(

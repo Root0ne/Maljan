@@ -520,6 +520,7 @@ class TestTheNode:
 
         record = update["stage_results"]["triage_pack"]
         assert record["ran"] is True
+        assert record["failure"] is False
         assert record["reason"] == ""
         assert record["duration_ms"] >= 0
         assert [kind for kind, _ in events if kind.startswith("stage_")] == [
@@ -553,6 +554,7 @@ class TestTheNode:
         update = asyncio.run(node(_state(sample_path=_write(tmp_path, "s.exe", _pe()))))
         record = update["stage_results"]["triage_pack"]
         assert record["ran"] is True
+        assert record["failure"] is True
         assert record["reason"] == "triage pack failed: RuntimeError: the pack itself broke"
         assert update["triage_facts"]["degradation_reasons"] == ["triage.pack_failed"]
         assert update["triage_facts"]["entries"] == 0
@@ -597,6 +599,25 @@ class TestTheReputationLookupHonoursTheTeam:
             result.entries[-1].error or ""
         )
 
+    def test_exclusions_that_cannot_be_read_withhold_every_server(self, tmp_path: Path) -> None:
+        """Not knowing what the team withholds is read as withholding: the hash stays home."""
+        container = ServiceContainer(Settings(_env_file=None), mock=True)
+
+        def _broken() -> Any:
+            raise RuntimeError("profile unreadable")
+
+        container.active_profile = _broken  # type: ignore[method-assign]
+        recorder = EvidenceRecorder(PIPELINE, counter=EvidenceCounter(), stage="triage_pack")
+        result = run_pack(
+            recorder,
+            _inputs(_write(tmp_path, "s.exe", _pe()), "pe"),
+            reputation=_reputation_lookup(container, "b" * 64),
+        )
+        last = result.entries[-1]
+        assert last.tool == "reputation" and last.server == PIPELINE and last.ok is False
+        assert "withheld because the team's exclusions could not be read" in (last.error or "")
+        assert result.failed == []
+
     def test_no_sha256_means_no_lookup_and_a_reason(self, tmp_path: Path) -> None:
         result = self._run(Settings(_env_file=None), sha256="", tmp_path=tmp_path)
         assert "no sha256 to look up" in (result.entries[-1].error or "")
@@ -613,6 +634,24 @@ class TestThePackBudget:
         assert later and all(entry.ok is False for entry in later)
         assert all("budget of 0 s was spent" in (entry.error or "") for entry in later)
         assert "hashes" in result.failed
+
+    def test_the_lookup_is_not_made_once_the_budget_is_spent(self, tmp_path: Path) -> None:
+        asked: list[str] = []
+
+        def lookup(recorder: EvidenceRecorder) -> Any:
+            asked.append("yes")
+            return recorder.record(tool="check_hash", args={}, server="threatintel", output="x")
+
+        recorder = EvidenceRecorder(PIPELINE, counter=EvidenceCounter(), stage="triage_pack")
+        result = run_pack(
+            recorder,
+            _inputs(_write(tmp_path, "s.exe", _pe()), "pe", budget_s=1e-9),
+            reputation=lookup,
+        )
+        assert asked == []
+        (entry,) = [e for e in result.entries if e.tool == "reputation"]
+        assert entry.ok is False and entry.server == PIPELINE
+        assert (entry.error or "").startswith("not run:")
 
     def test_no_budget_means_every_step_runs(self, tmp_path: Path) -> None:
         result = _pack(_write(tmp_path, "s.exe", _pe()), "pe", budget_s=0)
@@ -685,3 +724,16 @@ class TestWhichPackFailuresDegradeTheRun:
         assert is_pack_reason("triage.capa_failed") and not is_pack_reason("analyst failures: x")
         assert reason_sentence("triage.capa_failed") == "the triage pack could not run capa"
         assert reason_sentence("no sandbox report") == "no sandbox report"
+        # A lookup that failed under either server's tool name is one sentence.
+        for tool in ("reputation", "get_file_report", "check_hash"):
+            assert reason_sentence(f"triage.{tool}_failed") == (
+                "the triage pack's reputation lookup did not answer"
+            )
+
+    def test_the_run_is_degraded_only_by_what_degrades_it(self) -> None:
+        from maljan.pipeline.triage_pack import run_is_degraded
+
+        assert run_is_degraded(["triage.capa_failed", "triage.reputation_failed"]) is False
+        assert run_is_degraded(["triage.hashes_failed"]) is True
+        assert run_is_degraded(["triage.capa_failed", "analyst failures: static"]) is True
+        assert run_is_degraded([]) is False

@@ -282,13 +282,15 @@ def nudge_turns(msgs: list) -> tuple[list, bool]:
     for message in msgs:
         invalid = getattr(message, "invalid_tool_calls", None) or []
         if isinstance(message, AIMessage) and invalid:
-            out.append(
-                AIMessage(
-                    content=message.content,
-                    tool_calls=list(getattr(message, "tool_calls", None) or []),
-                )
-            )
             changed = True
+            kept_calls = list(getattr(message, "tool_calls", None) or [])
+            content = message.content if isinstance(message.content, str) else ""
+            # A turn that was nothing but the call it could not make is left
+            # out rather than sent as an empty assistant turn, which some
+            # templates render as nothing and a few reject.
+            if not content.strip() and not kept_calls:
+                continue
+            out.append(AIMessage(content=message.content, tool_calls=kept_calls))
             continue
         out.append(message)
     return out, changed
@@ -1880,10 +1882,14 @@ class BaseAnalyst(ABC):
             messages = list(messages)
             if not str(getattr(self, "run_state_block", "") or ""):
                 return messages
+            # A step is a model turn. The framing and the tool results are
+            # not steps, so the first turn reads the whole budget and each
+            # assistant turn since then takes one off it.
+            spent = sum(1 for m in messages if getattr(m, "type", "") == "ai")
             try:
                 return self.frame_messages(
                     messages,
-                    steps_left=max_steps - len(messages),
+                    steps_left=max_steps - spent,
                     seconds_left=float(timeout) - (time.monotonic() - started),
                 )
             except Exception as exc:  # noqa: BLE001 — the block never costs a turn
@@ -1937,20 +1943,25 @@ class BaseAnalyst(ABC):
             elif role == "human":
                 prebuilt.append(HumanMessage(content=content))
 
-        cfg_for_timeout = get_settings()
-        _timeout_overrides = getattr(cfg_for_timeout, "react_agent_timeout_overrides", {}) or {}
-        no_tools_timeout = _timeout_overrides.get(self.name, cfg_for_timeout.react_agent_timeout)
-        _step_overrides = getattr(cfg_for_timeout, "react_agent_max_steps_overrides", {}) or {}
-        _max_steps = _step_overrides.get(self.name, cfg_for_timeout.react_agent_max_steps)
+        cfg = get_settings()
+        # Per-agent timeout override. The static
+        # analyst with 31 Ghidra tools never finishes inside 180 s on
+        # commodity hardware; give it the operator-configured headroom.
+        overrides = getattr(cfg, "react_agent_timeout_overrides", {}) or {}
+        timeout = overrides.get(self.name, cfg.react_agent_timeout)
+        # Per-agent recursion-step override: the
+        # static analyst's Ghidra ReAct loop needs far more than the default
+        # ~4-tool-call budget. Without this it hit the step cap and LangGraph
+        # returned the "need more steps" stop message instead of real claims.
+        step_overrides = getattr(cfg, "react_agent_max_steps_overrides", {}) or {}
+        max_steps = step_overrides.get(self.name, cfg.react_agent_max_steps)
 
         # The two standing blocks: the pack at the head of the task, the run
         # state in the system turn with this loop's whole budget still ahead.
-        prebuilt = self.frame_messages(
-            prebuilt, steps_left=_max_steps, seconds_left=float(no_tools_timeout)
-        )
+        prebuilt = self.frame_messages(prebuilt, steps_left=max_steps, seconds_left=float(timeout))
 
         if not self.tools:
-            return self._capture_findings(self._invoke_llm_with_timeout(prebuilt, no_tools_timeout))
+            return self._capture_findings(self._invoke_llm_with_timeout(prebuilt, timeout))
 
         from langgraph.prebuilt import create_react_agent
 
@@ -1982,18 +1993,6 @@ class BaseAnalyst(ABC):
 
         messages = prebuilt
 
-        cfg = get_settings()
-        # Per-agent timeout override. The static
-        # analyst with 31 Ghidra tools never finishes inside 180 s on
-        # commodity hardware; give it the operator-configured headroom.
-        overrides = getattr(cfg, "react_agent_timeout_overrides", {}) or {}
-        timeout = overrides.get(self.name, cfg.react_agent_timeout)
-        # Per-agent recursion-step override: the
-        # static analyst's Ghidra ReAct loop needs far more than the default
-        # ~4-tool-call budget. Without this it hit the step cap and LangGraph
-        # returned the "need more steps" stop message instead of real claims.
-        step_overrides = getattr(cfg, "react_agent_max_steps_overrides", {}) or {}
-        max_steps = step_overrides.get(self.name, cfg.react_agent_max_steps)
         # The run-state block is regenerated on every model turn with the
         # budget this loop has left, which is why the executor's prompt is a
         # callable rather than the fixed messages.
@@ -2341,8 +2340,16 @@ class BaseAnalyst(ABC):
         bind = getattr(self.llm, "bind_tools", None)
         if not tools or bind is None:
             return None
+        # The same tools the loop was run with, guards included, so the
+        # server sees the tool list the transcript was produced against. An
+        # agent that cannot pin — one built outside a job — binds them bare.
         try:
-            return bind(tools, tool_choice="none")
+            pinned = self.pinned_tools()
+        except Exception as exc:  # noqa: BLE001 — the bare tools are the fallback's fallback
+            self.logger.debug("%s: tools bound unpinned for the nudge (%s).", self.name, exc)
+            pinned = tools
+        try:
+            return bind(pinned, tool_choice="none")
         except Exception as exc:  # noqa: BLE001 — a model that cannot bind has no fallback
             self.logger.debug("%s: tools could not be bound for the nudge (%s).", self.name, exc)
             return None
@@ -3012,6 +3019,15 @@ class BaseAnalyst(ABC):
         if prompt:
             messages.append(SystemMessage(content=prompt))
         messages.append(HumanMessage(content=self._truncate_input(evidence)))
+        # Framed like every other turn: the feedback asks the analyst to cite
+        # ledger ids, and the pack is where the ids it can cite are written.
+        # Through the module function, so a duck-typed analyst that borrows
+        # this method alone is framed too.
+        messages = frame_messages(
+            messages,
+            facts_block=str(getattr(self, "facts_block", "") or ""),
+            run_state=str(getattr(self, "run_state_block", "") or ""),
+        )
 
         cfg = get_settings()
         timeout = int(
@@ -3076,6 +3092,12 @@ class BaseAnalyst(ABC):
     def _alignment_gate(self, knowledge: Any, cfg_validation: Any) -> Any | None:
         """The alignment gate for this run, or ``None``; see :func:`alignment_gate`."""
         return alignment_gate(knowledge, cfg_validation, self.logger, self.name)
+
+    def drain_nudge_retry_mode(self) -> str | None:
+        """How the last nudge had to be sent, handed over once."""
+        mode = getattr(self, "_nudge_retry_mode", None)
+        self._nudge_retry_mode = None
+        return str(mode) if mode else None
 
     def drain_validation_not_run(self) -> list[str]:
         """The checks that could not run, handed over once."""

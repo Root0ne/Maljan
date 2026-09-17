@@ -177,24 +177,30 @@ class ReportComposer:
         # Set per ``compose`` call; empty until then, which grounds nothing and
         # therefore judges nothing (see ``ungrounded_capabilities``).
         self._grounding = CapabilityGrounding()
-        # The triage pack for this report, set per ``compose`` call.
+        # The triage pack and the run state for this report, set per
+        # ``compose`` call.
         self._facts_block = ""
+        self._run_state = ""
 
     async def compose(
         self,
         report: MalwareReport,
         isr_reports: dict[str, Any] | None = None,
         facts_block: str = "",
+        run_state: str = "",
     ) -> None:
         """Fill report.intro_background / technical_analysis / c2_channels /
         conclusion. Mutates ``report`` in place; each section is best-effort.
 
-        ``facts_block`` is the triage pack; every section's prompt leads with
-        it, so no section is written without the facts the run established.
+        ``facts_block`` is the triage pack and ``run_state`` the run's state
+        block; every section's prompt leads with the two, so no section is
+        written without the facts the run established or without knowing
+        which stages ran.
         """
         ta = report.technical_analysis or TechnicalAnalysis()
         authored = 0
         self._facts_block = facts_block
+        self._run_state = run_state
         # What this run established, read once and asked of every section, so
         # a conclusion cannot be the first place "command-and-control" appears.
         self._grounding = CapabilityGrounding.from_report(report, isr_reports)
@@ -278,13 +284,21 @@ class ReportComposer:
         bundle = bundle_for(section, report, report.technical_evidence, isr_reports)
         if is_empty(bundle):
             return None
+        from maljan.pipeline.run_state import with_run_state
+
+        head: list[str] = []
+        run_state = str(getattr(self, "_run_state", "") or "")
+        if run_state:
+            head.append(with_run_state("", run_state))
         facts = str(getattr(self, "_facts_block", "") or "")
-        body = _bundle_text(section, bundle)
         if facts:
-            body = f"{facts}\n\n{body}"
+            head.append(facts)
+        # The two standing blocks lead, then the instruction, then the
+        # section's own bundle.
+        human = "\n\n".join([*head, instruction, _bundle_text(section, bundle)])
         messages = [
             SystemMessage(content=_SYSTEM),
-            HumanMessage(content=f"{instruction}\n\n{body}"),
+            HumanMessage(content=human),
         ]
         try:
             return await asyncio.wait_for(

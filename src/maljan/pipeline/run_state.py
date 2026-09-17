@@ -32,6 +32,8 @@ RUN_STATE_END = "=== END RUN STATE ==="
 _BLOCK_RE = re.compile(re.escape(RUN_STATE_BEGIN) + r".*?" + re.escape(RUN_STATE_END), re.DOTALL)
 
 # How many characters of a pack line the identity and reputation lines keep.
+# The pack renders a line whole; this block repeats four of them on every
+# turn of every loop, so here they are cut.
 _LINE_CHARS = 240
 
 
@@ -94,10 +96,10 @@ def _lines(
     for tool in ("identify_file", "hashes", "signing_info"):
         entry = by_tool.get(tool)
         if entry is not None:
-            lines.append(render_pack([entry], _LINE_CHARS))
+            lines.append(_cut(render_pack([entry], 0)))
     reputation = [e for e in pack if e.tool in ("get_file_report", "check_hash", "reputation")]
     if reputation:
-        lines.append(render_pack([reputation[-1]], _LINE_CHARS))
+        lines.append(_cut(render_pack([reputation[-1]], 0)))
 
     stages = state.get("stage_results") or {}
     if isinstance(stages, Mapping) and stages:
@@ -139,6 +141,10 @@ def _lines(
     if budget:
         lines.append("budget remaining: " + ", ".join(budget))
     return lines
+
+
+def _cut(line: str) -> str:
+    return line if len(line) <= _LINE_CHARS else line[: _LINE_CHARS - 1] + "…"
 
 
 def _get(row: Any, key: str) -> Any:

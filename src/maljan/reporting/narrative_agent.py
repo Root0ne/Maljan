@@ -329,7 +329,11 @@ class NarrativeAgent:
         self.validation_tally = ValidationTally()
 
     async def generate(
-        self, report: MalwareReport, isr_reports: Any = None, facts_block: str = ""
+        self,
+        report: MalwareReport,
+        isr_reports: Any = None,
+        facts_block: str = "",
+        run_state: str = "",
     ) -> NarrativeOutput | None:
         """Return a ``NarrativeOutput`` or ``None`` if both paths fail.
 
@@ -338,7 +342,7 @@ class NarrativeAgent:
         Both surfaces are wrapped in broad ``except`` so the report node can
         always rely on the fallback narrative.
         """
-        messages = self._build_prompt(report, facts_block)
+        messages = self._build_prompt(report, facts_block, run_state)
 
         # What this run actually established, so a summary cannot be the first
         # place "command-and-control" or "data exfiltration" appears. Run 3's
@@ -473,15 +477,22 @@ class NarrativeAgent:
         self._record_ungrounded(found)
         return output
 
-    def _build_prompt(self, report: MalwareReport, facts_block: str = "") -> list[BaseMessage]:
-        """The system turn and the human turn, the pack leading the human turn.
+    def _build_prompt(
+        self, report: MalwareReport, facts_block: str = "", run_state: str = ""
+    ) -> list[BaseMessage]:
+        """The system turn and the human turn, the two standing blocks leading the human turn.
 
         ``facts_block`` is the triage pack as the analysts and the judge saw
-        it; the summary is written over the same facts, with their ids.
+        it and ``run_state`` the run's state block; the summary is written
+        over the same facts, with their ids, and knows which stages ran.
         """
+        from maljan.pipeline.run_state import with_run_state
+
         body = build_prompt_text(report)
         if facts_block:
             body = f"{facts_block}\n\n{body}"
+        if run_state:
+            body = f"{with_run_state('', run_state)}\n\n{body}"
         return [
             SystemMessage(content=_SYSTEM_PROMPT),
             HumanMessage(content=body),

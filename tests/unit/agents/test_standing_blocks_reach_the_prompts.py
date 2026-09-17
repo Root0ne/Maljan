@@ -92,6 +92,43 @@ class TestAnAnalystsPrompt:
         assert RUN_STATE_BEGIN in system
         assert human.startswith(PACK_HEADING)
 
+    def test_the_validation_feedback_turn_shows_the_ids_it_asks_the_analyst_to_cite(
+        self, monkeypatch: Any
+    ) -> None:
+        """The retry asks for a ledger id; the pack is where the ids are."""
+        from maljan.agents import base_agent
+        from maljan.pipeline.validation import Violation
+        from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+
+        # The validator runs three times: the check before the loop, the loop's
+        # look at the prior answer, and the look at the retry.
+        told = [Violation(code="isr.ungrounded_technique", message="cite ev_0001")]
+        answers = iter([told, told, []])
+        monkeypatch.setattr(base_agent, "validate_isr", lambda *_a, **_k: next(answers, []))
+        agent = _briefed(_LLM())
+        # Every real analyst carries a system prompt; the retry is built on it.
+        agent._system_prompt = lambda _default: "You are a static analyst."  # type: ignore[method-assign]
+        sent: list[list[Any]] = []
+
+        def _capture(turns: list[Any], timeout: int) -> AIMessage:
+            sent.append(list(turns))
+            return AIMessage(content=REPORT)
+
+        agent._invoke_llm_with_timeout = _capture  # type: ignore[method-assign]
+        isr = AgentISR(
+            agent_id="static",
+            domain="static",
+            claims=[
+                ClaimEvidence(claim="c", evidence_ref="x", confidence=0.5, technique_id="T1055")
+            ],
+        )
+        agent._validate_isr(isr, "the raw data")
+        assert sent
+        system, human = _system_and_human(sent[0])
+        assert RUN_STATE_BEGIN in system
+        assert human.startswith(PACK_HEADING)
+        assert "[ev_0001]" in human
+
     def test_an_agent_outside_a_staged_run_sends_what_it_always_sent(self) -> None:
         llm = _LLM()
         agent = _Analyst(llm)
@@ -206,10 +243,18 @@ def _report() -> MalwareReport:
 
 
 class TestTheReportRounds:
-    def test_the_narrative_prompt_leads_with_the_pack(self) -> None:
+    def test_the_narrative_prompt_leads_with_the_run_state_then_the_pack(self) -> None:
         agent = NarrativeAgent.__new__(NarrativeAgent)
-        messages = agent._build_prompt(_report(), FACTS)
-        assert str(messages[1].content).startswith(FACTS + "\n\nDETERMINISTIC FINDINGS")
+        messages = agent._build_prompt(_report(), FACTS, RUN_STATE)
+        human = str(messages[1].content)
+        assert human.startswith(RUN_STATE_BEGIN)
+        assert (
+            human.index(RUN_STATE_BEGIN)
+            < human.index(PACK_HEADING)
+            < human.index("DETERMINISTIC FINDINGS")
+        )
+        packed = agent._build_prompt(_report(), FACTS)
+        assert str(packed[1].content).startswith(FACTS + "\n\nDETERMINISTIC FINDINGS")
         bare = agent._build_prompt(_report())
         assert str(bare[1].content).startswith("DETERMINISTIC FINDINGS")
 
@@ -228,13 +273,20 @@ class TestTheReportRounds:
             "maljan.reporting.composer.bundle_for", return_value={"facts": {"verdict": "x"}}
         ):
             composer._facts_block = FACTS
+            composer._run_state = RUN_STATE
             asyncio.run(
                 composer._author("introduction", _report(), None, MagicMock, "Write an intro.")
             )
         assert seen
         human = str(seen[0][1].content)
-        assert human.startswith("Write an intro.\n\n" + FACTS)
-        assert "SECTION: introduction" in human
+        # The two standing blocks lead, then the instruction, then the bundle.
+        assert human.startswith(RUN_STATE_BEGIN)
+        assert (
+            human.index(RUN_STATE_BEGIN)
+            < human.index(PACK_HEADING)
+            < human.index("Write an intro.")
+            < human.index("SECTION: introduction")
+        )
 
     def test_compose_hands_the_pack_to_its_sections(self) -> None:
         composer = ReportComposer.__new__(ReportComposer)
@@ -242,6 +294,7 @@ class TestTheReportRounds:
         composer.validation_tally = MagicMock()
         composer._grounding = MagicMock()
         composer._facts_block = ""
+        composer._run_state = ""
 
         async def _author(*_a: Any, **_k: Any) -> Any:
             return None
@@ -249,5 +302,6 @@ class TestTheReportRounds:
         composer._author = _author  # type: ignore[method-assign]
         with patch("maljan.reporting.composer.CapabilityGrounding") as grounding:
             grounding.from_report.return_value = MagicMock()
-            asyncio.run(composer.compose(_report(), None, facts_block=FACTS))
+            asyncio.run(composer.compose(_report(), None, facts_block=FACTS, run_state=RUN_STATE))
         assert composer._facts_block == FACTS
+        assert composer._run_state == RUN_STATE

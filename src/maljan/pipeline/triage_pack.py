@@ -34,7 +34,7 @@ from __future__ import annotations
 import json
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
@@ -60,6 +60,7 @@ __all__ = [
     "failure_reason",
     "is_pack_reason",
     "malicious_count",
+    "run_is_degraded",
     "reason_sentence",
     "pack_block",
     "pack_entries",
@@ -120,6 +121,22 @@ def degrades_run(reason: str) -> bool:
     return bool(match and match.group("tool") in ESSENTIAL_TOOLS)
 
 
+def run_is_degraded(reasons: Sequence[str]) -> bool:
+    """Whether a run's degradation reasons make it degraded.
+
+    Every reason that is not the pack's keeps the weight it always had; a
+    pack reason counts only for an essential tool or the pack itself. A capa
+    that ran out of budget is an absence the judge is told about, not a
+    degraded run.
+    """
+    return any(degrades_run(reason) if is_pack_reason(reason) else True for reason in reasons or [])
+
+
+# The reputation tools, whichever server answered: their failure is one
+# sentence, about the lookup.
+_REPUTATION_TOOLS: frozenset[str] = frozenset({"reputation", "get_file_report", "check_hash"})
+
+
 def reason_sentence(reason: str) -> str:
     """A pack reason as a sentence for a prompt; any other reason as it is.
 
@@ -132,7 +149,7 @@ def reason_sentence(reason: str) -> str:
     tool = match.group("tool")
     if tool == "pack":
         return "the triage pack itself failed before it finished"
-    if tool == "reputation":
+    if tool in _REPUTATION_TOOLS:
         return "the triage pack's reputation lookup did not answer"
     return f"the triage pack could not run {tool}"
 
@@ -295,17 +312,7 @@ class _Pack:
         """
         spent = self._over_budget()
         if spent is not None:
-            message = f"not run: the pack's budget of {int(spent)} s was spent before this step"
-            entry = self.recorder.record(
-                tool=tool,
-                args=args,
-                server=PIPELINE,
-                output=message,
-                ok=False,
-                error=message,
-                started_at=time.time(),
-            )
-            self._failed(tool, entry)
+            self._record_not_run(tool, args, spent)
             return None
         self.steps_run += 1
         started, wall_clock = (started if started is not None else time.monotonic()), time.time()
@@ -344,6 +351,22 @@ class _Pack:
             self._failed(tool, entry)
             return None
         return value if isinstance(value, dict) else None
+
+    def _record_not_run(self, tool: str, args: dict[str, Any], spent: float) -> None:
+        """The entry for a step the budget stopped before it started."""
+        message = (
+            f"{_NOT_RUN_PREFIX} the pack's budget of {int(spent)} s was spent before this step"
+        )
+        entry = self.recorder.record(
+            tool=tool,
+            args=args,
+            server=PIPELINE,
+            output=message,
+            ok=False,
+            error=message,
+            started_at=time.time(),
+        )
+        self._failed(tool, entry)
 
     def _failed(self, tool: str, entry: LedgerEntry) -> None:
         self.result.failed.append(tool)
@@ -480,6 +503,10 @@ class _Pack:
         """
         if self.reputation is None:
             return
+        spent = self._over_budget()
+        if spent is not None:
+            self._record_not_run("reputation", {"sha256": self.inputs.sha256}, spent)
+            return
         try:
             entry = self.reputation(self.recorder)
         except Exception as exc:  # noqa: BLE001 — the lookup degrades, the pack goes on
@@ -504,8 +531,11 @@ class _Pack:
     def _function_matches(self) -> None:
         if self.function_matches is None:
             return
-        if self._over_budget() is not None:
-            self.record("function_matches", {"exclude_sample_id": self.inputs.sha256}, dict)
+        spent = self._over_budget()
+        if spent is not None:
+            self._record_not_run(
+                "function_matches", {"exclude_sample_id": self.inputs.sha256}, spent
+            )
             return
         started = time.monotonic()
         try:
@@ -625,8 +655,13 @@ PACK_HEADING = "Facts established before analysis (ledger ids in brackets; cite 
 # The tail of a cut block. It names what was left out and where the rest is,
 # so a model that wants more than the head knows the head is not all there is.
 _LEFT_OUT = (
-    "{n} more pack entries not shown here; every entry's full output is reachable by tool call."
+    "{n} more pack {noun} not shown here; every entry's full output is reachable by tool call."
 )
+
+
+def _left_out(n: int) -> str:
+    return _LEFT_OUT.format(n=n, noun="entry" if n == 1 else "entries")
+
 
 # How many named items a line lists before it says how many more there are.
 _LIST_HEAD = 6
@@ -668,9 +703,9 @@ def render_pack(entries: list[LedgerEntry], max_chars: int) -> str:
     used = 0
     for index, line in enumerate(lines):
         left_out = len(lines) - index
-        tail = len(_LEFT_OUT.format(n=left_out)) + 1 if left_out > 1 else 0
+        tail = len(_left_out(left_out)) + 1 if left_out > 1 else 0
         if used + len(line) + 1 + tail > max_chars and kept:
-            kept.append(_LEFT_OUT.format(n=left_out))
+            kept.append(_left_out(left_out))
             return "\n".join(kept)
         kept.append(line)
         used += len(line) + 1
@@ -688,7 +723,11 @@ def _pack_line(entry: LedgerEntry) -> str:
     """One entry as one line. Never raises: an unreadable answer is named as such."""
     label = _GROUP_LABELS.get(entry.tool, entry.tool)
     if not entry.ok:
-        return f"[{entry.id}] {label}: failed ({_short(entry.error or entry.output)})"
+        # A call the pipeline did not make — a lookup with no server to ask,
+        # a step after the budget — is not a failure and is not called one;
+        # a call that was made and broke is.
+        verb = "not done" if _was_not_made(entry) else "failed"
+        return f"[{entry.id}] {label}: {verb} ({_short(entry.error or entry.output)})"
     data = entry.structured if isinstance(entry.structured, dict) else None
     render = _RENDERERS.get(entry.tool)
     if entry.tool in ("get_file_report", "check_hash"):
@@ -700,6 +739,17 @@ def _pack_line(entry: LedgerEntry) -> str:
     except Exception as exc:  # noqa: BLE001 — a renderer must never cost the block
         logger.debug("pack line for %s could not be rendered (%s).", entry.tool, exc)
         return f"[{entry.id}] {label}: recorded"
+
+
+# How an entry the pipeline wrote about a call it did not make begins.
+_NOT_RUN_PREFIX = "not run:"
+
+
+def _was_not_made(entry: LedgerEntry) -> bool:
+    """Whether a failed entry records a call that was never made."""
+    if entry.server == PIPELINE and entry.tool == "reputation":
+        return True
+    return str(entry.error or entry.output or "").startswith(_NOT_RUN_PREFIX)
 
 
 def _short(text: str | None, limit: int = _TEXT_HEAD) -> str:
