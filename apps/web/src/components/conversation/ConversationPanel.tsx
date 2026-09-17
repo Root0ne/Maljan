@@ -85,11 +85,14 @@ export default function ConversationPanel({
     0,
   );
 
+  /* Follow the tail only while the run is talking. A finished run is opened to
+   * be read from the start, and a replay that lands on its own last line hides
+   * the argument that produced it. */
   useEffect(() => {
-    if (!pinned) return;
+    if (!live || !pinned) return;
     const stream = streamRef.current;
     if (stream) stream.scrollTop = stream.scrollHeight;
-  }, [shown, pinned]);
+  }, [shown, pinned, live]);
 
   function onScroll() {
     const stream = streamRef.current;
@@ -214,7 +217,7 @@ export default function ConversationPanel({
                         item={item}
                         jobId={jobId}
                         initials={initials[item.speaker] ?? "?"}
-                        first={position === 0 || round.items[position - 1].speaker !== item.speaker}
+                        first={isFirstOfSpeaker(round.items, position)}
                       />
                     ))}
                   </div>
@@ -252,6 +255,26 @@ export default function ConversationPanel({
         )}
       </div>
     </section>
+  );
+}
+
+/**
+ * Whether this line opens a speaker's block, and so carries the header.
+ *
+ * Consecutive lines of one kind from one speaker share a header, the way a
+ * group thread groups a burst of messages. Three things break the block: a
+ * different speaker, a different addressee — who a line was said to is part of
+ * what it is — and a change between speech, machine work and a room note, so a
+ * message after a run of tool calls is introduced rather than left floating.
+ */
+function isFirstOfSpeaker(items: ConversationItem[], position: number): boolean {
+  if (position === 0) return true;
+  const previous = items[position - 1];
+  const item = items[position];
+  return (
+    previous.speaker !== item.speaker ||
+    previous.addressedTo !== item.addressedTo ||
+    groupOf(previous.kind) !== groupOf(item.kind)
   );
 }
 
