@@ -585,51 +585,6 @@ class PreprocessingConfig(BaseModel):
     use_language_signatures: bool = True
     language_signatures_path: str = "data/language_signatures_v1.json"
 
-    # ATT&CK case-prior RAG (§4 U2 — LLM-centric, cross-sample TTP grounding).
-    # The per-sample function RAG retrieves over THIS sample's own functions only;
-    # this fills the cross-sample gap. When enabled AND a vendored case corpus exists
-    # at ``attck_case_corpus_path``, the static analyst's sample profile retrieves the
-    # behaviourally-similar prior cases mined from our OWN long-term memory (Qdrant
-    # StoredCase: summary_text + attributed technique_ids), and their technique_ids are
-    # aggregated into a ranked ATT&CK CANDIDATE list injected as evidence — the LLM
-    # decides which TTPs apply. Raises static-only TTP precision without a second
-    # statistical brain (nothing trained; adding a case is a new corpus row). Reuses
-    # the fastembed BGE-384 embedder already loaded for LTM — zero new deps. Build the
-    # corpus with scripts/knowledge/build_attck_case_kb.py.
-    #
-    # STAYS OFF — measured, not merely undeployed. The index itself works; the
-    # *query* does not reach it:
-    #
-    #   corpus-native query (leave-one-out, near-duplicates suppressed)
-    #       retrieval F1 0.620   vs frequency-prior 0.424   vs random 0.078
-    #   production query (build_sample_profile_text over 15 labelled samples)
-    #       retrieval F1 0.111   vs frequency-prior 0.123
-    #
-    # So with the query production actually sends, the candidate list is no better than
-    # printing the eight most common techniques in the corpus and never looking at the
-    # sample. The cause is a vocabulary mismatch, not a tuning problem: the corpus
-    # renders capa rule sentences and lowercase API names ("allocate RW memory";
-    # "closehandle"), the runtime profile renders import-category counts and CamelCase
-    # ("capabilities: execution x5"; "GetProcAddress"). The only text the two share is
-    # the boilerplate, which is why every query lands at 0.78-0.90 similarity regardless
-    # of content. A variant querying with only the lowercased import segment was tried
-    # and did not close the gap (F1 0.090).
-    #
-    # Enabling it anyway would be worse than a no-op: an LLM shown a technique list that
-    # tracks corpus frequency rather than this sample would read it as corroboration.
-    # Re-open this when the corpus is rebuilt in build_sample_profile_text's vocabulary
-    # (or the query in capa's) — the eval script re-runs in ~2 min and answers it.
-    use_attck_case_rag: bool = False
-    attck_case_corpus_path: str = "data/attck_case_corpus_v1.json"
-    attck_case_rag_top_k: Annotated[int, Field(ge=1)] = 5
-    # NOTE: this floor is inert at present — every one of the 15 production-style queries
-    # scored 0.78-0.90 against the corpus, so nothing is ever filtered. It is kept (rather
-    # than raised to a value that would appear to work) because the scores do not separate
-    # good matches from bad ones, exactly as measured for the semantic ATT&CK gate above;
-    # a threshold picked to make the numbers look decisive would only hide that.
-    attck_case_rag_min_score: Annotated[float, Field(ge=0, le=1)] = 0.35
-    attck_case_rag_max_techniques: Annotated[int, Field(ge=1)] = 8
-
     # ATT&CK index backend for technique-ID grounding (§1.5). One of:
     #   "tfidf"    keyword bag-of-words (clean alignment gate, weaker ranking)
     #   "semantic" dense BGE-384 embeddings (better ranking, poor gate)

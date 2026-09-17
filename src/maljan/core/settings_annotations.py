@@ -645,38 +645,6 @@ ANNOTATIONS: dict[str, Annotation] = {
         ),
         "subgroup": "Reference data",
     },
-    "preprocessing.attck_case_corpus_path": {
-        "title": "ATT&CK case corpus path",
-        "description": (
-            "Path to the ATT&CK case-prior corpus JSON used when use_attck_case_rag is "
-            "enabled. Build it with scripts/knowledge/build_attck_case_kb.py against a populated "
-            "Qdrant long-term-memory store."
-        ),
-        "subgroup": "Reference data",
-    },
-    "preprocessing.attck_case_rag_max_techniques": {
-        "title": "ATT&CK case-RAG max techniques",
-        "description": (
-            "Maximum number of technique IDs surfaced in the ATT&CK case-prior candidate list."
-        ),
-        "subgroup": "Thresholds and limits",
-    },
-    "preprocessing.attck_case_rag_min_score": {
-        "title": "ATT&CK case-RAG min score",
-        "description": (
-            "Minimum similarity score for a case-prior RAG match to be kept. Currently "
-            "inert in practice — measured production queries all score 0.78-0.90 "
-            "regardless of content, so nothing is filtered — but kept rather than "
-            "raised to a value that would appear to work."
-        ),
-        "subgroup": "Thresholds and limits",
-        "advanced": True,
-    },
-    "preprocessing.attck_case_rag_top_k": {
-        "title": "ATT&CK case-RAG top-K",
-        "description": ("Number of prior cases retrieved per query for ATT&CK case-prior RAG."),
-        "subgroup": "Thresholds and limits",
-    },
     "preprocessing.attck_index_backend": {
         "title": "ATT&CK index backend",
         "description": (
@@ -815,19 +783,6 @@ ANNOTATIONS: dict[str, Annotation] = {
             "sandbox-unreachable run. On by default. Each row carries the catalog's "
             "own modest confidence and names the imports behind it, so an analyst "
             "reading it can check the reasoning rather than take the number."
-        ),
-        "subgroup": "Feature switches",
-    },
-    "preprocessing.use_attck_case_rag": {
-        "title": "Use ATT&CK case-prior RAG",
-        "description": (
-            "Enables cross-sample ATT&CK case-prior retrieval: the sample's profile is "
-            "matched against behaviourally-similar prior cases from long-term memory, "
-            "and their technique IDs are aggregated into a ranked candidate list for "
-            "the LLM. Stays off by default — measured evaluation found the production "
-            "query text does not actually reach the corpus effectively (retrieval F1 "
-            "0.111 vs a 0.123 frequency-prior baseline), so enabling it would look like "
-            "corroboration without being one."
         ),
         "subgroup": "Feature switches",
     },
