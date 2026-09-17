@@ -158,9 +158,9 @@ rules:
       - "DisableTaskMgr"
       - "DisableRegistryTools"
 
-  # T1562.001 - Disable or Modify Tools
+  # T1685 - Disable or Modify Tools (T1562.001 until ATT&CK 19.2)
   - id: disable_defense_tools
-    technique_id: "T1562.001"
+    technique_id: "T1685"
     confidence: 0.88
     description: "Disable or modify security tools"
     platform: ["windows"]
@@ -369,9 +369,9 @@ rules:
       - "services.exe"
       - " SERVICE_"
 
-  # T1574.002 - DLL Side-Loading
+  # T1574.001 - DLL (side-loading; T1574.002 until ATT&CK merged it into T1574.001)
   - id: dll_side_loading
-    technique_id: "T1574.002"
+    technique_id: "T1574.001"
     confidence: 0.85
     description: "DLL side-loading for execution"
     platform: ["windows"]
