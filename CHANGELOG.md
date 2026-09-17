@@ -8,6 +8,29 @@ change landed on `main`.
 
 ### Added
 
+- **An agent can ask another agent, as a tool call.** `ToolRef(kind="agent",
+  agent=<key>)` on a definition binds a tool `ask_<key>` (`task`, optional
+  `context`) described from the callee's label and role. Calling it runs the
+  callee under the same job — same container, sample paths, triage pack and
+  run state — with the task as its human turn, checks its answer the way a
+  stage answer is checked, and returns its ISR text verbatim. The callee's tool
+  calls are ledger entries under its own key; the ask is an entry under
+  `server="team"`, `tool="ask_<key>"`, with the callee's wall clock as its
+  duration; two `agent_message` events carry the exchange with `stage`,
+  `round` and `addressed_to`. The callee shares the caller's remaining steps
+  and seconds and what it spends is charged to the caller's loop, whose budget
+  line says so. Guards, each a readable tool error: `core.agents.delegation_depth`
+  (2), a cycle back up the call chain, a callee that is undefined or disabled,
+  and not enough budget left to ask. The settings model and the API refuse a
+  reference to an unknown agent, to the definition itself, to the judge or the
+  reporter, and any such reference on those two. A new seeded definition
+  `lead` (role `lead`, `src/maljan/agents/prompts/lead.md`) references
+  `static`, `dynamic`, `network`, `reverser` and `triage`; a new seeded team
+  `team_lead` runs it as its one analysis stage
+  (`tests/fixtures/golden/graph_team_lead.json`, `docs/assets/team-team-lead.svg`).
+  The `default` team is unchanged. The console's agent editor offers **Ask
+  another agent** in the Tools tree and the transcript draws the addressee
+  arrow on an ask and its answer.
 - **An id retired by a catalogue move is reported as retired, not invented.**
   `data/attck_retired_ids.json` — per id, its domain and the ATT&CK release
   that retired it — is written by the autoupdate script from the catalogue it

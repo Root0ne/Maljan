@@ -280,7 +280,7 @@ with `uv sync --extra tools` (the backend image already does); without them
 `{"error": "<module> is not installed"}`. Nothing else changes, and the server
 starts either way.
 
-Four teams ship built in; they are listed under **Teams** below. `default` is
+Five teams ship built in; they are listed under **Teams** below. `default` is
 the three analysts with their tools.
 `measurement` is the same three analysts with `exclude_servers: ["*"]`,
 `exclude_sandbox_tools` on and `static_provider` forced to `none` — the
@@ -387,6 +387,7 @@ pipeline → Teams) is an ordered list of stages. Each stage is:
 | `measurement` | The four after the pack, with every tool server withheld and no pack | What the ensemble contributes with nothing to call and nothing established. |
 | `mobile` | `triage_pack` → `triage` → `android_static` → `dynamic` → `debate` → `verdict` → `report` | An APK or a DEX. |
 | `deep_static` | `triage_pack` → `triage` → `static` → `reversing` → `network` → `debate` → `verdict` → `report` | Reading the code. |
+| `team_lead` | `triage_pack` → `lead` (lead) → `debate` → `verdict` → `report` | One lead agent gives the specialists their work; see *Delegation* below. |
 
 `triage_pack` is a stage of kind `triage`: the pipeline itself running the
 deterministic tools over the sample and writing each result to the evidence
@@ -445,19 +446,58 @@ have no other tools at all is named as running with nothing to call; one that
 also holds a tool server, as `deep_static`'s reverser does, is named as running
 without the decompiler.
 
-Like every built-in team, all four are editable only in their debate options,
+Like every built-in team, all five are editable only in their debate options,
 their `builtin_tools` switches and `exclude_servers`. Everything else means
 cloning the team, which the console does in one click.
+
+### Delegation
+
+A definition's `tools` list takes four kinds of reference. `mcp` names a
+server (and optionally one tool of it), `provider` means the agent's own static
+provider's tools, `sandbox` the in-process tools over the job's sandbox report,
+and `agent` names another definition:
+
+```json
+{"kind": "agent", "agent": "static"}
+```
+
+Bound to an agent, that reference is a tool named `ask_static` in its toolbox:
+the model hands the static analyst a `task` (and, when it helps, a `context`),
+the static analyst works on it with its own tools under the same job, and its
+answer — its claims with the ledger ids they cite — comes back as the tool
+result, unedited. The console's agent editor offers every other analyst-role
+definition under **Ask another agent** in the Tools tree; the settings model
+refuses a reference to an agent that does not exist, to the definition itself,
+to the judge or the reporter, and any such reference on the judge or the
+reporter. A disabled callee is refused when it is asked, by name, so a built-in
+team may keep a disabled member while another team runs.
+
+The seeded `lead` definition (role `lead`, prompt in
+`src/maljan/agents/prompts/lead.md`) references `static`, `dynamic`,
+`network`, `reverser` and `triage`, and keeps the `knowledge` server; the
+`team_lead` team runs it as its one analysis stage. A team of your own may put
+a reference on any analyst: a static clone that asks the network analyst is as
+legal as a lead.
+
+One setting governs it, in the Agents group: `agents.delegation_depth` (2). A
+stage's agent asking a specialist is depth 1, that specialist asking another
+is depth 2, and an ask that would go deeper is refused with a message the
+model reads. It bounds the nesting, never the number of asks. The budget is
+not a setting of its own: a callee shares the caller's remaining steps and
+seconds, and what it spends comes off the caller's `react_agent_max_steps` and
+`react_agent_timeout` (with their per-agent overrides) for that loop. See
+*Delegation* in [architecture.md](architecture.md) for what the ledger and the
+transcript record.
 
 ### A name a later release takes
 
 Seeding a built-in takes a name. `triage`, `android_static`, `reverser`,
-`mobile` and `deep_static` were all legal names for an operator's own agent or
-team before they were seeded, and a stored entry under one of them would
-otherwise be refused as tampering with a built-in — on every read, which is to
-say at boot.
+`lead`, `mobile`, `deep_static` and `team_lead` were all legal names for an
+operator's own agent or team before they were seeded, and a stored entry under
+one of them would otherwise be refused as tampering with a built-in — on every
+read, which is to say at boot.
 
-So a stored entry under one of those five names that is not the seed is renamed
+So a stored entry under one of those seven names that is not the seed is renamed
 out of the way on load: `reverser` becomes `reverser_custom`, and every
 reference to it moves with it — the teams that named it, the per-agent model
 entry under `llm.agents`, each server's `agents` binding and both

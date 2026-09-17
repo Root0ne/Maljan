@@ -42,6 +42,7 @@ rather than a rejection.
 | `measurement` | The same four, with every tool server withheld | What the ensemble contributes on its own, with nothing to call. |
 | `mobile` | `triage` → `android_static` → `dynamic` → `debate` → `verdict` → `report` | An APK or a DEX. The Android stage declines on anything else and says so. |
 | `deep_static` | `triage` → `static` → `reversing` → `network` → `debate` → `verdict` → `report` | Reading the code: the reversing stage takes each static finding into the decompiler. |
+| `team_lead` | `lead` → `debate` → `verdict` → `report` | One lead agent plans, asks the specialists through `ask_<agent>` tools, and reports what they established. |
 
 Teams are configuration, not code. A team of your own is an ordered list of
 stages and a prompt per agent, written in the console; see
