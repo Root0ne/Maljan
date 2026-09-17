@@ -10,7 +10,10 @@ surfaces some signal.
 Nothing here labels an import. What an import table means for the sample —
 a behaviour category per API and the technique rules that list it — is what
 the triage pack's ``api_capability`` call states in the evidence ledger, cited
-by id; this module reads the table and reports what is in it. Section
+by id; this module reads the table and reports what is in it. The behaviour
+map behind that call covers Windows APIs only, so an ELF or Mach-O import
+table yields no capability profile and no rule hit; what such a sample's
+imports mean is for the analyst to say from the table itself. Section
 entropy (``_HIGH_ENTROPY_THRESHOLD``) is the one heuristic left, and it is
 a number a reader can check against the section table.
 

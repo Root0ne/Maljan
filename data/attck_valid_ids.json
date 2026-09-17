@@ -1,4 +1,7 @@
 {
+  "_meta": {
+    "attck_version": "19.2"
+  },
   "enterprise": [
     "T1001",
     "T1001.001",

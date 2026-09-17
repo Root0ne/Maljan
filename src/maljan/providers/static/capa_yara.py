@@ -243,15 +243,12 @@ class CapaYaraStaticProvider(StaticProvider):
         if capa_result is None and not yara_hits:
             return None
 
-        capabilities: dict[str, int] = {}
         hits: list[dict[str, Any]] = []
         rows: list[dict[str, str]] = []
         capa_rows: list[dict[str, Any]] = []
         for name, rule in ((capa_result or {}).get("rules") or {}).items():
             meta = rule.get("meta") or {}
             namespace = str(meta.get("namespace") or "")
-            top = namespace.split("/", 1)[0] if namespace else "uncategorised"
-            capabilities[top] = capabilities.get(top, 0) + 1
             rows.append({"rule": str(name), "namespace": namespace})
             capa_rows.append(
                 {
@@ -287,7 +284,6 @@ class CapaYaraStaticProvider(StaticProvider):
             evidence["yara"] = _render_yara(yara_hits)
 
         return StaticEvidenceBundle(
-            api_capabilities=capabilities,
             technique_hits=hits,
             strings=[],
             technical_evidence=evidence,

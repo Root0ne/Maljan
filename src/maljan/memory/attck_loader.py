@@ -489,6 +489,8 @@ def _read_platform_map_file(path: Path) -> dict[str, tuple[str, ...]]:
         return {}
     out: dict[str, tuple[str, ...]] = {}
     for tid, row in raw.items():
+        if str(tid).startswith("_"):  # the file's own metadata, not a technique
+            continue
         platforms = row.get("platforms") if isinstance(row, dict) else None
         out[str(tid).upper()] = tuple(str(p) for p in (platforms or []) if str(p).strip())
     return out
@@ -518,7 +520,7 @@ def retired_ids() -> dict[str, str]:
         _retired_cache = {
             str(tid).upper(): str((row or {}).get("retired_in") or "unknown")
             for tid, row in (raw.items() if isinstance(raw, dict) else [])
-            if isinstance(row, dict)
+            if isinstance(row, dict) and not str(tid).startswith("_")
         }
     return _retired_cache
 

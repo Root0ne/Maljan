@@ -63,10 +63,11 @@ class TestThePlatformMap:
         script = _script()
         out = tmp_path / "attck_platforms.json"
         script.write_platform_map(
-            {"T1055": {"domain": "enterprise", "platforms": ["Windows"]}}, out
+            {"T1055": {"domain": "enterprise", "platforms": ["Windows"]}}, out, "19.2"
         )
         assert json.loads(out.read_text(encoding="utf-8")) == {
-            "T1055": {"domain": "enterprise", "platforms": ["Windows"]}
+            "_meta": {"attck_version": "19.2"},
+            "T1055": {"domain": "enterprise", "platforms": ["Windows"]},
         }
 
 
@@ -102,3 +103,17 @@ class TestTheRetiredSet:
         bundle = {"objects": [{"type": "x-mitre-collection", "x_mitre_version": "19.2"}]}
         assert script.bundle_version(bundle) == "19.2"
         assert script.bundle_version({"objects": []}) == "unknown"
+
+
+class TestTheTwoDomainTuplesAgree:
+    def test_the_script_and_the_loader_spell_the_domains_the_same(self) -> None:
+        from maljan.memory import attck_loader
+
+        assert _script().DOMAINS == attck_loader.DOMAINS
+
+
+class TestIcsPlatformsAreNotTheStringNone:
+    def test_the_literal_none_is_dropped(self) -> None:
+        script = _script()
+        rows = script._extract_platform_map([_technique("T0800", ["None"])], "ics")
+        assert rows == {"T0800": {"domain": "ics", "platforms": []}}

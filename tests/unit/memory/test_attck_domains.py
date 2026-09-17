@@ -37,7 +37,7 @@ def _point_at(monkeypatch: pytest.MonkeyPatch, path: Path) -> None:
 class TestTheVendoredCatalog:
     def test_the_shipped_catalog_has_one_list_per_domain(self) -> None:
         raw = json.loads(attck_loader.VALID_IDS_FILE.read_text(encoding="utf-8"))
-        assert set(raw) == set(attck_loader.DOMAINS)
+        assert {k for k in raw if not k.startswith("_")} == set(attck_loader.DOMAINS)
         assert raw["enterprise"], "the Enterprise list is the one that cannot be empty"
 
     def test_a_mobile_technique_is_valid(self) -> None:
@@ -147,8 +147,22 @@ class TestTheVendoredPlatformMap:
         assert set(raw["T1633"]["platforms"]) == {"Android", "iOS"}
         # Every id in the map is in the id catalogue, and in the same domain.
         ids = json.loads(attck_loader.VALID_IDS_FILE.read_text(encoding="utf-8"))
-        for tid, row in list(raw.items())[:200]:
+        for tid, row in [(t, r) for t, r in raw.items() if not t.startswith("_")][:200]:
             assert tid in ids[row["domain"]], tid
+
+    def test_the_three_vendored_files_say_which_release_they_came_from(self) -> None:
+        versions = set()
+        for path in (
+            attck_loader.VALID_IDS_FILE,
+            attck_loader.PLATFORMS_FILE,
+            attck_loader.RETIRED_IDS_FILE,
+        ):
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            versions.add(raw["_meta"]["attck_version"])
+        assert versions == {"19.2"}
+        # The metadata key is not a technique.
+        assert attck_loader.platforms_for("_META") == ()
+        assert "_META" not in attck_loader.retired_ids()
 
     def test_platforms_come_from_the_map_and_nothing_is_loaded(
         self, monkeypatch: pytest.MonkeyPatch

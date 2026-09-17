@@ -28,7 +28,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from maljan.pipeline.validation import corroboration_row, corroboration_sources
+from maljan.analysis.corroboration import corroboration_row, corroboration_sources
 
 # ---------------------------------------------------------------------------
 # Sub-components

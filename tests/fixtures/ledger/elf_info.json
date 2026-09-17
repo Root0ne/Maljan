@@ -7,6 +7,6 @@
     {"name": ".text", "virtual_address": 4096, "virtual_size": 8192,
      "raw_size": 8192, "entropy": 6.1, "characteristics": "ELF"}
   ],
-  "imports": [{"dll": "libc.so.6", "function": "execve", "category": "execution"}],
+  "imports": [{"dll": "libc.so.6", "function": "execve"}],
   "exports": []
 }

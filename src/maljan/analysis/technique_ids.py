@@ -17,6 +17,8 @@ from typing import Any
 
 TECHNIQUE_RE = re.compile(r"\bT\d{4}(?:\.\d{3})?\b", re.IGNORECASE)
 SIGMA_TAG_RE = re.compile(r"^attack\.(t\d{4}(?:\.\d{3})?)$", re.IGNORECASE)
+# A whole string that is one id, for a field an agent wrote as the id itself.
+TECHNIQUE_ID_EXACT_RE = re.compile(r"^T\d{4}(?:\.\d{3})?$")
 
 
 def technique_ids_in(value: Any) -> list[str]:

@@ -65,7 +65,6 @@ class StaticJobContext:
 
 @dataclass(frozen=True)
 class StaticEvidenceBundle:
-    api_capabilities: dict[str, int] = field(default_factory=dict)
     technique_hits: list[dict[str, Any]] = field(default_factory=list)
     strings: list[dict[str, Any]] = field(default_factory=list)
     technical_evidence: dict[str, str] = field(default_factory=dict)

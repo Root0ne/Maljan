@@ -108,7 +108,9 @@ or `archive_list`, which carry the section entropies, the packer signature
 hits and the import rows); a `strings` head capped by `triage.strings_head`
 and `iocs_from_file`; `yara_scan`, `capa` under the static provider's budget
 and, when a sandbox report exists, `sigma_match_sandbox`; `api_capability`
-over the import set and `lolbin_lookup` over the sandbox's command lines; the
+over the import set (the behaviour map is Windows-only, so an ELF or Mach-O
+import table yields no profile and no rule hit) and `lolbin_lookup` over the
+sandbox's command lines; the
 sandbox projections at summary level (processes, network, signatures, dropped
 files, channels) and `pcap_summary` when a capture was fetched; one reputation
 lookup on the sha256 (`get_file_report` on `virustotal` when it is enabled,

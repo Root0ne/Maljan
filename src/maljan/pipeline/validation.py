@@ -28,6 +28,11 @@ from typing import Any
 
 from pydantic import ValidationError
 
+# The row helpers live with the shape (``analysis.corroboration``) and are
+# re-exported here, where every reader of a run's validation looks for them.
+from maljan.analysis.corroboration import corroboration_row as corroboration_row
+from maljan.analysis.corroboration import corroboration_sources as corroboration_sources
+from maljan.analysis.technique_ids import TECHNIQUE_ID_EXACT_RE
 from maljan.core.logger import logger
 from maljan.schemas.evidence import entry_ids_in
 from maljan.schemas.judgement import SEVERITY_RATINGS
@@ -42,7 +47,7 @@ MAX_SUGGESTIONS = 3
 # as noise rather than as a correction.
 MAX_SCHEMA_VIOLATIONS = 6
 
-_TID_RE = re.compile(r"^T\d{4}(?:\.\d{3})?$")
+_TID_RE = TECHNIQUE_ID_EXACT_RE
 
 # The literals a STIX pattern quotes, e.g. ``[file:name = 'x.exe']`` -> ``x.exe``.
 _PATTERN_LITERAL_RE = re.compile(r"'([^']*)'")
@@ -1763,33 +1768,6 @@ def corroboration(
                     asserted.append(label)
         out[tid] = {"asserted_by": sorted(asserted), "claimed_by": sorted(claimed)}
     return out
-
-
-def corroboration_row(row: Mapping[str, Any] | Sequence[str] | None) -> dict[str, list[str]]:
-    """One corroboration row in the current shape, whichever shape it was stored in.
-
-    ``{asserted_by, claimed_by}`` comes back as it is; a flat list of sources —
-    the shape stored before the two lists — is read as claimed by all of them,
-    which is what a list that never distinguished a rule from an agent meant.
-    """
-    if isinstance(row, Mapping):
-        return {
-            "asserted_by": [str(x) for x in row.get("asserted_by") or []],
-            "claimed_by": [str(x) for x in row.get("claimed_by") or []],
-        }
-    return {"asserted_by": [], "claimed_by": [str(x) for x in (row or [])]}
-
-
-def corroboration_sources(row: Mapping[str, Any] | Sequence[str] | None) -> list[str]:
-    """Every source of one corroboration row, whichever shape the row has.
-
-    The new rows are ``{asserted_by, claimed_by}``; a summary stored before
-    them is a flat list. Readers that count sources go through this so an
-    old stored run still counts.
-    """
-    if isinstance(row, Mapping):
-        return [*(row.get("asserted_by") or []), *(row.get("claimed_by") or [])]
-    return [str(s) for s in (row or [])]
 
 
 UNSUPPORTED_MALWARE_CODE = "verdict.unsupported_malware"

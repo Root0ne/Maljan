@@ -1,4 +1,7 @@
 {
+  "_meta": {
+    "attck_version": "19.2"
+  },
   "T1070.001": {
     "domain": "enterprise",
     "retired_in": "19.2"

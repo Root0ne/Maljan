@@ -13,11 +13,11 @@ is the judge's decision, which is the judge's job.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Sequence
 from typing import Any
 
 from maljan.analysis.technique_ids import (
+    TECHNIQUE_ID_EXACT_RE,
     api_capability_hits,
     sigma_technique_ids,
     technique_ids_in,
@@ -31,7 +31,7 @@ MAX_TECHNIQUES = 25
 # How many sources are listed per technique before the rest are counted.
 MAX_SOURCES_PER_TECHNIQUE = 6
 
-_TID_RE = re.compile(r"^T\d{4}(?:\.\d{3})?$")
+_TID_RE = TECHNIQUE_ID_EXACT_RE
 
 
 def summarise(isrs: dict[str, Any] | None, ledger: Sequence[Any] | None = None) -> str:
@@ -122,8 +122,8 @@ def _technique_ids(structured: Any, depth: int = 0) -> set[str]:
     capa writes ``attck`` as a list of decorated strings, a Sigma match
     writes ``tags`` like ``attack.t1055.012``, the LOLBin table and the
     API-to-technique rules write a bare ``technique_id``; all three are read
-    as they are written (``analysis.technique_ids``). Nothing else in a
-    result counts — a technique quoted in free text is not an assertion.
+    as they are written (``analysis.technique_ids``). Nothing outside those
+    keys counts, so a technique quoted in a description is not an assertion.
     """
     if depth > 6:
         return set()

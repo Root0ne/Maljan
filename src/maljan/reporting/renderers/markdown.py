@@ -285,7 +285,13 @@ class MarkdownRenderer:
             lines.append("")
             lines.append("| Technique | Name | Source | Imports |")
             lines.append("|---|---|---|---|")
-            for hit in static.api_technique_hits[:25]:
+            # By source, then technique: a stated order, so a capa-heavy binary
+            # cannot push the pack's rows off the end of the audit trail.
+            ordered_hits = sorted(
+                static.api_technique_hits,
+                key=lambda h: (str(h.get("source") or ""), str(h.get("technique_id") or "")),
+            )
+            for hit in ordered_hits[:25]:
                 apis = ", ".join(f"`{a}`" for a in (hit.get("matched_apis") or [])[:6])
                 source = str(hit.get("source") or "-")
                 if hit.get("evidence_id"):

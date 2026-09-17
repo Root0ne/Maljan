@@ -1,195 +1,134 @@
 {
+  "_meta": {
+    "attck_version": "19.2"
+  },
   "T0800": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0801": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0802": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0806": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0807": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0809": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0811": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0813": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0814": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0815": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0816": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0817": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0819": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0820": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0821": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0822": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0823": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0826": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0827": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0828": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0829": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0830": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0831": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0832": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0834": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0835": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0836": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0837": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0838": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0840": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0842": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0843": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0843.001": {
     "domain": "ics",
@@ -205,15 +144,11 @@
   },
   "T0845": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0846": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0846.001": {
     "domain": "ics",
@@ -229,129 +164,87 @@
   },
   "T0847": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0848": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0849": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0851": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0852": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0853": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0858": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0859": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0860": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0861": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0862": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0863": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0864": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0865": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0866": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0867": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0868": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0869": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0871": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0872": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0873": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0873.001": {
     "domain": "ics",
@@ -359,111 +252,75 @@
   },
   "T0874": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0877": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0878": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0879": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0880": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0881": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0882": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0883": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0884": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0885": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0886": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0887": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0888": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0889": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0890": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0892": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0893": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0894": {
     "domain": "ics",
-    "platforms": [
-      "None"
-    ]
+    "platforms": []
   },
   "T0895": {
     "domain": "ics",
