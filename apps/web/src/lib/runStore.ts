@@ -456,6 +456,12 @@ export function resetRun(jobId: string): void {
 
 function dial(entry: RunEntry): void {
   if (entry.socket || entry.readers === 0) return;
+  /* A credential the server rejected is never redialled, wherever the dial
+   * comes from. Two readers arrive together and each asks the feed to open;
+   * the second answers from cache and dials first, so the first one's dial can
+   * land after the socket has already been refused. Only the one rule stops
+   * it, and it belongs here rather than at each caller. */
+  if (entry.state.connection === "unauthorized") return;
   const jobId = entry.state.jobId;
   patch(entry, { connection: entry.attempt === 0 ? "connecting" : "reconnecting" });
 
@@ -508,14 +514,6 @@ async function backfill(entry: RunEntry): Promise<void> {
   }
 }
 
-/**
- * Fall back to the recorded conversation, once it is clear there is no feed.
- *
- * Only then: a run that still has its events replays from them, and stored
- * rows laid over a feed would be the same conversation twice — a row numbered
- * by an older scheme can even carry a number a live event is already using,
- * which would shadow the real thing rather than merely repeat it.
- */
 /** The speaker a watcher of the run publishes under; see `nodes.ROOM_SPEAKER`. */
 const ROOM_SPEAKER = "pipeline";
 
@@ -535,6 +533,14 @@ function kindOfStoredRow(row: TranscriptRow): string {
   return "says";
 }
 
+/**
+ * Fall back to the recorded conversation, once it is clear there is no feed.
+ *
+ * Only then: a run that still has its events replays from them, and stored
+ * rows laid over a feed would be the same conversation twice — a row numbered
+ * by an older scheme can even carry a number a live event is already using,
+ * which would shadow the real thing rather than merely repeat it.
+ */
 function hydrate(entry: RunEntry): void {
   const rows = entry.transcript;
   if (!rows?.length || !entry.backfilled) return;

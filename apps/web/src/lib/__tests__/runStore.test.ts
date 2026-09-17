@@ -331,6 +331,45 @@ describe("the socket", () => {
     expect(getRun(JOB).connection).toBe("unauthorized");
   });
 
+  it("does not redial a refused credential for a second reader", async () => {
+    /* Two readers of one run arrive together — the analysis layout and the tab
+     * inside it — and each asks the feed to open. The second answers from the
+     * back-fill already made and dials first, so the first reader's dial lands
+     * after the socket has been refused. It must not dial. */
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const dials: number[] = [];
+    configureRunTransport({
+      async readEvents() {
+        await held;
+        return [];
+      },
+      connect(_jobId, _since, handlers) {
+        dials.push(1);
+        // What the server does with a rejected credential: refuses it. The
+        // close arrives after the dial returns, as a socket's does.
+        queueMicrotask(() => handlers.onClose(4401));
+        return { close() {} };
+      },
+    });
+
+    subscribeRun(JOB, () => {});
+    subscribeRun(JOB, () => {});
+    // The second reader's back-fill answers from cache, so it dials and is
+    // refused while the first reader's read is still in flight.
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dials).toHaveLength(1);
+    expect(getRun(JOB).connection).toBe("unauthorized");
+
+    release();
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(dials).toHaveLength(1);
+    expect(getRun(JOB).connection).toBe("unauthorized");
+  });
+
   it("says so when the recorded feed cannot be read", async () => {
     configureRunTransport({
       async readEvents() {
