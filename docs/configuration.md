@@ -470,7 +470,11 @@ definition under **Ask another agent** in the Tools tree; the settings model
 refuses a reference to an agent that does not exist, to the definition itself,
 to the judge or the reporter, and any such reference on the judge or the
 reporter. A disabled callee is refused when it is asked, by name, so a built-in
-team may keep a disabled member while another team runs.
+team may keep a disabled member while another team runs, and so is an ask that
+would come back with a server the asking stage withholds — a stage with
+**Built-in tools** off cannot reach them through a colleague that no stage
+narrows. A `provider` reference is valid on a `generic` or a `lead` definition;
+every other role opens its provider itself.
 
 The seeded `lead` definition (role `lead`, prompt in
 `src/maljan/agents/prompts/lead.md`) references `static`, `dynamic`,

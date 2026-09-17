@@ -26,6 +26,11 @@ name.
 ``is_secret`` rows are never touched. No agent map was ever stored as one, and
 a credential must not pass through a JSON rewrite.
 
+Revision ``20260921000000`` does the same job for ``lead`` and ``team_lead``
+and loads ``_plain_value``, ``_rename_map`` and ``_apply`` from this file
+rather than copying them. Those three names are part of what a later revision
+reads, so a cleanup here is a change to that revision as well.
+
 Revision ID: 20260917000000
 Revises: 20260916000000
 """

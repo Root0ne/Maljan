@@ -355,6 +355,28 @@ change landed on `main`.
 
 ### Fixed
 
+- **A delegated ask stays inside the stage that made it.** A callee's
+  effective tool set is its own definition narrowed by the tool policy of the
+  stage doing the asking, so a stage with `builtin_tools=False` can no longer
+  reach a built-in server through a specialist that no stage narrows; the ask
+  is refused naming the stage and the servers. A profile that excludes every
+  server withholds the `ask_*` tools too. The callee's hard cap stops at the
+  ceiling its caller set, so it cannot outlive the caller waiting for it, and
+  a hand-over to a caller whose loop has already ended drains the callee
+  without folding anything onto an agent that is done with. Each agent's lock
+  is now taken by its own stage run as well as by an ask of it, so the two
+  cannot drive one instance's buffers at once, and a caller waits for a busy
+  callee only as long as it can still read an answer in. The brief written
+  onto a callee is given back afterwards, its findings and artifacts travel to
+  the caller with the callee named as their source, and a `lead` may carry a
+  provider reference like the generic agent it otherwise is.
+- **The transcript draws a delegated round once.** An addressed line is
+  identified by a digest of what it says rather than by a counter taken before
+  the duplicate check, so the stream back-fill and the live socket no longer
+  show every ask and answer twice; recorded rows that share an identity — a
+  lead's report and its asks, which the table cannot yet tell apart — carry
+  their own `seq`. The agent editor offers **Ask another agent** only where a
+  reference can be saved.
 - **The budget a model is told is in model turns.** The run-state line
   reported graph steps as turns, about twice the truth (a tool round is two
   graph steps); `model_turns_left` counts what langgraph counts and the
