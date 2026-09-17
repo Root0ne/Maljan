@@ -448,6 +448,14 @@ change landed on `main`.
   bubble until the message that closes the turn replaces it. Filters narrow it
   by participant and by kind; the stream follows the newest message while the
   reader is at the bottom of it and offers a way back when they are not.
+- **What a reputation service said about the sample.** A run asks one service
+  about the file's hash — `get_file_report` on VirusTotal's own MCP server, or
+  `check_hash` on the threat-intel sidecar — and the console dropped the
+  answer. IDENTITY now draws it beside the hashes, under the name of the
+  service that gave it, with its engine counts, the labels the industry gives
+  the file and when it was first and last seen. It is read from that service's
+  ledger entry and from nothing else, so a configured service that was never
+  asked draws no section.
 - **One store and one socket per run.** `apps/web/src/lib/runStore.ts` holds a
   run's events, roster, stages, connection and cursor in a module-level map
   keyed by job id, opens the single socket a job gets, back-fills from
@@ -465,9 +473,46 @@ change landed on `main`.
   notice instead of adding a participant the operator never composed; the
   judge publishes under its agent key with its configured `display_name`,
   which is the key its roster entry carries, so a run draws one judge rather
-  than two. A failure on either path names the class of the exception and
-  never its message — the log keeps the words for an operator, and an
+  than two. A failure on any of the three published paths — the judge, the
+  mediator and an analyst's revision — names the class of the exception and
+  never its message: the log keeps the words for an operator, and an
   exception's text can carry a path, a host or a credential.
+- **An analysis offers only the tabs the run filled.** A tab is drawn when the
+  report carries what it draws — a ledger section routed to it, or its own
+  typed block — so twelve tabs no longer stand ready for ten of them to
+  apologise. SUMMARY, CONVERSATION and EVIDENCE are always offered, and a
+  running job offers those three alone until the report fills the rest. Inside
+  a tab the same rule reaches every panel: a run with no observed traffic
+  draws no empty Domains table, and the only empty states left are the two
+  that say something — a string filter that matched nothing, and a sandbox
+  that traced no process because the sample detected it.
+- **One list of analyses.** A report is a completed job, so `/reports` is gone
+  and lands on `/jobs` with its status filter applied; the verdict it carried
+  is a column on the row it belongs to, the search palette offers samples and
+  analyses rather than three lists, and the dashboard shows the five latest
+  runs as a way into the list rather than a second copy of it. On SUMMARY the
+  verdict and the confidence are the header's, the techniques and the
+  endpoints are counts that open the tab holding the lists, the threat-intel
+  enrichment button is here once instead of on NETWORK and ATTRIBUTION both,
+  and a Run record disclosure carries the job's configuration and what the run
+  spent.
+- **Settings open on what a first run needs.** Before a language model is
+  connected the hub lists the four guides a first analysis needs and the
+  configuration console is not offered — its route only bounced back to the
+  guides — and a non-admin sees the two entries they can use rather than four,
+  two of them permanently disabled. The LLM guide drops its Limits step, which
+  staged five keys the console already renders. An analyst is drawn under the
+  name its operator gave it, with its key beside it only where the two differ,
+  in the stage list, the agent list and the run's stage strip.
+- **One icon set, and no colour that eases into another.** `lucide-react`
+  replaces twenty hand-drawn inline SVGs and gives the navigation, the analysis
+  tabs, the settings rail, the guide cards and the verdict badge an icon at 16
+  or 18 px in `currentColor`. The twenty-eight `transition-colors` and the one
+  `backdrop-blur` are gone: a hover state arrives with the pointer. A unit test
+  reads the tree for gradients, colour transitions and the blur.
+- **The nine retired analysis routes redirect from the server.** They were
+  client components that mounted only to replace the URL; `next.config.ts`
+  answers with a 308 instead.
 - **The LIVE and PROCESS tabs are gone**, along with their duplicate socket,
   duplicate back-fill and second status poll. `/live`, `/process`, `/agents`,
   `/pipeline` and `/timeline` redirect to CONVERSATION, the per-agent results

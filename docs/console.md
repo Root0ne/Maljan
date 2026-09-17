@@ -6,15 +6,14 @@ The web console in `apps/web`. It talks to the API in `apps/api` over
 ## Navigation
 
 ```
-/dashboard              Counts, verdict mix, recent analyses, runtime banners
+/dashboard              Counts, verdict mix, the five latest runs, runtime banners
 /samples                Upload a sample, browse samples, submit an analysis
-/jobs                   Runs, filtered by status; cancel a running one
-/reports                Finished reports
+/jobs                   Every analysis, filtered by status; cancel a running one
 /analysis/{jobId}
-  ├── SUMMARY           Verdict, severity, executive summary, exports
+  ├── SUMMARY           Severity, findings counts, executive summary, exports
   ├── CONVERSATION      The run as a group conversation, live and replayed
-  ├── IDENTITY          Hashes, file metadata, signatures
-  ├── STATIC            PE structure, imports, strings, packers
+  ├── IDENTITY          Hashes, file metadata, signatures, reputation
+  ├── STATIC            Binary structure, imports, strings, packers
   ├── DYNAMIC           Process tree, behaviour, sandbox findings
   ├── NETWORK           Domains, IPs, URLs, and their enrichment
   ├── PERSISTENCE       Autoruns, services, scheduled tasks
@@ -31,13 +30,31 @@ The web console in `apps/web`. It talks to the API in `apps/api` over
 /audit                  Admin: the audit trail
 ```
 
-The analysis header carries the verdict, the sample, the job status and the
-run's stages. The stage strip is there and nowhere else, so the shape of the
-run reads the same from every tab.
+A report is a completed job, so there is one list of analyses rather than a
+Jobs page and a Reports page that link to the same run. `/reports` lands on
+that list with its status filter applied. The verdict of a finished run is a
+column on its row; the search palette offers samples and analyses, each row a
+link into the run rather than a second rendering of the list.
 
-Older analysis URLs still resolve: `/ttps` goes to ATT&CK, `/rules`,
-`/signatures` and `/stix` to DETECTION, and `/live`, `/process`, `/agents`,
-`/pipeline` and `/timeline` to CONVERSATION.
+The analysis header carries the verdict, the sample, the job status and the
+run's stages, and the stage strip is there and nowhere else, so the shape of
+the run reads the same from every tab. A stage names itself and its members by
+the labels an operator gave them — the same names the conversation uses.
+
+**Only the tabs the run filled.** A tab is offered when the report carries
+what it draws: a ledger section routed to it, or its own typed block
+(`apps/web/src/components/analysis/analysisTabs.ts`). SUMMARY, CONVERSATION
+and EVIDENCE are always offered — the first is where a run lands, the second
+answers whatever state the job is in, and on the third "no call matches these
+filters" is information rather than an apology. While a job is still running
+those three are all there is, and the rest appear as the report fills them.
+Inside a tab the same rule applies to every panel, so a run with no observed
+traffic shows no empty Domains table.
+
+Older analysis URLs still resolve, from the server: `/ttps` goes to ATT&CK,
+`/rules`, `/signatures` and `/stix` to DETECTION, and `/live`, `/process`,
+`/agents`, `/pipeline` and `/timeline` to CONVERSATION
+(`apps/web/next.config.ts`).
 
 ## Conversation
 
@@ -102,6 +119,42 @@ keeps the order its events arrived in. A run whose feed has passed the
 retention window replays from the conversation stored on its report instead —
 only then, so stored rows can never be laid over a feed that still has
 something to say.
+
+## Reputation
+
+A run asks one service about the sample's hash: `get_file_report` on
+VirusTotal's own MCP server when it is configured, `check_hash` on the
+threat-intel sidecar when it is not. The answer is drawn on IDENTITY, beside
+the hashes, under the name of the service that gave it — its engine counts, the
+labels the industry gives the file, and when it was first and last seen.
+
+It is read from that service's ledger entry and from nothing else, so a
+service that is configured and was never asked, or asked and answered nothing,
+draws no section at all.
+
+## Settings
+
+Anyone signed in has Profile and API keys. An administrator also has the setup
+guides and, once a language model is connected, the configuration console —
+until then the console's route only bounces back to the guides, so it is not
+offered. A non-admin sees two entries rather than four, the two admin ones
+having been drawn permanently disabled before.
+
+Before a model is connected the hub lists the four guides a first analysis
+needs — a model, a static analyser, a sandbox and a team — and opens the other
+three once there is a model to test them against. Every setting is editable in
+exactly one group of the console; a guide is the staged, step-by-step way into
+the same keys, and each group header links to the guide that covers it.
+
+## Style
+
+No gradients, and no colour or background that eases from one value to
+another: a hover state is a state, so it arrives when the pointer does. The
+transitions that stay are the ones that move something — a rail widening, a
+chevron turning. Icons are `lucide-react` at 16 or 18 px, drawn in
+`currentColor` with nothing filled behind them. The rules are held by
+`apps/web/src/lib/__tests__/styleRules.test.ts`, which reads the tree rather
+than the built CSS.
 
 ## Evidence
 
