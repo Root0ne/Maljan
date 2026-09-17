@@ -11,7 +11,7 @@ import asyncio
 import json
 import re
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path
@@ -654,6 +654,36 @@ def _reputation_lookup(container: ServiceContainer, sha256: str) -> Any:
         )
 
     return lookup
+
+
+def tool_failures(ledger: Sequence[Any], limit: int = 20) -> list[dict[str, Any]]:
+    """Each distinct tool failure in the ledger, once, with its remedy.
+
+    Keyed by tool and message so a call that failed the same way five times
+    is one row with a count of five; the report header and the console read
+    this rather than walking the ledger. A step the pack's budget stopped is
+    not a failure and is left out, as the run-state block leaves it out.
+    """
+    rows: dict[tuple[str, str], dict[str, Any]] = {}
+    for entry in ledger:
+        if getattr(entry, "ok", True) or getattr(entry, "repeated_of", None):
+            continue
+        message = str(getattr(entry, "error", "") or getattr(entry, "output", "") or "").strip()
+        if message.startswith(NOT_RUN_PREFIX):
+            continue
+        key = (str(getattr(entry, "tool", "")), message)
+        row = rows.get(key)
+        if row is None:
+            rows[key] = row = {
+                "tool": key[0],
+                "server": getattr(entry, "server", None),
+                "error": message,
+                "remediation": getattr(entry, "remediation", None),
+                "entry_id": str(getattr(entry, "id", "")),
+                "count": 0,
+            }
+        row["count"] += 1
+    return list(rows.values())[:limit]
 
 
 def _tool_error_text(output: str) -> str | None:
@@ -3251,6 +3281,7 @@ def make_report_node(
             "failed": sum(1 for e in _ledger if not e.ok),
             "trimmed": sum(1 for e in _ledger if e.truncated),
             "by_tool": dict(sorted(_by_tool.items())),
+            "failures": tool_failures(_ledger),
         }
         _summary["sections_without_evidence"] = sum(
             1 for section in report.sections if not section_is_grounded(section)

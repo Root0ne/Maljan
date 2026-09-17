@@ -19,6 +19,8 @@ class EvidenceEntryResponse(BaseModel):
     server: str | None = None
     tool: str
     ok: bool
+    error: str | None = None
+    remediation: str | None = None
     duration_ms: int
     seq: int
     args: dict[str, Any] | None = None

@@ -16,6 +16,11 @@ export interface EvidenceEntry {
   server: string | null;
   tool: string;
   ok: boolean;
+  /** The failure text when `ok` is false, and what the tool said would make
+   *  the next call succeed, when it said. Absent on rows written before the
+   *  two columns existed. */
+  error?: string | null;
+  remediation?: string | null;
   duration_ms: number;
   seq: number;
   args: Record<string, unknown> | null;

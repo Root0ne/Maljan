@@ -78,6 +78,7 @@ class EvidenceRecorder:
         started_at: float = 0.0,
         duration_ms: int = 0,
         repeated_of: str | None = None,
+        remediation: str | None = None,
     ) -> LedgerEntry:
         """Append one entry and return it, so the caller can quote its id."""
         entry_id, seq = self.counter.next_id()
@@ -95,6 +96,7 @@ class EvidenceRecorder:
             duration_ms=duration_ms,
             stage=self.stage,
             repeated_of=repeated_of,
+            remediation=remediation,
         )
         self.entries.append(entry)
         return entry

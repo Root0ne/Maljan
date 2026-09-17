@@ -48,6 +48,7 @@ from maljan.pipeline.conditions import TriageFacts
 from maljan.providers import sandbox_tools
 from maljan.schemas.evidence import LedgerEntry, apply_budget
 from maljan.tools import binary, identify, knowledge, pcap, rules, strings
+from maljan.tools.errors import error_parts, normalise_error
 
 __all__ = [
     "ESSENTIAL_TOOLS",
@@ -333,7 +334,13 @@ class _Pack:
             )
             self._failed(tool, entry)
             return None
-        error = value.get("error") if isinstance(value, dict) else None
+        # A flat error from an in-process implementation is given the code
+        # and the remedy the sidecars give it, so the entry a reader cites
+        # says what to do about it whichever way the tool was reached.
+        value = normalise_error(value)
+        parts = error_parts(value) if isinstance(value, dict) else None
+        error: Any = parts[1] if parts else None
+        remediation = parts[2] if parts else None
         if not error and isinstance(value, dict) and value.get("reason"):
             established = _ESTABLISHED.get(tool)
             if established is not None and not established(value):
@@ -345,6 +352,7 @@ class _Pack:
             output=result_text(value),
             ok=not error,
             error=str(error) if error else None,
+            remediation=remediation,
             started_at=wall_clock,
             duration_ms=int((time.monotonic() - started) * 1000),
         )

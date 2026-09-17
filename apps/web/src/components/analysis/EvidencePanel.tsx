@@ -243,6 +243,16 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
                           {entry.ok ? "ok" : "error"}
                         </td>
                       </tr>
+                      {!entry.ok && (entry.error || entry.remediation) && (
+                        <tr className="border-b border-border-light bg-status-red/5">
+                          <td colSpan={8} className="px-3 py-1.5 text-[11px]">
+                            <span className="text-status-red">{entry.error ?? "failed"}</span>
+                            {entry.remediation && (
+                              <span className="text-text-secondary"> — {entry.remediation}</span>
+                            )}
+                          </td>
+                        </tr>
+                      )}
                       {expanded && (
                         <tr className="border-b border-border-light bg-bg-deep">
                           <td colSpan={8} className="px-3 pb-3 pt-1 space-y-3">
