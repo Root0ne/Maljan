@@ -419,6 +419,17 @@ _MIME_TYPE = re.compile(r"\A[a-z]+/[a-z0-9][a-z0-9.+_\-]*\Z")
 _IDENTIFIER = re.compile(
     r"\A[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\Z"
 )
+# A key this system issues: an agent, a stage, a server, a tool. Lowercase,
+# starting with a letter, separated by underscores or dashes — the slug
+# ``SERVER_KEY_PATTERN`` admits, up to 32 characters, and the shape of
+# ``speaker``, ``stage``, ``agent`` and ``tool`` on every event the publisher
+# scrubs. A long one is past the credential floor, and a redacted speaker is a
+# conversation the console cannot group under anybody. No vendor's key is
+# shaped like this: they carry capitals, a prefix, ``+``/``/``, or they are
+# hex — and a hex run is still a key, because this exemption does not cover
+# one.
+_SLUG = re.compile(r"\A[a-z][a-z0-9_-]*\Z")
+_ALL_HEX = re.compile(r"\A[0-9a-f]+\Z")
 _PATH_SHAPED = re.compile(r"\A(?:/|\./|\.\./|~/|[A-Za-z]:/)[^/]*/")
 # The three digests a malware analysis is *about*, which the rule above would
 # otherwise take for keys: md5, sha1 and sha256. A sample hash is not a secret
@@ -580,17 +591,26 @@ def _is_a_token(run: str) -> bool:
 
 
 def _looks_like_a_credential(token: str) -> bool:
-    """Whether this run of characters is a key rather than a word or a digest."""
-    if (
-        _DIGEST.match(token)
-        or _IDENTIFIER.match(token)
-        or _MIME_TYPE.match(token)
-        or _PATH_SHAPED.match(token)
-    ):
+    """Whether this run of characters is a key rather than a word or a digest.
+
+    In this order, and the order is the argument. A digest and an identifier
+    are what the analysis is *about*. A vendor prefix is a key however short
+    it is and whatever else its shape reads as, so it is asked before the
+    shapes that are exempt. What is left is exempt when it is a MIME type, a
+    path or a key this system issues, and a credential when it is long enough
+    to be one or is a token.
+    """
+    if _DIGEST.match(token) or _IDENTIFIER.match(token):
         return False
     lowered = token.lower()
     if any(lowered.startswith(prefix) for prefix in _CREDENTIAL_PREFIXES):
         return True
+    if (
+        _MIME_TYPE.match(token)
+        or _PATH_SHAPED.match(token)
+        or (_SLUG.match(token) and not _ALL_HEX.match(token))
+    ):
+        return False
     return bool(_CREDENTIAL_RUN.match(token)) or _is_a_token(token)
 
 

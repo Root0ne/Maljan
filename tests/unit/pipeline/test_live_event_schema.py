@@ -605,6 +605,27 @@ class TestTheKeyShapesARunOfWordCharactersMisses:
         )
         assert ev.summarize_args({"session_id": str(uuid.UUID(int=1))}) == "session_id=***"
 
+    def test_a_key_this_system_issues_travels_whole(self) -> None:
+        """An agent, a stage, a server and a tool are named by a slug.
+
+        ``SERVER_KEY_PATTERN`` admits 32 lowercase characters, which is past
+        the credential floor — and the publisher scrubs every string of every
+        event, so a long agent key came out as ``speaker: ***``: a
+        conversation the console cannot group under anybody.
+        """
+        for value in (
+            "windows_pe_static_analyst",
+            "android_manifest_reviewer",
+            "triage_pack_and_the_judge",
+            "analysis-mcp-on-the-second-host",
+        ):
+            assert ev.scrub(value) == value, value
+
+    def test_a_long_hex_run_is_still_a_key(self) -> None:
+        """The slug shape must not take a lowercase hex token with it."""
+        assert ev.scrub("d" * 48) == "***"
+        assert ev.scrub("abcdef0123456789abcdef0123456789abcd") == "***"
+
     def test_a_mime_type_still_travels_whole(self) -> None:
         """Long enough for the base64 rule, and the one shape that must survive it."""
         for value in (
