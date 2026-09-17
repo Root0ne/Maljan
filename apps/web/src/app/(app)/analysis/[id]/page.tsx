@@ -406,6 +406,11 @@ function configValue(value: unknown): string {
   return JSON.stringify(value);
 }
 
+/* What the analysis header already says. The team a run was submitted with is
+ * the badge beside the title; listing it again here would put one fact on one
+ * screen twice. */
+const SHOWN_IN_THE_HEADER = new Set(["profile"]);
+
 /**
  * What this run was told to do, and what it spent doing it.
  *
@@ -427,7 +432,9 @@ function RunRecord({
   const triage = runSummary.triage ?? null;
   const validation = runSummary.validation ?? null;
   const retryMode = Object.entries(runSummary.nudge?.retry_mode ?? {});
-  const configRows = Object.entries(config ?? {});
+  const configRows = Object.entries(config ?? {}).filter(
+    ([key]) => !SHOWN_IN_THE_HEADER.has(key),
+  );
 
   return (
     <details className="col-span-2 bg-bg-surface border border-border rounded">

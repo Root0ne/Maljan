@@ -45,6 +45,7 @@ export default function ConversationPage() {
         connection={run.connection}
         feedError={run.feedError}
         live={Boolean(live)}
+        jobStatus={job?.status ?? null}
       />
       {report && <AgentsPanel />}
     </div>

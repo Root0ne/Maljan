@@ -214,6 +214,39 @@ describe("the recorded conversation", () => {
     expect(getRun(JOB).events.map((e) => e.data.text)).toEqual(["live"]);
   });
 
+  it("stands in when the feed answered with everything but the talking", async () => {
+    /* A run whose speech was never recorded as events still published its
+     * roster, its stages and its tool calls. Reading "there are events" as
+     * "there is a conversation" left that run with a stream of tool rows and
+     * no argument behind them. */
+    const { transport } = fakeTransport([
+      event("roster", { seq: 1, agents: [], stages: [] }),
+      event("stage_started", { seq: 2, stage: "analysis", kind: "analysis" }),
+      event("tool_call_finished", { seq: 3, agent: "static", tool: "capa", ok: true }),
+    ]);
+    configureRunTransport(transport);
+    hydrateRunTranscript(JOB, ROWS);
+    subscribeRun(JOB, () => {});
+    await vi.advanceTimersByTimeAsync(0);
+
+    const texts = getRun(JOB)
+      .events.filter((e) => e.type === "agent_message")
+      .map((e) => e.data.text);
+    expect(texts).toEqual(["one claim", "Verdict: Malware"]);
+  });
+
+  it("draws a stored watcher as a notice, not as a member of the team", async () => {
+    const { transport } = fakeTransport();
+    configureRunTransport(transport);
+    hydrateRunTranscript(JOB, [
+      { speaker: "pipeline", role: "negotiator", round: 1, status: "complete", text: "Mediator: all agree." },
+    ]);
+    subscribeRun(JOB, () => {});
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(getRun(JOB).events[0].data.kind).toBe("system");
+  });
+
   it("waits for the feed to answer before standing in for it", () => {
     hydrateRunTranscript(JOB, ROWS);
 

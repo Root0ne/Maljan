@@ -516,9 +516,33 @@ async function backfill(entry: RunEntry): Promise<void> {
  * by an older scheme can even carry a number a live event is already using,
  * which would shadow the real thing rather than merely repeat it.
  */
+/** The speaker a watcher of the run publishes under; see `nodes.ROOM_SPEAKER`. */
+const ROOM_SPEAKER = "pipeline";
+
+/**
+ * The kind a stored row would have gone out under.
+ *
+ * Stored rows carry no `kind` — the column postdates them — so it is derived
+ * the way the publisher derives it. The judge closes the run; the room's own
+ * watchers, the mediator and the sycophancy detector, are notices whatever
+ * role they were filed under, and drawing one as a participant would add a
+ * speaker to a team nobody composed.
+ */
+function kindOfStoredRow(row: TranscriptRow): string {
+  if (row.speaker === ROOM_SPEAKER) return "system";
+  if (row.role === "judge") return "verdict";
+  if (row.role === "system" || row.role === "negotiator") return "system";
+  return "says";
+}
+
 function hydrate(entry: RunEntry): void {
   const rows = entry.transcript;
-  if (!rows?.length || !entry.backfilled || entry.state.events.length > 0) return;
+  if (!rows?.length || !entry.backfilled) return;
+  /* What the stored rows stand in for is the conversation, not the feed. A
+   * back-fill that answered with a roster, some stage markers and the tool
+   * calls but no line anybody said is a run whose speech was never recorded as
+   * events, and the recorded conversation is still the only copy of it. */
+  if (entry.state.events.some((e) => e.type === "agent_message")) return;
   entry.transcript = null;
   applyRunEvents(
     entry.state.jobId,
@@ -531,7 +555,7 @@ function hydrate(entry: RunEntry): void {
         round: row.round,
         status: row.status,
         text: row.text,
-        kind: row.role === "judge" ? "verdict" : row.role === "system" ? "system" : "says",
+        kind: kindOfStoredRow(row),
         stage: row.stage ?? undefined,
         addressed_to: row.addressed_to ?? undefined,
         confidence: row.confidence ?? undefined,

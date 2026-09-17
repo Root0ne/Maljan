@@ -59,6 +59,7 @@ export default function ConversationPanel({
   connection,
   feedError,
   live,
+  jobStatus,
 }: {
   jobId: string;
   events: RunEvent[];
@@ -68,6 +69,9 @@ export default function ConversationPanel({
   connection: RunConnection;
   feedError: string | null;
   live: boolean;
+  /** The job's own status, which is what says whether a silent feed is a
+   *  finished one. */
+  jobStatus: string | null;
 }) {
   const [agents, setAgents] = useState<ReadonlySet<string>>(new Set<string>());
   const [groups, setGroups] = useState<ReadonlySet<ItemGroup>>(new Set<ItemGroup>());
@@ -84,7 +88,7 @@ export default function ConversationPanel({
     [conversation.participants],
   );
 
-  const { counts, partial } = useToolCounts(jobId, events);
+  const { counts, partial } = useToolCounts(jobId, events, jobStatus);
 
   const shown = stages.reduce(
     (total, stage) => total + stage.rounds.reduce((n, round) => n + round.items.length, 0),
@@ -205,6 +209,9 @@ export default function ConversationPanel({
           aria-live="polite"
           aria-relevant="additions text"
           aria-label="Conversation"
+          /* A scrollable region has to be reachable by keyboard, or the only
+           * way through a long run is a pointer. */
+          tabIndex={0}
           className="h-[62vh] min-h-80 space-y-3 overflow-y-auto rounded border border-border bg-bg-deep p-3"
         >
           {shown === 0 ? (

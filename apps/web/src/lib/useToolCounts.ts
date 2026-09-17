@@ -7,6 +7,11 @@
  * carried tool calls has none of those events and its ledger is the only
  * record, so the ledger answers for that case and only for it — one number,
  * one place, with the fallback here rather than in each reader.
+ *
+ * "The feed carries no tool calls" is only an answer once the run has stopped
+ * talking. A live run starts with an empty feed, and reading that as "this run
+ * predates tool-call events" sent a ledger request at the top of every run, for
+ * a ledger that was still being written.
  */
 
 import { useEffect, useState } from "react";
@@ -27,14 +32,22 @@ export interface ToolCounts {
   partial: boolean;
 }
 
-export function useToolCounts(jobId: string, events: readonly RunEvent[]): ToolCounts {
+/** A job that has stopped: only then is a silent feed a finished feed. */
+const TERMINAL = new Set(["completed", "failed", "cancelled"]);
+
+export function useToolCounts(
+  jobId: string,
+  events: readonly RunEvent[],
+  jobStatus: string | null | undefined,
+): ToolCounts {
   const fromFeed = toolCallsFromFeed(events);
   const feedHasCalls = Object.keys(fromFeed).length > 0;
+  const finished = TERMINAL.has(String(jobStatus ?? ""));
   const [fromLedger, setFromLedger] = useState<Record<string, number>>({});
   const [ledgerTotal, setLedgerTotal] = useState(0);
 
   useEffect(() => {
-    if (!jobId || feedHasCalls) return;
+    if (!jobId || feedHasCalls || !finished) return;
     let cancelled = false;
     api
       .getJobEvidence(jobId, { pageSize: LEDGER_SAMPLE })
@@ -51,7 +64,7 @@ export function useToolCounts(jobId: string, events: readonly RunEvent[]): ToolC
     return () => {
       cancelled = true;
     };
-  }, [jobId, feedHasCalls]);
+  }, [jobId, feedHasCalls, finished]);
 
   return {
     counts: feedHasCalls ? fromFeed : fromLedger,
