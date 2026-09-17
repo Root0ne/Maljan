@@ -284,7 +284,7 @@ function SamplesPageContent() {
         onDragLeave={() => setDragOver(false)}
         onDrop={onDrop}
         onClick={() => fileRef.current?.click()}
-        className={`mb-6 border border-dashed rounded p-6 text-center cursor-pointer transition-colors ${
+        className={`mb-6 border border-dashed rounded p-6 text-center cursor-pointer ${
           dragOver
             ? "border-accent bg-accent/5"
             : "border-border hover:border-text-muted"
@@ -334,7 +334,7 @@ function SamplesPageContent() {
             </thead>
             <tbody className="divide-y divide-border-light">
               {samples.map((s) => (
-                <tr key={s.id} className="hover:bg-bg-hover transition-colors">
+                <tr key={s.id} className="hover:bg-bg-hover">
                   <td className="px-4 py-2.5">
                     <span className="text-sm text-text-primary">{s.filename}</span>
                   </td>
@@ -361,7 +361,7 @@ function SamplesPageContent() {
                             setActionError(getErrorMessage(err) || "Failed to load sample details.");
                           }
                         }}
-                        className="px-2.5 py-1 text-xs border border-border text-text-secondary rounded hover:bg-bg-hover transition-colors"
+                        className="px-2.5 py-1 text-xs border border-border text-text-secondary rounded hover:bg-bg-hover"
                       >
                         Details
                       </button>
@@ -370,7 +370,7 @@ function SamplesPageContent() {
                           setActionError(null);
                           openSubmitDialog(s);
                         }}
-                        className="px-2.5 py-1 text-xs bg-accent text-white rounded hover:bg-accent-hover transition-colors"
+                        className="px-2.5 py-1 text-xs bg-accent text-white rounded hover:bg-accent-hover"
                       >
                         Analyze
                       </button>
@@ -575,7 +575,7 @@ function SamplesPageContent() {
                 <button
                   type="button"
                   onClick={closeSubmitDialog}
-                  className="px-2.5 py-1 text-xs border border-border text-text-secondary rounded hover:bg-bg-hover transition-colors"
+                  className="px-2.5 py-1 text-xs border border-border text-text-secondary rounded hover:bg-bg-hover"
                 >
                   Cancel
                 </button>
@@ -583,7 +583,7 @@ function SamplesPageContent() {
                   type="button"
                   disabled={submitting}
                   onClick={() => startAnalysis(submitFor.id)}
-                  className="px-2.5 py-1 text-xs bg-accent text-white rounded hover:bg-accent-hover transition-colors disabled:opacity-50"
+                  className="px-2.5 py-1 text-xs bg-accent text-white rounded hover:bg-accent-hover disabled:opacity-50"
                 >
                   Start analysis
                 </button>

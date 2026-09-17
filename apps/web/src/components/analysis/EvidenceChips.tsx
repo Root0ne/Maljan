@@ -37,7 +37,7 @@ export default function EvidenceChips({
         <Link
           key={id}
           href={`/analysis/${jobId}/evidence?evidence=${encodeURIComponent(id)}`}
-          className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-accent/15 text-accent-strong hover:bg-accent/25 transition-colors"
+          className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-accent/15 text-accent-strong hover:bg-accent/25"
           title="Open this call in the evidence ledger"
         >
           {id}

@@ -82,7 +82,7 @@ export default function Header() {
             <span className="text-xs text-text-secondary">{user.email}</span>
             <button
               onClick={logout}
-              className="text-xs text-text-muted hover:text-text-primary transition-colors"
+              className="text-xs text-text-muted hover:text-text-primary"
             >
               Sign out
             </button>

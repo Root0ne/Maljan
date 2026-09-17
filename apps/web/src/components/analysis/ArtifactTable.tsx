@@ -66,7 +66,7 @@ function SectionBody({ section }: { section: EvidenceSection }) {
           </thead>
           <tbody className="divide-y divide-border-light">
             {section.rows.map((row, i) => (
-              <tr key={i} className="hover:bg-bg-hover transition-colors">
+              <tr key={i} className="hover:bg-bg-hover">
                 {row.map((cell, j) => (
                   <td
                     key={j}

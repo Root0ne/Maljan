@@ -132,7 +132,7 @@ export default function SettingsApiKeysPage() {
           </div>
           <button
             type="submit"
-            className="h-9 px-4 text-xs bg-accent text-white rounded hover:bg-accent-hover transition-colors"
+            className="h-9 px-4 text-xs bg-accent text-white rounded hover:bg-accent-hover"
           >
             Create
           </button>
@@ -147,7 +147,7 @@ export default function SettingsApiKeysPage() {
               <button
                 type="button"
                 onClick={() => handleCopyKey(createdKey.raw_key)}
-                className="shrink-0 h-7 px-2 text-xs text-text-secondary border border-border rounded hover:text-text-primary transition-colors"
+                className="shrink-0 h-7 px-2 text-xs text-text-secondary border border-border rounded hover:text-text-primary"
               >
                 {copyState === "copied" ? "Copied" : "Copy"}
               </button>
@@ -236,7 +236,7 @@ export default function SettingsApiKeysPage() {
                         setKeyActionError(null);
                         setConfirmRevoke(key);
                       }}
-                      className="h-7 px-3 text-xs text-text-secondary border border-border rounded hover:text-status-red hover:border-status-red/30 transition-colors"
+                      className="h-7 px-3 text-xs text-text-secondary border border-border rounded hover:text-status-red hover:border-status-red/30"
                     >
                       Revoke
                     </button>
@@ -287,7 +287,7 @@ export default function SettingsApiKeysPage() {
                 type="button"
                 onClick={closeRevokeModal}
                 disabled={revoking}
-                className="px-3 py-1 text-xs border border-border text-text-secondary rounded hover:bg-bg-hover transition-colors disabled:text-text-disabled"
+                className="px-3 py-1 text-xs border border-border text-text-secondary rounded hover:bg-bg-hover disabled:text-text-disabled"
               >
                 Keep it
               </button>
@@ -295,7 +295,7 @@ export default function SettingsApiKeysPage() {
                 type="button"
                 onClick={handleConfirmRevoke}
                 disabled={revoking}
-                className="px-3 py-1 text-xs bg-status-red text-bg-deep rounded hover:bg-status-red/90 transition-colors disabled:opacity-50"
+                className="px-3 py-1 text-xs bg-status-red text-bg-deep rounded hover:bg-status-red/90 disabled:opacity-50"
               >
                 {revoking ? "Revoking..." : "Revoke key"}
               </button>
