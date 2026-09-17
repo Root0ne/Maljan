@@ -304,6 +304,22 @@ change landed on `main`.
 
 ### Fixed
 
+- **The budget a model is told is in model turns.** The run-state line
+  reported graph steps as turns, about twice the truth (a tool round is two
+  graph steps); `model_turns_left` counts what langgraph counts and the
+  initial framing, the per-turn refresher and the final-answer nudge share
+  it. **The ISR parser keeps every technique id as written**: the
+  1001–1700 range guard and the placeholder set are gone, and
+  `attck.unknown_id` does the challenging. **The static provider does not run
+  capa and YARA again** when the triage pack recorded them. **`api_capability`
+  is a catalogue association, not a source**: its rows travel under
+  `associated_by`, shown in a Catalogue column and on the pack line as
+  "API catalogue associations (reference)", never in `asserted_by`; the
+  judge's zero-corroboration note counts the analysts' claimed techniques
+  and states rule matches no analyst claimed separately. YARA TTP rules are
+  the fifth asserting source (`yara`), an asserted id the catalogue retired is
+  marked in the table, a skipped lookup is not a failed tool in the run
+  state, and a budget-trimmed pack entry says its output was dropped.
 - **Our own rule files assert only live ids.** Two API-to-technique rules and
   one YARA rule carried ids the catalogue retired (T1562.001, T1562.006,
   T1574.002); they now name what the 19.2 bundle's `revoked-by` points at

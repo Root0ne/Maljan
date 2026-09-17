@@ -276,8 +276,8 @@ class OpenAIProvider:
         ik_llama probe) ``repeat_penalty`` is the honored key and
         ``repetition_penalty`` is silently ignored. The penalty damps
         catastrophic single-token loops but does NOT by itself make the small
-        model converge on an ATT&CK ID — that is what the deterministic TF-IDF
-        re-grounding (correct_isr_reports) handles.
+        model converge on an ATT&CK ID — that is what the technique check
+        challenges, with feedback, and never substitutes.
 
         Output cap: ``ChatOpenAI(max_tokens=N)`` does not put ``max_tokens`` on
         the wire. ``langchain-openai`` renames it to OpenAI's newer

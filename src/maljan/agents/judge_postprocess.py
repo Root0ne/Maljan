@@ -98,8 +98,9 @@ def postprocess_judge_bundle(
 ) -> dict[str, Any]:
     """Apply the defensive bundle fixes in place; return the same dict.
 
-    ``bundle_dict`` is the parsed JSON Bundle returned by the verdict LLM
-    (and already filtered for structurally impossible technique IDs upstream).
+    ``bundle_dict`` is the parsed JSON Bundle returned by the verdict LLM,
+    exactly as the judge wrote it; the technique check reports what is wrong
+    with its ids, it does not filter them.
     Everything done here is a shape repair — a STIX id that is not a UUID, a
     missing MITRE reference, a relationship pointing at an object that is not
     in the bundle. None of it changes what the judge decided.

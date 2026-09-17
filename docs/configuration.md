@@ -547,7 +547,7 @@ has_pcap and stages.triage.claim_count > 0
 not stages.detonate.ran
 size > 10485760
 triage.yara_hits > 0 or triage.capa_hits > 0
-not triage.has_signature and triage.reputation_malicious != 0
+not triage.has_signature and triage.reputation_malicious != None and triage.reputation_malicious > 0
 ```
 
 ### What a stage reads

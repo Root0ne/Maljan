@@ -213,10 +213,11 @@ This is a change of method from the tree the paper was evaluated on (tag
 `ATTCKValidator.correct_isr_reports`, which replaced an analyst's technique id
 with the alignment index's best candidate whenever the gate disagreed, so the
 identifiers in a report were valid because the pass had made them so. Here
-identifier validity holds by construction in a narrower sense — every id is
+what holds by construction is that no invalid id goes unflagged: every id is
 checked against the vendored catalogue, and one the catalogue lacks is
-reported, flagged `technique_id_valid=False` and kept as written — and the
-technique choice is the model's, made under deterministic challenges: an id
+reported, flagged `technique_id_valid=False` and kept as written — an invalid
+id can be kept, and then it is kept marked. The technique choice is the
+model's, made under deterministic challenges: an id
 the catalogue does not have, a domain or platform the sample cannot have, an
 alignment the index disputes, and a corroboration count that says who else
 named the technique. The gate is one of those challenges; it no longer
@@ -241,14 +242,24 @@ decides.
    violation is raised only when the index neither ranked the id among its
    candidates nor scored it at or above `validation.alignment_threshold`
    (0.05); the feedback lists the candidates and says the analyst may keep
-   the id and say why. It runs only when the index is warm in this worker
+   the id and say why. The ranking lives on the ISR record
+   (`ClaimEvidence.alignment`) and in the judge's `TECHNIQUE CHECK` block; the
+   report shows it only for a technique the gate questioned and the analyst
+   kept. It runs only when the index is warm in this worker
    (`validation.alignment_gate = auto`); `validation.alignment_gate_build`
    lets the first run that wants it start the build on a thread and go
    without. The index never substitutes an id.
 4. **Corroboration** (exact). Per technique in the run, `asserted_by` — the
    deterministic sources carrying their own ATT&CK ids: capa's `attck`
-   field, a Sigma rule's technique tags, `lolbin_lookup`, `api_capability`'s
-   technique rules — and `claimed_by`, the agents. Two flat lists in
+   field, a Sigma rule's technique tags, a YARA TTP rule's
+   `meta.technique_id`, `lolbin_lookup` — and `claimed_by`, the agents.
+   `api_capability` is not among the sources: the API catalogue associates a
+   technique with an import set (BitBlt and CreateCompatibleDC read as screen
+   capture on any GUI program), so its associations travel under
+   `associated_by`, shown in a Catalogue column for reference and counted for
+   nothing. An asserted id the catalogue has retired
+   (upstream Sigma rules and the case corpus still name a few) is marked
+   `retired in ATT&CK 19.2` in the table. Two flat lists in
    `run_summary.corroboration`, rendered as a table in the report and shown
    on the console's technique cards. No weights, no score; a technique
    nothing asserted keeps its row with the empty list showing, which is the
@@ -269,10 +280,10 @@ Two metrics record the outcome:
 * `run_summary.validation` — how many feedback retries the run spent, a count
   per violation code, and every finding that stayed unresolved with the agent
   that owns it.
-* `run_summary.corroboration` — per technique id, the sources that named it:
-  analysts by name and tools by tool name. A count of distinct sources, not a
-  combined confidence. The same collection builds the judge's evidence-summary
-  block, so the metric and what the judge read cannot disagree.
+* `run_summary.corroboration` — per technique id, the two lists item 4 of
+  the technique check describes, `asserted_by` and `claimed_by`, with no
+  score. The same collection builds the judge's evidence-summary block, so
+  the metric and what the judge read cannot disagree.
 
 A degraded run is not capped. The judge is told in the prompt why the run is
 thin — no sandbox report, an analyst that failed, a container nothing could

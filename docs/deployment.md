@@ -18,7 +18,7 @@ applies both.
 | `qdrant` | `qdrant/qdrant:v1.18.2` | Vector store, pinned to match the client version. |
 | `minio` | `minio/minio:latest` | Sample storage, with its own console. |
 | `ghidra-mcp` | built from `external/ghidra-mcp` | Static analysis engine. Capped at 6 GB memory and swap, because the JVM's own limit does not bound the container. |
-| `migrate` | `maljan-backend` | One-shot `alembic upgrade head`. Runs to completion before the API and the worker start. |
+| `migrate` | `maljan-backend` | One-shot `alembic upgrade head`. Runs to completion before the API and the worker start; on an upgrade, migrate before restarting either, since a stored built-in team written before a seeding revision loads under a renamed key until the revision has run. |
 | `backend-api` | `maljan-backend` | The FastAPI service. |
 | `backend-worker` | `maljan-backend` | The arq worker. Capped at 8 GB memory and swap; `WORKER_RSS_RESTART_MB` makes it exit between jobs before it gets there, and `restart: unless-stopped` brings it back. |
 | `frontend` | built from `docker/Dockerfile.frontend` | The console. |

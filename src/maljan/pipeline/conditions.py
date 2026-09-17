@@ -87,8 +87,11 @@ class TriageFacts:
     The pack writes tens of ledger entries; a condition wants to know whether
     the sample carries a signature, what a reputation service counted, and
     whether any rule fired. ``reputation_malicious`` is ``None`` when no
-    lookup was made or the answer carried no count, and a condition comparing
-    it to a number is told so at run time rather than reading zero.
+    lookup was made or the answer carried no count: an ordered comparison
+    (``>``, ``<``) against it is refused at run time rather than reading
+    zero, while ``==`` and ``!=`` compare against ``None`` as written — so a
+    condition that means "looked up and found malicious" says
+    ``reputation_malicious != None and reputation_malicious > 0``.
     """
 
     has_signature: bool = False

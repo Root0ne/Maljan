@@ -236,8 +236,10 @@ def build_entry(
 def stored_bytes(entry: LedgerEntry) -> int:
     """What the entry keeps: the full parsed result when there is one, else the text.
 
-    The text is a prefix of the result's JSON, so the larger of the two is the
-    size of what is stored, not their sum.
+    The row persists both columns, so what is written is their sum; what the
+    budget charges is the larger of the two, because the text is a prefix of
+    the result's JSON and charging it twice would halve the budget for
+    nothing.
     """
     text = len(entry.output.encode("utf-8", errors="ignore"))
     if entry.structured is None:

@@ -23,6 +23,13 @@ credential must not pass through a JSON rewrite.
 
 Revision ID: 20260919000000
 Revises: 20260918000000
+
+Run this before the API and the worker are restarted on the new tree. A
+worker that boots first still starts: ``default`` and a derived built-in
+heal in memory, custom teams load as they are, and a stored ``mobile`` or
+``deep_static`` written before the pack loads under a renamed key
+(``mobile_custom``) until this revision has run — a save in that window
+would persist the copy.
 """
 
 from __future__ import annotations
