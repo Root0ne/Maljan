@@ -58,6 +58,10 @@ _TECHNIQUE_RE = re.compile(r"\b(T\d{4}(?:\.\d{3})?)\b")
 # returning a useless "need more steps" non-answer. (Phrase observed across
 # live runs; it is not a maljan/langchain in-tree literal.)
 _RECURSION_STOP_RE = re.compile(r"need more steps to process", re.IGNORECASE)
+# What the loop writes down for itself when the graph's own limit stopped it
+# before langgraph could say so. Worded so ``_RECURSION_STOP_RE`` reads it, and
+# so the salvage path that follows treats it the way it treats langgraph's.
+RECURSION_STOP_TEXT = "Sorry, need more steps to process this request."
 
 # Bounds for the forced-synthesis salvage (see ``_force_final_synthesis``).
 #
@@ -254,15 +258,16 @@ def model_turns_left(max_steps: int, messages: list) -> int:
 
 
 class LoopBudget:
-    """One tool loop's steps and seconds, shared with the agents it asks.
+    """One tool loop's steps and seconds.
 
-    The loop's own turns are counted from its conversation, refreshed on
-    every model turn; what the agents it delegated to spent is charged here
-    by the delegation when each of them returns. Both come off the same
-    ``max_steps``, so an agent that asked three specialists has three
-    specialists' worth of turns fewer for itself, and the budget line it
-    reads says so. The wall clock needs no charging: a delegated call runs
-    inside the caller's own timeout.
+    The loop's own turns are counted from its conversation, refreshed on every
+    model turn. What an agent it asked spends is *not* taken off this: an ask
+    carries its own step budget (``agents.delegation_steps``), because a
+    caller and its specialists doing different work out of one step count
+    starved both — the live proof watched a lead's third ask refused with
+    three steps left while the first callee had already died at a recursion
+    limit of five. The wall clock is the one thing they really share, and it
+    needs no charging: a delegated call runs inside the caller's own timeout.
     """
 
     def __init__(self, max_steps: int, timeout: float, started: float | None = None) -> None:
@@ -276,41 +281,35 @@ class LoopBudget:
         """Record what the loop's own conversation has spent so far."""
         self.own_steps = steps_used(messages)
 
-    def charge(self, steps: int) -> None:
-        """Take what a delegated agent spent off this loop's budget."""
+    def note_delegated(self, steps: int) -> None:
+        """Record what an agent this loop asked spent, for the meter only.
+
+        Not charged. The number is here so a budget row can say the caller's
+        loop had work done under it, and so the meter's two sides add up; it
+        does not shorten the caller's own budget in either dimension.
+        """
         self.delegated_steps += max(0, int(steps))
 
-    # What the tool round making an ask costs: the assistant turn that called
-    # the tool and the tool node running it. The refresher counted the
-    # conversation before that turn, so an ask made from inside it is two
-    # steps further on than ``own_steps`` says.
-    STEPS_IN_FLIGHT = 2
-
     def steps_left(self) -> int:
-        return max(0, self.max_steps - self.own_steps - self.delegated_steps)
-
-    def steps_for_a_callee(self) -> int:
-        """What an agent asked from inside this loop's current turn may spend."""
-        return max(0, self.steps_left() - self.STEPS_IN_FLIGHT)
+        return max(0, self.max_steps - self.own_steps)
 
     def turns_left(self, messages: list) -> int:
-        """The budget line's number: model turns left after every charge."""
-        return model_turns_left(self.max_steps - self.delegated_steps, messages)
+        """The budget line's number: model turns this loop has left."""
+        return model_turns_left(self.max_steps, messages)
 
     def seconds_left(self) -> float:
         return max(0.0, self.timeout - (time.monotonic() - self.started))
 
-    def spent_by_delegates(self) -> bool:
-        """Whether delegated work has used what the loop's own turns had left.
-
-        Only then is the loop ended early: with nothing delegated, the graph's
-        own recursion limit is the one that ends it, as it always has.
-        """
-        return self.delegated_steps > 0 and self.steps_left() <= 0
-
 
 class BudgetCeiling:
-    """The most a delegated loop may spend: what its caller had left."""
+    """What one delegated loop gets: the delegation's own budget, not a share.
+
+    ``steps`` is ``agents.delegation_steps`` and replaces whatever the callee
+    would otherwise have had — a specialist answering an ask is doing one
+    focused job, not its own stage. ``seconds`` is the per-ask timeout already
+    cut down to what the caller has left, because the caller is waiting inside
+    its own wall clock.
+    """
 
     def __init__(self, steps: int, seconds: float) -> None:
         self.steps = int(steps)
@@ -416,10 +415,10 @@ def hard_cap(timeout: float, ceiling: BudgetCeiling | None = None) -> float:
 def loop_limits(agent_name: str, ceiling: BudgetCeiling | None = None) -> tuple[int, int]:
     """``(timeout, max_steps)`` for one loop of ``agent_name``.
 
-    The per-agent overrides first, then the ceiling a caller set when the
-    agent is answering a delegated task: a callee never gets more than its
-    caller had left, in either dimension. A module function rather than only
-    a method, so a duck-typed analyst that borrows one method reads the same
+    The per-agent overrides for a loop of its own. A ceiling replaces both:
+    an agent answering an ask spends the delegation's budget, not its stage's
+    and not a leftover of its caller's. A module function rather than only a
+    method, so a duck-typed analyst that borrows one method reads the same
     numbers.
     """
     cfg = get_settings()
@@ -428,8 +427,8 @@ def loop_limits(agent_name: str, ceiling: BudgetCeiling | None = None) -> tuple[
     step_overrides = getattr(cfg, "react_agent_max_steps_overrides", {}) or {}
     max_steps = int(step_overrides.get(agent_name, cfg.react_agent_max_steps))
     if ceiling is not None:
-        max_steps = max(2, min(max_steps, int(ceiling.steps)))
-        timeout = max(1, min(timeout, int(ceiling.seconds)))
+        max_steps = max(2, int(ceiling.steps))
+        timeout = max(1, int(ceiling.seconds))
     return timeout, max_steps
 
 
@@ -2325,6 +2324,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             self._record_budget(plain, [], None)
             return self._capture_findings(answer)
 
+        from langgraph.errors import GraphRecursionError
         from langgraph.prebuilt import create_react_agent
 
         self.logger.info("Starting ReAct agent loop with %d tools...", len(self.tools))
@@ -2453,28 +2453,36 @@ class BaseAnalyst(BudgetMeter, ABC):
                     stream_mode="values",
                 )
                 async with contextlib.aclosing(stream) as snapshots:
-                    async for snapshot in snapshots:
-                        latest.update(snapshot)
-                        if repeats.ending_the_loop():
-                            self.logger.warning(
-                                "%s ReAct loop ended after %d repeated tool call(s); "
-                                "synthesising from what it gathered.",
-                                self.name,
-                                repeats.served_repeats,
-                            )
-                            break
-                        # The agents this loop asked spent what it had left:
-                        # the graph's own limit cannot see that, so the loop
-                        # is ended here and what was gathered is written up.
-                        if budget.spent_by_delegates():
-                            self.logger.warning(
-                                "%s ReAct loop ended: the agents it asked spent %d of its "
-                                "%d steps; synthesising from what it gathered.",
-                                self.name,
-                                budget.delegated_steps,
-                                budget.max_steps,
-                            )
-                            break
+                    try:
+                        async for snapshot in snapshots:
+                            latest.update(snapshot)
+                            if repeats.ending_the_loop():
+                                self.logger.warning(
+                                    "%s ReAct loop ended after %d repeated tool call(s); "
+                                    "synthesising from what it gathered.",
+                                    self.name,
+                                    repeats.served_repeats,
+                                )
+                                break
+                    except GraphRecursionError:
+                        # The step cap, reached without langgraph's own
+                        # "need more steps" turn — which it only takes when
+                        # the model asks for a tool with fewer than two steps
+                        # left, and never when the cap is small. The
+                        # conversation up to here is what the loop gathered,
+                        # and the salvage below turns it into claims: an
+                        # agent at its cap writes up what it has, and a
+                        # recursion error is not something a model can read.
+                        self.logger.warning(
+                            "%s ReAct loop reached its %d-step cap; "
+                            "synthesising from what it gathered.",
+                            self.name,
+                            max_steps,
+                        )
+                        latest["messages"] = [
+                            *list(latest.get("messages") or []),
+                            AIMessage(content=RECURSION_STOP_TEXT),
+                        ]
                 return dict(latest)
 
             last_conn_exc: Exception | None = None
@@ -2625,30 +2633,17 @@ class BaseAnalyst(BudgetMeter, ABC):
         # tool-calling and synthesise now, so the gathered evidence becomes real
         # claims instead of a useless "need more steps" non-answer.
         hit_step_cap = bool(_RECURSION_STOP_RE.search(content))
-        # A loop ended for repeating itself, or because the agents it asked
-        # spent its steps, is in the same place as one that spent them
-        # itself: it has evidence and no answer, and the salvage is what turns
-        # the first into the second.
-        ended_early = repeats.ending_the_loop() or budget.spent_by_delegates()
+        # A loop ended for repeating itself is in the same place as one that
+        # spent its steps: it has evidence and no answer, and the salvage is
+        # what turns the first into the second.
+        ended_early = repeats.ending_the_loop()
         self._record_react_loop(hit_step_cap=hit_step_cap)
-        cap = (
-            "repeats"
-            if repeats.ending_the_loop()
-            else "steps"
-            if hit_step_cap or budget.spent_by_delegates()
-            else None
-        )
+        cap = "repeats" if repeats.ending_the_loop() else "steps" if hit_step_cap else None
         self._record_budget(
             budget,
             msgs,
             cap,
-            detail=(
-                f"{repeats.served_repeats} repeated tool call(s)"
-                if cap == "repeats"
-                else f"{budget.delegated_steps} of {budget.max_steps} steps spent by delegates"
-                if cap == "steps" and budget.spent_by_delegates()
-                else ""
-            ),
+            detail=(f"{repeats.served_repeats} repeated tool call(s)" if cap == "repeats" else ""),
         )
         self._budget_tick(budget, msgs, final=True, ledger_entries=len(recorder.entries))
         if tool_call_count > 0 and (not content.strip() or hit_step_cap or ended_early):

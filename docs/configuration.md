@@ -522,15 +522,28 @@ The seeded `lead` definition (role `lead`, prompt in
 a reference on any analyst: a static clone that asks the network analyst is as
 legal as a lead.
 
-One setting governs it, in the Agents group: `agents.delegation_depth` (2). A
-stage's agent asking a specialist is depth 1, that specialist asking another
-is depth 2, and an ask that would go deeper is refused with a message the
-model reads. It bounds the nesting, never the number of asks. The budget is
-not a setting of its own: a callee shares the caller's remaining steps and
-seconds, and what it spends comes off the caller's `react_agent_max_steps` and
-`react_agent_timeout` (with their per-agent overrides) for that loop. See
-*Delegation* in [architecture.md](architecture.md) for what the ledger and the
-transcript record.
+Three settings govern it, in the Agents group. `agents.delegation_depth` (2)
+bounds the nesting: a stage's agent asking a specialist is depth 1, that
+specialist asking another is depth 2, and an ask that would go deeper is
+refused with a message the model reads. It bounds the nesting, never the
+number of asks.
+
+`agents.delegation_steps` (12) and `agents.delegation_timeout_seconds` (300)
+are what one ask gets. They are the delegation's own budget, not a share of
+the caller's: an ask carries them whole, whatever the caller has spent, and
+the caller's own step budget is not reduced by what its specialists do. The
+one thing the two really share is the wall clock — the caller waits inside its
+own timeout — so an ask is cut to what the caller has left, and an ask is
+refused only when that is below the floor a first model turn needs. A callee
+that reaches its step cap writes up what it gathered, the way an analyst at
+its own cap does.
+
+That makes the caller's stage timeout the thing that decides how many asks fit
+in one loop: the seeded `lead` has `react_agent_timeout_overrides` of 1800 s
+and `react_agent_max_steps_overrides` of 40, which is room for five asks and
+the turns to weigh them. The `ask_<key>` tool's description tells the model
+the same numbers. See *Delegation* in [architecture.md](architecture.md) for
+what the ledger and the transcript record.
 
 ### A name a later release takes
 

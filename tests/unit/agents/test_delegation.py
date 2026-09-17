@@ -30,6 +30,7 @@ from maljan.agents.delegation import (
     DelegationRefused,
     _brief_callee,
     ask,
+    ask_budget,
     ask_tool,
     refusal,
     tool_name,
@@ -322,25 +323,31 @@ class TestAnAskThroughTheRealLoop:
         assert "Context from boss:\nSee the pack." in human
         assert "CLAIM:" in human
 
-    def test_the_callee_s_turns_come_off_the_caller_s_budget(self, team) -> None:
-        boss = team.get_agent("boss")
-        charged: list[int] = []
-        original = LoopBudget.charge
+    def test_the_callee_s_turns_are_noted_and_not_charged(self, team) -> None:
+        """The caller's step budget is its own; the specialists' are theirs.
 
-        def _charge(self: LoopBudget, steps: int) -> None:
-            charged.append(int(steps))
+        Sharing one count starved both: the live proof watched the first
+        callee die at a recursion limit of five and the lead's third ask
+        refused with three steps left.
+        """
+        boss = team.get_agent("boss")
+        noted: list[int] = []
+        original = LoopBudget.note_delegated
+
+        def _note(self: LoopBudget, steps: int) -> None:
+            noted.append(int(steps))
             original(self, steps)
 
-        LoopBudget.charge = _charge  # type: ignore[method-assign]
+        LoopBudget.note_delegated = _note  # type: ignore[method-assign]
         try:
             _run_boss(team)
         finally:
-            LoopBudget.charge = original  # type: ignore[method-assign]
+            LoopBudget.note_delegated = original  # type: ignore[method-assign]
         # The helper spent one tool round and one plain turn: three steps.
-        assert charged == [3]
+        assert noted == [3]
         assert boss.steps_spent == 3 + 3
 
-    def test_the_callee_never_gets_more_than_the_caller_had_left(self) -> None:
+    def test_the_callee_s_steps_come_from_the_delegation_and_not_the_caller(self) -> None:
         seen: list[tuple[int, int]] = []
         container = _team(
             boss_script=[
@@ -349,6 +356,7 @@ class TestAnAskThroughTheRealLoop:
             ],
             helper_script=[AIMessage(content=HELPER_REPORT)],
         )
+        steps, seconds = ask_budget(container)
         helper = container.get_agent("helper")
         original = helper._loop_limits
 
@@ -359,12 +367,23 @@ class TestAnAskThroughTheRealLoop:
 
         helper._loop_limits = _limits  # type: ignore[method-assign]
         _run_boss(container)
-        timeout, steps = seen[0]
-        # The boss had ten steps and 180 s; the ask happens on its second
-        # step, and the callee's clock is what the caller has left, less the
-        # margin the caller keeps to read the answer.
-        assert steps <= 8
-        assert timeout <= 180 - 15
+        timeout, allowed = seen[0]
+        # The boss had ten steps and 180 s. The callee gets the delegation's
+        # twelve whatever the caller has left, and a clock that is the per-ask
+        # timeout or what the caller has left, whichever is shorter.
+        assert allowed == steps == 12
+        assert timeout <= 180 - 15 and timeout <= seconds
+
+    def test_a_short_caller_clock_still_cuts_the_ask(self) -> None:
+        from maljan.agents.delegation import _what_this_ask_gets
+
+        container = _team([], [])
+        budget = LoopBudget(max_steps=10, timeout=60.0)
+
+        ceiling = _what_this_ask_gets(container, budget)
+
+        assert ceiling.steps == 12, "the steps are the delegation's, whole"
+        assert 1 <= ceiling.seconds <= 60 - 15 + 1
 
 
 class TestTheGuards:
@@ -422,12 +441,22 @@ class TestTheGuards:
         container.config.agents.definitions["fourth"] = container.config.agents.definitions["third"]
         assert refusal(container, third, "fourth") is None
 
-    def test_a_caller_with_no_budget_left_is_told_to_answer(self) -> None:
+    def test_a_caller_with_no_time_left_is_told_to_answer(self) -> None:
         container = _team([], [])
         boss = self._boss(container)
         boss.loop_budget = LoopBudget(max_steps=10, timeout=20.0)
         why = refusal(container, boss, "helper")
-        assert why is not None and "not enough budget" in why
+        assert why is not None and "not enough time" in why
+
+    def test_a_caller_with_no_steps_left_may_still_ask(self) -> None:
+        """An ask has a step budget of its own, so the caller's say nothing."""
+        container = _team([], [])
+        boss = self._boss(container)
+        boss.loop_budget = LoopBudget(max_steps=10, timeout=3600.0)
+        boss.loop_budget.own_steps = 10
+
+        assert boss.loop_budget.steps_left() == 0
+        assert refusal(container, boss, "helper") is None
 
     def test_the_refusal_is_raised_before_the_callee_is_touched(self) -> None:
         container = _team([], [])
@@ -586,15 +615,71 @@ class TestTheGuards:
 
 
 class TestTheCeiling:
-    def test_it_caps_both_dimensions_and_never_below_a_first_turn(self) -> None:
+    def test_it_replaces_the_agent_s_own_limits_and_never_goes_below_a_first_turn(self) -> None:
+        """A callee answering an ask spends the delegation's budget, not its stage's."""
         container = _team([], [])
         helper = container.get_agent("helper")
         helper._budget_ceiling = BudgetCeiling(steps=1, seconds=0.5)
-        timeout, steps = helper._loop_limits()
-        assert (timeout, steps) == (1, 2)
-        helper._budget_ceiling = BudgetCeiling(steps=1000, seconds=100000.0)
-        timeout, steps = helper._loop_limits()
-        assert timeout <= 180 and steps <= 10
+        assert helper._loop_limits() == (1, 2)
+        helper._budget_ceiling = BudgetCeiling(steps=12, seconds=300.0)
+        assert helper._loop_limits() == (300, 12)
+
+    def test_the_seeded_lead_has_room_for_several_asks(self) -> None:
+        from maljan.core.config import Settings
+
+        seeded = Settings(_env_file=None)
+
+        assert seeded.react_agent_max_steps_overrides["lead"] == 40
+        assert seeded.agents.delegation_steps == 12
+        assert seeded.agents.delegation_timeout_seconds == 300
+        fits = seeded.react_agent_timeout_overrides["lead"] // (
+            seeded.agents.delegation_timeout_seconds
+        )
+        assert fits >= 5, "a lead's stage holds several asks end to end"
+
+    def test_the_ask_tool_tells_the_model_what_an_ask_costs(self, team) -> None:
+        described = next(
+            t for t in team.get_agent("boss").tools if t.name == tool_name("helper")
+        ).description
+
+        assert "12 steps" in described and "300 s" in described
+        assert "do not come out of your step budget" in described
+
+
+class TestACalleeAtItsCapWritesUpWhatItHas:
+    def test_the_graph_s_own_limit_becomes_a_synthesis_and_not_an_error(self) -> None:
+        """The live proof watched a callee die at a recursion limit of five.
+
+        A recursion error is not something a model can read, and the evidence
+        the callee gathered before it is the whole of what the ask bought.
+        """
+        peeks = [_call("peek", {"path": f"/samples/{n}.bin"}, f"peek_{n}") for n in range(8)]
+        container = _team(
+            boss_script=[
+                _call(tool_name("helper"), {"task": "Look at everything."}, "ask_1"),
+                AIMessage(content=BOSS_REPORT),
+            ],
+            helper_script=peeks,
+        )
+        container.config.agents.delegation_steps = 4
+
+        isr = _run_boss(container)
+
+        # The caller read an answer rather than a tool failure, and the
+        # callee's calls are on the record.
+        entries = container.get_agent("boss")._evidence_entries
+        assert [e.tool for e in entries if e.agent == "helper"], "its calls were kept"
+        ask_entry = next(e for e in entries if e.server == TEAM_SERVER)
+        assert ask_entry.ok is True, "the ask answered rather than raising"
+        assert isr is not None
+
+    def test_a_callee_s_recursion_limit_is_the_delegation_s_steps(self) -> None:
+        from maljan.agents.delegation import _what_this_ask_gets
+
+        container = _team([], [])
+        container.config.agents.delegation_steps = 7
+
+        assert _what_this_ask_gets(container, None).steps == 7
 
 
 class TestOneAgentDoesOneThingAtATime:
@@ -794,23 +879,23 @@ class TestACalleeNeverOutlivesItsCaller:
 
 
 class TestTheLoopBudget:
-    def test_delegated_steps_shrink_the_turns_the_caller_is_told(self) -> None:
+    def test_delegated_steps_leave_the_caller_s_turns_where_they_were(self) -> None:
+        """What a specialist spends is its own; the lead's line does not move."""
         from langchain_core.messages import HumanMessage
 
         budget = LoopBudget(max_steps=10, timeout=100.0)
         assert budget.turns_left([HumanMessage(content="t")]) == 5
-        budget.charge(4)
-        assert budget.turns_left([HumanMessage(content="t")]) == 3
-        assert budget.steps_left() == 6
-        assert budget.spent_by_delegates() is False
-        budget.charge(6)
-        assert budget.spent_by_delegates() is True
 
-    def test_nothing_delegated_never_ends_a_loop_early(self) -> None:
+        budget.note_delegated(4)
+
+        assert budget.turns_left([HumanMessage(content="t")]) == 5
+        assert budget.steps_left() == 10
+        assert budget.delegated_steps == 4, "noted for the meter"
+
+    def test_the_caller_s_own_turns_are_what_run_it_out(self) -> None:
         budget = LoopBudget(max_steps=2, timeout=100.0)
         budget.own_steps = 2
         assert budget.steps_left() == 0
-        assert budget.spent_by_delegates() is False
 
 
 class TestTheNodeBriefsALeadLikeAStaticAgent:

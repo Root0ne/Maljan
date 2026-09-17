@@ -40,6 +40,22 @@ def _no_llm(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _the_model_answers(monkeypatch):
+    """The probe's one-turn completion, answered without touching a network.
+
+    The probe ends by calling the model, which is the whole point of it — but
+    a suite that reached an endpoint would be testing the endpoint. Every test
+    here is about what the probe resolves and reports; the completion itself
+    is driven against a mocked client in ``TestTheProbeMakesTheCallTheJobWillMake``.
+    """
+
+    async def _answered(provider: str, *, endpoint: str, model: str, api_key: str = ""):
+        return (bool(model.strip()), f"{model!r} answered" if model.strip() else "no model named")
+
+    monkeypatch.setattr(settings_probes, "complete_one_turn", _answered)
+
+
+@pytest.fixture(autouse=True)
 def _no_servers(monkeypatch):
     """Every server attaches instantly and offers two tools."""
 
@@ -352,7 +368,13 @@ async def test_an_inheriting_agent_reports_the_resolved_global_expert_model(monk
 
 
 def _tags(monkeypatch, names, *, reachable=True):
-    """Stand in for one GET of ``/api/tags``, counting the calls."""
+    """An Ollama server that lists ``names`` and will generate with those only.
+
+    Both halves, because the probe asks for both: the tag list says the
+    endpoint is up, and the one-turn completion says the server will actually
+    load the model. A tag it does not have is refused the way Ollama refuses
+    it, with a 404.
+    """
     import httpx
 
     calls: list[str] = []
@@ -361,6 +383,13 @@ def _tags(monkeypatch, names, *, reachable=True):
         calls.append(str(request.url))
         if not reachable:
             raise httpx.ConnectError("connection refused", request=request)
+        if request.url.path.endswith("/api/generate"):
+            import json as _json
+
+            asked = _json.loads(request.content or b"{}").get("model", "")
+            if asked not in names:
+                return httpx.Response(404, json={"error": f"model {asked!r} not found"})
+            return httpx.Response(200, json={"response": "OK"})
         return httpx.Response(200, json={"models": [{"name": n} for n in names]})
 
     monkeypatch.setattr(
@@ -373,6 +402,8 @@ def _tags(monkeypatch, names, *, reachable=True):
 
 @pytest.mark.asyncio
 async def test_a_per_agent_ollama_model_the_server_lacks_is_reported(monkeypatch):
+    """The server will not load it, and the probe finds that out by asking."""
+    monkeypatch.undo()
     calls = _tags(monkeypatch, ["qwen3:8b"])
     staged = {
         "llm.provider": "ollama",
@@ -381,9 +412,8 @@ async def test_a_per_agent_ollama_model_the_server_lacks_is_reported(monkeypatch
     }
     result = await probe_agent({"name": "network", "settings": staged})
     assert result.ok is False
-    assert "qwen3:nope" in result.detail
-    assert "not present on the Ollama server" in result.detail
-    assert len(calls) == 1
+    assert "qwen3:nope" in result.detail and "404" in result.detail
+    assert [c for c in calls if c.endswith("/api/generate")], "the model was asked, not listed"
 
 
 @pytest.mark.asyncio
@@ -460,7 +490,7 @@ class TestTheProbeMakesTheCallTheJobWillMake:
 
     @pytest.mark.asyncio
     async def test_a_completion_that_was_refused_is_not_a_pass(self, monkeypatch) -> None:
-        from app.services import settings_probes
+        monkeypatch.undo()
 
         class _Client:
             async def __aenter__(self) -> Any:
@@ -482,7 +512,7 @@ class TestTheProbeMakesTheCallTheJobWillMake:
 
     @pytest.mark.asyncio
     async def test_a_completion_that_answered_is_a_pass(self, monkeypatch) -> None:
-        from app.services import settings_probes
+        monkeypatch.undo()
 
         class _Client:
             async def __aenter__(self) -> Any:
@@ -503,7 +533,8 @@ class TestTheProbeMakesTheCallTheJobWillMake:
         assert ok is True and "qwen" in said
 
     @pytest.mark.asyncio
-    async def test_an_agent_that_names_no_model_is_not_a_pass(self) -> None:
+    async def test_an_agent_that_names_no_model_is_not_a_pass(self, monkeypatch) -> None:
+        monkeypatch.undo()
         from app.services.settings_probes import complete_one_turn
 
         ok, said = await complete_one_turn("openai", endpoint="http://x/v1", model="  ")

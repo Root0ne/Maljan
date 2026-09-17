@@ -1907,12 +1907,28 @@ class AgentsConfig(BaseModel):
     a specialist is depth 1, that specialist asking another is depth 2, and an
     ask that would go deeper is refused with a tool error the model reads. It
     bounds the nesting, never the number of asks.
+
+    ``delegation_steps`` and ``delegation_timeout_seconds`` are what one ask
+    gets. They are the delegation's own budget, not a share of the caller's:
+    a callee derived from what its caller had left ran out of steps before it
+    had made a tool call — the live proof watched a static specialist die at a
+    recursion limit of five, and every later ask refused with "0 s and 3 steps
+    remain". An ask is bounded by the caller's remaining wall clock and by
+    nothing else, because the wall clock is the one thing the two really
+    share: the ask runs inside the caller's own timeout.
     """
 
     profile: str = "default"
     profiles: dict[str, ProfileDefinition] = Field(default_factory=_builtin_profiles)
     definitions: dict[str, AgentDefinition] = Field(default_factory=_builtin_definitions)
     delegation_depth: Annotated[int, Field(ge=1)] = 2
+    # Twelve steps is about five tool rounds and an answer — what a specialist
+    # needs to open the sample, look at two or three things and write a claim.
+    delegation_steps: Annotated[int, Field(ge=2)] = 12
+    # Five minutes per ask on a local model: a specialist with tools spends
+    # most of it waiting for its own tool calls, and a lead with a long stage
+    # timeout can still make several asks inside one loop.
+    delegation_timeout_seconds: Annotated[int, Field(ge=1)] = 300
 
     @model_validator(mode="before")
     @classmethod
@@ -2642,6 +2658,12 @@ class Settings(BaseSettings):
             # safe_analyze_isr_chunked still tolerates a genuinely wedged chunk.
             # Override via ``REACT_AGENT_TIMEOUT_OVERRIDES__static=1500``.
             "static": 1500,
+            # A lead's stage has to hold several asks end to end. At the
+            # default 300 s per ask, 1800 fits five of them with the lead's
+            # own turns around them; the per-ask timeout is what bounds any
+            # one specialist, and the refusal is what stops the last ask that
+            # would not fit.
+            "lead": 1800,
             # Judge budget bumped 300 → 600 for the same reason — the
             # final-verdict LLM call on Qwen 35B repeatedly bottlenecked
             # at 180-300s in the 2026-05-28 sequential live runs.
@@ -2699,6 +2721,12 @@ class Settings(BaseSettings):
         default_factory=lambda: {
             "static": 40,
             "network": 6,
+            # A lead spends its steps on asks and on reading what comes back,
+            # and each ask is two of them — the turn that calls the tool and
+            # the node that runs it. Six asks and the turns to weigh them is
+            # forty; the specialists' own steps are their own and do not come
+            # out of this.
+            "lead": 40,
         }
     )
 

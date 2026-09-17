@@ -1588,6 +1588,27 @@ ANNOTATIONS.update(
             ),
             "group": "agents",
         },
+        "agents.delegation_steps": {
+            "title": "Steps one ask gets",
+            "description": (
+                "How many graph steps a delegated agent may spend answering one "
+                "ask — about five tool rounds and an answer at the default. It is "
+                "the ask's own budget, not a share of the caller's: a callee that "
+                "inherited what its caller had left ran out before it had made a "
+                "tool call. The caller's own step budget is not reduced by what "
+                "its specialists spend; its wall clock is."
+            ),
+            "group": "agents",
+        },
+        "agents.delegation_timeout_seconds": {
+            "title": "Seconds one ask gets",
+            "description": (
+                "How long a delegated agent may take over one ask. An ask is also "
+                "bounded by the time its caller has left, so the caller's own "
+                "stage timeout is what decides how many asks fit in one loop."
+            ),
+            "group": "agents",
+        },
         "agents.definitions": {
             "title": "Agent definitions",
             "description": (

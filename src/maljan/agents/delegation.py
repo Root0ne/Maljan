@@ -61,9 +61,10 @@ TEAM_SERVER = "team"
 
 # An ask that would leave its caller with less than this cannot be answered
 # in the time: the callee's loop needs a first model turn and the caller a
-# last one to read the answer.
+# last one to read the answer. There is no matching step floor — an ask has a
+# step budget of its own, so the caller's remaining steps say nothing about
+# whether a specialist can still do a piece of work.
 MIN_SECONDS_TO_ASK = 20.0
-MIN_STEPS_TO_ASK = 2
 # Kept back from what the caller has left, so the callee's hard cap fires
 # before the caller's own does and the caller still reads the answer.
 SECONDS_KEPT_FOR_THE_CALLER = 15.0
@@ -113,11 +114,15 @@ def ask_tool(container: Any, caller_key: str, callee_key: str) -> BaseTool:
     definition = container.config.agents.definitions.get(callee_key)
     label = str(getattr(definition, "label", "") or "") or callee_key
     role = str(getattr(definition, "role", "") or "agent")
+    steps, seconds = ask_budget(container)
     description = (
         f"Ask {label} ({callee_key}, role {role}) to work on one focused task with its "
         "own tools over this sample. Its answer comes back as its own claims, each with "
-        "the ledger ids it cited, exactly as it gave them. Its tool calls and its turns "
-        "count against your budget."
+        "the ledger ids it cited, exactly as it gave them. It gets "
+        f"{steps} steps and up to {seconds} s of its own, and they do not come out of "
+        f"your step budget — your wall clock is what they cost, so about "
+        f"{_asks_that_fit(caller_key, seconds)} of these fit in your time. Ask one at a "
+        "time and read each answer before the next."
     )
 
     def _ask(task: str, context: str = "") -> str:
@@ -133,6 +138,22 @@ def ask_tool(container: Any, caller_key: str, callee_key: str) -> BaseTool:
         infer_schema=False,
         metadata={SERVER_METADATA_KEY: TEAM_SERVER},
     )
+
+
+def _asks_that_fit(caller_key: str, seconds: int) -> int:
+    """Roughly how many asks the caller's own stage timeout has room for.
+
+    A number the model can plan against. Rough on purpose: an ask that
+    finishes early gives its remainder back, so this is a floor rather than a
+    quota, and the refusal is what actually stops the last one.
+    """
+    from maljan.agents.base_agent import loop_limits
+
+    try:
+        timeout, _steps = loop_limits(caller_key)
+    except Exception:  # noqa: BLE001 — a sentence is never worth a failed resolution
+        return 1
+    return max(1, int(timeout // max(1, seconds)))
 
 
 def refusal(container: Any, caller: Any, callee_key: str) -> str | None:
@@ -171,12 +192,16 @@ def refusal(container: Any, caller: Any, callee_key: str) -> str | None:
         )
     budget = getattr(caller, "loop_budget", None)
     if budget is not None:
+        # Time, and only time. An ask has a step budget of its own, so the
+        # caller having spent its steps says nothing about whether a
+        # specialist can still do a piece of work — but the caller waits
+        # inside its own wall clock, so its remaining seconds are real.
         seconds = budget.seconds_left() - SECONDS_KEPT_FOR_THE_CALLER
-        steps = budget.steps_for_a_callee()
-        if seconds < MIN_SECONDS_TO_ASK or steps < MIN_STEPS_TO_ASK:
+        if seconds < MIN_SECONDS_TO_ASK:
             return (
-                f"not enough budget left to ask {callee_key!r}: {max(0, int(seconds))} s "
-                f"and {steps} step(s) remain; write your answer from what you have"
+                f"not enough time left to ask {callee_key!r}: {max(0, int(seconds))} s "
+                f"remain and an ask needs at least {int(MIN_SECONDS_TO_ASK)} s; "
+                "write your answer from what you have"
             )
     return None
 
@@ -292,7 +317,6 @@ def _seconds_to_wait_for(caller: Any) -> float:
 
 
 def _ask(container: Any, caller: Any, callee: Any, task: str, context: str) -> str:
-    from maljan.agents.base_agent import BudgetCeiling
 
     stage = str(getattr(caller, "pipeline_stage", "") or "analysis")
     round_index = int(getattr(caller, "current_round", 0) or 0)
@@ -316,11 +340,7 @@ def _ask(container: Any, caller: Any, callee: Any, task: str, context: str) -> s
     its_own = _what_the_callee_had(callee)
     _brief_callee(caller, callee, stage=stage, round_index=round_index)
     budget = getattr(caller, "loop_budget", None)
-    if budget is not None:
-        callee._budget_ceiling = BudgetCeiling(
-            steps=budget.steps_for_a_callee(),
-            seconds=budget.seconds_left() - SECONDS_KEPT_FOR_THE_CALLER,
-        )
+    callee._budget_ceiling = _what_this_ask_gets(container, budget)
     spent_before = int(getattr(callee, "steps_spent", 0) or 0)
     started = time.monotonic()
     try:
@@ -331,7 +351,8 @@ def _ask(container: Any, caller: Any, callee: Any, task: str, context: str) -> s
         _give_the_callee_back_what_it_had(callee, its_own)
         spent = int(getattr(callee, "steps_spent", 0) or 0) - spent_before
         if budget is not None:
-            budget.charge(spent)
+            # Noted, not charged: the caller's own step budget is its own.
+            budget.note_delegated(spent)
         _hand_over_the_record(
             caller, callee, still_running=getattr(caller, "loop_budget", None) is budget
         )
@@ -369,6 +390,30 @@ def _note_what_the_callee_cannot_have(container: Any, callee: Any) -> None:
         note_unavailable_tools(container, callee)
     except Exception as exc:  # noqa: BLE001 — a record is never worth a run
         logger.debug("delegation: the callee's manifest check was skipped (%s).", exc)
+
+
+def ask_budget(container: Any) -> tuple[int, int]:
+    """``(steps, seconds)`` one ask gets, from the job's settings."""
+    agents = container.config.agents
+    steps = int(getattr(agents, "delegation_steps", 12) or 12)
+    seconds = int(getattr(agents, "delegation_timeout_seconds", 300) or 300)
+    return max(2, steps), max(1, seconds)
+
+
+def _what_this_ask_gets(container: Any, budget: Any) -> Any:
+    """The callee's ceiling: the delegation's own budget, cut to the caller's clock.
+
+    The steps are the delegation's, whole. The seconds are the delegation's or
+    what the caller has left, whichever is less, because the caller is waiting
+    inside its own timeout and an ask that outlived it would answer an agent
+    whose node has already failed.
+    """
+    from maljan.agents.base_agent import BudgetCeiling
+
+    steps, seconds = ask_budget(container)
+    if budget is not None:
+        seconds = int(min(seconds, max(1.0, budget.seconds_left() - SECONDS_KEPT_FOR_THE_CALLER)))
+    return BudgetCeiling(steps=steps, seconds=float(seconds))
 
 
 def _brief_callee(caller: Any, callee: Any, *, stage: str, round_index: int) -> None:

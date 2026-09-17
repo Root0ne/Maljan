@@ -154,7 +154,7 @@ class TestTheLoopMetersItself:
         agent = self._agent([AIMessage(content="CLAIM: x")], events)
         budget = LoopBudget(max_steps=40, timeout=1500.0)
         budget.own_steps = 31
-        budget.charge(4)
+        budget.note_delegated(4)
 
         agent._record_budget(budget, [], "time", detail="the loop exceeded its hard cap")
 

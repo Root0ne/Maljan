@@ -3,10 +3,10 @@
 A local model that hits its generation limit mid-call emits arguments that
 stop in the middle. langchain marks the call invalid and langgraph ignores it
 entirely, so nothing runs, nothing answers it, and the loop ends on a turn it
-paid a step for. The repair is the smallest defensible one — append the quote
-and the brackets that are missing, never remove or change a character — and
-the ledger says the call was made on repaired arguments and keeps what the
-model actually wrote.
+paid a step for. The repair is the smallest defensible one — append the
+brackets that are missing, never remove or change a character, and never close
+a value the model was still writing — and the ledger says the call was made on
+repaired arguments and keeps what the model actually wrote.
 """
 
 from __future__ import annotations
@@ -32,23 +32,25 @@ class TestWhatCanBeClosedOff:
     @pytest.mark.parametrize(
         ("written", "read_as"),
         [
-            # A string the model never closed, and then the object.
-            ('{"path": "/s.bin", "pattern": "http|www', {"path": "/s.bin", "pattern": "http|www"}),
             # An array left open inside an object.
             ('{"path": "/s.bin", "names": ["a", "b"', {"path": "/s.bin", "names": ["a", "b"]}),
             # The object alone, every value complete.
             ('{"path": "/s.bin", "start": 0', {"path": "/s.bin", "start": 0}),
+            # A nested object, both levels left open.
+            ('{"opts": {"depth": 2', {"opts": {"depth": 2}}),
         ],
     )
     def test_the_missing_closers_are_appended(self, written: str, read_as: dict) -> None:
         assert repair_arguments(written) == read_as
 
-    def test_an_escaped_quote_does_not_end_the_string(self) -> None:
-        assert repair_arguments('{"pattern": "say \\"hi') == {"pattern": 'say "hi'}
-
     @pytest.mark.parametrize(
         "written",
         [
+            # A value cut in the middle. Closing the quote would hand the tool
+            # a path that exists nowhere, or a different search.
+            '{"path": "/tmp/dropper.ex',
+            '{"path": "/s.bin", "pattern": "http|www',
+            '{"pattern": "say \\"hi',
             # A key with nothing after it: appending cannot say what it was.
             '{"path": ',
             # A trailing comma: nothing appended makes this JSON.
@@ -82,20 +84,22 @@ class TestTheTurnTheRepairChanges:
     def test_a_repairable_call_moves_across_and_the_turn_keeps_its_id(self) -> None:
         repairs = ArgumentRepairs()
 
-        repaired = repair_invalid_tool_calls(
-            self._turn('{"path": "/s.bin", "pattern": "ht'), repairs
-        )
+        repaired = repair_invalid_tool_calls(self._turn('{"path": "/s.bin", "start": 0'), repairs)
 
         assert repaired is not None
         assert repaired.id == "turn-1" and repaired.content == "Let me look."
         assert repaired.invalid_tool_calls == []
-        assert [call["args"] for call in repaired.tool_calls] == [
-            {"path": "/s.bin", "pattern": "ht"}
-        ]
+        assert [call["args"] for call in repaired.tool_calls] == [{"path": "/s.bin", "start": 0}]
         assert repaired.tool_calls[0]["id"] == "call_9"
 
     def test_an_unrepairable_call_is_left_exactly_where_it_was(self) -> None:
         assert repair_invalid_tool_calls(self._turn('{"path": '), ArgumentRepairs()) is None
+
+    def test_a_call_cut_inside_a_value_is_left_where_it_was(self) -> None:
+        """Closing the quote would invent the rest of a path or a pattern."""
+        assert (
+            repair_invalid_tool_calls(self._turn('{"path": "/tmp/dropp'), ArgumentRepairs()) is None
+        )
 
     def test_a_turn_with_nothing_wrong_is_not_touched(self) -> None:
         turn = AIMessage(content="", id="t", tool_calls=[{"name": "s", "args": {}, "id": "c"}])

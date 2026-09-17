@@ -410,6 +410,18 @@ change landed on `main`.
   now finds a tool the collision rule renamed, the failure list says when it
   cut and trims a message, and one place decides what a failure looks like.
 
+- **An ask has a budget of its own.** Deriving a callee's steps from what its
+  caller had left starved both: the live proof watched a specialist die at a
+  recursion limit of five before it had made a tool call, later asks refused
+  with "0 s and 3 steps remain", and the lead close with no techniques.
+  `agents.delegation_steps` (12) and `agents.delegation_timeout_seconds` (300)
+  are what one ask gets, bounded by the caller's remaining wall clock and by
+  nothing else; the caller's own step budget is not reduced by what its
+  specialists spend, and an ask is refused only when the caller has less time
+  left than a first model turn needs. A loop that reaches the graph's own step
+  cap writes up what it gathered instead of raising a recursion error. The
+  seeded `lead` gets 40 steps and a 1800 s stage, and the `ask_<key>` tool's
+  description tells the model what an ask costs and roughly how many fit.
 - **A caller asks one agent at a time.** langgraph gathers a turn's tool calls,
   so a model that emitted two `ask_*` calls ran two nested loops at once — two
   analysts against one llama-server slot, which is the re-prefill timeout this
