@@ -38,6 +38,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from maljan.agents.base_agent import (
     BudgetMeter,
     LoopBudget,
+    _turn_key,
     retry_on_connection_error,
     run_on_agent_loop,
 )
@@ -349,7 +350,7 @@ class JudgeAgent(BudgetMeter):
         # only the last round's calls while the earlier ones consumed ids.
         self._evidence_entries: list[LedgerEntry] = []
 
-    def _publish_questions(self, conversation: list[Any], already: set[int]) -> None:
+    def _publish_questions(self, conversation: list[Any], already: set[str]) -> None:
         """Publish each question the judge has asked and not published yet.
 
         A question, not every intermediate turn. The judge's loop narrates as
@@ -359,7 +360,7 @@ class JudgeAgent(BudgetMeter):
         actually answer or wait on. A turn that also calls ``ask_<key>`` names
         that agent as the addressee, because that is who the judge is asking.
 
-        Identified by the message's own id, so a hook that sees the same
+        Identified by what the turn said, so a hook that sees the same
         conversation twice — which it does, once per model turn — publishes
         each question once. Never raises: this is telemetry inside a prompt
         hook, and a hook that throws ends the loop.
@@ -368,7 +369,7 @@ class JudgeAgent(BudgetMeter):
             for message in conversation:
                 if getattr(message, "type", "") != "ai":
                     continue
-                marker = id(message)
+                marker = _turn_key(message)
                 if marker in already:
                     continue
                 already.add(marker)
@@ -547,7 +548,7 @@ class JudgeAgent(BudgetMeter):
         cap: str | None = None
         turns: list[Any] = []
 
-        asked: set[int] = set()
+        asked: set[str] = set()
 
         def _count_the_turns(state: Any) -> list[Any]:
             """Count the conversation before every model turn, and change nothing.

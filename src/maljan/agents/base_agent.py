@@ -392,6 +392,22 @@ def lock_for(agent: Any) -> Any:
     return lock if lock is not None else contextlib.nullcontext()
 
 
+def _turn_key(message: Any) -> str:
+    """What identifies one model turn, for publishing it exactly once.
+
+    Not ``id(message)``: CPython reuses an address after collection, so a
+    turn that had been collected could suppress a later one, and a graph that
+    copied its state between snapshots — a checkpointer, a serialising reducer
+    — would make every turn look new on every snapshot and republish the whole
+    conversation each time. langchain gives a message its own id; a message
+    without one is keyed on what it says, which is the thing being published.
+    """
+    own = getattr(message, "id", None)
+    if own:
+        return f"id:{own}"
+    return f"text:{hash(str(getattr(message, 'content', '') or ''))}"
+
+
 def _steps_this_loop_spent(ledger: LoopBudget, messages: list) -> int:
     """What *this* loop has used, from the conversation or from the budget itself.
 
@@ -1729,7 +1745,7 @@ class BudgetMeter:
         """The job's event sink, or ``None`` for an agent outside a job."""
         return getattr(getattr(self, "_container", None), "event_sink", None)
 
-    def _publish_deltas(self, snapshot: Any, already: set[int]) -> None:
+    def _publish_deltas(self, snapshot: Any, already: set[str]) -> None:
         """Publish what this agent has newly said, once per turn it says it in.
 
         The loop reads its graph as a stream of whole states, so the smallest
@@ -1737,7 +1753,7 @@ class BudgetMeter:
         is still the difference between a reader watching an analyst work and
         a reader watching a dot for half an hour, which is what this is for.
 
-        A turn is identified by the message object rather than counted, so a
+        A turn is identified by what the model said rather than counted, so a
         state yielded twice publishes nothing twice. Never raises, and silent
         when ``core.events.stream_deltas`` is off or there is no sink.
         """
@@ -1756,7 +1772,7 @@ class BudgetMeter:
             for message in list(messages or []):
                 if getattr(message, "type", "") != "ai":
                     continue
-                marker = id(message)
+                marker = _turn_key(message)
                 if marker in already:
                     continue
                 already.add(marker)
@@ -2512,7 +2528,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                     {"recursion_limit": max_steps},
                     stream_mode="values",
                 )
-                spoken: set[int] = set()
+                spoken: set[str] = set()
                 async with contextlib.aclosing(stream) as snapshots:
                     try:
                         async for snapshot in snapshots:

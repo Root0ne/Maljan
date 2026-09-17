@@ -137,6 +137,15 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
+# How much of a resume is read at once, and how many of those a single resume
+# may take. The page size is the reader's own ceiling; the page count bounds a
+# socket that would otherwise sit replaying a pathological run while the
+# client waits for its first live event. 40 pages is 40 000 events, which is
+# more than any run this has seen publishes.
+_REPLAY_PAGE = 1000
+_REPLAY_PAGES = 40
+
+
 async def _replay(websocket: WebSocket, job_id: str, since: int) -> None:
     """Send everything this job published after ``since``, then return.
 
@@ -146,27 +155,52 @@ async def _replay(websocket: WebSocket, job_id: str, since: int) -> None:
     one; both carry ``seq`` and the client orders and dedupes on it, which is
     what the cursor is for.
 
+    Paged rather than capped. A single read is bounded — by the reader's
+    ceiling and, before that, by the Redis stream's own length — so a resume
+    that asked for a long run used to get a prefix of what it asked for with
+    nothing saying so, and no way for the client to know it should page the
+    REST endpoint instead. Each page advances the cursor to the last ``seq``
+    it carried, so the next one continues from there.
+
     Never raises. A replay that cannot be read leaves the client where it
     already was — attached, and one refresh away from the endpoint that reads
     the same two stores.
     """
+    sent = 0
+    cursor = since
     try:
         from app.services.job_events import read_events
 
         redis_conn = aioredis.from_url(settings.redis_url, decode_responses=True)
         try:
             async with async_session_factory() as db:
-                events = await read_events(db, redis_conn, job_id, since=since)
+                for _page in range(_REPLAY_PAGES):
+                    events = await read_events(
+                        db, redis_conn, job_id, since=cursor, limit=_REPLAY_PAGE
+                    )
+                    if not events:
+                        break
+                    for event in events:
+                        await websocket.send_text(json.dumps(event))
+                    sent += len(events)
+                    highest = max(
+                        (int((e.get("data") or {}).get("seq") or 0) for e in events), default=0
+                    )
+                    if highest <= cursor or len(events) < _REPLAY_PAGE:
+                        # Either the page was short — there is nothing more —
+                        # or it carried no number this could advance past,
+                        # which is a run from before there were numbers and
+                        # has no second page to ask for.
+                        break
+                    cursor = highest
         finally:
             try:
                 await redis_conn.aclose()
             except Exception:  # noqa: BLE001
                 pass
-        for event in events:
-            await websocket.send_text(json.dumps(event))
         logger.info(
             "WebSocket replayed %d event(s) after seq=%s: job=%s",
-            len(events),
+            sent,
             log_safe(since),
             log_safe(job_id),
         )

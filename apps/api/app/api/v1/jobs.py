@@ -3,6 +3,7 @@
 Uses AnalysisService for business logic separation.
 """
 
+import time
 import uuid
 from typing import Any
 
@@ -260,6 +261,69 @@ async def get_job(
     return JobResponse.model_validate(job).model_copy(update={"roster": roster})
 
 
+# One job's roster, remembered for a few seconds. The analysis layout polls
+# this endpoint every 3 s and the live view every 5 s, and the roster is a
+# property of the team the run was composed from rather than of the run's
+# progress — so rebuilding it on every poll spent a settings query and a full
+# builtin-map merge per poll, per open run, on an answer that cannot change.
+# Small, time-bounded and process-local: a restart or a settings change costs
+# at most one stale roster for the length of the window.
+_ROSTER_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_ROSTER_CACHE_SECONDS = 20.0
+_ROSTER_CACHE_MAX = 256
+
+
+def _cached_roster(key: str) -> dict[str, Any] | None:
+    hit = _ROSTER_CACHE.get(key)
+    if hit is None:
+        return None
+    written, roster = hit
+    if time.monotonic() - written > _ROSTER_CACHE_SECONDS:
+        _ROSTER_CACHE.pop(key, None)
+        return None
+    return roster
+
+
+def _remember_roster(key: str, roster: dict[str, Any]) -> None:
+    if len(_ROSTER_CACHE) >= _ROSTER_CACHE_MAX:
+        # Drop what has already expired; if nothing has, drop the oldest.
+        now = time.monotonic()
+        stale = [
+            key
+            for key, (written, _) in _ROSTER_CACHE.items()
+            if now - written > _ROSTER_CACHE_SECONDS
+        ]
+        for k in stale or [min(_ROSTER_CACHE, key=lambda k: _ROSTER_CACHE[k][0])]:
+            _ROSTER_CACHE.pop(k, None)
+    _ROSTER_CACHE[key] = (time.monotonic(), roster)
+
+
+def _profile_the_job_ran(job: Any) -> str:
+    """The team this run actually used, as exactly as the job can say.
+
+    The job's own config when it pinned one; otherwise the profile recorded in
+    the run summary's settings snapshot, which is what the worker composed the
+    team from. Only a run with neither — one still running, or one that failed
+    before it wrote a report — falls through to the current default, and for
+    those the current default *is* what the worker read.
+
+    Without this, changing ``core.agents.profile`` renamed the roster of every
+    finished run that had not pinned a profile.
+    """
+    pinned = str((getattr(job, "config", None) or {}).get("profile") or "")
+    if pinned:
+        return pinned
+    report = getattr(job, "report", None)
+    summary = getattr(report, "run_summary", None) if report is not None else None
+    if isinstance(summary, dict):
+        snapshot = summary.get("settings_snapshot")
+        if isinstance(snapshot, dict):
+            recorded = str(snapshot.get("agents.profile") or "")
+            if recorded:
+                return recorded
+    return ""
+
+
 def _delegation_depth(overrides: dict[str, Any]) -> int:
     """How far the roster follows an ``ask_<key>`` chain: what the asks get."""
     from maljan.core.config import AgentsConfig
@@ -274,10 +338,9 @@ def _delegation_depth(overrides: dict[str, Any]) -> int:
 async def _roster_for_job(db: AsyncSession, job: Any) -> dict[str, Any]:
     """Who can speak in this job's run, by key, label, role and stage.
 
-    Read off the team the job names, or the stored default when it names none,
-    through the same effective maps the submit checks use — so the roster a
-    reader is shown is the team the worker composed rather than a second
-    reading of the settings.
+    Read off the team the job ran, through the same effective maps the submit
+    checks use — so the roster a reader is shown is the team the worker
+    composed rather than a second reading of the settings.
 
     Never raises. A roster is how the console draws names; a job endpoint that
     500s because a stored profile will not validate would take the run's
@@ -288,12 +351,14 @@ async def _roster_for_job(db: AsyncSession, job: Any) -> dict[str, Any]:
 
     from app.services.agent_map import effective_definitions, effective_profiles
 
+    cache_key = str(getattr(job, "id", ""))
+    cached = _cached_roster(cache_key) if cache_key else None
+    if cached is not None:
+        return cached
     try:
         overrides = await SettingsService(db).load_overrides()
         profiles = effective_profiles(overrides)
-        name = str((job.config or {}).get("profile") or "") or str(
-            overrides.get("core.agents.profile") or "default"
-        )
+        name = _profile_the_job_ran(job) or str(overrides.get("core.agents.profile") or "default")
         document = dict(profiles.get(name) or profiles.get("default") or {})
         if not document.get("stages") and document.get("analysts"):
             # A team written as a flat analyst list has no stages in the
@@ -304,9 +369,12 @@ async def _roster_for_job(db: AsyncSession, job: Any) -> dict[str, Any]:
             # team somebody is still editing, and its members are still the
             # ones who would speak.
             document = ProfileDefinition.model_validate(document).model_dump(mode="json")
-        return roster_payload(
+        roster = roster_payload(
             document, effective_definitions(overrides), depth=_delegation_depth(overrides)
         )
+        if cache_key:
+            _remember_roster(cache_key, roster)
+        return roster
     except Exception as exc:  # noqa: BLE001 — a label is never worth a 500
         # The type and not the message: an exception raised while reading the
         # settings store can carry a stored value in its text, and this line

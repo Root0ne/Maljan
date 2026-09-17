@@ -211,6 +211,65 @@ class TestIncrementalPersistence:
         assert [row.seq for row in session.added] == [1, 2, 3, 4, 5, 6]
         assert session.added[-1].type == "cancelled"
 
+    def test_the_task_flushes_the_feed_on_every_way_out_of_a_run(self) -> None:
+        """The property the cancelled-run test above can only assume.
+
+        Driving ``run_analysis`` to its cancellation return needs a worker, a
+        queue and a database, so what is checked here is the wiring: the flush
+        is in the ``finally`` of the one ``try`` that encloses the task's early
+        returns, so success, failure and every cancellation leave through it.
+        """
+        import ast
+        import inspect
+
+        from app.worker import analysis_worker
+
+        tree = ast.parse(inspect.getsource(analysis_worker))
+        task = next(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.AsyncFunctionDef) and node.name == "run_analysis"
+        )
+        tries = [node for node in ast.walk(task) if isinstance(node, ast.Try) and node.finalbody]
+        flushing = [
+            node
+            for node in tries
+            if any(
+                isinstance(call.func, ast.Name) and call.func.id == "_stop_event_feed"
+                for statement in node.finalbody
+                for call in ast.walk(statement)
+                if isinstance(call, ast.Call)
+            )
+        ]
+        assert len(flushing) == 1, "the feed is flushed in exactly one place"
+
+        # Every ``return`` of the task — the early ones a cancelled or invalid
+        # job takes among them, and the one the failure handler takes — is
+        # inside that ``try``, which is what makes its ``finally`` run.
+        guarded = {id(node) for node in ast.walk(flushing[0])}
+        returns = [node for node in ast.walk(task) if isinstance(node, ast.Return)]
+        assert returns
+        assert all(id(node) in guarded for node in returns), (
+            "a return that skips the try leaves the run's last lines unwritten"
+        )
+
+    def test_the_feed_is_registered_where_the_finally_can_reach_it(self) -> None:
+        """Registered inside the same ``try``'s enclosing block, not above it.
+
+        Registered above the session context, a raise while entering that
+        context left the buffer in the module-global map for the life of the
+        process.
+        """
+        import inspect
+
+        from app.worker import analysis_worker
+
+        source = inspect.getsource(analysis_worker.run_analysis)
+        started = source.index("_start_event_feed(")
+        session = source.index("async with db_session() as db:")
+        assert session < started, "the feed is registered inside the session context"
+        assert started < source.index("\n        try:"), "and before the try that flushes it"
+
     def test_a_database_that_refuses_the_batch_never_fails_the_publish(self) -> None:
         class _Broken(_Session):
             async def commit(self) -> None:

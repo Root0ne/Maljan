@@ -125,6 +125,52 @@ async def test_the_schema_accepts_a_line_with_no_number() -> None:
     assert line.model_copy(update={"seq": None}).seq is None
 
 
+class TestTheStoredNumber:
+    """What the worker writes into ``agent_messages.seq``.
+
+    Read off the worker's source rather than by driving a run, which needs a
+    queue and a database: the rule is one expression and what matters is that
+    it cannot hand two messages the same number.
+    """
+
+    @staticmethod
+    def _stored(transcript: list[dict[str, Any]]) -> list[int]:
+        """The rule as the worker writes it, applied to one recording."""
+        numbered = any(int(m.get("seq") or 0) > 0 for m in transcript)
+        return [
+            int(m.get("seq") or 0) or (0 if numbered else index)
+            for index, m in enumerate(transcript)
+        ]
+
+    def test_the_expression_under_test_is_the_one_the_worker_uses(self) -> None:
+        import inspect
+
+        from app.worker import analysis_worker
+
+        source = inspect.getsource(analysis_worker.run_analysis)
+        assert '_numbered = any(int(m.get("seq") or 0) > 0 for m in transcript)' in source
+        assert "seq=_stamped or (0 if _numbered else index)," in source
+
+    def test_a_numbered_run_stores_the_publisher_s_numbers(self) -> None:
+        assert self._stored([{"seq": 3}, {"seq": 7}, {"seq": 11}]) == [3, 7, 11]
+
+    def test_a_run_the_publisher_never_reached_keeps_its_recorded_order(self) -> None:
+        assert self._stored([{}, {}, {}]) == [0, 1, 2]
+
+    def test_a_line_that_missed_its_stamp_borrows_nobody_s_number(self) -> None:
+        """The collision the fallback used to make.
+
+        The position and the publisher's count share the low integers, so a
+        line that missed its stamp in an otherwise-numbered run took a number
+        another line already owned and the console drew the two as one. It
+        gets 0 instead, which is outside the publisher's range and which every
+        reader already treats as "no number".
+        """
+        stored = self._stored([{"seq": 1}, {}, {"seq": 3}])
+        assert stored == [1, 0, 3]
+        assert len(set(stored)) == len(stored)
+
+
 class TestTheFeedCheck:
     """``transcript_is_numbered`` itself: one existence query, never raising."""
 

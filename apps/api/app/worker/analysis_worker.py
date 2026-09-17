@@ -261,10 +261,20 @@ class _JobEventBuffer:
 
     A row per event, committed as the event is published, would put a
     transaction between every tool call and the next on a database the same
-    process is running the analysis against. A batch — fifty events, or two
-    seconds, whichever comes first — costs one transaction per batch and still
-    leaves a cancelled run holding all but its last handful of lines, which is
-    the case the table exists for.
+    process is running the analysis against. A batch costs one transaction per
+    batch and still leaves a cancelled run holding all but its last handful of
+    lines, which is the case the table exists for.
+
+    The batch is written on the first event after fifty have queued or after
+    two seconds have passed — on an event, not on a timer. Nothing here wakes
+    up on its own: a run that emits five lines and then spends half an hour
+    inside one analyst turn keeps those five in memory until the next event or
+    until the run ends, and the ``finally`` that ends it covers cancellation
+    and failure alike. What that leaves uncovered is a ``SIGKILL`` or the
+    memory recycler taking the process mid-silence, which costs the handful of
+    lines still queued; a timer task per job would close it and would have to
+    be cancelled on every path out of a run, which is a failure mode of its
+    own for the last few lines of a run nobody is watching.
 
     Never raises and never blocks the publish it was called from. A feed that
     could fail a run would be worse than no feed: the rows are a record of the
@@ -285,7 +295,7 @@ class _JobEventBuffer:
         self._lock = asyncio.Lock()
 
     async def add(self, seq: int, event_type: str, data: dict[str, Any], ts: str) -> None:
-        """Queue one event, flushing when the batch is full or old enough."""
+        """Queue one event, writing the batch when it is full or old enough."""
         async with self._lock:
             self._pending.append(
                 {
@@ -368,10 +378,6 @@ async def _next_seq(redis_conn: aioredis.Redis, job_id: str) -> int:
     """The next sequence number for this job's feed. Never raises."""
     try:
         seq = int(await redis_conn.incr(_seq_key(job_id)))
-        # The same 24 h the stream gets: the counter is only meaningful while
-        # there is a stream to read alongside it, and the table keeps its own
-        # copy of every number for the replay after that.
-        await redis_conn.expire(_seq_key(job_id), 86_400)
     except Exception as exc:  # noqa: BLE001 — a counter never costs a run
         logger.debug(
             "Event sequence INCR failed (%s); numbering locally.",
@@ -379,6 +385,24 @@ async def _next_seq(redis_conn: aioredis.Redis, job_id: str) -> int:
             extra={"job_id": job_id, "component": "pubsub"},
         )
         seq = _LAST_SEQ.get(job_id, 0) + 1
+    else:
+        # Only the ``INCR`` decides the number. A failing TTL refresh used to
+        # land in the same ``except`` and throw away a number Redis had
+        # already advanced past, so the fallback handed out a value the next
+        # successful ``INCR`` would hand out again — a duplicate ``seq`` under
+        # two publishers, and an integrity error on the batch that carried it.
+        #
+        # The same 24 h the stream gets: the counter is only meaningful while
+        # there is a stream to read alongside it, and the table keeps its own
+        # copy of every number for the replay after that.
+        try:
+            await redis_conn.expire(_seq_key(job_id), 86_400)
+        except Exception as exc:  # noqa: BLE001 — a TTL never costs a number
+            logger.debug(
+                "Event sequence TTL refresh failed (%s); the number stands.",
+                exc,
+                extra={"job_id": job_id, "component": "pubsub"},
+            )
     # Written without an await in between, so two coroutines interleaving here
     # cannot both read the same previous value.
     _LAST_SEQ[job_id] = max(seq, _LAST_SEQ.get(job_id, 0))
@@ -561,10 +585,6 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
     redis_conn: aioredis.Redis = ctx["redis"]
     db_session: async_sessionmaker = ctx["db_session"]
 
-    # Before the first event of the run, which is the status change below: a
-    # feed that starts late starts at the wrong ``seq``.
-    _start_event_feed(job_id, db_session)
-
     async with db_session() as db:
         job = None  # Ensure job is defined for the except block
         app: Any = None  # released in the finally below, whichever way we leave
@@ -584,6 +604,13 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         # degradation makes it into both run_summary and the report banner
         # even though nothing in the pipeline itself reads the stored flag.
         _report_hash_mismatch_reason: str | None = None
+        # Registered here rather than above the session: this is the statement
+        # before the ``try`` whose ``finally`` unregisters it, so there is no
+        # window in which a raise leaves a buffer in the module-global map for
+        # the life of the process. Still before the run's first event — the
+        # status change below — because a feed that starts late starts at the
+        # wrong ``seq``.
+        _start_event_feed(job_id, db_session)
         try:
             # ── 1. Load job ──────────────────────────────────────
             from app.models.job import AnalysisJob
@@ -1357,18 +1384,26 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # is the only place the per-round positions, the sycophancy
             # intervention and the revised prose survive past the 24 h Redis
             # stream. See ``AgentMessage`` for the full rationale.
+            # Whether the publisher numbered this run at all. A run it never
+            # reached — one whose loop was already closing, or whose recorder
+            # raised — falls back to the position in the recording, which is
+            # the order the lines were said in and all this column ever meant.
+            # A run it numbered *partly* may not: the position and the
+            # publisher's count share the low integers, so a line that missed
+            # its stamp would borrow a number another line already owns and
+            # the console would draw the two as one. Those get ``0``, which is
+            # outside the publisher's range — it counts from 1 — and which
+            # every reader already treats as "no number".
+            _numbered = any(int(m.get("seq") or 0) > 0 for m in transcript)
             for index, message in enumerate(transcript):
+                _stamped = int(message.get("seq") or 0)
                 db.add(
                     AgentMessage(
                         report_id=report.id,
                         # The number the publisher gave this message when it
                         # went out, so the stored row and the live event a
                         # console still holds are one message rather than two.
-                        # A message the publisher never reached — a run whose
-                        # Redis was down throughout — falls back to its
-                        # position in the recording, which is the order it was
-                        # said in and all this column ever meant.
-                        seq=int(message.get("seq", index) or index),
+                        seq=_stamped or (0 if _numbered else index),
                         speaker=str(message.get("speaker", "unknown"))[:100],
                         role=str(message.get("role", "system"))[:20],
                         round=int(message.get("round", 0) or 0),

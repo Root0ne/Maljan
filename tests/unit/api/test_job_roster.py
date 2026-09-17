@@ -30,6 +30,9 @@ class _Job:
         self.completed_at = None
         self.duration_seconds = None
         self.error_message = None
+        # The relationship the endpoint reads the run's recorded profile from;
+        # ``None`` until the run writes a report.
+        self.report = None
 
 
 class _Service:
@@ -49,6 +52,14 @@ class _User:
 
 class _Session:
     pass
+
+
+@pytest.fixture(autouse=True)
+def _forget_cached_rosters() -> None:
+    """The roster cache is process-local; no test may inherit another's."""
+    from app.api.v1 import jobs
+
+    jobs._ROSTER_CACHE.clear()
 
 
 def _overrides(monkeypatch: pytest.MonkeyPatch, stored: dict[str, Any]) -> None:
@@ -265,6 +276,97 @@ async def test_the_walk_follows_the_configured_delegation_depth(
         db=_Session(),
     )
     assert {a.key for a in response.roster.agents} == {"boss", "hand"}
+
+
+@pytest.mark.asyncio
+async def test_a_finished_run_keeps_the_team_it_actually_ran(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Changing the default afterwards must not rename a finished run's roster.
+
+    The job pinned no profile, so the team it ran is the one the worker
+    recorded in its settings snapshot — not whatever the default happens to be
+    when somebody opens the run a week later.
+    """
+    _overrides(monkeypatch, {"core.agents.profile": "measurement"})
+    job = _Job()
+    job.report = type(
+        "R", (), {"run_summary": {"settings_snapshot": {"agents.profile": "team_lead"}}}
+    )()
+    response = await get_job(job_id=uuid.uuid4(), user=_User(), svc=_Service(job), db=_Session())
+    assert [s.key for s in response.roster.stages] == [
+        "triage_pack",
+        "lead",
+        "verdict",
+        "report",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_pinned_profile_still_wins_over_the_recorded_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _overrides(monkeypatch, {})
+    job = _Job(config={"profile": "team_lead"})
+    job.report = type(
+        "R", (), {"run_summary": {"settings_snapshot": {"agents.profile": "default"}}}
+    )()
+    response = await get_job(job_id=uuid.uuid4(), user=_User(), svc=_Service(job), db=_Session())
+    assert "lead" in {s.key for s in response.roster.stages}
+
+
+@pytest.mark.asyncio
+async def test_a_run_with_no_report_yet_falls_through_to_the_current_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Which is what the worker read when it composed the team moments ago.
+    _overrides(monkeypatch, {})
+    response = await get_job(job_id=uuid.uuid4(), user=_User(), svc=_Service(_Job()), db=_Session())
+    assert {a.key for a in response.roster.agents} >= {"static", "judge"}
+
+
+@pytest.mark.asyncio
+async def test_the_roster_is_not_rebuilt_on_every_poll(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The layout polls this endpoint every 3 s while the live view polls it
+    every 5 s, and the roster cannot change mid-run."""
+    reads = {"count": 0}
+
+    async def load(self: Any) -> dict[str, Any]:
+        reads["count"] += 1
+        return {}
+
+    monkeypatch.setattr("app.services.settings_service.SettingsService.load_overrides", load)
+    job = _Job()
+    for _ in range(4):
+        await get_job(job_id=job.id, user=_User(), svc=_Service(job), db=_Session())
+    assert reads["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_two_jobs_do_not_share_a_roster(monkeypatch: pytest.MonkeyPatch) -> None:
+    _overrides(
+        monkeypatch,
+        {
+            "core.agents.profiles": {
+                "one": {
+                    "stages": [{"key": "a", "label": "A", "kind": "analysis", "agents": ["static"]}]
+                },
+                "two": {
+                    "stages": [
+                        {"key": "b", "label": "B", "kind": "analysis", "agents": ["dynamic"]}
+                    ]
+                },
+            }
+        },
+    )
+    first = _Job(config={"profile": "one"})
+    second = _Job(config={"profile": "two"})
+    a = await get_job(job_id=first.id, user=_User(), svc=_Service(first), db=_Session())
+    b = await get_job(job_id=second.id, user=_User(), svc=_Service(second), db=_Session())
+    assert [x.key for x in a.roster.agents] == ["static"]
+    assert [x.key for x in b.roster.agents] == ["dynamic"]
 
 
 @pytest.mark.asyncio
