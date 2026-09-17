@@ -339,7 +339,8 @@ function AnalysesList() {
               </button>
             </div>
             <p className="text-sm text-text-secondary mb-4 leading-relaxed">
-              Cancel job {confirmJob.id.slice(0, 8)}? This will stop the in-flight analysis and mark the job as cancelled. Cannot be undone.
+              Cancelling job {confirmJob.id.slice(0, 8)} stops the analysis where it is and
+              marks the job cancelled. It cannot be undone.
             </p>
             {cancelError && (
               <div role="alert" className="mb-3 text-xs text-status-red bg-status-red/10 border border-status-red/20 rounded px-2 py-1.5">
