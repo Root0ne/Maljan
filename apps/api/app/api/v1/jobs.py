@@ -15,7 +15,7 @@ from app.logging_config import get_logger
 from app.logsafe import log_safe
 from app.models.user import User
 from app.schemas.evidence import EvidenceEntryResponse, EvidenceListResponse
-from app.schemas.job import JobCreateRequest, JobListResponse, JobResponse
+from app.schemas.job import JobCreateRequest, JobListResponse, JobResponse, JobRoster
 from app.services import audit
 from app.services.analysis_service import AnalysisService
 from app.services.settings_service import SettingsService
@@ -256,9 +256,8 @@ async def get_job(
             extra={"job_id": log_safe(job_id), "user_id": log_safe(user.id)},
         )
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
-    return JobResponse.model_validate(job).model_copy(
-        update={"roster": await _roster_for_job(db, job)}
-    )
+    roster = JobRoster.model_validate(await _roster_for_job(db, job))
+    return JobResponse.model_validate(job).model_copy(update={"roster": roster})
 
 
 async def _roster_for_job(db: AsyncSession, job: Any) -> dict[str, Any]:
@@ -284,13 +283,24 @@ async def _roster_for_job(db: AsyncSession, job: Any) -> dict[str, Any]:
         name = str((job.config or {}).get("profile") or "") or str(
             overrides.get("core.agents.profile") or "default"
         )
-        document = profiles.get(name) or profiles.get("default") or {}
-        # Validated rather than read raw: a team written as a flat analyst
-        # list has no stages in the document, and the model is where that
-        # conversion lives.
-        return roster_payload(ProfileDefinition.model_validate(document), effective_definitions(overrides))
+        document = dict(profiles.get(name) or profiles.get("default") or {})
+        if not document.get("stages") and document.get("analysts"):
+            # A team written as a flat analyst list has no stages in the
+            # document and the model is where that conversion lives. A team
+            # that already has stages is read as it stands rather than
+            # validated, because a roster is a list of names: a stored profile
+            # the model would reject — one missing a verdict stage, say — is a
+            # team somebody is still editing, and its members are still the
+            # ones who would speak.
+            document = ProfileDefinition.model_validate(document).model_dump(mode="json")
+        return roster_payload(document, effective_definitions(overrides))
     except Exception as exc:  # noqa: BLE001 — a label is never worth a 500
-        logger.warning(f"Could not build a roster for job {log_safe(job.id)}: {log_safe(exc)}")
+        # The type and not the message: an exception raised while reading the
+        # settings store can carry a stored value in its text, and this line
+        # goes to a log an operator ships somewhere.
+        logger.warning(
+            f"Could not build a roster for job {log_safe(job.id)} ({type(exc).__name__})."
+        )
         return {"agents": [], "stages": []}
 
 
