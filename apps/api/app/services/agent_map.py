@@ -16,6 +16,7 @@ from maljan.core.config import (
     AGENT_KEY_PATTERN,
     BUILTIN_PROFILES,
     PROMPT_ROLES,
+    PROVIDER_REFERENCE_RULE,
     REPORTER_AGENT_KEY,
     AgentDefinition,
     ProfileDefinition,
@@ -164,11 +165,8 @@ def validate_definitions(
                 f"Available: {', '.join(sorted(provider_ids))}"
             )
         has_provider_ref = any(ref.kind == "provider" for ref in model.tools)
-        if has_provider_ref and model.role != "generic":
-            errors[name] = (
-                f"{name!r}: provider tool references are only valid on generic "
-                "definitions; built-in roles open their provider themselves"
-            )
+        if has_provider_ref and model.role not in PROMPT_ROLES:
+            errors[name] = f"{name!r}: {PROVIDER_REFERENCE_RULE}"
             continue
         for ref in model.tools:
             if ref.kind != "mcp":

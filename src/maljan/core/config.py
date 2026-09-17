@@ -625,6 +625,15 @@ AnalystRole = Literal["static", "dynamic", "network", "judge", "generic", "lead"
 # The roles that are a prompt rather than a class, and therefore need one.
 PROMPT_ROLES: tuple[str, ...] = ("generic", "lead")
 
+# Why a provider reference is refused, in one sentence both the settings model
+# and the API's definition editor raise, so the two never word it differently.
+# A built-in role opens the provider its class knows about; a definition that
+# is only a prompt is the one that has to say which one it wants.
+PROVIDER_REFERENCE_RULE = (
+    f"provider tool references are only valid on {' and '.join(PROMPT_ROLES)} "
+    "definitions; built-in roles open their provider themselves"
+)
+
 # Deprecated. ``MCPServerConfig.agents`` used to be a Literal of the four
 # built-in roles; an operator can now bind a server to any definition key, so
 # the field is a plain ``str`` validated against the definition map in
@@ -2048,11 +2057,8 @@ class AgentsConfig(BaseModel):
             if definition.role in PROMPT_ROLES and not (definition.prompt or "").strip():
                 raise ValueError(f"{key!r}: a {definition.role} agent needs a prompt")
             has_provider_ref = any(ref.kind == "provider" for ref in definition.tools)
-            if has_provider_ref and definition.role != "generic":
-                raise ValueError(
-                    f"{key!r}: provider tool references are only valid on generic "
-                    "definitions; built-in roles open their provider themselves"
-                )
+            if has_provider_ref and definition.role not in PROMPT_ROLES:
+                raise ValueError(f"{key!r}: {PROVIDER_REFERENCE_RULE}")
             for problem in agent_reference_problems(key, definition, self.definitions):
                 raise ValueError(f"{key!r}: {problem}")
 

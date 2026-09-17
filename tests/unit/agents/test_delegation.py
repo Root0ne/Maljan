@@ -10,8 +10,10 @@ before anything runs.
 
 from __future__ import annotations
 
+import contextlib
 import threading
 from typing import Any
+from unittest import mock
 
 import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -19,6 +21,7 @@ from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
 
+from maljan.agents import delegation
 from maljan.agents.base_agent import BudgetCeiling, LoopBudget
 from maljan.agents.composition import ResolvedAgent
 from maljan.agents.configurable_analyst import ConfigurableAnalyst
@@ -249,6 +252,46 @@ class TestAnAskThroughTheRealLoop:
         assert ask_entry.duration_ms >= 0
         # Nothing is left on the callee: one node writes it all.
         assert team.get_agent("helper").drain_evidence_entries() == []
+
+    def test_the_callee_s_artifacts_travel_with_its_ledger(self) -> None:
+        """Only the text crosses back to the model; the structured channel needs carrying."""
+        helper_answer = (
+            "```maljan-findings\n"
+            '{"findings": [{"title": "raw socket", "evidence_ids": ["ev_0001"]}], '
+            '"artifacts": [{"kind": "endpoints", "value": "1.2.3.4:443", '
+            '"evidence_ids": ["ev_0001"]}]}\n'
+            "```\n" + HELPER_REPORT
+        )
+        container = _team(
+            boss_script=[
+                _call(tool_name("helper"), {"task": "Where does it call?"}, "ask_1"),
+                AIMessage(content=BOSS_REPORT),
+            ],
+            helper_script=[
+                _call("peek", {"path": "/samples/s.bin"}, "peek_1"),
+                AIMessage(content=helper_answer),
+            ],
+        )
+
+        isr = _run_boss(container)
+
+        assert [artifact.value for artifact in isr.artifacts] == ["1.2.3.4:443"]
+        assert [artifact.source for artifact in isr.artifacts] == ["helper"]
+        assert [finding.title for finding in isr.findings] == ["raw socket"]
+
+    def test_the_ask_leaves_nothing_of_the_caller_s_on_the_callee(self, team) -> None:
+        """A callee that runs its own stage later must not still be pinned to the caller's."""
+        helper = team.get_agent("helper")
+        helper.pipeline_stage = "specialists"
+        helper._analysis_file_path = "/its/own/s.bin"
+        helper.facts_block = "its own pack"
+
+        _run_boss(team)
+
+        assert helper.pipeline_stage == "specialists"
+        assert helper._analysis_file_path == "/its/own/s.bin"
+        assert helper.facts_block == "its own pack"
+        assert helper.call_chain == ()
 
     def test_the_two_transcript_lines_say_who_asked_whom(self, team) -> None:
         _run_boss(team)
@@ -505,6 +548,110 @@ class TestTheCeiling:
         helper._budget_ceiling = BudgetCeiling(steps=1000, seconds=100000.0)
         timeout, steps = helper._loop_limits()
         assert timeout <= 180 and steps <= 10
+
+
+class TestOneAgentDoesOneThingAtATime:
+    """The lock the job holds for each agent, taken by every path that drives it."""
+
+    def _ask_from_a_thread(self, container: _Container, done: list[str]) -> threading.Thread:
+        def _go() -> None:
+            try:
+                ask(container, caller_key="boss", callee_key="helper", task="Have a look.")
+                done.append("answered")
+            except DelegationRefused as refused:
+                done.append(str(refused))
+
+        thread = threading.Thread(target=_go, daemon=True)
+        thread.start()
+        return thread
+
+    def _held_by_another_thread(self, agent: Any) -> tuple[threading.Event, threading.Thread]:
+        """The agent's lock, taken on a thread of its own and let go on demand."""
+        taken, release = threading.Event(), threading.Event()
+
+        def _hold() -> None:
+            with agent.delegation_lock:
+                taken.set()
+                release.wait(timeout=10)
+
+        holder = threading.Thread(target=_hold, daemon=True)
+        holder.start()
+        assert taken.wait(timeout=5)
+        return release, holder
+
+    def test_an_ask_waits_while_the_callee_runs_its_own_stage(self) -> None:
+        container = _team([], [])
+        helper = container.get_agent("helper")
+        done: list[str] = []
+
+        release, holder = self._held_by_another_thread(helper)
+        thread = self._ask_from_a_thread(container, done)
+        thread.join(timeout=0.3)
+        assert done == [], "the ask is waiting on the callee's own loop"
+
+        release.set()
+        holder.join(timeout=5)
+        thread.join(timeout=5)
+        assert done == ["answered"], "and is answered the moment the loop lets go"
+
+    def test_the_callee_s_own_stage_waits_while_it_is_answering_an_ask(self) -> None:
+        container = _team([], [])
+        helper = container.get_agent("helper")
+        release, holder = self._held_by_another_thread(helper)
+        ran: list[str] = []
+
+        def _stage() -> None:
+            helper.analyze_isr = lambda data: ran.append(data) or None  # type: ignore[assignment]
+            with contextlib.suppress(Exception):
+                helper.safe_analyze_isr("its own stage")
+
+        stage = threading.Thread(target=_stage, daemon=True)
+        stage.start()
+        stage.join(timeout=0.3)
+        assert ran == [], "the stage run is waiting on the ask"
+        release.set()
+        stage.join(timeout=5)
+        assert ran == ["its own stage"]
+
+    def test_a_callee_that_never_frees_up_is_refused_in_words_the_model_reads(self) -> None:
+        container = _team([], [])
+        boss = container.get_agent("boss")
+        boss.loop_budget = LoopBudget(max_steps=10, timeout=1000.0)
+        helper = container.get_agent("helper")
+        release, holder = self._held_by_another_thread(helper)
+
+        try:
+            with (
+                mock.patch.object(delegation, "_seconds_to_wait_for", return_value=0.05),
+                pytest.raises(DelegationRefused, match="busy with its own work"),
+            ):
+                ask(container, caller_key="boss", callee_key="helper", task="t")
+        finally:
+            release.set()
+            holder.join(timeout=5)
+
+    def test_the_wait_is_what_the_caller_can_spare(self) -> None:
+        from maljan.agents.delegation import SECONDS_WAITING_OUTSIDE_A_LOOP, _seconds_to_wait_for
+
+        container = _team([], [])
+        boss = container.get_agent("boss")
+        assert _seconds_to_wait_for(boss) == SECONDS_WAITING_OUTSIDE_A_LOOP
+        boss.loop_budget = LoopBudget(max_steps=10, timeout=100.0)
+        assert 80.0 < _seconds_to_wait_for(boss) <= 85.0
+        boss.loop_budget = LoopBudget(max_steps=10, timeout=1.0)
+        assert _seconds_to_wait_for(boss) == 1.0
+
+    def test_a_chunked_stage_run_may_take_the_lock_it_already_holds(self) -> None:
+        """One chunk enters through both wrappers; a plain lock would stop there."""
+        container = _team([], [])
+        helper = container.get_agent("helper")
+        helper.analyze_isr = lambda data: None  # type: ignore[assignment]
+
+        class _Chunk:
+            content = "one chunk"
+
+        with contextlib.suppress(Exception):
+            helper.safe_analyze_isr_chunked([_Chunk()])
 
 
 class TestACalleeNeverOutlivesItsCaller:

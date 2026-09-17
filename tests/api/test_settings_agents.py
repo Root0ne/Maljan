@@ -144,7 +144,7 @@ def test_a_provider_tool_reference_on_a_built_in_role_is_refused():
             _defs(strings={"role": "static", "tools": [{"kind": "provider"}]}), stored={}
         )
     assert exc.value.errors[f"{AGENT_DEFINITIONS_KEY}.strings"] == (
-        "'strings': provider tool references are only valid on generic "
+        "'strings': provider tool references are only valid on generic and lead "
         "definitions; built-in roles open their provider themselves"
     )
 

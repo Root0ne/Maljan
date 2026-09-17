@@ -16,10 +16,11 @@ import re
 import threading
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from concurrent.futures import CancelledError as _FuturesCancelled
 from concurrent.futures import Future as _ConcurrentFuture
 from concurrent.futures import TimeoutError as _FuturesTimeout
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal
 
 import tiktoken
@@ -314,6 +315,15 @@ class BudgetCeiling:
     def __init__(self, steps: int, seconds: float) -> None:
         self.steps = int(steps)
         self.seconds = float(seconds)
+
+
+# The class-level stand-ins for two pieces of per-agent state, for an analyst
+# built without ``__init__``. The mapping is read-only so one of them cannot
+# become every stand-in's; the lock is deliberately shared, because a set of
+# stand-ins asking each other is one conversation and serialising it is the
+# same answer the real agents get.
+_NO_PATH_CHOICES: Mapping[str, Any] = MappingProxyType({})
+_SHARED_STAND_IN_LOCK = threading.RLock()
 
 
 # How long past its own timeout a loop is left alone before it is aborted
@@ -1726,15 +1736,22 @@ class BaseAnalyst(ABC):
         # allows this agent when it is the callee. ``steps_spent`` counts every
         # graph step this agent's loops have used, so a caller can charge the
         # difference. ``current_round`` is the debate round the agent is
-        # working in, so an ask carries it. The lock keeps one callee to one
-        # ask at a time: two callers asking the same agent at once would share
-        # its buffers.
+        # working in, so an ask carries it. ``sample_path_choices`` is what the
+        # node pinned, which an ask reads to choose the callee's own mirror.
+        #
+        # The lock is this agent's for the whole job — the container caches one
+        # instance per key — and everything that drives the agent takes it: an
+        # ask of it, and its own stage. Two callers asking it at once, or an
+        # ask arriving while its own loop runs, would share one set of buffers,
+        # one budget and one call chain. Reentrant, because a chunked stage run
+        # enters through two of the wrappers that take it.
         self.call_chain: tuple[str, ...] = ()
         self.loop_budget: LoopBudget | None = None
         self._budget_ceiling: BudgetCeiling | None = None
         self.steps_spent: int = 0
         self.current_round: int = 0
-        self.delegation_lock = threading.Lock()
+        self.sample_path_choices = {}
+        self.delegation_lock = threading.RLock()
         # The budget meter's record of every loop this agent ran since the
         # node last drained it: steps against the cap, seconds against the
         # limit, and the cap that ended it when one did. The node writes it
@@ -2974,8 +2991,17 @@ class BaseAnalyst(ABC):
             raise AnalystError(f"{self.name} analysis failed: {e}") from e
 
     def safe_analyze_isr(self, data: str) -> AgentISR:
-        """Wrapper around analyze_isr() with error handling and token protection."""
+        """Wrapper around analyze_isr() with error handling and token protection.
+
+        Under this agent's delegation lock, so an ask of it waits while its own
+        stage runs and its own stage waits while it is answering one: both
+        drive the same buffers, the same budget and the same call chain.
+        """
         self.current_round = 0
+        with self.delegation_lock:
+            return self._analyze_isr_guarded(data)
+
+    def _analyze_isr_guarded(self, data: str) -> AgentISR:
         try:
             truncated = self._truncate_input(data)
             isr = self.analyze_isr(truncated)
@@ -3001,6 +3027,14 @@ class BaseAnalyst(ABC):
 
         if len(chunks) == 1:
             return self.safe_analyze_isr(chunks[0].content)
+
+        # The whole run of chunks under one hold of the lock, so an ask cannot
+        # land between two chunks of the same conversation.
+        with self.delegation_lock:
+            return self._analyze_chunks(chunks, merge_chunk_isrs)
+
+    def _analyze_chunks(self, chunks: list, merge_chunk_isrs: Callable[..., Any]) -> AgentISR:
+        """Every chunk analysed and merged, with the gate over the whole evidence."""
 
         self.logger.info("Chunked analysis: %d chunks for agent='%s'.", len(chunks), self.name)
 
@@ -3472,19 +3506,24 @@ class BaseAnalyst(ABC):
         mediator_feedback: str,
         revision_round: int = 1,
     ) -> tuple[str, AgentISR]:
-        """Wrapper around revise_isr() with error handling."""
+        """Wrapper around revise_isr() with error handling.
+
+        Under this agent's delegation lock, for the reason ``safe_analyze_isr``
+        takes it: a revision round is this agent's own loop.
+        """
         self.current_round = int(revision_round)
-        try:
-            truncated = self._truncate_input(original_data)
-            text, isr = self.revise_isr(
-                truncated, own_report, peer_reports, mediator_feedback, revision_round
-            )
-            return text, self._drain_findings(isr)
-        except AnalystError:
-            raise
-        except Exception as e:
-            self.logger.error("ISR revision failed: %s", e)
-            raise AnalystError(f"{self.name} ISR revision failed: {e}") from e
+        with self.delegation_lock:
+            try:
+                truncated = self._truncate_input(original_data)
+                text, isr = self.revise_isr(
+                    truncated, own_report, peer_reports, mediator_feedback, revision_round
+                )
+                return text, self._drain_findings(isr)
+            except AnalystError:
+                raise
+            except Exception as e:
+                self.logger.error("ISR revision failed: %s", e)
+                raise AnalystError(f"{self.name} ISR revision failed: {e}") from e
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -3674,7 +3713,13 @@ class BaseAnalyst(ABC):
     _budget_ceiling: BudgetCeiling | None = None
     steps_spent: int = 0
     current_round: int = 0
-    sample_path_choices: dict[str, Any] = {}
+    # The lock included: ``delegation.ask`` takes it on the callee, and a
+    # stand-in that a real agent is allowed to ask must have one to take.
+    delegation_lock: Any = _SHARED_STAND_IN_LOCK
+    # Read-only, because one dict here would be one dict for every analyst
+    # built without ``__init__``, and the node writes a whole new mapping
+    # rather than into this one.
+    sample_path_choices: Mapping[str, Any] = _NO_PATH_CHOICES
     _budget_records: list[dict[str, Any]] = []
 
     def _with_answer_status(self, isr: AgentISR) -> AgentISR:

@@ -464,15 +464,32 @@ def test_a_generic_definition_with_a_provider_reference_is_accepted():
     assert cfg.agents.definitions["strings"].tools[0].kind == "provider"
 
 
+def test_a_lead_may_name_its_own_static_provider():
+    """A lead is the same class as a generic agent, and picks its provider the same way."""
+    cfg = _settings(
+        definitions={
+            "boss": {
+                "role": "lead",
+                "prompt": "You lead.",
+                "static_provider": "r2",
+                "tools": [{"kind": "provider"}],
+            }
+        }
+    )
+    assert cfg.agents.definitions["boss"].tools[0].kind == "provider"
+
+
 def test_a_provider_reference_on_a_built_in_role_is_refused():
     """Resolution never opens a provider for a built-in role (spec §4).
 
-    Only a ``generic`` definition has no class of its own to open one
-    lazily, so a provider reference is meaningful only there.
+    Only a definition that is a prompt rather than a class — ``generic`` or
+    ``lead`` — has none of its own to open lazily.
     """
     with pytest.raises(
         ValidationError,
-        match=("'static_r2': provider tool references are only valid on generic definitions"),
+        match=(
+            "'static_r2': provider tool references are only valid on generic and lead definitions"
+        ),
     ):
         _settings(
             definitions={

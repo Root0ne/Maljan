@@ -29,6 +29,13 @@ caller, or anyone already waiting on this answer — is refused as a cycle; and
 an ask that would come back with a server the asking stage withholds is
 refused naming the stage and the servers, because a callee's effective tool
 set is its own definition narrowed by the tool policy of the stage asking.
+
+One agent does one thing at a time. Each agent carries the job's lock for
+itself, and an ask of it, a second ask of it and its own stage run all take
+that lock, because all three drive the same buffers, the same budget and the
+same call chain. A caller waits only as long as it can still read an answer
+in, and a callee that does not free up in that time is a refusal like the
+others.
 """
 
 from __future__ import annotations
@@ -60,6 +67,9 @@ MIN_STEPS_TO_ASK = 2
 # Kept back from what the caller has left, so the callee's hard cap fires
 # before the caller's own does and the caller still reads the answer.
 SECONDS_KEPT_FOR_THE_CALLER = 15.0
+# How long an ask made outside a tool loop — a script, a test harness — waits
+# for a busy callee. A caller inside a loop waits what its own budget allows.
+SECONDS_WAITING_OUTSIDE_A_LOOP = 300.0
 
 # How much of a callee's raw answer is shown when it carried no claim.
 _ANSWER_WITHOUT_CLAIMS_CHARS = 2000
@@ -206,10 +216,34 @@ def ask(container: Any, *, caller_key: str, callee_key: str, task: str, context:
         logger.info("delegation refused (%s -> %s): %s", caller_key, callee_key, why)
         raise DelegationRefused(why)
     callee = container.get_agent(callee_key)
-    # One ask at a time per callee: the instance is cached per job and keeps
-    # its own buffers, so a second caller waits for the first to be answered.
-    with callee.delegation_lock:
+    # One thing at a time per callee. The instance is the job's, so a second
+    # caller asking it and the callee's own stage run drive the same buffers,
+    # the same budget and the same call chain; both take this lock, and the
+    # one that arrives second waits.
+    #
+    # Bounded, for two reasons. A caller must not spend more waiting than it
+    # has left to read the answer with, and two agents in one parallel stage
+    # that reference each other would otherwise each hold what the other
+    # wants. What the wait buys is an answer; what it costs is refused in
+    # words the model can act on.
+    wait = _seconds_to_wait_for(caller)
+    if not callee.delegation_lock.acquire(timeout=wait):
+        raise DelegationRefused(
+            f"agent {callee_key!r} is busy with its own work and did not free up within "
+            f"{int(wait)} s; answer from what you have or ask someone else"
+        )
+    try:
         return _ask(container, caller, callee, str(task or "").strip(), str(context or "").strip())
+    finally:
+        callee.delegation_lock.release()
+
+
+def _seconds_to_wait_for(caller: Any) -> float:
+    """How long a caller may wait for a busy callee: what it can spare, at most."""
+    budget = getattr(caller, "loop_budget", None)
+    if budget is None:
+        return SECONDS_WAITING_OUTSIDE_A_LOOP
+    return max(1.0, float(budget.seconds_left()) - SECONDS_KEPT_FOR_THE_CALLER)
 
 
 def _ask(container: Any, caller: Any, callee: Any, task: str, context: str) -> str:
@@ -229,6 +263,7 @@ def _ask(container: Any, caller: Any, callee: Any, task: str, context: str) -> s
         addressed_to=str(callee.name),
     )
 
+    its_own = _what_the_callee_had(callee)
     _brief_callee(caller, callee, stage=stage, round_index=round_index)
     budget = getattr(caller, "loop_budget", None)
     if budget is not None:
@@ -243,6 +278,7 @@ def _ask(container: Any, caller: Any, callee: Any, task: str, context: str) -> s
     finally:
         callee._budget_ceiling = None
         callee.call_chain = ()
+        _give_the_callee_back_what_it_had(callee, its_own)
         spent = int(getattr(callee, "steps_spent", 0) or 0) - spent_before
         if budget is not None:
             budget.charge(spent)
@@ -257,6 +293,7 @@ def _ask(container: Any, caller: Any, callee: Any, task: str, context: str) -> s
             time.monotonic() - started,
         )
 
+    _hand_over_the_structured_channel(caller, callee, isr)
     answer = _answer_text(isr, text)
     emit_agent_message(
         sink,
@@ -301,6 +338,51 @@ def _brief_callee(caller: Any, callee: Any, *, stage: str, round_index: int) -> 
         or None
     )
     callee._path_by_server = dict(getattr(resolved, "path_by_server", {}) or {})
+
+
+# What ``_brief_callee`` writes onto the callee, and so what is given back to
+# it when the ask is over. A callee that runs a stage of its own later in the
+# run must not still be holding the caller's pack or the caller's path: the
+# node re-pins a sandbox-fed role and nothing re-pins the rest.
+_BRIEFED_STATE = (
+    "pipeline_stage",
+    "current_round",
+    "facts_block",
+    "pack_ledger_ids",
+    "run_state_block",
+    "sample_format",
+    "_analysis_file_path",
+    "_path_by_server",
+)
+
+
+def _what_the_callee_had(callee: Any) -> dict[str, Any]:
+    """The state the brief is about to write over, kept to be put back."""
+    return {name: getattr(callee, name, None) for name in _BRIEFED_STATE}
+
+
+def _give_the_callee_back_what_it_had(callee: Any, its_own: dict[str, Any]) -> None:
+    """Undo the brief, so the ask leaves nothing behind on the callee."""
+    for name, value in its_own.items():
+        setattr(callee, name, value)
+
+
+def _hand_over_the_structured_channel(caller: Any, callee: Any, isr: AgentISR) -> None:
+    """Move the callee's findings and artifacts onto the caller's own buffers.
+
+    ``answer_task`` drains them onto the ISR the delegation holds, and only
+    the text of that ISR crosses back to the model — so without this a
+    specialist's artifacts would reach no report. They travel unedited; an
+    artifact that did not say which agent established it is marked with the
+    callee's name, because on the caller's buffer it would otherwise read as
+    the caller's.
+    """
+    for artifact in list(isr.artifacts or []):
+        if not str(getattr(artifact, "source", "") or "").strip():
+            artifact.source = str(callee.name)
+        caller._artifacts_buffer.append(artifact)
+    for finding in list(isr.findings or []):
+        caller._findings_buffer.append(finding)
 
 
 def _task_turn(caller_name: str, task: str, context: str, callee: Any) -> str:
