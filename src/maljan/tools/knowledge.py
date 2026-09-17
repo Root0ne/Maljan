@@ -296,9 +296,12 @@ def api_capability(
     """What each named API does, and which techniques cite it as evidence.
 
     ``behaviours`` is the catalog's own category for the API; ``techniques``
-    are the technique rules that list it. Both are lookups in a vendored table,
-    so an API absent from the table comes back with empty lists rather than a
-    guess.
+    are the technique rules the *whole* import set clears whose evidence
+    includes this API, each with the APIs it matched and its ``min_apis``.
+    Every rule in the vendored map needs two or more APIs, so the set is
+    matched once and the rows point back into it: asked one name at a time,
+    no rule could ever fire. Both are lookups in a vendored table, so an API
+    absent from the table comes back with empty lists rather than a guess.
 
     ``catalog_flags`` carries the catalog's own labels — ``suspicious`` for an
     API it tiers high or medium — named for where they come from rather than
@@ -310,20 +313,22 @@ def api_capability(
     names = [str(n).strip() for n in (api_names or []) if str(n).strip()]
     behaviours = load_api_behaviour_db(str(resolve_data(behaviour_map)))
     techniques = load_api_attck_map(str(resolve_data(attck_map)))
+    cleared = techniques.match(set(names)) if techniques is not None and names else []
     rows: list[dict[str, Any]] = []
     for name in names:
         category, suspicious = behaviours.classify(name) if behaviours else (None, False)
         cited: list[dict[str, Any]] = []
-        if techniques is not None:
-            for rule, matched in techniques.match({name}):
-                cited.append(
-                    {
-                        "technique_id": rule.technique_id,
-                        "name": rule.name,
-                        "matched": matched,
-                        "min_apis": rule.min_apis,
-                    }
-                )
+        for rule, matched in cleared:
+            if name not in matched:
+                continue
+            cited.append(
+                {
+                    "technique_id": rule.technique_id,
+                    "name": rule.name,
+                    "matched": list(matched),
+                    "min_apis": rule.min_apis,
+                }
+            )
         rows.append(
             {
                 "api": name,

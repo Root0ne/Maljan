@@ -48,6 +48,26 @@ class TestApiCapability:
     def test_an_empty_list_is_an_empty_answer(self) -> None:
         assert knowledge.api_capability([]) == {"capabilities": []}
 
+    def test_a_rule_fires_over_the_whole_set_and_each_api_it_matched_cites_it(self) -> None:
+        """Every rule in the vendored map needs two or more APIs. Matched one
+        name at a time no rule can fire, which is how the pack's entry came to
+        list no technique on any sample; the set is matched once."""
+        result = knowledge.api_capability(
+            ["VirtualAllocEx", "WriteProcessMemory", "CreateRemoteThread", "RegQueryValueExA"]
+        )
+        by_api = {row["api"]: row for row in result["capabilities"]}
+        cited = by_api["WriteProcessMemory"]["techniques"]
+        assert [c["technique_id"] for c in cited] == ["T1055"]
+        assert set(cited[0]["matched"]) >= {"WriteProcessMemory", "CreateRemoteThread"}
+        assert len(cited[0]["matched"]) >= cited[0]["min_apis"]
+        assert by_api["CreateRemoteThread"]["techniques"][0]["technique_id"] == "T1055"
+        # An API the rule did not match does not carry it.
+        assert by_api["RegQueryValueExA"]["techniques"] == []
+
+    def test_one_api_alone_clears_no_rule(self) -> None:
+        row = knowledge.api_capability(["WriteProcessMemory"])["capabilities"][0]
+        assert row["techniques"] == []
+
 
 class TestLolbinLookup:
     def test_a_scriptlet_rundll32_invocation_maps_to_its_technique(self) -> None:
