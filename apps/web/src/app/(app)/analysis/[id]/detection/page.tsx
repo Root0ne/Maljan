@@ -4,7 +4,7 @@ import { useReport } from "../layout";
 import RuleMatchesPanel from "@/components/analysis/RuleMatchesPanel";
 import GeneratedRulesPanel from "@/components/analysis/GeneratedRulesPanel";
 import StixPanel from "@/components/analysis/StixPanel";
-import { hasRuleMatches } from "@/components/analysis/analysisTabs";
+import { hasRuleMatches } from "@/components/analysis/ruleMatches";
 
 /**
  * Unified "Detection" tab.
@@ -23,7 +23,7 @@ export default function DetectionTab() {
   const { report } = useReport();
   const mr = report?.malware_report;
   const generated = mr?.detection_signatures ?? [];
-  const matched = hasRuleMatches(report);
+  const matched = hasRuleMatches(report?.agent_findings);
   // A bundle with no objects in it is a bundle nobody wants to export.
   const stix = Object.keys(mr?.stix_bundle_extended ?? report?.stix_bundle ?? {}).length > 0;
 

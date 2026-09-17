@@ -3,31 +3,7 @@
 import { useMemo, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { useReport } from "@/app/(app)/analysis/[id]/layout";
-import type { AgentFinding } from "@/types";
-
-interface ClaimRecord {
-  claim: string;
-  confidence: number;
-  evidence_ref: string;
-  technique_id: string;
-}
-
-interface YaraMatch {
-  rule_name: string;
-  pattern_count: number;
-  technique_id: string;
-  evidence: string;
-  confidence: number;
-}
-
-interface SigmaMatch {
-  rule_name: string;
-  technique_id: string;
-  source: string;
-  evidence: string;
-  confidence: number;
-  severity: "critical" | "high" | "medium" | "low";
-}
+import { ruleMatches } from "./ruleMatches";
 
 const SEVERITY_STYLES: Record<string, { dots: string; text: string }> = {
   critical: { dots: "bg-status-red", text: "text-status-red" },
@@ -35,55 +11,6 @@ const SEVERITY_STYLES: Record<string, { dots: string; text: string }> = {
   medium: { dots: "bg-status-blue", text: "text-status-blue" },
   low: { dots: "bg-text-muted", text: "text-text-muted" },
 };
-
-/* ── Claim parsers ─────────────────────────────────────
- * The deterministic layers (src/maljan/analysis/yara_layer.py +
- * sigma_layer.py) emit free-text claims like:
- *
- *   "Deterministic YARA signature match: Virtualization and sandbox
- *    evasion (rule: sandbox_evasion, 1 pattern(s) found)"
- *
- *   "Sigma rule detection: Suspicious DNS Z Flag Bit Set (technique
- *    T1095, source=generic)"
- *
- * The shape is stable enough to extract rule_name + pattern_count /
- * source via regex without a schema change.
- */
-function parseYara(c: ClaimRecord): YaraMatch {
-  const ruleMatch = /rule:\s*([^,)\s]+)/i.exec(c.claim);
-  const patternMatch = /(\d+)\s+pattern/i.exec(c.claim);
-  return {
-    rule_name: ruleMatch?.[1] ?? c.claim.split(":").slice(1).join(":").trim() ?? "unknown",
-    pattern_count: patternMatch ? Number(patternMatch[1]) : 0,
-    technique_id: c.technique_id || "",
-    evidence: c.evidence_ref || "",
-    confidence: c.confidence ?? 0,
-  };
-}
-
-function parseSigma(c: ClaimRecord): SigmaMatch {
-  const nameMatch = /Sigma rule detection:\s*(.+?)\s*\(technique\s+([^,)]+)(?:,\s*source=([^)]+))?\)/i.exec(
-    c.claim,
-  );
-  const ruleName = nameMatch?.[1] ?? c.claim;
-  const technique = nameMatch?.[2] ?? c.technique_id ?? "";
-  const source = nameMatch?.[3] ?? "";
-  // The deterministic Sigma layer doesn't surface a severity per match,
-  // so derive a rough one from confidence. >=0.9 critical, >=0.7 high,
-  // >=0.5 medium, else low. Real Sigma severity would live in claim
-  // payload once the layer plumbs it through.
-  const conf = c.confidence ?? 0;
-  const severity: SigmaMatch["severity"] =
-    conf >= 0.9 ? "critical" : conf >= 0.7 ? "high" : conf >= 0.5 ? "medium" : "low";
-  return {
-    rule_name: ruleName.trim(),
-    technique_id: technique.trim(),
-    source: source.trim(),
-    evidence: c.evidence_ref || "",
-    confidence: conf,
-    severity,
-  };
-}
 
 function Section({
   title,
@@ -113,32 +40,15 @@ function Section({
   );
 }
 
-function findingsByName(
-  findings: AgentFinding[] | undefined,
-  name: string,
-): ClaimRecord[] {
-  const row = findings?.find((f) => f.agent_name === name);
-  if (!row || !Array.isArray(row.claims)) return [];
-  return row.claims
-    .filter((c): c is Record<string, unknown> => !!c && typeof c === "object")
-    .map((c) => ({
-      claim: String((c as Record<string, unknown>).claim ?? ""),
-      confidence: Number((c as Record<string, unknown>).confidence ?? 0),
-      evidence_ref: String((c as Record<string, unknown>).evidence_ref ?? ""),
-      technique_id: String((c as Record<string, unknown>).technique_id ?? ""),
-    }));
-}
-
 export default function RulesTab() {
   const { report, job, loading } = useReport();
 
-  const { yaraMatches, sigmaMatches } = useMemo(() => {
-    const findings = report?.agent_findings;
-    return {
-      yaraMatches: findingsByName(findings, "yara_layer").map(parseYara),
-      sigmaMatches: findingsByName(findings, "sigma_layer").map(parseSigma),
-    };
-  }, [report?.agent_findings]);
+  /* One reading of the run's rule matches, shared with the tab rule that
+   * decides whether this panel is reachable at all (`ruleMatches.ts`). */
+  const { yara: yaraMatches, sigma: sigmaMatches } = useMemo(
+    () => ruleMatches(report?.agent_findings),
+    [report?.agent_findings],
+  );
 
   const severityCounts = useMemo(
     () =>

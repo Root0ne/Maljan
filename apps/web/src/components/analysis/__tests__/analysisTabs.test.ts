@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import type { ReportDetailDTO } from "@/lib/api";
 import type { EvidenceSection, MalwareReport } from "@/types/malware-report";
-import { TABS, tabHasContent, tabsFor, hasRuleMatches } from "../analysisTabs";
+import { TABS, tabHasContent, tabsFor } from "../analysisTabs";
+import { hasRuleMatches } from "../ruleMatches";
 
 function section(over: Partial<EvidenceSection> = {}): EvidenceSection {
   return {
@@ -231,11 +232,39 @@ describe("a tab earned by the ledger rather than by a typed block", () => {
     expect(tabHasContent("/static", strings)).toBe(true);
   });
 
-  it("offers ATT&CK for corroboration alone, which is a mapping too", () => {
+  it("does not offer ATT&CK for corroboration the judge mapped nothing from", () => {
+    /* The tab builds its matrix from the mapped techniques and reads
+     * corroboration only to decorate a card that already exists, so a
+     * corroborated id with no mapping behind it would offer a tab that then
+     * apologises — the thing this whole rule is for. */
     const corroborated = report({
       run_summary: { corroboration: { T1055: { asserted_by: ["capa"], claimed_by: [] } } },
     });
-    expect(tabHasContent("/capabilities", corroborated)).toBe(true);
+    expect(tabHasContent("/capabilities", corroborated)).toBe(false);
+  });
+
+  it("offers ATT&CK for a mapped technique, typed or stored", () => {
+    const mapped = report({
+      malware_report: malwareReport({
+        ttp_mappings: [
+          {
+            technique_id: "T1055",
+            technique_name: "Process Injection",
+            tactic: "TA0004",
+            evidence_quotes: [],
+            confidence: 0.9,
+            contributing_layers: [],
+            is_corroborated: true,
+          },
+        ],
+      }),
+    });
+    expect(tabHasContent("/capabilities", mapped)).toBe(true);
+
+    // A report old enough to have no typed mappings draws from the stored
+    // copy of what the /mitre endpoint answers.
+    const legacy = report({ mitre_techniques: [{ technique_id: "T1059" }] });
+    expect(tabHasContent("/capabilities", legacy)).toBe(true);
   });
 
   it("does not offer ATTRIBUTION for an attribution block that named nothing", () => {
@@ -255,11 +284,31 @@ describe("a tab earned by the ledger rather than by a typed block", () => {
         } as ReportDetailDTO["agent_findings"][number],
       ],
     });
-    expect(hasRuleMatches(fired)).toBe(true);
+    expect(hasRuleMatches(fired.agent_findings)).toBe(true);
     expect(tabHasContent("/detection", fired)).toBe(true);
   });
 
-  it("reads no rule matches from a report that is not there", () => {
+  it("does not offer DETECTION for a layer whose claims the panel cannot read", () => {
+    /* The panel keeps only object-shaped claims, so a layer that recorded
+     * plain strings draws no row. The tab used to be offered over that,
+     * putting a heading and a paragraph above nothing. */
+    const strings = report({
+      agent_findings: [
+        {
+          agent_name: "yara_layer",
+          domain: "static",
+          claims: ["Deterministic YARA signature match: sandbox_evasion"],
+          dissent_items: null,
+          revision_rounds: 0,
+          final_confidence: 1,
+        } as ReportDetailDTO["agent_findings"][number],
+      ],
+    });
+    expect(hasRuleMatches(strings.agent_findings)).toBe(false);
+    expect(tabHasContent("/detection", strings)).toBe(false);
+  });
+
+  it("reads no rule matches from findings that are not there", () => {
     expect(hasRuleMatches(null)).toBe(false);
   });
 });

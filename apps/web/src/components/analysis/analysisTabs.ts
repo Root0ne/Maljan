@@ -22,6 +22,8 @@
 
 import type { ReportDetailDTO } from "@/lib/api";
 import { sectionsForTab } from "./reportSections";
+import { hasRuleMatches } from "./ruleMatches";
+import { dynamicAnalystClaims } from "./dynamicClaims";
 import type { MalwareReport } from "@/types/malware-report";
 
 export type TabGroup = "overview" | "analysis" | "intel" | "advanced";
@@ -81,26 +83,6 @@ function nonEmpty(value: unknown): boolean {
   return Boolean(value);
 }
 
-/** The claims of every analyst whose domain or name is `domain`. */
-function analystClaims(report: ReportDetailDTO, domain: string): boolean {
-  return (report.agent_findings ?? []).some(
-    (finding) =>
-      (finding.domain?.toLowerCase() === domain ||
-        finding.agent_name?.toLowerCase().includes(domain)) &&
-      (finding.claims?.length ?? 0) > 0,
-  );
-}
-
-/** Whether a deterministic rule layer recorded a match on this run. */
-export function hasRuleMatches(report: ReportDetailDTO | null | undefined): boolean {
-  if (!report) return false;
-  return (report.agent_findings ?? []).some(
-    (finding) =>
-      (finding.agent_name === "yara_layer" || finding.agent_name === "sigma_layer") &&
-      (finding.claims?.length ?? 0) > 0,
-  );
-}
-
 function attributionSaysSomething(mr: MalwareReport | null): boolean {
   const attribution = mr?.attribution;
   if (!attribution) return false;
@@ -142,7 +124,9 @@ export function tabHasContent(key: string, report: ReportDetailDTO | null): bool
       return (
         Boolean(mr?.dynamic) ||
         sectionsForTab(sections, "dynamic").length > 0 ||
-        analystClaims(report, "dynamic")
+        // The same reading the tab draws from, so the tab and its rule cannot
+        // disagree about whether the analyst concluded anything.
+        dynamicAnalystClaims(report.agent_findings).length > 0
       );
     case "/network":
       // A capture or a sandbox network channel, and the endpoints carved out
@@ -157,20 +141,21 @@ export function tabHasContent(key: string, report: ReportDetailDTO | null): bool
     case "/persistence":
       return nonEmpty(mr?.persistence) || sectionsForTab(sections, "persistence").length > 0;
     case "/capabilities":
-      // Techniques the run mapped, or the corroboration table that says which
-      // deterministic source asserted each of them.
-      return (
-        nonEmpty(mr?.ttp_mappings) ||
-        nonEmpty(mr?.capability_matrix) ||
-        nonEmpty(report.mitre_techniques) ||
-        nonEmpty(report.run_summary?.corroboration)
-      );
+      /* The techniques the run mapped, and only those: the tab builds its
+       * matrix from `ttp_mappings` or, for a report that predates them, from
+       * the `/mitre` endpoint whose stored copy is `mitre_techniques`.
+       * `corroboration` is read per technique to decorate a card that already
+       * exists, so a corroborated id the judge never mapped would offer a tab
+       * that then apologises — which is the thing this rule is for. */
+      return nonEmpty(mr?.ttp_mappings) || nonEmpty(report.mitre_techniques);
     case "/attribution":
       return attributionSaysSomething(mr);
     case "/detection":
       // Rules that fired, rules the run wrote, and the STIX bundle it exports.
       return (
-        hasRuleMatches(report) ||
+        // Not "a layer carried a claim" but "the panel has a row", which is
+        // the same reading the panel itself makes.
+        hasRuleMatches(report.agent_findings) ||
         nonEmpty(mr?.detection_signatures) ||
         nonEmpty(mr?.stix_bundle_extended) ||
         nonEmpty(report.stix_bundle)

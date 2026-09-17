@@ -3,47 +3,14 @@
 import { useState } from "react";
 
 import { useReport } from "../layout";
-import type { AgentFindingDTO } from "@/lib/api";
 import type { ProcessNode } from "@/types/malware-report";
 import { confidenceClass } from "@/lib/report-utils";
 import Th from "@/components/ui/Th";
 import { ArtifactSections } from "@/components/analysis/ArtifactTable";
 import { hasSection, isCoveredBySection, sectionsForTab } from "@/components/analysis/reportSections";
+import { dynamicAnalystClaims, type AnalystClaims } from "@/components/analysis/dynamicClaims";
 
-/** One claim of an analyst's final ISR, as the pipeline records it. */
-interface AnalystClaim {
-  claim?: string;
-  description?: string;
-  confidence?: number;
-  evidence_ref?: string | string[];
-}
-
-/**
- * What the dynamic analyst concluded, whether or not the sandbox produced
- * anything.
- *
- * This tab used to render the "not detonated" notice and
- * nothing else whenever the sandbox report was empty — including on runs where
- * the dynamic analyst did execute and reasoned its way to a stated position
- * (sandbox evasion, say). That reasoning was in the API's `agent_findings` all
- * along and only the transcript ever showed it, so a run where the analyst
- * worked looked exactly like one where it never started.
- */
-function dynamicClaims(findings: AgentFindingDTO[] | undefined): {
-  agent: string;
-  claims: AnalystClaim[];
-}[] {
-  return (findings ?? [])
-    .filter(
-      (f) =>
-        f.domain?.toLowerCase() === "dynamic" ||
-        f.agent_name?.toLowerCase().includes("dynamic")
-    )
-    .map((f) => ({ agent: f.agent_name, claims: (f.claims ?? []) as AnalystClaim[] }))
-    .filter((f) => f.claims.length > 0);
-}
-
-function AnalystFindings({ findings }: { findings: ReturnType<typeof dynamicClaims> }) {
+function AnalystFindings({ findings }: { findings: AnalystClaims[] }) {
   return (
     <div className="bg-bg-surface border border-border rounded">
       <div className="px-4 py-3 border-b border-border">
@@ -98,7 +65,7 @@ export default function DynamicTab() {
     return <div className="p-4 text-sm text-text-secondary">Loading...</div>;
   }
 
-  const analystFindings = dynamicClaims(report?.agent_findings);
+  const analystFindings = dynamicAnalystClaims(report?.agent_findings);
   const dyn = report?.malware_report?.dynamic;
   // The registry exists on Windows and nowhere else, and an empty "Registry
   // Modifications" panel on a Linux, macOS or Android sample reads as a
