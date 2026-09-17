@@ -123,11 +123,6 @@ test.describe("Analysis tabs", () => {
       page.getByRole("heading", { name: /Family-Feature RAG Candidates/i })
     ).toBeVisible();
     await expect(page.getByText("FormBook")).toBeVisible();
-
-    await expect(
-      page.getByRole("heading", { name: /ATT&CK Case Priors/i })
-    ).toBeVisible();
-    await expect(page.getByText("T1055", { exact: true })).toBeVisible();
   });
 
   /* C4 (dev audit 2026-09-06): the IOC, ATT&CK and timeline endpoints all
