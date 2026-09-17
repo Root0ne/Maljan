@@ -9,6 +9,7 @@
     "attck_validate": [
       "ids"
     ],
+    "capabilities": [],
     "family_lookup": [
       "k",
       "query"
@@ -32,6 +33,7 @@
     "api_capability",
     "attck_lookup",
     "attck_validate",
+    "capabilities",
     "family_lookup",
     "lolbin_lookup",
     "resolve_technique",

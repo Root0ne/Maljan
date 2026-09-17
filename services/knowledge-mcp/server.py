@@ -18,16 +18,40 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from maljan.tools import knowledge as knowledge_tools
+from maljan.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, manifest, module
+from maljan.tools.errors import code_for_exception, normalise_error, tool_error
 
 mcp = FastMCP("KnowledgeMCP")
 
+# The two retrievals over a vector store need its client; every other lookup
+# reads the vendored catalogues.
+TOOL_NEEDS: list[ToolNeeds] = [
+    ToolNeeds("resolve_technique"),
+    ToolNeeds("attck_lookup"),
+    ToolNeeds("attck_validate"),
+    ToolNeeds("api_capability"),
+    ToolNeeds("lolbin_lookup"),
+    ToolNeeds("family_lookup", (module("qdrant_client"),)),
+    ToolNeeds("similar_cases", (module("qdrant_client"),)),
+]
+CAPABILITIES = manifest("knowledge", TOOL_NEEDS)
+
 
 def _guard(tool: str, call: Any, **kwargs: Any) -> dict[str, Any]:
-    """Run one lookup, turning any exception into a returned error."""
+    """Run one lookup, turning any exception into a returned error with a remedy."""
     try:
-        return dict(call(**kwargs))
+        return dict(normalise_error(dict(call(**kwargs))))
     except Exception as exc:  # noqa: BLE001 — a tool server answers, it does not raise
-        return {"error": f"{type(exc).__name__}: {exc}", "tool": tool}
+        return tool_error(code_for_exception(exc), f"{type(exc).__name__}: {exc}", tool=tool)
+
+
+@mcp.tool(name=CAPABILITIES_TOOL)
+def capabilities() -> dict[str, Any]:
+    """What this server can do on this host.
+
+    Each tool, its optional dependency, and whether it is available.
+    """
+    return dict(CAPABILITIES)
 
 
 @mcp.tool()

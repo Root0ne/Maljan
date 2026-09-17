@@ -103,12 +103,15 @@ async def test_the_judge_agent_the_container_hands_out_can_reach_the_registry(mo
         # manifest: the point of the regression is that the registry is
         # reachable at all, so every server it binds has to arrive.
         goldens = Path(__file__).resolve().parents[2] / "fixtures" / "golden" / "mcp_tools"
-        expected = sorted(
-            name
-            for key in ("knowledge", "threatintel")
-            for name in json.loads((goldens / f"{key}.json").read_text(encoding="utf-8"))["tools"]
-        )
-        assert sorted(t.name for t in judge.tools) == expected
+        # Under the registry's collision rule: a name the first server already
+        # offered arrives from the second prefixed with that server's key,
+        # which is what both sidecars' ``capabilities`` tool now does. The
+        # role-bound server attaches first, the definition's reference after.
+        expected: list[str] = []
+        for key in ("threatintel", "knowledge"):
+            for name in json.loads((goldens / f"{key}.json").read_text(encoding="utf-8"))["tools"]:
+                expected.append(f"{key}__{name}" if name in expected else name)
+        assert sorted(t.name for t in judge.tools) == sorted(expected)
     finally:
         await judge.aclose()
 

@@ -17,6 +17,8 @@ from typing import Any
 import httpx
 from mcp.server.fastmcp import FastMCP
 
+from maljan.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, env, manifest
+
 mcp = FastMCP("ThreatIntelMCP")
 
 # ---------------------------------------------------------------------------
@@ -30,6 +32,31 @@ ABUSEIPDB_BASE = "https://api.abuseipdb.com/api/v2"
 
 # Minimal in-memory cache to avoid hammering APIs during testing
 _cache: dict[str, Any] = {}
+
+# Every lookup answers without a key, from heuristic mock data; what the key
+# buys is the real service, and that is what the manifest says is missing.
+TOOL_NEEDS: list[ToolNeeds] = [
+    ToolNeeds(
+        "check_ip_reputation",
+        (env("VIRUSTOTAL_API_KEY"), env("ABUSEIPDB_API_KEY")),
+        without="heuristic mock data",
+    ),
+    ToolNeeds(
+        "check_domain_reputation", (env("VIRUSTOTAL_API_KEY"),), without="heuristic mock data"
+    ),
+    ToolNeeds("check_hash", (env("VIRUSTOTAL_API_KEY"),), without="heuristic mock data"),
+    ToolNeeds("get_threatintel_status"),
+]
+CAPABILITIES = manifest("threatintel", TOOL_NEEDS)
+
+
+@mcp.tool(name=CAPABILITIES_TOOL)
+def capabilities() -> dict[str, Any]:
+    """What this server can do on this host.
+
+    Each tool, the setting it needs, and whether it is configured.
+    """
+    return dict(CAPABILITIES)
 
 
 # ---------------------------------------------------------------------------

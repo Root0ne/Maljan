@@ -32,9 +32,38 @@ from maljan.tools import binary as binary_tools
 from maljan.tools import identify as identify_tools
 from maljan.tools import rules as rule_tools
 from maljan.tools import strings as string_tools
+from maljan.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, manifest, module
+from maljan.tools.errors import code_for_exception, normalise_error, tool_error
 from maljan.tools.strings import DEFAULT_STRINGS_LIMIT
 
 mcp = FastMCP("AnalysisMCP")
+
+# What each tool needs beyond the interpreter, probed once when the server
+# starts. A tool that is not listed always answers.
+TOOL_NEEDS: list[ToolNeeds] = [
+    ToolNeeds("identify_file"),
+    ToolNeeds("hashes"),
+    ToolNeeds("signing_info"),
+    ToolNeeds("strings"),
+    ToolNeeds("iocs_from_text"),
+    ToolNeeds("iocs_from_file"),
+    ToolNeeds("pe_info", (module("pefile"),)),
+    ToolNeeds("elf_info", (module("elftools"),)),
+    ToolNeeds("macho_info", (module("macholib"),)),
+    ToolNeeds("apk_info", (module("androguard"),), without="the zip-level facts"),
+    ToolNeeds("carve_payloads"),
+    ToolNeeds("archive_list", (module("py7zr"),), without="zip and tar members; 7z needs py7zr"),
+    ToolNeeds("document_info", (module("olefile"),), without="the PDF and OOXML halves"),
+    ToolNeeds("yara_scan", (module("yara"),), without="the regex fallback over the corpus"),
+    ToolNeeds("sigma_match", (module("sigma"),)),
+    ToolNeeds("sigma_match_sandbox", (module("sigma"),)),
+    ToolNeeds("capa", (module("capa"),), timeout_s=300),
+    ToolNeeds("put_sample"),
+    ToolNeeds("put_sample_begin"),
+    ToolNeeds("put_sample_chunk"),
+    ToolNeeds("put_sample_finish"),
+]
+CAPABILITIES = manifest("analysis", TOOL_NEEDS)
 
 # Chunked uploads in flight, keyed by upload id. Bounded by the number of
 # concurrent stagers, which is the number of agents in a profile — but a
@@ -108,14 +137,26 @@ def _guard(tool: str, call: Any, **kwargs: Any) -> dict[str, Any]:
     """Run one tool call, turning any exception into a returned error.
 
     A raised exception reaches the model as a transport-level failure with no
-    structure; a returned ``{"error": ...}`` is something it can read and route
-    around, which is the difference between an agent that tries another tool
-    and one that retries the same broken call until its step budget is gone.
+    structure; a returned error is something it can read and route around,
+    which is the difference between an agent that tries another tool and one
+    that retries the same broken call until its step budget is gone. The
+    error carries a code and a remediation (``maljan.tools.errors``), and an
+    implementation's flat ``{"error": "<text>"}`` is rewritten into the same
+    shape on the way out.
     """
     try:
-        return dict(call(**_read_absent_words(call, kwargs)))
+        return dict(normalise_error(dict(call(**_read_absent_words(call, kwargs)))))
     except Exception as exc:  # noqa: BLE001 — a tool server answers, it does not raise
-        return {"error": f"{type(exc).__name__}: {exc}", "tool": tool}
+        return tool_error(code_for_exception(exc), f"{type(exc).__name__}: {exc}", tool=tool)
+
+
+@mcp.tool(name=CAPABILITIES_TOOL)
+def capabilities() -> dict[str, Any]:
+    """What this server can do on this host.
+
+    Each tool, its optional dependency, and whether it is available.
+    """
+    return dict(CAPABILITIES)
 
 
 # ---------------------------------------------------------------------------

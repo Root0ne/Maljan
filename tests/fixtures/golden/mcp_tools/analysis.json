@@ -19,6 +19,7 @@
       "path",
       "timeout_s"
     ],
+    "capabilities": [],
     "carve_payloads": [
       "path"
     ],
@@ -106,6 +107,7 @@
     "apk_info",
     "archive_list",
     "capa",
+    "capabilities",
     "carve_payloads",
     "document_info",
     "elf_info",

@@ -77,6 +77,7 @@ def test_the_analysis_golden_carries_the_whole_sample_delivery_convention() -> N
 def test_the_knowledge_golden_carries_the_reference_lookups() -> None:
     tools = set(_golden("knowledge")["tools"])
     assert tools == {
+        "capabilities",
         "resolve_technique",
         "attck_lookup",
         "attck_validate",

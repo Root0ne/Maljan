@@ -2,6 +2,7 @@
   "server": "network",
   "source": "live handshake",
   "tools": [
+    "capabilities",
     "extract_dns",
     "extract_http",
     "pcap_summary",
