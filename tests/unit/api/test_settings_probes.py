@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 
@@ -180,6 +182,8 @@ async def test_llm_probe_anthropic_ok(monkeypatch):
 @pytest.mark.asyncio
 async def test_llm_probe_ollama_ok(monkeypatch):
     def handler(req: httpx.Request):
+        if req.url.path.endswith("/api/generate"):
+            return httpx.Response(200, json={"response": "OK"})
         assert req.url.path.endswith("/api/tags")
         return httpx.Response(200, json={"models": [{"name": "qwen3.5:9b"}, {"name": "llama3:8b"}]})
 
@@ -635,7 +639,20 @@ async def test_rest_probe_never_puts_the_token_in_the_url_or_detail(monkeypatch)
 
 
 def _tags_transport(monkeypatch, names):
+    """An Ollama server that lists ``names`` and generates with those only.
+
+    The probe asks for both: the tag list says the endpoint is up and the name
+    is in its catalogue, and the one-turn completion says the server will
+    actually load it. A tag it does not have is refused with a 404, the way
+    Ollama refuses it.
+    """
+
     def handler(req: httpx.Request):
+        if req.url.path.endswith("/api/generate"):
+            asked = json.loads(req.content or b"{}").get("model", "")
+            if asked not in names:
+                return httpx.Response(404, json={"error": f"model {asked!r} not found"})
+            return httpx.Response(200, json={"response": "OK"})
         assert req.url.path.endswith("/api/tags")
         return httpx.Response(200, json={"models": [{"name": n} for n in names]})
 
@@ -684,8 +701,14 @@ async def test_llm_probe_asks_a_per_agent_endpoint_for_its_own_catalogue(monkeyp
     }
 
     def handler(req: httpx.Request):
+        names = catalogues[req.url.host]
+        if req.url.path.endswith("/api/generate"):
+            asked = json.loads(req.content or b"{}").get("model", "")
+            if asked not in names:
+                return httpx.Response(404, json={"error": f"model {asked!r} not found"})
+            return httpx.Response(200, json={"response": "OK"})
         assert req.url.path.endswith("/api/tags")
-        return httpx.Response(200, json={"models": [{"name": n} for n in catalogues[req.url.host]]})
+        return httpx.Response(200, json={"models": [{"name": n} for n in names]})
 
     monkeypatch.setattr(
         probes, "_client", lambda: httpx.AsyncClient(transport=transport(handler), timeout=10)
