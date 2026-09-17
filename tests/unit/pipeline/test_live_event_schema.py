@@ -168,9 +168,42 @@ class TestArgumentSummaries:
         assert "abc123" not in summary
         assert summary == "header=Bearer ***"
 
-    def test_a_hex_key_under_a_neutral_name_is_replaced(self) -> None:
-        summary = ev.summarize_args({"query": "a1b2c3d4e5f60718293a4b5c6d7e8f90"})
+    def test_a_hex_run_that_is_not_a_digest_is_replaced(self) -> None:
+        # 34 characters: longer than the rule's floor, and not the length of
+        # any digest, so there is nothing to say it is not a key.
+        summary = ev.summarize_args({"query": "a1b2c3d4e5f60718293a4b5c6d7e8f90ab"})
         assert summary == "query=***"
+
+    def test_the_sample_hash_survives_under_any_name(self) -> None:
+        # The subject of the analysis, not a secret: it is on the job, on the
+        # report and in ``pipeline_started`` already, and a bubble reading
+        # ``hash=***`` cannot say which artifact a lookup was for.
+        md5 = "44d88612fea8a8f36de82e1278abb02f"
+        sha1 = "3395856ce81f2b7382dee72602f798b642f14140"
+        sha256 = "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f"
+        assert ev.summarize_args({"hash": md5}) == f"hash={md5}"
+        assert ev.summarize_args({"query": sha1}) == f"query={sha1}"
+        assert ev.summarize_args({"value": sha256}) == f"value={sha256}"
+
+    def test_a_digest_survives_a_result_summary_too(self) -> None:
+        md5 = "44d88612fea8a8f36de82e1278abb02f"
+        assert md5 in ev.summarize_result(f"known sample {md5}, 61/70 engines")
+
+    def test_a_digest_under_a_credential_name_is_still_replaced(self) -> None:
+        # The name is the stronger signal when it is explicit: an argument
+        # called ``api_key`` is a credential whatever its value looks like.
+        md5 = "44d88612fea8a8f36de82e1278abb02f"
+        assert ev.summarize_args({"api_key": md5}) == "api_key=***"
+
+    def test_an_argument_is_not_a_credential_for_containing_one_as_a_substring(
+        self,
+    ) -> None:
+        summary = ev.summarize_args({"author": "mehmet", "obsession": "none"})
+        assert summary == "author=mehmet, obsession=none"
+
+    def test_a_credential_name_written_three_ways_is_still_caught(self) -> None:
+        for name in ("api_key", "apiKey", "api-key", "private_key"):
+            assert ev.summarize_args({name: "value"}) == f"{name}=***", name
 
     def test_a_vendor_key_prefix_is_replaced_wherever_it_appears(self) -> None:
         summary = ev.summarize_args({"value": "sk-liveKey", "note": "nvapi-abc"})
@@ -183,6 +216,34 @@ class TestArgumentSummaries:
         assert "/opt/maljan" not in summary
         assert "/tmp/x" not in summary
         assert summary == "cmd=run.sh evil.exe --out r.json"
+
+    def test_only_a_token_shaped_like_a_path_is_cut(self) -> None:
+        """A slash alone does not make a path.
+
+        Found in a live run: a ``tool_call_finished`` summary read
+        ``"mime": x-msdownload"`` because the output said
+        ``"application/x-msdownload"``. A MIME type, a sub-technique id, a
+        date and a ratio all carry a slash and all have to survive whole.
+        """
+        for value in ("application/x-msdownload", "T1055/012", "2026/09/17", "1/2"):
+            assert ev.scrub(value) == value, value
+
+    def test_a_relative_path_with_no_marker_is_left_alone(self) -> None:
+        # It names no host directory, which is the thing that must not travel.
+        assert ev.scrub("data/samples/a.exe") == "data/samples/a.exe"
+
+    def test_every_shape_a_host_path_takes_is_cut(self) -> None:
+        for value in (
+            "/home/x/samples/a.exe",
+            "./rel/a.exe",
+            "../up/a.exe",
+            "~/home/a.exe",
+            "C:\\Users\\x\\a.exe",
+        ):
+            assert ev.scrub(value) == "a.exe", value
+
+    def test_a_url_still_keeps_only_its_scheme_and_host(self) -> None:
+        assert ev.scrub("https://u:p@h/x") == "https://h/…"
 
     def test_a_short_word_is_left_alone(self) -> None:
         assert ev.summarize_args({"pattern": "http", "start": 0}) == "pattern=http, start=0"
@@ -218,6 +279,36 @@ class TestArgumentSummaries:
         assert "/home/operator" not in summary
         assert "FileNotFoundError" not in summary
         assert summary == "the call failed; submit the sample again"
+
+    def test_a_key_echoed_inside_json_is_replaced(self) -> None:
+        """The shape a tool result actually arrives in.
+
+        Every rule here is anchored to the whole token, and a JSON result
+        hands it ``"sk-liveKey",`` rather than ``sk-liveKey`` — so before the
+        punctuation was peeled off first, a key echoed by an API response
+        travelled verbatim while the same key passed as a bare argument was
+        replaced.
+        """
+        summary = ev.summarize_result('{"api_key": "sk-liveSecretValue0123456789"}')
+        assert "sk-liveSecretValue0123456789" not in summary
+        assert summary == '{"api_key": "***"}'
+
+    def test_the_pack_s_hashes_result_travels_whole(self) -> None:
+        """The path a real ``hashes`` entry takes, not a bare token.
+
+        Pinned on the JSON the ledger stores rather than on the digest alone,
+        because that is what ``summarize_result`` is given and because the
+        digests used to survive it for the wrong reason — the quotes and the
+        comma defeated the whole-token credential test rather than the digest
+        exemption doing it.
+        """
+        output = (
+            '{"md5": "44d88612fea8a8f36de82e1278abb02f", '
+            '"sha1": "3395856ce81f2b7382dee72602f798b642f14140", '
+            '"sha256": "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f", '
+            '"mime": "application/x-msdownload"}'
+        )
+        assert ev.summarize_result(output) == output
 
     def test_a_failure_with_no_remediation_still_says_nothing_raw(self) -> None:
         summary = ev.summarize_result("Traceback: /etc/maljan/secrets.env", ok=False)

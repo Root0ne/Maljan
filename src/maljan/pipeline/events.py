@@ -319,13 +319,21 @@ _SECRET_ARGUMENT_WORDS = (
 # * anything shaped like a credential is replaced outright — a ``Bearer``
 #   prefix, one of the vendor key prefixes, or an unbroken run of hex or
 #   base64 long enough to be a key rather than a hash fragment somebody is
-#   discussing;
+#   discussing — except an exact md5, sha1 or sha256 digest, which is the
+#   subject of the analysis rather than a secret;
 # * a URL keeps its scheme and host and loses its userinfo, path and query,
 #   because the userinfo *is* a credential and the query is where one is
 #   usually smuggled;
-# * every remaining whitespace-separated token that names a path is cut to its
-#   last segment, so a command line with three host paths loses all three
-#   rather than only the last.
+# * every remaining whitespace-separated token that *looks like a filesystem
+#   path* is cut to its last segment, so a command line with three host paths
+#   loses all three rather than only the last.
+#
+# Each token is peeled of the punctuation around it before any of that and
+# wrapped in it again afterwards. A tool result is JSON, so the thing a rule
+# has to recognise arrives as ``"sk-liveKey",`` rather than as ``sk-liveKey``
+# — every rule here is anchored to the whole token, so without the peel a key
+# echoed by an API response travelled verbatim while the same key passed as a
+# bare argument was replaced.
 _CREDENTIAL_PREFIXES = ("sk-", "sk_", "nvapi-", "ghp_", "gho_", "xoxb-")
 # An authorization scheme and the word after it, which the token-by-token pass
 # cannot see as one thing: "Bearer" is a word and the secret is the next one,
@@ -334,10 +342,36 @@ _SCHEME_AND_SECRET = re.compile(r"(?i)\b(bearer|basic|token)\s+\S+")
 # 24 is above a CRC, a short hash prefix and a ledger id, and below every API
 # key shape this has met.
 _CREDENTIAL_RUN = re.compile(r"(?:[A-Fa-f0-9]{24,}|[A-Za-z0-9_\-]{24,}={0,2})\Z")
+# The three digests a malware analysis is *about*, which the rule above would
+# otherwise take for keys: md5, sha1 and sha256. A sample hash is not a secret
+# — it is on the job, on the report and in ``pipeline_started`` already — and a
+# tool bubble reading ``hash=***`` cannot say which of three artifacts a
+# reputation lookup was for, which is most of what the bubble is for.
+#
+# Exact lengths, not a range: 32, 40 and 64 hex characters are what a digest
+# is, and widening it to "any hex" would hand back the shape the rule exists
+# to catch.
+_DIGEST = re.compile(r"\A[A-Fa-f0-9]{32}\Z|\A[A-Fa-f0-9]{40}\Z|\A[A-Fa-f0-9]{64}\Z")
 _URL = re.compile(r"\A(?P<scheme>[a-zA-Z][a-zA-Z0-9+.\-]*)://(?P<rest>\S*)\Z")
+# What a filesystem path starts with, and nothing else does. A slash alone is
+# not the signal: a MIME type (``application/x-msdownload``), a sub-technique
+# id (``T1055/012``), a date (``2026/09/17``) and a ratio all carry one, and
+# cutting them to their last segment turned readable tool output into
+# nonsense. A relative path with no marker (``data/samples/a.exe``) is left
+# alone under this rule — it names no host directory, which is the thing that
+# must not travel.
+_PATH_START = re.compile(r"\A(?:/|\./|\.\./|~/|[A-Za-z]:[\\/]|\\\\)")
+# The punctuation a token arrives wrapped in, peeled before the rules run and
+# restored after. Kept narrow: these are quoting and separator characters, not
+# characters a path, a URL or a key is made of.
+_PEEL_LEADING = "\"'`([{<"
+_PEEL_TRAILING = "\"'`)]}>,;:"
 # One argument's value, and the whole summary. Short on purpose: this is the
 # line under a chat bubble that says which call is running, not a record of it.
-ARGUMENT_VALUE_CHARS = 60
+# 64 rather than a rounder number so a sha256 — the one long value this is
+# meant to let through whole — fits exactly instead of arriving one character
+# short of identifying anything.
+ARGUMENT_VALUE_CHARS = 64
 ARGUMENT_SUMMARY_CHARS = 240
 ARGUMENTS_SUMMARISED = 6
 # One tool result's headline, for the same reason.
@@ -347,12 +381,31 @@ _REDACTED = "***"
 
 
 def _is_secret_argument(name: str) -> bool:
+    """Whether this argument's *name* says its value is a credential.
+
+    Matched on whole words rather than on any substring. A plain containment
+    check redacted ``author`` for holding ``auth`` and ``session_id`` is a
+    genuine hit while ``obsession`` is not, so the name is split on the
+    separators argument names actually use and each word is compared whole. A
+    listed word that is itself compound (``api_key``, ``private_key``) is also
+    tried against the joined name, because ``apiKey`` and ``api-key`` are the
+    same argument written three ways.
+    """
     lowered = str(name).lower()
-    return any(word in lowered for word in _SECRET_ARGUMENT_WORDS)
+    words = set(re.split(r"[^a-z0-9]+", lowered)) - {""}
+    joined = re.sub(r"[^a-z0-9]+", "", lowered)
+    for secret in _SECRET_ARGUMENT_WORDS:
+        if secret in words:
+            return True
+        if "_" in secret and secret.replace("_", "") in joined:
+            return True
+    return False
 
 
 def _looks_like_a_credential(token: str) -> bool:
-    """Whether this run of characters is a key rather than a word."""
+    """Whether this run of characters is a key rather than a word or a digest."""
+    if _DIGEST.match(token):
+        return False
     lowered = token.lower()
     if any(lowered.startswith(prefix) for prefix in _CREDENTIAL_PREFIXES):
         return True
@@ -377,23 +430,39 @@ def _scrub_url(token: str) -> str | None:
     return f"{found.group('scheme')}://{host}/…" if host else token
 
 
-def _scrub_token(token: str) -> str:
-    """One whitespace-separated word of a value, made safe to publish."""
-    if not token:
-        return token
-    if _looks_like_a_credential(token):
+def _peel(token: str) -> tuple[str, str, str]:
+    """``token`` split into the punctuation around it and the value inside."""
+    core = token.lstrip(_PEEL_LEADING)
+    lead = token[: len(token) - len(core)]
+    stripped = core.rstrip(_PEEL_TRAILING)
+    return lead, stripped, core[len(stripped) :]
+
+
+def _scrub_core(core: str) -> str:
+    """One token's value, without the punctuation it arrived wrapped in."""
+    if _looks_like_a_credential(core):
         return _REDACTED
-    as_url = _scrub_url(token)
+    as_url = _scrub_url(core)
     if as_url is not None:
         return as_url
-    if "/" in token or "\\" in token:
+    if _PATH_START.match(core):
         # A host path is reduced to its last segment. The sample lives under a
         # per-job directory whose name is an internal identifier and whose
         # prefix is wherever this deployment happens to be installed, and
         # neither belongs in a payload that a browser and a long-lived table
         # both keep; the file name is the part a reader is actually reading.
-        return token.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1] or token
-    return token
+        return core.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1] or core
+    return core
+
+
+def _scrub_token(token: str) -> str:
+    """One whitespace-separated word of a value, made safe to publish."""
+    if not token:
+        return token
+    lead, core, tail = _peel(token)
+    if not core:
+        return token
+    return f"{lead}{_scrub_core(core)}{tail}"
 
 
 def scrub(text: Any) -> str:
@@ -431,10 +500,9 @@ def summarize_args(args: Any) -> str:
     arguments as sent reads the ledger entry this call writes, which is behind
     the same ownership check as the report.
 
-    A long unbroken run of hex or base64 is replaced even when it is a sample
-    hash rather than a key, because nothing at this point can tell the two
-    apart and the hash is on the job, the report and ``pipeline_started``
-    already.
+    A long unbroken run of hex or base64 is replaced, except one that is
+    exactly an md5, sha1 or sha256 digest: those are what the analysis is
+    about and are on the job, the report and ``pipeline_started`` already.
     """
     if not isinstance(args, dict) or not args:
         return ""

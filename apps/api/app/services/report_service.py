@@ -169,6 +169,36 @@ class ReportService:
         )
         return result.scalar_one_or_none()
 
+    async def transcript_is_numbered(self, job_id: uuid.UUID) -> bool:
+        """Whether this job's stored conversation carries publisher numbers.
+
+        ``agent_messages.seq`` used to be the message's position within the
+        report — ``0, 1, 2, …`` — and is now the number the publisher gave the
+        message when it went out. The two are different numbers for the same
+        run, and a client that keyed a stored row on the old one would fail to
+        collapse it onto its live twin and draw the line twice.
+
+        A run cannot be asked which world it belongs to, so its feed is asked
+        instead: a run published under this release has ``job_events`` rows
+        and a run recorded before it has none. One indexed existence check per
+        report read, against the index the unique constraint already builds.
+        """
+        from app.models.job_event import JobEvent
+
+        try:
+            found = await self.db.execute(
+                select(JobEvent.id).where(JobEvent.job_id == job_id).limit(1)
+            )
+        except Exception as exc:  # noqa: BLE001 — a report never 500s over a number
+            logger.warning(
+                "Could not tell whether job %s has a feed (%s); serving the "
+                "transcript without numbers.",
+                log_safe(job_id),
+                type(exc).__name__,
+            )
+            return False
+        return found.scalar_one_or_none() is not None
+
     async def delete_report(
         self,
         report_id: uuid.UUID,

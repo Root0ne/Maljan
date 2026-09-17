@@ -118,11 +118,19 @@ async def read_events(
 ) -> list[dict[str, Any]]:
     """This job's events after ``since``, in sequence order, from either store.
 
-    The table is consulted when the stream answered nothing at all — it has
-    expired, or the run predates it — and when what the stream answered starts
-    later than the cursor asked for, which is the capped-stream case: a client
-    resuming from event 40 of a run that has published 2,000 would otherwise
-    be handed events 1,001 onwards with a silent hole in front of them.
+    No cursor means "from the beginning", which is the same question as
+    ``since=0``: the publisher's first event of a run is ``seq`` 1, so a read
+    is complete only when what came back starts there. Anything else — an
+    expired stream, a run that predates sequencing, or a stream trimmed past
+    its own start, which a long run reaches routinely now that a tool call is
+    two events — goes through the table, and the stream is used only for what
+    the table does not yet hold.
+
+    That last case is why the test is on the lowest ``seq`` rather than on the
+    stream being empty. A run that published 2,400 events keeps 1,401–2,400 in
+    a ``maxlen=1000`` stream; a console mounting fresh would otherwise be
+    handed a conversation that begins in the middle of the debate, with
+    nothing saying so, while the table holds all 2,400 one query away.
 
     Merged on ``seq``, which is unique per job in both stores, so an event held
     by both is returned once. An event published before sequencing existed
@@ -131,9 +139,12 @@ async def read_events(
     """
     limit = max(1, min(int(limit), MAX_EVENTS))
     from_stream = await _from_stream(redis_conn, job_id, since, limit)
+    # ``None`` and ``0`` ask the same question of the stream; they differ only
+    # in ``_from_stream``, which leaves an unsequenced legacy event in when no
+    # cursor was given and filters it out when one was.
+    floor = 0 if since is None else since
     lowest = min((_seq_of(e) for e in from_stream), default=0)
-    complete = bool(from_stream) and (since is None or lowest <= since + 1)
-    if complete:
+    if from_stream and lowest <= floor + 1:
         return sorted(from_stream, key=_seq_of)
 
     merged: dict[int, dict[str, Any]] = {}

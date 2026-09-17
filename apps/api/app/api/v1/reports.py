@@ -36,6 +36,24 @@ async def list_reports(
     return await svc.list_reports(user=user, page=page, page_size=page_size)
 
 
+async def _detail(svc: ReportService, report: Any) -> ReportDetailResponse:
+    """One report, with the transcript numbered only if this run was numbered.
+
+    ``seq`` on a stored line means the number the publisher gave it, which is
+    what a console collapses the line onto its live twin with. A run recorded
+    before the publisher numbered anything carries its old position within the
+    report instead — a different number for the same message — so those lines
+    go out with no ``seq`` at all and the client falls back to the identity the
+    two sources had in common then. See ``ReportService.transcript_is_numbered``.
+    """
+    detail = ReportDetailResponse.model_validate(report)
+    if detail.transcript and not await svc.transcript_is_numbered(detail.job_id):
+        detail = detail.model_copy(
+            update={"transcript": [m.model_copy(update={"seq": None}) for m in detail.transcript]}
+        )
+    return detail
+
+
 @router.get("/{report_id}", response_model=ReportDetailResponse)
 async def get_report(
     report_id: uuid.UUID,
@@ -46,7 +64,7 @@ async def get_report(
     report = await svc.get_report(report_id, user)
     if not report:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
-    return report
+    return await _detail(svc, report)
 
 
 @router.get("/job/{job_id}", response_model=ReportDetailResponse)
@@ -61,7 +79,7 @@ async def get_report_by_job_id(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Report not found for this job"
         )
-    return report
+    return await _detail(svc, report)
 
 
 @router.get("/{report_id}/stix")

@@ -203,9 +203,18 @@ class AgentMessageResponse(BaseModel):
     frontend maps a replayed conversation and a live one through the same code
     path — which is the point of storing the broadcast rather than
     reconstructing it from ``agent_findings``.
+
+    ``seq`` is the number the publisher gave the message when it went out, and
+    is the identity a client collapses a stored row onto its live twin with.
+    It is ``None`` for a run recorded before the publisher numbered anything:
+    such a row carries its old position within the report, which is a
+    different number from the same run's live events, and sending it would
+    have a client draw every line of that run twice. The endpoint decides
+    which world a run belongs to by whether it has a feed at all — see
+    ``ReportService.transcript_is_numbered``.
     """
 
-    seq: int
+    seq: int | None = None
     speaker: str
     role: str
     round: int
