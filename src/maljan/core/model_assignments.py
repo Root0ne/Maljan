@@ -16,6 +16,12 @@ not part of the key — two providers cannot serve one model at one endpoint.
 An endpoint is a URL where a provider has one, and the vendor's own name where
 it does not: Anthropic and Gemini are vendor APIs with nothing per-agent to
 override, so "the Anthropic API" is the whole of what an address means there.
+
+There is one function that answers where a call goes, and the settings probe
+calls it too. A probe that worked the address out for itself and a gate that
+worked it out from here would agree until they did not — a vendor with no URL,
+a trailing slash on a base URL — and the operator would see a green test
+followed by a refused job, with nothing on either screen saying why.
 """
 
 from __future__ import annotations
@@ -29,8 +35,9 @@ _VENDOR_ENDPOINTS = {
     "anthropic": "the Anthropic API",
     "gemini": "the Gemini API",
 }
-# The default an OpenAI entry with no base_url talks to.
+# What an entry with no base_url of its own talks to.
 _OPENAI_DEFAULT = "https://api.openai.com/v1"
+_OLLAMA_DEFAULT = "http://localhost:11434"
 
 
 @dataclass(frozen=True)
@@ -48,15 +55,48 @@ class ModelAssignment:
         return (self.endpoint, self.model)
 
 
+def normalised_endpoint(url: object) -> str:
+    """One address, one spelling: trimmed, with no trailing slash.
+
+    A base URL typed ``http://box:8080/v1/`` and the same one typed without the
+    slash are one server. Folding them here, in the one place the endpoint is
+    worked out, is what keeps a row filed under one spelling from being looked
+    up under the other.
+    """
+    return str(url or "").strip().rstrip("/")
+
+
+def endpoint_where(
+    provider: str,
+    base_url: object = None,
+    *,
+    openai_base_url: object = None,
+    ollama_base_url: object = None,
+) -> str:
+    """Where ``provider`` sends its calls, an entry's own ``base_url`` first.
+
+    The plain-value form of ``endpoint_for``, for the settings probe, which
+    holds staged values rather than a settings object. One function under both
+    so that the address a probe files its answer under and the address the gate
+    looks that answer up under cannot be two.
+    """
+    named = normalised_endpoint(base_url)
+    if provider == "openai":
+        return named or normalised_endpoint(openai_base_url) or _OPENAI_DEFAULT
+    if provider == "ollama":
+        return named or normalised_endpoint(ollama_base_url) or _OLLAMA_DEFAULT
+    return _VENDOR_ENDPOINTS.get(provider, provider)
+
+
 def endpoint_for(settings: object, provider: str, base_url: str | None = None) -> str:
     """Where ``provider`` sends its calls under ``settings``, agent override first."""
     llm = settings.llm  # type: ignore[attr-defined]
-    named = (base_url or "").strip()
-    if provider == "openai":
-        return named or (llm.openai.base_url or "").strip() or _OPENAI_DEFAULT
-    if provider == "ollama":
-        return named or str(llm.ollama.base_url or "").strip()
-    return _VENDOR_ENDPOINTS.get(provider, provider)
+    return endpoint_where(
+        provider,
+        base_url,
+        openai_base_url=llm.openai.base_url,
+        ollama_base_url=llm.ollama.base_url,
+    )
 
 
 def assignment_for(settings: object, agent: str) -> ModelAssignment:
