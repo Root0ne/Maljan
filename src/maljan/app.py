@@ -370,6 +370,7 @@ class MaljanApp:
             "validation_retries": 0,
             "validation_fed_back": {},
             "triage_facts": {},
+            "nudge_retry_modes": {},
         }
 
         result = await self.graph.ainvoke(initial_state)

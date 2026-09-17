@@ -1287,6 +1287,10 @@ def make_stage_agent_node(
                     agent_name: [e.to_captured().model_dump() for e in entries]
                 }
             update.update(_validation_update(bound_agent, agent_name))
+            mode = getattr(bound_agent, "_nudge_retry_mode", None)
+            if mode:
+                update["nudge_retry_modes"] = {agent_name: str(mode)}
+                bound_agent._nudge_retry_mode = None
             return update
 
         try:
@@ -2586,6 +2590,7 @@ def make_judge_node(
                     .set_token_usage(container.get_token_ledger().snapshot())
                     .set_truncation(container.get_truncation_ledger().snapshot())
                     .set_triage(_triage_facts)
+                    .set_nudge(state.get("nudge_retry_modes") or {})
                     .build()
                 )
                 run_summary_dict = summary.to_dict()

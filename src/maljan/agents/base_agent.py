@@ -263,6 +263,35 @@ def answer_is_isr(text: str) -> bool:
     return "CLAIM:" in text or has_findings_block(text)
 
 
+def nudge_turns(msgs: list) -> tuple[list, bool]:
+    """The conversation as it can be sent back to the server, and whether it changed.
+
+    An assistant turn that carried a tool call whose arguments never parsed
+    ends the loop: no tool ran, and nothing answered it. Sent back as it is,
+    the server has to render that call into its template and fails on the
+    same arguments, which is the 500 a live nudge got ("Failed to parse tool
+    call arguments as JSON"). The call is dropped, the turn's text kept, and
+    the answer the nudge asks for is what the model says next.
+    """
+    from langchain_core.messages import AIMessage
+
+    out: list = []
+    changed = False
+    for message in msgs:
+        invalid = getattr(message, "invalid_tool_calls", None) or []
+        if isinstance(message, AIMessage) and invalid:
+            out.append(
+                AIMessage(
+                    content=message.content,
+                    tool_calls=list(getattr(message, "tool_calls", None) or []),
+                )
+            )
+            changed = True
+            continue
+        out.append(message)
+    return out, changed
+
+
 def cause_chain(exc: BaseException, limit: int = 4) -> str:
     """``exc``'s causes, innermost last, as one line.
 
@@ -1528,6 +1557,9 @@ class BaseAnalyst(ABC):
         # after its one nudge. Read by ``_text_to_isr`` so the ISR says why it
         # is empty instead of leaving the reader to infer it from a claim list.
         self._answer_unstructured: bool = False
+        # How the last final-answer nudge had to be sent when the plain way
+        # would not do, or ``None``. The node reads it into the run summary.
+        self._nudge_retry_mode: str | None = None
 
     def _system_prompt(self, fallback: str | Callable[[], str]) -> str:
         """This analyst's system turn for the job it is actually running.
@@ -2215,23 +2247,63 @@ class BaseAnalyst(ABC):
             "%s: the loop's last message was not a final report; asking once for one.",
             self.name,
         )
-        turns = [*msgs, HumanMessage(content=FINAL_ANSWER_NUDGE)]
-
-        async def _ask() -> Any:
-            return await asyncio.wait_for(
-                self.llm.ainvoke(turns), timeout=min(remaining_time, float(timeout))
+        sendable, dropped = nudge_turns(msgs)
+        modes: list[str] = ["invalid_tool_calls_dropped"] if dropped else []
+        if dropped:
+            self.logger.warning(
+                "%s: the nudge leaves out a tool call whose arguments never parsed.", self.name
             )
+        turns = [*sendable, HumanMessage(content=FINAL_ANSWER_NUDGE)]
+        budget = min(remaining_time, float(timeout))
+
+        def _ask_with(model: Any, label: str) -> Any:
+            async def _ask() -> Any:
+                return await asyncio.wait_for(model.ainvoke(turns), timeout=budget)
+
+            return _run_coro_blocking(_ask(), budget + 5, label=label)
 
         try:
-            answer = _run_coro_blocking(
-                _ask(), min(remaining_time, float(timeout)) + 5, label=f"nudge:{self.name}"
-            )
-        except Exception as exc:  # noqa: BLE001 — a nudge that fails changes nothing
+            answer = _ask_with(self.llm, f"nudge:{self.name}")
+        except Exception as exc:  # noqa: BLE001 — a nudge that fails is asked one other way
             self.logger.warning("%s: the final-answer nudge failed (%s).", self.name, exc)
-            return None
+            # The other shape the server accepts: the loop's own tools bound
+            # and forbidden, so the transcript renders as the loop rendered
+            # it and the model still has to answer in prose.
+            withheld = self._llm_with_tools_withheld()
+            if withheld is None:
+                self._nudge_retry_mode = "+".join(modes) or None
+                return None
+            try:
+                answer = _ask_with(withheld, f"nudge-tools-none:{self.name}")
+            except Exception as again:  # noqa: BLE001 — changes nothing
+                self.logger.warning(
+                    "%s: the final-answer nudge failed with tools withheld too (%s).",
+                    self.name,
+                    again,
+                )
+                self._nudge_retry_mode = "+".join(modes) or None
+                return None
+            modes.append("tool_choice_none")
+        self._nudge_retry_mode = "+".join(modes) or None
         record_response_usage(self.token_ledger, answer)
         text = str(getattr(answer, "content", "") or "")
         return text or None
+
+    def _llm_with_tools_withheld(self) -> Any | None:
+        """This agent's model with its tools bound and ``tool_choice="none"``, or ``None``.
+
+        ``None`` when the agent has no tools or the model cannot bind them;
+        the caller then has no second way to ask.
+        """
+        tools = list(getattr(self, "tools", None) or [])
+        bind = getattr(self.llm, "bind_tools", None)
+        if not tools or bind is None:
+            return None
+        try:
+            return bind(tools, tool_choice="none")
+        except Exception as exc:  # noqa: BLE001 — a model that cannot bind has no fallback
+            self.logger.debug("%s: tools could not be bound for the nudge (%s).", self.name, exc)
+            return None
 
     def _record_react_loop(self, *, hit_step_cap: bool) -> None:
         """Count one ReAct loop and whether it exhausted its step budget.
@@ -2378,7 +2450,10 @@ class BaseAnalyst(ABC):
             return ""
 
         budget = synthesis_budget_chars(get_settings(), self.name)
-        trimmed = _trim_for_synthesis(msgs, budget)
+        # The same transcript rule the nudge follows: a tool call whose
+        # arguments never parsed is not sent back to the server.
+        sendable, _dropped = nudge_turns(msgs)
+        trimmed = _trim_for_synthesis(sendable, budget)
         if len(trimmed) < len(msgs):
             self.logger.warning(
                 "%s forced synthesis: trimmed %d of %d messages to fit %d chars.",

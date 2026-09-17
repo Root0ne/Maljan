@@ -98,6 +98,7 @@ def _default_profile_summary() -> RunSummary:
         ]
     )
     builder.set_triage({"entries": 11, "failed": 1, "duration_ms": 900, "yara_hits": 2})
+    builder.set_nudge({"static": "invalid_tool_calls_dropped"})
     builder.set_degraded_mode(False, [])
     builder.set_failed_analysts([])
     builder.set_token_usage(
@@ -133,7 +134,13 @@ def _default_profile_summary() -> RunSummary:
 # counter per object kind that was dropped. Their contents are a property of
 # the run, not of the format, so they are pinned as present and opaque.
 _DATA_KEYED = frozenset(
-    {"techniques_by_layer", "truncation.integrity_dropped", "corroboration", "validation.by_code"}
+    {
+        "techniques_by_layer",
+        "truncation.integrity_dropped",
+        "corroboration",
+        "validation.by_code",
+        "nudge.retry_mode",
+    }
 )
 
 

@@ -33,6 +33,9 @@
     "sycophancy_events": null,
     "termination_reason": null
   },
+  "nudge": {
+    "retry_mode": "<data-keyed map>"
+  },
   "profile": {
     "analysts": [
       null

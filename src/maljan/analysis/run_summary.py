@@ -234,6 +234,10 @@ class RunSummary:
     # on a run whose team has no triage stage or whose pack declined to run,
     # which a reader has to be able to tell from a pack that wrote nothing.
     triage: dict[str, Any] | None = None
+    # How the final-answer nudge had to be sent, per analyst, when the plain
+    # way failed: ``{"retry_mode": {"static": "invalid_tool_calls_dropped"}}``.
+    # ``None`` when no analyst needed a different way.
+    nudge: dict[str, Any] | None = None
 
     # ------------------------------------------------------------------
     # Rendering
@@ -464,6 +468,7 @@ class RunSummary:
             "profile": dict(self.profile) if self.profile else None,
             "stages": [dict(row) for row in self.stages],
             "triage": dict(self.triage) if self.triage else None,
+            "nudge": dict(self.nudge) if self.nudge else None,
         }
 
         if self.validation:
@@ -544,6 +549,13 @@ class RunSummaryBuilder:
         self._profile: dict[str, Any] | None = None
         self._stages: list[dict[str, Any]] = []
         self._triage: dict[str, Any] | None = None
+        self._nudge: dict[str, Any] | None = None
+
+    def set_nudge(self, retry_modes: dict[str, str] | None) -> RunSummaryBuilder:
+        """Which analysts needed the nudge sent another way, and which way."""
+        modes = {str(k): str(v) for k, v in (retry_modes or {}).items() if v}
+        self._nudge = {"retry_mode": modes} if modes else None
+        return self
 
     def set_triage(self, facts: dict[str, Any] | None) -> RunSummaryBuilder:
         """The pack's three counts, out of the state channel the triage node wrote.
@@ -790,6 +802,7 @@ class RunSummaryBuilder:
             profile=self._profile,
             stages=self._stages,
             triage=self._triage,
+            nudge=self._nudge,
         )
 
 

@@ -243,6 +243,11 @@ class AnalysisState(TypedDict):
     # triage node; empty on a run whose team has no triage stage.
     triage_facts: dict[str, Any]
 
+    # Which analysts had their final-answer nudge sent another way than the
+    # plain one, and which way. Written by the analyst nodes, merged per agent,
+    # read by the judge into ``run_summary.nudge``.
+    nudge_retry_modes: Annotated[dict[str, str], _merge_dicts]
+
     # How many feedback retries the run spent, across every producer.
     # Append-only: two analysts running in parallel each add their own.
     validation_retries: Annotated[int, operator.add]
