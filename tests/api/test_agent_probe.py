@@ -335,7 +335,11 @@ async def test_an_inheriting_agent_reports_the_resolved_global_expert_model(monk
     staged = {"llm.provider": "ollama", "llm.ollama.expert_model": "qwen3.5:9b"}
     result = await probe_agent({"name": "network", "settings": staged})
     assert result.ok is True
-    assert result.details["llm"] == {"provider": "ollama", "model": "qwen3.5:9b"}
+    assert result.details["llm"] == {
+        "provider": "ollama",
+        "model": "qwen3.5:9b",
+        "endpoint": "http://localhost:11434",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -390,7 +394,12 @@ async def test_a_per_agent_ollama_model_the_server_has_still_resolves(monkeypatc
     }
     result = await probe_agent({"name": "network", "settings": staged})
     assert result.ok is True
-    assert result.details["llm"] == {"provider": "ollama", "model": "qwen3:4b"}
+    assert result.details["llm"] == {
+        "provider": "ollama",
+        "model": "qwen3:4b",
+        # Where the answer is filed: the endpoint this agent would call.
+        "endpoint": "http://localhost:11434",
+    }
 
 
 @pytest.mark.asyncio

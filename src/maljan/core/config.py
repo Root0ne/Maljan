@@ -267,6 +267,16 @@ class LLMConfig(BaseModel):
     # Per-agent overrides: {"static": AgentLLMConfig(...), "dynamic": ...}
     agents: dict[str, AgentLLMConfig] = Field(default_factory=dict)
 
+    # Whether a job is refused when an agent names a model no probe has
+    # reached. A model name is the one part of a definition nothing validates
+    # until the run gets to that agent: a typo in it, or an endpoint that no
+    # longer serves it, fails minutes into an analysis with a sample already
+    # uploaded and a queue slot spent. The settings probe already answers the
+    # question; this makes the answer a precondition rather than a courtesy.
+    # Turned off for an air-gapped batch run, where the endpoint is known good
+    # and there is nobody at a console to press the button.
+    require_probe: bool = True
+
     # Hard output cap for the judge verdict generation (max_tokens). The judge
     # otherwise has no output bound — only the 600 s wall-clock timeout — so a
     # degenerate/rambling decode on the slow local model burns the full budget

@@ -132,6 +132,9 @@ function SamplesPageContent() {
       );
       window.location.href = `/analysis/${job.id}/live`;
     } catch (err) {
+      // The API's own sentence, shown as it was written: an unknown profile, a
+      // disabled analyst, or a model whose probe has not passed — each names
+      // what to fix and where, and rewording them here would lose that.
       setSubmitError(getErrorMessage(err) || "Failed to start analysis.");
       setSubmitting(false);
     }

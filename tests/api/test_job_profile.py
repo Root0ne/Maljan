@@ -70,7 +70,12 @@ def _submit(client: TestClient, config: dict) -> object:
         duration_seconds=None,
         error_message=None,
     )
-    with patch("app.api.v1.jobs.AnalysisService.create_job", AsyncMock(return_value=created)):
+    # The probe gate is a submit-time check of its own, with its own tests;
+    # here it stands aside so what is asserted is the profile rule.
+    with (
+        patch("app.api.v1.jobs.AnalysisService.create_job", AsyncMock(return_value=created)),
+        patch("app.api.v1.jobs._unprobed_models_for", AsyncMock(return_value=[])),
+    ):
         return client.post("/api/v1/jobs", json={"sample_id": str(uuid.uuid4()), "config": config})
 
 

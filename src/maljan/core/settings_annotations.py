@@ -378,6 +378,17 @@ ANNOTATIONS: dict[str, Annotation] = {
         "probe": "llm",
         "subgroup": "Google Gemini",
     },
+    "llm.require_probe": {
+        "title": "Require a passing model probe",
+        "description": (
+            "Refuse a job whose agents name a model no probe has reached at the "
+            "endpoint they would use. The probe result is stored against that "
+            "endpoint and model, so changing either asks for it again. Turn this "
+            "off for an air-gapped batch run, where the endpoint is known good "
+            "and nobody is at the console to press the button."
+        ),
+        "probe": "llm",
+    },
     "llm.judge_max_tokens": {
         "title": "Judge max output tokens",
         "description": (

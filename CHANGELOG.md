@@ -353,6 +353,32 @@ change landed on `main`.
   operator who runs it behind HTTP, writing under `MALJAN_STAGING_DIR` with
   `MALJAN_STAGING_TTL_HOURS` pruning.
 
+- **A model is probed before a job may name it.** The `llm` and `agent`
+  probes write down every `(endpoint, model)` pair they reached, with the
+  provider and the sentence they came back with (`model_probes`, revision
+  `20260924000000`). Submitting a job reads that record for every model its
+  team's agents would call and refuses with 422 naming the agent, the model,
+  the endpoint and the probe's last message; the console shows the same
+  sentence on the submit form. A changed endpoint or model finds no row and is
+  refused until it is probed. `core.llm.require_probe` (on) turns the gate off
+  for an air-gapped batch run.
+- **The same indicator or finding said twice is written once.**
+  `reporting.dedupe` says what makes two indicators one — the kind and the
+  value with its case, its padding and its defanging undone — and both the
+  report's indicator table and the STIX bundle's integrity pass read it. A
+  finding is fingerprinted on its first technique id and its normalised title.
+  A fold keeps the first occurrence's words, its confidence and every other
+  number as written, and grows only the set-shaped cells: the ledger ids, the
+  agents, an indicator's labels. `run_summary.dedupe` states what was folded.
+- **A tool call the model ran out of room to finish is closed off.** langchain
+  marks a call whose arguments never parsed invalid and langgraph ignores it,
+  so nothing ran and the loop ended holding a turn it paid a step for. The
+  quote and the brackets the arguments are missing are appended — never
+  removing, substituting or inserting anywhere but the end — and the call is
+  made when the result parses; a trailing comma, a key with no value or a
+  missing colon is still left to the path that drops it. The ledger entry
+  carries `args_repaired` and `args_raw` (revision `20260923000000`).
+
 ### Fixed
 
 - **A delegated ask stays inside the stage that made it.** A callee's

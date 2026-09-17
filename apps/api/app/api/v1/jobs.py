@@ -70,6 +70,27 @@ def _profile_agents(profile: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(named))
 
 
+async def _unprobed_models_for(db: AsyncSession, config: dict[str, Any]) -> list[str]:
+    """Every model this job's agents would call that no probe has reached.
+
+    Read off the team the job would actually run — the profile it names, or
+    the stored default — because the gate is about the models a run will ask
+    for, and a team nobody selected names models nobody will call.
+    """
+    from app.services.model_probes import unprobed_models
+    from app.services.settings_service import effective_core_settings
+
+    settings = await effective_core_settings(db)
+    profile = str(config.get("profile") or settings.agents.profile)
+    team = settings.agents.profiles.get(profile)
+    if team is None:
+        # An unknown profile is refused a few lines further on, with the list
+        # of the ones that exist; saying it twice, differently, helps nobody.
+        return []
+    agents = [agent for stage in team.stages for agent in stage.agents]
+    return await unprobed_models(db, settings, agents)
+
+
 # The config keys an audit row may carry. A job config is operator-supplied and
 # open-ended, so it is never copied wholesale: only these are named, and a
 # credential someone put in it has no way through.
@@ -105,6 +126,16 @@ async def create_job(
         f"Creating analysis job for sample={log_safe(body.sample_id)}",
         extra={"sample_id": log_safe(body.sample_id), "user_id": log_safe(user.id)},
     )
+    unprobed = await _unprobed_models_for(db, body.config or {})
+    if unprobed:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "A model this team would call has no passing probe. Test it in "
+                "Settings, or turn off core.llm.require_probe for an air-gapped "
+                "run. " + "; ".join(unprobed)
+            ),
+        )
     profile = (body.config or {}).get("profile")
     if profile is not None:
         known = await _known_profiles(db)

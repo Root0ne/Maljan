@@ -14,6 +14,7 @@ import httpx
 from maljan.core import virustotal
 from maljan.core.config import MCPServerConfig
 from maljan.core.logger import logger
+from maljan.core.model_assignments import endpoint_for
 from maljan.core.paths import resolve_data
 from maljan.core.settings_overrides import build_settings, redact_url, split_key
 from maljan.providers.errors import ProviderConfigurationError
@@ -698,7 +699,17 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
                 # built-in's resolved prompt read-only, and a clone seeds its
                 # copy from this text rather than guessing it.
                 "prompt": resolved.prompt,
-                "llm": {"provider": llm_provider, "model": llm_model},
+                "llm": {
+                    "provider": llm_provider,
+                    "model": llm_model,
+                    # Where the call would go, so the probe's answer can be
+                    # filed under the pair it was taken against.
+                    "endpoint": endpoint_for(
+                        settings,
+                        llm_provider,
+                        getattr(agent_llm, "base_url", None) if agent_llm else None,
+                    ),
+                },
                 "static_provider": resolved.static_provider_id,
                 "servers": servers,
             },
@@ -1039,18 +1050,51 @@ def _unwrap(value: Any) -> Any:
     return value.get_secret_value() if hasattr(value, "get_secret_value") else value
 
 
+def candidate_settings(values: dict[str, Any], stored: dict[str, Any]) -> Any:
+    """The core settings a probe of these staged values would run against.
+
+    Staged over stored, the same layering every probe reads, exported because
+    the caller that records what a probe reached needs the same answer: which
+    endpoint, and which model, the values under test name.
+    """
+    core_layer = {split_key(k)[1]: v for k, v in stored.items() if k.startswith("core.")}
+    core_layer.update(
+        {split_key(k)[1]: v for k, v in values.items() if k.startswith("core.") and v is not None}
+    )
+    return build_settings(core_layer)
+
+
+def models_the_llm_probe_reached(settings: Any) -> list[tuple[str, str, str]]:
+    """``(endpoint, model, provider)`` for every pair the LLM probe checked.
+
+    Only the pairs it actually asked about. The probe reaches the selected
+    provider's own endpoint and the expert and judge models it serves; on
+    Ollama it also asks each per-agent override's server for that override's
+    tag by name. An agent sitting on a different provider was not tested here
+    and is left for its own probe to answer for, because recording a pass for
+    something nothing reached is worse than recording nothing.
+    """
+    llm = settings.llm
+    provider = str(llm.provider)
+    home = endpoint_for(settings, provider)
+    pairs = [
+        (home, str(llm.expert_model), provider),
+        (home, str(llm.judge_model), provider),
+    ]
+    if provider == "ollama":
+        for override in llm.agents.values():
+            if str(override.provider) != "ollama" or not override.model:
+                continue
+            pairs.append(
+                (endpoint_for(settings, "ollama", override.base_url), str(override.model), "ollama")
+            )
+    return [(endpoint, model, name) for endpoint, model, name in pairs if endpoint and model]
+
+
 async def run_probe(name: str, values: dict[str, Any], stored: dict[str, Any]) -> ProbeResult:
     probe = PROBES[name]
     try:
-        core_layer = {split_key(k)[1]: v for k, v in stored.items() if k.startswith("core.")}
-        core_layer.update(
-            {
-                split_key(k)[1]: v
-                for k, v in values.items()
-                if k.startswith("core.") and v is not None
-            }
-        )
-        core = build_settings(core_layer)
+        core = candidate_settings(values, stored)
     except (ValueError, ValidationError) as exc:
         # A malformed key or a staged value the model rejects is an operator
         # error, not a route error. Name the fields and why they were

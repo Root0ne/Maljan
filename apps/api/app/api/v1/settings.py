@@ -44,7 +44,14 @@ from app.services.audit import record as audit_record
 from app.services.mapping_preview import PREVIEW_MAX_BYTES, preview_mapping
 from app.services.server_map import SERVER_MAP_KEY, TOKEN_MASK
 from app.services.settings_catalog_api import catalog_index, full_catalog, resolved_catalog
-from app.services.settings_probes import PROBES, run_agent_probe, run_mcp_probe, run_probe
+from app.services.settings_probes import (
+    PROBES,
+    candidate_settings,
+    models_the_llm_probe_reached,
+    run_agent_probe,
+    run_mcp_probe,
+    run_probe,
+)
 from app.services.settings_service import (
     SettingsService,
     SettingsValidationError,
@@ -458,6 +465,27 @@ async def register_virustotal_agent(
     )
 
 
+async def _write_down_what_was_reached(
+    db: AsyncSession, pairs: list[tuple[str, str, str]], *, ok: bool, detail: str
+) -> None:
+    """File this probe's answer under every model it was taken against.
+
+    Never raises. A probe is an operator pressing a button and reading a
+    sentence; a store that could not be written is a reason to log, not a
+    reason to give them an error instead of their answer.
+    """
+    from app.services.model_probes import record_probe
+
+    for endpoint, model, provider in pairs:
+        try:
+            await record_probe(
+                db, endpoint=endpoint, model=model, provider=provider, ok=ok, detail=detail
+            )
+        except Exception as exc:  # noqa: BLE001 — the answer still reaches the operator
+            logger.warning("probe result not stored: %s", type(exc).__name__)
+            return
+
+
 @router.post("/test/agent", response_model=ProbeResponse)
 async def test_agent(
     body: ProbeRequest,
@@ -470,9 +498,23 @@ async def test_agent(
     Takes staged values so an operator can resolve a definition they have not
     saved yet — the same contract every other probe has. No LLM call is made:
     this reports the model that *would* be used, never a completion.
+
+    What it reached is written down against the endpoint and the model it
+    named, so submitting a job can refuse a team whose agents name a model
+    nothing has ever answered for.
     """
     stored = await SettingsService(db).load_overrides()
-    return await _probe_response(run_agent_probe(name, body.values, stored))
+    response = await _probe_response(run_agent_probe(name, body.values, stored))
+    named = (response.details or {}).get("llm") or {}
+    endpoint, model = str(named.get("endpoint") or ""), str(named.get("model") or "")
+    if endpoint and model:
+        await _write_down_what_was_reached(
+            db,
+            [(endpoint, model, str(named.get("provider") or ""))],
+            ok=response.ok,
+            detail=response.detail,
+        )
+    return response
 
 
 @router.post("/test/{probe}", response_model=ProbeResponse)
@@ -485,7 +527,15 @@ async def test_probe(
     if probe not in PROBES:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown probe: {probe}")
     stored = await SettingsService(db).load_overrides()
-    return await _probe_response(run_probe(probe, body.values, stored))
+    response = await _probe_response(run_probe(probe, body.values, stored))
+    if probe == "llm":
+        try:
+            reached = models_the_llm_probe_reached(candidate_settings(body.values, stored))
+        except Exception as exc:  # noqa: BLE001 — the answer still reaches the operator
+            logger.warning("probed models not derived: %s", type(exc).__name__)
+            reached = []
+        await _write_down_what_was_reached(db, reached, ok=response.ok, detail=response.detail)
+    return response
 
 
 async def _capped_body(request: Request) -> dict[str, Any]:

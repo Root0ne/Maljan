@@ -167,6 +167,28 @@ Thirteen probes back the "Test" buttons
 that fails answers 200 with the failure as data — a connection test that fails
 is an answer, not an error.
 
+### A model is probed before a job may name it
+
+The `llm` and `agent` probes write down what they reached: one row per
+`(endpoint, model)` pair, with the provider, whether the probe got there and
+the sentence it came back with. Submitting a job reads that record for every
+model the team's agents would call, and refuses the job with 422 when one of
+them has no passing result — naming the agent, the model, the endpoint and the
+probe's last message. The console shows that sentence on the submit form.
+
+The pair is also the invalidation. A changed endpoint or a changed model is a
+different question, finds no row, and is refused until it is probed: nothing
+has to expire a result, because a result is never read for a pair it was not
+taken against. The `llm` probe records the selected provider's expert and
+judge models at its own endpoint, and on Ollama each per-agent override at its
+own server; an agent sitting on a different provider or its own endpoint is
+recorded by its own **Test** button in the agent editor.
+
+`core.llm.require_probe` (on) turns the gate off. It is there for an
+air-gapped batch run, where the endpoint is known good and nobody is at a
+console to press a button, and it is the only way past — a job cannot ask to
+skip it.
+
 ### Format routing and the sandbox
 
 No sample is refused for its format. Routing detects the file type from magic
