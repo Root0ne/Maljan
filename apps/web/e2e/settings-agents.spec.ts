@@ -123,7 +123,10 @@ test.describe("agent definitions and profiles", () => {
     await triage.getByLabel("lean stage_1 key").fill("triage");
     const renamed = lean.locator('[data-stage="triage"]');
     await renamed.getByLabel("lean triage add agent").selectOption("static");
-    await expect(renamed.getByText("static")).toBeVisible();
+    // Named the way its operator named it, with its key beside it — the picker
+    // offers "Static analyst (static)" and the stage lists the same name.
+    await expect(renamed.getByText("Static analyst")).toBeVisible();
+    await expect(renamed.getByText("static", { exact: true })).toBeVisible();
 
     // A second stage that depends on the first and only runs on Windows.
     await lean.getByRole("button", { name: "Add stage" }).click();

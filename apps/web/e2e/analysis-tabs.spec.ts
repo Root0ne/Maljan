@@ -246,12 +246,171 @@ test.describe("Analysis tabs", () => {
 
     await page.goto(`/analysis/${JOB_ID}/dynamic`);
 
-    await expect(page.getByText(/may not have been detonated/)).toBeVisible();
+    await expect(page.getByText(/was not detonated on this run/)).toBeVisible();
     await expect(page.getByRole("heading", { name: "Analyst findings" })).toBeVisible();
     await expect(
       page.getByText("The sample very likely detected the sandbox and exited early.")
     ).toBeVisible();
     await expect(page.getByText("no process activity recorded")).toBeVisible();
+  });
+
+  /* The console dropped the one reputation answer a run gets. It draws it
+   * now, on the tab that holds the hash that was looked up, and only when the
+   * ledger actually holds it — a configured service that was never asked
+   * draws nothing. */
+  test("the identity tab draws what VirusTotal answered about the hash", async ({
+    sessionPage: page,
+  }) => {
+    await page.route(`**/api/v1/jobs/*/evidence**`, (route) => {
+      const tool = new URL(route.request().url()).searchParams.get("tool");
+      const entries =
+        tool === "get_file_report"
+          ? [
+              {
+                id: "9",
+                entry_id: "ev_0042",
+                stage: "triage",
+                agent: "pipeline",
+                server: "virustotal",
+                tool: "get_file_report",
+                ok: true,
+                duration_ms: 310,
+                seq: 42,
+                args: { hash: "a".repeat(64) },
+                output: "",
+                structured: {
+                  data: {
+                    attributes: {
+                      last_analysis_stats: { malicious: 42, suspicious: 3, undetected: 26 },
+                      popular_threat_classification: {
+                        suggested_threat_label: "trojan.formbook/injector",
+                      },
+                      first_submission_date: 1_600_000_000,
+                    },
+                  },
+                },
+                created_at: "2026-09-01T10:00:00Z",
+              },
+            ]
+          : [];
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          job_id: JOB_ID,
+          entries,
+          total: entries.length,
+          page: 1,
+          page_size: 5,
+        }),
+      });
+    });
+
+    await page.goto(`/analysis/${JOB_ID}/identity`);
+
+    const section = page.getByTestId("reputation-section");
+    await expect(section).toBeVisible();
+    await expect(section.getByRole("heading", { name: "VirusTotal" })).toBeVisible();
+    await expect(section).toContainText("42");
+    await expect(section).toContainText("/71");
+    await expect(section).toContainText("trojan.formbook/injector");
+    // The citation resolves into the ledger rather than restating the row.
+    await expect(section.getByRole("link", { name: "ev_0042" })).toHaveAttribute(
+      "href",
+      `/analysis/${JOB_ID}/evidence?evidence=ev_0042`,
+    );
+    await expect(alerts(page)).toHaveCount(0);
+  });
+
+  test("a run that asked nobody about the hash draws no reputation section", async ({
+    sessionPage: page,
+  }) => {
+    await page.goto(`/analysis/${JOB_ID}/identity`);
+
+    await expect(page.getByRole("heading", { name: /File Hashes/i })).toBeVisible();
+    await expect(page.getByTestId("reputation-section")).toHaveCount(0);
+  });
+
+  /* A tab is a promise that there is something behind it. The fixture report
+   * fills every one of them, which is what the walk above proves; this is the
+   * other half — a report that filled none of them offers none. */
+  test("a report with nothing in it offers only the three that always answer", async ({
+    sessionPage: page,
+  }) => {
+    await page.route(`**/api/v1/reports/job/${JOB_ID}`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...REPORT,
+          mitre_techniques: [],
+          stix_bundle: null,
+          agent_findings: [],
+          malware_report: {
+            ...REPORT.malware_report,
+            static: null,
+            dynamic: null,
+            network: null,
+            persistence: [],
+            ttp_mappings: [],
+            capability_matrix: [],
+            sections: [],
+            detection_signatures: [],
+            defensive_recommendations: [],
+            stix_bundle_extended: {},
+            attribution: {
+              family: null,
+              family_confidence: 0,
+              family_grounded: true,
+              actor: null,
+              campaign: null,
+              similar_samples: [],
+            },
+          },
+        }),
+      })
+    );
+
+    await page.goto(`/analysis/${JOB_ID}`);
+
+    // The identity block is on every report, so IDENTITY joins the three.
+    for (const label of ["SUMMARY", "CONVERSATION", "IDENTITY", "EVIDENCE"]) {
+      await expect(page.getByRole("link", { name: new RegExp(`^${label}$`, "i") })).toBeVisible();
+    }
+    for (const label of [
+      "STATIC",
+      "DYNAMIC",
+      "NETWORK",
+      "PERSISTENCE",
+      "ATTRIBUTION",
+      "DETECTION",
+      "DEFENSE",
+    ]) {
+      await expect(page.getByRole("link", { name: new RegExp(`^${label}$`, "i") })).toHaveCount(0);
+    }
+    await expect(alerts(page)).toHaveCount(0);
+  });
+
+  test("a running job offers the three that can answer before it finishes", async ({
+    sessionPage: page,
+  }) => {
+    await page.route(`**/api/v1/jobs/${JOB_ID}`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ...COMPLETED_JOB, status: "running", completed_at: null }),
+      })
+    );
+    await page.route(`**/api/v1/reports/job/${JOB_ID}`, (route) =>
+      route.fulfill({ status: 404, body: JSON.stringify({ detail: "Not found" }) })
+    );
+
+    await page.goto(`/analysis/${JOB_ID}`);
+
+    await expect(page.getByRole("link", { name: /^SUMMARY$/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /^CONVERSATION$/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /^EVIDENCE$/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /^IDENTITY$/i })).toHaveCount(0);
   });
 
   test("the conversation is offered whatever state the job is in", async ({

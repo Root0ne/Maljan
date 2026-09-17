@@ -58,7 +58,9 @@ export default function PipelineStrip({
             }`}
             title={stage.reason || `${stage.kind} stage`}
           >
-            <span className="font-mono">{names.get(`stage:${stage.key}`) ?? stage.key}</span>
+            {/* A name rather than a key, so not monospaced: the roster's
+                label where the run published one, the key where it did not. */}
+            <span className="font-medium">{names.get(`stage:${stage.key}`) ?? stage.key}</span>
             <span className="uppercase tracking-wider">{stage.status}</span>
             {members.length > 0 && (
               <span className="text-text-muted">{members.join(", ")}</span>

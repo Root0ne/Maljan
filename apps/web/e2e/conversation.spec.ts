@@ -338,7 +338,10 @@ test.describe("Conversation", () => {
     await page.goto(`/analysis/${JOB_ID}/conversation`);
 
     const strip = page.getByTestId("pipeline-strip");
-    await expect(strip).toContainText("analysis");
+    // The roster's label for the stage, and the label of the agent that ran
+    // in it — the same names the conversation draws, not the keys.
+    await expect(strip).toContainText("Analysis");
+    await expect(strip).toContainText("Lead analyst");
     await expect(strip).toContainText("done");
     await expect(page.getByTestId("pipeline-strip")).toHaveCount(1);
   });
