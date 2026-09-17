@@ -28,6 +28,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from maljan.pipeline.validation import corroboration_row, corroboration_sources
+
 # ---------------------------------------------------------------------------
 # Sub-components
 # ---------------------------------------------------------------------------
@@ -248,6 +250,13 @@ class RunSummary:
     # Rendering
     # ------------------------------------------------------------------
 
+    def __post_init__(self) -> None:
+        # A summary read back from storage may carry the flat rows written
+        # before the two lists; every reader below assumes the current shape.
+        self.corroboration = {
+            tid: corroboration_row(row) for tid, row in (self.corroboration or {}).items()
+        }
+
     def to_markdown(self) -> str:
         """Render the full run summary as a human-readable Markdown report."""
         sample_label = f"{self.file_hash}"
@@ -333,7 +342,7 @@ class RunSummary:
             ]
             for tid, sources in sorted(
                 self.corroboration.items(),
-                key=lambda item: (-len(_corroboration_sources(item[1])), item[0]),
+                key=lambda item: (-len(corroboration_sources(item[1])), item[0]),
             ):
                 asserted = ", ".join(sources.get("asserted_by") or []) or "—"
                 claimed = ", ".join(sources.get("claimed_by") or []) or "—"
@@ -781,21 +790,12 @@ class RunSummaryBuilder:
         A flat list of sources — the shape stored before the two lists — is
         read as claimed by all of them, so an older summary still builds.
         """
-        self._corroboration = {}
-        for tid, row in (corroboration or {}).items():
-            if isinstance(row, dict):
-                self._corroboration[tid] = {
-                    "asserted_by": [str(x) for x in row.get("asserted_by") or []],
-                    "claimed_by": [str(x) for x in row.get("claimed_by") or []],
-                }
-            else:
-                self._corroboration[tid] = {
-                    "asserted_by": [],
-                    "claimed_by": [str(x) for x in (row or [])],
-                }
+        self._corroboration = {
+            tid: corroboration_row(row) for tid, row in (corroboration or {}).items()
+        }
         counts: dict[str, int] = {}
         for row in self._corroboration.values():
-            for source in _corroboration_sources(row):
+            for source in corroboration_sources(row):
                 counts[str(source)] = counts.get(str(source), 0) + 1
         self._techniques_by_layer = counts
         return self
@@ -838,13 +838,6 @@ class RunSummaryBuilder:
 # ---------------------------------------------------------------------------
 # Pure-Python helper (avoids importing from routing to prevent circular deps)
 # ---------------------------------------------------------------------------
-
-
-def _corroboration_sources(row: Any) -> list[str]:
-    """Every source of one corroboration row, whichever shape it has."""
-    if isinstance(row, dict):
-        return [*(row.get("asserted_by") or []), *(row.get("claimed_by") or [])]
-    return [str(s) for s in (row or [])]
 
 
 def _rolling_std(values: list[float]) -> float:

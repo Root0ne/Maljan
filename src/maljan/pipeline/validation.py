@@ -1721,6 +1721,21 @@ def corroboration(
     return out
 
 
+def corroboration_row(row: Mapping[str, Any] | Sequence[str] | None) -> dict[str, list[str]]:
+    """One corroboration row in the current shape, whichever shape it was stored in.
+
+    ``{asserted_by, claimed_by}`` comes back as it is; a flat list of sources —
+    the shape stored before the two lists — is read as claimed by all of them,
+    which is what a list that never distinguished a rule from an agent meant.
+    """
+    if isinstance(row, Mapping):
+        return {
+            "asserted_by": [str(x) for x in row.get("asserted_by") or []],
+            "claimed_by": [str(x) for x in row.get("claimed_by") or []],
+        }
+    return {"asserted_by": [], "claimed_by": [str(x) for x in (row or [])]}
+
+
 def corroboration_sources(row: Mapping[str, Any] | Sequence[str] | None) -> list[str]:
     """Every source of one corroboration row, whichever shape the row has.
 

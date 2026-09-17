@@ -373,3 +373,28 @@ class TestRunSummaryToDict:
     def test_validation_none_when_not_set(self) -> None:
         d = self._make_summary().to_dict()
         assert d["validation"] is None
+
+
+class TestASummaryStoredInTheFlatShape:
+    """A stored summary from before the two lists is read on every path,
+    not only through the builder: the CLI builds a RunSummary from the
+    stored dict directly."""
+
+    def test_the_dataclass_normalises_on_construction(self) -> None:
+        import dataclasses
+
+        summary = dataclasses.replace(
+            _make_builder().build(), corroboration={"T1055": ["static", "capa"]}
+        )
+        assert summary.corroboration == {
+            "T1055": {"asserted_by": [], "claimed_by": ["static", "capa"]}
+        }
+        assert summary.to_dict()["corroboration"]["T1055"]["claimed_by"] == ["static", "capa"]
+        assert "| T1055 | — | static, capa |" in summary.to_markdown()
+
+    def test_the_current_shape_passes_through(self) -> None:
+        import dataclasses
+
+        row = {"asserted_by": ["capa"], "claimed_by": ["static"]}
+        summary = dataclasses.replace(_make_builder().build(), corroboration={"T1055": row})
+        assert summary.corroboration == {"T1055": row}

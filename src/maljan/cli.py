@@ -135,16 +135,21 @@ def _print_run_summary_inline(run_summary_dict: dict) -> None:
             )
 
     if corroboration:
-        multi = sum(1 for sources in corroboration.values() if len(sources) > 1)
+        from maljan.pipeline.validation import corroboration_sources
+
+        multi = sum(1 for row in corroboration.values() if len(corroboration_sources(row)) > 1)
         typer.echo(
             f"\nCorroboration: {len(corroboration)} technique(s) | "
             f"{multi} named by more than one source"
         )
-        # Best-corroborated first, which is the order a reader wants and the
-        # same order the judge was shown them in.
-        ranked = sorted(corroboration.items(), key=lambda item: (-len(item[1]), item[0]))
-        for tid, sources in ranked[:3]:
-            typer.echo(f"  {tid:14s} {', '.join(sources)}")
+        # Most sources first, which is the order a reader wants and the same
+        # order the judge was shown them in. Rows are read in either shape.
+        ranked = sorted(
+            corroboration.items(),
+            key=lambda item: (-len(corroboration_sources(item[1])), item[0]),
+        )
+        for tid, row in ranked[:3]:
+            typer.echo(f"  {tid:14s} {', '.join(corroboration_sources(row))}")
 
     if validation:
         unresolved = validation.get("unresolved") or []
