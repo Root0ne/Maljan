@@ -93,31 +93,30 @@ function shortHash(text: string): string {
 }
 
 /**
- * The identity of one message.
+ * The identity of one message: who said it, in which round, and what it said.
  *
- * `role:speaker:round` is enough for a line said to the room: a given agent
- * speaks once per role per round. A line said to one agent is not — a lead
- * that asks three specialists in one round, or the same one twice, speaks
- * several times as the same role in the same round — so those carry the
- * addressee and a digest of what was said.
+ * One scheme for all three readers, and that is the whole point. `role:speaker:round`
+ * alone is enough for a line said to the room but not for a delegated one — a
+ * lead that asks three specialists in one round speaks three times as the same
+ * role in the same round — so the digest of the text is always part of it.
  *
- * Derived from the content rather than counted, and that is the whole point:
- * the stream back-fill and the live socket overlap by design, and a counter
- * gave the replayed copy of an ask the *next* number, so both were kept and
- * every ask and answer in the replay window was drawn twice. Two copies of
- * one line hash the same and collapse; two different asks in one round do
- * not.
+ * Derived from the content rather than counted, and never from anything only
+ * one source has. A counter gave the back-filled copy of an ask the *next*
+ * number, so both copies were kept; then the addressee was put in the id, and
+ * since `agent_messages` has no column for it, a stored report and events
+ * still inside the stream's TTL drew every ask twice again — once with the
+ * arrow and once without. The text is the one thing a live event and its
+ * persisted row both carry verbatim, so it is what they are keyed on. The
+ * addressee stays on the message, for drawing the arrow; it is not in the id
+ * until both sides have it.
  */
 function messageId(
   role: TranscriptRole,
   speaker: string,
   round: number,
-  addressedTo: string | undefined,
   text: string
 ): string {
-  const base = `${role}:${speaker}:${round}`;
-  if (!addressedTo) return base;
-  return `${base}->${addressedTo}#${shortHash(text)}`;
+  return `${role}:${speaker}:${round}#${shortHash(text)}`;
 }
 
 function asAddressee(value: unknown): string | undefined {
@@ -224,10 +223,8 @@ export function messagesFromEvents(events: WSEvent[]): TranscriptMessage[] {
     const addressedTo = asAddressee(d.addressed_to);
 
     // The stream back-fill and the live socket overlap by design, so the same
-    // message can arrive twice; `messageId` says what makes two the same, and
-    // an addressed line is identified by what it says so both copies of it
-    // land on one id.
-    const id = messageId(role, speaker, round, addressedTo, text);
+    // message can arrive twice; `messageId` says what makes two the same.
+    const id = messageId(role, speaker, round, text);
     if (seen.has(id)) continue;
     seen.add(id);
 
@@ -297,6 +294,9 @@ export function messagesFromTranscript(
 ): TranscriptMessage[] {
   const out: TranscriptMessage[] = [];
   const all = rows ?? [];
+  /* Two rows that say the same thing in the same round are two rows: an agent
+     asked twice with the same words. Only those carry their `seq`, because a
+     row that is already unique has to keep the id its live twin has. */
   const shared = new Set<string>();
   const once = new Set<string>();
   for (const row of all) {
@@ -304,7 +304,6 @@ export function messagesFromTranscript(
       asRole(row.role),
       String(row.speaker ?? "unknown"),
       Number(row.round ?? 0),
-      asAddressee(row.addressed_to),
       String(row.text ?? "")
     );
     if (once.has(id)) shared.add(id);
@@ -315,7 +314,7 @@ export function messagesFromTranscript(
     const speaker = String(row.speaker ?? "unknown");
     const round = Number(row.round ?? 0);
     const addressedTo = asAddressee(row.addressed_to);
-    const id = messageId(role, speaker, round, addressedTo, String(row.text ?? ""));
+    const id = messageId(role, speaker, round, String(row.text ?? ""));
     out.push({
       id: shared.has(id) ? `${id}#${Number(row.seq ?? 0)}` : id,
       speaker,
@@ -378,13 +377,16 @@ export function messagesFromReport(
     // after revising, not its opening one. Label it truthfully; for these
     // legacy reports the per-round ISRs were never written down.
     const revised = (f.revision_rounds ?? 0) > 0;
+    const role: TranscriptRole = revised ? "reviser" : "analyst";
+    const round = revised ? f.revision_rounds : 0;
+    const text = f.status_reason || summarizeClaims(asClaims(f.claims), f.domain);
     out.push({
-      id: `analyst:${f.agent_name}:0`,
+      id: messageId(role, f.agent_name, round, text),
       speaker: f.agent_name,
-      role: revised ? "reviser" : "analyst",
-      round: revised ? f.revision_rounds : 0,
+      role,
+      round,
       status: (f.status ?? "complete") as TranscriptStatus,
-      text: f.status_reason || summarizeClaims(asClaims(f.claims), f.domain),
+      text,
       confidence: f.final_confidence,
       claims: asClaims(f.claims),
       dissent: asStrings(f.dissent_items),
@@ -399,7 +401,7 @@ export function messagesFromReport(
       const text = String(entry.argument ?? "").trim();
       if (!text) continue;
       out.push({
-        id: `negotiator:${speaker}:${round}`,
+        id: messageId("negotiator", speaker, round, text),
         speaker,
         role: "negotiator",
         round,

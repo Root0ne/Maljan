@@ -35,7 +35,11 @@ export const BUILTIN_AGENT_KEYS = new Set([
   "reporter",
 ]);
 /** Roles that read a static provider; the others have nothing to point at. */
-const PROVIDER_ROLES = new Set(["static", "generic"]);
+/* The roles that pick a static provider of their own: the built-in static
+   analyst, and the two that are a prompt rather than a class. A `lead` is
+   the same class as a generic agent, so the API takes a provider reference
+   on it and the console has to be able to express one. */
+const PROVIDER_ROLES = new Set(["static", "generic", "lead"]);
 /** The roles a custom definition may take. `judge` and `report` are missing on
  *  purpose: there is exactly one of each and both are built-ins, so offering
  *  either here would only produce a definition the settings model rejects. */
@@ -739,7 +743,7 @@ export function AgentDetail({
         <fieldset className="border border-border rounded p-2">
           <legend className="text-xs text-text-muted px-1">Tools</legend>
           <ul role="tree" aria-label={`${agentKey} tools`} className="space-y-1">
-            {agent.role === "generic" && !locked && (
+            {PROVIDER_ROLES.has(agent.role) && agent.role !== "static" && !locked && (
               <li
                 role="treeitem"
                 aria-selected={hasRef(agentKey, {
