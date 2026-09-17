@@ -150,9 +150,16 @@ async def _unprobed_models_in(db: AsyncSession, changes: dict[str, Any]) -> list
     Judged against the settings as this save would leave them, so an operator
     moving an agent to a new endpoint and a new model in one change is judged
     on the pair they are moving it to rather than the one they are leaving.
-    """
-    from app.services.model_probes import unprobed_models_being_saved
 
+    A save that names no per-agent model is answered before the store is read:
+    every PATCH goes through here, most of them carry one leaf of one group,
+    and reading the overrides back and rebuilding the whole settings model to
+    conclude that there was nothing to check is work on the path of every save.
+    """
+    from app.services.model_probes import AGENT_MODELS_KEY, unprobed_models_being_saved
+
+    if AGENT_MODELS_KEY not in changes:
+        return []
     try:
         stored = await SettingsService(db).load_overrides()
         settings = candidate_settings(changes, stored)

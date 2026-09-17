@@ -228,6 +228,32 @@ def _submit(client: TestClient, refusals: list[str]) -> Any:
 
 class TestSavingAModel:
     @pytest.mark.asyncio
+    async def test_a_save_naming_no_agent_model_is_answered_before_the_store_is_read(self) -> None:
+        """Every PATCH passes the gate, and most of them have nothing for it to check.
+
+        Reading the overrides back and rebuilding the whole settings model to
+        conclude that is work on the path of every save.
+        """
+        from app.api.v1 import settings as settings_route
+        from app.services.model_probes import AGENT_MODELS_KEY
+
+        reader = AsyncMock(return_value={})
+        with patch.object(settings_route.SettingsService, "load_overrides", reader):
+            nothing = await settings_route._unprobed_models_in(
+                _Db([]), {"core.llm.provider": "ollama"}
+            )
+            reader.assert_not_awaited()
+
+            refusals = await settings_route._unprobed_models_in(
+                _Db([]),
+                {AGENT_MODELS_KEY: {"static": {"provider": "ollama", "model": "qwen3:4b"}}},
+            )
+
+        assert nothing == []
+        assert refusals and "qwen3:4b" in refusals[0], "a save that names one is checked"
+        reader.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_a_per_agent_model_no_probe_reached_is_refused_on_save(self) -> None:
         from app.services.model_probes import AGENT_MODELS_KEY, unprobed_models_being_saved
 
