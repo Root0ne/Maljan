@@ -205,7 +205,8 @@ export default function SearchPalette({
           ci(row.sample, q) ||
           ci(row.verdict, q) ||
           ci(verdictLabel(row.verdict), q) ||
-          ci(row.malwareCategory, q),
+          ci(row.malwareCategory, q) ||
+          ci(row.status, q),
       )
       .slice(0, 8)
       .map((row) => ({

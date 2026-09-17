@@ -93,7 +93,17 @@ export function analysisRows(
     });
   }
 
-  return rows;
+  /* Newest first, and sorted here rather than trusted from either endpoint:
+   * the reports appended above have no place in the jobs order, so without
+   * this a finished run could sit under older ones. A row with no timestamp
+   * keeps the position it was built in. */
+  return rows.sort((a, b) => time(b.createdAt) - time(a.createdAt));
+}
+
+/** An ISO timestamp as a number, or 0 for one that cannot be read. */
+function time(iso: string | null | undefined): number {
+  const at = new Date(iso ?? "").getTime();
+  return Number.isNaN(at) ? 0 : at;
 }
 
 /** The statuses the list filters by, in the order they are offered. */

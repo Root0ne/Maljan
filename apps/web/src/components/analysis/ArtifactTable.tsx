@@ -2,6 +2,7 @@
 
 import type { EvidenceSection } from "@/types/malware-report";
 import EvidenceChips from "./EvidenceChips";
+import { saysSomething } from "./reportSections";
 
 /**
  * One report section, drawn from its own declared shape.
@@ -17,6 +18,10 @@ import EvidenceChips from "./EvidenceChips";
  * the calls they name, and each chip opens that call.
  */
 export default function ArtifactTable({ section }: { section: EvidenceSection }) {
+  const rows = rowsOf(section);
+  /* A section whose every row said nothing is not drawn at all: a heading over
+   * an empty table is the "No X yet" placeholder in another shape. */
+  if (section.kind === "kv" && rows.length === 0) return null;
   return (
     <div className="bg-bg-surface border border-border rounded">
       <div className="px-4 py-3 border-b border-border flex flex-wrap items-center gap-2">
@@ -33,20 +38,34 @@ export default function ArtifactTable({ section }: { section: EvidenceSection })
           <EvidenceChips ids={section.evidence_ids} />
         </span>
       </div>
-      <SectionBody section={section} />
+      <SectionBody section={section} rows={rows} />
     </div>
   );
 }
 
-function SectionBody({ section }: { section: EvidenceSection }) {
-  if (section.kind === "table" || (section.kind === "kv" && section.rows.length > 0)) {
+/**
+ * The rows a section draws.
+ *
+ * A key/value row whose value is nothing is a field the tool has rather than a
+ * fact about the sample, so it is not drawn. A table row is left alone: its
+ * cells are positional, and dropping one because a column is blank would put
+ * the rest under the wrong headings.
+ */
+function rowsOf(section: EvidenceSection): string[][] {
+  const rows = section.rows ?? [];
+  if (section.kind !== "kv") return rows;
+  return rows.filter((row) => row.slice(1).some(saysSomething));
+}
+
+function SectionBody({ section, rows }: { section: EvidenceSection; rows: string[][] }) {
+  if (section.kind === "table" || (section.kind === "kv" && rows.length > 0)) {
     const columns =
       section.columns.length > 0
         ? section.columns
         : section.kind === "kv"
         ? ["Field", "Value"]
-        : section.rows[0]?.map((_, i) => `Column ${i + 1}`) ?? [];
-    if (section.rows.length === 0) {
+        : rows[0]?.map((_, i) => `Column ${i + 1}`) ?? [];
+    if (rows.length === 0) {
       return <p className="p-4 text-xs text-text-muted">The tool returned no rows.</p>;
     }
     return (
@@ -65,7 +84,7 @@ function SectionBody({ section }: { section: EvidenceSection }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-border-light">
-            {section.rows.map((row, i) => (
+            {rows.map((row, i) => (
               <tr key={i} className="hover:bg-bg-hover">
                 {row.map((cell, j) => (
                   <td

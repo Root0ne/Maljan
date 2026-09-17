@@ -5,6 +5,7 @@ import { useState } from "react";
 import { useReport } from "../layout";
 import { copyToClipboard, truncateMiddle } from "@/lib/report-utils";
 import Field from "@/components/ui/Field";
+import { attributionSaysSomething } from "@/components/analysis/analysisTabs";
 import type { FamilyAttribution } from "@/types/malware-report";
 
 type SimilarSample = {
@@ -25,7 +26,11 @@ export default function AttributionTab() {
 
   const attribution: FamilyAttribution | undefined =
     report?.malware_report?.attribution;
-  if (!attribution) {
+  /* The same rule the tab bar applies: the block is on every report, so its
+   * presence says nothing — what it named does. A direct link to this tab on
+   * a run that named nothing gets the sentence written for it rather than a
+   * card of "(unknown)"s. */
+  if (!attribution || !attributionSaysSomething(report?.malware_report ?? null)) {
     return (
       <div className="p-8 text-center text-sm text-text-secondary">
         This run named no family, actor or campaign.

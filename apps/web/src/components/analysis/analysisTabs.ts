@@ -83,7 +83,13 @@ function nonEmpty(value: unknown): boolean {
   return Boolean(value);
 }
 
-function attributionSaysSomething(mr: MalwareReport | null): boolean {
+/**
+ * Whether the attribution block named anything.
+ *
+ * Exported because the tab draws itself on the same answer: the block is on
+ * every report, so its presence says nothing and only its content does.
+ */
+export function attributionSaysSomething(mr: MalwareReport | null | undefined): boolean {
   const attribution = mr?.attribution;
   if (!attribution) return false;
   return Boolean(

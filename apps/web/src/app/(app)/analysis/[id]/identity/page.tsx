@@ -8,9 +8,11 @@ import { copyToClipboard, formatBytes } from "@/lib/report-utils";
 import Field from "@/components/ui/Field";
 import { ArtifactSections } from "@/components/analysis/ArtifactTable";
 import ReputationSection from "@/components/analysis/ReputationSection";
+import { readIdentitySection, type HashField } from "@/components/analysis/identitySection";
 import {
   binarySectionKeys,
   isCoveredBySection,
+  saysSomething,
   sectionsForTab,
 } from "@/components/analysis/reportSections";
 import { fileTypeLabel, platformLabel } from "@/types/malware-report";
@@ -31,7 +33,22 @@ export default function IdentityTab() {
   // These lead the page; the typed block below is the report's own summary of
   // the same facts and stands down when a header section already carries them.
   const reportSections = report?.malware_report?.sections;
-  const evidenceSections = sectionsForTab(reportSections, "identity");
+  /* The `identity` section is the one that overlaps this tab's own blocks: its
+   * hashes are the File hashes block and its three signing rows are one fact
+   * about one format. It is split rather than drawn as it arrives. */
+  const tabSections = sectionsForTab(reportSections, "identity");
+  const identitySection = tabSections.find((section) => section.key === "identity") ?? null;
+  const {
+    section: splitIdentity,
+    hashes: ledgerHashes,
+    signing: sectionStatesSigning,
+  } = readIdentitySection(
+    identitySection,
+    report?.malware_report?.identity?.file_type,
+  );
+  const evidenceSections = tabSections.flatMap((section) =>
+    section.key === "identity" ? (splitIdentity ? [splitIdentity] : []) : [section],
+  );
   const showsTypedIdentity = !isCoveredBySection(reportSections, binarySectionKeys("header"));
 
   if (!identity) {
@@ -55,6 +72,12 @@ export default function IdentityTab() {
       : { label: "SIGNED", cls: "text-status-green bg-status-green/10 border-status-green/30" }
     : { label: "UNSIGNED", cls: "text-text-muted bg-bg-active border-border" };
 
+  const hashRows = HASH_ROWS.map(({ field, label }) => ({
+    field,
+    label,
+    value: ledgerHashes[field] ?? identity.hashes[field as keyof typeof identity.hashes] ?? "",
+  })).filter((row) => saysSomething(row.value));
+
   return (
     <div className="space-y-4">
       <ArtifactSections sections={evidenceSections} />
@@ -65,64 +88,71 @@ export default function IdentityTab() {
           <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
             Sample Identification
           </h2>
-          <span
-            className={`text-[11px] uppercase tracking-wider font-medium px-2 py-0.5 rounded border ${sigState.cls}`}
-          >
-            {sigState.label}
-          </span>
+          {/* Stands down when the table above already says whether the
+              sample is signed. */}
+          {!sectionStatesSigning && (
+            <span
+              className={`text-[11px] uppercase tracking-wider font-medium px-2 py-0.5 rounded border ${sigState.cls}`}
+            >
+              {sigState.label}
+            </span>
+          )}
         </div>
+        {/* A row whose value is nothing is not a row. Seven labels above
+            seven "(unknown)"s said only that the extractor has seven fields. */}
         <div className="p-4 grid grid-cols-2 gap-4">
-          <Field label="File Name" value={identity.file_name || "(unknown)"} />
-          <Field label="File Type" value={fileTypeLabel(identity.file_type)} />
-          <Field
-            label="Platform"
-            value={
-              identity.platform && identity.platform !== "unknown"
-                ? platformLabel(identity.platform)
-                : "(unknown)"
-            }
-          />
-          <Field label="Size" value={formatBytes(identity.file_size_bytes)} />
-          <Field label="MIME Type" value={identity.mime_type || "(unknown)"} />
-          <Field
-            label="Compile Timestamp"
-            value={
-              identity.compile_timestamp
+          {[
+            { label: "File Name", value: identity.file_name ?? "" },
+            { label: "File Type", value: identity.file_type ? fileTypeLabel(identity.file_type) : "" },
+            {
+              label: "Platform",
+              value:
+                identity.platform && identity.platform !== "unknown"
+                  ? platformLabel(identity.platform)
+                  : "",
+            },
+            {
+              label: "Size",
+              value: identity.file_size_bytes ? formatBytes(identity.file_size_bytes) : "",
+            },
+            { label: "MIME Type", value: identity.mime_type ?? "" },
+            {
+              label: "Compile Timestamp",
+              value: identity.compile_timestamp
                 ? new Date(identity.compile_timestamp).toLocaleString()
-                : "(unknown)"
-            }
-          />
-          <Field
-            label="Language / Compiler"
-            value={identity.language_or_compiler || "(unknown)"}
-          />
+                : "",
+            },
+            { label: "Language / Compiler", value: identity.language_or_compiler ?? "" },
+          ]
+            .filter((field) => saysSomething(field.value))
+            .map((field) => (
+              <Field key={field.label} label={field.label} value={field.value} />
+            ))}
         </div>
       </div>
       )}
 
-      {/* The hashes are always drawn: no header section carries them, and they
-        * are what a reader copies out of this page. */}
-      <div className="bg-bg-surface border border-border rounded">
-        <div className="px-4 py-3 border-b border-border">
-          <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-            File Hashes
-          </h2>
+      {/* Every fingerprint the run computed, in the one place that holds them.
+        * The ledger's `hashes` entry leads, because it carries the ones the
+        * typed model has no field for; the typed block fills in the rest. A
+        * hash no tool produced is absent rather than drawn as a dash: ssdeep
+        * and tlsh need an optional library and imphash needs an import table,
+        * and an empty row reads as a missing value rather than an
+        * inapplicable one. */}
+      {hashRows.length > 0 && (
+        <div className="bg-bg-surface border border-border rounded">
+          <div className="px-4 py-3 border-b border-border">
+            <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+              File Hashes
+            </h2>
+          </div>
+          <div className="p-4 space-y-2">
+            {hashRows.map((row) => (
+              <HashRow key={row.field} label={row.label} value={row.value} />
+            ))}
+          </div>
         </div>
-        <div className="p-4 space-y-2">
-          <HashRow label="MD5" value={identity.hashes.md5} />
-          <HashRow label="SHA-1" value={identity.hashes.sha1} />
-          <HashRow label="SHA-256" value={identity.hashes.sha256} />
-          <HashRow label="SHA-512" value={identity.hashes.sha512} />
-          {/* Imphash is a PE import-table hash; a Mach-O, an APK or a script
-            * has no import table and an always-drawn empty row reads as a
-            * missing value rather than an inapplicable one. */}
-          {identity.hashes.imphash && (
-            <HashRow label="Imphash" value={identity.hashes.imphash} />
-          )}
-          <HashRow label="SSDeep" value={identity.hashes.ssdeep} />
-          <HashRow label="TLSH" value={identity.hashes.tlsh} />
-        </div>
-      </div>
+      )}
 
       <ReputationSection jobId={jobId} enabled={!loading} />
 
@@ -134,18 +164,23 @@ export default function IdentityTab() {
             </h2>
           </div>
           <div className="p-4 grid grid-cols-2 gap-4">
-            <Field label="Signer Subject" value={identity.signing.signer_subject || "-"} />
-            <Field label="Issuer" value={identity.signing.signer_issuer || "-"} />
-            <Field
-              label="Signature Valid"
-              value={
-                identity.signing.signature_valid === null
-                  ? "unverified"
-                  : identity.signing.signature_valid
-                    ? "yes"
-                    : "no"
-              }
-            />
+            {[
+              { label: "Signer Subject", value: identity.signing.signer_subject ?? "" },
+              { label: "Issuer", value: identity.signing.signer_issuer ?? "" },
+              {
+                label: "Signature Valid",
+                value:
+                  identity.signing.signature_valid === null
+                    ? "unverified"
+                    : identity.signing.signature_valid
+                      ? "yes"
+                      : "no",
+              },
+            ]
+              .filter((field) => saysSomething(field.value))
+              .map((field) => (
+                <Field key={field.label} label={field.label} value={field.value} />
+              ))}
           </div>
         </div>
       )}
@@ -153,7 +188,19 @@ export default function IdentityTab() {
   );
 }
 
-function HashRow({ label, value }: { label: string; value: string | null }) {
+/** The hashes a reader knows by name, in the order they are usually quoted. */
+const HASH_ROWS: { field: HashField; label: string }[] = [
+  { field: "md5", label: "MD5" },
+  { field: "sha1", label: "SHA-1" },
+  { field: "sha256", label: "SHA-256" },
+  { field: "sha512", label: "SHA-512" },
+  { field: "imphash", label: "Imphash" },
+  { field: "telfhash", label: "Telfhash" },
+  { field: "ssdeep", label: "SSDeep" },
+  { field: "tlsh", label: "TLSH" },
+];
+
+function HashRow({ label, value }: { label: string; value: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="flex items-center gap-3">

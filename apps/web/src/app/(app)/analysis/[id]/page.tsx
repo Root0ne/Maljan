@@ -64,7 +64,7 @@ export default function SummaryTab() {
   return mr ? <MalwareReportSummary mr={mr} /> : <LegacySummary />;
 }
 
-/* ── Legacy summary (pre-Faz5 reports without malware_report payload) ──
+/* ── The summary of a report with no structured payload ──
  *
  * A report old enough to carry no `malware_report` has a verdict, a category
  * and the analysts' findings, and nothing else. The verdict and the confidence
@@ -216,65 +216,69 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
         </details>
       )}
 
-      {/* Severity card.
+      {/* Severity, when the judge assessed one or named the behaviour. A card
+          reading "not assessed" beside "Uncategorized" is a heading over two
+          absences.
+
           The verdict and the confidence are in the analysis header, where
           every tab can see them; repeating them here made the same two facts
           read twice on the one tab that also carries the argument for them. */}
-      <div className="bg-bg-surface border border-border rounded col-span-2">
-        <div className="px-4 py-3 border-b border-border">
-          <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-            Severity
-          </h2>
-        </div>
-        <div className="p-4 flex flex-wrap gap-x-12 gap-y-4">
-          <div className="max-w-md">
-            <div className="text-[11px] text-text-muted uppercase tracking-wider mb-1">
-              Rating
-            </div>
-            {mr.severity ? (
-              <span
-                className={`inline-flex items-center gap-2 px-2 py-0.5 rounded text-xs font-medium ${sevStyle.bg} ${sevStyle.border} ${sevStyle.text} border`}
-              >
-                {mr.severity.rating}
-                <span className="font-mono">{mr.severity.overall_score.toFixed(1)}/10</span>
-              </span>
-            ) : (
-              <span className="text-sm text-text-muted">not assessed</span>
+      {(mr.severity || mr.malware_category) && (
+        <div className="bg-bg-surface border border-border rounded col-span-2">
+          <div className="px-4 py-3 border-b border-border">
+            <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+              Severity
+            </h2>
+          </div>
+          <div className="p-4 flex flex-wrap gap-x-12 gap-y-4">
+            {mr.severity && (
+              <div className="max-w-md">
+                <div className="text-[11px] text-text-muted uppercase tracking-wider mb-1">
+                  Rating
+                </div>
+                <span
+                  className={`inline-flex items-center gap-2 px-2 py-0.5 rounded text-xs font-medium ${sevStyle.bg} ${sevStyle.border} ${sevStyle.text} border`}
+                >
+                  {mr.severity.rating}
+                  <span className="font-mono">{mr.severity.overall_score.toFixed(1)}/10</span>
+                </span>
+                {/* The rating alone is a number with no argument behind it. The
+                    judge writes why it chose that rating, and printing the
+                    rating without it leaves a reader with nothing to disagree
+                    with. */}
+                {mr.severity.business_impact && (
+                  <p className="mt-1 text-[11px] text-text-muted leading-relaxed">
+                    {mr.severity.business_impact}
+                  </p>
+                )}
+                {mr.severity.affected_platforms.length > 0 && (
+                  <p className="mt-1 text-[11px] text-text-muted">
+                    Affects: {mr.severity.affected_platforms.join(", ")}
+                  </p>
+                )}
+              </div>
             )}
-            {/* The rating alone is a number with no argument behind it. The
-                judge writes why it chose that rating, and printing the rating
-                without it leaves a reader with nothing to disagree with. */}
-            {mr.severity?.business_impact && (
-              <p className="mt-1 text-[11px] text-text-muted leading-relaxed">
-                {mr.severity.business_impact}
-              </p>
-            )}
-            {(mr.severity?.affected_platforms?.length ?? 0) > 0 && (
-              <p className="mt-1 text-[11px] text-text-muted">
-                Affects: {mr.severity?.affected_platforms.join(", ")}
-              </p>
+            {mr.malware_category && (
+              <div>
+                <div className="text-[11px] text-text-muted uppercase tracking-wider mb-1">
+                  Category
+                </div>
+                {/* Free text, printed as written. The category is whatever the
+                    judge called the behaviour; mapping it onto a fixed list
+                    would be this console overruling the run. A family is a
+                    different claim and is not a substitute for one. */}
+                <div className="text-sm text-text-primary">{mr.malware_category}</div>
+              </div>
             )}
           </div>
-          <div>
-            <div className="text-[11px] text-text-muted uppercase tracking-wider mb-1">
-              Category
-            </div>
-            {/* Free text, printed as written. The category is whatever the
-                judge called the behaviour; mapping it onto a fixed list would
-                be this console overruling the run. A family is a different
-                claim and is not a substitute for one. */}
-            <div className="text-sm text-text-primary">
-              {mr.malware_category || "Uncategorized"}
-            </div>
-          </div>
         </div>
-      </div>
+      )}
 
       {/* What the run found, as counts that open the tab that holds them.
           The techniques and the endpoints are tables on ATT&CK and NETWORK;
           listing the first five of each here was the same finding twice, and
           the shorter of the two copies. */}
-      {(ttpCount > 0 || net.domains + net.ips + net.urls > 0) && (
+      {jobId && (ttpCount > 0 || net.domains + net.ips + net.urls > 0) && (
         <div className="col-span-2 bg-bg-surface border border-border rounded">
           <div className="px-4 py-3 border-b border-border">
             <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
@@ -310,12 +314,14 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
             <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
               Evidence
             </h2>
-            <Link
-              href={`/analysis/${report?.job_id ?? ""}/evidence`}
-              className="ml-auto text-[11px] text-accent-strong hover:underline"
-            >
-              Open the ledger
-            </Link>
+            {jobId && (
+              <Link
+                href={`/analysis/${jobId}/evidence`}
+                className="ml-auto text-[11px] text-accent-strong hover:underline"
+              >
+                Open the ledger
+              </Link>
+            )}
           </div>
           <div className="p-4 grid grid-cols-5 gap-3 text-center">
             <Stat label="Calls" value={evidence.entries ?? 0} />

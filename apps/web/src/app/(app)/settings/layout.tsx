@@ -72,20 +72,19 @@ function Nav({ items, pathname }: { items: NavItem[]; pathname: string }) {
  * already bounced to the guides in that state, and a tab that bounces is a tab
  * that lies about where it goes. The guides are the way in, and the console
  * joins them as soon as the analysts have something to talk to.
+ *
+ * It is the provider's `chrome`, so it survives a schema that is still
+ * loading, refused or broken — the way back to a profile page does not depend
+ * on a catalogue.
  */
-function AdminNav({ pathname, children }: { pathname: string; children: ReactNode }) {
+function AdminNav({ pathname }: { pathname: string }) {
   const ctx = useSettingsContext();
   const configured = llmLooksConfigured(
     ctx.effectiveValue,
     (key) => ctx.values[key]?.is_set === true,
   );
   const items = [...ACCOUNT_ITEMS, SETUP_ITEM, ...(configured ? [CONSOLE_ITEM] : [])];
-  return (
-    <>
-      <Nav items={items} pathname={pathname} />
-      {children}
-    </>
-  );
+  return <Nav items={items} pathname={pathname} />;
 }
 
 export default function SettingsLayout({ children }: { children: ReactNode }) {
@@ -98,9 +97,7 @@ export default function SettingsLayout({ children }: { children: ReactNode }) {
     // Only an admin mounts the provider at all: a non-admin would spend two
     // requests on a schema the API refuses them, on every settings page.
     body = (
-      <SettingsProvider>
-        <AdminNav pathname={pathname}>{children}</AdminNav>
-      </SettingsProvider>
+      <SettingsProvider chrome={<AdminNav pathname={pathname} />}>{children}</SettingsProvider>
     );
   } else if (isAdminArea(pathname)) {
     // Each area names itself: a notice under the guides that talks about the

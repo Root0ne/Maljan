@@ -486,6 +486,16 @@ change landed on `main`.
   draws no empty Domains table, and the only empty states left are the two
   that say something — a string filter that matched nothing, and a sandbox
   that traced no process because the sample detected it.
+- **A row that says nothing is not drawn.** Across the report tabs, a
+  key/value row whose value is empty, `-` or an empty list is dropped, and a
+  key/value section whose every row said nothing is not drawn at all. IDENTITY
+  applies it twice over: the `identity` section's hashes move into the File
+  hashes block, which lists only the fingerprints a tool produced rather than
+  a dash per field the extractor has, and its three signing rows — one per
+  format `signing_info` knows about, of which all but one are that tool's
+  untouched defaults — become the one for the format the run routed on, as a
+  sentence rather than as `present=no`. SUMMARY's severity card is drawn only
+  when the judge assessed a rating or named a category.
 - **One list of analyses.** A report is a completed job, so `/reports` is gone
   and lands on `/jobs` with its status filter applied; the verdict it carried
   is a column on the row it belongs to, the search palette offers samples and

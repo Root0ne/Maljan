@@ -43,7 +43,11 @@ the labels an operator gave them — the same names the conversation uses.
 
 **Only the tabs the run filled.** A tab is offered when the report carries
 what it draws: a ledger section routed to it, or its own typed block
-(`apps/web/src/components/analysis/analysisTabs.ts`). SUMMARY, CONVERSATION
+(`apps/web/src/components/analysis/analysisTabs.ts`). Where a tab's content
+needs parsing before it is known to be drawable, the rule and the panel share
+one reading — the rule for DETECTION is the rule-match parser itself
+(`ruleMatches.ts`), and the rule for ATT&CK is the mapped techniques the
+matrix is built from, never the corroboration it only decorates a card with. SUMMARY, CONVERSATION
 and EVIDENCE are always offered — the first is where a run lands, the second
 answers whatever state the job is in, and on the third "no call matches these
 filters" is information rather than an apology. While a job is still running
@@ -132,6 +136,20 @@ It is read from that service's ledger entry and from nothing else, so a
 service that is configured and was never asked, or asked and answered nothing,
 draws no section at all.
 
+## A row that says nothing
+
+Across the report tabs, a key/value row whose value is empty, `-` or an empty
+list is not drawn, and a key/value section whose every row said nothing is not
+drawn either — a heading over an empty table is the "No X yet" placeholder in
+another shape. A table row is left alone, because its cells are positional.
+
+IDENTITY applies it twice over. The `identity` section is the one that
+overlaps the tab's own blocks, so it is split: its hashes go to the File
+hashes block, which draws only the fingerprints a tool produced, and its three
+signing rows — one per format `signing_info` knows about, of which all but one
+are the tool's untouched defaults — become the one for the format the run
+routed on, stated as a sentence.
+
 ## Settings
 
 Anyone signed in has Profile and API keys. An administrator also has the setup
@@ -151,8 +169,10 @@ the same keys, and each group header links to the guide that covers it.
 No gradients, and no colour or background that eases from one value to
 another: a hover state is a state, so it arrives when the pointer does. The
 transitions that stay are the ones that move something — a rail widening, a
-chevron turning. Icons are `lucide-react` at 16 or 18 px, drawn in
-`currentColor` with nothing filled behind them. The rules are held by
+chevron turning. Icons are `lucide-react`, drawn in `currentColor` with
+nothing filled behind them: 16 or 18 px everywhere except the conversation
+components, whose icons sit inline with 11 px text and are sized to it. The
+rules are held by
 `apps/web/src/lib/__tests__/styleRules.test.ts`, which reads the tree rather
 than the built CSS.
 

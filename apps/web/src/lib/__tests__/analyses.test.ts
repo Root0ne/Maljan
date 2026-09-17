@@ -79,9 +79,25 @@ describe("one list from the two endpoints", () => {
   it("keeps a report whose job this page of jobs did not reach", () => {
     // The two endpoints page independently, so a verdict is not dropped for
     // landing outside the window of jobs that was asked for.
-    const rows = analysisRows([job()], [report(), report({ id: "r2", job_id: "job-7" })]);
+    const rows = analysisRows(
+      [job()],
+      [report(), report({ id: "r2", job_id: "job-7", created_at: "2026-09-16T09:00:00Z" })],
+    );
     expect(rows.map((r) => r.id)).toEqual(["job-1", "job-7"]);
     expect(rows[1].status).toBe("completed");
+  });
+
+  it("orders the whole list newest first, however the rows were built", () => {
+    /* The reports appended above have no place in the jobs order, so a run
+     * that finished today could otherwise sit under one from last week. */
+    const rows = analysisRows(
+      [
+        job({ id: "job-old", created_at: "2026-09-10T09:00:00Z" }),
+        job({ id: "job-new", created_at: "2026-09-17T09:00:00Z" }),
+      ],
+      [report({ id: "r3", job_id: "job-middle", created_at: "2026-09-14T09:00:00Z" })],
+    );
+    expect(rows.map((r) => r.id)).toEqual(["job-new", "job-middle", "job-old"]);
   });
 
   it("answers an empty list for nothing at all", () => {

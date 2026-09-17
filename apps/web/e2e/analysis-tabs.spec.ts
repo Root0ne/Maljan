@@ -254,6 +254,67 @@ test.describe("Analysis tabs", () => {
     await expect(page.getByText("no process activity recorded")).toBeVisible();
   });
 
+  /* The identity section is the one that overlaps the tab's own blocks: the
+   * hashes it carries were printed twice on one screen, and its three signing
+   * rows are one fact about one format with the tool's defaults beside it. */
+  test("the identity table drops what the tab draws better", async ({
+    sessionPage: page,
+  }) => {
+    await page.route(`**/api/v1/reports/job/${JOB_ID}`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...REPORT,
+          malware_report: {
+            ...REPORT.malware_report,
+            sections: [
+              {
+                key: "identity",
+                title: "Sample identity",
+                kind: "kv",
+                columns: ["Field", "Value"],
+                rows: [
+                  ["file type", "pe"],
+                  ["mime type", ""],
+                  ["md5", "5d41402abc4b2a76b9719d911017c592"],
+                  ["sha256", "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"],
+                  ["authenticode", "present=no, subject=, issuer="],
+                  ["apk", "present=no, schemes="],
+                  ["macho", "present=no"],
+                ],
+                text: "",
+                items: [],
+                evidence_ids: ["ev_0001"],
+                source: "tool:identify_file",
+              },
+            ],
+          },
+        }),
+      })
+    );
+
+    await page.goto(`/analysis/${JOB_ID}/identity`);
+
+    // One place for a hash, and it is the block with the copy buttons.
+    await expect(page.getByText("5d41402abc4b2a76b9719d911017c592")).toHaveCount(1);
+    await expect(page.getByRole("heading", { name: /File Hashes/i })).toBeVisible();
+
+    // The routed format says whether the sample is signed, as a sentence; the
+    // two formats it is not say nothing at all.
+    await expect(page.getByText("Authenticode")).toBeVisible();
+    await expect(page.getByText("Not signed")).toBeVisible();
+    await expect(page.getByText(/present=no/)).toHaveCount(0);
+    await expect(page.getByText("macho", { exact: true })).toHaveCount(0);
+
+    // A hash no tool produced is absent rather than drawn as a dash.
+    await expect(page.getByText("SHA-512")).toHaveCount(0);
+    await expect(page.getByText("TLSH")).toHaveCount(0);
+    await expect(page.getByText("SSDeep")).toHaveCount(0);
+
+    await expect(alerts(page)).toHaveCount(0);
+  });
+
   /* The console dropped the one reputation answer a run gets. It draws it
    * now, on the tab that holds the hash that was looked up, and only when the
    * ledger actually holds it — a configured service that was never asked

@@ -104,6 +104,17 @@ export function tabOfSection(key: string): SectionTab {
   return "other";
 }
 
+/**
+ * Whether one cell says anything.
+ *
+ * A key/value row whose value is empty, or the `-` a table prints for empty,
+ * is a field the tool has rather than a fact about the sample.
+ */
+export function saysSomething(value: string | null | undefined): boolean {
+  const text = (value ?? "").trim();
+  return text !== "" && text !== "-";
+}
+
 /** A section carries something worth drawing. */
 export function sectionHasContent(section: EvidenceSection): boolean {
   return Boolean(
