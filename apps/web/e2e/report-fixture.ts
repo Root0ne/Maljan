@@ -86,8 +86,6 @@ export const MALWARE_REPORT: MalwareReport = {
       {
         dll: "KERNEL32.dll",
         function: "VirtualAllocEx",
-        is_suspicious: true,
-        category: "process_injection",
       },
     ],
     exports: [],

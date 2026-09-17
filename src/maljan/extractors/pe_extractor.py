@@ -7,10 +7,12 @@ parser based on the file's magic bytes. PE samples get the richest output
 fall back to a strings + magic header extraction so the report still
 surfaces some signal.
 
-Suspicious flagging is rule-based (no LLM) — see ``_SUSPICIOUS_IMPORTS`` and
-``_HIGH_ENTROPY_THRESHOLD``. The flags are advisory; the narrative agent
-later expands on them, and the heatmap aggregates them into capability
-cells.
+Nothing here labels an import. What an import table means for the sample —
+a behaviour category per API and the technique rules that list it — is what
+the triage pack's ``api_capability`` call states in the evidence ledger, cited
+by id; this module reads the table and reports what is in it. Section
+entropy (``_HIGH_ENTROPY_THRESHOLD``) is the one heuristic left, and it is
+a number a reader can check against the section table.
 
 Reuses ``maljan.loaders.pe_loader.PELoader`` for low-level parsing —
 extending rather than rewriting.
@@ -64,7 +66,7 @@ from maljan.tools.strings import (  # noqa: F401
 )
 
 # ---------------------------------------------------------------------------
-# Heuristics — suspicious-import classifier
+# Heuristics
 # ---------------------------------------------------------------------------
 
 _HIGH_ENTROPY_THRESHOLD = 7.0
@@ -77,139 +79,6 @@ _SPARSE_IMPORT_THRESHOLD = 15
 _MEMO_LOCK = threading.Lock()
 _MEMO: dict[tuple[str, int, int], StaticAnalysis | None] = {}
 _MEMO_MAX_ENTRIES = 4
-
-# DLL→function classifier — extend rather than replace.
-_SUSPICIOUS_IMPORTS: dict[str, str] = {
-    # Process injection
-    "VirtualAlloc": "process_injection",
-    "VirtualAllocEx": "process_injection",
-    "WriteProcessMemory": "process_injection",
-    "CreateRemoteThread": "process_injection",
-    "NtCreateThreadEx": "process_injection",
-    "RtlCreateUserThread": "process_injection",
-    "QueueUserAPC": "process_injection",
-    "SetWindowsHookEx": "process_injection",
-    # Anti-analysis / anti-debug
-    "IsDebuggerPresent": "anti_debug",
-    "CheckRemoteDebuggerPresent": "anti_debug",
-    "NtQueryInformationProcess": "anti_debug",
-    "GetTickCount": "anti_debug",
-    "QueryPerformanceCounter": "anti_debug",
-    "OutputDebugStringA": "anti_debug",
-    # Network / C2
-    "WSAStartup": "network",
-    "WSASocketA": "network",
-    "connect": "network",
-    "InternetOpenA": "network",
-    "InternetOpenUrlA": "network",
-    "HttpSendRequestA": "network",
-    "URLDownloadToFileA": "network",
-    "WinHttpConnect": "network",
-    "WinHttpOpen": "network",
-    "WinHttpSendRequest": "network",
-    "send": "network",
-    "recv": "network",
-    # Crypto
-    "CryptAcquireContextA": "crypto",
-    "CryptEncrypt": "crypto",
-    "CryptDecrypt": "crypto",
-    "BCryptEncrypt": "crypto",
-    "BCryptDecrypt": "crypto",
-    "CryptGenKey": "crypto",
-    # File & persistence
-    "CreateFileA": "filesystem",
-    "WriteFile": "filesystem",
-    "DeleteFileA": "filesystem",
-    "MoveFileExA": "filesystem",
-    "CopyFileA": "filesystem",
-    "SetFileAttributesA": "filesystem",
-    "RegCreateKeyExA": "registry",
-    "RegSetValueExA": "registry",
-    "RegOpenKeyExA": "registry",
-    # Privilege / token
-    "AdjustTokenPrivileges": "privilege",
-    "OpenProcessToken": "privilege",
-    "LookupPrivilegeValueA": "privilege",
-    "ImpersonateLoggedOnUser": "privilege",
-    "CreateProcessAsUserA": "privilege",
-    # Execution
-    "WinExec": "execution",
-    "ShellExecuteA": "execution",
-    "CreateProcessA": "execution",
-    "LoadLibraryA": "execution",
-    "GetProcAddress": "execution",
-}
-
-
-def classify_import(function: str) -> tuple[str | None, bool]:
-    """Return ``(behaviour_category, is_suspicious)`` for one imported symbol.
-
-    ``category`` and ``is_suspicious`` used to be the same fact —
-    ``is_suspicious=bool(category)`` — which was correct while the table held
-    51 hand-picked names that a human had already decided were interesting.
-
-    They are separated here because the table is about to get an order of
-    magnitude larger. Categorising ``RegOpenKeyExA`` is useful (it tells the
-    prompt and the ATT&CK mapper what the binary touches); calling it
-    *suspicious* is not, and if every import in a benign PE is flagged then
-    four consumers quietly stop working: the report's "Suspicious Imports"
-    table becomes the whole import table, the suspicious-first sort that
-    decides which rows survive the prompt's row cap becomes a no-op, the
-    family-RAG profile text saturates, and the import-capability layer's
-    ``is_suspicious`` gate stops filtering anything.
-
-    So a category is assigned to everything recognised, while suspicion is
-    reserved for the ``high``/``medium`` tiers. The hardcoded table below is
-    the fallback used when no data asset is present; every one of its entries
-    is suspicious by construction, which is the invariant the tests pin.
-    """
-    legacy = _SUSPICIOUS_IMPORTS.get(function)
-    db = _behaviour_db()
-    if db is not None:
-        category, suspicious = db.classify(function)
-        if category is not None:
-            # Suspicion is the *union* of the two sources, not the catalog's
-            # verdict alone. The catalog tiers whole categories, and
-            # ``filesystem``/``registry`` are informational because every
-            # Windows program reads files and opens keys — but six specific
-            # filesystem calls and three registry calls were hand-picked into
-            # the legacy table by someone who decided they mattered, and the
-            # vendored family fingerprints were built against that decision.
-            # Demoting them here would change the family-RAG profile text
-            # without changing the catalog it is matched against: a silent
-            # retrieval regression with no exception to notice it by.
-            #
-            # The result is admittedly uneven — CreateFileA is flagged and
-            # ReadFile is not — but that unevenness is inherited, not
-            # introduced, and preserving it costs nothing.
-            return category, suspicious or bool(legacy)
-        # Fall through: an API the catalog has not heard of may still be in the
-        # curated table, and losing a known-bad name to a catalog gap would be a
-        # silent regression.
-    return legacy, bool(legacy)
-
-
-def _behaviour_db() -> Any:
-    """Return the loaded behaviour catalog, or ``None`` to use the built-in table.
-
-    Config is read per call rather than captured at import: the settings object
-    is memoised anyway, and reading it lazily keeps this module importable
-    without a configured environment — which several tests and the offline
-    scripts rely on.
-    """
-    try:
-        from maljan.analysis.api_capability_db import load_api_behaviour_db
-        from maljan.core.config import get_settings
-        from maljan.core.paths import resolve_data
-
-        cfg = get_settings().preprocessing
-        if not getattr(cfg, "use_api_behaviour_map", False):
-            return None
-        return load_api_behaviour_db(str(resolve_data(cfg.api_behaviour_map_path)))
-    except Exception as exc:  # noqa: BLE001 — classification must never break a parse
-        logger.debug("pe_extractor: behaviour catalog unavailable (%s)", exc)
-        return None
-
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -299,8 +168,6 @@ def _build_static_analysis_uncached(path: Path) -> StaticAnalysis | None:
     if not packer_hint and any(s.entropy >= _HIGH_ENTROPY_THRESHOLD for s in sections):
         packer_hint = "high-entropy sections (possibly packed/encrypted)"
 
-    capabilities = Counter(imp.category for imp in imports if imp.category)
-
     return StaticAnalysis(
         sections=sections,
         imports=imports,
@@ -309,7 +176,6 @@ def _build_static_analysis_uncached(path: Path) -> StaticAnalysis | None:
         embedded_resources=embedded,
         packer_hint=packer_hint,
         obfuscation_indicators=obfuscation,
-        api_capabilities=dict(capabilities),
         packer_matches=parsed.packer_matches,
         pdb_path=parsed.pdb_path,
     )
@@ -442,15 +308,7 @@ def _pe_imports(pe: Any) -> list[ImportRow]:
             fn = (imp.name or b"").decode("utf-8", errors="replace") if imp.name else None
             if not fn:
                 fn = f"Ordinal_{getattr(imp, 'ordinal', '?')}"
-            category, suspicious = classify_import(fn)
-            rows.append(
-                ImportRow(
-                    dll=dll,
-                    function=fn,
-                    is_suspicious=suspicious,
-                    category=category,
-                )
-            )
+            rows.append(ImportRow(dll=dll, function=fn))
     return rows
 
 
@@ -780,60 +638,12 @@ def _parse_elf_sections(blob: bytes) -> list[PESection]:
     return out
 
 
-# ELF API surface that's most useful to call out for malware triage:
-# native execution, anti-debug, code injection, persistence, network.
-_ELF_SUSPICIOUS_FUNCTIONS: frozenset[str] = frozenset(
-    {
-        "execve",
-        "execv",
-        "execvp",
-        "execvpe",
-        "execl",
-        "execle",
-        "execlp",
-        "fork",
-        "vfork",
-        "clone",
-        "system",
-        "popen",
-        "ptrace",
-        "syscall",
-        "mmap",
-        "mmap64",
-        "mprotect",
-        "memfd_create",
-        "dlopen",
-        "dlsym",
-        "socket",
-        "connect",
-        "bind",
-        "listen",
-        "accept",
-        "recv",
-        "send",
-        "recvfrom",
-        "sendto",
-        "inet_pton",
-        "inet_ntop",
-        "getaddrinfo",
-        "gethostbyname",
-        "setuid",
-        "setgid",
-        "seteuid",
-        "setegid",
-        "chroot",
-        "unshare",
-    }
-)
-
-
 def _parse_elf_imports(blob: bytes) -> list[ImportRow]:
     """Return DT_NEEDED libraries paired with undefined .dynsym symbols.
 
     Each ``(library, function)`` pair becomes one :class:`ImportRow`. The
     library column lists every DT_NEEDED entry once for the first import
-    and then ``""`` to keep tables compact. Set ``is_suspicious=True``
-    when the function name matches :data:`_ELF_SUSPICIOUS_FUNCTIONS`.
+    and then ``""`` to keep tables compact.
     """
     try:
         from elftools.elf.dynamic import DynamicSection  # type: ignore[import-not-found]
@@ -874,13 +684,7 @@ def _parse_elf_imports(blob: bytes) -> list[ImportRow]:
         # we cannot map it to a specific DT_NEEDED entry.
         lib_label = libraries[0] if libraries else ""
         for fn in functions:
-            out.append(
-                ImportRow(
-                    dll=lib_label,
-                    function=fn,
-                    is_suspicious=fn in _ELF_SUSPICIOUS_FUNCTIONS,
-                )
-            )
+            out.append(ImportRow(dll=lib_label, function=fn))
             lib_label = ""  # compact: only the first row shows the lib
     except Exception as exc:  # noqa: BLE001
         logger.warning("pe_extractor: ELF imports parse failed (%s)", exc)

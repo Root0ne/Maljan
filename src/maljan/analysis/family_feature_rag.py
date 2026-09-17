@@ -44,26 +44,27 @@ def build_sample_profile_text(static: StaticAnalysis) -> str:
 
     Shared by the runtime query path and the offline catalog builder so both sides
     speak the same vocabulary. Summarises the signals that distinguish families:
-    import-capability mix, characteristic suspicious imports, packer, and
-    high-entropy sections. Returns '' when there is nothing to say.
+    the import names themselves, the packer, and high-entropy sections. Returns
+    '' when there is nothing to say.
+
+    The profile used to lead with a capability histogram and a "suspicious
+    imports" list, both read off labels the extractor stamped on every row.
+    The extractor no longer labels anything — what an import means is the pack's
+    ``api_capability`` entry, in the ledger — so the profile carries the names
+    in the binary's own order. A fingerprint catalogue built against the old
+    vocabulary must be rebuilt with ``scripts/knowledge/build_family_feature_kb.py``
+    before the two embed into one space again.
     """
     parts: list[str] = []
 
-    # Import-capability histogram (the 10 _SUSPICIOUS_IMPORTS groups).
-    cap_counts = Counter(imp.category for imp in static.imports if getattr(imp, "category", None))
-    if cap_counts:
-        caps = ", ".join(f"{cat} x{n}" for cat, n in cap_counts.most_common())
-        parts.append(f"capabilities: {caps}")
-
-    # Characteristic suspicious imports (the API names themselves carry signal).
-    sus_funcs = [imp.function for imp in static.imports if getattr(imp, "is_suspicious", False)]
-    if sus_funcs:
-        # Stable, de-duplicated, capped.
-        seen: list[str] = []
-        for fn in sus_funcs:
-            if fn and fn not in seen:
-                seen.append(fn)
-        parts.append("suspicious imports: " + ", ".join(seen[:_MAX_IMPORTS]))
+    # The import names, de-duplicated, in the order the binary lists them.
+    seen: list[str] = []
+    for imp in static.imports:
+        fn = imp.function
+        if fn and fn not in seen:
+            seen.append(fn)
+    if seen:
+        parts.append("imports: " + ", ".join(seen[:_MAX_IMPORTS]))
 
     # Packer / obfuscation.
     if static.packer_hint:

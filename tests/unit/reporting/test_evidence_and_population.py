@@ -280,11 +280,9 @@ class TestTechnicalSectionsSeeTheirOwnMeasurements:
                     {"technique_id": "T1622", "name": "Debugger Evasion", "confidence": 0.5},
                 ],
                 imports=[
-                    ImportRow(dll="crypt32.dll", function="CryptEncrypt", category="crypto"),
-                    ImportRow(dll="kernel32.dll", function="FindFirstFileW", category="discovery"),
-                    ImportRow(
-                        dll="kernel32.dll", function="IsDebuggerPresent", category="anti_debug"
-                    ),
+                    ImportRow(dll="crypt32.dll", function="CryptEncrypt"),
+                    ImportRow(dll="kernel32.dll", function="FindFirstFileW"),
+                    ImportRow(dll="kernel32.dll", function="IsDebuggerPresent"),
                 ],
             )
         )

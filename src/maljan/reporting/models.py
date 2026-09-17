@@ -148,12 +148,14 @@ class PESection(BaseModel):
 class ImportRow(BaseModel):
     """Single DLL→function import row."""
 
-    model_config = _STRICT_CONFIG
+    # Permissive on purpose: a report written while the extractor labelled
+    # imports carries ``is_suspicious`` and ``category`` on every row. Those
+    # keys are ignored on load rather than kept as fields nothing writes; what
+    # an import means is stated by the pack's ``api_capability`` entry now.
+    model_config = _PERMISSIVE_CONFIG
 
     dll: str
     function: str
-    is_suspicious: bool = False
-    category: str | None = None  # "process_injection", "anti_debug", "network", ...
 
 
 class StringIOC(BaseModel):
@@ -207,13 +209,17 @@ class StaticAnalysis(BaseModel):
     # often the family's own before the industry picked one.
     pdb_path: str | None = None
     obfuscation_indicators: list[str] = Field(default_factory=list)
-    # {behaviour_category: count} over the resolved import table. Cheap to carry
-    # and it saves every consumer — prompt, report, family RAG — from
-    # recomputing the same histogram from ``imports``.
+    # {behaviour_category: count} over the import table, as the knowledge table
+    # stated it when the triage pack asked (``tools.knowledge.api_capability``).
+    # ``api_capabilities_evidence_ids`` names the ledger entries it was counted
+    # from, so the profile line in the report points at rows a reader can open.
     api_capabilities: dict[str, int] = Field(default_factory=dict)
-    # The audit trail behind an import-derived technique: one row per technique
-    # with the exact imports that evidenced it. Without this a reader sees a
-    # technique in the report and has no way to check the reasoning.
+    api_capabilities_evidence_ids: list[str] = Field(default_factory=list)
+    # The audit trail behind a rule-derived technique: one row per rule that
+    # fired over the import table — capa's, or the knowledge table's technique
+    # rules — with the imports or namespaces that evidenced it and, for the
+    # pack's rows, the ledger id. Without this a reader sees a technique in the
+    # report and has no way to check the reasoning.
     api_technique_hits: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -458,7 +464,11 @@ class TTPMapping(BaseModel):
 class FamilyAttribution(BaseModel):
     """Best-guess malware family / actor / campaign attribution."""
 
-    model_config = _STRICT_CONFIG
+    # Permissive on purpose: every report written before the in-process
+    # case-prior retrieval went carries ``attck_case_candidates`` (usually
+    # ``[]``). The key is ignored on load rather than kept as a field nothing
+    # writes.
+    model_config = _PERMISSIVE_CONFIG
 
     family: str | None = None
     family_confidence: Annotated[float, Field(ge=0.0, le=1.0)] = 0.0

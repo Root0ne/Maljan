@@ -113,10 +113,10 @@ class TestTypedBlocks:
         assert report.static.imports[0].function == "VirtualAllocEx"
         assert report.static.exports == ["StartService"]
         assert report.static.packer_hint == "UPX"
-        # The tool lists imports without a capability label, so the
-        # projection has no profile to build from them.
+        # The format tool lists imports and nothing more; the capability
+        # profile is the pack's ``api_capability`` entry, absent from this run.
         assert report.static.api_capabilities == {}
-        assert report.static.imports[0].is_suspicious is False
+        assert report.static.api_capabilities_evidence_ids == []
 
     def test_dynamic_and_network_are_projected_from_the_sandbox_tools(self) -> None:
         ledger = ledger_from_sandbox(
@@ -243,3 +243,58 @@ class TestEvidenceIndex:
         counter = EvidenceCounter()
         report = _build([entry("identify_file", {"file_type": "PE"}, counter)])
         assert {section.key for section in report.sections} >= {"identity"}
+
+
+class TestTheCapabilityProfile:
+    def test_it_is_the_pack_s_api_capability_entry_cited_by_id(self) -> None:
+        """Counted from the knowledge table's rows, never from a label the
+        extractor put on an import, and the entry id travels with it. The
+        payload is what the tool returns for this import set."""
+        from maljan.tools.knowledge import api_capability
+
+        names = ["VirtualAllocEx", "WriteProcessMemory", "CreateRemoteThread", "RegQueryValueExA"]
+        payload = api_capability(names)
+        counter = EvidenceCounter()
+        ledger = [
+            entry("pe_info", {"imports": [{"dll": "k32", "function": n} for n in names]}, counter),
+            entry("api_capability", payload, counter),
+        ]
+        report = _build(ledger)
+        assert report.static is not None
+        expected = {}
+        for row in payload["capabilities"]:
+            if row["category"]:
+                expected[row["category"]] = expected.get(row["category"], 0) + 1
+        assert report.static.api_capabilities == expected
+        assert report.static.api_capabilities_evidence_ids == [ledger[1].id]
+        hits = [h for h in report.static.api_technique_hits if h["source"] == "api_capability"]
+        assert [h["technique_id"] for h in hits] == ["T1055"]
+        assert hits[0]["evidence_id"] == ledger[1].id
+        assert set(hits[0]["matched_apis"]) >= {"WriteProcessMemory", "CreateRemoteThread"}
+        # One rule, one row, however many APIs cited it.
+        assert len(hits) == 1
+
+    def test_a_rule_under_its_floor_is_not_a_hit(self) -> None:
+        counter = EvidenceCounter()
+        payload = {
+            "capabilities": [
+                {
+                    "api": "WriteProcessMemory",
+                    "category": "process_injection",
+                    "behaviours": ["process_injection"],
+                    "techniques": [
+                        {
+                            "technique_id": "T1055",
+                            "name": "Process Injection",
+                            "matched": ["WriteProcessMemory"],
+                            "min_apis": 2,
+                        }
+                    ],
+                    "catalog_flags": ["suspicious"],
+                }
+            ]
+        }
+        report = _build([entry("api_capability", payload, counter)])
+        assert report.static is not None
+        assert report.static.api_capabilities == {"process_injection": 1}
+        assert report.static.api_technique_hits == []

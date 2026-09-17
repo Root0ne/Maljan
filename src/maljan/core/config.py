@@ -554,17 +554,6 @@ class PreprocessingConfig(BaseModel):
     family_rag_top_k: Annotated[int, Field(ge=1)] = 5
     family_rag_min_score: Annotated[float, Field(ge=0, le=1)] = 0.3
 
-    # Windows API behaviour map — the data-driven replacement for the 51-entry
-    # ``pe_extractor._SUSPICIOUS_IMPORTS`` table. ~680 API names across 13
-    # behaviour categories, with a per-category tier deciding which of them
-    # actually count as *suspicious* (categorising RegOpenKeyExA is useful;
-    # flagging it is not). ON by default and fail-safe in both directions: a
-    # missing or malformed catalog logs once and falls back to the built-in
-    # table, so the worst case is the behaviour we shipped before it existed.
-    # Build it with scripts/knowledge/build_api_capability_db.py.
-    use_api_behaviour_map: bool = True
-    api_behaviour_map_path: str = "data/api_behaviour_map_v1.json"
-
     # Deterministic API→ATT&CK mapping, computed from the same resolved-import
     # set as the behaviour map above (one parse, two projections). It fills
     # ``StaticAnalysis.api_technique_hits``: one row per technique with the

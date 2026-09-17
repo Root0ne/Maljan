@@ -38,8 +38,10 @@ __all__ = [
     "reset_cache",
 ]
 
-# Tiers that make an import "suspicious". ``informational`` deliberately does
-# not: see ``pe_extractor.classify_import`` for why the two facts are separate.
+# Tiers the catalogue itself calls "suspicious". ``informational`` deliberately
+# is not one: every Windows program reads files and opens keys. The tool that
+# reads this (``tools.knowledge.api_capability``) reports the tier as a
+# catalogue flag, named for where it comes from, not as a finding.
 _SUSPICIOUS_TIERS = frozenset({"high", "medium"})
 _VALID_TIERS = frozenset({"high", "medium", "informational"})
 

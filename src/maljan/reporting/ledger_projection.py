@@ -279,16 +279,14 @@ def static_from_ledger(
 
     # capa reaches the report as a tool call like everything else
     # (``providers.static.capa_yara.ledger_entries``); this is what keeps its
-    # capability counters and technique hits in front of the layers that read
-    # ``static``, rather than folding the bundle into the builder by hand.
+    # technique hits in front of the layers that read ``static``, rather than
+    # folding the bundle into the builder by hand.
     for _entry, data in _payloads(ledger, "capa"):
         for row in data.get("capabilities") or []:
             if not isinstance(row, dict):
                 continue
             seen = True
             namespace = str(row.get("namespace") or "")
-            top = namespace.split("/", 1)[0] if namespace else "uncategorised"
-            static.api_capabilities[top] = static.api_capabilities.get(top, 0) + 1
             for technique in row.get("attck") or []:
                 tid = _technique_id(technique)
                 if not tid:
@@ -303,11 +301,52 @@ def static_from_ledger(
                     }
                 )
 
+    # The capability profile is what the knowledge table said about the import
+    # set when the pack asked (``tools.knowledge.api_capability``): a category
+    # per API and the technique rules that list it. Counted here and cited by
+    # the entry's id. A rule is a hit only when the APIs it matched across the
+    # whole import set clear its ``min_apis``; the tool answers one API at a
+    # time and leaves that arithmetic to whoever reads the rows.
+    for entry, data in _payloads(ledger, "api_capability"):
+        rows = [row for row in data.get("capabilities") or [] if isinstance(row, dict)]
+        rules: dict[tuple[str, str], tuple[int, list[str]]] = {}
+        for row in rows:
+            category = str(row.get("category") or "").strip()
+            if category:
+                static.api_capabilities[category] = static.api_capabilities.get(category, 0) + 1
+            for rule in row.get("techniques") or []:
+                if not isinstance(rule, dict):
+                    continue
+                tid = _technique_id(rule.get("technique_id"))
+                if not tid:
+                    continue
+                _floor, apis = rules.setdefault(
+                    (tid, str(rule.get("name") or "")), (_min_apis(rule), [])
+                )
+                for api in rule.get("matched") or []:
+                    if str(api) and str(api) not in apis:
+                        apis.append(str(api))
+        for (tid, name), (floor, apis) in rules.items():
+            if len(apis) < floor:
+                continue
+            static.api_technique_hits.append(
+                {
+                    "technique_id": tid,
+                    "name": name,
+                    "matched_apis": apis,
+                    "source": "api_capability",
+                    "evidence_id": entry.id,
+                }
+            )
+        if rows:
+            seen = True
+            static.api_capabilities_evidence_ids.append(entry.id)
+
     for artifact in _artifacts(isrs, "imports"):
         for row in _rows_of(artifact):
             if len(row) >= 2:
                 seen = True
-                static.imports.append(ImportRow(dll=row[0], function=row[1], is_suspicious=True))
+                static.imports.append(ImportRow(dll=row[0], function=row[1]))
     for artifact in _artifacts(isrs, "iocs", "indicators"):
         for row in _rows_of(artifact):
             if len(row) >= 2:
@@ -345,6 +384,14 @@ def _technique_id(value: Any) -> str:
     text = str(value or "")
     match = _TECHNIQUE_RE.search(text)
     return match.group(0) if match else ""
+
+
+def _min_apis(rule: dict[str, Any]) -> int:
+    """The rule's own floor, never below one."""
+    try:
+        return max(1, int(rule.get("min_apis") or 1))
+    except (TypeError, ValueError):
+        return 1
 
 
 # ---------------------------------------------------------------------------

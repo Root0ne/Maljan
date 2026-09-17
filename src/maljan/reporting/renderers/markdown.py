@@ -257,8 +257,11 @@ class MarkdownRenderer:
 
         if static.api_capabilities:
             ordered = sorted(static.api_capabilities.items(), key=lambda kv: -kv[1])
+            cited = ", ".join(static.api_capabilities_evidence_ids)
             lines.append(
-                "**Import capability profile**: "
+                "**Import capability profile**"
+                + (f" ({cited})" if cited else "")
+                + ": "
                 + ", ".join(f"{cat} ×{count}" for cat, count in ordered)
             )
             lines.append("")
@@ -267,20 +270,21 @@ class MarkdownRenderer:
             lines.append("### ATT&CK Techniques Derived From Imports")
             lines.append("")
             lines.append(
-                "_Deterministic: each row is the import table alone — no sandbox, "
-                "no model. This is the audit trail behind the capability matrix._"
+                "_Deterministic: each row is a rule that fired over the import table — "
+                "capa's, or the knowledge table's — no sandbox, no model. The pack's "
+                "rows cite their ledger entry._"
             )
             lines.append("")
-            lines.append("| Technique | Name | Confidence | Imports |")
+            lines.append("| Technique | Name | Source | Imports |")
             lines.append("|---|---|---|---|")
-            for hit in sorted(
-                static.api_technique_hits,
-                key=lambda h: -float(h.get("confidence") or 0.0),
-            )[:25]:
+            for hit in static.api_technique_hits[:25]:
                 apis = ", ".join(f"`{a}`" for a in (hit.get("matched_apis") or [])[:6])
+                source = str(hit.get("source") or "-")
+                if hit.get("evidence_id"):
+                    source = f"{source} ({hit['evidence_id']})"
                 lines.append(
                     f"| {hit.get('technique_id', '?')} | {hit.get('name', '-')} "
-                    f"| {float(hit.get('confidence') or 0.0):.2f} | {apis} |"
+                    f"| {source} | {apis} |"
                 )
             lines.append("")
 
@@ -303,16 +307,6 @@ class MarkdownRenderer:
                     f"| `{sec.name}` | {sec.virtual_address} | {sec.virtual_size} | "
                     f"{sec.raw_size} | {raw_offset} | {sec.entropy:.2f} | {flag} |"
                 )
-            lines.append("")
-
-        suspicious_imports = [i for i in static.imports if i.is_suspicious]
-        if suspicious_imports:
-            lines.append("### Suspicious Imports")
-            lines.append("")
-            lines.append("| DLL | Function | Category |")
-            lines.append("|---|---|---|")
-            for imp in suspicious_imports[:40]:
-                lines.append(f"| `{imp.dll}` | `{imp.function}` | {imp.category or '-'} |")
             lines.append("")
 
         if static.exports:

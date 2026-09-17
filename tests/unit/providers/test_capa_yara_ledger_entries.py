@@ -71,12 +71,15 @@ def _builder(ledger) -> MalwareReportBuilder:
 
 
 class TestReachesTheReport:
-    def test_capa_capabilities_still_reach_the_static_block(self):
+    def test_capa_technique_hits_still_reach_the_static_block(self):
+        """capa's rule namespaces are not the import capability profile — that
+        is the pack's ``api_capability`` entry — but its technique hits are."""
         ledger = ledger_entries(_bundle(capa_rules=[_CAPA_ROW]), EvidenceCounter())
         report = _builder(ledger).build_deterministic()
         assert report.static is not None
-        assert report.static.api_capabilities.get("data-manipulation") == 1
-        assert any(h["technique_id"] == "T1027" for h in report.static.api_technique_hits)
+        assert report.static.api_capabilities == {}
+        hits = [h for h in report.static.api_technique_hits if h["source"] == "capa"]
+        assert any(h["technique_id"] == "T1027" for h in hits)
 
     def test_capa_and_yara_print_as_evidence_sections(self):
         ledger = ledger_entries(

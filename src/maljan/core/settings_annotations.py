@@ -645,14 +645,6 @@ ANNOTATIONS: dict[str, Annotation] = {
         ),
         "subgroup": "Reference data",
     },
-    "preprocessing.api_behaviour_map_path": {
-        "title": "API behaviour map path",
-        "description": (
-            "Path to the API-behaviour-map catalog JSON used when use_api_behaviour_map "
-            "is enabled. Build it with scripts/knowledge/build_api_capability_db.py."
-        ),
-        "subgroup": "Reference data",
-    },
     "preprocessing.attck_case_corpus_path": {
         "title": "ATT&CK case corpus path",
         "description": (
@@ -823,16 +815,6 @@ ANNOTATIONS: dict[str, Annotation] = {
             "sandbox-unreachable run. On by default. Each row carries the catalog's "
             "own modest confidence and names the imports behind it, so an analyst "
             "reading it can check the reasoning rather than take the number."
-        ),
-        "subgroup": "Feature switches",
-    },
-    "preprocessing.use_api_behaviour_map": {
-        "title": "Use API behaviour map",
-        "description": (
-            "Enables the data-driven Windows-API behaviour catalog (~680 API names "
-            "across 13 behaviour categories) in place of the small hardcoded "
-            "suspicious-imports table. On by default and fail-safe: a missing or "
-            "malformed catalog falls back to the built-in table."
         ),
         "subgroup": "Feature switches",
     },

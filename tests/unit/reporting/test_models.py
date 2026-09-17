@@ -235,3 +235,26 @@ class TestPersistenceLinuxKinds:
             PersistenceMechanism.model_validate(
                 {"kind": "totally_made_up", "target": "x", "evidence_ref": "y"}
             )
+
+
+class TestRowsWrittenBeforeTheLabelsWent:
+    """The API re-validates every stored report. A row carrying a key the
+    model no longer has must load, and the key must not come back."""
+
+    def test_an_import_row_with_the_old_label_keys_loads(self) -> None:
+        from maljan.reporting.models import ImportRow
+
+        row = ImportRow.model_validate(
+            {"dll": "k32", "function": "VirtualAllocEx", "is_suspicious": True, "category": "x"}
+        )
+        assert row.function == "VirtualAllocEx"
+        assert not hasattr(row, "is_suspicious")
+        assert "is_suspicious" not in row.model_dump()
+
+    def test_an_attribution_with_case_priors_loads(self) -> None:
+        from maljan.reporting.models import FamilyAttribution
+
+        attribution = FamilyAttribution.model_validate(
+            {"attck_case_candidates": [{"technique_id": "T1055", "support": 7}]}
+        )
+        assert "attck_case_candidates" not in attribution.model_dump()
