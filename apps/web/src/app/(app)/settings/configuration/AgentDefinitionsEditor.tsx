@@ -391,10 +391,14 @@ export function AgentDetail({
 
   /** The agents this one may be given as tools: every other analyst-role
    *  definition, whether or not it is enabled — a disabled one is refused at
-   *  run time by name rather than silently missing from the list. */
-  const askable = Object.entries(definitions)
-    .filter(([key, d]) => key !== agentKey && ASKABLE_ROLES.has(d.role))
-    .map(([key]) => key);
+   *  run time by name rather than silently missing from the list. Empty for a
+   *  judge or a reporter, whose references the API always refuses, so the
+   *  group is not offered where ticking a row is a guaranteed save error. */
+  const askable = ASKABLE_ROLES.has(definitions[agentKey]?.role)
+    ? Object.entries(definitions)
+        .filter(([key, d]) => key !== agentKey && ASKABLE_ROLES.has(d.role))
+        .map(([key]) => key)
+    : [];
 
   /** The message the API put on one named field, so it can be rendered under
    *  that field rather than at the foot of the detail. */

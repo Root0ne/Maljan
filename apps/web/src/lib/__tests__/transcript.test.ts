@@ -40,6 +40,17 @@ describe("an addressed line in the transcript", () => {
     expect(messagesFromEvents([twice, twice])).toHaveLength(1);
   });
 
+  it("keeps one line when the back-fill and the live socket both carry it", () => {
+    const twice = say({
+      speaker: "lead",
+      role: "analyst",
+      round: 0,
+      text: "Does it beacon?",
+      addressed_to: "network",
+    });
+    expect(messagesFromEvents([twice, twice])).toHaveLength(1);
+  });
+
   it("reads the same fields off a recorded row", () => {
     const [row] = messagesFromTranscript([
       {
@@ -55,6 +66,35 @@ describe("an addressed line in the transcript", () => {
     ]);
     expect(row.addressedTo).toBe("lead");
     expect(row.stage).toBe("lead");
-    expect(row.id).toBe("analyst:static:1->lead#0");
+    // A recorded row and its live twin are the same line, so a job whose
+    // events have not yet expired does not draw the ask twice.
+    const [live] = messagesFromEvents([
+      say({ speaker: "static", role: "analyst", round: 1, text: "answer", addressed_to: "lead" }),
+    ]);
+    expect(row.id).toBe(live.id);
+  });
+
+  it("gives every row of a delegated round an id of its own", () => {
+    /* `addressed_to` has no column, so a lead's report and each of its asks
+     * come back under one identity. React keys them, and a merge tells them
+     * apart, so the recording's own order is what separates them. */
+    const rows = messagesFromTranscript([
+      { seq: 1, speaker: "lead", role: "analyst", round: 0, status: "complete", text: "first" },
+      { seq: 2, speaker: "lead", role: "analyst", round: 0, status: "complete", text: "second" },
+      { seq: 3, speaker: "lead", role: "analyst", round: 0, status: "complete", text: "my report" },
+    ]);
+    expect(new Set(rows.map((m) => m.id)).size).toBe(3);
+    expect(rows.map((m) => m.id)).toEqual([
+      "analyst:lead:0#1",
+      "analyst:lead:0#2",
+      "analyst:lead:0#3",
+    ]);
+  });
+
+  it("leaves a row that is already alone identified the way a live event is", () => {
+    const [row] = messagesFromTranscript([
+      { seq: 4, speaker: "static", role: "analyst", round: 0, status: "complete", text: "report" },
+    ]);
+    expect(row.id).toBe("analyst:static:0");
   });
 });

@@ -77,28 +77,47 @@ export interface TranscriptMessage {
 }
 
 /**
+ * A short, stable digest of a line's text.
+ *
+ * FNV-1a, because what is wanted is that the same text gives the same key in
+ * every copy of the same line and two different lines almost never collide —
+ * not that the key is hard to forge.
+ */
+function shortHash(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(36);
+}
+
+/**
  * The identity of one message.
  *
  * `role:speaker:round` is enough for a line said to the room: a given agent
  * speaks once per role per round. A line said to one agent is not — a lead
  * that asks three specialists in one round, or the same one twice, speaks
  * several times as the same role in the same round — so those carry the
- * addressee and a count of how many such lines came before, which both the
- * live stream and the recording reproduce in the same order.
+ * addressee and a digest of what was said.
+ *
+ * Derived from the content rather than counted, and that is the whole point:
+ * the stream back-fill and the live socket overlap by design, and a counter
+ * gave the replayed copy of an ask the *next* number, so both were kept and
+ * every ask and answer in the replay window was drawn twice. Two copies of
+ * one line hash the same and collapse; two different asks in one round do
+ * not.
  */
 function messageId(
   role: TranscriptRole,
   speaker: string,
   round: number,
   addressedTo: string | undefined,
-  counts: Map<string, number>
+  text: string
 ): string {
   const base = `${role}:${speaker}:${round}`;
   if (!addressedTo) return base;
-  const key = `${base}->${addressedTo}`;
-  const n = counts.get(key) ?? 0;
-  counts.set(key, n + 1);
-  return `${key}#${n}`;
+  return `${base}->${addressedTo}#${shortHash(text)}`;
 }
 
 function asAddressee(value: unknown): string | undefined {
@@ -194,7 +213,6 @@ function asStrings(value: unknown): string[] {
 export function messagesFromEvents(events: WSEvent[]): TranscriptMessage[] {
   const out: TranscriptMessage[] = [];
   const seen = new Set<string>();
-  const addressed = new Map<string, number>();
 
   for (const event of events) {
     if (event.type !== "agent_message") continue;
@@ -206,12 +224,10 @@ export function messagesFromEvents(events: WSEvent[]): TranscriptMessage[] {
     const addressedTo = asAddressee(d.addressed_to);
 
     // The stream back-fill and the live socket overlap by design, so the same
-    // message can arrive twice; `messageId` says what makes two the same.
-    // A back-filled addressed line and its live twin count once here because
-    // the count is taken before the duplicate is dropped, so the second copy
-    // draws the next number and is kept. That is the one shape this id cannot
-    // collapse; the recording, which carries `seq`, replaces it after the run.
-    const id = messageId(role, speaker, round, addressedTo, addressed);
+    // message can arrive twice; `messageId` says what makes two the same, and
+    // an addressed line is identified by what it says so both copies of it
+    // land on one id.
+    const id = messageId(role, speaker, round, addressedTo, text);
     if (seen.has(id)) continue;
     seen.add(id);
 
@@ -267,19 +283,41 @@ export interface TranscriptRow {
  *
  * `messagesFromReport` below remains for reports written before the recording
  * existed.
+ *
+ * A delegated round is the one shape where several rows share an identity.
+ * `addressed_to` has no column yet, so a lead's report and each of its asks
+ * come back as `analyst:lead:0` — duplicate React keys, and a merge that
+ * cannot tell them apart. Every row of such a group carries its own `seq`
+ * instead, which is the recording's own order and unique by construction. A
+ * row whose identity is already unique keeps it, so it still collapses onto
+ * its live twin.
  */
 export function messagesFromTranscript(
   rows: TranscriptRow[] | null | undefined
 ): TranscriptMessage[] {
   const out: TranscriptMessage[] = [];
-  const addressed = new Map<string, number>();
-  for (const row of rows ?? []) {
+  const all = rows ?? [];
+  const shared = new Set<string>();
+  const once = new Set<string>();
+  for (const row of all) {
+    const id = messageId(
+      asRole(row.role),
+      String(row.speaker ?? "unknown"),
+      Number(row.round ?? 0),
+      asAddressee(row.addressed_to),
+      String(row.text ?? "")
+    );
+    if (once.has(id)) shared.add(id);
+    once.add(id);
+  }
+  for (const row of all) {
     const role = asRole(row.role);
     const speaker = String(row.speaker ?? "unknown");
     const round = Number(row.round ?? 0);
     const addressedTo = asAddressee(row.addressed_to);
+    const id = messageId(role, speaker, round, addressedTo, String(row.text ?? ""));
     out.push({
-      id: messageId(role, speaker, round, addressedTo, addressed),
+      id: shared.has(id) ? `${id}#${Number(row.seq ?? 0)}` : id,
       speaker,
       role,
       round,
