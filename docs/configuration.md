@@ -426,7 +426,7 @@ pipeline → Teams) is an ordered list of stages. Each stage is:
 | `measurement` | The four after the pack, with every tool server withheld and no pack | What the ensemble contributes with nothing to call and nothing established. |
 | `mobile` | `triage_pack` → `triage` → `android_static` → `dynamic` → `debate` → `verdict` → `report` | An APK or a DEX. |
 | `deep_static` | `triage_pack` → `triage` → `static` → `reversing` → `network` → `debate` → `verdict` → `report` | Reading the code. |
-| `team_lead` | `triage_pack` → `lead` (lead) → `debate` → `verdict` → `report` | One lead agent gives the specialists their work; see *Delegation* below. |
+| `team_lead` | `triage_pack` → `lead` (lead) → `verdict` → `report` | One lead agent gives the specialists their work; see *Delegation* below. The one seeded team with no debate: a debate over a single analyst costs a second full loop and cannot change a position. |
 
 `triage_pack` is a stage of kind `triage`: the pipeline itself running the
 deterministic tools over the sample and writing each result to the evidence

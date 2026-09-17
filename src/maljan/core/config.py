@@ -1760,14 +1760,22 @@ def _deep_static_stages() -> list[StageDefinition]:
 
 
 def _team_lead_stages() -> list[StageDefinition]:
-    """A team led by one agent: the pack, the lead, the debate, the verdict.
+    """A team led by one agent: the pack, the lead, the verdict.
 
     The lead is the only analyst the stage list names. The specialists it
     asks are its tools, not stages: which of them run, in what order and how
     often is the lead's decision on this sample, which is the point of having
     a lead rather than a fixed sequence. What they did is still in the ledger
-    under their own keys, and the debate and the verdict read the lead's
-    report with their evidence cited in it.
+    under their own keys, and the verdict reads the lead's report with their
+    evidence cited in it.
+
+    No debate stage, and that is the whole difference from the other seeded
+    teams. A debate is agents arguing with each other, and this team has one
+    analyst: the stage would hand the lead its own report, ask it to revise
+    against nobody, and cost a second full loop — with the asks that loop
+    makes — for a round that cannot change a position. The lead's own asks
+    are where the disagreement happens here; a specialist that contradicts
+    the lead does it in the answer the lead reads, not in a round afterwards.
     """
     return [
         triage_stage(),
@@ -1779,18 +1787,11 @@ def _team_lead_stages() -> list[StageDefinition]:
             inject_upstream="none",
         ),
         StageDefinition(
-            key="debate",
-            label="Debate",
-            kind="debate",
-            depends_on=["lead"],
-            inject_upstream="none",
-        ),
-        StageDefinition(
             key="verdict",
             label="Verdict",
             kind="verdict",
             agents=[JUDGE_AGENT_KEY],
-            depends_on=["debate"],
+            depends_on=["lead"],
             inject_upstream="none",
         ),
         StageDefinition(

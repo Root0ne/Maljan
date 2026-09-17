@@ -765,13 +765,16 @@ def test_the_team_lead_profile_is_seeded_and_the_default_is_unchanged():
     cfg = Settings(_env_file=None)
     assert "team_lead" in BUILTIN_PROFILES
     team = cfg.agents.profiles["team_lead"]
+    # No debate stage: a debate over a single analyst hands the lead its own
+    # report and costs a second full loop for a round that cannot change a
+    # position. The lead's asks are where the disagreement happens.
     assert [(s.key, s.kind, s.agents) for s in team.stages] == [
         ("triage_pack", "triage", []),
         ("lead", "analysis", ["lead"]),
-        ("debate", "debate", []),
         ("verdict", "verdict", ["judge"]),
         ("report", "report", [REPORTER_AGENT_KEY]),
     ]
+    assert not any(stage.kind == "debate" for stage in team.stages)
     assert cfg.agents.profiles["default"].analysis_agents == ["static", "dynamic", "network"]
     assert not any(
         ref.kind == "agent"

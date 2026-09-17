@@ -54,7 +54,11 @@ change landed on `main`.
   reporter, and any such reference on those two. A new seeded definition
   `lead` (role `lead`, `src/maljan/agents/prompts/lead.md`) references
   `static`, `dynamic`, `network`, `reverser` and `triage`; a new seeded team
-  `team_lead` runs it as its one analysis stage
+  `team_lead` runs it as its one analysis stage, with no debate stage — a
+  debate over a single analyst hands the lead its own report, asks it to
+  revise against nobody and costs a second full loop, with the asks that loop
+  makes, for a round that cannot change a position; the disagreement happens
+  in the lead's own asks instead
   (`tests/fixtures/golden/graph_team_lead.json`, `docs/assets/team-team-lead.svg`).
   The `default` team is unchanged. The console's agent editor offers **Ask
   another agent** in the Tools tree and the transcript draws the addressee

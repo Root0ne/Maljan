@@ -369,12 +369,19 @@ read.
 ![The deep_static team](assets/team-deep-static.svg)
 
 **`team_lead`** is a team led by one agent: the pack, then a `lead` stage whose
-only agent is `lead`, then the debate, the verdict and the report. The
-specialists — `static`, `dynamic`, `network`, `reverser` and `triage` — are the
-lead's tools rather than stages, so which of them work on a sample, in what
-order and how often is the lead's decision rather than a fixed sequence. Their
-tool calls are in the ledger under their own keys and their answers are in the
-transcript, addressed to the lead.
+only agent is `lead`, then the verdict and the report. The specialists —
+`static`, `dynamic`, `network`, `reverser` and `triage` — are the lead's tools
+rather than stages, so which of them work on a sample, in what order and how
+often is the lead's decision rather than a fixed sequence. Their tool calls are
+in the ledger under their own keys and their answers are in the transcript,
+addressed to the lead.
+
+It is the one seeded team with no debate stage. A debate is agents arguing
+with each other, and this team has one analyst: the stage would hand the lead
+its own report, ask it to revise against nobody, and cost a second full loop —
+with the asks that loop makes — for a round that cannot change a position. The
+disagreement happens in the lead's own asks instead, where a specialist that
+contradicts it does so in the answer it reads.
 
 ![The team_lead team](assets/team-team-lead.svg)
 

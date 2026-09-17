@@ -3,20 +3,12 @@
     "analysts": [
       "lead"
     ],
-    "conditional": {
-      "negotiation": {
-        "judge": "judge",
-        "revision": "revision"
-      }
-    },
+    "conditional": {},
     "edges": [
       "__start__->triage_pack",
       "judge->report",
-      "lead_analyst->negotiation",
-      "negotiation->judge",
-      "negotiation->revision",
+      "lead_analyst->judge",
       "report->__end__",
-      "revision->negotiation",
       "triage_pack->lead_analyst"
     ],
     "nodes": [
@@ -24,9 +16,7 @@
       "__start__",
       "judge",
       "lead_analyst",
-      "negotiation",
       "report",
-      "revision",
       "triage_pack"
     ]
   },
@@ -34,20 +24,12 @@
     "analysts": [
       "lead"
     ],
-    "conditional": {
-      "negotiation": {
-        "judge": "judge",
-        "revision": "revision"
-      }
-    },
+    "conditional": {},
     "edges": [
       "__start__->triage_pack",
       "judge->report",
-      "lead_analyst->negotiation",
-      "negotiation->judge",
-      "negotiation->revision",
+      "lead_analyst->judge",
       "report->__end__",
-      "revision->negotiation",
       "triage_pack->lead_analyst"
     ],
     "nodes": [
@@ -55,9 +37,7 @@
       "__start__",
       "judge",
       "lead_analyst",
-      "negotiation",
       "report",
-      "revision",
       "triage_pack"
     ]
   }
