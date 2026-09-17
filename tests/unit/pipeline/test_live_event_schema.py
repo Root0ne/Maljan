@@ -148,9 +148,45 @@ class TestArgumentSummaries:
         assert ev.summarize_args({"path": r"C:\\Users\\op\\samples\\evil.exe"}) == "path=evil.exe"
 
     def test_a_long_value_is_capped(self) -> None:
-        summary = ev.summarize_args({"pattern": "x" * 500})
+        summary = ev.summarize_args({"pattern": "word " * 200})
         assert len(summary) <= ev.ARGUMENT_SUMMARY_CHARS
         assert summary.endswith("…")
+
+    def test_a_url_with_userinfo_and_no_path_still_loses_the_userinfo(self) -> None:
+        summary = ev.summarize_args({"endpoint": "https://operator:hunter2@vt.example"})
+        assert "hunter2" not in summary
+        assert "operator" not in summary
+        assert summary == "endpoint=https://vt.example/…"
+
+    def test_a_url_query_never_travels(self) -> None:
+        summary = ev.summarize_args({"url": "https://vt.example/v3/files?apikey=SECRETKEY"})
+        assert "SECRETKEY" not in summary
+        assert summary == "url=https://vt.example/…"
+
+    def test_a_bearer_value_under_a_neutral_name_is_replaced(self) -> None:
+        summary = ev.summarize_args({"header": "Bearer abc123"})
+        assert "abc123" not in summary
+        assert summary == "header=Bearer ***"
+
+    def test_a_hex_key_under_a_neutral_name_is_replaced(self) -> None:
+        summary = ev.summarize_args({"query": "a1b2c3d4e5f60718293a4b5c6d7e8f90"})
+        assert summary == "query=***"
+
+    def test_a_vendor_key_prefix_is_replaced_wherever_it_appears(self) -> None:
+        summary = ev.summarize_args({"value": "sk-liveKey", "note": "nvapi-abc"})
+        assert summary == "value=***, note=***"
+
+    def test_a_command_line_loses_every_host_path_it_names(self) -> None:
+        summary = ev.summarize_args(
+            {"cmd": "/opt/maljan/bin/run.sh /home/op/data/samples/ab12/evil.exe --out /tmp/x/r.json"}
+        )
+        assert "/home/op" not in summary
+        assert "/opt/maljan" not in summary
+        assert "/tmp/x" not in summary
+        assert summary == "cmd=run.sh evil.exe --out r.json"
+
+    def test_a_short_word_is_left_alone(self) -> None:
+        assert ev.summarize_args({"pattern": "http", "start": 0}) == "pattern=http, start=0"
 
     def test_many_arguments_are_counted_rather_than_listed(self) -> None:
         summary = ev.summarize_args({f"k{i}": i for i in range(10)})
@@ -165,9 +201,28 @@ class TestArgumentSummaries:
         assert ev.summarize_args(None) == ""
 
     def test_a_result_summary_is_one_capped_line(self) -> None:
-        summary = ev.summarize_result("first line\nsecond line" + "y" * 500)
+        summary = ev.summarize_result("first line\nsecond line " + "word " * 200)
         assert "\n" not in summary
         assert len(summary) <= ev.RESULT_SUMMARY_CHARS
+
+    def test_a_result_that_echoes_a_key_is_scrubbed_like_an_argument(self) -> None:
+        summary = ev.summarize_result("called with sk-liveKeyValue against https://u:p@vt.example")
+        assert "sk-liveKeyValue" not in summary
+        assert "u:p@" not in summary
+
+    def test_a_failure_says_what_would_fix_it_and_not_what_broke(self) -> None:
+        summary = ev.summarize_result(
+            "FileNotFoundError: /home/operator/maljan/data/samples/ab12/evil.exe is missing",
+            ok=False,
+            remediation="submit the sample again",
+        )
+        assert "/home/operator" not in summary
+        assert "FileNotFoundError" not in summary
+        assert summary == "the call failed; submit the sample again"
+
+    def test_a_failure_with_no_remediation_still_says_nothing_raw(self) -> None:
+        summary = ev.summarize_result("Traceback: /etc/maljan/secrets.env", ok=False)
+        assert summary == "the call failed"
 
 
 class TestValidationFeedback:

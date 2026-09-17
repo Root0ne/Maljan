@@ -2496,6 +2496,30 @@ class TriageConfig(BaseModel):
     budget_seconds: Annotated[int, Field(ge=1)] = 1200
 
 
+class EventsConfig(BaseModel):
+    """The live conversation feed: what it carries, and how long it is kept.
+
+    The events themselves are not optional — the console is drawn from them
+    and a run that published none would be a spinner again. What is settable
+    is the one channel that costs something per model turn rather than per
+    step, and how long the record of a finished run stays on the job.
+
+    ``stream_deltas`` publishes an agent's partial text while its loop is
+    still running. It is on because a thirty-minute analyst that says nothing
+    until it is done is the complaint this whole feed exists to answer; a
+    deployment whose browsers are on a thin link can turn it off and still see
+    every finished message.
+
+    ``retention_days`` bounds ``job_events``. The transcript and the evidence
+    ledger of a finished run are kept by the report and the job and are not
+    touched by this; what ages out is the moment-by-moment feed, which is what
+    a reader wants while a run is fresh and nobody reads a month later.
+    """
+
+    stream_deltas: bool = True
+    retention_days: Annotated[int, Field(ge=1)] = 30
+
+
 class ValidationConfig(BaseModel):
     """The technique check's one heuristic part, and when it is allowed to run.
 
@@ -2584,6 +2608,8 @@ class Settings(BaseSettings):
     reporting: ReportingConfig = Field(default_factory=ReportingConfig)
     triage: TriageConfig = Field(default_factory=TriageConfig)
     validation: ValidationConfig = Field(default_factory=ValidationConfig)
+    # The live conversation feed the console is drawn from.
+    events: EventsConfig = Field(default_factory=EventsConfig)
     # Which analysts exist, in what order, and what each one gets. The
     # ``default`` profile is the architecture this project measured itself on.
     agents: AgentsConfig = Field(default_factory=AgentsConfig)

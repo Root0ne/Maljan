@@ -25,6 +25,13 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from maljan.core.logger import logger
+from maljan.pipeline.events import (
+    EventSink,
+    emit_tool_call_finished,
+    emit_tool_call_started,
+    summarize_args,
+    summarize_result,
+)
 from maljan.schemas.evidence import EvidenceCounter, LedgerEntry, build_entry
 
 if TYPE_CHECKING:
@@ -175,7 +182,16 @@ def result_text(value: Any) -> str:
 
 
 class EvidenceRecorder:
-    """One agent's tool calls for one loop, in the order they happened."""
+    """One agent's tool calls for one loop, in the order they happened.
+
+    The same object is also the live feed of those calls. A ledger entry is
+    written the moment a call answers, which is exactly when the console wants
+    to draw the result, so the event goes out from here rather than from a
+    second place that would have to be kept in step with it: one entry, one
+    ``tool_call_finished``, always carrying the id the entry was filed under.
+    The pack (``pipeline.triage_pack``) writes its steps through this same
+    method and is fed out live for free.
+    """
 
     def __init__(
         self,
@@ -183,6 +199,7 @@ class EvidenceRecorder:
         *,
         counter: EvidenceCounter | None = None,
         stage: str = "analysis",
+        sink: EventSink | None = None,
     ) -> None:
         self.agent = agent
         self.stage = stage
@@ -191,6 +208,22 @@ class EvidenceRecorder:
         # monotonic within this loop rather than within a job.
         self.counter = counter if counter is not None else EvidenceCounter()
         self.entries: list[LedgerEntry] = []
+        # ``None`` outside a job, which makes every emit a no-op, exactly as
+        # it does everywhere else in the pipeline.
+        self.sink = sink
+
+    def call_started(
+        self, *, tool: str, args: dict[str, Any] | None = None, server: str | None = None
+    ) -> None:
+        """Announce a call that is about to run. Never raises."""
+        emit_tool_call_started(
+            self.sink,
+            stage=self.stage,
+            agent=self.agent,
+            tool=tool,
+            server=server,
+            args_summary=summarize_args(args),
+        )
 
     def record(
         self,
@@ -229,6 +262,22 @@ class EvidenceRecorder:
             args_raw=args_raw,
         )
         self.entries.append(entry)
+        emit_tool_call_finished(
+            self.sink,
+            stage=self.stage,
+            agent=self.agent,
+            tool=tool,
+            server=server,
+            evidence_id=entry.id,
+            ok=ok,
+            duration_ms=duration_ms,
+            # The entry's own output, which the ledger has already trimmed,
+            # rather than the text the model reads: what goes to the console
+            # is a headline, and the whole result is one ledger lookup away.
+            # A failure travels as the remediation the tool offered and not as
+            # its error text, which is the half that names hosts and paths.
+            summary=summarize_result(entry.output, ok=ok, remediation=remediation or ""),
+        )
         return entry
 
 
@@ -615,6 +664,11 @@ def _record_tool(
     if func is not None:
 
         def wrapped_func(**kwargs: Any) -> str:  # noqa: F811
+            # Announced before the guard is consulted, so every finish the
+            # console sees has a start behind it: the refused repeat writes a
+            # ledger entry like any other call and would otherwise close a
+            # bubble that was never opened.
+            recorder.call_started(tool=name, args=kwargs, server=server)
             answered = _already_answered(kwargs)
             if answered is not None:
                 return answered
@@ -631,6 +685,7 @@ def _record_tool(
     if coroutine is not None:
 
         async def wrapped_coroutine(**kwargs: Any) -> str:  # noqa: F811
+            recorder.call_started(tool=name, args=kwargs, server=server)
             answered = _already_answered(kwargs)
             if answered is not None:
                 return answered

@@ -92,6 +92,10 @@ class TestAgentMessagePayload:
             "round": 0,
             "status": "complete",
             "text": "hi",
+            # Always present, because the console switches on it and a
+            # message with no kind is one it cannot place. ``says`` is what
+            # every line emitted before the field existed was.
+            "kind": "says",
         }
 
     def test_confidence_claims_and_dissent_round_trip(self) -> None:

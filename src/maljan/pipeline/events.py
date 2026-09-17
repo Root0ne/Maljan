@@ -23,6 +23,7 @@ Deliberately minimal, and deliberately not async:
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -296,12 +297,44 @@ _SECRET_ARGUMENT_WORDS = (
     "api_key",
     "apikey",
     "auth",
+    "authorization",
+    "bearer",
+    "cookie",
     "credential",
     "passphrase",
+    "passwd",
     "password",
+    "private_key",
+    "pwd",
     "secret",
+    "session",
     "token",
 )
+
+# A name is the weaker half of the check. A key travels just as happily under
+# ``query``, ``value`` or ``header``, and a sandbox command line carries host
+# paths in the middle of a sentence, so every string value is scrubbed on its
+# way out whatever it is called:
+#
+# * anything shaped like a credential is replaced outright — a ``Bearer``
+#   prefix, one of the vendor key prefixes, or an unbroken run of hex or
+#   base64 long enough to be a key rather than a hash fragment somebody is
+#   discussing;
+# * a URL keeps its scheme and host and loses its userinfo, path and query,
+#   because the userinfo *is* a credential and the query is where one is
+#   usually smuggled;
+# * every remaining whitespace-separated token that names a path is cut to its
+#   last segment, so a command line with three host paths loses all three
+#   rather than only the last.
+_CREDENTIAL_PREFIXES = ("sk-", "sk_", "nvapi-", "ghp_", "gho_", "xoxb-")
+# An authorization scheme and the word after it, which the token-by-token pass
+# cannot see as one thing: "Bearer" is a word and the secret is the next one,
+# however short it is.
+_SCHEME_AND_SECRET = re.compile(r"(?i)\b(bearer|basic|token)\s+\S+")
+# 24 is above a CRC, a short hash prefix and a ledger id, and below every API
+# key shape this has met.
+_CREDENTIAL_RUN = re.compile(r"(?:[A-Fa-f0-9]{24,}|[A-Za-z0-9_\-]{24,}={0,2})\Z")
+_URL = re.compile(r"\A(?P<scheme>[a-zA-Z][a-zA-Z0-9+.\-]*)://(?P<rest>\S*)\Z")
 # One argument's value, and the whole summary. Short on purpose: this is the
 # line under a chat bubble that says which call is running, not a record of it.
 ARGUMENT_VALUE_CHARS = 60
@@ -318,24 +351,71 @@ def _is_secret_argument(name: str) -> bool:
     return any(word in lowered for word in _SECRET_ARGUMENT_WORDS)
 
 
-def _summarize_value(value: Any) -> str:
-    """One argument, short enough to read and stripped of what must not travel.
+def _looks_like_a_credential(token: str) -> bool:
+    """Whether this run of characters is a key rather than a word."""
+    lowered = token.lower()
+    if any(lowered.startswith(prefix) for prefix in _CREDENTIAL_PREFIXES):
+        return True
+    return bool(_CREDENTIAL_RUN.match(token))
 
-    A host path is reduced to its last segment. The sample lives under a
-    per-job directory whose name is an internal identifier and whose prefix is
-    wherever this deployment happens to be installed, and neither belongs in a
-    payload that a browser and a long-lived table both keep; the file name is
-    the part a reader of the conversation is actually reading.
+
+def _scrub_url(token: str) -> str | None:
+    """A URL cut back to scheme and host, or ``None`` when this is not one.
+
+    The userinfo is a credential outright, and the query is where one travels
+    when it is not in the userinfo, so neither survives. The host stays
+    because which service was called is the fact a reader of the conversation
+    is after.
     """
+    found = _URL.match(token)
+    if not found:
+        return None
+    rest = found.group("rest")
+    host = rest.split("/", 1)[0].split("?", 1)[0].split("#", 1)[0]
+    if "@" in host:
+        host = host.rsplit("@", 1)[1]
+    return f"{found.group('scheme')}://{host}/…" if host else token
+
+
+def _scrub_token(token: str) -> str:
+    """One whitespace-separated word of a value, made safe to publish."""
+    if not token:
+        return token
+    if _looks_like_a_credential(token):
+        return _REDACTED
+    as_url = _scrub_url(token)
+    if as_url is not None:
+        return as_url
+    if "/" in token or "\\" in token:
+        # A host path is reduced to its last segment. The sample lives under a
+        # per-job directory whose name is an internal identifier and whose
+        # prefix is wherever this deployment happens to be installed, and
+        # neither belongs in a payload that a browser and a long-lived table
+        # both keep; the file name is the part a reader is actually reading.
+        return token.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1] or token
+    return token
+
+
+def scrub(text: Any) -> str:
+    """Any text on its way into an event payload.
+
+    One whole-string pass first, for the one shape a token-by-token pass
+    cannot see — an authorization scheme and the word after it — then token by
+    token for the rest.
+    """
+    joined = _SCHEME_AND_SECRET.sub(lambda m: f"{m.group(1)} {_REDACTED}", str(text or ""))
+    return " ".join(_scrub_token(token) for token in joined.split())
+
+
+def _summarize_value(value: Any) -> str:
+    """One argument, short enough to read and stripped of what must not travel."""
     if isinstance(value, bool) or value is None:
         return str(value).lower() if isinstance(value, bool) else "null"
     if isinstance(value, int | float):
         return str(value)
     if isinstance(value, dict | list | tuple):
         return f"<{len(value)} items>" if not isinstance(value, dict) else f"<{len(value)} keys>"
-    text = " ".join(str(value).split())
-    if "/" in text or "\\" in text:
-        text = text.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1] or text
+    text = scrub(value)
     if len(text) > ARGUMENT_VALUE_CHARS:
         text = text[: ARGUMENT_VALUE_CHARS - 1] + "…"
     return text
@@ -344,10 +424,17 @@ def _summarize_value(value: Any) -> str:
 def summarize_args(args: Any) -> str:
     """A tool call's arguments as one short, redacted line.
 
-    Never the arguments themselves: an argument named like a credential is
-    replaced outright, a path is cut to its file name, every value is capped
-    and only the first few are named at all. A caller that wants the arguments
-    as sent reads the ledger entry this call writes.
+    Never the arguments themselves. An argument named like a credential is
+    replaced outright; every value, whatever it is named, is scrubbed of
+    credential shapes, URL userinfo and host paths; every value is capped and
+    only the first few arguments are named at all. A caller that wants the
+    arguments as sent reads the ledger entry this call writes, which is behind
+    the same ownership check as the report.
+
+    A long unbroken run of hex or base64 is replaced even when it is a sample
+    hash rather than a key, because nothing at this point can tell the two
+    apart and the hash is on the job, the report and ``pipeline_started``
+    already.
     """
     if not isinstance(args, dict) or not args:
         return ""
@@ -361,9 +448,24 @@ def summarize_args(args: Any) -> str:
     return line[: ARGUMENT_SUMMARY_CHARS - 1] + "…" if len(line) > ARGUMENT_SUMMARY_CHARS else line
 
 
-def summarize_result(output: Any) -> str:
-    """A tool result's first line, capped. The whole of it is in the ledger."""
-    text = " ".join(str(output or "").split())
+def summarize_result(output: Any, *, ok: bool = True, remediation: str = "") -> str:
+    """A tool result's headline, scrubbed and capped.
+
+    A result is not safer than an argument. An API answer echoes the key it
+    was called with, an error names the host path it could not read, and a
+    string lifted out of the sample is whatever the sample's author put there,
+    so the whole of it goes through the same scrub.
+
+    A failure says so and says what would fix it, and nothing else: the raw
+    exception text is the part that names paths and hosts, and it is already
+    kept verbatim on the ledger entry, behind the report's ownership check.
+    """
+    if not ok:
+        fix = scrub(remediation)
+        headline = "the call failed"
+        text = f"{headline}; {fix}" if fix else headline
+    else:
+        text = scrub(output)
     if len(text) > RESULT_SUMMARY_CHARS:
         text = text[: RESULT_SUMMARY_CHARS - 1] + "…"
     return text

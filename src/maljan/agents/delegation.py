@@ -354,6 +354,10 @@ def _ask(container: Any, caller: Any, callee: Any, task: str, context: str) -> s
         report=context or None,
         stage=stage,
         addressed_to=str(callee.name),
+        # The two halves of an ask are the two kinds the console draws as an
+        # arrow between participants rather than as a line to the room.
+        kind="delegation_ask",
+        display_name=_label(container, str(caller.name)),
     )
 
     # What the callee cannot have on this host, recorded once, the way the
@@ -402,8 +406,20 @@ def _ask(container: Any, caller: Any, callee: Any, task: str, context: str) -> s
         report=answer,
         stage=stage,
         addressed_to=str(caller.name),
+        kind="delegation_answer",
+        display_name=_label(container, str(callee.name)),
     )
     return answer
+
+
+def _label(container: Any, key: str) -> str:
+    """The configured label for ``key``, or the key when there is no config."""
+    try:
+        from maljan.agents.composition import display_name
+
+        return display_name(container.config, key)
+    except Exception:  # noqa: BLE001 — a missing label never costs an ask
+        return key
 
 
 def _note_what_the_callee_cannot_have(container: Any, callee: Any) -> None:

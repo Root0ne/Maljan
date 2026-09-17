@@ -862,7 +862,13 @@ def make_triage_node(
             announce_started(container, stage)
 
         recorder = EvidenceRecorder(
-            PIPELINE, counter=container.get_evidence_counter(), stage=stage.key
+            PIPELINE,
+            counter=container.get_evidence_counter(),
+            stage=stage.key,
+            # The pack's steps are tool calls like any other, and the console
+            # draws them in the same conversation, so they are fed out as the
+            # pack writes them rather than only after the run.
+            sink=container.event_sink,
         )
         cfg = container.config
         capa_cfg = cfg.static.capa

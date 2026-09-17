@@ -75,6 +75,18 @@ def active_profile(settings: Settings) -> ProfileDefinition:
     return settings.agents.profiles[settings.agents.profile]
 
 
+def display_name(settings: Settings, key: str) -> str:
+    """The label an operator gave this agent, or its key when they gave none.
+
+    The label lives on the definition, which only an admin can read through
+    the settings endpoint. Every place that puts a name in front of a reader
+    asks here instead, so a non-admin watching a run sees the same name the
+    operator typed rather than the registry key the name was meant to replace.
+    """
+    definition = settings.agents.definitions.get(key)
+    return str(getattr(definition, "label", "") or key)
+
+
 def analyst_keys(settings: Settings) -> list[str]:
     """Every analysis-stage agent of the active profile, in stage order.
 

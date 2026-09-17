@@ -45,6 +45,7 @@ from maljan.core.config import get_settings
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger, record_response_usage
 from maljan.core.truncation_ledger import TruncationLedger, record_judge_response
+from maljan.pipeline.events import emit_judge_question, scrub
 from maljan.pipeline.mediation_models import MediatorVerdict
 from maljan.pipeline.state import AgentArgument
 from maljan.pipeline.validation import (
@@ -271,6 +272,22 @@ def _sha256_of(sample: Any) -> str:
     return str(data.get("sha256") or "").strip()
 
 
+def _who_is_asked(message: Any) -> str | None:
+    """The agent a judge turn is asking, when the same turn delegates to one.
+
+    The judge's own ``ask_<key>`` tools are the only place a question in this
+    loop names a recipient. A turn that calls none is asking the room.
+    """
+    from maljan.agents.delegation import tool_name
+
+    prefix = tool_name("")
+    for call in list(getattr(message, "tool_calls", None) or []):
+        name = str((call or {}).get("name") or "")
+        if name.startswith(prefix):
+            return name[len(prefix) :] or None
+    return None
+
+
 class JudgeAgent(BudgetMeter):
     """Chief controller responsible for mediation, consensus detection, and final verdict.
 
@@ -331,6 +348,41 @@ class JudgeAgent(BudgetMeter):
         # once per round, and a buffer replaced on each of them would persist
         # only the last round's calls while the earlier ones consumed ids.
         self._evidence_entries: list[LedgerEntry] = []
+
+    def _publish_questions(self, conversation: list[Any], already: set[int]) -> None:
+        """Publish each question the judge has asked and not published yet.
+
+        A question, not every intermediate turn. The judge's loop narrates as
+        much as it asks, and a console that drew the narration as a question
+        card would put a card in front of the reader on nearly every turn; a
+        turn whose text ends in a question mark is the one a reader can
+        actually answer or wait on. A turn that also calls ``ask_<key>`` names
+        that agent as the addressee, because that is who the judge is asking.
+
+        Identified by the message's own id, so a hook that sees the same
+        conversation twice — which it does, once per model turn — publishes
+        each question once. Never raises: this is telemetry inside a prompt
+        hook, and a hook that throws ends the loop.
+        """
+        try:
+            for message in conversation:
+                if getattr(message, "type", "") != "ai":
+                    continue
+                marker = id(message)
+                if marker in already:
+                    continue
+                already.add(marker)
+                text = str(getattr(message, "content", "") or "").strip()
+                if not text or not text.rstrip().endswith("?"):
+                    continue
+                emit_judge_question(
+                    self._event_sink(),
+                    stage=str(getattr(self, "pipeline_stage", "") or "verdict"),
+                    text=scrub(text),
+                    addressed_to=_who_is_asked(message),
+                )
+        except Exception as exc:  # noqa: BLE001 — a prompt hook never fails a loop
+            self.logger.debug("judge question not published (%s).", exc)
 
     def _server_registry(self) -> Any | None:
         """The job's tool-server registry, or None when this judge runs bare."""
@@ -479,6 +531,7 @@ class JudgeAgent(BudgetMeter):
             # entry that says "analysis" for either sends a reader looking for
             # an analyst that never made the call.
             stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
+            sink=self._event_sink(),
         )
         messages = messages_pre
 
@@ -494,6 +547,8 @@ class JudgeAgent(BudgetMeter):
         cap: str | None = None
         turns: list[Any] = []
 
+        asked: set[int] = set()
+
         def _count_the_turns(state: Any) -> list[Any]:
             """Count the conversation before every model turn, and change nothing.
 
@@ -502,6 +557,12 @@ class JudgeAgent(BudgetMeter):
             refresh, and without something counting, a loop cut off at its
             wall clock hands the meter an empty conversation and records the
             zero steps this meter exists to stop recording.
+
+            The same hook is where a question the judge asks mid-loop is
+            published. It is the one seam the loop offers between two model
+            turns, so a question reaches a reader while the judge is still
+            waiting on the answer rather than after the verdict, which is the
+            whole point of showing it.
             """
             conversation = state.get("messages") if isinstance(state, dict) else None
             if conversation is None:
@@ -513,6 +574,7 @@ class JudgeAgent(BudgetMeter):
             # exactly that, one verdict call that ran past its wall clock.
             budget.note_turns(conversation)
             budget.own_steps += 1
+            self._publish_questions(conversation, asked)
             return conversation
 
         agent_executor = create_react_agent(
@@ -1011,6 +1073,9 @@ class JudgeAgent(BudgetMeter):
             max_retries=_VERDICT_RETRIES,
             parse=_parse,
             on_feedback=tally.count,
+            sink=self._event_sink(),
+            agent="judge",
+            stage=str(getattr(self, "pipeline_stage", "") or "verdict"),
         )
         if timed_out:
             # No answer at all, so there is nothing to feed back and nothing
