@@ -439,6 +439,17 @@ change landed on `main`.
 
 ### Fixed
 
+- **Four key shapes the event scrubber could not see.** A credential run was
+  anchored to `[A-Za-z0-9_-]`, so a standard base64 key (`+` and `/` in the
+  alphabet), a bare JWT — this project's own access-token shape — a key behind
+  the `\"` of nested JSON and one behind a Unicode dash or quotation mark all
+  travelled verbatim in `args_summary` and `summary`. The value run now ends at
+  a backslash and at anything outside ASCII, the length rule reads the standard
+  base64 alphabet, and a three-segment run whose head really is a JOSE header
+  is replaced. Digests, MIME types and host paths are unchanged: a digest is
+  what the analysis is about, a MIME type is long enough for the widened rule
+  (`application/octet-stream` is exactly 24 characters), and a path is still
+  cut to the file name a reader needs rather than replaced outright.
 - **A tool server reads the sample it was given, and nothing else on the host.**
   Every `path`, `pcap_path` and `ruleset` argument of the `analysis` and
   `network` sidecars is now resolved with symlinks followed and refused unless

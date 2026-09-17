@@ -23,6 +23,8 @@ Deliberately minimal, and deliberately not async:
 
 from __future__ import annotations
 
+import base64
+import binascii
 import re
 from collections.abc import Callable
 from typing import Any
@@ -347,7 +349,13 @@ _CREDENTIAL_PREFIXES = ("sk-", "sk_", "nvapi-", "ghp_", "gho_", "xoxb-")
 # while the credential pass beside it was splitting the same punctuation off
 # cleanly. Admitting a character here only lets a match *begin*; every marker
 # requirement below still has to be met.
-_AFTER = r"(?:\A|(?<=[\s\"'`<>=:,{\[(]))"
+#
+# A backslash is here because a tool result is JSON inside JSON: the value a
+# rule has to find arrives as ``\"sk-…\"``, and the escape sits against it on
+# both sides. Everything outside ASCII is here because a model writes prose
+# with the punctuation its own language uses — an em dash, a curly quote —
+# and a key or a path written after one of those is a key or a path.
+_AFTER = r"(?:\A|(?<=[\s\"'`<>=:,{\[(\\]|[^\x00-\x7f]))"
 # Where such a run ends: the next separator that cannot be part of a path, a
 # URL or a key.
 #
@@ -368,8 +376,27 @@ _UNTIL = _UNTIL_CHARS + r"*"
 # by the same *constant*, so the two cannot drift apart again.
 _SCHEME_AND_SECRET = re.compile(r"(?i)\b(bearer|basic|token)\s+" + _UNTIL_CHARS + r"+")
 # 24 is above a CRC, a short hash prefix and a ledger id, and below every API
-# key shape this has met.
-_CREDENTIAL_RUN = re.compile(r"(?:[A-Fa-f0-9]{24,}|[A-Za-z0-9_\-]{24,}={0,2})\Z")
+# key shape this has met. The second alternative is the *standard* base64
+# alphabet, not the URL-safe one alone: an AWS secret key, a PKCS blob and
+# anything a server base64-encodes carry ``+`` and ``/``, and a rule that
+# stopped at ``[A-Za-z0-9_-]`` read the run as ending at the first of them and
+# then failed its own whole-run anchor.
+_CREDENTIAL_RUN = re.compile(r"(?:[A-Fa-f0-9]{24,}|[A-Za-z0-9+/_\-]{24,}={0,2})\Z")
+# A JSON Web Token, which no length rule can see: it is three base64url runs
+# with dots between them, and this project's own access token is one. The
+# segments are held to a floor so that a dotted module name or a hostname is
+# not a candidate, and the head still has to *be* a header — see
+# ``_is_a_token``.
+_JWT_RUN = re.compile(r"\A[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}={0,2}\Z")
+# What the base64 alternative must not take for a key. A MIME type is long
+# enough for it (``application/octet-stream`` is exactly 24 characters) and is
+# the subject of half the tool answers in a run; a path is cut to its file
+# name by the pass below, which is what a reader needs, and reading it as a
+# key would replace the file name too. A path here is one with a marker *and*
+# a second separator: ``/wJalrXUtnFEMIK7MDENG`` is a key that begins with a
+# slash, not a directory.
+_MIME_TYPE = re.compile(r"\A[a-z]+/[a-z0-9][a-z0-9.+_\-]*\Z")
+_PATH_SHAPED = re.compile(r"\A(?:/|\./|\.\./|~/|[A-Za-z]:/)[^/]*/")
 # The three digests a malware analysis is *about*, which the rule above would
 # otherwise take for keys: md5, sha1 and sha256. A sample hash is not a secret
 # — it is on the job, on the report and in ``pipeline_started`` already — and a
@@ -397,7 +424,13 @@ _URL_RUN = re.compile(_AFTER + r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.\-]*)://(?P<rest
 # one — a run either rule can fire on is made of ``[A-Za-z0-9_-]`` and nothing
 # else — and the pieces a split leaves behind (``api_key``, ``C``, ``https``)
 # are far too short to match anything.
-_VALUE_RUN = re.compile(r"[^\s\"'`<>;:{}\[\](),=]+")
+# The backslash and the non-ASCII range split for the same reasons ``_AFTER``
+# admits them: an escaped quote is what a key inside nested JSON sits against,
+# and a dash or a quotation mark a model typed is the end of the value in
+# front of it. A colon is already outside the class, so a JWT's dots are the
+# one separator left inside it — which is what lets the whole token be seen as
+# one run.
+_VALUE_RUN = re.compile(r"[^\s\"'`<>;:{}\[\](),=\\\x80-\U0010ffff]+")
 # A filesystem path, wherever it starts. A slash alone is not the signal: a
 # MIME type (``application/x-msdownload``), a sub-technique id
 # (``T1055/012``), a date (``2026/09/17``) and a ratio all carry one, and
@@ -493,14 +526,34 @@ def _is_secret_argument(name: str) -> bool:
     return False
 
 
+def _is_a_token(run: str) -> bool:
+    """Whether this dotted run is a JWT rather than three words with dots in them.
+
+    The shape alone is not enough — a long enough hostname has it — so the
+    first segment has to be a JOSE header: either the ``eyJ`` every
+    base64url-encoded ``{"`` begins with, or something that really decodes to
+    the start of a JSON object.
+    """
+    if not _JWT_RUN.match(run):
+        return False
+    head = run.split(".", 1)[0]
+    if head.startswith("eyJ"):
+        return True
+    try:
+        decoded = base64.urlsafe_b64decode(head + "=" * (-len(head) % 4))
+    except (ValueError, binascii.Error):
+        return False
+    return decoded.lstrip().startswith(b"{")
+
+
 def _looks_like_a_credential(token: str) -> bool:
     """Whether this run of characters is a key rather than a word or a digest."""
-    if _DIGEST.match(token):
+    if _DIGEST.match(token) or _MIME_TYPE.match(token) or _PATH_SHAPED.match(token):
         return False
     lowered = token.lower()
     if any(lowered.startswith(prefix) for prefix in _CREDENTIAL_PREFIXES):
         return True
-    return bool(_CREDENTIAL_RUN.match(token))
+    return bool(_CREDENTIAL_RUN.match(token)) or _is_a_token(token)
 
 
 def _shorten_url(found: re.Match[str]) -> str:

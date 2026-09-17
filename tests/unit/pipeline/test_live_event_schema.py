@@ -512,6 +512,96 @@ class TestArgumentSummaries:
         assert summary == "the call failed"
 
 
+class TestTheKeyShapesARunOfWordCharactersMisses:
+    """Four shapes a key really arrives in that a ``[A-Za-z0-9_-]`` run cannot see.
+
+    Each one was confirmed travelling verbatim through ``scrub``: the two
+    characters standard base64 adds, the dots a JWT is made of, the backslash
+    an escaped JSON quote leaves against the value, and the punctuation a model
+    writes prose with.
+    """
+
+    def test_a_standard_base64_key_is_replaced(self) -> None:
+        """``+`` and ``/`` are in the alphabet; a run of word characters is not."""
+        key = "wJalrXUtnFEMI" + "/" + "K7MDENG" + "+" + "bPxRfiCYEXAMPLEKEY"
+
+        assert ev.scrub(f"secret={key}") == "secret=***"
+        assert ev.summarize_args({"value": key}) == "value=***"
+
+    def test_a_base64_key_with_its_padding_is_replaced(self) -> None:
+        key = _opaque_run(26) + "aZ9" + "=="
+
+        assert ev.scrub(f"token {key} there") == "token *** there"
+
+    def test_a_bare_jwt_is_replaced(self) -> None:
+        """The platform's own access-token shape, which travels with no prefix."""
+        jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27uhbUJU1p1r_wW1g"
+
+        assert ev.scrub(f"the socket sent {jwt}") == "the socket sent ***"
+
+    def test_a_jwt_is_recognised_by_what_its_head_decodes_to(self) -> None:
+        """A dotted run is only a token when its first part is a JSON header."""
+        import base64 as _b64
+
+        head = _b64.urlsafe_b64encode(b'{"alg":"none"}').decode().rstrip("=")
+        jwt = f"{head}.eyJzdWIiOiJhYmNkZWZnaCJ9.c2lnbmF0dXJlLWhlcmUtMTIz"
+
+        assert ev.scrub(jwt) == "***"
+
+    def test_a_dotted_run_that_is_not_a_token_survives(self) -> None:
+        for value in (
+            "maljan.pipeline.events",
+            "subdomain.exampledomain.technology",
+            "application/x-msdownload",
+        ):
+            assert ev.scrub(value) == value, value
+
+    def test_an_escaped_json_quote_ends_a_value(self) -> None:
+        """The ordinary MCP result shape: JSON inside a JSON string.
+
+        The trailing backslash used to sit inside the value run and break the
+        whole-run anchor, so the key travelled while the same key passed as a
+        bare argument was replaced.
+        """
+        key = _vendor_key(body="A" * 30)
+        body = '{"body": "{' + chr(92) + '"apiKey' + chr(92) + '":' + chr(92) + '"' + key
+        body += chr(92) + '"}"}'
+
+        assert key not in ev.scrub(body)
+
+    def test_a_unicode_dash_ends_a_value(self) -> None:
+        key = "AbCdEfGhIjKlMnOpQrStUvWxYz012345"
+
+        assert ev.scrub(f"authorization —{key}") == "authorization —***"
+
+    def test_a_unicode_quote_ends_a_value(self) -> None:
+        key = "AbCdEfGhIjKlMnOpQrStUvWxYz012345"
+
+        assert ev.scrub(f"“{key}”") == "“***”"
+
+    def test_a_path_behind_a_unicode_quote_is_still_cut(self) -> None:
+        assert ev.scrub("the sample is at “/home/op/x/evil.exe”") == ("the sample is at “evil.exe”")
+
+    def test_a_digest_is_still_the_subject_of_the_analysis(self) -> None:
+        for algorithm in ("md5", "sha1", "sha256"):
+            assert ev.scrub(_digest(algorithm)) == _digest(algorithm), algorithm
+
+    def test_a_mime_type_still_travels_whole(self) -> None:
+        """Long enough for the base64 rule, and the one shape that must survive it."""
+        for value in (
+            "application/octet-stream",
+            "application/x-msdownload",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.api+json",
+        ):
+            assert ev.scrub(value) == value, value
+
+    def test_a_host_path_is_still_cut_rather_than_replaced(self) -> None:
+        """A reader needs the file name; a path with no dot in it is not a key."""
+        assert ev.scrub("/home/operator/samples/ab12cd34ef56") == "ab12cd34ef56"
+        assert ev.scrub("/opt/maljan/data/samples/dropper") == "dropper"
+
+
 class TestValidationFeedback:
     def test_the_correction_names_its_code_and_its_retry(self) -> None:
         recorded, sink = _sink()
