@@ -439,6 +439,18 @@ change landed on `main`.
 
 ### Fixed
 
+- **The analysis socket checks the account, at the handshake and while it
+  streams.** `/ws/analysis/{job_id}` decoded the token and went straight to the
+  ownership query, so it never read the `User` row and never saw `is_active` —
+  an account an admin had just deactivated kept the full live feed of its own
+  jobs until the access token expired half an hour later. The handshake now
+  reads the account first, before it says anything about the job, and closes
+  with 1008 when it is missing or deactivated; a streaming socket re-reads it
+  every 60 seconds and closes the same way. The job id is canonicalised
+  directly after it is parsed, so a socket opened with the uppercase or
+  unhyphenated spelling of a job id shares the bucket, the listener and the
+  Redis connection of the one the publisher writes to instead of getting its
+  own and receiving nothing.
 - **A delegation guard that reads both ways an agent is bound to a server.**
   `servers_withheld_from` computed what a callee brings from the `mcp`
   references on its definition alone, but the shipped binding mechanism is the

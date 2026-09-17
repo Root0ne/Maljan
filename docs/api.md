@@ -92,6 +92,15 @@ into a bounded Redis stream and served by `GET /jobs/{job_id}/events` for a tab
 that opens mid-run; the stream expires after 24 hours, after which
 `run_summary.stages` is the record.
 
+The socket is held to the same account checks an HTTP route is. The handshake
+reads the account the token names and closes with 1008 when it is missing or
+deactivated, before it says anything about the job; while the socket streams,
+it reads that account again every minute and closes with 1008 the moment it is
+deactivated, rather than letting the feed run until the access token expires.
+Every string on the feed is scrubbed by the publisher — credential shapes
+replaced, URLs cut to scheme and host, host paths cut to file names — and a
+published failure names the kind of exception it was, never its message.
+
 ### Reports
 
 One report is reachable by its own id or by the job that produced it, and the
