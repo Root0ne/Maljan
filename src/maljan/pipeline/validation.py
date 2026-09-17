@@ -370,12 +370,18 @@ def platform_mismatch_message(
     The catalogue's own domain and platforms for the id, against the routed
     ones. Two ways to miss: the id belongs to another domain, or it declares
     platforms and none of them is the sample's. An id the catalogue carries
-    no platforms for is not questioned — no information is not a mismatch.
+    no platforms for is not questioned — no information is not a mismatch —
+    and neither is a technique whose only platform is ``PRE``: it happens
+    before any host is touched, so no sample's platform can contradict it.
+
+    ``attck_scope`` is asked first: it answers from the vendored files and
+    loads nothing, which is what lets this run inside an analyst's turn.
+    ``attck_lookup`` is the fallback for a knowledge object without it.
     """
     expected_domain, expected_platforms = scope
     if expected_domain is None:
         return ""
-    lookup = getattr(attck, "attck_lookup", None)
+    lookup = getattr(attck, "attck_scope", None) or getattr(attck, "attck_lookup", None)
     if lookup is None:
         return ""
     try:
@@ -394,7 +400,7 @@ def platform_mismatch_message(
             f"{f' (platforms {", ".join(platforms)})' if platforms else ''}; this sample is "
             f"{sample_words}. Use a technique from the sample's domain, or drop the technique id."
         )
-    if expected_platforms and platforms:
+    if expected_platforms and platforms and not _pre_only(platforms):
         wanted = {p.lower() for p in expected_platforms}
         if not any(p.lower() in wanted for p in platforms):
             return (
@@ -403,6 +409,11 @@ def platform_mismatch_message(
                 "technique id."
             )
     return ""
+
+
+def _pre_only(platforms: Sequence[str]) -> bool:
+    """Whether ``PRE`` is the technique's only platform."""
+    return len(platforms) == 1 and str(platforms[0]).strip().upper() == "PRE"
 
 
 # ---------------------------------------------------------------------------

@@ -239,6 +239,20 @@ def attck_lookup(technique_id: str) -> dict[str, Any]:
     return out
 
 
+def attck_scope(technique_id: str) -> dict[str, Any]:
+    """The domain and platforms the vendored catalogue gives a technique.
+
+    Answered from the two vendored files alone — the id catalogue and the
+    platform map — so a validation turn that asks it loads no STIX bundle and
+    touches no network. ``attck_lookup`` is the fuller answer, with the name
+    and the tactics, and it costs the catalogue load; this one does not.
+    """
+    from maljan.memory.attck_loader import domain_of, platforms_for
+
+    tid = (technique_id or "").strip().upper()
+    return {"technique_id": tid, "domain": domain_of(tid), "platforms": list(platforms_for(tid))}
+
+
 def attck_validate(ids: list[str]) -> dict[str, Any]:
     """Which of the given ids are not real techniques, and what was probably meant.
 

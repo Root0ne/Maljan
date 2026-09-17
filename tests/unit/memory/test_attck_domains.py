@@ -109,6 +109,9 @@ class TestThePlatformMap:
     def test_an_uncatalogued_technique_reports_no_platforms(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        # With no vendored row, a real id is answered from the bundle cache and
+        # an invented one from nowhere.
+        monkeypatch.setattr(attck_loader, "_platform_map_cache", {})
         monkeypatch.setattr(attck_loader, "_platform_cache", {"T1055": ("Windows",)})
         assert attck_loader.platforms_for("T1055") == ("Windows",)
         assert attck_loader.platforms_for("T9999") == ()
@@ -129,3 +132,80 @@ class TestOptionalDomains:
     def test_an_unknown_domain_is_a_programming_error(self) -> None:
         with pytest.raises(ValueError, match="Unknown ATT&CK domain"):
             attck_loader.load_domain_data("cloud")
+
+
+class TestTheVendoredPlatformMap:
+    """The platform half of the technique check answers from data/, not from
+    a bundle load: the map ships beside the id catalogue, from the same
+    script and the same bundles."""
+
+    def test_the_shipped_map_carries_domain_and_platforms_per_id(self) -> None:
+        raw = json.loads(attck_loader.PLATFORMS_FILE.read_text(encoding="utf-8"))
+        assert raw["T1055"]["domain"] == "enterprise"
+        assert "Windows" in raw["T1055"]["platforms"]
+        assert raw["T1633"]["domain"] == "mobile"
+        assert set(raw["T1633"]["platforms"]) == {"Android", "iOS"}
+        # Every id in the map is in the id catalogue, and in the same domain.
+        ids = json.loads(attck_loader.VALID_IDS_FILE.read_text(encoding="utf-8"))
+        for tid, row in list(raw.items())[:200]:
+            assert tid in ids[row["domain"]], tid
+
+    def test_platforms_come_from_the_map_and_nothing_is_loaded(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _no_load(*_args: object, **_kwargs: object) -> object:
+            raise AssertionError("the bundle catalogue was loaded")
+
+        attck_loader.reset_caches()
+        monkeypatch.setattr(attck_loader, "load_all_domains", _no_load)
+        assert "Windows" in attck_loader.platforms_for("T1055")
+        assert attck_loader.platforms_for("T1633") == ("Android", "iOS")
+        assert attck_loader.domain_of("T1633") == "mobile"
+
+    def test_an_invented_id_loads_nothing_and_has_no_platforms(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _no_load(*_args: object, **_kwargs: object) -> object:
+            raise AssertionError("the bundle catalogue was loaded")
+
+        attck_loader.reset_caches()
+        monkeypatch.setattr(attck_loader, "load_all_domains", _no_load)
+        assert attck_loader.platforms_for("T9999") == ()
+
+    def test_a_real_id_the_map_lacks_falls_back_to_the_bundles(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        short_map = tmp_path / "attck_platforms.json"
+        short_map.write_text(
+            json.dumps({"T1055": {"domain": "enterprise", "platforms": ["Windows"]}}),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(attck_loader, "PLATFORMS_FILE", short_map)
+        attck_loader.reset_caches()
+        loads: list[int] = []
+
+        class _Technique:
+            technique_id = "T1059"
+            platforms = ["Linux", "Windows"]
+
+        class _Domain:
+            techniques = [_Technique()]
+
+        def _load(*_args: object, **_kwargs: object) -> dict[str, _Domain]:
+            loads.append(1)
+            return {"enterprise": _Domain()}
+
+        monkeypatch.setattr(attck_loader, "load_all_domains", _load)
+        assert attck_loader.platforms_for("T1055") == ("Windows",)
+        assert loads == []
+        assert attck_loader.platforms_for("T1059") == ("Linux", "Windows")
+        assert loads == [1]
+
+    def test_an_unreadable_map_is_empty_rather_than_fatal(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(attck_loader, "PLATFORMS_FILE", tmp_path / "absent.json")
+        monkeypatch.setattr(attck_loader, "_platform_cache", {})
+        attck_loader.reset_caches()
+        monkeypatch.setattr(attck_loader, "_platform_cache", {})
+        assert attck_loader.platforms_for("T1055") == ()

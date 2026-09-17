@@ -27,6 +27,7 @@ from maljan.pipeline.validation import (
     corroboration,
     corroboration_sources,
     expected_technique_scope,
+    platform_mismatch_message,
     technique_check_note,
     validate_isr,
     validate_verdict_bundle,
@@ -602,4 +603,69 @@ class TestTheNotRunSentence:
         assert not_run_sentence("attck.unknown_id").endswith("(attck.unknown_id)")
         assert not_run_sentence("some.other_check") == (
             "a validation check could not run (some.other_check)"
+        )
+
+
+class TestThePlatformCheckLoadsNoCatalogue:
+    def test_a_validation_turn_touches_no_bundle(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The scope comes from the two vendored files. Loading the STIX
+        bundles inside an analyst's turn cost a second and a hundred
+        megabytes on a warm cache and a network fetch on a cold one."""
+        from maljan.memory import attck_loader
+        from maljan.tools import knowledge
+
+        def _no_load(*_args: object, **_kwargs: object) -> object:
+            raise AssertionError("the bundle catalogue was loaded in a validation turn")
+
+        attck_loader.reset_caches()
+        monkeypatch.setattr(attck_loader, "load_all_domains", _no_load)
+        monkeypatch.setattr(knowledge, "_catalog", _no_load)
+        isr = _isr(_claim("T1055"), _claim("T1633"))
+        violations = validate_isr(isr, attck=knowledge, sample=PE)
+        assert _codes(violations) == [PLATFORM_MISMATCH_CODE]
+        assert "T1633 belongs to the ATT&CK mobile domain" in violations[0].message
+        assert [c.technique_id for c in isr.claims] == ["T1055", "T1633"]
+
+    def test_attck_scope_answers_from_the_vendored_files(self) -> None:
+        from maljan.tools import knowledge
+
+        assert knowledge.attck_scope("t1633") == {
+            "technique_id": "T1633",
+            "domain": "mobile",
+            "platforms": ["Android", "iOS"],
+        }
+        assert knowledge.attck_scope("T9999") == {
+            "technique_id": "T9999",
+            "domain": None,
+            "platforms": [],
+        }
+
+
+class TestAPreOnlyTechnique:
+    def test_it_is_exempt_from_the_platform_half(self) -> None:
+        """T1583 (Acquire Infrastructure) declares PRE alone: it happens before
+        any host is touched, so a Windows sample cannot contradict it. The
+        domain half still applies."""
+        from maljan.tools import knowledge
+
+        assert knowledge.attck_scope("T1583")["platforms"] == ["PRE"]
+        assert platform_mismatch_message("T1583", knowledge, ("enterprise", ("Windows",))) == ""
+
+    def test_the_exemption_is_for_pre_alone(self) -> None:
+        class _Scope:
+            @staticmethod
+            def attck_scope(tid: str) -> dict[str, Any]:
+                return {"technique_id": tid, "domain": "enterprise", "platforms": ["PRE", "Linux"]}
+
+        message = platform_mismatch_message("T1000", _Scope(), ("enterprise", ("Windows",)))
+        assert "declares the platforms PRE, Linux" in message
+
+    def test_a_pre_only_technique_from_another_domain_is_still_a_mismatch(self) -> None:
+        class _Scope:
+            @staticmethod
+            def attck_scope(tid: str) -> dict[str, Any]:
+                return {"technique_id": tid, "domain": "mobile", "platforms": ["PRE"]}
+
+        assert "belongs to the ATT&CK mobile domain" in platform_mismatch_message(
+            "T1000", _Scope(), ("enterprise", ("Windows",))
         )
