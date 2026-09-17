@@ -6,6 +6,7 @@ The web console in `apps/web`. It talks to the API in `apps/api` over
 ## Navigation
 
 ```
+/login, /register       Sign in, or ask for an account
 /dashboard              Counts, verdict mix, the five latest runs, runtime banners
 /samples                Upload a sample, browse samples, submit an analysis
 /jobs                   Every analysis, filtered by status; cancel a running one
@@ -39,7 +40,10 @@ link into the run rather than a second rendering of the list.
 The analysis header carries the verdict, the sample, the job status and the
 run's stages, and the stage strip is there and nowhere else, so the shape of
 the run reads the same from every tab. A stage names itself and its members by
-the labels an operator gave them — the same names the conversation uses.
+the labels an operator gave them — the same names the conversation and the
+per-agent results table use. One selector answers for all of them
+(`apps/web/src/lib/rosterNames.ts`), reading the roster the job carries and
+falling back to the published key where the roster names nobody.
 
 **Only the tabs the run filled.** A tab is offered when the report carries
 what it draws: a ledger section routed to it, or its own typed block

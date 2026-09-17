@@ -515,11 +515,12 @@ change landed on `main`.
   name its operator gave it, with its key beside it only where the two differ,
   in the stage list, the agent list and the run's stage strip.
 - **One icon set, and no colour that eases into another.** `lucide-react`
-  replaces twenty hand-drawn inline SVGs and gives the navigation, the analysis
-  tabs, the settings rail, the guide cards and the verdict badge an icon at 16
-  or 18 px in `currentColor`. The twenty-eight `transition-colors` and the one
-  `backdrop-blur` are gone: a hover state arrives with the pointer. A unit test
-  reads the tree for gradients, colour transitions and the blur.
+  replaces the nineteen hand-drawn inline SVGs the console had and gives the
+  navigation, the analysis tabs, the settings rail, the guide cards and the
+  verdict badge an icon at 16 or 18 px in `currentColor`. Every one of the
+  eighty-four `transition-colors` and the one `backdrop-blur` are gone: a
+  hover state arrives with the pointer. A unit test reads the tree for
+  gradients, colour transitions and the blur.
 - **The nine retired analysis routes redirect from the server.** They were
   client components that mounted only to replace the URL; `next.config.ts`
   answers with a 308 instead.
