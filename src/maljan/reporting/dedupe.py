@@ -33,15 +33,21 @@ from typing import Any
 # The two ways an analyst writes an address it does not want a reader to open,
 # undone so the defanged spelling and the plain one fingerprint alike. Only
 # these: a substitution table that guessed would merge indicators that differ.
-_DEFANGED = (
-    ("[.]", "."),
-    ("(.)", "."),
-    ("[:]", ":"),
-    ("[://]", "://"),
-    ("[at]", "@"),
-    ("(at)", "@"),
-    ("hxxps", "https"),
-    ("hxxp", "http"),
+_DEFANGED = {
+    "[.]": ".",
+    "(.)": ".",
+    "[:]": ":",
+    "[://]": "://",
+    "[at]": "@",
+    "(at)": "@",
+    "hxxps": "https",
+    "hxxp": "http",
+}
+# Matched whatever case it was written in, longest spelling first so ``hxxps``
+# is not read as ``hxxp`` with a stray ``s``.
+_DEFANGED_RE = re.compile(
+    "|".join(re.escape(spelling) for spelling in sorted(_DEFANGED, key=len, reverse=True)),
+    re.IGNORECASE,
 )
 
 _WHITESPACE = re.compile(r"\s+")
@@ -57,11 +63,13 @@ def canonical_value(value: Any, *, fold_case: bool = True) -> str:
     ``/gate.php`` are two paths, and folding them would remove one of them
     from the report with nothing saying it happened — the thing this module
     exists to prevent.
+
+    Defanging is undone whatever case it was written in, even where the value
+    keeps its own: ``hXXp://a[.]com/Gate.php`` and ``http://a.com/Gate.php``
+    are one endpoint, and the only thing the writer changed is the part that
+    was never meant to be read literally.
     """
-    text = str(value or "").strip()
-    for defanged, plain in _DEFANGED:
-        text = text.replace(defanged, plain)
-        text = text.replace(defanged.upper(), plain)
+    text = _DEFANGED_RE.sub(lambda hit: _DEFANGED[hit.group(0).lower()], str(value or "").strip())
     return text.lower() if fold_case else text
 
 

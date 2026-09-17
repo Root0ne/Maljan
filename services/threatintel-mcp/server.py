@@ -430,6 +430,17 @@ def _joined(parts: list[str], tool: str) -> str:
     return "\n\n".join(said)
 
 
+def _every_part_answered(text: str, parts: list[str]) -> bool:
+    """Whether the joined answer is safe to keep.
+
+    A mixed result carries one source's failure sentence in it, and the cache
+    has no expiry: keeping it would replay "VirusTotal did not answer" for
+    every later look at that indicator for the life of the server, long after
+    VirusTotal came back.
+    """
+    return all(error_parts(part) is None for part in parts) and error_parts(text) is None
+
+
 @mcp.tool()
 def check_ip_reputation(ip_address: str) -> str:
     """Check the reputation of an IP address.
@@ -450,7 +461,8 @@ def check_ip_reputation(ip_address: str) -> str:
         parts.append(_mock_ip_reputation(ip_address))
 
     result = _joined(parts, "check_ip_reputation")
-    _set_cache("ip", ip_address, result)
+    if _every_part_answered(result, parts):
+        _set_cache("ip", ip_address, result)
     return result
 
 
