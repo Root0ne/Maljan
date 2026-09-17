@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Any
 
 from maljan.agents.evidence_recorder import EvidenceRecorder, result_text
+from maljan.analysis.technique_ids import technique_ids_in
 from maljan.core.logger import logger
 from maljan.extractors.sample_identity import ARCHIVE_FILE_TYPES, DOCUMENT_FILE_TYPES
 from maljan.pipeline.conditions import TriageFacts
@@ -960,7 +961,7 @@ def _capa(data: dict[str, Any]) -> str:
     rows = [r for r in (data.get("capabilities") or []) if isinstance(r, dict)]
     techniques: list[str] = []
     for row in rows:
-        for found in re.findall(r"\bT\d{4}(?:\.\d{3})?\b", str(row.get("attck") or "")):
+        for found in technique_ids_in(row.get("attck")):
             if found not in techniques:
                 techniques.append(found)
     text = f"{len(rows)} capabilities"

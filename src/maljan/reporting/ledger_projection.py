@@ -27,6 +27,7 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from maljan.analysis.technique_ids import sigma_technique_ids
 from maljan.core.logger import logger
 from maljan.reporting.models import (
     DynamicBehavior,
@@ -795,10 +796,8 @@ def persistence_from_ledger(
         for row in data.get("matches") or []:
             if not isinstance(row, dict):
                 continue
-            raw_meta = row.get("meta")
-            meta: dict[str, Any] = raw_meta if isinstance(raw_meta, dict) else {}
-            techniques = row.get("technique_ids") or meta.get("technique_ids") or []
-            technique = str(techniques[0]) if techniques else None
+            techniques = sigma_technique_ids(row)
+            technique = techniques[0] if techniques else None
             if technique and not technique.startswith("T1547"):
                 continue
             _add(

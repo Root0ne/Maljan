@@ -451,27 +451,34 @@ def _entry(tool: str, payload: dict[str, Any], seq: int):
     )
 
 
+def _fixture(name: str) -> dict[str, Any]:
+    import json
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2] / "fixtures" / "ledger"
+    return json.loads((root / f"{name}.json").read_text(encoding="utf-8"))
+
+
 class TestCorroborationCounts:
     def test_the_pack_s_sources_assert_and_the_agents_claim(self) -> None:
+        """The four sources in the shapes they really emit: the capa and
+        Sigma ledger fixtures, and the two knowledge tools called live.
+        capa decorates its ids, Sigma lower-cases them under ``tags``."""
+        from maljan.tools.knowledge import api_capability, lolbin_lookup
+
+        capa = _fixture("capa")
+        assert capa["capabilities"][0]["attck"] == ["Defense Evasion::Process Injection [T1055]"]
+        sigma = _fixture("sigma_match")
+        assert "attack.t1547.001" in sigma["matches"][0]["tags"]
         ledger = [
-            _entry("capa", {"capabilities": [{"rule": "inject", "attck": "T1055"}]}, 1),
+            _entry("capa", capa, 1),
+            _entry("sigma_match_sandbox", sigma, 2),
             _entry(
-                "sigma_match_sandbox",
-                {"matches": [{"title": "Run key", "meta": {"technique_ids": ["T1547.001"]}}]},
-                2,
-            ),
-            _entry(
-                "lolbin_lookup",
-                {"hits": [{"binary": "rundll32", "technique_id": "T1218.011"}], "checked": 1},
-                3,
+                "lolbin_lookup", lolbin_lookup(["rundll32.exe C:\\Users\\Public\\x.dll,DllMain"]), 3
             ),
             _entry(
                 "api_capability",
-                {
-                    "capabilities": [
-                        {"api": "VirtualAllocEx", "techniques": [{"technique_id": "T1055"}]}
-                    ]
-                },
+                api_capability(["VirtualAllocEx", "WriteProcessMemory", "CreateRemoteThread"]),
                 4,
             ),
         ]

@@ -17,6 +17,8 @@ import re
 from collections.abc import Sequence
 from typing import Any
 
+from maljan.analysis.technique_ids import sigma_technique_ids, technique_ids_in
+
 # How many techniques the block names. The judge's prompt is already a
 # multi-kilobyte assembly and the tail of a confidence-ordered list is noise;
 # the count of what was left out is printed instead.
@@ -103,21 +105,26 @@ def _as_confidence(value: Any) -> float | None:
 
 
 def _technique_ids(structured: Any, depth: int = 0) -> set[str]:
-    """Every ATT&CK id a tool result names, wherever in its shape it sits."""
+    """Every ATT&CK id a tool result asserts, in the shapes the tools emit.
+
+    capa writes ``attck`` as a list of decorated strings, a Sigma match
+    writes ``tags`` like ``attack.t1055.012``, the LOLBin table and the
+    API-to-technique rules write a bare ``technique_id``; all three are read
+    as they are written (``analysis.technique_ids``). Nothing else in a
+    result counts — a technique quoted in free text is not an assertion.
+    """
     if depth > 6:
         return set()
     found: set[str] = set()
     if isinstance(structured, dict):
         for key, value in structured.items():
-            if key in ("technique_id", "attck", "technique_ids") and isinstance(value, str):
-                if _TID_RE.match(value.strip().upper()):
-                    found.add(value.strip().upper())
-                continue
-            found |= _technique_ids(value, depth + 1)
+            if key in ("technique_id", "attck", "technique_ids"):
+                found.update(technique_ids_in(value))
+            elif key == "tags":
+                found.update(sigma_technique_ids({"tags": value}))
+            else:
+                found |= _technique_ids(value, depth + 1)
     elif isinstance(structured, list):
         for item in structured:
-            if isinstance(item, str) and _TID_RE.match(item.strip().upper()):
-                found.add(item.strip().upper())
-            else:
-                found |= _technique_ids(item, depth + 1)
+            found |= _technique_ids(item, depth + 1)
     return found
