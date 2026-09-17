@@ -332,6 +332,13 @@ _SHARED_STAND_IN_LOCK = threading.RLock()
 HARD_CAP_GRACE = 30.0
 
 
+def _state_messages(state: Any) -> list[Any]:
+    """The conversation out of a graph state, however the state is shaped."""
+    if isinstance(state, dict):
+        return list(state.get("messages") or [])
+    return list(getattr(state, "messages", None) or [])
+
+
 def hard_cap(timeout: float, ceiling: BudgetCeiling | None = None) -> float:
     """The wall a loop is aborted at, never later than a caller is waiting for.
 
@@ -2214,7 +2221,13 @@ class BaseAnalyst(ABC):
         # what gives each call its timing, its outcome and the id the model was
         # shown. What it gathered is appended to the agent's buffer at the end;
         # nothing is reset here, because this may be the second of ten chunks.
-        from maljan.agents.evidence_recorder import EvidenceRecorder, RepeatGuard, record_tools
+        from maljan.agents.evidence_recorder import (
+            ArgumentRepairs,
+            EvidenceRecorder,
+            RepeatGuard,
+            record_tools,
+            repair_invalid_tool_calls,
+        )
 
         # An agent built outside a container has no counter attached, and one
         # per loop would issue ``ev_0001`` twice to the same buffer. It keeps
@@ -2232,6 +2245,9 @@ class BaseAnalyst(ABC):
         # The repeat guard is per loop, like the recorder: a second chunk is a
         # new conversation and the model has not seen the first one's answers.
         repeats = RepeatGuard()
+        # The arguments this loop had to close off, so the ledger entry for
+        # such a call says so and keeps what the model actually wrote.
+        repairs = ArgumentRepairs()
 
         messages = prebuilt
 
@@ -2248,12 +2264,37 @@ class BaseAnalyst(ABC):
         # and its middleware hook. The contract this loop needs is one call
         # before every model turn that can replace the system message; that is
         # what moves when the helper does.
+        def _close_off_truncated_calls(state: Any) -> dict[str, Any]:
+            """The one seam between a model turn and the tool node.
+
+            A call whose arguments never parsed is not refused by langgraph —
+            it is ignored, so nothing runs and nothing answers it, and the
+            loop ends on a turn it paid a step for. Here it is closed off when
+            appending the brackets it is missing makes it parse, and left
+            exactly as it was when it does not. The replacement carries the
+            same message id, so the conversation gains no turn.
+            """
+            turns = list(_state_messages(state))
+            last = next(
+                (m for m in reversed(turns) if getattr(m, "type", "") == "ai"),
+                None,
+            )
+            if last is None or getattr(last, "id", None) is None:
+                return {}
+            try:
+                repaired = repair_invalid_tool_calls(last, repairs)
+            except Exception as exc:  # noqa: BLE001 — a repair never costs a loop
+                self.logger.debug("tool argument repair skipped (%s).", exc)
+                return {}
+            return {"messages": [repaired]} if repaired is not None else {}
+
         agent_executor = create_react_agent(
             self.llm,
-            record_tools(self.pinned_tools(), recorder, repeats),
+            record_tools(self.pinned_tools(), recorder, repeats, repairs),
             prompt=self._run_state_refresher(
                 int(max_steps), float(timeout), budget.started, budget=budget
             ),
+            post_model_hook=_close_off_truncated_calls,
         )
 
         # Run the ReAct coroutine on the shared, never-closing agent

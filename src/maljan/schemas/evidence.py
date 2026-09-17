@@ -151,6 +151,14 @@ class LedgerEntry(BaseModel):
         default=None,
         description="Id of the earlier identical call this one was answered from.",
     )
+    args_repaired: bool = Field(
+        default=False,
+        description="Whether the model's arguments were closed off before the call ran.",
+    )
+    args_raw: str | None = Field(
+        default=None,
+        description="The arguments as the model wrote them, kept when they were repaired.",
+    )
     started_at: float = Field(default=0.0, description="Unix timestamp the call started at.")
     duration_ms: int = Field(default=0, description="Wall-clock duration of the call.")
     seq: int = Field(default=0, description="Call order within the job, 1-based.")
@@ -204,6 +212,8 @@ def build_entry(
     max_chars: int = MAX_OUTPUT_CHARS,
     repeated_of: str | None = None,
     remediation: str | None = None,
+    args_repaired: bool = False,
+    args_raw: str | None = None,
 ) -> LedgerEntry:
     """One entry, with the output trimmed and parsed the same way every time.
 
@@ -225,6 +235,12 @@ def build_entry(
     carries the note the model was given rather than a tool result, so it is
     never parsed into ``structured``: nothing downstream should read a
     reference to another entry as data.
+
+    ``args_repaired`` says the model's arguments were truncated and were
+    closed off before the call ran (``agents.evidence_recorder``), and
+    ``args_raw`` keeps them as the model wrote them. Both so a reader can see
+    that a call was made on repaired arguments and check the repair against
+    what arrived.
     """
     safe_args = dict(args) if isinstance(args, dict) else {}
     full = str(output or "")
@@ -251,6 +267,8 @@ def build_entry(
         output=text,
         structured=None if repeated_of else parse_structured(full),
         repeated_of=repeated_of,
+        args_repaired=bool(args_repaired),
+        args_raw=args_raw if args_repaired else None,
         started_at=started_at,
         duration_ms=max(0, int(duration_ms)),
         seq=seq,

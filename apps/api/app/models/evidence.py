@@ -50,6 +50,11 @@ class EvidenceEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     seq: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     args: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    # Whether the model's arguments were truncated and were closed off before
+    # the call ran, and what it wrote before they were
+    # (``maljan.agents.evidence_recorder``).
+    args_repaired: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    args_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Text, not String(n): a decompilation runs to thousands of characters and
     # the producer already caps it (schemas.evidence).
     output: Mapped[str] = mapped_column(Text, nullable=False, default="")

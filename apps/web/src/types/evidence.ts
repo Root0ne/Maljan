@@ -24,6 +24,10 @@ export interface EvidenceEntry {
   duration_ms: number;
   seq: number;
   args: Record<string, unknown> | null;
+  /** True when the model's arguments were truncated and were closed off
+   *  before the call ran; `args_raw` is what it wrote. */
+  args_repaired?: boolean;
+  args_raw?: string | null;
   output: string;
   structured: unknown | null;
   created_at: string | null;
