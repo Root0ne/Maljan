@@ -20,7 +20,14 @@ import httpx
 from mcp.server.fastmcp import FastMCP
 
 from maljan.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, env, manifest
-from maljan.tools.errors import NOT_CONFIGURED, TIMEOUT, TOOL_FAILED, tool_error
+from maljan.tools.errors import (
+    NOT_CONFIGURED,
+    TIMEOUT,
+    TOOL_FAILED,
+    error_parts,
+    error_sentence,
+    tool_error,
+)
 
 mcp = FastMCP("ThreatIntelMCP")
 
@@ -93,6 +100,11 @@ def _abuseipdb_headers() -> dict[str, str]:
     return {"Key": ABUSEIPDB_API_KEY, "Accept": "application/json"}
 
 
+def tool_error_text(code: str, message: str, tool: str) -> str:
+    """One structured failure as the text these prose-answering tools return."""
+    return json.dumps(tool_error(code, message, tool=tool))
+
+
 def _lookup_error(code: str, message: str, tool: str) -> str:
     """A failed lookup as the structured error, in the text these tools return.
 
@@ -103,7 +115,7 @@ def _lookup_error(code: str, message: str, tool: str) -> str:
     console's failed row. The structured shape is what tells them apart, and
     ``normalise_error`` gives it the remedy for its code.
     """
-    return json.dumps(tool_error(code, message, tool=tool))
+    return tool_error_text(code, message, tool)
 
 
 def _cache_key(prefix: str, query: str) -> str:
@@ -116,8 +128,16 @@ def _check_cache(prefix: str, query: str) -> str | None:
 
 
 def _set_cache(prefix: str, query: str, value: str) -> None:
-    key = _cache_key(prefix, query)
-    _cache[key] = value
+    """Keep an answer. A failure is not an answer and is never kept.
+
+    The cache has no expiry, so one timed-out lookup cached as a failure would
+    be replayed for every later look at that indicator for the life of the
+    server — and every replay is another failed ledger entry and another row
+    in the report header, for a service that came back a second later.
+    """
+    if error_parts(value) is not None:
+        return
+    _cache[_cache_key(prefix, query)] = value
 
 
 # ---------------------------------------------------------------------------
@@ -390,6 +410,26 @@ def _mock_hash_reputation(file_hash: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _joined(parts: list[str], tool: str) -> str:
+    """Two sources as one answer, or one failure when neither answered.
+
+    A structured error joined to a sentence is neither: nothing downstream can
+    parse it, so a rate-limited lookup was recorded as a successful call whose
+    result happened to mention a rate limit, and the model read a JSON
+    document glued to prose. So: if every source failed, the answer is the
+    first failure, whole and parseable. If one answered, the failures are
+    reduced to their own sentence and what the model reads stays prose.
+    """
+    failures = [(part, error_parts(part)) for part in parts]
+    answered = [part for part, failure in failures if failure is None]
+    if not answered:
+        return parts[0] if parts else tool_error_text(TOOL_FAILED, "no source answered", tool)
+    said: list[str] = []
+    for part, failure in failures:
+        said.append(part if failure is None else str(error_sentence(part)))
+    return "\n\n".join(said)
+
+
 @mcp.tool()
 def check_ip_reputation(ip_address: str) -> str:
     """Check the reputation of an IP address.
@@ -409,7 +449,7 @@ def check_ip_reputation(ip_address: str) -> str:
     if not parts:
         parts.append(_mock_ip_reputation(ip_address))
 
-    result = "\n\n".join(parts)
+    result = _joined(parts, "check_ip_reputation")
     _set_cache("ip", ip_address, result)
     return result
 

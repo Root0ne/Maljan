@@ -46,15 +46,19 @@ def repair_arguments(text: str) -> dict[str, Any] | None:
     nothing answers it, so the loop ends on a turn that cost a step and
     produced nothing.
 
-    The repair is the smallest one that can be defended: read the text once,
-    tracking whether the cursor is inside a string and which brackets are
-    open, and append the quote and the closers that are missing. Nothing is
-    removed, nothing is substituted and nothing is inserted anywhere but the
-    end, so a repair cannot invent an argument the model did not write — it
-    can only finish a sentence the model started. A trailing comma, a key with
-    no value, a missing colon: all of those still fail to parse afterwards and
-    are left to the refusal path, which is the right answer for a call whose
-    meaning is genuinely unknown.
+    The repair closes brackets and nothing else. Read the text once, tracking
+    whether the cursor is inside a string and which brackets are open, and
+    append the closers that are missing. Nothing is removed, nothing is
+    substituted and nothing is inserted anywhere but the end.
+
+    A value cut in the middle of a string is *not* repaired, and that is the
+    rule this exists under: closing the quote would hand the tool an argument
+    the model never finished writing — ``{"path": "/tmp/dropper.ex`` becomes a
+    path that exists nowhere, and a ``strings`` pattern cut mid-token becomes
+    a different search. The call is refused with the message it was already
+    refused with, which is the honest answer to a call whose meaning is
+    genuinely unknown. A trailing comma, a key with no value and a missing
+    colon are refused the same way.
     """
     raw = str(text or "")
     if not raw.strip():
@@ -77,7 +81,11 @@ def repair_arguments(text: str) -> dict[str, Any] | None:
             stack.append(char)
         elif char in _CLOSERS.values() and stack and _CLOSERS[stack[-1]] == char:
             stack.pop()
-    tail = ('"' if in_string else "") + "".join(_CLOSERS[open_] for open_ in reversed(stack))
+    if in_string:
+        # The model was still writing a value. Whatever it meant to type next
+        # is not something this may guess.
+        return None
+    tail = "".join(_CLOSERS[open_] for open_ in reversed(stack))
     if not tail:
         # Nothing was left open, so whatever is wrong with this call is not
         # something appending can fix.
@@ -340,6 +348,16 @@ class RepeatGuard:
         self._first.setdefault(key, entry_id)
 
 
+# What the model is told when its call ran on arguments that were closed off.
+# It is on the result rather than only in the ledger, because the model is the
+# one that can look at the answer and say the brackets were not what it meant.
+REPAIRED_NOTICE = (
+    "\n\nThe arguments for this call stopped in the middle and were closed off "
+    "before it ran. Read the answer against what you meant to ask, and call it "
+    "again with the whole arguments if it is not."
+)
+
+
 # What both notices say on the call before the loop ends. One sentence, in one
 # place, because the model reads it from whichever branch it lands in.
 _ENDING_SENTENCE = (
@@ -555,6 +573,8 @@ def _record_tool(
             args_raw=raw,
         )
         _note(kwargs, entry.id)
+        if raw is not None:
+            text = f"{text}{REPAIRED_NOTICE}"
         # ``text``, not ``entry.output``: the ledger trims what it stores, and
         # what the model reads is not the ledger's business. The size of a tool
         # result in a prompt is decided where it has always been decided —

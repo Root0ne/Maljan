@@ -62,7 +62,7 @@ __all__ = [
 # there has been a settings store, so a stored document that edits one is an
 # operator tampering with a built-in and the loud refusal is the right answer —
 # it is what the console's own per-field error says, and renaming it would
-# silently grow a duplicate of a built-in instead. These five are different:
+# silently grow a duplicate of a built-in instead. These are different:
 # they were legal names yesterday.
 NEWLY_RESERVED_DEFINITIONS: frozenset[str] = frozenset(
     {"triage", "android_static", "reverser", "lead"}

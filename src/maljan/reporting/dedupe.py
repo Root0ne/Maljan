@@ -49,17 +49,87 @@ _WHITESPACE = re.compile(r"\s+")
 _TITLE_TAIL = ".,;:!-–— "
 
 
-def canonical_value(value: Any) -> str:
-    """One indicator value in the spelling two copies of it share."""
-    text = str(value or "").strip().lower()
+def canonical_value(value: Any, *, fold_case: bool = True) -> str:
+    """One indicator value in the spelling two copies of it share.
+
+    ``fold_case`` is false where the case is part of the value. A URL path is
+    case-sensitive on most of the servers that serve it, so ``/Gate.php`` and
+    ``/gate.php`` are two paths, and folding them would remove one of them
+    from the report with nothing saying it happened — the thing this module
+    exists to prevent.
+    """
+    text = str(value or "").strip()
     for defanged, plain in _DEFANGED:
         text = text.replace(defanged, plain)
-    return text
+        text = text.replace(defanged.upper(), plain)
+    return text.lower() if fold_case else text
+
+
+# The indicator kinds whose value means the same thing however it is typed: a
+# digest, a host name, an address, a mailbox. Listed rather than inferred, and
+# everything not on it keeps its case — the shy direction, which leaves two
+# rows where there might be one rather than one where there are two.
+_CASE_BLIND = frozenset(
+    {
+        "md5",
+        "sha1",
+        "sha256",
+        "sha512",
+        "hash",
+        "imphash",
+        "domain",
+        "domain-name",
+        "hostname",
+        "fqdn",
+        "ip",
+        "ipv4",
+        "ipv6",
+        "ipv4-addr",
+        "ipv6-addr",
+        "ip_address",
+        "email",
+        "email-addr",
+    }
+)
+
+
+def folds_case(kind: Any) -> bool:
+    """Whether two spellings of this kind that differ only in case are one thing."""
+    return str(kind or "").strip().lower() in _CASE_BLIND
 
 
 def indicator_fingerprint(kind: Any, value: Any) -> tuple[str, str]:
     """What makes two indicator rows the same indicator."""
-    return (str(kind or "").strip().lower(), canonical_value(value))
+    name = str(kind or "").strip().lower()
+    return (name, canonical_value(value, fold_case=folds_case(name)))
+
+
+# The object path a STIX comparison expression opens with, mapped to the kind
+# ``folds_case`` knows. A pattern this cannot read keeps its case.
+_STIX_PATHS: tuple[tuple[str, str], ...] = (
+    ("file:hashes", "hash"),
+    ("domain-name:value", "domain"),
+    ("ipv4-addr:value", "ipv4"),
+    ("ipv6-addr:value", "ipv6"),
+    ("email-addr:value", "email"),
+)
+
+
+def pattern_fingerprint(pattern_type: Any, pattern: Any) -> tuple[str, str]:
+    """What makes two STIX indicators the same indicator.
+
+    The same rule the report's table uses, read off the pattern itself: a
+    pattern over a digest or a host name folds its case, a pattern over a URL,
+    a file name or anything this cannot read does not. Defanging is undone
+    either way, because ``[.]`` never meant anything but ``.``.
+    """
+    text = str(pattern or "")
+    lowered = text.lower()
+    kind = next((name for path, name in _STIX_PATHS if path in lowered), "")
+    return (
+        str(pattern_type or "stix").strip().lower(),
+        canonical_value(text, fold_case=folds_case(kind)),
+    )
 
 
 def normalised_title(title: Any) -> str:
@@ -69,14 +139,18 @@ def normalised_title(title: Any) -> str:
 
 
 def finding_fingerprint(technique_ids: Any, title: Any) -> tuple[str, str]:
-    """What makes two findings the same finding: its technique and what it says.
+    """What makes two findings the same finding: its techniques and what it says.
 
-    The first technique id, because that is the one the finding is filed
-    under; a finding with none is fingerprinted on its title alone, which is
-    why the title is normalised rather than compared as written.
+    Every technique id, not the first. Two findings under one title where one
+    claims ``T1055`` and the other ``T1055`` and ``T1027`` are not the same
+    finding: folding them would drop the second id, and merging the column
+    instead would put a technique against an analyst that never claimed it.
+    The ids are sorted so the order two analysts wrote them in does not make
+    one finding two. A finding with none is fingerprinted on its title alone,
+    which is why the title is normalised rather than compared as written.
     """
-    ids = [str(tid).strip().upper() for tid in (technique_ids or []) if str(tid).strip()]
-    return (ids[0] if ids else "", normalised_title(title))
+    ids = sorted({str(tid).strip().upper() for tid in (technique_ids or []) if str(tid).strip()})
+    return (",".join(ids), normalised_title(title))
 
 
 def merge_cell(kept: str, arriving: str, *, separator: str = ", ") -> str:

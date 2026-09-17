@@ -37,15 +37,6 @@ UNSUPPORTED_FORMAT = "unsupported_format"
 NOT_CONFIGURED = "not_configured"
 TOOL_FAILED = "tool_failed"
 
-CODES: tuple[str, ...] = (
-    MISSING_DEPENDENCY,
-    TIMEOUT,
-    BAD_ARGUMENT,
-    NO_SUCH_FILE,
-    UNSUPPORTED_FORMAT,
-    NOT_CONFIGURED,
-    TOOL_FAILED,
-)
 
 REMEDIATIONS: dict[str, str] = {
     MISSING_DEPENDENCY: (

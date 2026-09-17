@@ -65,7 +65,7 @@ class TestWhatCanBeClosedOff:
 
     def test_nothing_is_removed_or_substituted(self) -> None:
         """The repaired text is the written text with a tail, never a rewrite."""
-        written = '{"pattern": "a[b]c'
+        written = '{"pattern": "a[b]c"'
         assert repair_arguments(written) == {"pattern": "a[b]c"}
 
 
@@ -105,15 +105,15 @@ class TestTheTurnTheRepairChanges:
 
 class TestTheLedgerSaysTheCallWasRepaired:
     def _tool(self) -> StructuredTool:
-        def strings(path: str, pattern: str = "") -> dict[str, Any]:
+        def strings(path: str, pattern: str = "", start: int = 0) -> dict[str, Any]:
             """Read the strings."""
-            return {"path": path, "pattern": pattern}
+            return {"path": path, "pattern": pattern, "start": start}
 
         return StructuredTool.from_function(func=strings, name="strings", description="strings")
 
     def test_the_entry_is_marked_and_keeps_what_the_model_wrote(self) -> None:
         repairs = ArgumentRepairs()
-        written = '{"path": "/s.bin", "pattern": "ht'
+        written = '{"path": "/s.bin", "start": 0'
         repair_invalid_tool_calls(
             AIMessage(
                 content="",
@@ -129,20 +129,24 @@ class TestTheLedgerSaysTheCallWasRepaired:
 
         # langchain fills the schema's defaults before the tool runs, so what
         # arrives is a superset of what the repair wrote.
-        tool.invoke({"path": "/s.bin", "pattern": "ht"})
+        answer = tool.invoke({"path": "/s.bin", "start": 0, "pattern": ""})
 
         entry = recorder.entries[0]
         assert entry.args_repaired is True
         assert entry.args_raw == written
+        # The model is told too: it is the one that can say the brackets were
+        # not what it meant.
+        assert "were closed off" in answer
 
     def test_an_ordinary_call_is_not_marked(self) -> None:
         recorder = EvidenceRecorder("static")
         tool = record_tools([self._tool()], recorder, None, ArgumentRepairs())[0]
 
-        tool.invoke({"path": "/s.bin", "pattern": "ht"})
+        answer = tool.invoke({"path": "/s.bin", "pattern": "ht"})
 
         assert recorder.entries[0].args_repaired is False
         assert recorder.entries[0].args_raw is None
+        assert "were closed off" not in answer
 
 
 class _Scripted(BaseChatModel):

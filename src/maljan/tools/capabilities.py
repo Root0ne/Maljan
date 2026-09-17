@@ -75,6 +75,13 @@ def module(name: str) -> Requirement:
 
 
 def binary(name: str) -> Requirement:
+    """A tool that shells out to something on PATH.
+
+    No built-in sidecar needs one — capa is a Python API here, not a command —
+    but the kind is part of the vocabulary ``docs/configuration.md`` publishes
+    for a server somebody else writes, and a kind with no way to declare it is
+    a kind nobody can use.
+    """
     return Requirement("binary", name)
 
 

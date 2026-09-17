@@ -27,7 +27,7 @@ import uuid
 from typing import Any
 
 from maljan.core.logger import logger
-from maljan.reporting.dedupe import indicator_fingerprint
+from maljan.reporting.dedupe import pattern_fingerprint
 
 # UUID5 namespace for ATT&CK technique IDs — same value on every run so a
 # downstream consumer can dedupe ``attack-pattern--<uuid5>`` across reports.
@@ -389,15 +389,17 @@ def enforce_bundle_integrity(
     objects = kept
 
     # 3) indicator dedup by (pattern type, canonical pattern). Canonical
-    # because two indicators for one endpoint differ by case and by whether
-    # whoever wrote them defanged it, and an exact comparison kept both.
+    # because two indicators for one endpoint differ by whether whoever wrote
+    # them defanged it, and an exact comparison kept both; canonical *with the
+    # case kept* wherever the case is part of the value, because a URL path is
+    # case-sensitive and folding one away removes a fact from the report.
     # ``reporting.dedupe`` is the one place that says what makes two
     # indicators the same, so the bundle and the report's table agree.
     seen_pat: dict[tuple[str, str], Any] = {}
     kept = []
     for o in objects:
         if _otype(o) == "indicator":
-            key = indicator_fingerprint(_oget(o, "pattern_type", "stix"), _oget(o, "pattern", ""))
+            key = pattern_fingerprint(_oget(o, "pattern_type", "stix"), _oget(o, "pattern", ""))
             first = seen_pat.get(key)
             if first is not None:
                 _merge_indicator_sets(first, o)

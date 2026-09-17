@@ -357,6 +357,47 @@ class TestTheThreatIntelSidecarAnswersAFailureAsOne:
         assert answer is not None
         assert answer[0] == errors.TOOL_FAILED and "429" in answer[1]
 
+    def test_two_sources_that_both_failed_answer_as_one_failure(
+        self, server: Any, monkeypatch
+    ) -> None:
+        """A structured error joined to a sentence parses as neither."""
+        import httpx
+
+        self._raising(server, monkeypatch, httpx.TimeoutException("slow"))
+        failed = server._vt_ip_lookup("1.2.3.4")
+
+        joined = server._joined([failed, failed], "check_ip_reputation")
+
+        answer = errors.error_parts(joined)
+        assert answer is not None and answer[0] == errors.TIMEOUT
+
+    def test_one_source_that_answered_keeps_the_answer_prose(
+        self, server: Any, monkeypatch
+    ) -> None:
+        import httpx
+
+        self._raising(server, monkeypatch, httpx.TimeoutException("slow"))
+        failed = server._vt_ip_lookup("1.2.3.4")
+
+        joined = server._joined([failed, "IP 1.2.3.4 (TR): clean."], "check_ip_reputation")
+
+        assert errors.error_parts(joined) is None, "the call answered"
+        assert "{" not in joined, "no JSON document is glued to the sentence"
+        assert "did not answer" in joined and "clean." in joined
+
+    def test_a_failure_is_never_cached(self, server: Any, monkeypatch) -> None:
+        """The cache has no expiry, so one timeout would be replayed for ever."""
+        import httpx
+
+        self._raising(server, monkeypatch, httpx.TimeoutException("slow"))
+        server._cache.clear()
+
+        server._set_cache("ip", "1.2.3.4", server._vt_ip_lookup("1.2.3.4"))
+
+        assert server._check_cache("ip", "1.2.3.4") is None
+        server._set_cache("ip", "1.2.3.4", "IP 1.2.3.4: clean.")
+        assert server._check_cache("ip", "1.2.3.4") == "IP 1.2.3.4: clean."
+
     def test_a_lookup_that_found_nothing_is_still_an_answer(self, server: Any, monkeypatch) -> None:
         """VirusTotal having nothing on a hash is a result, not a failed call."""
 
