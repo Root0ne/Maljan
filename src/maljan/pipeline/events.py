@@ -60,7 +60,7 @@ def emit(sink: EventSink | None, event_type: str, data: dict[str, Any]) -> None:
 # The budget meter. ``budget_tick`` is one agent's spend as of one model turn
 # — every ``BUDGET_TICK_EVERY`` steps and once more when its loop ends — and
 # ``stage_ended_at_cap`` says which cap, when a cap is what ended the work:
-# ``steps`` (the recursion limit, or the steps its delegates spent), ``time``
+# ``steps`` (the loop's own recursion limit), ``time``
 # (the wall-clock hard cap), ``repeats`` (the repeat guard) or
 # ``budget_seconds`` (the triage pack's budget). Both are telemetry; neither
 # changes what a model said.

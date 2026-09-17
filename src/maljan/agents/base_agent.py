@@ -309,11 +309,18 @@ class BudgetCeiling:
     focused job, not its own stage. ``seconds`` is the per-ask timeout already
     cut down to what the caller has left, because the caller is waiting inside
     its own wall clock.
+
+    ``wall`` is that remainder, kept separately so the hard cap can put its
+    grace inside it: clamping the abort to ``seconds`` fired it at exactly the
+    soft timeout and gave a callee none of the thirty seconds every other loop
+    gets to come back in. It defaults to ``seconds`` for a ceiling built
+    without one.
     """
 
-    def __init__(self, steps: int, seconds: float) -> None:
+    def __init__(self, steps: int, seconds: float, wall: float | None = None) -> None:
         self.steps = int(steps)
         self.seconds = float(seconds)
+        self.wall = float(seconds if wall is None else wall)
 
 
 # The class-level stand-ins for two pieces of per-agent state, for an analyst
@@ -323,7 +330,10 @@ class BudgetCeiling:
 # same answer the real agents get.
 _NO_PATH_CHOICES: Mapping[str, Any] = MappingProxyType({})
 _SHARED_STAND_IN_LOCK = threading.RLock()
-_SHARED_STAND_IN_ASKS_LOCK = threading.Lock()
+# Reentrant, unlike a real agent's: a set of stand-ins shares this one object,
+# so a plain lock would make a stand-in asking through another stand-in block
+# on itself and be refused rather than nesting.
+_SHARED_STAND_IN_ASKS_LOCK = threading.RLock()
 
 
 # How long past its own timeout a loop is left alone before it is aborted
@@ -383,7 +393,7 @@ def lock_for(agent: Any) -> Any:
 
 
 def _steps_this_loop_spent(ledger: LoopBudget, messages: list) -> int:
-    """What the loop has used, from the conversation or from the budget itself.
+    """What *this* loop has used, from the conversation or from the budget itself.
 
     A loop that ended at its wall clock has no conversation to hand over: the
     thread it was running on did not come back, and the record was written
@@ -392,9 +402,15 @@ def _steps_this_loop_spent(ledger: LoopBudget, messages: list) -> int:
     off, landed in the summary as zero steps. The refresher counted the
     conversation before every model turn, so the budget itself holds the last
     figure anyone saw.
+
+    Its own turns and nothing else. What a specialist spent is filed under the
+    specialist, and it comes out of the specialist's cap, not this one: adding
+    it here counted the same steps in two rows and made ``steps_used`` a number
+    that could exceed ``max_steps`` — a lead that made six asks of twelve steps
+    would read 82 of 40. The row carries ``delegated_steps`` beside this, for a
+    reader who wants the other number.
     """
-    own = steps_used(messages) if messages else ledger.own_steps
-    return int(own) + int(ledger.delegated_steps)
+    return int(steps_used(messages) if messages else ledger.own_steps)
 
 
 def hard_cap(timeout: float, ceiling: BudgetCeiling | None = None) -> float:
@@ -403,12 +419,15 @@ def hard_cap(timeout: float, ceiling: BudgetCeiling | None = None) -> float:
     A delegated loop runs on a tool thread that cannot be cancelled, so the
     grace it is normally given is the time it can outlive the caller by: the
     caller's own wait fires, its node fails and drains it, and a callee still
-    running writes its ledger onto an agent that has finished. The ceiling is
-    what the caller had left, so the callee's wall never goes past it.
+    running writes its ledger onto an agent that has finished. The ceiling
+    carries what the caller had left, and the grace goes inside that rather
+    than being clipped away against the ask's own timeout — a callee whose
+    abort fires at the same second as its soft timeout never gets to write up
+    what it gathered.
     """
     wall = float(timeout) + HARD_CAP_GRACE
     if ceiling is not None:
-        wall = min(wall, float(ceiling.seconds))
+        wall = min(wall, float(ceiling.wall))
     return max(1.0, wall)
 
 
@@ -2567,9 +2586,9 @@ class BaseAnalyst(BudgetMeter, ABC):
             raise AnalystError(f"{self.name} ReAct agent returned no result")
 
         msgs = thread_result.get("messages", []) or []
-        # What this loop cost, for a caller that delegated to it: its own
-        # turns and the turns of everything it asked in turn.
-        self.steps_spent += steps_used(msgs) + budget.delegated_steps
+        # What this loop cost: its own turns. What it asked for is the
+        # callee's own budget and is counted under the callee.
+        self.steps_spent += steps_used(msgs)
         # Tool calls are AIMessage instances whose ``tool_calls`` attribute
         # is a non-empty list. Counting them is cheap and the most useful
         # single metric for "did this analyst overspend on Ghidra".

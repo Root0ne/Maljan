@@ -345,7 +345,10 @@ class TestAnAskThroughTheRealLoop:
             LoopBudget.note_delegated = original  # type: ignore[method-assign]
         # The helper spent one tool round and one plain turn: three steps.
         assert noted == [3]
-        assert boss.steps_spent == 3 + 3
+        # The boss's own conversation is three steps too, and the helper's are
+        # not added to them: they come out of the helper's cap and are filed
+        # under the helper.
+        assert boss.steps_spent == 3
 
     def test_the_callee_s_steps_come_from_the_delegation_and_not_the_caller(self) -> None:
         seen: list[tuple[int, int]] = []
@@ -636,6 +639,25 @@ class TestTheCeiling:
             seeded.agents.delegation_timeout_seconds
         )
         assert fits >= 5, "a lead's stage holds several asks end to end"
+
+    def test_the_lead_prompt_and_the_ask_tool_say_the_same_thing(self, team) -> None:
+        """The prompt the lead reads first must not contradict its own tools.
+
+        Before F44 it said the specialists' turns were the lead's, which is the
+        belief that made the live proof's lead stop asking and close with no
+        techniques — from the prompt side, even with the budget fixed.
+        """
+        from maljan.agents.prompts import LEAD_PROMPT
+
+        described = next(
+            t for t in team.get_agent("boss").tools if t.name == tool_name("helper")
+        ).description
+
+        assert "budget of its own" in LEAD_PROMPT
+        assert "are not yours" in LEAD_PROMPT, "a specialist's steps are its own"
+        assert "costs you is time" in LEAD_PROMPT, "the wall clock is what an ask costs"
+        assert "shared with the specialists" not in LEAD_PROMPT
+        assert "do not come out of your step budget" in described
 
     def test_the_ask_tool_tells_the_model_what_an_ask_costs(self, team) -> None:
         described = next(

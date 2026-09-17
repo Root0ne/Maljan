@@ -159,7 +159,13 @@ class TestTheLoopMetersItself:
         agent._record_budget(budget, [], "time", detail="the loop exceeded its hard cap")
 
         (record,) = _budget_update(agent, "static")["budget_records"]["static"]
-        assert record["steps_used"] == 35, "its own turns and what it delegated"
+        # Its own turns and no more: a specialist's steps come out of the
+        # specialist's cap and are filed under the specialist, so counting
+        # them here would count them twice and could put steps_used past
+        # max_steps.
+        assert record["steps_used"] == 31
+        assert record["delegated_steps"] == 4, "kept beside it, for a reader who wants it"
+        assert record["steps_used"] <= record["max_steps"]
         assert record["cap"] == "time" and record["max_steps"] == 40
         assert [p["cap"] for k, p in events if k == STAGE_ENDED_AT_CAP] == ["time"]
 

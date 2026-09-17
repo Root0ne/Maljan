@@ -13,7 +13,8 @@ second mechanism: the ask is a ledger entry (``server="team"``,
 the callee's wall clock as its duration; the callee's own tool calls are
 ledger entries under the callee's key, written to the caller's evidence buffer
 so the stage node that drains the caller writes them all; the callee's turns
-are charged to the caller's loop budget; and the ask and the answer are two
+come out of the ask's own budget and are counted under the callee; and the ask
+and the answer are two
 ``agent_message`` events with ``addressed_to`` set, so the transcript shows
 who asked whom and what came back.
 
@@ -87,6 +88,14 @@ _ANSWER_WITHOUT_CLAIMS_CHARS = 2000
 
 class DelegationRefused(Exception):
     """An ask that is not made, with the reason in the words the model reads."""
+
+
+# How a refusal reads in a ledger entry's error, since the recorder writes an
+# exception as ``<type>: <message>``. Named here rather than spelled at the
+# reader, so the two cannot drift: the report header uses it to leave a guard
+# that worked out of its list of broken tools, while a callee that raised or
+# ran out of time stays in.
+REFUSAL_PREFIX = f"{DelegationRefused.__name__}:"
 
 
 class AskArguments(BaseModel):
@@ -297,12 +306,20 @@ def ask(container: Any, *, caller_key: str, callee_key: str, task: str, context:
         # stage that reference each other would otherwise each hold what the
         # other wants. What the wait buys is an answer; what it costs is
         # refused in words the model can act on.
-        if not _held(callee.delegation_lock, wait):
+        if not _held(callee.delegation_lock, _seconds_to_wait_for(caller)):
             raise DelegationRefused(
-                f"agent {callee_key!r} is busy with its own work and did not free up within "
-                f"{int(wait)} s; answer from what you have or ask someone else"
+                f"agent {callee_key!r} is busy with its own work and did not free up in time; "
+                "answer from what you have or ask someone else"
             )
         try:
+            # Asked again now the waiting is done: the second ask of a turn
+            # can have spent the caller's clock queueing, and an ask made with
+            # no time left runs a one-second loop that fails where the refusal
+            # is a sentence the model can act on.
+            why = refusal(container, caller, callee_key)
+            if why is not None:
+                logger.info("delegation refused (%s -> %s): %s", caller_key, callee_key, why)
+                raise DelegationRefused(why)
             return _ask(
                 container, caller, callee, str(task or "").strip(), str(context or "").strip()
             )
@@ -326,7 +343,6 @@ def _seconds_to_wait_for(caller: Any) -> float:
 
 
 def _ask(container: Any, caller: Any, callee: Any, task: str, context: str) -> str:
-
     stage = str(getattr(caller, "pipeline_stage", "") or "analysis")
     round_index = int(getattr(caller, "current_round", 0) or 0)
     sink = getattr(container, "event_sink", None)
@@ -420,9 +436,11 @@ def _what_this_ask_gets(container: Any, budget: Any) -> Any:
     from maljan.agents.base_agent import BudgetCeiling
 
     steps, seconds = ask_budget(container)
+    wall = float(seconds)
     if budget is not None:
-        seconds = int(min(seconds, max(1.0, budget.seconds_left() - SECONDS_KEPT_FOR_THE_CALLER)))
-    return BudgetCeiling(steps=steps, seconds=float(seconds))
+        wall = max(1.0, budget.seconds_left() - SECONDS_KEPT_FOR_THE_CALLER)
+        seconds = int(min(seconds, wall))
+    return BudgetCeiling(steps=steps, seconds=float(seconds), wall=wall)
 
 
 def _brief_callee(caller: Any, callee: Any, *, stage: str, round_index: int) -> None:

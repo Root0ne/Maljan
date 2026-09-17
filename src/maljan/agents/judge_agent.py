@@ -507,7 +507,12 @@ class JudgeAgent(BudgetMeter):
             if conversation is None:
                 conversation = getattr(state, "messages", None) or []
             conversation = list(conversation)
+            # The turn about to be taken counts. The hook runs before the
+            # model, so a loop cut off *during* its first turn would otherwise
+            # record nothing at all — and the judge's characteristic failure is
+            # exactly that, one verdict call that ran past its wall clock.
             budget.note_turns(conversation)
+            budget.own_steps += 1
             return conversation
 
         agent_executor = create_react_agent(

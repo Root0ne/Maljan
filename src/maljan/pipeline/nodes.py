@@ -18,7 +18,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from maljan.agents.delegation import TEAM_SERVER
+from maljan.agents.delegation import REFUSAL_PREFIX
 from maljan.agents.evidence_recorder import EvidenceRecorder
 from maljan.agents.judge_agent import (
     VERDICT_FALLBACK_CODE,
@@ -722,10 +722,12 @@ def tool_failures(ledger: Sequence[Any], limit: int = 20) -> list[dict[str, Any]
     for entry in ledger:
         if getattr(entry, "ok", True) or getattr(entry, "repeated_of", None):
             continue
-        # A refused ask is a guard working: a cycle, a depth, a budget the
+        # A refused ask is a guard working: a cycle, a depth, a clock the
         # caller had already spent. It is a failed entry so the model reads
-        # it, and it is not a tool an operator can go and fix.
-        if str(getattr(entry, "server", "") or "") == TEAM_SERVER:
+        # it, and it is not a tool an operator can go and fix. A callee that
+        # raised or ran out of time is a different thing and stays in the
+        # list, which is why this reads the refusal rather than the server.
+        if str(getattr(entry, "error", "") or "").startswith(REFUSAL_PREFIX):
             continue
         message = str(getattr(entry, "error", "") or getattr(entry, "output", "") or "").strip()
         if message.startswith(NOT_RUN_PREFIX):

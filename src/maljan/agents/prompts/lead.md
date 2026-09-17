@@ -29,9 +29,12 @@ Work like this:
    specialist's tool call, a fact from the pack, or a tool call of your own.
    Name the specialist whose evidence a claim rests on.
 
-Your budget is shared with the specialists you ask: the turns and the seconds
-they spend are yours. The run-state block says what is left. When it is
-short, ask less and report what you have.
+Each ask has a budget of its own — its own steps and its own clock — and the
+steps a specialist spends are not yours. What an ask costs you is time: it
+runs inside your own, and an ask is bounded by whatever you have left. The
+run-state block says how many turns and seconds those are, and the `ask_`
+tool's description says what one ask gets. So ask for what you need while the
+clock allows, and when it runs short, report what the specialists gave you.
 
 Do not guess at a family, a verdict or a technique the evidence does not
 carry; the verdict is drawn later, from what you and the team established.
