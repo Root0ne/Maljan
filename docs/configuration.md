@@ -311,6 +311,27 @@ deep reversing loop whose decompilation is the evidence; set it to `0` to keep
 every output, which is a supportable choice on a machine with room for it and
 a way to fill a JSONB column and a context window on one that has not.
 
+### The live conversation
+
+Two settings under **Live events** govern the feed the console draws a running
+analysis from. Neither turns the feed off: the events are what the console
+shows, and a run that published none would be a spinner again.
+
+`events.stream_deltas` (on) publishes an agent's text while its loop is still
+running, as `agent_message_delta`. What is published is one model turn's text
+as the loop produces it, not a token at a time — the loop reads its graph as a
+stream of whole states and that is the smallest thing there is to publish.
+Turn it off on a deployment whose browsers are on a thin link; every finished
+message is unaffected.
+
+`events.retention_days` (30) is how long a finished run's feed stays in
+`job_events` before the worker's nightly sweep removes it. The feed is what
+makes a failed or cancelled run readable at all — no report is written for
+one — and is what a reader wants while a run is fresh. The transcript, the
+agent findings and the evidence ledger are kept by the report and the job and
+are not touched by the sweep, so shortening this does not shorten how long a
+finished analysis is readable.
+
 ### Read-only deployment group
 
 The Deployment group shows the bootstrap values the process is running with —
