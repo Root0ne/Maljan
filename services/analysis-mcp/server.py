@@ -89,9 +89,12 @@ CAPABILITIES = manifest("analysis", TOOL_NEEDS)
 # Chunked uploads in flight, keyed by upload id. Bounded by the number of
 # concurrent stagers, which is the number of agents in a profile — but a
 # ``put_sample_begin`` whose caller vanished would otherwise hold its chunks
-# for the process lifetime, so they are evicted by age as well.
+# for the process lifetime, so they are evicted by age as well, and by count:
+# each entry is cheap, and fifteen minutes of them is a long time to admit
+# 2 GiB of chunks apiece.
 _UPLOADS: dict[str, dict[str, Any]] = {}
 _UPLOAD_TTL_SECONDS = 15 * 60
+_MAX_UPLOADS = 32
 
 # A chunk larger than this is refused rather than buffered: the convention
 # splits at 8 MiB and a caller sending more is not speaking it.
@@ -100,6 +103,20 @@ _MAX_CHUNK_BYTES = 16 * 1024 * 1024
 # reachable over HTTP is a place to post arbitrary bytes, and an unbounded
 # accept is an unbounded write.
 _MAX_SAMPLE_BYTES = 2 * 1024 * 1024 * 1024
+
+
+def _too_long_to_decode(encoded: str, limit: int) -> bool:
+    """Whether this base64 argument would exceed ``limit`` once decoded.
+
+    Asked before decoding, not after. Base64 is four characters to three
+    bytes, so the length of the argument bounds the length of the blob without
+    materialising it — and materialising it was the problem: a 4 GiB argument
+    was held as a string and again as bytes before the ceiling below refused
+    it. The bound is generous by the padding and any whitespace, which costs
+    nothing: what is being prevented is the order of magnitude.
+    """
+    return (len(encoded) // 4) * 3 > limit
+
 
 # How long a staged sample is kept. Every ``put_sample*`` call prunes, so a
 # long-lived server does not accumulate malware bytes without bound.
@@ -120,6 +137,21 @@ _DEFAULT_STAGING_TTL_HOURS = 24.0
 # named "" was created for it.
 _ABSENT_WORDS = frozenset({"null", "None"})
 _ABSENT_CHARACTERS = " \t\r\n\"'"
+
+
+def _within(asked: Any, declared: int) -> int:
+    """One tool's wall clock, held to the value its own manifest declares.
+
+    A model that asks for a day gets the minute the manifest promised: the
+    declared value is what every reader of ``capabilities`` was told, and a
+    tool that quietly took more would make that structure untrue. Asking for
+    less is allowed — a caller in a hurry is entitled to be.
+    """
+    try:
+        wanted = int(asked)
+    except (TypeError, ValueError):
+        return declared
+    return max(1, min(wanted, declared))
 
 
 def _optional_string_params(call: Any) -> frozenset[str]:
@@ -396,7 +428,13 @@ def _carve_under_staging(path: str) -> dict[str, Any]:
     target = Path(path)
     if not target.is_file():
         return {"error": f"no such file: {path}", "tool": "carve_payloads"}
-    digest = hashlib.sha256(target.read_bytes()).hexdigest()
+    # Read in pieces rather than whole: this runs on live samples, and the
+    # upload ceiling above admits 2 GiB of them.
+    digest = hashlib.sha256()
+    with target.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    digest = digest.hexdigest()
     destination = _staging_dir() / "carved"
     for directory in (destination, destination / digest):
         directory.mkdir(mode=0o700, exist_ok=True)
@@ -434,7 +472,7 @@ def yara_scan(
         path=path or None,
         text=text or None,
         ruleset=ruleset,
-        timeout_s=timeout_s,
+        timeout_s=_within(timeout_s, YARA_TIMEOUT_S),
     )
 
 
@@ -455,7 +493,13 @@ def sigma_match_sandbox(report: dict[str, Any], ruleset: str = "default") -> dic
 @mcp.tool()
 def capa(path: str, timeout_s: int = CAPA_TIMEOUT_S, backend: str = "auto") -> dict[str, Any]:
     """Run capa and report the capabilities it finds, with ATT&CK and MBC metadata."""
-    return _guard("capa", rule_tools.capa, path=path, timeout_s=timeout_s, backend=backend)
+    return _guard(
+        "capa",
+        rule_tools.capa,
+        path=path,
+        timeout_s=_within(timeout_s, CAPA_TIMEOUT_S),
+        backend=backend,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -577,6 +621,10 @@ def _write_sample(filename: str, blob: bytes, sha256: str) -> dict[str, Any]:
 def put_sample(filename: str, content_b64: str, sha256: str = "") -> dict[str, Any]:
     """Upload a sample in one call and get back the path to analyse it at."""
     _evict_stale_uploads()
+    if _too_long_to_decode(content_b64, _MAX_SAMPLE_BYTES):
+        return tool_error(
+            BAD_ARGUMENT, f"sample exceeds {_MAX_SAMPLE_BYTES} bytes", tool="put_sample"
+        )
     try:
         blob = base64.b64decode(content_b64, validate=True)
     except Exception as exc:  # noqa: BLE001
@@ -595,6 +643,13 @@ def put_sample_begin(filename: str, sha256: str, size: int) -> dict[str, Any]:
         return tool_error(
             BAD_ARGUMENT,
             f"declared size must be between 0 and {_MAX_SAMPLE_BYTES} bytes",
+            tool="put_sample_begin",
+        )
+    if len(_UPLOADS) >= _MAX_UPLOADS:
+        return tool_error(
+            BAD_ARGUMENT,
+            f"too many uploads in flight (limit {_MAX_UPLOADS}); finish one before starting "
+            "another",
             tool="put_sample_begin",
         )
     upload_id = uuid.uuid4().hex
@@ -616,6 +671,10 @@ def put_sample_chunk(upload_id: str, seq: int, content_b64: str) -> dict[str, An
     upload = _UPLOADS.get(upload_id)
     if upload is None:
         return tool_error(BAD_ARGUMENT, f"unknown upload_id {upload_id!r}", tool="put_sample_chunk")
+    if _too_long_to_decode(content_b64, _MAX_CHUNK_BYTES):
+        return tool_error(
+            BAD_ARGUMENT, f"chunk exceeds {_MAX_CHUNK_BYTES} bytes", tool="put_sample_chunk"
+        )
     try:
         blob = base64.b64decode(content_b64, validate=True)
     except Exception as exc:  # noqa: BLE001

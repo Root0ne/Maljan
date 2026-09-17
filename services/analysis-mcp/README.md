@@ -85,9 +85,15 @@ The directory is created with mode 0o700 and refused if what is already at that
 path is a symlink or is owned by another user — the default name is predictable
 and the system temp directory is shared with every other local account. Files
 are created with `O_CREAT|O_EXCL|O_NOFOLLOW` at 0o600 rather than written and
-then chmodded, uploads are capped at 2 GiB, an unfinished chunked upload is
-evicted after fifteen minutes, and every `put_sample*` call prunes staged files
-past the TTL.
+then chmodded, uploads are capped at 2 GiB — measured on the encoded argument
+before it is decoded, so an oversized one is refused rather than materialised
+twice — at most 32 chunked uploads may be in flight at once, an unfinished one
+is evicted after fifteen minutes, and every `put_sample*` call prunes staged
+files past the TTL.
+
+`timeout_s` on `yara_scan` and `capa` is a request, not an instruction: the
+value the `capabilities` manifest declares (60 s and 300 s) is the ceiling, so
+a caller asking for more is given that. Asking for less is honoured.
 
 ### Capabilities
 

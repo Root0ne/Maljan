@@ -439,6 +439,16 @@ change landed on `main`.
 
 ### Fixed
 
+- **A sidecar decides what it will read before it reads it.** `put_sample`
+  base64-decoded its whole argument and then applied the 2 GiB ceiling, so an
+  oversized upload was materialised twice before being refused; the encoded
+  length is now checked first, and so is a chunk's. At most 32 chunked uploads
+  may be in flight. `yara_scan` and `capa` clamp `timeout_s` to the value their
+  own `capabilities` manifest declares, so the structure whose premise is that
+  it was computed stays true. Every `network` tool takes a `packet_limit` and
+  holds it to 5000, where `extract_dns` and `extract_http` used to call
+  `rdpcap` with no count and read the whole capture into memory. The digest
+  that names a carve directory is read in 1 MiB blocks rather than whole.
 - **Every probe leaves an audit row.** `run_probe` backfills any input the
   caller did not stage from the decrypted store, so `POST /settings/test/llm`
   with a staged `base_url` sends the stored API key to whatever host the caller

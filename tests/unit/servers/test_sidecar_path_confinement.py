@@ -316,3 +316,157 @@ class TestTheWriteSideKeepsItsOwnConfinement:
 
         assert answer.get("error") is None, answer
         assert (staging / "carved").is_dir()
+
+
+class TestAnArgumentIsBoundedBeforeItIsRead:
+    """What a tool will materialise, decided before it materialises it.
+
+    ``put_sample`` base64-decoded the whole argument into memory and *then*
+    applied the sample ceiling, so a 4 GiB argument was held twice over before
+    being refused; the chunked route was bounded per chunk and in total but not
+    in the number of uploads in flight; and the two rule tools took their
+    wall clock straight from the model, above the value their own manifest
+    declares.
+    """
+
+    def test_an_oversized_single_shot_upload_is_refused_before_it_is_decoded(
+        self, analysis: Any, staging: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import base64
+
+        decoded: list[int] = []
+        real = base64.b64decode
+
+        def _counting(value: Any, validate: bool = False) -> bytes:
+            decoded.append(len(value))
+            return real(value, validate=validate)
+
+        monkeypatch.setattr(analysis.base64, "b64decode", _counting)
+        monkeypatch.setattr(analysis, "_MAX_SAMPLE_BYTES", 16)
+
+        answer = analysis.put_sample("s.bin", "A" * 4096)
+
+        assert answer["error"]["code"] == "bad_argument"
+        assert decoded == [], "the argument was decoded before it was refused"
+
+    def test_an_oversized_chunk_is_refused_before_it_is_decoded(
+        self, analysis: Any, staging: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import base64
+
+        decoded: list[int] = []
+        real = base64.b64decode
+
+        def _counting(value: Any, validate: bool = False) -> bytes:
+            decoded.append(len(value))
+            return real(value, validate=validate)
+
+        started = analysis.put_sample_begin("s.bin", "", 1024)
+        monkeypatch.setattr(analysis.base64, "b64decode", _counting)
+        monkeypatch.setattr(analysis, "_MAX_CHUNK_BYTES", 16)
+
+        answer = analysis.put_sample_chunk(started["upload_id"], 0, "A" * 4096)
+
+        assert answer["error"]["code"] == "bad_argument"
+        assert decoded == []
+
+    def test_uploads_in_flight_are_capped_by_count(
+        self, analysis: Any, staging: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(analysis, "_MAX_UPLOADS", 2)
+        analysis._UPLOADS.clear()
+
+        first = analysis.put_sample_begin("a.bin", "", 8)
+        second = analysis.put_sample_begin("b.bin", "", 8)
+        third = analysis.put_sample_begin("c.bin", "", 8)
+
+        assert first["upload_id"] and second["upload_id"]
+        assert third["error"]["code"] == "bad_argument"
+        assert len(analysis._UPLOADS) == 2
+        analysis._UPLOADS.clear()
+
+    def test_a_ruleset_timeout_cannot_exceed_the_declared_one(
+        self, analysis: Any, staging: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        asked: list[int] = []
+
+        def _fake_scan(**kwargs: Any) -> dict[str, Any]:
+            asked.append(int(kwargs["timeout_s"]))
+            return {"matches": [], "rule_count": 0, "filtered": 0}
+
+        monkeypatch.setattr(analysis.rule_tools, "yara_scan", _fake_scan)
+
+        analysis.yara_scan(text="x", timeout_s=86_400)
+        analysis.yara_scan(text="x", timeout_s=5)
+        analysis.yara_scan(text="x", timeout_s=-1)
+
+        assert asked == [analysis.YARA_TIMEOUT_S, 5, 1]
+
+    def test_a_capa_timeout_cannot_exceed_the_declared_one(
+        self, analysis: Any, staging: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        asked: list[int] = []
+
+        def _fake_capa(**kwargs: Any) -> dict[str, Any]:
+            asked.append(int(kwargs["timeout_s"]))
+            return {"capabilities": [], "meta": {}}
+
+        monkeypatch.setattr(analysis.rule_tools, "capa", _fake_capa)
+
+        analysis.capa(_pe(staging / "s.bin"), timeout_s=86_400)
+
+        assert asked == [analysis.CAPA_TIMEOUT_S]
+
+    def test_the_declared_timeout_is_what_the_manifest_says(self, analysis: Any) -> None:
+        declared = {tool["name"]: tool.get("timeout_s") for tool in analysis.CAPABILITIES["tools"]}
+        assert declared["yara_scan"] == analysis.YARA_TIMEOUT_S
+        assert declared["capa"] == analysis.CAPA_TIMEOUT_S
+
+    def test_carving_never_holds_the_whole_sample_in_memory(
+        self, analysis: Any, staging: Path
+    ) -> None:
+        """The digest that names the carve directory is read in chunks."""
+        import hashlib
+        import inspect
+
+        source = inspect.getsource(analysis._carve_under_staging)
+        assert "read_bytes()" not in source
+
+        blob = b"MZ" + b"\x00" * 4096
+        sample = staging / "big.bin"
+        sample.write_bytes(blob)
+
+        answer = analysis.carve_payloads(str(sample))
+
+        assert answer.get("error") is None, answer
+        assert (staging / "carved" / hashlib.sha256(blob).hexdigest()).is_dir()
+
+
+class TestACaptureIsReadInBoundedPieces:
+    def test_every_packet_walking_tool_takes_a_limit(self, network: Any) -> None:
+        import inspect
+
+        for tool in ("read_pcap_summary", "extract_dns", "extract_http", "pcap_summary"):
+            parameters = inspect.signature(getattr(network, tool)).parameters
+            assert "packet_limit" in parameters, tool
+            assert int(parameters["packet_limit"].default) > 0, tool
+
+    def test_the_limit_reaches_the_reader(
+        self, network: Any, staging: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``rdpcap`` with no count reads the whole capture into memory."""
+        asked: list[Any] = []
+
+        def _fake_rdpcap(path: str, count: int = -1) -> list[Any]:
+            asked.append(count)
+            return []
+
+        monkeypatch.setattr(network, "rdpcap", _fake_rdpcap)
+        monkeypatch.setattr(network, "_SCAPY_MISSING", None)
+        capture = staging / "c.pcap"
+        capture.write_bytes(b"\xd4\xc3\xb2\xa1" + b"\x00" * 20)
+
+        network.extract_dns(str(capture))
+        network.extract_http(str(capture), packet_limit=7)
+
+        assert asked == [network.DEFAULT_PACKET_LIMIT, 7]
