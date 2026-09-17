@@ -1,11 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { useParams } from "next/navigation";
 
 import { useReport } from "../layout";
 import { copyToClipboard, formatBytes } from "@/lib/report-utils";
 import Field from "@/components/ui/Field";
 import { ArtifactSections } from "@/components/analysis/ArtifactTable";
+import ReputationSection from "@/components/analysis/ReputationSection";
 import {
   binarySectionKeys,
   isCoveredBySection,
@@ -16,6 +18,8 @@ import type { SampleIdentity } from "@/types/malware-report";
 
 export default function IdentityTab() {
   const { report, loading } = useReport();
+  const params = useParams();
+  const jobId = (params.id as string) ?? "";
 
   if (loading) {
     return <div className="p-4 text-sm text-text-secondary">Loading...</div>;
@@ -34,9 +38,10 @@ export default function IdentityTab() {
     return (
       <div className="space-y-4">
         <ArtifactSections sections={evidenceSections} />
+        <ReputationSection jobId={jobId} enabled={!loading} />
         {evidenceSections.length === 0 && (
           <div className="p-8 text-center text-sm text-text-secondary">
-            No identity payload available for this report.
+            No identifying tool answered for this sample.
           </div>
         )}
       </div>
@@ -119,6 +124,8 @@ export default function IdentityTab() {
         </div>
       </div>
 
+      <ReputationSection jobId={jobId} enabled={!loading} />
+
       {identity.signing.is_signed && (
         <div className="bg-bg-surface border border-border rounded">
           <div className="px-4 py-3 border-b border-border">
@@ -165,7 +172,7 @@ function HashRow({ label, value }: { label: string; value: string | null }) {
                 setTimeout(() => setCopied(false), 1500);
               }
             }}
-            className="text-[11px] px-2 py-0.5 border border-border rounded text-text-secondary hover:text-text-primary hover:border-text-muted transition-colors"
+            className="text-[11px] px-2 py-0.5 border border-border rounded text-text-secondary hover:text-text-primary hover:border-text-muted"
           >
             {copied ? "copied" : "copy"}
           </button>
