@@ -7,8 +7,14 @@
  * strip in the same place rather than each drawing its own. Live stage events
  * are laid over the stored rollup by `stageTimeline`, which is what lets a
  * stage that has not happened yet appear beside one that just finished.
+ *
+ * A stage and its members are named the way an operator named them. The run's
+ * roster carries a label for every key it publishes, so a team of ahmet,
+ * mehmet and cemal reads as such here and in the conversation rather than as
+ * `ahmet_1` in one place and "ahmet" in the other.
  */
 
+import type { JobRoster } from "@/types/events";
 import { formatStageDuration, type StageTimelineRow } from "./stageTimeline";
 
 const STATUS_STYLE: Record<string, string> = {
@@ -18,25 +24,51 @@ const STATUS_STYLE: Record<string, string> = {
   pending: "border-border bg-bg-surface text-text-disabled",
 };
 
-export default function PipelineStrip({ stages }: { stages: StageTimelineRow[] }) {
+/** Every label the roster carries, keyed by what the pipeline publishes. */
+function namesFrom(roster: JobRoster | null): Map<string, string> {
+  const names = new Map<string, string>();
+  for (const agent of roster?.agents ?? []) {
+    if (agent.label) names.set(agent.key, agent.label);
+  }
+  for (const stage of roster?.stages ?? []) {
+    if (stage.label) names.set(`stage:${stage.key}`, stage.label);
+  }
+  return names;
+}
+
+export default function PipelineStrip({
+  stages,
+  roster = null,
+}: {
+  stages: StageTimelineRow[];
+  roster?: JobRoster | null;
+}) {
   if (stages.length === 0) return null;
+  const names = namesFrom(roster);
+
   return (
     <div className="mt-3 flex flex-wrap gap-2" data-testid="pipeline-strip">
-      {stages.map((stage) => (
-        <span
-          key={stage.key}
-          className={`flex items-baseline gap-2 rounded border px-2 py-1 text-[11px] ${
-            STATUS_STYLE[stage.status] ?? STATUS_STYLE.pending
-          }`}
-          title={stage.reason || `${stage.kind} stage`}
-        >
-          <span className="font-mono">{stage.key}</span>
-          <span className="uppercase tracking-wider">{stage.status}</span>
-          {formatStageDuration(stage.duration_ms) && (
-            <span className="font-mono">{formatStageDuration(stage.duration_ms)}</span>
-          )}
-        </span>
-      ))}
+      {stages.map((stage) => {
+        const members = stage.agents.map((key) => names.get(key) ?? key);
+        return (
+          <span
+            key={stage.key}
+            className={`flex items-baseline gap-2 rounded border px-2 py-1 text-[11px] ${
+              STATUS_STYLE[stage.status] ?? STATUS_STYLE.pending
+            }`}
+            title={stage.reason || `${stage.kind} stage`}
+          >
+            <span className="font-mono">{names.get(`stage:${stage.key}`) ?? stage.key}</span>
+            <span className="uppercase tracking-wider">{stage.status}</span>
+            {members.length > 0 && (
+              <span className="text-text-muted">{members.join(", ")}</span>
+            )}
+            {formatStageDuration(stage.duration_ms) && (
+              <span className="font-mono">{formatStageDuration(stage.duration_ms)}</span>
+            )}
+          </span>
+        );
+      })}
     </div>
   );
 }

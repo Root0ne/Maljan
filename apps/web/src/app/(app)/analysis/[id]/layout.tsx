@@ -386,7 +386,7 @@ export default function AnalysisLayout({
               </div>
 
               {/* The shape of the run, in the one place every tab can see it. */}
-              <PipelineStrip stages={run.stages} />
+              <PipelineStrip stages={run.stages} roster={run.roster} />
             </div>
           </div>
         </div>
