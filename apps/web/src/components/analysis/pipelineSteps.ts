@@ -144,7 +144,13 @@ export function pipelineSteps(runSummary: unknown): PipelineStep[] {
 
   const steps: PipelineStep[] = [INGESTION_STEP];
   for (const stage of stages) {
-    const skipped = stage.ran ? "" : stage.reason || "did not run";
+    // A stage that ran carries a reason only when it failed: the triage pack
+    // that crashed says so here rather than drawing as done.
+    const skipped = stage.ran
+      ? stage.kind === "triage" && stage.reason
+        ? `failed: ${stage.reason}`
+        : ""
+      : stage.reason || "did not run";
     if (stage.kind === "analysis") {
       steps.push(...(stage.agents ?? []).map((id) => analystStep(id, stage.key, skipped)));
       continue;

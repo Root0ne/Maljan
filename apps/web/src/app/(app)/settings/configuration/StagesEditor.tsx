@@ -459,7 +459,12 @@ function StageCard({
             aria-label={`${label} kind`}
             disabled={fixed}
             value={stage.kind}
-            onChange={(e) => onPatch({ kind: e.target.value as StageKind })}
+            onChange={(e) => {
+              const kind = e.target.value as StageKind;
+              // A triage or debate stage names no agent; a list left behind
+              // from an analysis stage is refused by the API on save.
+              onPatch(kind === "triage" || kind === "debate" ? { kind, agents: [] } : { kind });
+            }}
           >
             {KINDS.map((k) => (
               <option key={k} value={k}>
