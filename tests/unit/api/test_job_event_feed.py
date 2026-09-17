@@ -573,3 +573,171 @@ class TestThePublisherIsTheGuarantee:
 
         assert recorded["seq"] == 1
         assert self.SECRET not in recorded["text"]
+
+
+class TestWhatTheScrubMustNotTouchAndWhatItMust:
+    """A name is exempted because it is a name, not because of its shape.
+
+    Exempting by shape — "a lowercase run is a key this system issues" — let
+    every lowercase credential format through: Mailgun's ``key-…``, Google's
+    ``gocspx-…``, GitHub's ``ghs_…`` and any base64url blob without capitals in
+    it. The publisher is the one place that knows which *field* a string sits
+    in, so the identity fields are named here and everything else goes through
+    the credential rules whatever it looks like.
+    """
+
+    AGENT_KEY = "windows_pe_static_reverse_engineer"
+    LABEL = "StaticBinaryReverseEngineer"
+
+    def _publish(self, event_type: str, data: dict[str, Any]) -> dict[str, Any]:
+        redis_conn = _FakeRedis()
+
+        async def run() -> None:
+            await _publish_event(redis_conn, str(uuid.uuid4()), event_type, data)
+
+        asyncio.run(run())
+        (published,) = [json.loads(message) for _channel, message in redis_conn.published]
+        return dict(published["data"])
+
+    @pytest.mark.parametrize(
+        "secret",
+        [
+            "key-3ax6xnjp29jd6fds4gc373sgvjxteol0",
+            "gocspx-abcdefghijklmnopqrstuvwx",
+            "ghs_abcdefghijklmnopqrstuvwxyz0123456789",
+            "abcdefghij0123456789klmnopqrstuv",
+            "dghpc2lzyxzlcnlsb25nc2vjcmv0a2v5mtizndu2nzg5ma",
+        ],
+    )
+    def test_a_lowercase_key_in_a_tool_result_is_replaced(self, secret: str) -> None:
+        data = self._publish(
+            "tool_call_finished",
+            {
+                "stage": "analysis",
+                "agent": self.AGENT_KEY,
+                "tool": "iocs_from_file",
+                "summary": '{"secrets":["' + secret + '"],"count":1}',
+            },
+        )
+
+        assert secret not in json.dumps(data), data
+        assert data["summary"] == '{"secrets":["***"],"count":1}'
+
+    def test_the_names_around_it_are_left_as_they_are(self) -> None:
+        data = self._publish(
+            "tool_call_finished",
+            {
+                "stage": "analysis",
+                "agent": self.AGENT_KEY,
+                "tool": "iocs_from_file",
+                "server": "analysis-mcp-on-the-second-host",
+                "evidence_id": "ev_0007",
+                "summary": "ok",
+            },
+        )
+
+        assert data["agent"] == self.AGENT_KEY
+        assert data["server"] == "analysis-mcp-on-the-second-host"
+        assert data["evidence_id"] == "ev_0007"
+
+    def test_a_long_custom_agent_key_still_speaks(self) -> None:
+        data = self._publish(
+            "agent_message",
+            {
+                "speaker": self.AGENT_KEY,
+                "role": "analyst",
+                "kind": "says",
+                "status": "complete",
+                "display_name": self.LABEL,
+                "addressed_to": self.AGENT_KEY,
+                "stage": "analysis",
+                "text": "the sample is packed",
+            },
+        )
+
+        assert data["speaker"] == self.AGENT_KEY
+        assert data["addressed_to"] == self.AGENT_KEY
+        assert data["display_name"] == self.LABEL
+
+    def test_a_report_id_survives_and_so_does_a_digest(self) -> None:
+        import hashlib
+
+        report_id = str(uuid.uuid4())
+        digest = hashlib.sha256(b"a sample").hexdigest()
+
+        data = self._publish(
+            "completed",
+            {
+                "status": "completed",
+                "verdict": "Malicious",
+                "report_id": report_id,
+                "job_id": str(uuid.uuid4()),
+                "sha256": digest,
+            },
+        )
+
+        assert data["report_id"] == report_id
+        assert data["sha256"] == digest
+        assert uuid.UUID(data["job_id"])
+
+    def test_a_roster_keeps_every_name_it_carries(self) -> None:
+        data = self._publish(
+            "roster",
+            {
+                "agents": [
+                    {
+                        "key": self.AGENT_KEY,
+                        "label": self.LABEL,
+                        "role": "analyst",
+                        "stages": ["analysis"],
+                        "via": ["lead"],
+                    }
+                ],
+                "stages": [
+                    {
+                        "key": "analysis",
+                        "label": "Analysis",
+                        "kind": "analysis",
+                        "agents": [self.AGENT_KEY],
+                    }
+                ],
+            },
+        )
+
+        assert data["agents"][0]["key"] == self.AGENT_KEY
+        assert data["agents"][0]["label"] == self.LABEL
+        assert data["agents"][0]["via"] == ["lead"]
+        assert data["stages"][0]["agents"] == [self.AGENT_KEY]
+
+    def test_an_identity_field_exempts_a_name_and_not_a_sentence(self) -> None:
+        """The exemption reaches a string and a list of strings under that key,
+        never a structure nested below one."""
+        secret = "key-3ax6xnjp29jd6fds4gc373sgvjxteol0"
+
+        data = self._publish(
+            "agent_message",
+            {
+                "speaker": "static",
+                "claims": [{"claim": f"it posts {secret}", "evidence_ref": "ev_0001"}],
+                "report": f"the config held {secret}",
+                "text": f"found {secret}",
+            },
+        )
+
+        blob = json.dumps(data)
+        assert secret not in blob, blob
+        assert data["claims"][0]["evidence_ref"] == "ev_0001"
+
+    def test_a_sample_filename_is_not_a_name_this_system_gave(self) -> None:
+        """The uploader chose it, so it is scrubbed like any other text."""
+        data = self._publish(
+            "pipeline_started",
+            {
+                "agents": ["static"],
+                "sample_filename": "key-3ax6xnjp29jd6fds4gc373sgvjxteol0",
+                "sha256": "ab12" + "0" * 12 + "...",
+            },
+        )
+
+        assert data["sample_filename"] == "***"
+        assert data["agents"] == ["static"]

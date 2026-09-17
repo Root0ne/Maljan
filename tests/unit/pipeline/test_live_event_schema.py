@@ -605,24 +605,32 @@ class TestTheKeyShapesARunOfWordCharactersMisses:
         )
         assert ev.summarize_args({"session_id": str(uuid.UUID(int=1))}) == "session_id=***"
 
-    def test_a_key_this_system_issues_travels_whole(self) -> None:
-        """An agent, a stage, a server and a tool are named by a slug.
+    def test_a_lowercase_key_is_a_key(self) -> None:
+        """Lowercase is not a shape that makes a run safe.
 
-        ``SERVER_KEY_PATTERN`` admits 32 lowercase characters, which is past
-        the credential floor — and the publisher scrubs every string of every
-        event, so a long agent key came out as ``speaker: ***``: a
-        conversation the console cannot group under anybody.
+        Four real key formats carry nothing but lowercase letters, digits and
+        a dash or underscore, and a run of them is a credential whatever it
+        reads like. The names an event carries are exempted where their names
+        are known — in the publisher, by key — and never here, by shape.
         """
         for value in (
-            "windows_pe_static_analyst",
-            "android_manifest_reviewer",
-            "triage_pack_and_the_judge",
-            "analysis-mcp-on-the-second-host",
+            "key-3ax6xnjp29jd6fds4gc373sgvjxteol0",
+            "gocspx-abcdefghijklmnopqrstuvwx",
+            "ghs_abcdefghijklmnopqrstuvwxyz0123456789",
+            "abcdefghij0123456789klmnopqrstuv",
+            "dghpc2lzyxzlcnlsb25nc2vjcmv0a2v5mtizndu2nzg5ma",
         ):
-            assert ev.scrub(value) == value, value
+            assert ev.scrub(value) == "***", value
+
+    def test_a_lowercase_key_inside_a_tool_result_is_replaced(self) -> None:
+        """The shape the audit's own scenario produces: a result quoting one."""
+        summary = ev.summarize_result(
+            '{"secrets":["key-3ax6xnjp29jd6fds4gc373sgvjxteol0"],"count":1}'
+        )
+
+        assert summary == '{"secrets":["***"],"count":1}'
 
     def test_a_long_hex_run_is_still_a_key(self) -> None:
-        """The slug shape must not take a lowercase hex token with it."""
         assert ev.scrub("d" * 48) == "***"
         assert ev.scrub("abcdef0123456789abcdef0123456789abcd") == "***"
 

@@ -528,15 +528,14 @@ change landed on `main`.
   event reaches Redis, the socket and the table; the transcript recorder's copy
   is scrubbed with it, so a replayed run reads exactly as the live one did.
   Prose keeps its own line breaks and indentation (`scrub_keeping_layout`), so
-  a report is not flattened into a wall of text on its way out. Two shapes are
-  exempt from the credential rule for the reason a digest is — a canonical UUID
-  and the lowercase slug an agent, a stage, a server or a tool is named by:
-  both are what the run is *about*, and a `completed` event reading
-  `report_id=***` is a console that cannot open the report it is announcing,
-  while a long agent key reading `speaker=***` is a conversation it cannot
-  group. An argument *named* like a credential is still replaced by name, a
-  vendor prefix is still a key whatever else it reads as, and a long hex run
-  is still a key.
+  a report is not flattened into a wall of text on its way out. The fields that
+  *name* something rather than say something — the ids this system issues, the
+  agent, stage, server and tool keys, the labels an operator typed and the
+  words the console switches on — are exempt by **field name** in the
+  publisher, so a `completed` event can still be opened by its `report_id` and
+  a long agent key still speaks under its own name. Nothing is exempt for the
+  shape of its value beyond a digest and a canonical UUID: a lowercase run is a
+  credential like any other.
 - **A published failure says what kind it was, never what it said.** Five
   handlers in `pipeline/nodes.py` put `str(exc)` into an `agent_message` — the
   analyst failure and crash paths, the mediator, the revision hand-back and the

@@ -416,22 +416,81 @@ async def _next_seq(redis_conn: aioredis.Redis, job_id: str) -> int:
     return seq
 
 
-def scrubbed(value: Any) -> Any:
+# The fields of an event that *name* something rather than say something: an
+# identifier this system issued, a key one of its own patterns produced, a
+# label an operator typed, or a word the console switches on. None of them is
+# text a model or a sample author wrote, and each of them is read rather than
+# skimmed — a speaker replaced by ``***`` is a conversation the console cannot
+# group under anybody, and a ``report_id`` replaced by ``***`` is a completion
+# nobody can open.
+#
+# Named here, in the one place that knows which field a string sits in, rather
+# than guessed at from the shape of the value. A shape test around "the keys
+# this system issues are lowercase" let four real credential formats through —
+# ``key-…``, ``gocspx-…``, ``ghs_…`` and any base64url blob without capitals —
+# and a credential does not become safe by sitting in a field with a friendly
+# name, which is why ``text``, ``report``, ``summary``, ``message``,
+# ``detail``, ``reason``, ``claim``, ``evidence_ref`` and the sample's own
+# filename are deliberately absent from this list.
+IDENTITY_FIELDS = frozenset(
+    {
+        # What this system issued.
+        "report_id",
+        "job_id",
+        "sample_id",
+        "error_id",
+        "evidence_id",
+        "technique_id",
+        # Who and where: agent, stage, server and tool keys, in the singular
+        # and in the lists an event carries them in.
+        "speaker",
+        "agent",
+        "agents",
+        "addressed_to",
+        "stage",
+        "stages",
+        "via",
+        "server",
+        "tool",
+        "key",
+        "profile",
+        # What an operator called them.
+        "label",
+        "display_name",
+        # The words the console switches on.
+        "role",
+        "kind",
+        "status",
+        "phase",
+        "cap",
+        "code",
+        "verdict",
+    }
+)
+
+
+def scrubbed(value: Any, *, field: str = "") -> Any:
     """``value`` with every string inside it scrubbed, however deeply it sits.
 
     Keys are left as they are: a key is a field name the console switches on,
     not text somebody wrote. Numbers, booleans and ``None`` keep their type,
     so a payload that goes through this is still the payload the reader
     expects — only its prose has been through ``maljan.pipeline.events.scrub``.
+
+    A value sitting directly under one of ``IDENTITY_FIELDS`` is left alone,
+    and so is each string of a list under one — ``agents: ["static", …]`` is
+    the same kind of thing as ``agent: "static"``. The exemption stops there:
+    a dict below an identity field is walked like any other, so its own fields
+    are judged by their own names.
     """
     from maljan.pipeline.events import scrub_keeping_layout
 
     if isinstance(value, str):
-        return scrub_keeping_layout(value)
+        return value if field in IDENTITY_FIELDS else scrub_keeping_layout(value)
     if isinstance(value, dict):
-        return {key: scrubbed(item) for key, item in value.items()}
+        return {key: scrubbed(item, field=str(key)) for key, item in value.items()}
     if isinstance(value, list | tuple):
-        return [scrubbed(item) for item in value]
+        return [scrubbed(item, field=field) for item in value]
     return value
 
 
