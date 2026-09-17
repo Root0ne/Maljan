@@ -90,6 +90,28 @@ export const BUILTIN_ANALYST_STEPS: Record<string, { title: string; description:
 interface RunSummaryShape {
   profile?: { analysts?: string[]; custom?: string[] };
   stages?: StageRow[];
+  budget?: Record<string, { caps?: string[] } | null> | null;
+}
+
+/** What each cap the budget meter names means to a reader. */
+export const CAP_LABEL: Record<string, string> = {
+  steps: "ended at its step cap",
+  time: "ended at its time cap",
+  repeats: "ended on repeated calls",
+  budget_seconds: "ended at the pack's budget",
+};
+
+/**
+ * The caps that ended an agent's work, from `run_summary.budget`.
+ *
+ * Empty for a step that is not an agent, for a run stored before the meter
+ * existed, and for an agent whose loops all ended on an answer.
+ */
+export function capsHit(runSummary: unknown, agentId: string): string[] {
+  const summary = (runSummary ?? null) as RunSummaryShape | null;
+  const row = summary?.budget?.[agentId];
+  if (!row || !Array.isArray(row.caps)) return [];
+  return row.caps.filter((cap): cap is string => typeof cap === "string" && cap.length > 0);
 }
 
 /**

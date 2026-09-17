@@ -42,6 +42,7 @@ from maljan.pipeline.events import (
     claims_to_payload,
     emit,
     emit_agent_message,
+    emit_stage_ended_at_cap,
     summarize_claims,
 )
 from maljan.pipeline.evidence_summary import summarise
@@ -192,6 +193,19 @@ def _violations_from_rows(rows: Any) -> list[Violation]:
                 )
             )
     return out
+
+
+def _budget_update(agent: Any, agent_name: str) -> dict[str, Any]:
+    """The budget meter's rows for this agent since it was last drained."""
+    drain = getattr(agent, "drain_budget_records", None)
+    if not callable(drain):
+        return {}
+    try:
+        rows = list(drain() or [])
+    except Exception as exc:  # noqa: BLE001 — telemetry never breaks a run
+        logger.debug("budget records not read for %s: %s", agent_name, exc)
+        return {}
+    return {"budget_records": {agent_name: rows}} if rows else {}
 
 
 def _nudge_mode(agent: Any) -> str | None:
@@ -866,6 +880,15 @@ def make_triage_node(
             len(result.failed),
             result.duration_ms,
         )
+        stopped = list(getattr(result, "stopped_by_budget", None) or [])
+        if stopped:
+            emit_stage_ended_at_cap(
+                container.event_sink,
+                stage=stage.key,
+                agent=PIPELINE,
+                cap="budget_seconds",
+                detail=f"{len(stopped)} step(s) not run: {', '.join(stopped)}",
+            )
         update = {
             "triage_facts": result.to_state(),
             **stage_record(stage, ran=True, duration_ms=_elapsed_ms()),
@@ -1462,6 +1485,7 @@ def make_stage_agent_node(
             mode = _nudge_mode(bound_agent)
             if mode:
                 update["nudge_retry_modes"] = {agent_name: mode}
+            update.update(_budget_update(bound_agent, agent_name))
             return update
 
         try:
@@ -2826,6 +2850,7 @@ def make_judge_node(
                     .set_truncation(container.get_truncation_ledger().snapshot())
                     .set_triage(_triage_facts)
                     .set_nudge(state.get("nudge_retry_modes") or {})
+                    .set_budget(state.get("budget_records") or {})
                     .build()
                 )
                 run_summary_dict = summary.to_dict()

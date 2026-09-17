@@ -1714,6 +1714,11 @@ class BaseAnalyst(ABC):
         self.steps_spent: int = 0
         self.current_round: int = 0
         self.delegation_lock = threading.Lock()
+        # The budget meter's record of every loop this agent ran since the
+        # node last drained it: steps against the cap, seconds against the
+        # limit, and the cap that ended it when one did. The node writes it
+        # to the state and the judge reads it into ``run_summary.budget``.
+        self._budget_records: list[dict[str, Any]] = []
 
     def _system_prompt(self, fallback: str | Callable[[], str]) -> str:
         """This analyst's system turn for the job it is actually running.
@@ -1979,6 +1984,62 @@ class BaseAnalyst(ABC):
         """This agent's ``(timeout, max_steps)`` for one loop; see ``loop_limits``."""
         return loop_limits(self.name, getattr(self, "_budget_ceiling", None))
 
+    def _event_sink(self) -> Any:
+        """The job's event sink, or ``None`` for an agent outside a job."""
+        return getattr(getattr(self, "_container", None), "event_sink", None)
+
+    def _budget_tick(
+        self, ledger: LoopBudget, messages: list, *, final: bool = False, ledger_entries: int = 0
+    ) -> None:
+        """One ``budget_tick`` for this loop as it stands. Never raises."""
+        from maljan.pipeline.events import emit_budget_tick
+
+        try:
+            last = messages[-1] if messages else None
+            prompt_chars = sum(_message_chars(m) for m in messages)
+            emit_budget_tick(
+                self._event_sink(),
+                agent=str(self.name),
+                stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
+                steps_used=steps_used(messages) + ledger.delegated_steps,
+                max_steps=ledger.max_steps,
+                elapsed_s=time.monotonic() - ledger.started,
+                timeout_s=ledger.timeout,
+                prompt_chars=prompt_chars if last is not None else 0,
+                ledger_entries=ledger_entries,
+                final=final,
+            )
+        except Exception as exc:  # noqa: BLE001 — the meter never costs a turn
+            self.logger.debug("%s: budget tick skipped (%s).", self.name, exc)
+
+    def _record_budget(
+        self, ledger: LoopBudget, messages: list, cap: str | None, *, detail: str = ""
+    ) -> None:
+        """Write this loop's spend down, and announce the cap that ended it, if one did."""
+        from maljan.pipeline.events import emit_stage_ended_at_cap
+
+        stage = str(getattr(self, "pipeline_stage", "") or "analysis")
+        record: dict[str, Any] = {
+            "stage": stage,
+            "steps_used": steps_used(messages) + ledger.delegated_steps,
+            "max_steps": ledger.max_steps,
+            "elapsed_s": round(time.monotonic() - ledger.started, 1),
+            "timeout_s": round(ledger.timeout, 1),
+            "delegated_steps": ledger.delegated_steps,
+            "cap": cap,
+        }
+        self._budget_records.append(record)
+        if cap:
+            emit_stage_ended_at_cap(
+                self._event_sink(), stage=stage, agent=str(self.name), cap=cap, detail=detail
+            )
+
+    def drain_budget_records(self) -> list[dict[str, Any]]:
+        """Every loop's budget record since the last drain, handing over ownership."""
+        records = list(self._budget_records)
+        self._budget_records = []
+        return records
+
     def _run_state_refresher(
         self,
         max_steps: int,
@@ -1999,6 +2060,9 @@ class BaseAnalyst(ABC):
         numbers reads the same line.
         """
         ledger = budget if budget is not None else LoopBudget(max_steps, timeout, started)
+        from maljan.pipeline.events import BUDGET_TICK_EVERY
+
+        ticked: list[int] = [0]
 
         def refresh(state: Any) -> list[BaseMessage]:
             messages = state.get("messages") if isinstance(state, dict) else None
@@ -2008,6 +2072,12 @@ class BaseAnalyst(ABC):
             # Counted on every turn whether or not there is a block to show
             # it in: the budget is what an ask from inside this loop reads.
             ledger.note_turns(messages)
+            # The meter, every few steps: a tick per turn would be a stream
+            # of near-identical events on a forty-step loop.
+            used = steps_used(messages)
+            if budget is not None and used and used // BUDGET_TICK_EVERY > ticked[0]:
+                ticked[0] = used // BUDGET_TICK_EVERY
+                self._budget_tick(ledger, messages)
             if not str(getattr(self, "run_state_block", "") or ""):
                 return messages
             # The budget is stated in model turns (``model_turns_left``): the
@@ -2087,8 +2157,14 @@ class BaseAnalyst(ABC):
         )
 
         if not self.tools:
-            answer = self._invoke_llm_with_timeout(prebuilt, timeout)
+            plain = LoopBudget(int(max_steps), float(timeout))
+            try:
+                answer = self._invoke_llm_with_timeout(prebuilt, timeout)
+            except TimeoutError:
+                self._record_budget(plain, [], "time", detail="the model did not answer in time")
+                raise
             self.steps_spent += 1
+            self._record_budget(plain, [], None)
             return self._capture_findings(answer)
 
         from langgraph.prebuilt import create_react_agent
@@ -2270,6 +2346,9 @@ class BaseAnalyst(ABC):
                     self.name,
                     hard_timeout,
                 )
+                self._record_budget(
+                    budget, [], "time", detail=f"the loop exceeded its {hard_timeout}s hard cap"
+                )
                 raise
             except AnalystError:
                 raise
@@ -2360,6 +2439,26 @@ class BaseAnalyst(ABC):
         # the first into the second.
         ended_early = repeats.ending_the_loop() or budget.spent_by_delegates()
         self._record_react_loop(hit_step_cap=hit_step_cap)
+        cap = (
+            "repeats"
+            if repeats.ending_the_loop()
+            else "steps"
+            if hit_step_cap or budget.spent_by_delegates()
+            else None
+        )
+        self._record_budget(
+            budget,
+            msgs,
+            cap,
+            detail=(
+                f"{repeats.served_repeats} repeated tool call(s)"
+                if cap == "repeats"
+                else f"{budget.delegated_steps} of {budget.max_steps} steps spent by delegates"
+                if cap == "steps" and budget.spent_by_delegates()
+                else ""
+            ),
+        )
+        self._budget_tick(budget, msgs, final=True, ledger_entries=len(recorder.entries))
         if tool_call_count > 0 and (not content.strip() or hit_step_cap or ended_early):
             self.logger.warning(
                 "%s ReAct loop ended without a final answer after %d tool calls "
@@ -3552,6 +3651,7 @@ class BaseAnalyst(ABC):
     steps_spent: int = 0
     current_round: int = 0
     sample_path_choices: dict[str, Any] = {}
+    _budget_records: list[dict[str, Any]] = []
 
     def _with_answer_status(self, isr: AgentISR) -> AgentISR:
         """Say on the ISR that the loop never produced a report, when it did not.

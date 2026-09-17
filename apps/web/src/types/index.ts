@@ -46,6 +46,11 @@ export type WSEventType =
   | "stage_started"
   | "stage_skipped"
   | "stage_finished"
+  /* The budget meter: one agent's steps and seconds against its caps every
+   * few steps and at the end of its loop, and the cap that ended a stage's
+   * work when a cap did. See maljan/pipeline/events.py. */
+  | "budget_tick"
+  | "stage_ended_at_cap"
   | "completed"
   | "enrichment_complete"
   | "error"

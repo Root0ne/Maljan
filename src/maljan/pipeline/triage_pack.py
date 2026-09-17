@@ -219,6 +219,9 @@ class PackResult:
     facts: TriageFacts = field(default_factory=TriageFacts)
     failed: list[str] = field(default_factory=list)
     duration_ms: int = 0
+    # The steps the pack's own budget stopped before they started, in order.
+    # A skipped lookup is not one of these; it was never going to run.
+    stopped_by_budget: list[str] = field(default_factory=list)
 
     @property
     def degradation_reasons(self) -> list[str]:
@@ -379,6 +382,7 @@ class _Pack:
     def _record_not_run(self, tool: str, args: dict[str, Any], spent: float) -> None:
         """The entry for a step the budget stopped before it started."""
         message = f"{NOT_RUN_PREFIX} the pack's budget of {int(spent)} s was spent before this step"
+        self.result.stopped_by_budget.append(tool)
         entry = self.recorder.record(
             tool=tool,
             args=args,
