@@ -255,6 +255,12 @@ class RunSummary:
     # ``time``, ``repeats``, ``budget_seconds``). ``None`` on a run that
     # recorded no loop.
     budget: dict[str, Any] | None = None
+    # What the report said once that the run said twice:
+    # ``{indicators_merged, findings_merged}`` (``reporting.dedupe``). A merge
+    # grows a set of ids or agents and nothing else, so these two numbers say
+    # how much folding happened without implying anything was rewritten.
+    # ``None`` on a run assembled before the count existed.
+    dedupe: dict[str, int] | None = None
 
     # ------------------------------------------------------------------
     # Rendering
@@ -503,6 +509,7 @@ class RunSummary:
             "triage": dict(self.triage) if self.triage else None,
             "nudge": dict(self.nudge) if self.nudge else None,
             "budget": dict(self.budget) if self.budget else None,
+            "dedupe": dict(self.dedupe) if self.dedupe else None,
         }
 
         if self.validation:

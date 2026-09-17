@@ -27,6 +27,7 @@ import uuid
 from typing import Any
 
 from maljan.core.logger import logger
+from maljan.reporting.dedupe import indicator_fingerprint
 
 # UUID5 namespace for ATT&CK technique IDs — same value on every run so a
 # downstream consumer can dedupe ``attack-pattern--<uuid5>`` across reports.
@@ -305,6 +306,33 @@ def _is_wellformed_pattern(indicator: Any) -> bool:
     return pat.startswith("[") and pat.endswith("]") and "=" in pat
 
 
+def _merge_indicator_sets(kept: Any, duplicate: Any) -> None:
+    """Fold the set-shaped fields of a duplicate indicator onto the kept one.
+
+    Only the sets: ``labels`` and ``external_references`` are lists of things
+    an indicator is filed under, and losing one because two analysts described
+    the same endpoint is losing a fact. Everything else — the description, the
+    confidence, the valid-from — stays as the first occurrence wrote it, and
+    an SDO that will not take a new value (a frozen pydantic object) is left
+    alone rather than rebuilt.
+    """
+    for field in ("labels", "external_references"):
+        arriving = _oget(duplicate, field)
+        if not isinstance(arriving, list) or not arriving:
+            continue
+        current = list(_oget(kept, field) or [])
+        merged = list(current)
+        for item in arriving:
+            if item not in merged:
+                merged.append(item)
+        if merged == current:
+            continue
+        try:
+            _oset(kept, field, merged)
+        except Exception as exc:  # noqa: BLE001 — a frozen SDO keeps what it has
+            logger.debug("indicator merge skipped for %r (%s).", field, exc)
+
+
 def enforce_bundle_integrity(
     objects: list[Any],
     *,
@@ -360,19 +388,25 @@ def enforce_bundle_integrity(
     _dropped["duplicate_attack_pattern"] = len(objects) - len(kept)
     objects = kept
 
-    # 3) indicator dedup by (pattern_type, pattern)
-    seen_pat: dict[tuple[str, str], str] = {}
+    # 3) indicator dedup by (pattern type, canonical pattern). Canonical
+    # because two indicators for one endpoint differ by case and by whether
+    # whoever wrote them defanged it, and an exact comparison kept both.
+    # ``reporting.dedupe`` is the one place that says what makes two
+    # indicators the same, so the bundle and the report's table agree.
+    seen_pat: dict[tuple[str, str], Any] = {}
     kept = []
     for o in objects:
         if _otype(o) == "indicator":
-            key = (str(_oget(o, "pattern_type", "stix")), str(_oget(o, "pattern", "")))
-            if key in seen_pat:
+            key = indicator_fingerprint(_oget(o, "pattern_type", "stix"), _oget(o, "pattern", ""))
+            first = seen_pat.get(key)
+            if first is not None:
+                _merge_indicator_sets(first, o)
                 oid = _oid(o)
                 if isinstance(oid, str):
-                    remap[oid] = seen_pat[key]
+                    remap[oid] = _oid(first)
                 continue
             if isinstance(_oid(o), str):
-                seen_pat[key] = _oid(o)
+                seen_pat[key] = o
         kept.append(o)
     _dropped["duplicate_indicator"] = len(objects) - len(kept)
     objects = kept

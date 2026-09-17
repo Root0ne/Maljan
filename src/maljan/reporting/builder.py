@@ -28,6 +28,7 @@ from maljan.core.logger import logger
 from maljan.extractors.attribution import build_family_attribution
 from maljan.extractors.capability_matrix import build_capability_matrix
 from maljan.pipeline.outcome import INCONCLUSIVE_REASONS
+from maljan.reporting.dedupe import MergeTally
 from maljan.reporting.ledger_projection import (
     dynamic_from_ledger,
     identity_from_ledger,
@@ -203,11 +204,20 @@ class MalwareReportBuilder:
         # The sections the report is actually made of, and the index of the
         # calls behind them. Built last so a section builder can never affect
         # the verdict, the severity or the STIX bundle above it.
+        merges = MergeTally()
         report.sections = build_sections(
             self.evidence_ledger,
             self.isr_reports,
             identity.file_type,
             str(identity.platform),
+            merges=merges,
+        )
+        # What the run said twice and the report says once. The bundle's own
+        # indicator merge happened in the judge, long before this, and is
+        # counted by the integrity pass; both are the same act on the same
+        # run, so the summary states one number for it.
+        self.run_summary["dedupe"] = merges.as_dict(
+            extra_indicators=_indicators_merged_in_the_bundle(self.run_summary)
         )
         report.evidence_index = [
             EvidenceIndexRow(
@@ -501,6 +511,20 @@ class MalwareReportBuilder:
             tlp=tlp,
             copyright=f"© {now:%Y} {rc.publisher}",
         )
+
+
+def _indicators_merged_in_the_bundle(run_summary: dict[str, Any]) -> int:
+    """How many indicators the STIX integrity pass folded, from the summary it wrote."""
+    truncation = run_summary.get("truncation")
+    if not isinstance(truncation, dict):
+        return 0
+    dropped = truncation.get("integrity_dropped")
+    if not isinstance(dropped, dict):
+        return 0
+    try:
+        return int(dropped.get("duplicate_indicator", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _build_version_history(front_matter: ReportFrontMatter) -> list[VersionHistoryEntry]:
