@@ -175,7 +175,7 @@ export default function SettingsProfilePage() {
                 <button
                   type="submit"
                   disabled={!canSave}
-                  className="h-9 px-4 text-xs bg-accent text-white rounded hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="h-9 px-4 text-xs bg-accent text-white rounded hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {saving ? "Saving..." : "Save changes"}
                 </button>

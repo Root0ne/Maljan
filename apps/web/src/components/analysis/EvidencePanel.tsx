@@ -202,7 +202,7 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
                         ref={(node) => {
                           rowRefs.current[entry.entry_id] = node;
                         }}
-                        className={`border-b border-border-light cursor-pointer hover:bg-bg-hover transition-colors ${
+                        className={`border-b border-border-light cursor-pointer hover:bg-bg-hover ${
                           cited ? "bg-accent/5" : ""
                         }`}
                         onClick={() => toggle(setOpen, entry.entry_id)}

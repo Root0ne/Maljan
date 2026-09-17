@@ -28,7 +28,7 @@ from maljan.agents.judge_agent import (
 )
 from maljan.analysis.corroboration import corroboration_row
 from maljan.analysis.run_summary import RunSummaryBuilder
-from maljan.core.config import BUILTIN_AGENTS, PROMPT_ROLES, ReportingConfig
+from maljan.core.config import BUILTIN_AGENTS, JUDGE_AGENT_KEY, PROMPT_ROLES, ReportingConfig
 from maljan.core.container import ServiceContainer
 from maljan.core.exceptions import AnalystError, LLMError
 from maljan.core.logger import logger
@@ -1344,6 +1344,13 @@ def stage_key_of(stage: Any, default: str) -> str:
     return str(getattr(stage, "key", "") or default)
 
 
+# The room itself, rather than a participant. A watcher nobody composed into
+# the team — the mediator, the sycophancy detector — speaks as the pipeline and
+# names itself in the line it says, so the console draws a notice instead of
+# adding a participant to a roster the operator never wrote.
+ROOM_SPEAKER = "pipeline"
+
+
 def label_of(container: ServiceContainer, key: str) -> str:
     """The label an operator gave this agent, or its key. Never raises."""
     try:
@@ -2268,23 +2275,27 @@ def make_negotiation_node(
 
             emit_agent_message(
                 container.event_sink,
-                speaker="Mediator",
+                speaker=ROOM_SPEAKER,
                 role="negotiator",
-                text=argument.finding,
+                text=f"Mediator: {argument.finding}",
                 round_index=iteration + 1,
                 status="complete",
                 confidence=argument.confidence_score,
                 stage=stage_key_of(stage, "debate"),
+                # The mediator is the debate itself speaking, not a member of
+                # the team, so it is a notice that names itself.
+                kind="system",
             )
             if syco:
                 emit_agent_message(
                     container.event_sink,
-                    speaker="Sycophancy detector",
+                    speaker=ROOM_SPEAKER,
                     role="system",
                     text=(
-                        "Agents converged without new evidence — flagged as sycophantic "
-                        "agreement. The next revision round carries a directive to "
-                        "re-argue from evidence rather than defer to peers."
+                        "Sycophancy detector: agents converged without new evidence — "
+                        "flagged as sycophantic agreement. The next revision round "
+                        "carries a directive to re-argue from evidence rather than "
+                        "defer to peers."
                     ),
                     round_index=iteration + 1,
                     status="complete",
@@ -2320,12 +2331,19 @@ def make_negotiation_node(
             logger.error("Negotiation %s: %s", label, describe_exception_for_log(e))
             emit_agent_message(
                 container.event_sink,
-                speaker="Mediator",
+                speaker=ROOM_SPEAKER,
                 role="negotiator",
-                text=f"[ERROR] Mediation {label}: {describe_exception(e)}",
+                # The class of the failure, never its message: an exception's
+                # text can carry a path, a host or a credential, and this line
+                # is published to every reader of the run. One helper decides
+                # what that class is called, here and at every other published
+                # failure, so a group names what is inside it and a refusal
+                # keeps its remedy.
+                text=f"Mediator: [ERROR] Mediation {label} ({describe_exception(e)}).",
                 round_index=iteration + 1,
                 status=status,
                 stage=stage_key_of(stage, "debate"),
+                kind="system",
             )
             return {
                 "iteration_count": iteration + 1,
@@ -2490,6 +2508,13 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     container.event_sink,
                     speaker=name,
                     role="reviser",
+                    # The class of the failure and nothing else, as the judge
+                    # and the mediator already say it. The log above keeps the
+                    # exception's own words for an operator; this line goes to
+                    # every reader of the run, and an exception's text can
+                    # carry a path, a host or a credential. One helper decides
+                    # what that class is called, so a group names what is
+                    # inside it and a refusal keeps its remedy.
                     text=f"[ERROR] {name} revision failed: {describe_exception(result)}",
                     round_index=iteration,
                     status="failed",
@@ -3162,7 +3187,8 @@ def make_judge_node(
 
             emit_agent_message(
                 container.event_sink,
-                speaker="Judge",
+                speaker=JUDGE_AGENT_KEY,
+                display_name=label_of(container, JUDGE_AGENT_KEY),
                 role="judge",
                 text=(
                     f"Verdict: {decision}."
@@ -3218,8 +3244,13 @@ def make_judge_node(
             logger.error("Judge verdict %s: %s", type(e).__name__, e or "")
             emit_agent_message(
                 container.event_sink,
-                speaker="Judge",
+                speaker=JUDGE_AGENT_KEY,
+                display_name=label_of(container, JUDGE_AGENT_KEY),
                 role="judge",
+                # The class of the failure and nothing else. The log above
+                # carries the exception's own words for an operator; this line
+                # goes to every reader of the run, and an exception's text can
+                # carry a path, a host or a credential.
                 text=(
                     f"[ERROR] Judge failed ({describe_exception(e)}). "
                     "Falling back to a conservative Suspicious verdict; the run is "
@@ -3243,7 +3274,7 @@ def make_judge_node(
                         reason=f"judge failed ({type(e).__name__})",
                     ),
                     "final_decision": "Suspicious",
-                    "judge_report": f"[ERROR] Judge failed ({type(e).__name__}): {e or ''}",
+                    "judge_report": f"[ERROR] Judge failed ({describe_exception(e)}).",
                     "stix_output": {},
                     "degraded_mode": True,
                     "degradation_reasons": [f"judge failed ({type(e).__name__})"],

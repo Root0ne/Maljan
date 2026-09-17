@@ -713,9 +713,27 @@ worker sweeps it nightly. The transcript, the agent findings and the evidence
 ledger are kept by the report and the job and are not touched by the sweep.
 
 **What never travels.** Tool arguments and results go out as short summaries,
-scrubbed where they are built: anything shaped like a credential is replaced,
-a URL keeps its scheme and host only, and every path is cut to its file name.
-A failed call travels as the remedy the tool offered, not as its error text.
+and every string of every event — a message's text and its report, a
+correction, a cap's detail, a summary — is scrubbed once by the publisher, for
+all three sinks at once: anything shaped like a credential is replaced, a URL
+keeps its scheme and host only, and every path is cut to its file name. A
+producer may scrub as well; the publisher is what makes it a guarantee rather
+than a habit, and the transcript's copy is scrubbed as it is taken, so a
+replayed run reads exactly as the live one did.
+
+The fields that *name* something rather than say something are exempt, by
+field name (`analysis_worker.IDENTITY_FIELDS`): the ids this system issues
+(`report_id`, `job_id`, `sample_id`, `error_id`, `evidence_id`,
+`technique_id`), the agent, stage, server and tool keys (`speaker`, `agent`,
+`agents`, `addressed_to`, `stage`, `stages`, `via`, `server`, `tool`, `key`,
+`profile`), the labels an operator typed (`label`, `display_name`) and the
+words the console switches on (`role`, `kind`, `status`, `phase`, `cap`,
+`code`, `verdict`). Nothing is exempt for the *shape* of its value beyond a
+digest and a canonical UUID, because a credential does not become safe by
+being lowercase.
+
+A failed call travels as the remedy the tool offered, not as its error text,
+and a failed node travels as the class of its exception, never its message.
 The arguments and the output as they were are on the ledger entry, behind the
 same ownership check as the report.
 

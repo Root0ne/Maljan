@@ -3,7 +3,7 @@ import { test, expect } from "./fixtures";
 /**
  * FE-WS-RECONNECT-TEST-01 (audit 2026-05-19), rewritten 2026-07-26.
  *
- * `useWebSocket` reconnects with exponential backoff and full jitter, and
+ * The run store reconnects with exponential backoff and full jitter, and
  * deliberately does *not* reconnect on close code 1008 — an auth/policy
  * rejection needs a fresh credential, and retrying just hammers the API with
  * the same bad token. Neither behaviour was covered.
@@ -19,9 +19,8 @@ import { test, expect } from "./fixtures";
  * These drive the socket through `page.routeWebSocket`, so the schedule is
  * exercised against a socket the test controls and no backend is involved.
  *
- * `/process` rather than `/live` on purpose: the live page mounts a *second*
- * `useWebSocket` of its own on top of the analysis layout's, which would make
- * every connection count ambiguous.
+ * The schedule moved into the run store, which owns the one socket a job
+ * gets; the page under test is simply a page that reads a run.
  */
 
 const JOB_ID = "00000000-0000-0000-0000-000000000000";
@@ -47,7 +46,7 @@ test.describe("WebSocket reconnect", () => {
       if (attempts <= 2) ws.close({ code: 1011, reason: "e2e: forced drop" });
     });
 
-    await authenticatedPage.goto(`/analysis/${JOB_ID}/process`);
+    await authenticatedPage.goto(`/analysis/${JOB_ID}/conversation`);
 
     // Two drops must produce two retries. Generous timeout: the delay is
     // jittered, and on a successful open the schedule resets to its 1 s base.
@@ -72,7 +71,7 @@ test.describe("WebSocket reconnect", () => {
       ws.close({ code: 1008, reason: "e2e: invalid credentials" });
     });
 
-    await authenticatedPage.goto(`/analysis/${JOB_ID}/process`);
+    await authenticatedPage.goto(`/analysis/${JOB_ID}/conversation`);
 
     await expect.poll(() => attempts, { timeout: 10_000 }).toBe(1);
 
@@ -95,7 +94,7 @@ test.describe("WebSocket reconnect", () => {
       ws.close({ code: 4401, reason: "e2e: credential rejected" });
     });
 
-    await authenticatedPage.goto(`/analysis/${JOB_ID}/process`);
+    await authenticatedPage.goto(`/analysis/${JOB_ID}/conversation`);
 
     await expect.poll(() => attempts, { timeout: 10_000 }).toBe(1);
 

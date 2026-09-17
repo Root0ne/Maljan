@@ -1,7 +1,8 @@
 "use client";
 
 import { Suspense, useState, useRef, useCallback, useEffect } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Upload, X } from "lucide-react";
 import { api } from "@/lib/api";
 import type { SampleDTO, SandboxReportDTO } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
@@ -34,6 +35,7 @@ function formatSize(bytes: number): string {
 }
 
 function SamplesPageContent() {
+  const router = useRouter();
   const { staticProviders, sandboxProviders, profiles } = useProviderChoices();
   const [samples, setSamples] = useState<SampleRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -130,7 +132,10 @@ function SamplesPageContent() {
         sampleId,
         Object.keys(config).length > 0 ? config : undefined
       );
-      window.location.href = `/analysis/${job.id}/live`;
+      // Straight to the conversation, which is where a run is watched. A
+      // client-side push rather than a document load: the store, the session
+      // and the socket all survive it.
+      router.push(`/analysis/${job.id}/conversation`);
     } catch (err) {
       // The API's own sentence, shown as it was written: an unknown profile, a
       // disabled analyst, or a model whose probe has not passed — each names
@@ -279,20 +284,13 @@ function SamplesPageContent() {
         onDragLeave={() => setDragOver(false)}
         onDrop={onDrop}
         onClick={() => fileRef.current?.click()}
-        className={`mb-6 border border-dashed rounded p-6 text-center cursor-pointer transition-colors ${
+        className={`mb-6 border border-dashed rounded p-6 text-center cursor-pointer ${
           dragOver
             ? "border-accent bg-accent/5"
             : "border-border hover:border-text-muted"
         }`}
       >
-        <svg
-          className="mx-auto mb-2 text-text-muted"
-          width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"
-        >
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-          <polyline points="17 8 12 3 7 8" />
-          <line x1="12" y1="3" x2="12" y2="15" />
-        </svg>
+        <Upload size={18} aria-hidden="true" className="mx-auto mb-2 text-text-muted" />
         <p className="text-sm text-text-secondary">
           {uploading
             ? "Uploading..."
@@ -336,7 +334,7 @@ function SamplesPageContent() {
             </thead>
             <tbody className="divide-y divide-border-light">
               {samples.map((s) => (
-                <tr key={s.id} className="hover:bg-bg-hover transition-colors">
+                <tr key={s.id} className="hover:bg-bg-hover">
                   <td className="px-4 py-2.5">
                     <span className="text-sm text-text-primary">{s.filename}</span>
                   </td>
@@ -363,7 +361,7 @@ function SamplesPageContent() {
                             setActionError(getErrorMessage(err) || "Failed to load sample details.");
                           }
                         }}
-                        className="px-2.5 py-1 text-xs border border-border text-text-secondary rounded hover:bg-bg-hover transition-colors"
+                        className="px-2.5 py-1 text-xs border border-border text-text-secondary rounded hover:bg-bg-hover"
                       >
                         Details
                       </button>
@@ -372,7 +370,7 @@ function SamplesPageContent() {
                           setActionError(null);
                           openSubmitDialog(s);
                         }}
-                        className="px-2.5 py-1 text-xs bg-accent text-white rounded hover:bg-accent-hover transition-colors"
+                        className="px-2.5 py-1 text-xs bg-accent text-white rounded hover:bg-accent-hover"
                       >
                         Analyze
                       </button>
@@ -406,10 +404,7 @@ function SamplesPageContent() {
                 onClick={() => setDetailSample(null)}
                 className="text-text-muted hover:text-text-primary"
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
+                <X size={16} aria-hidden="true" />
               </button>
             </div>
             <div className="space-y-3 text-xs">
@@ -471,10 +466,7 @@ function SamplesPageContent() {
                 onClick={closeSubmitDialog}
                 className="text-text-muted hover:text-text-primary"
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
+                <X size={16} aria-hidden="true" />
               </button>
             </div>
 
@@ -583,7 +575,7 @@ function SamplesPageContent() {
                 <button
                   type="button"
                   onClick={closeSubmitDialog}
-                  className="px-2.5 py-1 text-xs border border-border text-text-secondary rounded hover:bg-bg-hover transition-colors"
+                  className="px-2.5 py-1 text-xs border border-border text-text-secondary rounded hover:bg-bg-hover"
                 >
                   Cancel
                 </button>
@@ -591,7 +583,7 @@ function SamplesPageContent() {
                   type="button"
                   disabled={submitting}
                   onClick={() => startAnalysis(submitFor.id)}
-                  className="px-2.5 py-1 text-xs bg-accent text-white rounded hover:bg-accent-hover transition-colors disabled:opacity-50"
+                  className="px-2.5 py-1 text-xs bg-accent text-white rounded hover:bg-accent-hover disabled:opacity-50"
                 >
                   Start analysis
                 </button>

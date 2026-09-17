@@ -27,7 +27,7 @@ export default function DefenseTab() {
   if (recommendations.length === 0) {
     return (
       <div className="p-8 text-center text-sm text-text-secondary">
-        No defensive recommendations available for this report.
+        This run wrote no defensive recommendation.
       </div>
     );
   }

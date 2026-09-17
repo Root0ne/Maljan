@@ -23,15 +23,44 @@ async function expectNoAlerts(page: import("@playwright/test").Page) {
   await expect(alerts(page)).toHaveCount(0);
 }
 
-test.describe("Jobs", () => {
-  test("lists jobs by sample name", async ({ authenticatedPage: page }) => {
+test.describe("Analyses", () => {
+  test("lists runs by sample name, with the verdict of the ones that finished", async ({
+    authenticatedPage: page,
+  }) => {
     await page.goto("/jobs");
 
-    // "Analysis Jobs — 1 result"; only rendered on success.
-    await expect(page.getByRole("heading", { name: /^Analysis Jobs/ })).toBeVisible();
+    // "Analyses — 1 result"; only rendered on success.
+    await expect(page.getByRole("heading", { name: /^Analyses/ })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Filters" })).toBeVisible();
     await expect(page.getByRole("link", { name: /invoice_scan\.exe/ })).toBeVisible();
+    // The verdict the Reports page used to carry, on the row it belongs to.
+    // The backend's raw "Malware" is owed to the reader as "Malicious".
+    await expect(page.getByText("Malicious").first()).toBeVisible();
+    await expect(page.getByText("Malware", { exact: true })).toHaveCount(0);
     await expectNoAlerts(page);
+  });
+
+  /* A report is a completed job, so the reports table was this table with one
+   * filter already applied. The old route lands on exactly that. */
+  test("/reports redirects into the list with its status filter applied", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/reports");
+
+    await expect(page).toHaveURL(/\/jobs\?status=completed$/, { timeout: 20_000 });
+    await expect(page.getByRole("link", { name: /invoice_scan\.exe/ })).toBeVisible();
+    await expectNoAlerts(page);
+  });
+
+  test("a status nothing matches empties the list and says which one", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/jobs");
+    await page.getByRole("button", { name: /^failed/ }).click();
+    await expect(page.getByText("No failed analysis.")).toBeVisible();
+
+    await page.getByRole("button", { name: /^completed/ }).click();
+    await expect(page.getByRole("link", { name: /invoice_scan\.exe/ })).toBeVisible();
   });
 });
 
@@ -55,29 +84,6 @@ test.describe("Samples", () => {
     await expect(modal).toBeVisible();
     await expect(modal.getByText("Sample Details")).toBeVisible();
     await expect(modal.getByText(/9f86d081884c7d659a2feaa0c55ad015/)).toBeVisible();
-  });
-});
-
-test.describe("Reports", () => {
-  test("lists reports and normalises the verdict", async ({ authenticatedPage: page }) => {
-    await page.goto("/reports");
-
-    await expect(page.getByRole("heading", { name: "Reports", exact: true })).toBeVisible();
-    await expect(page.getByRole("link", { name: /invoice_scan\.exe/ })).toBeVisible();
-    // The mock verdict is the backend's raw "Malware"; the UI owes the reader
-    // "Malicious". Same rule the dashboard and transcript specs enforce.
-    await expect(page.getByText("Malicious").first()).toBeVisible();
-    await expect(page.getByText("Malware", { exact: true })).toHaveCount(0);
-    await expectNoAlerts(page);
-  });
-
-  test("the verdict tabs filter client-side", async ({ authenticatedPage: page }) => {
-    await page.goto("/reports");
-    await page.getByRole("button", { name: /^Benign/ }).click();
-    await expect(page.getByText("No reports found.")).toBeVisible();
-
-    await page.getByRole("button", { name: /^Malicious/ }).click();
-    await expect(page.getByRole("link", { name: /invoice_scan\.exe/ })).toBeVisible();
   });
 });
 
@@ -149,13 +155,10 @@ test.describe("Result counts", () => {
     authenticatedPage: page,
   }) => {
     await page.goto("/jobs");
-    await expect(page.getByRole("heading", { name: "Analysis Jobs — 1 result" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Analyses — 1 result" })).toBeVisible();
 
     await page.goto("/samples");
     await expect(page.getByRole("heading", { name: "Samples — 1 file" })).toBeVisible();
-
-    await page.goto("/reports");
-    await expect(page.getByText("1 analysis report generated")).toBeVisible();
 
     await page.goto("/audit");
     await expect(page.getByText("1 total entry")).toBeVisible();

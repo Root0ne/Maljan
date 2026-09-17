@@ -5,42 +5,11 @@ import Link from "next/link";
 
 import { useReport } from "./layout";
 import { api } from "@/lib/api";
-import { downloadBlob, downloadObject } from "@/lib/report-utils";
+import { countLabel, downloadBlob, downloadObject } from "@/lib/report-utils";
 import { getErrorMessage } from "@/lib/errors";
-import { verdictLabel } from "@/lib/verdict";
+import { ENRICH_BUTTON_LABEL, ENRICH_STATUS_MESSAGE } from "@/lib/enrichment";
 import { SEVERITY_STYLES } from "@/types/malware-report";
-import type { FpWarning, MalwareReport, TTPMapping } from "@/types/malware-report";
-
-// The comprehensive report's verdict vocabulary is
-// "Malware" | "Suspicious" | "Benign" (backend models.py), so a lower-cased
-// verdict is "malware" — which was absent from these maps and fell back to
-// the muted "unknown" grey, rendering every Malware verdict as if it were
-// undetermined. Add the "malware" key (aligned with layout.tsx) alongside
-// the legacy "malicious" alias used by LegacySummary.
-const VERDICT_COLORS: Record<string, string> = {
-  malware: "bg-status-red",
-  malicious: "bg-status-red",
-  suspicious: "bg-status-orange",
-  benign: "bg-status-green",
-  unknown: "bg-text-muted",
-};
-
-const VERDICT_TEXT: Record<string, string> = {
-  malware: "text-status-red",
-  malicious: "text-status-red",
-  suspicious: "text-status-orange",
-  benign: "text-status-green",
-  unknown: "text-text-muted",
-};
-
-function lc(v: string | null | undefined): string {
-  return (v || "unknown").toLowerCase();
-}
-
-function pct(x: number | null | undefined): number {
-  if (!x) return 0;
-  return Math.round(x * 100);
-}
+import type { FpWarning, MalwareReport } from "@/types/malware-report";
 
 function countNetworkIOCs(mr: MalwareReport): {
   domains: number;
@@ -95,125 +64,46 @@ export default function SummaryTab() {
   return mr ? <MalwareReportSummary mr={mr} /> : <LegacySummary />;
 }
 
-/* ── Legacy summary (pre-Faz5 reports without malware_report payload) ── */
+/* ── The summary of a report with no structured payload ──
+ *
+ * A report old enough to carry no `malware_report` has a verdict, a category
+ * and the analysts' findings, and nothing else. The verdict and the confidence
+ * are in the analysis header; each analyst's confidence, its stance and its
+ * claims are the agents table and the stream on the Conversation tab. What is
+ * left for this page is the one sentence the run never wrote down, and the way
+ * to the argument behind it.
+ */
 function LegacySummary() {
-  const { report } = useReport();
-  const agentSummary =
-    report?.agent_findings?.map((f) => {
-      const p = pct(f.final_confidence);
-      let verdict = "unknown";
-      if (p >= 80) verdict = "malicious";
-      else if (p >= 50) verdict = "suspicious";
-      else verdict = "benign";
-      return { name: f.agent_name, verdict, confidence: p };
-    }) || [];
-
-  let keyFindings: string[] = [];
-  if (report?.agent_findings) {
-    for (const finding of report.agent_findings) {
-      if (finding.claims && Array.isArray(finding.claims)) {
-        for (const claim of finding.claims) {
-          if (claim && typeof claim === "object" && "description" in claim) {
-            keyFindings.push(String((claim as { description: unknown }).description));
-          } else if (claim && typeof claim === "object" && "claim" in claim) {
-            keyFindings.push(String((claim as { claim: unknown }).claim));
-          } else if (typeof claim === "string") {
-            keyFindings.push(claim);
-          }
-        }
-      }
-    }
-  }
-  if (keyFindings.length === 0 && report?.mitre_techniques) {
-    keyFindings = report.mitre_techniques.map((t) => {
-      const tt = t as { name?: string; technique_id?: string };
-      return tt.name || tt.technique_id || "Unknown technique";
-    });
-  }
-  keyFindings = Array.from(new Set(keyFindings)).slice(0, 6);
-  if (keyFindings.length === 0) {
-    keyFindings = ["No specific findings were extracted."];
-  }
-
-  const verdictDisplay = verdictLabel(report?.verdict);
-  const confidence = pct(report?.overall_confidence);
-  const verdictColorClass =
-    VERDICT_TEXT[lc(report?.verdict)] || VERDICT_TEXT.unknown;
+  const { report, job } = useReport();
+  const jobId = report?.job_id ?? job?.id ?? "";
+  const agentCount = report?.agent_findings?.length ?? 0;
 
   return (
-    <div className="grid grid-cols-2 gap-4">
-      <div className="bg-bg-surface border border-border rounded">
-        <div className="px-4 py-3 border-b border-border">
-          <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-            Agent Consensus
-          </h2>
-        </div>
-        <div className="p-4 space-y-3">
-          {agentSummary.length > 0 ? (
-            agentSummary.map((a) => (
-              <div key={a.name} className="flex items-center gap-3">
-                <span className="text-xs text-text-secondary w-32 shrink-0 truncate">
-                  {a.name}
-                </span>
-                <div className="flex-1 h-2 bg-bg-deep rounded-sm overflow-hidden">
-                  <div
-                    className={`h-full rounded-sm ${VERDICT_COLORS[a.verdict] || VERDICT_COLORS.unknown}`}
-                    style={{ width: `${a.confidence}%`, opacity: 0.7 }}
-                  />
-                </div>
-                <span
-                  className={`text-xs font-mono w-8 text-right ${VERDICT_TEXT[a.verdict] || VERDICT_TEXT.unknown}`}
-                >
-                  {a.confidence}
-                </span>
-              </div>
-            ))
-          ) : (
-            <div className="text-sm text-text-secondary">No agent data available.</div>
-          )}
-        </div>
+    <div className="bg-bg-surface border border-border rounded">
+      <div className="px-4 py-3 border-b border-border flex items-center gap-3">
+        <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+          This analysis
+        </h2>
+        {jobId && (
+          <Link
+            href={`/analysis/${jobId}/conversation`}
+            className="ml-auto text-[11px] text-accent-strong hover:underline"
+          >
+            Read the conversation
+          </Link>
+        )}
       </div>
-
-      <div className="bg-bg-surface border border-border rounded">
-        <div className="px-4 py-3 border-b border-border">
-          <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-            Key Findings
-          </h2>
-        </div>
-        <div className="p-4">
-          <ul className="space-y-2">
-            {keyFindings.map((f, i) => (
-              <li key={i} className="flex gap-2 text-xs text-text-secondary">
-                <span className="text-status-red mt-0.5 shrink-0">-</span>
-                <span className="truncate" title={f}>
-                  {f}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </div>
-
-      <div className="col-span-2 bg-bg-surface border border-border rounded">
-        <div className="px-4 py-3 border-b border-border">
-          <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-            Executive Summary
-          </h2>
-        </div>
-        <div className="p-4">
-          <p className="text-sm text-text-secondary leading-relaxed">
-            The analyzed sample has been classified as{" "}
-            <strong className={verdictColorClass}>{verdictDisplay}</strong> with a consensus
-            confidence score of <strong>{confidence}/100</strong>.
-            {report?.malware_category
-              ? ` Detected malware category: ${report.malware_category}.`
-              : ""}
-            {agentSummary.length > 0
-              ? ` The analysis involved ${agentSummary.length} agent(s).`
-              : ""}
-            {!report ? " Analysis is currently incomplete or data is missing." : ""}
-          </p>
-        </div>
+      <div className="p-4">
+        <p className="text-sm text-text-secondary leading-relaxed">
+          This report predates the structured report payload, so it carries a
+          verdict, a category and each analyst&apos;s findings and nothing more.
+          {report?.malware_category
+            ? ` The judge called the behaviour ${report.malware_category}.`
+            : ""}
+          {agentCount > 0
+            ? ` ${countLabel(agentCount, "analyst")} took part; what each one concluded is on the Conversation tab.`
+            : ""}
+        </p>
       </div>
     </div>
   );
@@ -221,26 +111,17 @@ function LegacySummary() {
 
 /* ── MalwareReport summary payload ───────────────────────────────────── */
 function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
-  const { report } = useReport();
+  const { report, job } = useReport();
   const reportId = report?.id ?? "";
+  const jobId = report?.job_id ?? job?.id ?? "";
   // A report whose judge assessed no severity says so. Falling back to
   // "Informational" would print a rating the run never established.
   const sevStyle = mr.severity
     ? (SEVERITY_STYLES[mr.severity.rating] ?? SEVERITY_STYLES.Informational)
     : SEVERITY_STYLES.Informational;
-  const confidence = pct(mr.overall_confidence);
-  const verdict = lc(mr.verdict);
-  const verdictText = VERDICT_TEXT[verdict] || VERDICT_TEXT.unknown;
   const net = countNetworkIOCs(mr);
-  const topTTPs: TTPMapping[] = [...mr.ttp_mappings]
-    .sort((a, b) => b.confidence - a.confidence)
-    .slice(0, 5);
-  const topSigs =
-    mr.dynamic?.sandbox_signatures
-      ? [...mr.dynamic.sandbox_signatures].sort((a, b) => b.severity - a.severity).slice(0, 5)
-      : [];
-  const sha256 = mr.identity.hashes.sha256;
-  const shortHash = sha256.slice(0, 12);
+  const ttpCount = mr.ttp_mappings.length;
+  const shortHash = mr.identity.hashes.sha256.slice(0, 12);
 
   // Surface the degraded flag from run_summary. Nothing lowers the confidence
   // for a degraded run — the judge is told why the run is thin and sets its own
@@ -335,133 +216,93 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
         </details>
       )}
 
-      {/* Severity & Verdict card */}
-      <div className="bg-bg-surface border border-border rounded col-span-2">
-        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-          <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-            Verdict & Severity
-          </h2>
-          <code className="text-[11px] font-mono text-text-muted" title={sha256}>
-            {sha256.slice(0, 16)}…
-          </code>
-        </div>
-        <div className="p-4 grid grid-cols-4 gap-4">
-          <div>
-            <div className="text-[11px] text-text-muted uppercase tracking-wider mb-1">
-              Verdict
-            </div>
-            <div className={`text-base font-semibold ${verdictText}`}>{verdictLabel(mr.verdict)}</div>
-          </div>
-          <div>
-            <div className="text-[11px] text-text-muted uppercase tracking-wider mb-1">
-              Confidence
-            </div>
-            <div className="text-base font-mono">{confidence}/100</div>
-          </div>
-          <div>
-            <div className="text-[11px] text-text-muted uppercase tracking-wider mb-1">
+      {/* Severity, when the judge assessed one or named the behaviour. A card
+          reading "not assessed" beside "Uncategorized" is a heading over two
+          absences.
+
+          The verdict and the confidence are in the analysis header, where
+          every tab can see them; repeating them here made the same two facts
+          read twice on the one tab that also carries the argument for them. */}
+      {(mr.severity || mr.malware_category) && (
+        <div className="bg-bg-surface border border-border rounded col-span-2">
+          <div className="px-4 py-3 border-b border-border">
+            <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
               Severity
-            </div>
-            {mr.severity ? (
-              <span
-                className={`inline-flex items-center gap-2 px-2 py-0.5 rounded text-xs font-medium ${sevStyle.bg} ${sevStyle.border} ${sevStyle.text} border`}
-              >
-                {mr.severity.rating}
-                <span className="font-mono">{mr.severity.overall_score.toFixed(1)}/10</span>
-              </span>
-            ) : (
-              <span className="text-sm text-text-muted">not assessed</span>
-            )}
-            {/* The rating alone is a number with no argument behind it. The
-                judge writes why it chose that rating, and printing the rating
-                without it leaves a reader with nothing to disagree with. */}
-            {mr.severity?.business_impact && (
-              <p className="mt-1 text-[11px] text-text-muted leading-relaxed">
-                {mr.severity.business_impact}
-              </p>
-            )}
-            {(mr.severity?.affected_platforms?.length ?? 0) > 0 && (
-              <p className="mt-1 text-[11px] text-text-muted">
-                Affects: {mr.severity?.affected_platforms.join(", ")}
-              </p>
-            )}
+            </h2>
           </div>
-          <div>
-            <div className="text-[11px] text-text-muted uppercase tracking-wider mb-1">
-              Category
-            </div>
-            {/* Free text, printed as written. The category is whatever the
-                judge called the behaviour; mapping it onto a fixed list would
-                be this console overruling the run. A family is a different
-                claim and is not a substitute for one. */}
-            <div className="text-sm text-text-primary">
-              {mr.malware_category || "Uncategorized"}
-            </div>
+          <div className="p-4 flex flex-wrap gap-x-12 gap-y-4">
+            {mr.severity && (
+              <div className="max-w-md">
+                <div className="text-[11px] text-text-muted uppercase tracking-wider mb-1">
+                  Rating
+                </div>
+                <span
+                  className={`inline-flex items-center gap-2 px-2 py-0.5 rounded text-xs font-medium ${sevStyle.bg} ${sevStyle.border} ${sevStyle.text} border`}
+                >
+                  {mr.severity.rating}
+                  <span className="font-mono">{mr.severity.overall_score.toFixed(1)}/10</span>
+                </span>
+                {/* The rating alone is a number with no argument behind it. The
+                    judge writes why it chose that rating, and printing the
+                    rating without it leaves a reader with nothing to disagree
+                    with. */}
+                {mr.severity.business_impact && (
+                  <p className="mt-1 text-[11px] text-text-muted leading-relaxed">
+                    {mr.severity.business_impact}
+                  </p>
+                )}
+                {mr.severity.affected_platforms.length > 0 && (
+                  <p className="mt-1 text-[11px] text-text-muted">
+                    Affects: {mr.severity.affected_platforms.join(", ")}
+                  </p>
+                )}
+              </div>
+            )}
+            {mr.malware_category && (
+              <div>
+                <div className="text-[11px] text-text-muted uppercase tracking-wider mb-1">
+                  Category
+                </div>
+                {/* Free text, printed as written. The category is whatever the
+                    judge called the behaviour; mapping it onto a fixed list
+                    would be this console overruling the run. A family is a
+                    different claim and is not a substitute for one. */}
+                <div className="text-sm text-text-primary">{mr.malware_category}</div>
+              </div>
+            )}
           </div>
         </div>
-      </div>
+      )}
 
-      {/* Top TTPs */}
-      <div className="bg-bg-surface border border-border rounded">
-        <div className="px-4 py-3 border-b border-border">
-          <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-            Top MITRE ATT&amp;CK Techniques
-          </h2>
-        </div>
-        <div className="p-4 space-y-2">
-          {topTTPs.length === 0 && (
-            <div className="text-xs text-text-muted">No techniques mapped.</div>
-          )}
-          {topTTPs.map((t) => (
-            <div key={t.technique_id} className="flex items-center gap-3">
-              <code className="text-[11px] font-mono text-status-blue w-20 shrink-0">
-                {t.technique_id}
-              </code>
-              <span className="text-xs text-text-secondary flex-1 truncate" title={t.technique_name}>
-                {t.technique_name}
-              </span>
-              <span className="text-[11px] font-mono text-text-muted w-12 text-right">
-                {Math.round(t.confidence * 100)}%
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Network IOCs summary */}
-      <div className="bg-bg-surface border border-border rounded">
-        <div className="px-4 py-3 border-b border-border">
-          <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-            Network IOC Snapshot
-          </h2>
-        </div>
-        <div className="p-4 grid grid-cols-4 gap-3 text-center">
-          <Stat label="Domains" value={net.domains} />
-          <Stat label="IPs" value={net.ips} />
-          <Stat label="URLs" value={net.urls} />
-          <Stat label="Suspicious" value={net.suspicious} accent="text-status-red" />
-        </div>
-        {topSigs.length > 0 && (
-          <div className="px-4 pb-4">
-            <div className="text-[11px] text-text-muted uppercase tracking-wider mb-2">
-              Top Sandbox Signatures
-            </div>
-            <ul className="space-y-1.5">
-              {topSigs.map((s) => (
-                <li key={s.name} className="flex gap-2 text-xs text-text-secondary">
-                  <span className="text-status-orange shrink-0">-</span>
-                  <span className="truncate" title={s.description || s.name}>
-                    {s.name}
-                  </span>
-                  <span className="ml-auto text-[11px] font-mono text-text-muted">
-                    sev {s.severity}
-                  </span>
-                </li>
-              ))}
-            </ul>
+      {/* What the run found, as counts that open the tab that holds them.
+          The techniques and the endpoints are tables on ATT&CK and NETWORK;
+          listing the first five of each here was the same finding twice, and
+          the shorter of the two copies. */}
+      {jobId && (ttpCount > 0 || net.domains + net.ips + net.urls > 0) && (
+        <div className="col-span-2 bg-bg-surface border border-border rounded">
+          <div className="px-4 py-3 border-b border-border">
+            <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+              Findings
+            </h2>
           </div>
-        )}
-      </div>
+          <div className="p-4 grid grid-cols-5 gap-3 text-center">
+            <CountLink
+              label="Techniques"
+              value={ttpCount}
+              href={`/analysis/${jobId}/capabilities`}
+            />
+            <CountLink label="Domains" value={net.domains} href={`/analysis/${jobId}/network`} />
+            <CountLink label="IPs" value={net.ips} href={`/analysis/${jobId}/network`} />
+            <CountLink label="URLs" value={net.urls} href={`/analysis/${jobId}/network`} />
+            <CountLink
+              label="Suspicious"
+              value={net.suspicious}
+              href={`/analysis/${jobId}/network`}
+              accent={net.suspicious > 0 ? "text-status-red" : undefined}
+            />
+          </div>
+        </div>
+      )}
 
       {/* What the report is standing on. Counted at build time from the
           ledger, so it says how much of the report is checkable and how much
@@ -473,12 +314,14 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
             <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
               Evidence
             </h2>
-            <Link
-              href={`/analysis/${report?.job_id ?? ""}/evidence`}
-              className="ml-auto text-[11px] text-accent-strong hover:underline"
-            >
-              Open the ledger
-            </Link>
+            {jobId && (
+              <Link
+                href={`/analysis/${jobId}/evidence`}
+                className="ml-auto text-[11px] text-accent-strong hover:underline"
+              >
+                Open the ledger
+              </Link>
+            )}
           </div>
           <div className="p-4 grid grid-cols-5 gap-3 text-center">
             <Stat label="Calls" value={evidence.entries ?? 0} />
@@ -505,33 +348,153 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
         </div>
       )}
 
-      {/* Executive summary */}
-      <div className="col-span-2 bg-bg-reading border border-border rounded">
-        <div className="px-4 py-3 border-b border-border">
-          <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-            Executive Summary
-          </h2>
+      {/* Executive summary — drawn when the run wrote one. A heading over an
+          apology is a section that exists to say it has nothing. */}
+      {(mr.executive_summary.trim() || mr.capabilities_narrative.length > 0) && (
+        <div className="col-span-2 bg-bg-reading border border-border rounded">
+          <div className="px-4 py-3 border-b border-border">
+            <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+              Executive Summary
+            </h2>
+          </div>
+          <div className="p-4">
+            {mr.executive_summary.trim() && (
+              <p className="text-sm text-text-secondary leading-relaxed whitespace-pre-wrap">
+                {mr.executive_summary}
+              </p>
+            )}
+            {mr.capabilities_narrative.length > 0 && (
+              <ul className="mt-3 space-y-2">
+                {mr.capabilities_narrative.map((para, i) => (
+                  <li key={i} className="text-sm text-text-secondary leading-relaxed">
+                    <span className="text-text-muted mr-2">{i + 1}.</span>
+                    {para}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
-        <div className="p-4">
-          <p className="text-sm text-text-secondary leading-relaxed whitespace-pre-wrap">
-            {mr.executive_summary || "Narrative not available for this report."}
-          </p>
-          {mr.capabilities_narrative.length > 0 && (
-            <ul className="mt-3 space-y-2">
-              {mr.capabilities_narrative.map((para, i) => (
-                <li key={i} className="text-sm text-text-secondary leading-relaxed">
-                  <span className="text-text-muted mr-2">{i + 1}.</span>
-                  {para}
+      )}
+
+      {/* How the run was set up and what it spent, in the one place that
+          answers it. This is the rollup the retired pipeline panel carried:
+          the job's own configuration, and the parts of the run summary no
+          other block on this page says. */}
+      <RunRecord runSummary={runSummary} config={job?.config ?? null} />
+    </div>
+  );
+}
+
+/** One count, and the tab that holds what it counts. */
+function CountLink({
+  label,
+  value,
+  href,
+  accent,
+}: {
+  label: string;
+  value: number;
+  href: string;
+  accent?: string;
+}) {
+  return (
+    <Link href={href} className="block rounded hover:bg-bg-hover">
+      <div className={`text-2xl font-mono ${accent ?? "text-text-primary"}`}>{value}</div>
+      <div className="text-[11px] text-text-muted uppercase tracking-wider">{label}</div>
+    </Link>
+  );
+}
+
+/** A job-config value as one line: a string as itself, anything else as JSON. */
+function configValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  return JSON.stringify(value);
+}
+
+/* What the analysis header already says. The team a run was submitted with is
+ * the badge beside the title; listing it again here would put one fact on one
+ * screen twice. */
+const SHOWN_IN_THE_HEADER = new Set(["profile"]);
+
+/**
+ * What this run was told to do, and what it spent doing it.
+ *
+ * Folded shut, because it answers a question a reader asks about one run in
+ * twenty — why this one used that sandbox, how many correction turns the
+ * producers needed — and never the first question about a report. Only the
+ * facts no other block carries: the stages are the header strip, the ledger
+ * counts are the Evidence block above, and the degradation reasons are the
+ * banner at the top.
+ */
+function RunRecord({
+  runSummary,
+  config,
+}: {
+  runSummary: MalwareReport["run_summary"] | null;
+  config: Record<string, unknown> | null;
+}) {
+  if (!runSummary) return null;
+  const triage = runSummary.triage ?? null;
+  const validation = runSummary.validation ?? null;
+  const retryMode = Object.entries(runSummary.nudge?.retry_mode ?? {});
+  const configRows = Object.entries(config ?? {}).filter(
+    ([key]) => !SHOWN_IN_THE_HEADER.has(key),
+  );
+
+  return (
+    <details className="col-span-2 bg-bg-surface border border-border rounded">
+      <summary className="px-4 py-3 cursor-pointer select-none text-xs font-medium text-text-primary uppercase tracking-wider">
+        Run record
+      </summary>
+      <div className="px-4 pb-4 grid grid-cols-2 gap-6 text-xs text-text-secondary">
+        <div>
+          <h3 className="text-[11px] uppercase tracking-wider text-text-muted mb-1.5">
+            Configuration
+          </h3>
+          {configRows.length === 0 ? (
+            <p className="text-text-muted">Submitted with the stored settings, unchanged.</p>
+          ) : (
+            <ul className="space-y-1">
+              {configRows.map(([key, value]) => (
+                <li key={key} className="font-mono text-[11px]">
+                  <span className="text-text-muted">{key}: </span>
+                  {configValue(value)}
                 </li>
               ))}
             </ul>
           )}
         </div>
+        <div>
+          <h3 className="text-[11px] uppercase tracking-wider text-text-muted mb-1.5">
+            What the run spent
+          </h3>
+          <ul className="space-y-1">
+            {triage && (
+              <li>
+                Triage ran {countLabel(triage.entries, "tool call")}
+                {triage.failed > 0 ? `, ${triage.failed} of them failed` : ""}.
+              </li>
+            )}
+            <li>
+              {validation?.retries
+                ? `${countLabel(validation.retries, "correction turn")} were spent on producers that answered in the wrong shape.`
+                : "No producer needed a correction turn."}
+            </li>
+            {(validation?.unresolved ?? []).map((item, i) => (
+              <li key={i} className="text-status-orange">
+                {item.agent} left {item.code} unfixed: {item.message}
+              </li>
+            ))}
+            {retryMode.map(([agent, mode]) => (
+              <li key={agent} className="text-text-muted">
+                {agent} needed the final-answer nudge sent as {mode}.
+              </li>
+            ))}
+          </ul>
+        </div>
       </div>
-      {/* The "External References" section is removed from SUMMARY per
-       * user request. The same references remain in the Markdown export
-       * (## References). */}
-    </div>
+    </details>
   );
 }
 
@@ -636,11 +599,6 @@ function DownloadBar({
     }
   };
 
-  const downloadStix = () => {
-    const body = JSON.stringify(mr.stix_bundle_extended, null, 2);
-    downloadBlob(body, `${safeName}-stix.json`, "application/json");
-  };
-
   const downloadMisp = () => {
     const body = JSON.stringify(mr.misp_attributes ?? [], null, 2);
     downloadBlob(body, `${safeName}-misp.json`, "application/json");
@@ -656,7 +614,7 @@ function DownloadBar({
       <button
         onClick={downloadMarkdown}
         disabled={!reportId || busy === "md"}
-        className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors disabled:text-text-disabled disabled:cursor-not-allowed"
+        className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted disabled:text-text-disabled disabled:cursor-not-allowed"
       >
         {busy === "md" ? "fetching..." : "↓ Markdown report"}
       </button>
@@ -664,7 +622,7 @@ function DownloadBar({
         onClick={downloadPdf}
         disabled={!reportId || busy === "pdf"}
         title="Print-ready A4 report with figures and a linked table of contents"
-        className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors disabled:text-text-disabled disabled:cursor-not-allowed"
+        className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted disabled:text-text-disabled disabled:cursor-not-allowed"
       >
         {busy === "pdf" ? "rendering..." : "↓ PDF report"}
       </button>
@@ -672,21 +630,15 @@ function DownloadBar({
         onClick={downloadHtml}
         disabled={!reportId || busy === "html"}
         title="Self-contained HTML — opens offline, no external requests"
-        className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors disabled:text-text-disabled disabled:cursor-not-allowed"
+        className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted disabled:text-text-disabled disabled:cursor-not-allowed"
       >
         {busy === "html" ? "fetching..." : "↓ HTML report"}
-      </button>
-      <button
-        onClick={downloadStix}
-        className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors"
-      >
-        ↓ STIX 2.1 bundle
       </button>
       <button
         onClick={downloadJson("iocs")}
         disabled={!reportId || busy === "iocs"}
         title="Every indicator the report holds, as JSON"
-        className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors disabled:text-text-disabled disabled:cursor-not-allowed"
+        className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted disabled:text-text-disabled disabled:cursor-not-allowed"
       >
         {busy === "iocs" ? "fetching..." : "\u2193 IOC list"}
       </button>
@@ -694,7 +646,7 @@ function DownloadBar({
         onClick={downloadJson("mitre")}
         disabled={!reportId || busy === "mitre"}
         title="The ATT&CK techniques this report mapped, as JSON"
-        className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors disabled:text-text-disabled disabled:cursor-not-allowed"
+        className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted disabled:text-text-disabled disabled:cursor-not-allowed"
       >
         {busy === "mitre" ? "fetching..." : "\u2193 MITRE ATT&CK"}
       </button>
@@ -702,7 +654,7 @@ function DownloadBar({
         onClick={downloadJson("timeline")}
         disabled={!reportId || busy === "timeline"}
         title="The negotiation timeline, round by round, as JSON"
-        className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors disabled:text-text-disabled disabled:cursor-not-allowed"
+        className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted disabled:text-text-disabled disabled:cursor-not-allowed"
       >
         {busy === "timeline" ? "fetching..." : "\u2193 Timeline"}
       </button>
@@ -710,10 +662,11 @@ function DownloadBar({
         onClick={downloadMisp}
         disabled={mispDisabled}
         title={mispDisabled ? "No MISP attributes generated for this report" : undefined}
-        className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors disabled:text-text-disabled disabled:cursor-not-allowed"
+        className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted disabled:text-text-disabled disabled:cursor-not-allowed"
       >
         ↓ MISP attributes
       </button>
+      <EnrichButton reportId={reportId} />
       {error && (
         <div
           role="alert"
@@ -723,5 +676,54 @@ function DownloadBar({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * The one button that asks the threat-intel services about this report.
+ *
+ * It used to sit on NETWORK and on ATTRIBUTION, two copies of one action
+ * against one endpoint, so a reader who pressed both queued nothing twice and
+ * learned that from a message on only one of the two tabs. It belongs on the
+ * tab a reader lands on, beside the exports, because what it changes — the
+ * reputation of the endpoints, the nearest-neighbour cases — is spread across
+ * the tabs it used to live on.
+ */
+function EnrichButton({ reportId }: { reportId: string }) {
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const run = async () => {
+    if (!reportId || busy) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      // The endpoint distinguishes queued / already_queued /
+      // skipped_no_network_iocs — say which one happened rather than always
+      // promising a refresh.
+      const res = await api.enrichReport(reportId);
+      setMessage(ENRICH_STATUS_MESSAGE[res.status] ?? ENRICH_STATUS_MESSAGE.queued);
+    } catch (err) {
+      setMessage(`Could not queue enrichment: ${getErrorMessage(err)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <button
+        onClick={run}
+        disabled={!reportId || busy}
+        className="ml-auto px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted disabled:text-text-disabled disabled:cursor-not-allowed"
+      >
+        {busy ? "queueing..." : ENRICH_BUTTON_LABEL}
+      </button>
+      {message && (
+        <p className="w-full text-xs text-text-secondary bg-bg-active border border-border rounded px-2 py-1.5">
+          {message}
+        </p>
+      )}
+    </>
   );
 }

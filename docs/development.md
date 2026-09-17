@@ -89,7 +89,7 @@ this tree; see [paper.md](paper.md).
 | Job | Contents |
 | :-- | :-- |
 | `quality` | Ruff lint, ruff format check, mypy. Every other job needs it. |
-| `semgrep` | `p/python`, `p/security-audit`, `p/typescript` and `p/react` at the pinned version, over `src/ apps/api/ services/ scripts/ apps/web/src/`. `.semgrepignore` keeps out what is not source: build output, the end-to-end suite, the unit specs. |
+| `semgrep` | `p/python`, `p/security-audit`, `p/typescript` and `p/react` at the pinned version, over `src/ apps/api/ services/ scripts/ apps/web/src/`. `.semgrepignore` keeps out what is not source: build output, the Playwright suite (`e2e/*.spec.ts`) and the vitest specs (`__tests__/*.test.ts`). |
 | `test` | `pytest tests/ -q --tb=short` on Python 3.13. |
 | `test-qdrant` | `tests/unit/test_qdrant_store.py` against a live Qdrant service container. |
 | `frontend` | `tsc --noEmit`, eslint, vitest and a production `next build`. |

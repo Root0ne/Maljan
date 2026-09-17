@@ -5,8 +5,14 @@ data/
 node_modules/
 # The frontend is scanned (see the semgrep job and `make semgrep`), minus what
 # is not source: its build output, its end-to-end suite and its unit specs.
+# The two suites are named differently on purpose — vitest takes `*.test.ts`
+# under a `__tests__` directory, Playwright takes `e2e/*.spec.ts` — so both
+# spellings are excluded rather than one pattern that happens to match neither.
 apps/web/.next/
 apps/web/out/
 apps/web/e2e/
+**/__tests__/
+*.test.ts
+*.test.tsx
 *.spec.ts
 *.spec.tsx

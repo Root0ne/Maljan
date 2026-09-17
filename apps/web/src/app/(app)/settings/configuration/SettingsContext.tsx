@@ -54,7 +54,17 @@ function gatesOnSchema(pathname: string): boolean {
   return pathname.startsWith("/settings/setup") || pathname.startsWith("/settings/configuration");
 }
 
-export function SettingsProvider({ children }: { children: React.ReactNode }) {
+export function SettingsProvider({
+  children,
+  chrome,
+}: {
+  children: React.ReactNode;
+  /** What stays on screen whatever the schema does. The settings nav reads
+   *  this context to know whether the console is worth offering yet, so it
+   *  has to be inside the provider — and a reader who is waiting for a schema,
+   *  or refused one, still needs the way back to their profile. */
+  chrome?: React.ReactNode;
+}) {
   const s = useSettings();
   const pathname = usePathname() ?? "";
   const [models, setModels] = useState<string[]>([]);
@@ -116,6 +126,15 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
 
   const gated = gatesOnSchema(pathname);
 
+  /* The chrome is outside every gate below: a schema that is loading, refused
+   * or broken decides what the page shows, never whether there is a page. */
+  const wrap = (body: React.ReactNode) => (
+    <SettingsCtx.Provider value={value}>
+      {chrome}
+      {body}
+    </SettingsCtx.Provider>
+  );
+
   // Only the *first* load blanks the page: `apply()`, `reset()` and
   // `resetGroup()` all call `reload()` to refresh `values` after a mutation,
   // which flips `loading` back to `true` for the duration of that fetch.
@@ -125,25 +144,25 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   // server/agent" scratch) through that refresh instead of being unmounted
   // and rebuilt from scratch the moment it resolves.
   if (gated && s.loading && !s.schema) {
-    return <div className="text-sm text-text-secondary">Loading configuration…</div>;
+    return wrap(<div className="text-sm text-text-secondary">Loading configuration…</div>);
   }
   if (gated && s.forbidden) {
-    return (
+    return wrap(
       <div className="text-sm text-text-secondary" role="alert">
         Configuration is available to administrators only (admin role required).
-      </div>
+      </div>,
     );
   }
   if (gated && s.loadError) {
-    return (
+    return wrap(
       <div className="text-sm text-status-red" role="alert">
         {s.loadError}
-      </div>
+      </div>,
     );
   }
-  if (gated && !s.schema) return null;
+  if (gated && !s.schema) return wrap(null);
 
-  return <SettingsCtx.Provider value={value}>{children}</SettingsCtx.Provider>;
+  return wrap(children);
 }
 
 export function useSettingsContext(): SettingsContextValue {

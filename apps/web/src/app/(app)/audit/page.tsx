@@ -89,7 +89,7 @@ export default function AuditLogsPage() {
                 </tr>
               ) : (
                 logs.map((log) => (
-                  <tr key={log.id} className="hover:bg-bg-hover transition-colors">
+                  <tr key={log.id} className="hover:bg-bg-hover">
                     <td className="px-4 py-2.5">
                       <span className="text-xs text-text-secondary font-mono">
                         {formatDateTime(log.created_at)}
@@ -121,7 +121,7 @@ export default function AuditLogsPage() {
             <button
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={page <= 1}
-              className="px-3 py-1 text-xs border border-border rounded text-text-secondary hover:bg-bg-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              className="px-3 py-1 text-xs border border-border rounded text-text-secondary hover:bg-bg-hover disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Previous
             </button>
@@ -131,7 +131,7 @@ export default function AuditLogsPage() {
             <button
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               disabled={page >= totalPages}
-              className="px-3 py-1 text-xs border border-border rounded text-text-secondary hover:bg-bg-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              className="px-3 py-1 text-xs border border-border rounded text-text-secondary hover:bg-bg-hover disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Next
             </button>

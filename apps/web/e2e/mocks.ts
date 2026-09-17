@@ -1388,7 +1388,7 @@ export const MOCK_SETTINGS_VALUES_FULL: SettingsValues = {
 export interface MockOptions {
   /**
    * Handler for `**​/ws/analysis/**`. The default accepts the connection and
-   * stays silent, which is enough for pages that merely mount `useWebSocket`.
+   * stays silent, which is enough for a page that merely subscribes to a run.
    * Pass `null` to leave the socket unrouted so the spec can install its own —
    * explicit, rather than relying on which `routeWebSocket` registration wins.
    */
@@ -1520,8 +1520,8 @@ export async function installApiMocks(
   await page.route("**/api/v1/reports/job/*", (route) =>
     json(route, { detail: "Report not found" }, 404)
   );
-  // Sub-resources. Timeline, STIX and MITRE are fetched on mount by the
-  // /process and /detection tabs; signatures and enrich are button-driven.
+  // Sub-resources. STIX and MITRE are fetched on mount by the /detection and
+  // /capabilities tabs; signatures and enrich are button-driven.
   await page.route("**/api/v1/reports/*/timeline", (route) =>
     json(route, { rounds: [], confidence_series: [] })
   );

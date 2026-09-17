@@ -85,7 +85,7 @@ export default function ChangesBar() {
               <button
                 type="button"
                 disabled={saving}
-                className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent text-white rounded hover:bg-accent-hover transition-colors disabled:opacity-50"
+                className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent text-white rounded hover:bg-accent-hover disabled:opacity-50"
                 onClick={onApply}
               >
                 {saving ? "Saving…" : "Confirm and apply"}
@@ -105,7 +105,7 @@ export default function ChangesBar() {
       <div
         role="region"
         aria-label="Unsaved changes"
-        className="sticky bottom-0 mt-6 border-t border-border bg-bg-surface/95 backdrop-blur px-4 py-3 rounded-t z-30"
+        className="sticky bottom-0 mt-6 border-t border-border bg-bg-surface px-4 py-3 rounded-t z-30"
       >
         {discarding && (
           <div
@@ -150,7 +150,7 @@ export default function ChangesBar() {
           </span>
           <button
             type="button"
-            className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent text-white rounded hover:bg-accent-hover transition-colors"
+            className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent text-white rounded hover:bg-accent-hover"
             onClick={() => setReviewing(true)}
           >
             Review

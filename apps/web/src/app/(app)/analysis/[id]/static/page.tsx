@@ -130,7 +130,7 @@ export default function StaticTab() {
             </thead>
             <tbody className="divide-y divide-border-light">
               {carvedPayloads.map((p, i) => (
-                <tr key={i} className="hover:bg-bg-hover transition-colors">
+                <tr key={i} className="hover:bg-bg-hover">
                   <td className="px-4 py-2 text-xs font-mono text-status-red">{p.type ?? "-"}</td>
                   <td className="px-4 py-2 text-xs font-mono text-text-secondary">
                     {p.id ?? "-"}
@@ -181,7 +181,7 @@ export default function StaticTab() {
             </thead>
             <tbody className="divide-y divide-border-light">
               {techniqueHits.map((h, i) => (
-                <tr key={i} className="hover:bg-bg-hover transition-colors">
+                <tr key={i} className="hover:bg-bg-hover">
                   <td className="px-4 py-2 text-xs font-mono text-accent">
                     {h.technique_id ?? "-"}
                   </td>
@@ -269,17 +269,14 @@ export default function StaticTab() {
         </div>
       )}
 
-      {showsExtractedSections && (
+      {showsExtractedSections && staticData.sections.length > 0 && (
       <div className="bg-bg-surface border border-border rounded">
         <div className="px-4 py-3 border-b border-border flex items-center justify-between">
           <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
             {sectionsLabel} ({staticData.sections.length})
           </h2>
         </div>
-        {staticData.sections.length === 0 ? (
-          <div className="p-8 text-center text-sm text-text-muted">No sections recorded.</div>
-        ) : (
-          <table className="w-full">
+        <table className="w-full">
             <thead>
               <tr className="border-b border-border">
                 <Th>Name</Th>
@@ -296,7 +293,7 @@ export default function StaticTab() {
             </thead>
             <tbody className="divide-y divide-border-light">
               {staticData.sections.map((s, i) => (
-                <tr key={`${s.name}-${i}`} className="hover:bg-bg-hover transition-colors">
+                <tr key={`${s.name}-${i}`} className="hover:bg-bg-hover">
                   <td className="px-4 py-2 text-xs font-mono text-text-primary">
                     {s.name}
                     {s.is_suspicious && (
@@ -329,21 +326,17 @@ export default function StaticTab() {
               ))}
             </tbody>
           </table>
-        )}
       </div>
       )}
 
-      {showsImports && (
+      {showsImports && imports.length > 0 && (
       <div className="bg-bg-surface border border-border rounded">
         <div className="px-4 py-3 border-b border-border flex items-center justify-between">
           <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
             Imports ({imports.length})
           </h2>
         </div>
-        {imports.length === 0 ? (
-          <div className="p-8 text-center text-sm text-text-muted">No imports to show.</div>
-        ) : (
-          <table className="w-full">
+        <table className="w-full">
             <thead>
               <tr className="border-b border-border">
                 <Th>{importContainer}</Th>
@@ -352,14 +345,13 @@ export default function StaticTab() {
             </thead>
             <tbody className="divide-y divide-border-light">
               {imports.slice(0, 500).map((row, i) => (
-                <tr key={i} className="hover:bg-bg-hover transition-colors">
+                <tr key={i} className="hover:bg-bg-hover">
                   <td className="px-4 py-2 text-xs font-mono text-text-secondary">{row.dll}</td>
                   <td className="px-4 py-2 text-xs font-mono text-text-primary">{row.function}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-        )}
         {imports.length > 500 && (
           <div className="px-4 py-2 text-[11px] text-text-muted border-t border-border">
             Showing first 500 of {imports.length}.
@@ -368,7 +360,7 @@ export default function StaticTab() {
       </div>
       )}
 
-      {showsStrings && (
+      {showsStrings && staticData.interesting_strings.length > 0 && (
       <div className="bg-bg-surface border border-border rounded">
         <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3 flex-wrap">
           <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
@@ -379,7 +371,7 @@ export default function StaticTab() {
               <button
                 key={k}
                 onClick={() => setStringKind(k)}
-                className={`text-[11px] uppercase tracking-wider px-2 py-0.5 rounded border transition-colors ${
+                className={`text-[11px] uppercase tracking-wider px-2 py-0.5 rounded border ${
                   stringKind === k
                     ? "border-accent text-accent"
                     : "border-border text-text-secondary hover:text-text-primary"
@@ -392,7 +384,7 @@ export default function StaticTab() {
         </div>
         {filteredStrings.length === 0 ? (
           <div className="p-8 text-center text-sm text-text-muted">
-            No interesting strings extracted.
+            No string of this kind was extracted.
           </div>
         ) : (
           <table className="w-full">
@@ -405,7 +397,7 @@ export default function StaticTab() {
             </thead>
             <tbody className="divide-y divide-border-light">
               {filteredStrings.slice(0, 300).map((s, i) => (
-                <tr key={i} className="hover:bg-bg-hover transition-colors">
+                <tr key={i} className="hover:bg-bg-hover">
                   <td className="px-4 py-2 text-[11px] uppercase tracking-wider text-text-muted">
                     {s.kind}
                   </td>

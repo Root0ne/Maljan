@@ -3,8 +3,10 @@
 import { getErrorMessage } from "@/lib/errors";
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { FileText } from "lucide-react";
 import { api } from "@/lib/api";
 import type { DashboardStatsDTO, JobDTO, SystemStatusDTO } from "@/lib/api";
+import { sampleLabel } from "@/lib/analyses";
 import { formatDuration, timeAgo } from "@/lib/report-utils";
 import { verdictBucket } from "@/lib/verdict";
 import {
@@ -33,6 +35,11 @@ const VERDICT_COLORS: Record<string, string> = {
   benign: "var(--status-green)",
 };
 
+/* Five, because this is a way in rather than a list. The full list is one
+ * click away and pages properly; restating ten of its rows here made the
+ * dashboard a second, worse copy of it. */
+const LATEST_RUNS = 5;
+
 const STATUS_STYLES: Record<string, string> = {
   completed: "text-status-green",
   running: "text-status-blue",
@@ -40,18 +47,6 @@ const STATUS_STYLES: Record<string, string> = {
   failed: "text-status-red",
   cancelled: "text-text-muted",
 };
-
-/* Every recent-analysis row rendered the same
-   `sample_id` UUID prefix, so the ten rows were indistinguishable. Prefer the
-   readable identity the API already returns — same precedence as the analysis
-   header (analysis/[id]/layout.tsx). */
-function sampleLabel(job: JobDTO): string {
-  return (
-    job.sample_filename ||
-    (job.sample_sha256 ? `${job.sample_sha256.slice(0, 16)}…` : "") ||
-    job.sample_id.slice(0, 12)
-  );
-}
 
 function StatCard({
   label,
@@ -122,13 +117,13 @@ export default function DashboardPage() {
       try {
         const [s, j, sys] = await Promise.all([
           api.getDashboardStats(),
-          api.getJobs(1, 10),
+          api.getJobs(1, LATEST_RUNS),
           // System status is best-effort: failure here must not block the
           // rest of the dashboard from rendering.
           api.getSystemStatus().catch(() => null),
         ]);
         setStats(mapApiStats(s));
-        setJobs(j.items.slice(0, 10));
+        setJobs(j.items.slice(0, LATEST_RUNS));
         setSystemStatus(sys);
       } catch (err) {
         setError(getErrorMessage(err) || "Failed to load dashboard data.");
@@ -234,35 +229,29 @@ export default function DashboardPage() {
         <div className="col-span-2 bg-bg-surface border border-border rounded">
           <div className="flex items-center justify-between px-4 py-3 border-b border-border">
             <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-              Recent Analyses
+              Latest runs
             </h2>
             <Link
               href="/jobs"
               className="text-xs text-accent-strong hover:underline"
             >
-              View all
+              Every analysis
             </Link>
           </div>
           <div className="divide-y divide-border-light">
             {jobs.length === 0 ? (
               <div className="px-4 py-6 text-center text-xs text-text-muted">
-                No recent analyses found.
+                Nothing has been analysed yet.
               </div>
             ) : (
               jobs.map((job) => (
                 <Link
                   key={job.id}
                   href={`/analysis/${job.id}`}
-                  className="flex items-center justify-between px-4 py-3 hover:bg-bg-hover transition-colors"
+                  className="flex items-center justify-between px-4 py-3 hover:bg-bg-hover"
                 >
                   <div className="flex items-center gap-3">
-                    <svg
-                      width="14" height="14" viewBox="0 0 24 24" fill="none"
-                      stroke="var(--text-secondary)" strokeWidth="1.5"
-                    >
-                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
-                      <path d="M14 2v6h6" />
-                    </svg>
+                    <FileText size={16} aria-hidden="true" className="text-text-secondary" />
                     <div>
                       <p className="text-sm text-text-primary">
                         {sampleLabel(job)}

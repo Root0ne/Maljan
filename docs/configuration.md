@@ -818,14 +818,14 @@ name the prompt showed it.
 
 The built-in `analysis` sidecar implements `put_sample*` even though it ships as
 a stdio server, because an operator may run that same file behind an HTTP
-transport on another host. Three environment variables configure it, and they
-are the only ones it is allowed to see:
+transport on another host. Two environment variables configure that, and with
+`MALJAN_SAMPLE_ROOTS` — defined once in the next section, and seen by the
+`network` sidecar as well — they are the only ones it is allowed to see:
 
 | variable | default | meaning |
 | :-- | :-- | :-- |
 | `MALJAN_STAGING_DIR` | a `maljan-analysis-mcp` directory under the system temp dir | where uploads land |
 | `MALJAN_STAGING_TTL_HOURS` | `24` | how long a staged sample is kept; `0` disables pruning |
-| `MALJAN_SAMPLE_ROOTS` | empty | the other directories a path argument may name, separated by `:` |
 
 The directory is created with mode 0o700 and refused if what is already at that
 path is a symlink or belongs to another user — the default name is predictable
@@ -844,8 +844,16 @@ anything that lands outside the directories they were given:
 
 * the staging directory `MALJAN_STAGING_DIR` names, where their own uploads
   land, and
-* every directory in `MALJAN_SAMPLE_ROOTS`, a list separated by `:`, empty by
-  default.
+* every directory in `MALJAN_SAMPLE_ROOTS`.
+
+| variable | default | meaning | seen by |
+| :-- | :-- | :-- | :-- |
+| `MALJAN_SAMPLE_ROOTS` | empty | the directories a `path`, `pcap_path` or delivered sample may be read in, separated by `:` | `analysis`, `network` |
+| `MALJAN_STAGING_DIR` | a `maljan-analysis-mcp` directory under the system temp dir | where a delivered sample lands, and a root for both | `analysis`, `network` |
+
+Those two, plus `MALJAN_STAGING_TTL_HOURS` above, are the whole of what the
+`analysis` sidecar's `env_allow` carries; the `network` sidecar's carries the
+two in this table and nothing else. Neither sees a credential of any kind.
 
 A refusal is the ordinary structured error with the code `path_outside_roots`
 and a remedy, and it names no host path.
