@@ -439,6 +439,18 @@ change landed on `main`.
 
 ### Fixed
 
+- **A published failure says what kind it was, never what it said.** Five
+  handlers in `pipeline/nodes.py` put `str(exc)` into an `agent_message` — the
+  analyst failure and crash paths, the mediator, the revision hand-back and the
+  judge's verdict — and that message reaches every connected browser, the Redis
+  stream and the `job_events` table for the whole retention window. An `OSError`
+  names the sample's host path, a transport error names the request URL, and a
+  base URL configured with userinfo carries the credential into the text. All
+  five now go through `events.describe_exception`, which says the exception's
+  class (qualified with its module where the bare name is ambiguous), the
+  remedy when the failure carries one, and nothing else. The operator's log
+  still gets the message, and the ledger still keeps the verbatim text behind
+  the report's ownership check.
 - **Three runs the scrubber ended in the middle of a value.** A UNC path
   carrying credentials (`\\user:pass@server\share\x`) travelled whole,
   because the marker did not admit `:` or `@` in its host; a URL whose

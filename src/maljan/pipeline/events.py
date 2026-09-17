@@ -655,6 +655,50 @@ def scrub(text: Any) -> str:
     return _PATH_RUN.sub(_shorten_path, flat)
 
 
+def describe_exception(exc: BaseException) -> str:
+    """What a failure may be called on the wire: its type, and its remedy.
+
+    Never its message. A published failure reaches every connected browser,
+    the Redis stream and the ``job_events`` table for the whole retention
+    window, and the message is the part that names the things a reader of that
+    feed has no business seeing: an ``OSError`` names the host path of the
+    sample, an ``httpx`` transport error names the request URL, and a base URL
+    configured with userinfo carries the credential into the text. The
+    verbatim text is on the ledger and in the log, behind the report's
+    ownership check, which is where it belongs.
+
+    A failure that carries a ``remediation`` — the shape
+    ``maljan.tools.errors`` uses, and what a refusal is made of — says it,
+    because a remedy is authored text about what the reader should do rather
+    than a report of what went wrong. It is scrubbed like anything else.
+
+    The class alone is not always enough to tell two failures apart:
+    ``concurrent.futures.CancelledError`` and ``asyncio.CancelledError`` print
+    the same word and only one of them is an ``Exception``, so a class outside
+    the builtins is qualified with its module. A group names what is inside
+    it, because an MCP connection error inside a task group is otherwise a
+    bare ``ExceptionGroup``.
+
+    This is not ``maljan.agents.base_agent.describe_exception``, which keeps
+    the message on purpose: that one writes the operator's log, where the
+    detail is the whole value and the reader is the operator.
+    """
+    inner = getattr(exc, "exceptions", None)
+    if isinstance(inner, list | tuple) and inner:
+        parts = [describe_exception(sub) for sub in inner[:3]]
+        return f"{_qualified(exc)}({'; '.join(part for part in parts if part)})"
+    remedy = scrub(getattr(exc, "remediation", "") or "")
+    return f"{_qualified(exc)}: {remedy}" if remedy else _qualified(exc)
+
+
+def _qualified(exc: BaseException) -> str:
+    """The exception's class, with its module when the name alone is ambiguous."""
+    module = type(exc).__module__
+    if module and module not in ("builtins", "__main__"):
+        return f"{module}.{type(exc).__name__}"
+    return type(exc).__name__
+
+
 def _summarize_value(value: Any) -> str:
     """One argument, short enough to read and stripped of what must not travel."""
     if isinstance(value, bool) or value is None:

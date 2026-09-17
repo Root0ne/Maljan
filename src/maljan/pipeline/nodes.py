@@ -42,6 +42,7 @@ from maljan.pipeline.conditions import (
 )
 from maljan.pipeline.events import (
     claims_to_payload,
+    describe_exception,
     emit,
     emit_agent_message,
     emit_stage_ended_at_cap,
@@ -1826,7 +1827,7 @@ def make_stage_agent_node(
                     "error_type": type(e).__name__,
                 },
             )
-            failed_text = f"[ERROR] {agent_name} analysis failed: {e}"
+            failed_text = f"[ERROR] {agent_name} analysis failed: {describe_exception(e)}"
             emit_agent_message(
                 container.event_sink,
                 speaker=agent_name,
@@ -1863,7 +1864,7 @@ def make_stage_agent_node(
                     "fatal": True,
                 },
             )
-            crashed_text = f"[ERROR] {agent_name} crashed: {e}"
+            crashed_text = f"[ERROR] {agent_name} crashed: {describe_exception(e)}"
             emit_agent_message(
                 container.event_sink,
                 speaker=agent_name,
@@ -2201,6 +2202,15 @@ def make_negotiation_node(
                 logger.debug("evidence ledger read skipped for the judges: %s", exc)
                 return []
 
+        # Two descriptions of one failure, and the difference is who reads
+        # them. The log gets the message — that is the operator's line, on the
+        # operator's host. The event gets the type and nothing else: it is
+        # fanned out to every browser and kept in a table. Imported before the
+        # ``try``, so the handler still has both names when the failure is the
+        # first line inside it.
+        from maljan.agents.base_agent import describe_exception as exception_detail
+        from maljan.agents.base_agent import run_on_agent_loop
+
         try:
             judge = container.get_judge_agent(role="expert")
             # Mediation is this debate stage's work, so the tool calls it makes
@@ -2218,7 +2228,6 @@ def make_negotiation_node(
             # the reasoning call, then the bounded structured-output retries),
             # so the outer cap covers both phases plus the house +30s of decode
             # headroom rather than truncating a mediation that is still working.
-            from maljan.agents.base_agent import describe_exception, run_on_agent_loop
             from maljan.core.config import get_settings
 
             mediation_timeout = float(get_settings().react_agent_timeout) * 2 + 30
@@ -2309,7 +2318,7 @@ def make_negotiation_node(
             # scoreable result instead of aborting an entire batch on one blip.
             label = "timed out" if isinstance(e, TimeoutError) else "failed"
             status = "timeout" if isinstance(e, TimeoutError) else "failed"
-            logger.error("Negotiation %s: %s", label, describe_exception(e))
+            logger.error("Negotiation %s: %s", label, exception_detail(e))
             emit_agent_message(
                 container.event_sink,
                 speaker="Mediator",
@@ -2482,7 +2491,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     container.event_sink,
                     speaker=name,
                     role="reviser",
-                    text=f"[ERROR] {name} revision failed: {result}",
+                    text=f"[ERROR] {name} revision failed: {describe_exception(result)}",
                     round_index=iteration,
                     status="failed",
                     stage=stage_key_of(stage, "debate"),
@@ -3213,7 +3222,7 @@ def make_judge_node(
                 speaker="Judge",
                 role="judge",
                 text=(
-                    f"[ERROR] Judge failed ({type(e).__name__}): {e or ''}. "
+                    f"[ERROR] Judge failed ({describe_exception(e)}). "
                     "Falling back to a conservative Suspicious verdict; the run is "
                     "marked degraded and the report says why."
                 ),

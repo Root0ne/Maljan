@@ -122,7 +122,11 @@ class TestTheNodeStampsIt:
         argument = result["discussion_history"][0]
         assert argument.status == "failed"
         assert result["is_consensus"] is False
-        # And the live transcript says so too, with the real cause in it.
+        # And the live transcript says so too, by the kind of failure it was.
+        # Not by its message: that text is fanned out to every browser and
+        # kept in a table, and an exception's message is where a host path or
+        # a configured credential travels — see ``events.describe_exception``.
         message = next(d for t, d in events if t == "agent_message")
         assert message["status"] == "failed"
-        assert "llama-server went away" in message["text"]
+        assert "ConnectionError" in message["text"]
+        assert "llama-server went away" not in message["text"]
