@@ -381,6 +381,32 @@ change landed on `main`.
 
 ### Fixed
 
+- **The capability manifest says only what it knows about this host.** A
+  missing module is reported in the import's own words; a broken install or a
+  shared library that will not load is reported by exception type alone, so no
+  absolute path reaches a probe response, the console, the run summary or the
+  judge's prompt. `timeout_s` is declared from the constant the tool itself
+  uses — 60 s for `yara_scan`, 300 s for `capa`, 15 s for every threatintel
+  lookup — and a test asserts the two match for every tool of every sidecar. A
+  degradation reason now says what the tool still answers without its library,
+  each requirement is probed once per cell, and `capabilities()` hands back a
+  copy nothing can reach into.
+- **The threatintel sidecar answers a failure as one.** Its four lookups
+  returned prose for a timeout, a bad status and an invalid key, which every
+  consumer read as an answer; they now return the structured error with its
+  code and remedy, while a lookup that simply found nothing stays an answer.
+  The `put_sample` family returns `bad_argument` in the same shape, and a
+  missing credential is no longer read as a missing file.
+- **The budget meter counts the loop that was cut off.** A loop that ended at
+  its wall clock recorded `steps_used: 0` — the one run the meter exists to
+  explain; it now reads the budget's own count. The judge runs the same meter
+  as the analysts, so the one loop with a hard timeout says which cap ended
+  it, and budget rows are drained on every path that drains a ledger: the
+  stage node, the revision node, the delegation hand-over and the judge. A
+  tick before the last one counts the calls made so far. A stage-start check
+  now finds a tool the collision rule renamed, the failure list says when it
+  cut and trims a message, and one place decides what a failure looks like.
+
 - **A delegated ask stays inside the stage that made it.** A callee's
   effective tool set is its own definition narrowed by the tool policy of the
   stage doing the asking, so a stage with `builtin_tools=False` can no longer

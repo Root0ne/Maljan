@@ -141,6 +141,44 @@ class TestTheLoopMetersItself:
         assert record["cap"] == "steps" and record["max_steps"] == 4
         assert isinstance(cfg, Settings)
 
+    def test_a_loop_cut_off_at_its_wall_clock_records_what_it_spent(self) -> None:
+        """The one run the meter exists to explain, and it used to read as zero.
+
+        A loop that does not come back from its thread has no conversation to
+        hand the record; the refresher counted the turns before every model
+        turn, so the budget itself is where the last figure is.
+        """
+        from maljan.agents.base_agent import LoopBudget
+
+        events: list[tuple[str, dict]] = []
+        agent = self._agent([AIMessage(content="CLAIM: x")], events)
+        budget = LoopBudget(max_steps=40, timeout=1500.0)
+        budget.own_steps = 31
+        budget.charge(4)
+
+        agent._record_budget(budget, [], "time", detail="the loop exceeded its hard cap")
+
+        (record,) = _budget_update(agent, "static")["budget_records"]["static"]
+        assert record["steps_used"] == 35, "its own turns and what it delegated"
+        assert record["cap"] == "time" and record["max_steps"] == 40
+        assert [p["cap"] for k, p in events if k == STAGE_ENDED_AT_CAP] == ["time"]
+
+    def test_the_meter_s_rows_are_this_agent_s_and_not_the_class_s(self) -> None:
+        """A stand-in built without ``__init__`` must not drain another one's rows."""
+        from maljan.agents.base_agent import BudgetMeter, LoopBudget
+
+        class _StandIn(BudgetMeter):
+            name = "stand-in"
+            logger = MagicMock()
+            pipeline_stage = "analysis"
+            _container = None
+
+        one, two = _StandIn(), _StandIn()
+        one._record_budget(LoopBudget(max_steps=4, timeout=1.0), [], None)
+
+        assert len(one.drain_budget_records()) == 1
+        assert two.drain_budget_records() == []
+
     def test_ticks_come_every_few_steps(self, monkeypatch) -> None:
         from maljan.core.config import get_settings
 
@@ -153,6 +191,9 @@ class TestTheLoopMetersItself:
         # Six tool rounds are twelve steps: a tick at five and ten, then the final one.
         assert [t["final"] for t in ticks] == [False, False, True]
         assert ticks[0]["steps_used"] >= 5
+        # A tick before the last one counts the calls made so far rather than
+        # publishing a zero that means "nobody asked".
+        assert ticks[0]["ledger_entries"] > 0
 
 
 class TestTheRunSummarySumsTheMeter:
@@ -193,3 +234,90 @@ class TestTheRunSummarySumsTheMeter:
 
     def test_no_records_is_none(self) -> None:
         assert RunSummaryBuilder(start_time=0.0).set_budget({}).build().to_dict()["budget"] is None
+
+
+class TestEveryPathThatDrainsALedgerDrainsTheMeter:
+    """Rows written on one path and drained on another are rows nobody sees."""
+
+    def test_a_callee_s_rows_travel_with_its_ledger(self) -> None:
+        from maljan.agents.base_agent import BudgetMeter, LoopBudget
+        from maljan.agents.delegation import _hand_over_the_record
+
+        class _Agent(BudgetMeter):
+            def __init__(self, name: str) -> None:
+                self.name = name
+                self.logger = MagicMock()
+                self.pipeline_stage = "analysis"
+                self._container = None
+                self._budget_records: list[dict[str, Any]] = []
+                self._evidence_entries: list[Any] = []
+                self.validation_findings: list[Any] = []
+                self.validation_retries = 0
+                self.validation_fed_back: dict[str, int] = {}
+                self.validation_not_run: list[str] = []
+
+            def drain_evidence_entries(self) -> list[Any]:
+                entries, self._evidence_entries = self._evidence_entries, []
+                return entries
+
+            def drain_validation_findings(self):
+                return [], 0, {}
+
+            def drain_validation_not_run(self) -> list[str]:
+                return []
+
+        caller, callee = _Agent("boss"), _Agent("helper")
+        callee._record_budget(LoopBudget(max_steps=8, timeout=60.0), [], "steps")
+
+        _hand_over_the_record(caller, callee)
+
+        (row,) = caller.drain_budget_records()
+        assert row["cap"] == "steps" and row["agent"] == "helper"
+        assert callee.drain_budget_records() == [], "the callee keeps nothing"
+
+    def test_a_caller_that_has_already_finished_is_given_no_rows(self) -> None:
+        from maljan.agents.base_agent import BudgetMeter, LoopBudget
+        from maljan.agents.delegation import _hand_over_the_record
+
+        class _Agent(BudgetMeter):
+            def __init__(self, name: str) -> None:
+                self.name = name
+                self.logger = MagicMock()
+                self.pipeline_stage = "analysis"
+                self._container = None
+                self._budget_records: list[dict[str, Any]] = []
+                self._evidence_entries: list[Any] = []
+
+            def drain_evidence_entries(self) -> list[Any]:
+                return []
+
+            def drain_validation_findings(self):
+                return [], 0, {}
+
+            def drain_validation_not_run(self) -> list[str]:
+                return []
+
+        caller, callee = _Agent("boss"), _Agent("helper")
+        callee._record_budget(LoopBudget(max_steps=8, timeout=60.0), [], None)
+
+        _hand_over_the_record(caller, callee, still_running=False)
+
+        assert caller.drain_budget_records() == []
+        assert callee.drain_budget_records() == [], "the callee is drained either way"
+
+    def test_the_judge_meters_its_own_loop_and_the_container_drains_it(self) -> None:
+        from maljan.agents.base_agent import BudgetMeter, LoopBudget
+        from maljan.agents.judge_agent import JudgeAgent
+        from maljan.pipeline.nodes import _judge_budget
+
+        judge = JudgeAgent(llm=MagicMock())
+        assert isinstance(judge, BudgetMeter), "the judge runs the analysts' meter"
+        judge._record_budget(LoopBudget(max_steps=10, timeout=600.0), [], "time")
+
+        container = MagicMock()
+        container.drain_all_judge_budget_records.return_value = judge.drain_budget_records()
+
+        update = _judge_budget(container)
+
+        assert [row["cap"] for row in update["budget_records"]["judge"]] == ["time"]
+        assert judge.drain_budget_records() == []

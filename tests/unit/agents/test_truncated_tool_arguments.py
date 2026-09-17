@@ -157,7 +157,15 @@ class _Scripted(BaseChatModel):
         return "scripted"
 
     def bind_tools(self, tools: Any, **_: Any) -> Any:
-        return self
+        """Bound the way a real provider binds, so the repair can be appended.
+
+        The repair rides on the runnable ``bind_tools`` returns rather than on
+        a graph node, so a stand-in that answers with itself never sees it —
+        and a test that never sees it would be testing nothing.
+        """
+        from langchain_core.utils.function_calling import convert_to_openai_tool
+
+        return self.bind(tools=[convert_to_openai_tool(tool) for tool in tools])
 
 
 class TestTheRepairedCallActuallyRuns:

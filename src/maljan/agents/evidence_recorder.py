@@ -561,7 +561,10 @@ def _record_tool(
         # ``llm.max_tool_output_chars`` and the summariser guardrail the MCP
         # toolkit applies before the tool ever returns — and a second, silent
         # cut here would make raising that setting do nothing.
-        return f"[{entry.id}]\n{text}{_steering(kwargs, repeated)}"
+        # ``failed=not entry.ok``: a tool that answers with an error twice is
+        # repeating a failure, and the notice that calls it an answer reads as
+        # if the model already has what it asked for.
+        return f"[{entry.id}]\n{text}{_steering(kwargs, repeated, failed=not entry.ok)}"
 
     def _stamp_error(
         kwargs: dict[str, Any],

@@ -426,18 +426,25 @@ def _hand_over_the_record(caller: Any, callee: Any, *, still_running: bool = Tru
     except Exception as exc:  # noqa: BLE001 — the record is handed over best-effort
         logger.debug("delegation: the callee's ledger could not be read (%s).", exc)
         entries = []
+    rows = _drain_budget_rows(callee)
     if not still_running:
         logger.warning(
-            "delegation %s -> %s: the caller's loop ended first; %d ledger entr(y/ies) "
-            "and the callee's validation state are dropped.",
+            "delegation %s -> %s: the caller's loop ended first; %d ledger entr(y/ies), "
+            "%d budget row(s) and the callee's validation state are dropped.",
             caller.name,
             callee.name,
             len(entries),
+            len(rows),
         )
         _drop_the_callee_s_validation_state(callee)
         return
     if entries:
         caller._evidence_entries.extend(entries)
+    # The callee's loop spent a budget too, and a callee that runs no stage of
+    # its own is drained by nobody else: its rows would stay on it until its
+    # next loop and then be counted in whichever stage drained it.
+    for row in rows:
+        caller._note_budget(dict(row, agent=str(callee.name)))
     try:
         rows, retries, fed_back = callee.drain_validation_findings()
         not_run = callee.drain_validation_not_run()
@@ -458,6 +465,18 @@ def _hand_over_the_record(caller: Any, callee: Any, *, still_running: bool = Tru
     for code in not_run:
         if code not in caller.validation_not_run:
             caller.validation_not_run.append(code)
+
+
+def _drain_budget_rows(callee: Any) -> list[dict[str, Any]]:
+    """What the callee's loops spent, handed over once. Never raises."""
+    drain = getattr(callee, "drain_budget_records", None)
+    if not callable(drain):
+        return []
+    try:
+        return list(drain() or [])
+    except Exception as exc:  # noqa: BLE001 — the meter never costs a run
+        logger.debug("delegation: the callee's budget rows could not be read (%s).", exc)
+        return []
 
 
 def _drop_the_callee_s_validation_state(callee: Any) -> None:

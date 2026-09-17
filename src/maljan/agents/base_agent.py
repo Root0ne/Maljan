@@ -332,11 +332,62 @@ _SHARED_STAND_IN_LOCK = threading.RLock()
 HARD_CAP_GRACE = 30.0
 
 
-def _state_messages(state: Any) -> list[Any]:
-    """The conversation out of a graph state, however the state is shaped."""
-    if isinstance(state, dict):
-        return list(state.get("messages") or [])
-    return list(getattr(state, "messages", None) or [])
+def _model_that_closes_off_truncated_calls(llm: Any, tools: list, repair: Any) -> Any:
+    """``llm`` with the repair appended, or ``llm`` when it cannot be appended to.
+
+    The repair has to sit between the model and the tool node and cost
+    nothing. A node would cost a superstep of every turn; binding the tools
+    here and piping the answer through the repair costs none, because
+    langgraph sees the same one runnable it always saw.
+
+    It is appended only when binding produced a ``RunnableBinding`` — what a
+    real provider returns, and what langgraph checks for before deciding to
+    bind the tools itself. A model that binds some other way is handed back
+    untouched, because a sequence langgraph then tries to bind again would
+    fail for every loop rather than for the rare truncated call this exists
+    to rescue.
+    """
+    from langchain_core.runnables import RunnableBinding, RunnableLambda
+
+    binder = getattr(llm, "bind_tools", None)
+    if not callable(binder):
+        return llm
+    try:
+        bound = binder(tools)
+    except Exception as exc:  # noqa: BLE001 — the loop binds them the ordinary way
+        logger.debug("tool argument repair not attached (%s).", exc)
+        return llm
+    if not isinstance(bound, RunnableBinding):
+        return llm
+    return bound | RunnableLambda(repair)
+
+
+def lock_for(agent: Any) -> Any:
+    """The lock that serialises everything driving one agent, or nothing.
+
+    An ask of an agent, a second ask of it and its own stage run all take it,
+    because all three drive the same buffers, the same budget and the same
+    call chain. A duck-typed stand-in that borrows one of these wrappers and
+    is never asked by anyone has no lock and needs none, so it gets a context
+    that does nothing rather than an attribute error.
+    """
+    lock = getattr(agent, "delegation_lock", None)
+    return lock if lock is not None else contextlib.nullcontext()
+
+
+def _steps_this_loop_spent(ledger: LoopBudget, messages: list) -> int:
+    """What the loop has used, from the conversation or from the budget itself.
+
+    A loop that ended at its wall clock has no conversation to hand over: the
+    thread it was running on did not come back, and the record was written
+    with an empty list — so the one run the meter exists to explain, the
+    analyst that spent twenty-five minutes and thirty tool calls and was cut
+    off, landed in the summary as zero steps. The refresher counted the
+    conversation before every model turn, so the budget itself holds the last
+    figure anyone saw.
+    """
+    own = steps_used(messages) if messages else ledger.own_steps
+    return int(own) + int(ledger.delegated_steps)
 
 
 def hard_cap(timeout: float, ceiling: BudgetCeiling | None = None) -> float:
@@ -1630,7 +1681,84 @@ def alignment_gate(knowledge: Any, cfg_validation: Any, log: Any, name: str) -> 
     return None
 
 
-class BaseAnalyst(ABC):
+class BudgetMeter:
+    """What one loop spent, announced as it runs and written down when it ends.
+
+    A mixin rather than a method on the analyst, because the judge runs a tool
+    loop too: it binds servers by role, its ledger entries carry its name, and
+    the console draws it as a step of the pipeline. One implementation is what
+    keeps its rows the same shape as an analyst's, and what keeps the two from
+    drifting the next time the meter grows a field.
+    """
+
+    name: str
+    logger: Any
+    pipeline_stage: str
+    _container: Any = None
+    # Read-only, so an agent built without ``__init__`` — a stand-in, a script
+    # — cannot drain another one's rows out of a list they all share.
+    _budget_records: Sequence[dict[str, Any]] = ()
+
+    def _event_sink(self) -> Any:
+        """The job's event sink, or ``None`` for an agent outside a job."""
+        return getattr(getattr(self, "_container", None), "event_sink", None)
+
+    def _budget_tick(
+        self, ledger: LoopBudget, messages: list, *, final: bool = False, ledger_entries: int = 0
+    ) -> None:
+        """One ``budget_tick`` for this loop as it stands. Never raises."""
+        from maljan.pipeline.events import emit_budget_tick
+
+        try:
+            emit_budget_tick(
+                self._event_sink(),
+                agent=str(self.name),
+                stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
+                steps_used=_steps_this_loop_spent(ledger, messages),
+                max_steps=ledger.max_steps,
+                elapsed_s=time.monotonic() - ledger.started,
+                timeout_s=ledger.timeout,
+                prompt_chars=sum(_message_chars(m) for m in messages),
+                ledger_entries=ledger_entries,
+                final=final,
+            )
+        except Exception as exc:  # noqa: BLE001 — the meter never costs a turn
+            self.logger.debug("%s: budget tick skipped (%s).", self.name, exc)
+
+    def _record_budget(
+        self, ledger: LoopBudget, messages: list, cap: str | None, *, detail: str = ""
+    ) -> None:
+        """Write this loop's spend down, and announce the cap that ended it, if one did."""
+        from maljan.pipeline.events import emit_stage_ended_at_cap
+
+        stage = str(getattr(self, "pipeline_stage", "") or "analysis")
+        record: dict[str, Any] = {
+            "stage": stage,
+            "steps_used": _steps_this_loop_spent(ledger, messages),
+            "max_steps": ledger.max_steps,
+            "elapsed_s": round(time.monotonic() - ledger.started, 1),
+            "timeout_s": round(ledger.timeout, 1),
+            "delegated_steps": ledger.delegated_steps,
+            "cap": cap,
+        }
+        self._note_budget(record)
+        if cap:
+            emit_stage_ended_at_cap(
+                self._event_sink(), stage=stage, agent=str(self.name), cap=cap, detail=detail
+            )
+
+    def _note_budget(self, record: dict[str, Any]) -> None:
+        """Keep one loop's record, on this instance rather than on the class."""
+        self._budget_records = [*self._budget_records, record]
+
+    def drain_budget_records(self) -> list[dict[str, Any]]:
+        """Every loop's budget record since the last drain, handing over ownership."""
+        records = list(self._budget_records)
+        self._budget_records = []
+        return records
+
+
+class BaseAnalyst(BudgetMeter, ABC):
     """Abstract base class for expert agents."""
 
     def __init__(self, llm: BaseChatModel, name: str, tools: list | None = None) -> None:
@@ -1763,7 +1891,7 @@ class BaseAnalyst(ABC):
         # node last drained it: steps against the cap, seconds against the
         # limit, and the cap that ended it when one did. The node writes it
         # to the state and the judge reads it into ``run_summary.budget``.
-        self._budget_records: list[dict[str, Any]] = []
+        self._budget_records: Sequence[dict[str, Any]] = []
 
     def _system_prompt(self, fallback: str | Callable[[], str]) -> str:
         """This analyst's system turn for the job it is actually running.
@@ -2029,68 +2157,13 @@ class BaseAnalyst(ABC):
         """This agent's ``(timeout, max_steps)`` for one loop; see ``loop_limits``."""
         return loop_limits(self.name, getattr(self, "_budget_ceiling", None))
 
-    def _event_sink(self) -> Any:
-        """The job's event sink, or ``None`` for an agent outside a job."""
-        return getattr(getattr(self, "_container", None), "event_sink", None)
-
-    def _budget_tick(
-        self, ledger: LoopBudget, messages: list, *, final: bool = False, ledger_entries: int = 0
-    ) -> None:
-        """One ``budget_tick`` for this loop as it stands. Never raises."""
-        from maljan.pipeline.events import emit_budget_tick
-
-        try:
-            last = messages[-1] if messages else None
-            prompt_chars = sum(_message_chars(m) for m in messages)
-            emit_budget_tick(
-                self._event_sink(),
-                agent=str(self.name),
-                stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
-                steps_used=steps_used(messages) + ledger.delegated_steps,
-                max_steps=ledger.max_steps,
-                elapsed_s=time.monotonic() - ledger.started,
-                timeout_s=ledger.timeout,
-                prompt_chars=prompt_chars if last is not None else 0,
-                ledger_entries=ledger_entries,
-                final=final,
-            )
-        except Exception as exc:  # noqa: BLE001 — the meter never costs a turn
-            self.logger.debug("%s: budget tick skipped (%s).", self.name, exc)
-
-    def _record_budget(
-        self, ledger: LoopBudget, messages: list, cap: str | None, *, detail: str = ""
-    ) -> None:
-        """Write this loop's spend down, and announce the cap that ended it, if one did."""
-        from maljan.pipeline.events import emit_stage_ended_at_cap
-
-        stage = str(getattr(self, "pipeline_stage", "") or "analysis")
-        record: dict[str, Any] = {
-            "stage": stage,
-            "steps_used": steps_used(messages) + ledger.delegated_steps,
-            "max_steps": ledger.max_steps,
-            "elapsed_s": round(time.monotonic() - ledger.started, 1),
-            "timeout_s": round(ledger.timeout, 1),
-            "delegated_steps": ledger.delegated_steps,
-            "cap": cap,
-        }
-        self._budget_records.append(record)
-        if cap:
-            emit_stage_ended_at_cap(
-                self._event_sink(), stage=stage, agent=str(self.name), cap=cap, detail=detail
-            )
-
-    def drain_budget_records(self) -> list[dict[str, Any]]:
-        """Every loop's budget record since the last drain, handing over ownership."""
-        records = list(self._budget_records)
-        self._budget_records = []
-        return records
-
     def _run_state_refresher(
         self,
         max_steps: int,
         timeout: float,
         started: float,
         budget: LoopBudget | None = None,
+        recorder: Any = None,
     ) -> Any:
         """The per-turn hook that regenerates the run-state block's budget line.
 
@@ -2102,7 +2175,9 @@ class BaseAnalyst(ABC):
 
         ``budget`` is the loop's own when the loop made one; the arguments
         describe a fresh one otherwise, so a caller with only the three
-        numbers reads the same line.
+        numbers reads the same line. ``recorder`` is what the tick counts its
+        ledger entries from — without it every tick but the last published a
+        zero that meant "nobody asked" rather than "no calls yet".
         """
         ledger = budget if budget is not None else LoopBudget(max_steps, timeout, started)
         from maljan.pipeline.events import BUDGET_TICK_EVERY
@@ -2122,7 +2197,11 @@ class BaseAnalyst(ABC):
             used = steps_used(messages)
             if budget is not None and used and used // BUDGET_TICK_EVERY > ticked[0]:
                 ticked[0] = used // BUDGET_TICK_EVERY
-                self._budget_tick(ledger, messages)
+                self._budget_tick(
+                    ledger,
+                    messages,
+                    ledger_entries=len(getattr(recorder, "entries", None) or []),
+                )
             if not str(getattr(self, "run_state_block", "") or ""):
                 return messages
             # The budget is stated in model turns (``model_turns_left``): the
@@ -2264,37 +2343,34 @@ class BaseAnalyst(ABC):
         # and its middleware hook. The contract this loop needs is one call
         # before every model turn that can replace the system message; that is
         # what moves when the helper does.
-        def _close_off_truncated_calls(state: Any) -> dict[str, Any]:
-            """The one seam between a model turn and the tool node.
+        def _close_off_truncated_calls(answer: Any) -> Any:
+            """The model's turn with a call it ran out of room to finish made good.
 
-            A call whose arguments never parsed is not refused by langgraph —
-            it is ignored, so nothing runs and nothing answers it, and the
-            loop ends on a turn it paid a step for. Here it is closed off when
-            appending the brackets it is missing makes it parse, and left
-            exactly as it was when it does not. The replacement carries the
-            same message id, so the conversation gains no turn.
+            Appended to the model rather than added as a node: a node is a
+            superstep, and a seam that cost one would quietly take a third of
+            every loop's tool rounds away. Here the loop's shape is exactly
+            what it was — langgraph sees one message from the model, and what
+            it sees is the message with the call in ``tool_calls`` where the
+            arguments could be closed off, and untouched where they could not.
             """
-            turns = list(_state_messages(state))
-            last = next(
-                (m for m in reversed(turns) if getattr(m, "type", "") == "ai"),
-                None,
-            )
-            if last is None or getattr(last, "id", None) is None:
-                return {}
             try:
-                repaired = repair_invalid_tool_calls(last, repairs)
+                repaired = repair_invalid_tool_calls(answer, repairs)
             except Exception as exc:  # noqa: BLE001 — a repair never costs a loop
                 self.logger.debug("tool argument repair skipped (%s).", exc)
-                return {}
-            return {"messages": [repaired]} if repaired is not None else {}
+                return answer
+            return repaired if repaired is not None else answer
 
+        recorded = record_tools(self.pinned_tools(), recorder, repeats, repairs)
         agent_executor = create_react_agent(
-            self.llm,
-            record_tools(self.pinned_tools(), recorder, repeats, repairs),
+            _model_that_closes_off_truncated_calls(self.llm, recorded, _close_off_truncated_calls),
+            recorded,
             prompt=self._run_state_refresher(
-                int(max_steps), float(timeout), budget.started, budget=budget
+                int(max_steps),
+                float(timeout),
+                budget.started,
+                budget=budget,
+                recorder=recorder,
             ),
-            post_model_hook=_close_off_truncated_calls,
         )
 
         # Run the ReAct coroutine on the shared, never-closing agent
@@ -3039,7 +3115,7 @@ class BaseAnalyst(ABC):
         drive the same buffers, the same budget and the same call chain.
         """
         self.current_round = 0
-        with self.delegation_lock:
+        with lock_for(self):
             return self._analyze_isr_guarded(data)
 
     def _analyze_isr_guarded(self, data: str) -> AgentISR:
@@ -3056,6 +3132,10 @@ class BaseAnalyst(ABC):
     def safe_analyze_isr_chunked(self, chunks: list) -> AgentISR:
         """Analyze a list of TextChunk objects, merging their ISRs.
 
+        Each chunk's loop runs under this agent's delegation lock, the same one
+        a single-chunk run and an ask of it take, so nothing else drives the
+        agent while one of its chunks is in flight.
+
         Raises:
             AnalystError: If the chunk list is empty or analysis fails on all
                 chunks. An empty chunk list is treated as a hard input error
@@ -3069,14 +3149,6 @@ class BaseAnalyst(ABC):
         if len(chunks) == 1:
             return self.safe_analyze_isr(chunks[0].content)
 
-        # The whole run of chunks under one hold of the lock, so an ask cannot
-        # land between two chunks of the same conversation.
-        with self.delegation_lock:
-            return self._analyze_chunks(chunks, merge_chunk_isrs)
-
-    def _analyze_chunks(self, chunks: list, merge_chunk_isrs: Callable[..., Any]) -> AgentISR:
-        """Every chunk analysed and merged, with the gate over the whole evidence."""
-
         self.logger.info("Chunked analysis: %d chunks for agent='%s'.", len(chunks), self.name)
 
         chunk_isrs: list[AgentISR] = []
@@ -3085,7 +3157,11 @@ class BaseAnalyst(ABC):
         for chunk in chunks:
             prompt_text = f"{chunk.to_prompt_header()}\n\n{chunk.content}"
             try:
-                isr = self.analyze_isr(prompt_text)
+                # Each chunk's loop under this agent's lock, so an ask of it
+                # cannot run inside one: an ask drives the same buffers, the
+                # same budget and the same call chain this loop is using.
+                with lock_for(self):
+                    isr = self.analyze_isr(prompt_text)
                 chunk_isrs.append(isr)
                 self.logger.debug(
                     "Chunk %d/%d analyzed: %d claims.",
@@ -3553,7 +3629,7 @@ class BaseAnalyst(ABC):
         takes it: a revision round is this agent's own loop.
         """
         self.current_round = int(revision_round)
-        with self.delegation_lock:
+        with lock_for(self):
             try:
                 truncated = self._truncate_input(original_data)
                 text, isr = self.revise_isr(
@@ -3761,7 +3837,6 @@ class BaseAnalyst(ABC):
     # built without ``__init__``, and the node writes a whole new mapping
     # rather than into this one.
     sample_path_choices: Mapping[str, Any] = _NO_PATH_CHOICES
-    _budget_records: list[dict[str, Any]] = []
 
     def _with_answer_status(self, isr: AgentISR) -> AgentISR:
         """Say on the ISR that the loop never produced a report, when it did not.

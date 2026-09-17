@@ -656,6 +656,27 @@ class ServiceContainer:
         entries.sort(key=lambda entry: getattr(entry, "seq", 0))
         return entries
 
+    def drain_all_judge_budget_records(self) -> list[dict[str, Any]]:
+        """Every budget row the judge agents' loops left, from each cached role.
+
+        Drained beside the ledger and for the same reason: the judge is cached
+        per role, only some of those instances run a tool loop, and a meter
+        that is never drained reports nothing for the one loop with a hard
+        wall-clock timeout.
+        """
+        with self._lock:
+            judges = list(self._judge_agent_cache.values())
+        rows: list[dict[str, Any]] = []
+        for judge in judges:
+            drain = getattr(judge, "drain_budget_records", None)
+            if drain is None:
+                continue
+            try:
+                rows.extend(drain() or [])
+            except Exception as exc:  # noqa: BLE001 — the meter never fails a run
+                logger.debug("budget drain skipped for a judge agent: %s", exc)
+        return rows
+
     # ------------------------------------------------------------------
     # Composition accessors
     # ------------------------------------------------------------------

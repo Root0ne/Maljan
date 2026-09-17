@@ -16,6 +16,7 @@
   ],
   "budget": "<data-keyed map>",
   "corroboration": "<data-keyed map>",
+  "dedupe": null,
   "degradation_reasons": [],
   "degraded_mode": null,
   "elapsed_seconds": null,

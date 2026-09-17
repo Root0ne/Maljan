@@ -169,6 +169,25 @@ class TestAStageRecordsWhatItCannotHave:
         note_unavailable_tools(_Container(registry), agent)
         assert registry.degradation_reasons == noted
 
+    def test_a_tool_the_collision_rule_renamed_is_still_found(self) -> None:
+        """Two servers offering one name: the second is bound as ``<server>__<tool>``.
+
+        The manifest is keyed by the name the server itself uses, so without
+        the prefix coming off the renamed tool's cell is never found and its
+        stage-start record is lost with nothing saying so.
+        """
+        manifest = ServerCapabilities.from_payload("analysis", MANIFEST)
+        registry = _Registry({"analysis": manifest})
+        agent = MagicMock()
+        agent.tools = [_bound("analysis__document_info", "analysis")]
+
+        noted = note_unavailable_tools(_Container(registry), agent)
+
+        assert noted == [
+            "server.analysis.document_info_unavailable(olefile is not installed); "
+            "uv sync --extra tools"
+        ]
+
     def test_a_tool_the_agent_does_not_bind_is_not_its_reason(self) -> None:
         manifest = ServerCapabilities.from_payload("analysis", MANIFEST)
         registry = _Registry({"analysis": manifest})

@@ -35,7 +35,12 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 
-from maljan.agents.base_agent import retry_on_connection_error, run_on_agent_loop
+from maljan.agents.base_agent import (
+    BudgetMeter,
+    LoopBudget,
+    retry_on_connection_error,
+    run_on_agent_loop,
+)
 from maljan.core.config import get_settings
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger, record_response_usage
@@ -266,7 +271,7 @@ def _sha256_of(sample: Any) -> str:
     return str(data.get("sha256") or "").strip()
 
 
-class JudgeAgent:
+class JudgeAgent(BudgetMeter):
     """Chief controller responsible for mediation, consensus detection, and final verdict.
 
     Usage:
@@ -313,6 +318,14 @@ class JudgeAgent:
         # checkable the same way an analyst's claim is. Same counter as the
         # analysts, so the ids are one sequence across the whole job.
         self.evidence_counter: EvidenceCounter | None = None
+        # The name the meter and the console draw this agent under. Fixed:
+        # there is one judge, and the ledger already stamps its entries with
+        # this word.
+        self.name: str = "judge"
+        # The budget meter's rows for this agent's loops, drained by the node
+        # that reads its ledger. The meter itself comes from ``BudgetMeter``,
+        # so the judge's rows are the shape the analysts' rows are.
+        self._budget_records: list[dict[str, Any]] = []
         # Accumulated across mediation rounds and drained by the judge node,
         # for the reason the analysts' buffer is: ``mediate`` runs the loop
         # once per round, and a buffer replaced on each of them would persist
@@ -471,7 +484,17 @@ class JudgeAgent:
 
         messages = messages_pre
 
-        timeout = get_settings().react_agent_timeout
+        settings = get_settings()
+        timeout = settings.react_agent_timeout
+        max_steps = int(settings.react_agent_max_steps)
+        # The judge is an agent by every other measure here — its ledger
+        # entries carry its name, it binds servers by role, the console draws
+        # it as a step — so its loop is metered like one. Without this the one
+        # loop with a hard wall-clock timeout was the only one that never said
+        # a cap had ended it.
+        budget = LoopBudget(max_steps, float(timeout))
+        cap: str | None = None
+        turns: list[Any] = []
         self.logger.info(
             "JudgeAgent invoking ReAct (timeout=%ds, tools=%d)...",
             timeout,
@@ -481,11 +504,12 @@ class JudgeAgent:
             result = await asyncio.wait_for(
                 agent_executor.ainvoke(
                     {"messages": messages},
-                    {"recursion_limit": get_settings().react_agent_max_steps},
+                    {"recursion_limit": max_steps},
                 ),
                 timeout=timeout,
             )
             _msgs = result.get("messages", []) or []
+            turns = list(_msgs)
             msg_count = len(_msgs)
             self.logger.info("JudgeAgent ReAct loop completed: %d messages.", msg_count)
             # Record every AI turn the ReAct executor produced
@@ -498,11 +522,19 @@ class JudgeAgent:
             return str(_msgs[-1].content)
         except TimeoutError:
             self.logger.error("JudgeAgent ReAct timed out after %ds.", timeout)
+            cap = "time"
             raise
         finally:
             # In a ``finally`` for the reason the analysts' loop uses one: a
             # mediation that timed out still made the calls it made.
             self._evidence_entries.extend(recorder.entries)
+            self._record_budget(
+                budget,
+                turns,
+                cap,
+                detail=(f"the loop did not answer within {timeout}s" if cap else ""),
+            )
+            self._budget_tick(budget, turns, final=True, ledger_entries=len(recorder.entries))
 
     def drain_evidence_entries(self) -> list[LedgerEntry]:
         """Every entry the judge's tool loops gathered, handing over ownership."""
