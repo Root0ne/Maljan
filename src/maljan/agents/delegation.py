@@ -182,14 +182,36 @@ def refusal(container: Any, caller: Any, callee_key: str) -> str | None:
 
 
 def _servers_the_caller_may_not_reach(container: Any, caller: Any, callee_key: str) -> list[str]:
-    """The callee's servers the caller's own stage withholds, or nothing."""
+    """The callee's servers the stage this chain started in withholds, or nothing."""
     from maljan.agents.composition import servers_withheld_from
 
     try:
-        return servers_withheld_from(container.config, str(caller.name), callee_key)
+        return servers_withheld_from(
+            container.config,
+            str(caller.name),
+            callee_key,
+            also=frozenset(getattr(caller, "withheld_by_the_chain", ()) or ()),
+        )
     except Exception as exc:  # noqa: BLE001 — a guard never costs a run
         logger.debug("delegation: the caller's tool policy could not be read (%s).", exc)
         return []
+
+
+def _the_chain_s_tool_policy(caller: Any) -> frozenset[str]:
+    """Every server the stage that started this chain withholds, for the callee.
+
+    Carried rather than recomputed, because a callee that no stage names
+    withholds nothing of its own: without this the policy would hold for the
+    first ask and lapse for the one that ask makes in turn.
+    """
+    from maljan.agents.composition import _withheld_servers
+
+    inherited = frozenset(getattr(caller, "withheld_by_the_chain", ()) or ())
+    try:
+        return inherited | frozenset(_withheld_servers(caller._container.config, str(caller.name)))
+    except Exception as exc:  # noqa: BLE001 — the inherited set still holds
+        logger.debug("delegation: the caller's tool policy could not be read (%s).", exc)
+        return inherited
 
 
 def _where_the_caller_runs(container: Any, caller: Any) -> str:
@@ -327,6 +349,7 @@ def _brief_callee(caller: Any, callee: Any, *, stage: str, round_index: int) -> 
     callee.run_state_block = str(getattr(caller, "run_state_block", "") or "")
     callee.sample_format = tuple(getattr(caller, "sample_format", ("unknown", "unknown")))
     callee.call_chain = (*tuple(getattr(caller, "call_chain", ()) or ()), str(caller.name))
+    callee.withheld_by_the_chain = _the_chain_s_tool_policy(caller)
     choices = getattr(caller, "sample_path_choices", None) or {}
     resolved = getattr(callee, "_resolved", None)
     provider_id = str(getattr(resolved, "static_provider_id", "") or "")
@@ -353,6 +376,7 @@ _BRIEFED_STATE = (
     "sample_format",
     "_analysis_file_path",
     "_path_by_server",
+    "withheld_by_the_chain",
 )
 
 

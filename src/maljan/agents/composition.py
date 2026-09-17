@@ -341,7 +341,12 @@ def mcp_refs_for(settings: Settings, key: str) -> list[ToolRef]:
     return _mcp_refs(settings, definition, key)
 
 
-def servers_withheld_from(settings: Settings, caller_key: str, callee_key: str) -> list[str]:
+def servers_withheld_from(
+    settings: Settings,
+    caller_key: str,
+    callee_key: str,
+    also: frozenset[str] = frozenset(),
+) -> list[str]:
     """The servers ``callee_key`` brings that ``caller_key``'s own stage may not reach.
 
     A callee's effective tool set is its own definition narrowed by the tool
@@ -356,7 +361,11 @@ def servers_withheld_from(settings: Settings, caller_key: str, callee_key: str) 
     """
     from maljan.core.config import ALL_SERVERS
 
-    withheld = _withheld_servers(settings, caller_key)
+    # ``also`` is what the stage that started the chain withholds, carried down
+    # by the delegation. Without it the policy stops at the first callee: a
+    # specialist that no stage names withholds nothing of its own, so the ask
+    # it makes in turn would reach exactly what the stage was told not to.
+    withheld = _withheld_servers(settings, caller_key) | set(also)
     if not withheld:
         return []
     brought = {str(ref.server) for ref in mcp_refs_for(settings, callee_key)}

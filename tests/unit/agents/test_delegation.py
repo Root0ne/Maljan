@@ -28,6 +28,7 @@ from maljan.agents.configurable_analyst import ConfigurableAnalyst
 from maljan.agents.delegation import (
     TEAM_SERVER,
     DelegationRefused,
+    _brief_callee,
     ask,
     ask_tool,
     refusal,
@@ -523,6 +524,52 @@ class TestTheGuards:
         )
 
         assert refusal(container, container.get_agent("boss"), "helper") is None
+
+    def test_the_asking_stage_s_policy_holds_for_the_ask_that_ask_makes(self) -> None:
+        """A callee that no stage names withholds nothing of its own.
+
+        Without carrying the policy down, it would hold for the first ask and
+        lapse for the one that ask makes in turn.
+        """
+        container = _Container(
+            _settings(
+                definitions={
+                    "third": {
+                        "role": "generic",
+                        "prompt": "You are third.",
+                        "tools": [{"kind": "mcp", "server": "knowledge"}],
+                    }
+                },
+                profiles={
+                    "led": {
+                        "stages": [
+                            {
+                                "key": "lead",
+                                "kind": "analysis",
+                                "agents": ["boss"],
+                                "builtin_tools": False,
+                            },
+                            {
+                                "key": "verdict",
+                                "kind": "verdict",
+                                "agents": ["judge"],
+                                "depends_on": ["lead"],
+                            },
+                        ]
+                    }
+                },
+            ),
+            models={},
+            tools={},
+        )
+        boss = container.get_agent("boss")
+        boss.pipeline_stage = "lead"
+        helper = container.get_agent("helper")
+        _brief_callee(boss, helper, stage="lead", round_index=0)
+
+        why = refusal(container, helper, "third")
+
+        assert why is not None and "knowledge" in why
 
     def test_a_profile_with_nothing_to_call_binds_no_ask_tool(self) -> None:
         """``exclude_servers: ['*']`` is the tool-free baseline, delegation included."""
