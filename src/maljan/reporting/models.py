@@ -77,6 +77,8 @@ class SignatureInfo(BaseModel):
     signer_subject: str | None = None
     signer_issuer: str | None = None
     signature_valid: bool | None = None
+    # The pack's ``signing_info`` entry these facts were read from.
+    evidence_id: str | None = None
 
 
 # Canonical platform vocabulary. Used by SampleIdentity, the Sigma and YARA

@@ -171,9 +171,17 @@ class MarkdownRenderer:
         # `4d5a` is the finding, and the type string alone hides it.
         if ident.magic_bytes:
             lines.append(f"| Magic bytes | `{ident.magic_bytes}` |")
-        lines.append(f"| Signed | {'yes' if ident.signing.is_signed else 'no'} |")
-        if ident.signing.signer_subject:
-            lines.append(f"| Signer | {ident.signing.signer_subject} |")
+        signing = ident.signing
+        cited = f" ({signing.evidence_id})" if signing.evidence_id else ""
+        lines.append(f"| Signed | {'yes' if signing.is_signed else 'no'}{cited} |")
+        if signing.signer_subject:
+            lines.append(f"| Signer | {signing.signer_subject} |")
+        if signing.signer_issuer:
+            lines.append(f"| Signer issuer | {signing.signer_issuer} |")
+        if signing.signature_valid is not None:
+            lines.append(
+                f"| Signature chain | {'valid' if signing.signature_valid else 'invalid'} |"
+            )
         lines.append("")
         lines.append("**Hashes:**")
         lines.append("")

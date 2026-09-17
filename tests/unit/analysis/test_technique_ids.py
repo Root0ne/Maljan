@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from maljan.analysis.technique_ids import sigma_technique_ids, technique_ids_in
+from maljan.analysis.technique_ids import (
+    api_capability_hits,
+    sigma_technique_ids,
+    technique_ids_in,
+)
 
 
 class TestTechniqueIdsIn:
@@ -41,3 +45,31 @@ class TestSigmaTechniqueIds:
 
     def test_not_a_row(self) -> None:
         assert sigma_technique_ids(None) == []
+
+
+class TestApiCapabilityHits:
+    def _payload(self, matched: list[str], min_apis: int = 2) -> dict:
+        rule = {
+            "technique_id": "T1055",
+            "name": "Process Injection",
+            "matched": matched,
+            "min_apis": min_apis,
+        }
+        return {"capabilities": [{"api": api, "techniques": [rule]} for api in matched]}
+
+    def test_a_rule_the_set_cleared_is_one_row_with_the_pooled_apis(self) -> None:
+        hits = api_capability_hits(self._payload(["WriteProcessMemory", "CreateRemoteThread"]))
+        assert hits == [
+            {
+                "technique_id": "T1055",
+                "name": "Process Injection",
+                "matched_apis": ["WriteProcessMemory", "CreateRemoteThread"],
+            }
+        ]
+
+    def test_a_rule_under_its_floor_is_not_a_hit(self) -> None:
+        assert api_capability_hits(self._payload(["WriteProcessMemory"], min_apis=2)) == []
+
+    def test_not_a_payload(self) -> None:
+        assert api_capability_hits(None) == []
+        assert api_capability_hits({"capabilities": "nope"}) == []

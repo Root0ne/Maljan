@@ -17,7 +17,11 @@ import re
 from collections.abc import Sequence
 from typing import Any
 
-from maljan.analysis.technique_ids import sigma_technique_ids, technique_ids_in
+from maljan.analysis.technique_ids import (
+    api_capability_hits,
+    sigma_technique_ids,
+    technique_ids_in,
+)
 
 # How many techniques the block names. The judge's prompt is already a
 # multi-kilobyte assembly and the tail of a confidence-ordered list is noise;
@@ -91,7 +95,15 @@ def collect(
 
     for entry in ledger or []:
         tool = str(getattr(entry, "tool", "") or "tool")
-        for tid in _technique_ids(getattr(entry, "structured", None)):
+        structured = getattr(entry, "structured", None)
+        # The API rules assert a technique only when the import set cleared
+        # the rule's floor; a rule that merely lists one of the APIs does not.
+        ids = (
+            {hit["technique_id"] for hit in api_capability_hits(structured)}
+            if tool == "api_capability"
+            else _technique_ids(structured)
+        )
+        for tid in ids:
             add(tid, tool, None)
 
     return rows

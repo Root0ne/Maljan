@@ -59,6 +59,47 @@ def sigma_technique_ids(row: Mapping[str, Any] | None) -> list[str]:
     return found
 
 
+def api_capability_hits(payload: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+    """The technique rules an ``api_capability`` result cleared, one row per rule.
+
+    The tool answers per API and repeats a rule under every API it matched;
+    here the matched APIs are pooled per rule and the rule counts only when
+    they clear its own ``min_apis``. Each row: ``technique_id``, ``name``,
+    ``matched_apis`` in first-seen order. Corroboration and the report's
+    projection both read this, so what one calls asserted the other shows.
+    """
+    if not isinstance(payload, Mapping):
+        return []
+    rules: dict[tuple[str, str], tuple[int, list[str]]] = {}
+    for row in payload.get("capabilities") or []:
+        if not isinstance(row, Mapping):
+            continue
+        for rule in row.get("techniques") or []:
+            if not isinstance(rule, Mapping):
+                continue
+            ids = technique_ids_in(rule.get("technique_id"))
+            if not ids:
+                continue
+            key = (ids[0], str(rule.get("name") or ""))
+            _floor, apis = rules.setdefault(key, (_min_apis(rule), []))
+            for api in rule.get("matched") or []:
+                name = str(api).strip()
+                if name and name not in apis:
+                    apis.append(name)
+    return [
+        {"technique_id": tid, "name": name, "matched_apis": apis}
+        for (tid, name), (floor, apis) in rules.items()
+        if len(apis) >= floor
+    ]
+
+
+def _min_apis(rule: Mapping[str, Any]) -> int:
+    try:
+        return max(1, int(rule.get("min_apis") or 1))
+    except (TypeError, ValueError):
+        return 1
+
+
 def _strings(value: Any) -> Iterable[str]:
     if isinstance(value, str):
         yield value

@@ -503,6 +503,29 @@ class TestCorroborationCounts:
         # A technique nothing asserted keeps its row, with the empty list showing.
         assert rows["T1071"] == {"asserted_by": [], "claimed_by": ["static"]}
 
+    def test_a_rule_that_lists_an_api_but_did_not_fire_asserts_nothing(self) -> None:
+        """The same floor the projection applies: one API under a two-API rule
+        is a listing, not a hit, and corroboration does not count it."""
+        payload = {
+            "capabilities": [
+                {
+                    "api": "WriteProcessMemory",
+                    "techniques": [
+                        {
+                            "technique_id": "T1055",
+                            "name": "Process Injection",
+                            "matched": ["WriteProcessMemory"],
+                            "min_apis": 2,
+                        }
+                    ],
+                }
+            ]
+        }
+        rows = corroboration(
+            {"static": _isr(_claim("T1055"))}, [_entry("api_capability", payload, 1)]
+        )
+        assert rows["T1055"] == {"asserted_by": [], "claimed_by": ["static"]}
+
     def test_no_weights_and_no_score_anywhere(self) -> None:
         rows = corroboration({"static": _isr(_claim("T1055"))}, [])
         assert set(rows["T1055"]) == {"asserted_by", "claimed_by"}

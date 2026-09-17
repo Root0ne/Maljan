@@ -27,7 +27,7 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from maljan.analysis.technique_ids import sigma_technique_ids
+from maljan.analysis.technique_ids import api_capability_hits, sigma_technique_ids
 from maljan.core.logger import logger
 from maljan.reporting.models import (
     DynamicBehavior,
@@ -43,6 +43,7 @@ from maljan.reporting.models import (
     RegistryMod,
     SampleIdentity,
     SandboxSignature,
+    SignatureInfo,
     StaticAnalysis,
     StringIOC,
 )
@@ -174,7 +175,37 @@ def identity_from_ledger(
         platform=str(facts.get("platform") or platform or "unknown"),  # type: ignore[arg-type]
         mime_type=_opt(facts.get("mime")),
         magic_bytes=str(facts.get("magic_hex") or computed.get("magic_hex") or ""),
+        signing=_signing_from_ledger(ledger),
     )
+
+
+def _signing_from_ledger(ledger: list[LedgerEntry]) -> SignatureInfo:
+    """The signature facts as the pack's ``signing_info`` entry states them.
+
+    Signed means any of the three signature kinds the tool looks for is
+    present; the subject and issuer are Authenticode's, or an APK's signer
+    when that is the one present. ``signature_valid`` is set only when the
+    tool reports a chain verdict (``authenticode.valid``); the extractor
+    does not verify chains today, so it stays ``None`` rather than reading
+    "present" as "valid". The entry id travels with the facts.
+    """
+    for entry, data in _payloads(ledger, "signing_info"):
+        auth = _dict_of(data.get("authenticode"))
+        apk = _dict_of(data.get("apk"))
+        macho = _dict_of(data.get("macho"))
+        valid = auth.get("valid")
+        return SignatureInfo(
+            is_signed=bool(auth.get("present") or apk.get("present") or macho.get("present")),
+            signer_subject=_opt(auth.get("subject")) or _opt(apk.get("subject")),
+            signer_issuer=_opt(auth.get("issuer")) or _opt(apk.get("issuer")),
+            signature_valid=valid if isinstance(valid, bool) else None,
+            evidence_id=entry.id,
+        )
+    return SignatureInfo()
+
+
+def _dict_of(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
 
 
 def _hashes_of(sample_path: str | None) -> dict[str, Any]:
@@ -305,39 +336,17 @@ def static_from_ledger(
     # The capability profile is what the knowledge table said about the import
     # set when the pack asked (``tools.knowledge.api_capability``): a category
     # per API and the technique rules that list it. Counted here and cited by
-    # the entry's id. A rule is a hit only when the APIs it matched across the
-    # whole import set clear its ``min_apis``; the tool answers one API at a
-    # time and leaves that arithmetic to whoever reads the rows.
+    # the entry's id. Which rules fired is ``api_capability_hits``' answer, the
+    # same one corroboration reads.
     for entry, data in _payloads(ledger, "api_capability"):
         rows = [row for row in data.get("capabilities") or [] if isinstance(row, dict)]
-        rules: dict[tuple[str, str], tuple[int, list[str]]] = {}
         for row in rows:
             category = str(row.get("category") or "").strip()
             if category:
                 static.api_capabilities[category] = static.api_capabilities.get(category, 0) + 1
-            for rule in row.get("techniques") or []:
-                if not isinstance(rule, dict):
-                    continue
-                tid = _technique_id(rule.get("technique_id"))
-                if not tid:
-                    continue
-                _floor, apis = rules.setdefault(
-                    (tid, str(rule.get("name") or "")), (_min_apis(rule), [])
-                )
-                for api in rule.get("matched") or []:
-                    if str(api) and str(api) not in apis:
-                        apis.append(str(api))
-        for (tid, name), (floor, apis) in rules.items():
-            if len(apis) < floor:
-                continue
+        for hit in api_capability_hits(data):
             static.api_technique_hits.append(
-                {
-                    "technique_id": tid,
-                    "name": name,
-                    "matched_apis": apis,
-                    "source": "api_capability",
-                    "evidence_id": entry.id,
-                }
+                {**hit, "source": "api_capability", "evidence_id": entry.id}
             )
         if rows:
             seen = True
@@ -385,14 +394,6 @@ def _technique_id(value: Any) -> str:
     text = str(value or "")
     match = _TECHNIQUE_RE.search(text)
     return match.group(0) if match else ""
-
-
-def _min_apis(rule: dict[str, Any]) -> int:
-    """The rule's own floor, never below one."""
-    try:
-        return max(1, int(rule.get("min_apis") or 1))
-    except (TypeError, ValueError):
-        return 1
 
 
 # ---------------------------------------------------------------------------

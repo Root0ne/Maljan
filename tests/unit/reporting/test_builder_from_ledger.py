@@ -298,3 +298,54 @@ class TestTheCapabilityProfile:
         assert report.static is not None
         assert report.static.api_capabilities == {"process_injection": 1}
         assert report.static.api_technique_hits == []
+
+
+class TestSigningFromThePack:
+    def _signing_entry(self, counter: EvidenceCounter, authenticode: dict[str, Any]) -> Any:
+        return entry(
+            "signing_info",
+            {
+                "authenticode": authenticode,
+                "apk": {"present": False, "schemes": []},
+                "macho": {"present": False},
+            },
+            counter,
+        )
+
+    def test_a_signed_sample_reads_signed_with_its_signer_and_the_entry_id(self) -> None:
+        from maljan.reporting.renderers.markdown import MarkdownRenderer
+
+        counter = EvidenceCounter()
+        signed = self._signing_entry(
+            counter,
+            {"present": True, "subject": "Simon Tatham", "issuer": "Sectigo Public Code Signing"},
+        )
+        report = _build([signed])
+        signing = report.identity.signing
+        assert signing.is_signed is True
+        assert signing.signer_subject == "Simon Tatham"
+        assert signing.signer_issuer == "Sectigo Public Code Signing"
+        assert signing.signature_valid is None  # the tool reports no chain verdict
+        assert signing.evidence_id == signed.id
+        md = MarkdownRenderer().render(report)
+        assert f"| Signed | yes ({signed.id}) |" in md
+        assert "| Signer | Simon Tatham |" in md
+        assert "| Signer issuer | Sectigo Public Code Signing |" in md
+
+    def test_an_unsigned_sample_reads_unsigned_and_still_cites_the_entry(self) -> None:
+        counter = EvidenceCounter()
+        unsigned = self._signing_entry(counter, {"present": False})
+        report = _build([unsigned])
+        assert report.identity.signing.is_signed is False
+        assert report.identity.signing.signer_subject is None
+        assert report.identity.signing.evidence_id == unsigned.id
+
+    def test_a_chain_verdict_is_carried_only_when_the_tool_reports_one(self) -> None:
+        counter = EvidenceCounter()
+        verified = self._signing_entry(counter, {"present": True, "subject": "x", "valid": True})
+        assert _build([verified]).identity.signing.signature_valid is True
+
+    def test_no_entry_means_no_claim_and_no_id(self) -> None:
+        report = _build([])
+        assert report.identity.signing.is_signed is False
+        assert report.identity.signing.evidence_id is None
