@@ -526,7 +526,8 @@ change landed on `main`.
   `_publish_event` now applies it once to every string field of every payload,
   recursively through nested lists and dicts and leaving keys alone, before the
   event reaches Redis, the socket and the table; the transcript recorder's copy
-  is scrubbed with it, so a replayed run reads exactly as the live one did.
+  is scrubbed where that copy is taken, so a replayed run reads exactly as the
+  live one did even when the publish never happens.
   Prose keeps its own line breaks and indentation (`scrub_keeping_layout`), so
   a report is not flattened into a wall of text on its way out. The fields that
   *name* something rather than say something — the ids this system issues, the

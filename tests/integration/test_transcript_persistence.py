@@ -125,6 +125,36 @@ class TestTheRecorderRecordsWhatIsSent:
 
         assert [m["text"] for m in recorded] == ["last words"]
 
+    def test_the_recorded_copy_is_scrubbed_where_it_is_taken(self) -> None:
+        """Unconditionally, not as a side effect of the publish.
+
+        The copy is appended synchronously on the pipeline's thread and the
+        publish is scheduled afterwards, best-effort. Scrubbing it inside the
+        publish left the row verbatim on exactly the paths the recorder exists
+        for: a loop that has already closed, and a run whose last messages are
+        still queued when the transcript is written.
+        """
+        recorded: list[dict[str, Any]] = []
+        loop = MagicMock()
+        loop.call_soon_threadsafe.side_effect = RuntimeError("event loop is closed")
+        sink = _make_event_sink(AsyncMock(), "job-1", loop, recorder=recorded)
+        secret = "key-3ax6xnjp29jd6fds4gc373sgvjxteol0"
+
+        emit_agent_message(
+            sink,
+            speaker="static",
+            role="analyst",
+            text=f"the config held {secret}",
+            report="read from /home/operator/maljan/data/samples/ab12/evil.exe",
+        )
+
+        (message,) = recorded
+        assert secret not in message["text"]
+        assert message["text"] == "the config held ***"
+        assert "/home/operator" not in message["report"]
+        assert message["report"] == "read from evil.exe"
+        assert message["speaker"] == "static"
+
     def test_no_recorder_is_a_supported_configuration(self) -> None:
         """The CLI path passes no recorder and must not crash."""
         loop = MagicMock()

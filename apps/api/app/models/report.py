@@ -129,8 +129,8 @@ class AgentMessage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     This table is that stream, written down. The worker tees every
     ``agent_message`` event as it is published and persists the list as it was
-    published — scrubbed of credential shapes, URL userinfo and host paths by
-    the publisher, exactly as the socket saw it — so the conversation a reader
+    published — scrubbed of credential shapes, URL userinfo and host paths as
+    the copy is taken, exactly as the socket saw it — so the conversation a reader
     sees a month later is not a reconstruction of the live one, and not a more
     revealing version of it either: it is the same recording. The verbatim
     text of a tool call stays on the evidence ledger, behind the report's

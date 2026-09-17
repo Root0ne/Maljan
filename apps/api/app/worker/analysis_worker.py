@@ -537,16 +537,13 @@ async def _publish_event(
     seq = await _next_seq(redis_conn, job_id)
     if stamp is not None:
         stamp["seq"] = seq
-        # The recorder's copy is the same message, so it reads the same way: a
-        # credential redacted on the socket and printed in the clear on the
-        # replay would be one conversation told two ways, which is the thing
-        # one shared transcript model exists to prevent. In place, because the
-        # recorder is already holding this dict.
-        stamp.update(scrubbed({k: v for k, v in stamp.items() if k != "seq"}))
     # Scrubbed here, once, for all three sinks. Seven producers build these
     # payloads and a new one cannot be relied on to remember; the publisher is
     # where the wire begins, so it is where the guarantee belongs. Producers
-    # may still scrub — doing it twice changes nothing.
+    # may still scrub — doing it twice changes nothing. The recorder's copy is
+    # scrubbed where it is taken (``_make_event_sink``), not here: it is taken
+    # before this coroutine is even scheduled, and on the paths the recorder
+    # exists for this coroutine never runs.
     stamped = {**scrubbed(data or {}), "seq": seq}
     ts = datetime.now(UTC).isoformat()
     payload = {
@@ -626,6 +623,13 @@ def _make_event_sink(
     second, subtly different account of it. Appending on the calling thread also
     means a Redis outage cannot cost us the record: publishing is best-effort,
     persistence is not.
+
+    The copy is scrubbed as it is taken, for that same reason: the publish that
+    scrubs what goes on the wire is fire-and-forget, and on the two paths the
+    recorder is here for — a loop that has already closed, and a run whose last
+    messages are still queued when the transcript is written — it never runs.
+    A record that is more revealing than the feed it is a record of would be
+    one conversation told two ways.
     """
 
     # Deferred like every other ``maljan`` import in this module — the core
@@ -636,7 +640,7 @@ def _make_event_sink(
         recorded: dict[str, Any] | None = None
         if recorder is not None and event_type == AGENT_MESSAGE:
             try:
-                recorded = {**data, "ts": datetime.now(UTC).isoformat()}
+                recorded = {**scrubbed(data), "ts": datetime.now(UTC).isoformat()}
                 recorder.append(recorded)
             except Exception as exc:  # noqa: BLE001 — recording must not fail a run
                 recorded = None

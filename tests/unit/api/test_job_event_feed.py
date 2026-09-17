@@ -554,11 +554,18 @@ class TestThePublisherIsTheGuarantee:
         assert data["x"] is None
         assert data["seq"] == 1
 
-    def test_the_recorders_copy_is_scrubbed_too(self) -> None:
-        """The transcript is the same recording, so it reads the same way."""
+    def test_the_recorders_copy_is_numbered_here_and_scrubbed_elsewhere(self) -> None:
+        """The number is the publisher's; the scrub is the sink's.
+
+        The copy is taken and scrubbed on the pipeline's thread, before this
+        coroutine is scheduled — see ``_make_event_sink`` and
+        ``tests/integration/test_transcript_persistence.py``. All this does to
+        it is give it the number its event went out under, so a stored row and
+        the live message it replaces collapse to one.
+        """
         redis_conn = _FakeRedis()
         job_id = str(uuid.uuid4())
-        recorded: dict[str, Any] = {"text": f"the key is {self.SECRET}"}
+        recorded: dict[str, Any] = {"text": "the key is ***"}
 
         async def run() -> None:
             await _publish_event(
@@ -572,7 +579,10 @@ class TestThePublisherIsTheGuarantee:
         asyncio.run(run())
 
         assert recorded["seq"] == 1
-        assert self.SECRET not in recorded["text"]
+        assert recorded["text"] == "the key is ***"
+        (published,) = self._published(redis_conn)
+        assert published["data"]["seq"] == 1
+        assert self.SECRET not in json.dumps(published)
 
 
 class TestWhatTheScrubMustNotTouchAndWhatItMust:
