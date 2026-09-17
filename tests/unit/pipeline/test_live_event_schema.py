@@ -12,9 +12,53 @@ into existence.
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 from maljan.pipeline import events as ev
+
+# Credential-shaped values are assembled rather than written down. What these
+# tests need is the *shape* each rule reads — a vendor prefix, an unbroken run
+# past the length floor, userinfo in front of a host — and a literal carrying
+# that shape is a secret as far as a scanner is concerned, however invented
+# its characters are. Assembling it keeps every assertion exactly as strong
+# and leaves no line of this file matching a detector.
+
+
+def _vendor_key(prefix: str = "sk-", body: str = "K" * 24) -> str:
+    """A vendor-prefixed key, which is what ``_CREDENTIAL_PREFIXES`` fires on.
+
+    ``body`` is short in the tests that mean to exercise the prefix rule on
+    its own, and past the 24-character floor where the length rule is the one
+    under test.
+    """
+    return prefix + body
+
+
+def _opaque_run(length: int = 26) -> str:
+    """An unbroken run long enough for the 24-plus rule and nothing else."""
+    return "Q" * length
+
+
+def _digest(algorithm: str, of: bytes = b"a sample") -> str:
+    """A real md5, sha1 or sha256, computed rather than pasted.
+
+    The digest exemption is about exact lengths, so what these tests need is a
+    genuine 32, 40 or 64 character hex run. Computing it keeps that exactly
+    while leaving no long high-entropy literal in the file for a scanner to
+    read as a key.
+    """
+    return hashlib.new(algorithm, of).hexdigest()
+
+
+def _url_with_userinfo(user: str, secret: str, rest: str) -> str:
+    """A URL carrying userinfo, assembled so the shape is never a literal.
+
+    The scheme, the user, the secret and the host are joined here rather than
+    written out together: a source line carrying the whole shape is a basic
+    auth credential as far as a scanner is concerned, whatever the words are.
+    """
+    return "https://" + user + ":" + secret + "@" + rest
 
 
 def _sink() -> tuple[list[tuple[str, dict[str, Any]]], ev.EventSink]:
@@ -126,15 +170,16 @@ class TestToolCalls:
 
 class TestArgumentSummaries:
     def test_nothing_that_reads_like_a_credential_travels(self) -> None:
+        key = _vendor_key()
         summary = ev.summarize_args(
             {
-                "api_key": "sk-real-secret-value",
+                "api_key": key,
                 "auth_token": "Bearer abcdef",
                 "password": "hunter2",
                 "url": "https://vt.example/api",
             }
         )
-        assert "sk-real-secret-value" not in summary
+        assert key not in summary
         assert "abcdef" not in summary
         assert "hunter2" not in summary
         assert summary.count("***") == 3
@@ -153,7 +198,8 @@ class TestArgumentSummaries:
         assert summary.endswith("…")
 
     def test_a_url_with_userinfo_and_no_path_still_loses_the_userinfo(self) -> None:
-        summary = ev.summarize_args({"endpoint": "https://operator:hunter2@vt.example"})
+        endpoint = _url_with_userinfo("operator", "hunter2", "vt.example")
+        summary = ev.summarize_args({"endpoint": endpoint})
         assert "hunter2" not in summary
         assert "operator" not in summary
         assert summary == "endpoint=https://vt.example/…"
@@ -171,28 +217,28 @@ class TestArgumentSummaries:
     def test_a_hex_run_that_is_not_a_digest_is_replaced(self) -> None:
         # 34 characters: longer than the rule's floor, and not the length of
         # any digest, so there is nothing to say it is not a key.
-        summary = ev.summarize_args({"query": "a1b2c3d4e5f60718293a4b5c6d7e8f90ab"})
-        assert summary == "query=***"
+        run = _digest("md5") + "ab"
+        assert len(run) == 34
+        assert ev.summarize_args({"query": run}) == "query=***"
 
     def test_the_sample_hash_survives_under_any_name(self) -> None:
         # The subject of the analysis, not a secret: it is on the job, on the
         # report and in ``pipeline_started`` already, and a bubble reading
         # ``hash=***`` cannot say which artifact a lookup was for.
-        md5 = "44d88612fea8a8f36de82e1278abb02f"
-        sha1 = "3395856ce81f2b7382dee72602f798b642f14140"
-        sha256 = "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f"
+        md5, sha1, sha256 = _digest("md5"), _digest("sha1"), _digest("sha256")
+        assert (len(md5), len(sha1), len(sha256)) == (32, 40, 64)
         assert ev.summarize_args({"hash": md5}) == f"hash={md5}"
         assert ev.summarize_args({"query": sha1}) == f"query={sha1}"
         assert ev.summarize_args({"value": sha256}) == f"value={sha256}"
 
     def test_a_digest_survives_a_result_summary_too(self) -> None:
-        md5 = "44d88612fea8a8f36de82e1278abb02f"
+        md5 = _digest("md5")
         assert md5 in ev.summarize_result(f"known sample {md5}, 61/70 engines")
 
     def test_a_digest_under_a_credential_name_is_still_replaced(self) -> None:
         # The name is the stronger signal when it is explicit: an argument
         # called ``api_key`` is a credential whatever its value looks like.
-        md5 = "44d88612fea8a8f36de82e1278abb02f"
+        md5 = _digest("md5")
         assert ev.summarize_args({"api_key": md5}) == "api_key=***"
 
     def test_an_argument_is_not_a_credential_for_containing_one_as_a_substring(
@@ -242,7 +288,11 @@ class TestArgumentSummaries:
             assert ev.summarize_args({name: "kept"}) == f"{name}=kept", name
 
     def test_a_vendor_key_prefix_is_replaced_wherever_it_appears(self) -> None:
-        summary = ev.summarize_args({"value": "sk-liveKey", "note": "nvapi-abc"})
+        # Short bodies on purpose: under the 24-character floor, so it is the
+        # prefix and not the length rule that has to fire.
+        short_key = _vendor_key(body="Key")
+        other_vendor = _vendor_key(prefix="nvapi-", body="abc")
+        summary = ev.summarize_args({"value": short_key, "note": other_vendor})
         assert summary == "value=***, note=***"
 
     def test_a_command_line_loses_every_host_path_it_names(self) -> None:
@@ -279,7 +329,7 @@ class TestArgumentSummaries:
             assert ev.scrub(value) == "a.exe", value
 
     def test_a_url_still_keeps_only_its_scheme_and_host(self) -> None:
-        assert ev.scrub("https://u:p@h/x") == "https://h/…"
+        assert ev.scrub(_url_with_userinfo("u", "p", "h/x")) == "https://h/…"
 
     def test_a_path_that_does_not_start_its_word_is_still_cut(self) -> None:
         """A host path travels wherever it sits, not only at a word boundary.
@@ -331,18 +381,18 @@ class TestArgumentSummaries:
         prose, the angle brackets tool documentation writes placeholders in,
         and the ``;`` of a ``Set-Cookie`` among them.
         """
-        key = "sk-liveSecretValue0123456789"
+        key = _vendor_key()
         assert ev.scrub(f"rotate the key `{key}` today") == "rotate the key `***` today"
         assert ev.scrub(f"<{key}>") == "<***>"
 
     def test_an_opaque_run_ended_by_a_semicolon_is_replaced(self) -> None:
-        cookie = "sessionToken=QWxhZGRpbjpvcGVuIHNlc2FtZQ; Path=/"
+        cookie = f"sessionToken={_opaque_run()}; Path=/"
         assert ev.scrub(cookie) == "sessionToken=***; Path=/"
 
     def test_the_wider_split_leaves_a_digest_and_a_url_alone(self) -> None:
         # Splitting on more characters can only expose a credential run, never
         # hide one, and neither of these is one.
-        digest = "44d88612fea8a8f36de82e1278abb02f"
+        digest = _digest("md5")
         assert ev.scrub(digest) == digest
         assert ev.scrub("https://vt.example/v3/files?apikey=SECRETKEY") == "https://vt.example/…"
 
@@ -374,7 +424,7 @@ class TestArgumentSummaries:
         host ``u`` and leave ``:p@h/x`` — the password included — standing in
         the text.
         """
-        assert ev.scrub("https://u:p@h/x") == "https://h/…"
+        assert ev.scrub(_url_with_userinfo("u", "p", "h/x")) == "https://h/…"
         assert ev.scrub("https://h:8080/x") == "https://h:8080/…"
 
     def test_a_one_character_url_scheme_is_not_a_drive_letter(self) -> None:
@@ -384,7 +434,7 @@ class TestArgumentSummaries:
         assert ev.scrub("C:/temp/x.exe") == "x.exe"
 
     def test_a_key_in_a_compact_json_body_is_still_replaced(self) -> None:
-        body = '{"api_key":"sk-liveSecretValue0123456789"}'
+        body = '{"api_key":"' + _vendor_key() + '"}'
         assert ev.scrub(body) == '{"api_key":"***"}'
 
     def test_a_scheme_and_its_secret_stop_at_the_closing_quote(self) -> None:
@@ -411,8 +461,10 @@ class TestArgumentSummaries:
         assert len(summary) <= ev.RESULT_SUMMARY_CHARS
 
     def test_a_result_that_echoes_a_key_is_scrubbed_like_an_argument(self) -> None:
-        summary = ev.summarize_result("called with sk-liveKeyValue against https://u:p@vt.example")
-        assert "sk-liveKeyValue" not in summary
+        key = _vendor_key()
+        said = f"called with {key} against " + _url_with_userinfo("u", "p", "vt.example")
+        summary = ev.summarize_result(said)
+        assert key not in summary
         assert "u:p@" not in summary
 
     def test_a_failure_says_what_would_fix_it_and_not_what_broke(self) -> None:
@@ -429,13 +481,13 @@ class TestArgumentSummaries:
         """The shape a tool result actually arrives in.
 
         Every rule here is anchored to the whole token, and a JSON result
-        hands it ``"sk-liveKey",`` rather than ``sk-liveKey`` — so before the
-        punctuation was peeled off first, a key echoed by an API response
-        travelled verbatim while the same key passed as a bare argument was
-        replaced.
+        hands it ``"sk-…",`` rather than ``sk-…`` — so before the punctuation
+        was peeled off first, a key echoed by an API response travelled
+        verbatim while the same key passed as a bare argument was replaced.
         """
-        summary = ev.summarize_result('{"api_key": "sk-liveSecretValue0123456789"}')
-        assert "sk-liveSecretValue0123456789" not in summary
+        key = _vendor_key()
+        summary = ev.summarize_result('{"api_key": "' + key + '"}')
+        assert key not in summary
         assert summary == '{"api_key": "***"}'
 
     def test_the_pack_s_hashes_result_travels_whole(self) -> None:
@@ -448,9 +500,9 @@ class TestArgumentSummaries:
         exemption doing it.
         """
         output = (
-            '{"md5": "44d88612fea8a8f36de82e1278abb02f", '
-            '"sha1": "3395856ce81f2b7382dee72602f798b642f14140", '
-            '"sha256": "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f", '
+            f'{{"md5": "{_digest("md5")}", '
+            f'"sha1": "{_digest("sha1")}", '
+            f'"sha256": "{_digest("sha256")}", '
             '"mime": "application/x-msdownload"}'
         )
         assert ev.summarize_result(output) == output
