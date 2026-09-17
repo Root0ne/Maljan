@@ -52,9 +52,9 @@ change landed on `main`.
   is. Guards, each a readable tool error: `core.agents.delegation_depth` (2),
   a cycle back up the call chain, a callee that is undefined or disabled, a
   callee whose servers the asking stage withholds, and not enough time left to
-  ask. The settings model and the API refuse a
-  reference to an unknown agent, to the definition itself, to the judge or the
-  reporter, and any such reference on those two. A new seeded definition
+  ask. The settings model and the API refuse a reference to an unknown agent,
+  to the definition itself, to the judge or the reporter, and any such
+  reference on those two. A new seeded definition
   `lead` (role `lead`, `src/maljan/agents/prompts/lead.md`) references
   `static`, `dynamic`, `network`, `reverser` and `triage`; a new seeded team
   `team_lead` runs it as its one analysis stage, with no debate stage — a

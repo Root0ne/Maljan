@@ -643,9 +643,9 @@ class TestTheCeiling:
     def test_the_lead_prompt_and_the_ask_tool_say_the_same_thing(self, team) -> None:
         """The prompt the lead reads first must not contradict its own tools.
 
-        Before F44 it said the specialists' turns were the lead's, which is the
-        belief that made the live proof's lead stop asking and close with no
-        techniques — from the prompt side, even with the budget fixed.
+        A prompt that says the specialists' turns are the lead's is the belief
+        that makes a lead stop asking and close with no techniques, whatever
+        the budget underneath it does.
         """
         from maljan.agents.prompts import LEAD_PROMPT
 

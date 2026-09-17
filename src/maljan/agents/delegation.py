@@ -14,9 +14,8 @@ the callee's wall clock as its duration; the callee's own tool calls are
 ledger entries under the callee's key, written to the caller's evidence buffer
 so the stage node that drains the caller writes them all; the callee's turns
 come out of the ask's own budget and are counted under the callee; and the ask
-and the answer are two
-``agent_message`` events with ``addressed_to`` set, so the transcript shows
-who asked whom and what came back.
+and the answer are two ``agent_message`` events with ``addressed_to`` set, so
+the transcript shows who asked whom and what came back.
 
 The answer is the callee's ISR text, verbatim. The caller reads it as a tool
 result and decides what to make of it; nothing here edits a claim, a
