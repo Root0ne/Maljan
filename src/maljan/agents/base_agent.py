@@ -352,6 +352,13 @@ def _model_that_closes_off_truncated_calls(llm: Any, tools: list, repair: Any) -
     binder = getattr(llm, "bind_tools", None)
     if not callable(binder):
         return llm
+    names = [str(getattr(tool, "name", "")) for tool in tools]
+    if len(set(names)) != len(names):
+        # Two tools of one name: langgraph would keep one of them and then
+        # refuse the bound list for not matching. Nothing here is worth a loop
+        # that will not start.
+        logger.debug("tool argument repair not attached: two tools share a name.")
+        return llm
     try:
         bound = binder(tools)
     except Exception as exc:  # noqa: BLE001 — the loop binds them the ordinary way
