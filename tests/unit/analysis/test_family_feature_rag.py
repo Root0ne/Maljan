@@ -18,33 +18,24 @@ def _static(**kw) -> StaticAnalysis:
 
 
 class TestBuildSampleProfileText:
-    def test_capabilities_and_imports(self) -> None:
+    def test_imports_in_the_binary_s_order_and_no_label(self) -> None:
+        """The profile carries the names as the binary lists them. It used to
+        lead with a capability histogram and a "suspicious imports" list read
+        off labels the extractor stamped on each row; nothing labels a row now."""
         static = _static(
             imports=[
-                ImportRow(
-                    dll="k.dll",
-                    function="VirtualAllocEx",
-                    is_suspicious=True,
-                    category="process_injection",
-                ),
-                ImportRow(
-                    dll="k.dll",
-                    function="CreateRemoteThread",
-                    is_suspicious=True,
-                    category="process_injection",
-                ),
-                ImportRow(dll="ws.dll", function="connect", is_suspicious=True, category="network"),
-                ImportRow(dll="k.dll", function="lstrlen", is_suspicious=False),
+                ImportRow(dll="k.dll", function="VirtualAllocEx"),
+                ImportRow(dll="k.dll", function="CreateRemoteThread"),
+                ImportRow(dll="ws.dll", function="connect"),
+                ImportRow(dll="k.dll", function="lstrlen"),
             ],
             packer_hint="UPX",
         )
         text = build_sample_profile_text(static)
-        assert "capabilities:" in text
-        assert "process_injection x2" in text
-        assert "network x1" in text
-        assert "VirtualAllocEx" in text
+        assert "imports: VirtualAllocEx, CreateRemoteThread, connect, lstrlen" in text
         assert "packer: UPX" in text
-        assert "lstrlen" not in text  # non-suspicious imports excluded
+        assert "capabilities:" not in text
+        assert "suspicious" not in text
 
     def test_high_entropy_sections(self) -> None:
         static = _static(
@@ -61,11 +52,8 @@ class TestBuildSampleProfileText:
     def test_empty_static_is_empty_text(self) -> None:
         assert build_sample_profile_text(_static()) == ""
 
-    def test_suspicious_imports_deduped_and_capped(self) -> None:
-        imports = [
-            ImportRow(dll="k", function=f"Susp{i % 3}", is_suspicious=True, category="execution")
-            for i in range(20)
-        ]
+    def test_imports_deduped_and_capped(self) -> None:
+        imports = [ImportRow(dll="k", function=f"Susp{i % 3}") for i in range(20)]
         text = build_sample_profile_text(_static(imports=imports))
         # Only 3 distinct names despite 20 rows.
         assert text.count("Susp") == 3
@@ -74,9 +62,9 @@ class TestBuildSampleProfileText:
 class TestBuildFamilyFingerprintText:
     def test_aggregates_common_phrases(self) -> None:
         profiles = [
-            "capabilities: process_injection x2, network x1; suspicious imports: VirtualAllocEx",
-            "capabilities: process_injection x3; suspicious imports: VirtualAllocEx, connect",
-            "capabilities: process_injection x1; suspicious imports: VirtualAllocEx",
+            "imports: VirtualAllocEx, WriteProcessMemory; packer: UPX",
+            "imports: VirtualAllocEx, connect; packer: UPX",
+            "imports: VirtualAllocEx, lstrlen",
         ]
         fp = build_family_fingerprint_text(profiles)
         # VirtualAllocEx appears in all 3 -> kept; rendered text non-empty.

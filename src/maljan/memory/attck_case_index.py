@@ -23,7 +23,7 @@ uses — so query and corpus always live in one embedding space (mirrors
 than vendoring vectors).
 
 Fail-safe + OFF by default: a missing corpus yields ``None`` (no candidates), and the
-feature is gated behind ``PreprocessingConfig.use_attck_case_rag``.
+index is what the knowledge tool ``similar_cases`` reads.
 """
 
 from __future__ import annotations

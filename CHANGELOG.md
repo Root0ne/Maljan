@@ -8,6 +8,82 @@ change landed on `main`.
 
 ### Added
 
+- **An id retired by a catalogue move is reported as retired, not invented.**
+  `data/attck_retired_ids.json` — per id, its domain and the ATT&CK release
+  that retired it — is written by the autoupdate script from the catalogue it
+  is about to overwrite; `attck_validate` and `attck_lookup` carry
+  `retired_in`, and `attck.unknown_id` and the judge's attack-pattern message
+  add "(retired in ATT&CK 19.2)" so a stored report or a prompt still naming
+  `T1562.001` reads honestly. The id stays as written.
+- **The ATT&CK platform map ships beside the id catalogue.**
+  `data/attck_platforms.json` carries, per technique, its domain and MITRE
+  platforms, written by `scripts/knowledge/prepare_attck_malware_fixtures.py`
+  from the same bundles as `data/attck_valid_ids.json`. `attck_loader.platforms_for`
+  answers from it and consults the cached bundles only for a real id the map
+  lacks; `tools.knowledge.attck_scope` gives a technique's domain and platforms
+  from the two vendored files alone, and `attck.platform_mismatch` asks it, so
+  a validation turn loads no STIX bundle and touches no network. A technique
+  whose only platform is `PRE` is exempt from the platform half of the check.
+  Both vendored files now come from ATT&CK 19.2.
+- **The triage pack: the deterministic facts exist before any analyst starts.**
+  A new stage kind `triage` runs the tools in `src/maljan/tools` in-process
+  over the sample and writes each result to the evidence ledger as an ordinary
+  entry under `agent="pipeline"`, `server="pipeline"`, in a fixed order:
+  `identify_file`, `hashes`, `signing_info`, the format tool the routed type
+  selects, a capped `strings` head and `iocs_from_file`, `yara_scan`, `capa`,
+  `sigma_match_sandbox` when a report exists, `api_capability` over the import
+  set, `lolbin_lookup` over the sandbox's command lines, the sandbox
+  projections at summary level and `pcap_summary` when a capture exists, one
+  reputation lookup on the sha256 through whichever reputation server is
+  enabled (recorded under that server), and `function_matches` when a
+  function-hash store is present. A tool that fails is an entry with
+  `ok=False` and a degradation reason `triage.<tool>_failed`, never a failed
+  job; the pack rewrites nothing a model says. The stage (`triage_pack`) is
+  seeded first in `default`, `mobile` and `deep_static`, not in
+  `measurement`; a stored team gains it through alembic revision
+  `20260919000000`, which `downgrade` removes again. The builder starts the
+  graph at a dependency-free triage stage and hangs every other root off it.
+  Conditions may read `triage.has_signature`, `triage.reputation_malicious`,
+  `triage.yara_hits` and `triage.capa_hits`; `run_summary.triage` carries
+  `{entries, failed, duration_ms}`. Settings: `triage.enabled`,
+  `triage.strings_head` (300) and `triage.reputation` (`auto` | `off`); the
+  console's stage editor offers the kind.
+- **Every model reads the pack, and a run-state block, on every turn.**
+  `render_pack` turns the pack into one line per entry with its ledger id in
+  brackets, cut at `reporting.upstream_findings_max_chars` with a line saying
+  how many entries were left out; under the heading *Facts established before
+  analysis (ledger ids in brackets; cite them)* it leads every analyst's first
+  human turn, the mediator's and the verdict's prompts, the narrative prompt
+  and every composer section, and the report's identity and signature rows
+  come from the same entries when no model cited them. `pipeline/run_state.py`
+  derives a compact block from the state — sample, identity, signature,
+  reputation, stages run or skipped and why, ledger count, failed tools,
+  remaining steps and seconds — and puts it in the system turn between
+  markers, regenerated on every model turn of a tool loop and never trimmed.
+  With a pack present, `isr.ungrounded_technique` no longer exempts an analyst
+  whose own ledger is empty: the pack's ids are citable by every agent.
+- **The ATT&CK technique check comes back in four parts, none of them a
+  rewrite.** Validity keeps `attck.unknown_id` and, when the catalogue cannot
+  be read, records `validation.not_run` and a degradation reason instead of
+  an empty result. `attck.platform_mismatch` puts the catalogue's domain and
+  platforms against the routed sample in the analyst's loop and on the
+  judge's attack-patterns; `CapabilityCell` carries `domain` and `platforms`
+  and the FP linter's C1 reads them. `attck.weak_alignment` is the paper's
+  gate: on a warm ATT&CK index the claim text is ranked, the id's gate score
+  and the top candidates are written on the claim and shown to the judge and
+  in the report, and an id the index neither ranked nor scored above
+  `validation.alignment_threshold` is questioned once — never substituted.
+  `run_summary.corroboration` becomes `{technique: {asserted_by, claimed_by}}`,
+  the deterministic sources that carry their own ids (capa, sigma, lolbin,
+  api_capability) beside the agents, with no weights; the report renders the
+  table and the console's technique cards show the two lists. Settings:
+  `validation.alignment_gate` (auto | off), `validation.alignment_gate_build`
+  (false) and `validation.alignment_threshold` (0.05).
+- **A Malware verdict over a run nobody analysed is challenged, like Benign.**
+  `verdict.unsupported_malware` asks the judge to cite the entries that
+  establish it — a reputation entry, a YARA or capa hit — or to return
+  Suspicious with an inconclusive rationale; one retry, the survivor recorded,
+  nothing rewritten.
 - **VirusTotal's own MCP server ships as a built-in tool server.**
   `virustotal` is seeded in `_builtin_servers()` on the streamable-HTTP
   endpoint `https://ai.virustotal.com/mcp`, disabled until an operator
@@ -228,6 +304,78 @@ change landed on `main`.
 
 ### Fixed
 
+- **The budget a model is told is in model turns.** The run-state line
+  reported graph steps as turns, about twice the truth (a tool round is two
+  graph steps); `model_turns_left` counts what langgraph counts and the
+  initial framing, the per-turn refresher and the final-answer nudge share
+  it. **The ISR parser keeps every technique id as written**: the
+  1001–1700 range guard and the placeholder set are gone, and
+  `attck.unknown_id` does the challenging. **The static provider does not run
+  capa and YARA again** when the triage pack recorded them. **`api_capability`
+  is a catalogue association, not a source**: its rows travel under
+  `associated_by`, shown in a Catalogue column and on the pack line as
+  "API catalogue associations (reference)", never in `asserted_by`; the
+  judge's zero-corroboration note counts the analysts' claimed techniques
+  and states rule matches no analyst claimed separately. YARA TTP rules are
+  the fifth asserting source (`yara`), an asserted id the catalogue retired is
+  marked in the table, a skipped lookup is not a failed tool in the run
+  state, and a budget-trimmed pack entry says its output was dropped.
+- **Our own rule files assert only live ids.** Two API-to-technique rules and
+  one YARA rule carried ids the catalogue retired (T1562.001, T1562.006,
+  T1574.002); they now name what the 19.2 bundle's `revoked-by` points at
+  (T1685, T1574.001), the composer's evasion filter learns T1685, and a test
+  holds every technique id in `data/api_attck_map_v1.json` and
+  `data/yara_ttp_rules.yaml` to `valid_ids()`.
+- **`api_capability` cites the same spelling in every process.** The matcher
+  walked a set, so which of an ANSI/wide pair was cited — and the YARA draft's
+  strings — changed with the hash seed; the set is walked sorted and both
+  spellings cite the rule. Revision `20260920000000` also deletes the stored
+  `preprocessing.use_api_behaviour_map` and `api_behaviour_map_path` rows. The
+  three vendored ATT&CK files carry `_meta.attck_version`, ICS techniques no
+  longer declare the platform "None", and the derived-technique table is
+  ordered by source and id.
+- **The ledger keeps the full parsed result.** `build_entry` parsed
+  `structured` from the output it had already cut at `MAX_OUTPUT_CHARS`, so a
+  pack result longer than six thousand characters was stored with no
+  structured payload and corroboration, the projections and the evidence
+  sections saw nothing of it; on the live proof that hid a real rule hit.
+  `structured` is now the whole result and `output` the text a model reads;
+  `apply_budget` counts what is stored against the per-agent evidence byte
+  budget.
+- **The signature facts come from the pack's `signing_info` entry, cited by
+  id.** `identity.signing` was never filled from the ledger, so a signed
+  sample read `Signed: no`; the projection now reads presence, subject and
+  issuer (a chain verdict only when the tool reports one) and the `Signed`
+  row prints the entry id.
+- **One helper decides which API rules fired.** `api_capability_hits` applies
+  a rule's `min_apis` over the pooled matched APIs; the report's projection
+  and the corroboration collector both read it.
+- **Corroboration reads the ids capa and Sigma really write.** The extractor
+  behind `asserted_by` matched a whole string against `T1234`, so capa's
+  decorated `attck` strings and a Sigma match's `attack.t1055.012` tags never
+  counted and two of the four sources the table names could not appear in it.
+  One reader, `analysis.technique_ids`, takes the shapes as the tools emit
+  them, and the corroboration table, the persistence projection, the evidence
+  sections and the pack's capa line go through it. The Sigma ledger fixture
+  carried an invented `meta.technique_ids` key and now carries the `tags`
+  `sigma_match` writes.
+- **`api_capability` matches the import set as a whole.** Every rule in the
+  vendored API-to-technique map needs two or more APIs and the tool matched one
+  name at a time, so no rule could ever fire and the pack's entry listed no
+  technique on any sample. Each API's row now cites the rules the set clears
+  whose evidence includes it, with the APIs matched and the rule's floor.
+- **A corroboration row is read in one place, in either shape.** The CLI
+  counted a row's keys as its sources, and a summary stored before the two
+  lists crashed `to_markdown` and `to_dict` when the CLI rebuilt it directly;
+  `corroboration_row` normalises on construction and every reader goes through
+  it. From the same review: the judge node records its own unchecked
+  attack-patterns under `validation.not_run`; the index warmer checks and sets
+  under one lock and remembers a failed build; a reputation lookup that was
+  skipped renders as not done and one that broke as failed; the alignment gate
+  ranks the claim's own words; the judge's platform message drops its
+  duplicated subject; the report's corroboration table sits under its own
+  heading; a node-level test shows a capa failure alone leaves a run
+  undegraded.
 - **Carved payloads land under the sidecar's staging directory, never where the
   model says.** `carve_payloads` took a model-chosen `out_dir`, so a tool could
   write live malware anywhere the analysis sidecar could write; a live run
@@ -287,6 +435,15 @@ change landed on `main`.
   and size where known, file name, type and platform — and the lookup sentence
   names the sha256. A run whose analysts produced no prose left the judge with
   no hash anywhere in its conversation.
+
+- **The final-answer nudge survives a tool call the server cannot render.** A
+  live static loop ended on an assistant turn whose tool call carried
+  arguments that never parsed; the nudge sent the turn back and the server
+  answered 500 ("Failed to parse tool call arguments as JSON"). The nudge and
+  the forced synthesis now send the transcript without such a call, and when
+  the plain request still fails the nudge asks once more with the loop's tools
+  bound and `tool_choice="none"`; `run_summary.nudge.retry_mode` names which
+  analysts needed which repair.
 
 - **A Benign verdict over a run nobody analysed is challenged.**
   `verdict.unsupported_benign` asks the judge to cite the entry that
@@ -439,6 +596,17 @@ change landed on `main`.
 
 ### Changed
 
+- **The report's capability profile is the pack's `api_capability` entry,
+  cited by id.** `StaticAnalysis.api_capabilities` is counted from the entry's
+  rows and `api_capabilities_evidence_ids` names the entry; the Markdown
+  profile line, the console and the narrative prompt show the id. A technique
+  rule from that entry is a row under the derived-technique table only when
+  the APIs it matched clear its floor, with the entry id beside it, and the
+  YARA draft takes its import strings from those rows as bare names. capa's
+  namespaces are no longer counted as import capabilities; its technique hits
+  stay. The family-feature profile carries the import names in the binary's
+  order; a fingerprint catalogue built against the old vocabulary needs a
+  rebuild with `scripts/knowledge/build_family_feature_kb.py`.
 - **A debate hands over to exactly one node, and the settings say so.** A team
   whose debate feeds two stages — or one parallel analysis stage with two
   agents, which is two nodes — is refused when it is saved, per stage, instead
@@ -643,6 +811,25 @@ change landed on `main`.
 
 ### Removed
 
+- **The static analyst's case-prior hint and its settings.**
+  `StaticAnalyst._compute_attck_case_hint`, `analysis.attck_case_rag` and the
+  five `preprocessing.attck_case_*` settings; alembic revision
+  `20260920000000` deletes the stored rows. `similar_cases` stays.
+- **The in-process case-prior retrieval in the judge node.** The block that
+  retrieved ATT&CK techniques from similar prior cases inside the judge node,
+  the `attck_case_candidates` state channel and `FamilyAttribution` field, the
+  advisory table in the report and on the console, and the row helper only it
+  used. Prior cases remain reachable through the knowledge tool
+  `similar_cases`, which an analyst calls and cites.
+- **Import labelling in the extractor.** `pe_extractor.classify_import`, the
+  hand-picked suspicious-import table, the ELF list, `ImportRow.is_suspicious`
+  and `ImportRow.category`, the extractor-built capability counter, the
+  Markdown "Suspicious Imports" table, the narrative prompt's suspicious-import
+  list and the console's "suspicious only" filter. A report written while the
+  labels existed still loads: `ImportRow` and `FamilyAttribution` ignore the
+  retired keys. Settings `preprocessing.use_api_behaviour_map` and
+  `preprocessing.api_behaviour_map_path` go with them; the knowledge tool
+  reads the catalogue directly.
 - **The three-layer TTP cascade** (`analysis/ttp_cascade.py`). It weighted every
   claim by a table of per-layer constants and cross-layer multipliers nobody
   could derive from anything, handed the judge one number per technique, and the

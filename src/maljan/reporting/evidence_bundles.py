@@ -404,6 +404,9 @@ _EVASION_TECHNIQUES = frozenset(
         "T1620",
         "T1027",
         "T1140",
+        # T1685 is what ATT&CK 19.2 made of T1562.001 and T1562.006; the two
+        # retired ids stay so a report written before the move still renders.
+        "T1685",
         "T1562.001",
         "T1562.006",
         "T1070.004",

@@ -33,6 +33,9 @@
     "sycophancy_events": null,
     "termination_reason": null
   },
+  "nudge": {
+    "retry_mode": "<data-keyed map>"
+  },
   "profile": {
     "analysts": [
       null
@@ -62,6 +65,11 @@
     "output_tokens": null,
     "total_tokens": null
   },
+  "triage": {
+    "duration_ms": null,
+    "entries": null,
+    "failed": null
+  },
   "truncation": {
     "any_bound_hit": null,
     "integrity_dropped": "<data-keyed map>",
@@ -79,6 +87,9 @@
   },
   "validation": {
     "by_code": "<data-keyed map>",
+    "not_run": [
+      null
+    ],
     "retries": null,
     "unresolved": [
       {

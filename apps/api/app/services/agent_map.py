@@ -20,6 +20,7 @@ from maljan.core.config import (
     ProfileDefinition,
     _builtin_definitions,
     _builtin_profiles,
+    convert_builtin_profile_document,
 )
 from maljan.core.settings_overrides import build_settings
 from maljan.pipeline.conditions import validate_condition
@@ -290,7 +291,7 @@ def validate_profiles(
             errors.update(shape_errors)
             continue
         try:
-            model = ProfileDefinition.model_validate(entry)
+            model = ProfileDefinition.model_validate(convert_builtin_profile_document(name, entry))
         except ValidationError as exc:
             for err in exc.errors():
                 location = ".".join(str(p) for p in err["loc"])
@@ -379,6 +380,8 @@ def _stage_member_errors(
             errors[f"{field}.agents"] = (
                 "a debate stage names no agent; it argues over the analysis stages upstream of it"
             )
+        elif stage.kind == "triage" and stage.agents:
+            errors[f"{field}.agents"] = "a triage stage names no agent; the pipeline runs it"
     return errors
 
 

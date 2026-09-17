@@ -61,9 +61,12 @@ def _stage_events(events: list[tuple[str, dict]]) -> list[tuple[str, str]]:
 
 
 class TestTheDefaultTeam:
+    """The triage pack leads and, with no sample on disk here, declines and says so."""
+
     def test_each_stage_starts_once_and_ends_once_in_order(self) -> None:
         events, _ = _run(Settings(_env_file=None))
         assert _stage_events(events) == [
+            ("stage_skipped", "triage_pack"),
             ("stage_started", "analysis"),
             ("stage_finished", "analysis"),
             ("stage_started", "debate"),
@@ -84,6 +87,7 @@ class TestTheDefaultTeam:
         """A fan-out has no last node of its own; the next stage closes it."""
         events, _ = _run(Settings(_env_file=None, llm={"parallel_analysts": True}))
         assert _stage_events(events) == [
+            ("stage_skipped", "triage_pack"),
             ("stage_started", "analysis"),
             ("stage_finished", "analysis"),
             ("stage_started", "debate"),
@@ -104,6 +108,7 @@ class TestTheDefaultTeam:
         settings.reporting.enabled = False
         events, _ = _run(settings)
         assert _stage_events(events) == [
+            ("stage_skipped", "triage_pack"),
             ("stage_started", "analysis"),
             ("stage_finished", "analysis"),
             ("stage_started", "debate"),

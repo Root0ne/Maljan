@@ -6,7 +6,10 @@ import { useReport } from "../layout";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import {
+  associatedBy,
+  corroborationLists,
   corroborationSources,
+  retiredIn,
   isCorroborated,
   orderedTactics,
   parseTechniques,
@@ -131,82 +134,120 @@ export default function AttackTab() {
 
                 {/* Technique cards */}
                 <div className="space-y-px">
-                  {tactic.techniques.map((tech) => (
-                    <div
-                      key={`${tactic.id}-${tech.id}`}
-                      className="bg-bg-elevated border border-border px-3 py-2.5 hover:bg-bg-active transition-colors"
-                    >
-                      <p className="text-xs text-text-primary font-medium leading-tight mb-1">
-                        {tech.name}
-                      </p>
-                      {!tech.valid && (
-                        <span
-                          className="inline-block mb-1 text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-dashed border-status-orange text-status-orange"
-                          title="The ATT&CK catalog has no entry for this id. The producer kept it after being told, so it is printed and marked rather than deleted."
-                        >
-                          not in catalog
-                        </span>
-                      )}
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1">
-                          <span className="text-[11px] text-text-muted font-mono">{tech.id}</span>
-                          {/* The judge is not a source badge. It read the
-                              analysts, so listing it beside them would show a
-                              technique nobody observed twice as one two layers
-                              agreed on. The backend leaves it out of
-                              `is_corroborated` for the same reason. */}
-                          {tech.corroborating.map((src) => (
-                            <span
-                              key={src}
-                              className={`inline-block w-4 h-4 rounded-full text-center text-[11px] leading-4 ${SOURCE_COLORS[src] || "bg-text-muted/20 text-text-muted"}`}
-                              title={`Supported by the ${src} analysis layer`}
-                              role="img"
-                              aria-label={`Supported by the ${src} analysis layer`}
-                            >
-                              <span aria-hidden="true">{src[0]}</span>
-                            </span>
-                          ))}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {isCorroborated(tech) ? (
-                            <span
-                              className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-status-green/10 text-status-green"
-                              title={`Corroborated across ${tech.corroborating.length} independent analysis layers (${tech.corroborating.join(", ")})`}
-                            >
-                              corroborated
-                            </span>
-                          ) : (
-                            <span
-                              className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-text-muted/10 text-text-muted"
-                              title="Only one analysis layer supports this technique — weigh with caution"
-                            >
-                              single source
-                            </span>
-                          )}
-                          <span className="text-[11px] text-text-muted">
-                            {tech.matches} match{tech.matches !== 1 ? "es" : ""}
+                  {tactic.techniques.map((tech) => {
+                    const lists = corroborationLists(corroboration, tech.id);
+                    return (
+                      <div
+                        key={`${tactic.id}-${tech.id}`}
+                        className="bg-bg-elevated border border-border px-3 py-2.5 hover:bg-bg-active transition-colors"
+                      >
+                        <p className="text-xs text-text-primary font-medium leading-tight mb-1">
+                          {tech.name}
+                        </p>
+                        {!tech.valid && (
+                          <span
+                            className="inline-block mb-1 text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-dashed border-status-orange text-status-orange"
+                            title="The ATT&CK catalog has no entry for this id. The producer kept it after being told, so it is printed and marked rather than deleted."
+                          >
+                            not in catalog
                           </span>
-                        </div>
-                      </div>
-                      {/* What the run itself recorded for this id, kept apart
-                          from the matrix so the two can be compared rather
-                          than conflated. */}
-                      {corroborationSources(corroboration, tech.id).length > 0 && (
-                        <details className="mt-1">
-                          <summary className="text-[10px] uppercase tracking-wider text-text-muted cursor-pointer">
-                            Named by {corroborationSources(corroboration, tech.id).length}
-                          </summary>
-                          <ul className="mt-1 space-y-0.5">
-                            {corroborationSources(corroboration, tech.id).map((source) => (
-                              <li key={source} className="text-[11px] font-mono text-text-secondary">
-                                {source}
-                              </li>
+                        )}
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1">
+                            <span className="text-[11px] text-text-muted font-mono">{tech.id}</span>
+                            {/* The judge is not a source badge. It read the
+                                analysts, so listing it beside them would show a
+                                technique nobody observed twice as one two layers
+                                agreed on. The backend leaves it out of
+                                `is_corroborated` for the same reason. */}
+                            {tech.corroborating.map((src) => (
+                              <span
+                                key={src}
+                                className={`inline-block w-4 h-4 rounded-full text-center text-[11px] leading-4 ${SOURCE_COLORS[src] || "bg-text-muted/20 text-text-muted"}`}
+                                title={`Supported by the ${src} analysis layer`}
+                                role="img"
+                                aria-label={`Supported by the ${src} analysis layer`}
+                              >
+                                <span aria-hidden="true">{src[0]}</span>
+                              </span>
                             ))}
-                          </ul>
-                        </details>
-                      )}
-                    </div>
-                  ))}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {isCorroborated(tech) ? (
+                              <span
+                                className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-status-green/10 text-status-green"
+                                title={`Corroborated across ${tech.corroborating.length} independent analysis layers (${tech.corroborating.join(", ")})`}
+                              >
+                                corroborated
+                              </span>
+                            ) : (
+                              <span
+                                className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-text-muted/10 text-text-muted"
+                                title="Only one analysis layer supports this technique — weigh with caution"
+                              >
+                                single source
+                              </span>
+                            )}
+                            <span className="text-[11px] text-text-muted">
+                              {tech.matches} match{tech.matches !== 1 ? "es" : ""}
+                            </span>
+                          </div>
+                        </div>
+                        {/* What the run itself recorded for this id, kept apart
+                            from the matrix so the two can be compared rather
+                            than conflated. */}
+                        {(corroborationSources(corroboration, tech.id).length > 0 ||
+                          associatedBy(corroboration, tech.id).length > 0) && (
+                          <details className="mt-1">
+                            <summary className="text-[10px] uppercase tracking-wider text-text-muted cursor-pointer">
+                              Asserted by {lists.asserted_by.length}
+                              , claimed by {lists.claimed_by.length}
+                              {retiredIn(corroboration, tech.id) && (
+                                <span className="ml-1 normal-case tracking-normal text-status-orange">
+                                  (retired in ATT&amp;CK {retiredIn(corroboration, tech.id)})
+                                </span>
+                              )}
+                            </summary>
+                            <div className="mt-1 space-y-1">
+                              <div>
+                                <span className="text-[10px] uppercase tracking-wider text-text-muted">
+                                  Asserted by
+                                </span>
+                                <ul className="space-y-0.5">
+                                  {lists.asserted_by.length === 0 && (
+                                    <li className="text-[11px] text-text-muted">no deterministic source</li>
+                                  )}
+                                  {lists.asserted_by.map((source) => (
+                                    <li key={`a-${source}`} className="text-[11px] font-mono text-text-secondary">
+                                      {source}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                              <div>
+                                <span className="text-[10px] uppercase tracking-wider text-text-muted">
+                                  Claimed by
+                                </span>
+                                <ul className="space-y-0.5">
+                                  {lists.claimed_by.map((source) => (
+                                    <li key={`c-${source}`} className="text-[11px] font-mono text-text-secondary">
+                                      {source}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                              {associatedBy(corroboration, tech.id).length > 0 && (
+                                <div className="text-[11px] text-text-muted">
+                                  Catalogue association (reference, not a source):{" "}
+                                  <span className="font-mono">{associatedBy(corroboration, tech.id).join(", ")}</span>
+                                </div>
+                              )}
+                            </div>
+                          </details>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             ))}

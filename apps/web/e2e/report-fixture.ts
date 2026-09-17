@@ -86,8 +86,6 @@ export const MALWARE_REPORT: MalwareReport = {
       {
         dll: "KERNEL32.dll",
         function: "VirtualAllocEx",
-        is_suspicious: true,
-        category: "process_injection",
       },
     ],
     exports: [],
@@ -235,15 +233,6 @@ export const MALWARE_REPORT: MalwareReport = {
         sample_count: 34,
         match_method: "static_feature_rag",
         source: "fingerprint_catalog",
-      },
-    ],
-    attck_case_candidates: [
-      {
-        technique_id: "T1055",
-        support: 7,
-        similarity: 0.548,
-        match_method: "case_rag",
-        source: "attck_case_corpus",
       },
     ],
   },

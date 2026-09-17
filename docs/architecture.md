@@ -62,10 +62,13 @@ work over whichever tools the operator connected for that format.
 ## The pipeline
 
 A LangGraph `StateGraph` over one shared state (`src/maljan/pipeline/`). The
-analyst stage has two shapes and `parallel_analysts` chooses between them:
+triage pack runs first; the analyst stage after it has two shapes and
+`parallel_analysts` chooses between them:
 
 ```
 START
+  │
+triage_pack   the deterministic tools, run by the pipeline, one ledger entry each
   │
   ├─ parallel_analysts = False  (the default)
   │     static_analyst -> dynamic_analyst -> network_analyst
@@ -87,6 +90,74 @@ report  ->  END
 Sequential is the default because a single local model server has one slot, and
 fanning out three analysts onto it produces queue thrash rather than speed. Set
 `parallel_analysts` when each request gets its own slot, as with a hosted API.
+
+### The triage pack
+
+Before any analyst starts, the pipeline runs the deterministic tools itself
+(`src/maljan/pipeline/triage_pack.py`) and writes each result to the evidence
+ledger as an ordinary entry under `agent="pipeline"`, `server="pipeline"`. A
+human analyst runs the same dozen commands on every sample before opening a
+disassembler, and the live runs showed the local model rarely asks for any of
+them; a fact a model may or may not ask for is not a fact a run can rely on.
+
+The pack is the same code the `analysis` sidecar serves, called in-process, in
+a fixed order so the ids a sample produces are the same from one run to the
+next: `identify_file` and `hashes`; `signing_info`; the format tool the routed
+type selects (`pe_info`, `elf_info`, `macho_info`, `apk_info`, `document_info`
+or `archive_list`, which carry the section entropies, the packer signature
+hits and the import rows); a `strings` head capped by `triage.strings_head`
+and `iocs_from_file`; `yara_scan`, `capa` under the static provider's budget
+and, when a sandbox report exists, `sigma_match_sandbox`; `api_capability`
+over the import set (the behaviour map is Windows-only, so an ELF or Mach-O
+import table yields no profile and no rule hit) and `lolbin_lookup` over the
+sandbox's command lines; the
+sandbox projections at summary level (processes, network, signatures, dropped
+files, channels) and `pcap_summary` when a capture was fetched; one reputation
+lookup on the sha256 (`get_file_report` on `virustotal` when it is enabled,
+else `check_hash` on `threatintel`), made through the tool server exactly as
+an agent's call is and recorded under that server; and `function_matches` when
+a Qdrant function-hash store and a provider that hashes functions are both
+present.
+
+The pack states facts and draws no conclusion, and it never fails a job: a
+tool that raises or answers with an error is an entry with `ok=False` and a
+degradation reason `triage.<tool>_failed`, the next tool runs, and a
+reputation lookup that has no enabled server is an entry saying so rather than
+a silence. Four of its facts — `has_signature`, `reputation_malicious`,
+`yara_hits`, `capa_hits` — are readable by every later stage's `when`
+condition as `triage.<field>`, and `run_summary.triage` records how many
+entries it wrote, how many failed and how long it took. It declines, with the
+reason recorded, when `triage.enabled` is off, when the stage withholds the
+built-in tools, or when there is no sample on disk to read. The `measurement`
+baseline has no triage stage at all.
+
+**Every model reads it.** `triage_pack.render_pack` turns the entries into one
+line each — `[ev_0001] identity: pe windows, 4,486,656 bytes, …`,
+`[ev_0003] signature: none`, `[ev_0007] yara: 2 hits of 30 rules (…)`,
+`[ev_0008] capa: 6 capabilities, ATT&CK T1027, T1055 (rule-asserted)`,
+`[ev_0017] reputation: VirusTotal 31/75 malicious, labels Filisto` — cut at
+`reporting.upstream_findings_max_chars` with a last line saying how many
+entries were left out and that their full output is a tool call away. Under
+the heading *Facts established before analysis (ledger ids in brackets; cite
+them)* the block leads every analyst's first human turn (analysis and
+revision alike), the mediator's and the verdict's human turns, the narrative
+prompt and every composer section. The report's identity block and signature
+rows come from the same entries when no model cited them. And because every
+agent was shown the pack, the pack's ids are citable by every agent:
+`isr.ungrounded_technique` no longer exempts an analyst whose own ledger is
+empty when a pack is present — only a run with nothing citable at all (the
+measurement baseline) is exempt.
+
+**The run-state block.** `pipeline/run_state.py` derives a dozen lines from the
+state — the sample, the identity, hashes, signature and reputation lines out
+of the pack, which stages ran or were skipped and why, how many ledger entries
+exist and which tools failed, and the steps and seconds a tool loop has left —
+and puts them in the system turn between `=== RUN STATE … ===` markers. It is
+regenerated on every model turn of a tool loop (the executor's prompt hook
+rewrites the budget line) and replaced rather than appended, so a prompt
+carries exactly one block; the forced-synthesis trim keeps the system turn and
+the first human turn, so neither the block nor the pack is ever what gets cut.
+It is read-only to the model: nothing a model says is written into it.
 
 Agents exchange structured `AgentISR` objects — claims with an `evidence_ref`
 and a confidence — rather than raw text. Objects are built and cached in one
@@ -117,13 +188,86 @@ Two producers use it:
   claim citing no evidence. An id that survives the retry keeps the analyst's
   spelling and is flagged `technique_id_valid=False`; the report, the STIX
   minting step and the FP linter read the flag.
+
 * **The judge** (`agents/judge_agent.py`) — `validate_verdict_bundle` reports an
   indicator whose pattern names a value no tool in the run saw, an
   attack-pattern with an unresolvable id, a severity outside the enum, and a
   family named with no evidence ids. An ungrounded indicator that survives the
   retry is dropped, because a STIX consumer has no way to read a caveat — and
-  recorded, because the false positive is a fact about the run.
+  recorded, because the false positive is a fact about the run. Two symmetric
+  rules ask what a verdict over zero analyst claims rests on:
+  `verdict.unsupported_benign` asks for the entry that establishes Benign (a
+  signature is the usual one) and `verdict.unsupported_malware` for the entries
+  that establish Malware (a reputation entry, a rule hit); either way the
+  alternative offered is Suspicious with an inconclusive rationale, the judge
+  is asked once, and the second answer is kept as given.
 
+### The technique check
+
+Four parts, all in `pipeline/validation.py` and `tools/knowledge.py`, none of
+them a rewrite: the check produces violations and annotations, and the id an
+analyst wrote stays the id in the report.
+
+This is a change of method from the tree the paper was evaluated on (tag
+`paper-2026-09`). That tree carried a re-grounding pass,
+`ATTCKValidator.correct_isr_reports`, which replaced an analyst's technique id
+with the alignment index's best candidate whenever the gate disagreed, so the
+identifiers in a report were valid because the pass had made them so. Here
+what holds by construction is that no invalid id goes unflagged: every id is
+checked against the vendored catalogue, and one the catalogue lacks is
+reported, flagged `technique_id_valid=False` and kept as written — an invalid
+id can be kept, and then it is kept marked. The technique choice is the
+model's, made under deterministic challenges: an id
+the catalogue does not have, a domain or platform the sample cannot have, an
+alignment the index disputes, and a corroboration count that says who else
+named the technique. The gate is one of those challenges; it no longer
+decides.
+
+1. **Validity** (`attck.unknown_id`, exact). Every id against the vendored
+   catalogue. When the catalogue cannot be read the check says so instead of
+   answering "nothing unknown": `run_summary.validation.not_run` lists
+   `attck.unknown_id` and the run carries a degradation reason.
+2. **Domain and platform consistency** (`attck.platform_mismatch`, exact). The
+   catalogue's domain and platforms for the id against the routed sample —
+   a Windows PE is `enterprise`/Windows, an APK `mobile`/Android, an ELF
+   `enterprise`/Linux, a Mach-O `enterprise`/macOS, an unknown platform is no
+   check. Raised in the analyst's loop and on the judge's attack-patterns;
+   the feedback names the technique, its domain and platforms and the
+   sample's. `CapabilityCell` carries `domain` and `platforms` from the
+   catalogue and the FP linter's C1 reads them.
+3. **Alignment** (`attck.weak_alignment`, the paper's gate, heuristic). For
+   every technique an analyst keeps, the claim text is ranked against the
+   hybrid ATT&CK index; the claimed id's own TF-IDF gate score and the index's
+   top candidates are written on the claim (`ClaimEvidence.alignment`). The
+   violation is raised only when the index neither ranked the id among its
+   candidates nor scored it at or above `validation.alignment_threshold`
+   (0.05); the feedback lists the candidates and says the analyst may keep
+   the id and say why. The ranking lives on the ISR record
+   (`ClaimEvidence.alignment`) and in the judge's `TECHNIQUE CHECK` block; the
+   report shows it only for a technique the gate questioned and the analyst
+   kept. It runs only when the index is warm in this worker
+   (`validation.alignment_gate = auto`); `validation.alignment_gate_build`
+   lets the first run that wants it start the build on a thread and go
+   without. The index never substitutes an id.
+4. **Corroboration** (exact). Per technique in the run, `asserted_by` — the
+   deterministic sources carrying their own ATT&CK ids: capa's `attck`
+   field, a Sigma rule's technique tags, a YARA TTP rule's
+   `meta.technique_id`, `lolbin_lookup` — and `claimed_by`, the agents.
+   `api_capability` is not among the sources: the API catalogue associates a
+   technique with an import set (BitBlt and CreateCompatibleDC read as screen
+   capture on any GUI program), so its associations travel under
+   `associated_by`, shown in a Catalogue column for reference and counted for
+   nothing. An asserted id the catalogue has retired
+   (upstream Sigma rules and the case corpus still name a few) is marked
+   `retired in ATT&CK 19.2` in the table. Two flat lists in
+   `run_summary.corroboration`, rendered as a table in the report and shown
+   on the console's technique cards. No weights, no score; a technique
+   nothing asserted keeps its row with the empty list showing, which is the
+   firing-rate reading the paper argues for.
+
+What the check questioned and the analyst kept reaches the judge as a
+`TECHNIQUE CHECK` block beside the evidence summary, and the report's
+validation section lists the unresolved rows with their messages.
 What the judge decides is the judge's: `severity` (with its rationale),
 `malware_category` and `family` come back on the bundle under
 `x_maljan_assessment` and the report prints them as answered. A severity nobody
@@ -136,14 +280,25 @@ Two metrics record the outcome:
 * `run_summary.validation` — how many feedback retries the run spent, a count
   per violation code, and every finding that stayed unresolved with the agent
   that owns it.
-* `run_summary.corroboration` — per technique id, the sources that named it:
-  analysts by name and tools by tool name. A count of distinct sources, not a
-  combined confidence. The same collection builds the judge's evidence-summary
-  block, so the metric and what the judge read cannot disagree.
+* `run_summary.corroboration` — per technique id, the two lists item 4 of
+  the technique check describes, `asserted_by` and `claimed_by`, with no
+  score. The same collection builds the judge's evidence-summary block, so
+  the metric and what the judge read cannot disagree.
 
 A degraded run is not capped. The judge is told in the prompt why the run is
 thin — no sandbox report, an analyst that failed, a container nothing could
 open — and sets its own confidence; the report header states the same reasons.
+
+One more repair belongs here because it decides whether an analyst's answer
+exists at all. A tool loop that ends on a turn that is not a report is asked
+once more for one (the final-answer nudge). A live loop ended on an assistant
+turn whose tool call carried arguments that never parsed; no tool ran, and
+sending that turn back made the server fail rendering it ("Failed to parse
+tool call arguments as JSON", HTTP 500). The nudge and the forced synthesis now
+send the transcript without such a call — the turn's own words stay — and when
+the plain request still fails, the nudge asks once more with the loop's tools
+bound and `tool_choice="none"`, the one other shape the server accepts.
+`run_summary.nudge.retry_mode` names which analysts needed which repair.
 
 ## Agents and teams
 
@@ -167,10 +322,12 @@ stages before it (`inject_upstream`), how hard it argues if it is a debate
 (`debate`) and whether its agents keep the built-in tool servers
 (`builtin_tools`).
 
-The four kinds are the pipeline itself. An `analysis` stage runs the agents it
-names. A `debate` stage runs the mediation loop over the analysis stages
-upstream of it. The one `verdict` stage runs the judge. The optional `report`
-stage, always last, builds the report.
+The five kinds are the pipeline itself. A `triage` stage names no agent: it is
+the pipeline running the deterministic tools over the sample and writing the
+results to the ledger (see *The triage pack* above). An `analysis` stage runs
+the agents it names. A `debate` stage runs the mediation loop over the analysis
+stages upstream of it. The one `verdict` stage runs the judge. The optional
+`report` stage, always last, builds the report.
 
 ### The teams that ship
 
@@ -179,20 +336,20 @@ options, its built-in tool switches and `exclude_servers`. The rest of a
 seeded team is a claim the product makes about how the analysis is arranged,
 so changing it means cloning the team.
 
-**`default`** is the pipeline as four stages — `analysis` (static, dynamic,
-network) → `debate` → `verdict` → `report` — which is the architecture this
-project measured itself on.
+**`default`** is the triage pack in front of the pipeline as four stages —
+`triage_pack` → `analysis` (static, dynamic, network) → `debate` → `verdict` →
+`report` — the four being the architecture this project measured itself on.
 
 ![The default team](assets/team-default.svg)
 
-**`measurement`** is the same four with every tool server withheld and the
-static provider forced to `none`: the baseline for what the ensemble
-contributes on its own. It is a team rather than three tool-free clones of the
-definitions, so the agents it measures cannot drift from the ones `default`
-runs.
+**`measurement`** is the same four without the pack, with every tool server
+withheld and the static provider forced to `none`: the baseline for what the
+ensemble contributes on its own, with nothing established for it. It is a team
+rather than three tool-free clones of the definitions, so the agents it
+measures cannot drift from the ones `default` runs.
 
-**`mobile`** is a team for a mobile sample. `triage` identifies the sample and
-says which artefacts matter; `android_static` reads the manifest, the
+**`mobile`** is a team for a mobile sample. After the pack, `triage` reads the
+facts it wrote and says which artefacts matter; `android_static` reads the manifest, the
 permissions, the components, the DEX strings and the native libraries, and runs
 only when the sample really is one — `when: file_type in ("apk", "dex")`;
 `dynamic` detonates when a sandbox report reached the run. On a PE the Android
@@ -201,8 +358,8 @@ shows what the team chose not to do rather than nothing at all.
 
 ![The mobile team](assets/team-mobile.svg)
 
-**`deep_static`** is a team that reads the code. `triage`, then the built-in
-`static` stage, then `reversing` — a generic `reverser` agent that is handed
+**`deep_static`** is a team that reads the code. The pack, `triage`, then the
+built-in `static` stage, then `reversing` — a generic `reverser` agent that is handed
 the static stage's findings and asked to confirm or refute each of them at
 function level, with the tools of whichever static provider is configured — and
 then `network`, conditional on there being a capture or a sandbox report to
@@ -229,9 +386,13 @@ per agent, `<agent>_analyst`; a parallel one also contributes a barrier
 `<stage>__join` when its dependents start at more than one node. A debate stage
 contributes `negotiation` and `revision`, prefixed `<stage>__` only when a team
 holds more than one debate. The verdict stage is `judge` and the report stage
-is `report`. Edges follow `depends_on`; a stage with no dependency starts at
-`START`, a stage nothing depends on ends at `END`, and a debate's way out is
-the router's conditional edge.
+is `report`. A triage stage is one node named after the stage itself. Edges
+follow `depends_on`; a stage with no dependency starts at `START`, a stage
+nothing depends on ends at `END`, and a debate's way out is the router's
+conditional edge — with one rule on top: a triage stage that has no dependency
+is where the graph starts, and every other stage without a dependency follows
+it instead of `START`, so a team gains the pack by having the stage inserted
+and nothing else rewritten.
 
 The default team therefore builds exactly the graph the project has always
 built, node for node and edge for edge — `tests/fixtures/golden/graph_default.json`
@@ -347,9 +508,11 @@ model with the entry's id stamped on the front:
 {"machine": 332, "sections": [...], "imports": [...]}
 ```
 
-Ids (`ev_0007`) are monotonic across the whole job, and the judge's own calls —
-threat intel on a disputed indicator, a knowledge lookup — go through the same
-recorder under `agent="judge"`, so a verdict that leans on one can cite it.
+Ids (`ev_0007`) are monotonic across the whole job. The triage pack's calls
+are the first entries of every run that has one, under `agent="pipeline"`, and
+the judge's own calls — threat intel on a disputed indicator, a knowledge
+lookup — go through the same recorder under `agent="judge"`, so a verdict that
+leans on one can cite it.
 That stamp is what makes a report checkable: the model can cite the call it read
 a fact from, a report section lists the entries it was built from, and `GET
 /api/v1/jobs/{id}/evidence` serves those entries back.

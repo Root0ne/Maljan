@@ -212,15 +212,14 @@ class AnalysisState(TypedDict):
 
     # F10 (2026-07-05): attribution side-channels written by the judge node
     # (``make_judge_node``) and read back by the report node to populate
-    # ``FamilyAttribution.function_hash_matches`` / ``family_rag_candidates``
-    # / ``attck_case_candidates``. These MUST be declared channels — a
+    # ``FamilyAttribution.function_hash_matches`` / ``family_rag_candidates``.
+    # These MUST be declared channels — a
     # ``StateGraph(AnalysisState)`` only persists keys present in this
     # TypedDict, so an undeclared write is dropped between nodes and the
     # report node's ``state.get(...)`` always saw ``[]`` (silent data loss
     # on enriched runs with real function-hash / RAG overlap).
     function_hash_matches: list[dict[str, Any]]
     family_rag_candidates: list[dict[str, Any]]
-    attck_case_candidates: list[dict[str, Any]]
 
     # What each analyst was told was wrong with its answer and did not fix,
     # after its one retry (``pipeline.validation``). Per agent, so the run
@@ -236,9 +235,26 @@ class AnalysisState(TypedDict):
     # rather than per key because a parallel stage has several of them.
     stage_results: Annotated[dict[str, dict[str, Any]], _merge_stage_results]
 
+    # What the triage pack established and how it went: the four facts a
+    # stage condition reads (``conditions.TriageFacts``), the entry and
+    # failure counts and the wall clock the run summary reports, and the
+    # degradation reasons the judge carries forward. Written once by the
+    # triage node; empty on a run whose team has no triage stage.
+    triage_facts: dict[str, Any]
+
+    # Which analysts had their final-answer nudge sent another way than the
+    # plain one, and which way. Written by the analyst nodes, merged per agent,
+    # read by the judge into ``run_summary.nudge``.
+    nudge_retry_modes: Annotated[dict[str, str], _merge_dicts]
+
     # How many feedback retries the run spent, across every producer.
     # Append-only: two analysts running in parallel each add their own.
     validation_retries: Annotated[int, operator.add]
+
+    # The checks that could not run on this run, by code — the validity
+    # check on a box with no ATT&CK catalogue. Append-only; the judge reads
+    # the distinct codes into ``run_summary.validation.not_run``.
+    validation_not_run: Annotated[list[str], operator.add]
 
     # Every violation a producer was *shown*, by code. A violation the retry
     # fixed leaves no other trace on the run, and ``by_code`` built from the

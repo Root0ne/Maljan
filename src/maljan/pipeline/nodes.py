@@ -14,16 +14,19 @@ import time
 from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import replace
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from maljan.agents.evidence_recorder import EvidenceRecorder
 from maljan.agents.judge_agent import (
     VERDICT_FALLBACK_CODE,
     VERDICT_FALLBACK_REASON,
     VERDICT_TIMEOUT_CODE,
     VERDICT_TIMEOUT_REASON,
 )
+from maljan.analysis.corroboration import corroboration_row
 from maljan.analysis.run_summary import RunSummaryBuilder
-from maljan.core.config import BUILTIN_AGENTS
+from maljan.core.config import BUILTIN_AGENTS, ReportingConfig
 from maljan.core.container import ServiceContainer
 from maljan.core.exceptions import AnalystError, LLMError
 from maljan.core.logger import logger
@@ -32,6 +35,7 @@ from maljan.pipeline.conditions import (
     ConditionError,
     StageContext,
     StageResult,
+    TriageFacts,
     evaluate,
 )
 from maljan.pipeline.events import (
@@ -42,17 +46,36 @@ from maljan.pipeline.events import (
 )
 from maljan.pipeline.evidence_summary import summarise
 from maljan.pipeline.outcome import corrected_reasons, decide_from_bundle, verdict_for_run
+from maljan.pipeline.run_state import render_run_state
 from maljan.pipeline.state import AgentArgument, AnalysisState, _merge_stage_results
 from maljan.pipeline.sycophancy_detector import build_revision_directive, detect_sycophancy
+from maljan.pipeline.triage_pack import (
+    NOT_RUN_PREFIX,
+    PIPELINE,
+    CapaSettings,
+    PackInputs,
+    failure_reason,
+    pack_block,
+    pack_entries,
+    reason_sentence,
+    rules_already_recorded,
+    run_is_degraded,
+    run_pack,
+)
 from maljan.pipeline.validation import (
+    VALIDITY_CODE,
     ValidationTally,
     Violation,
     corroboration,
+    corroboration_sources,
+    not_run_sentence,
+    technique_check_note,
     ungrounded_technique_note,
     validation_metrics,
+    validity_check_available,
 )
 from maljan.reporting.ledger_report import section_is_grounded
-from maljan.schemas.evidence import LedgerEntry
+from maljan.schemas.evidence import LedgerEntry, apply_budget
 from maljan.schemas.isr_models import AgentISR
 from maljan.schemas.stix_models import Bundle
 
@@ -165,6 +188,19 @@ def _violations_from_rows(rows: Any) -> list[Violation]:
     return out
 
 
+def _nudge_mode(agent: Any) -> str | None:
+    """How this agent's last nudge had to be sent, read and cleared in one place."""
+    drain = getattr(agent, "drain_nudge_retry_mode", None)
+    if drain is None:
+        return None
+    try:
+        mode = drain()
+    except Exception as exc:  # noqa: BLE001 — a metric is never worth a lost run
+        logger.debug("nudge mode read skipped: %s", exc)
+        return None
+    return str(mode) if mode else None
+
+
 def _validation_update(agent: Any, agent_name: str) -> dict[str, Any]:
     """What this analyst was told and did not fix, on the state's channels."""
     drain = getattr(agent, "drain_validation_findings", None)
@@ -199,6 +235,15 @@ def _validation_update(agent: Any, agent_name: str) -> dict[str, Any]:
         update["validation_retries"] = retries
     if fed_back:
         update["validation_fed_back"] = dict(fed_back)
+    drain_not_run = getattr(agent, "drain_validation_not_run", None)
+    if drain_not_run is not None:
+        try:
+            not_run = [str(code) for code in (drain_not_run() or [])]
+        except Exception as exc:  # noqa: BLE001 — a metric is never worth a lost run
+            logger.debug("validation not-run read skipped for %s: %s", agent_name, exc)
+            not_run = []
+        if not_run:
+            update["validation_not_run"] = not_run
     return update
 
 
@@ -452,6 +497,347 @@ def _augment_static_chunks_with_path(
 
 
 # ---------------------------------------------------------------------------
+# Triage node
+# ---------------------------------------------------------------------------
+
+
+# How long the pack waits for the one reputation call. A lookup by hash is a
+# single round trip; a server that has not answered in this long is one the
+# run goes on without, and the entry says so.
+REPUTATION_TIMEOUT_S = 60.0
+
+
+def _withheld_servers(container: ServiceContainer) -> set[str] | None:
+    """The servers the active team withholds, or ``None`` when that cannot be read.
+
+    ``None`` rather than an empty set on a failure to read: a lookup that
+    sends the sample hash to a service the team meant to keep it from is the
+    disclosure the setting exists to prevent, so not knowing is treated as
+    withheld.
+    """
+    try:
+        return {str(name) for name in container.active_profile().exclude_servers}
+    except Exception as exc:  # noqa: BLE001 — unreadable exclusions withhold everything
+        logger.warning("triage pack: the team's exclude_servers could not be read (%s).", exc)
+        return None
+
+
+def _reputation_lookup(container: ServiceContainer, sha256: str) -> Any:
+    """The pack's reputation step, bound to this job's servers and settings.
+
+    Returns a callable the pack invokes with its recorder. The callable makes
+    at most one call: ``get_file_report`` on VirusTotal's own server when it
+    is enabled, else ``check_hash`` on the threat-intel sidecar when it is, and
+    otherwise writes the entry that says why there was none — no server
+    enabled, the setting off, the team withholding the server, no hash to ask
+    about. The call goes through the tool server registry exactly as an
+    agent's does and is recorded under that server, so a run's ledger says
+    which service was asked, not only that something was. A server the active
+    team lists in ``exclude_servers`` is never asked, for the same reason its
+    agents never see it.
+    """
+    from maljan.core import virustotal
+    from maljan.core.config import ALL_SERVERS, ToolRef
+
+    def _skip(recorder: Any, why: str) -> Any:
+        # The prefix is what tells the pack's rendering a call that was never
+        # made from one that was made and failed (``triage_pack._was_not_made``).
+        message = f"{NOT_RUN_PREFIX} {why}"
+        return recorder.record(
+            tool="reputation",
+            args={"sha256": sha256},
+            server=PIPELINE,
+            output=message,
+            ok=False,
+            error=message,
+            started_at=time.time(),
+        )
+
+    def lookup(recorder: Any) -> Any:
+        if str(container.config.triage.reputation) == "off":
+            return _skip(recorder, "core.triage.reputation is off; no lookup was made")
+        if not sha256:
+            return _skip(recorder, "the run has no sha256 to look up; no lookup was made")
+        servers = container.config.mcp.servers
+        candidates: list[tuple[str, str, dict[str, Any]]] = [
+            (virustotal.SERVER_KEY, "get_file_report", {"hash": sha256}),
+            ("threatintel", "check_hash", {"file_hash": sha256}),
+        ]
+        enabled = [c for c in candidates if getattr(servers.get(c[0]), "enabled", False)]
+        if not enabled:
+            return _skip(
+                recorder,
+                f"no reputation server is enabled ({virustotal.SERVER_KEY}, threatintel); "
+                "no lookup was made",
+            )
+        withheld = _withheld_servers(container)
+        usable = (
+            []
+            if withheld is None or ALL_SERVERS in withheld
+            else [c for c in enabled if c[0] not in withheld]
+        )
+        if not usable:
+            names = ", ".join(c[0] for c in enabled)
+            return _skip(
+                recorder,
+                f"{names} withheld by the team's exclude_servers; no lookup was made"
+                if withheld is not None
+                else f"{names} withheld because the team's exclusions could not be read",
+            )
+        server, tool_name, args = usable[0]
+        from maljan.agents.base_agent import run_coro_blocking
+
+        started, wall_clock = time.monotonic(), time.time()
+        registry = container.get_server_registry()
+        tools, reasons = registry.tools_for_ref(
+            ToolRef(kind="mcp", server=server, name=tool_name),
+            container.job_key(),
+            truncation_ledger=container.get_truncation_ledger(),
+        )
+        if not tools:
+            why = "; ".join(reasons) or f"{server} offered no tool named {tool_name}"
+            return recorder.record(
+                tool=tool_name,
+                args=args,
+                server=server,
+                output=why,
+                ok=False,
+                error=why,
+                started_at=wall_clock,
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
+        try:
+            output = str(
+                run_coro_blocking(
+                    tools[0].ainvoke(args), REPUTATION_TIMEOUT_S, label=f"triage:{tool_name}"
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 — a failed lookup is an entry
+            message = f"{type(exc).__name__}: {exc}"
+            return recorder.record(
+                tool=tool_name,
+                args=args,
+                server=server,
+                output=message,
+                ok=False,
+                error=message,
+                started_at=wall_clock,
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
+        # The MCP client answers a server-side failure as text rather than
+        # raising, so the wrapper an agent runs under records it as a result.
+        # The pack reads that text for what it is: a call that did not answer.
+        error = _tool_error_text(output)
+        return recorder.record(
+            tool=tool_name,
+            args=args,
+            server=server,
+            output=output,
+            ok=error is None,
+            error=error,
+            started_at=wall_clock,
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+
+    return lookup
+
+
+def _tool_error_text(output: str) -> str | None:
+    """The failure an MCP tool result carries, or ``None`` for an answer."""
+    text = (output or "").strip()
+    if not text.startswith("{"):
+        return None
+    try:
+        parsed = json.loads(text)
+    except (ValueError, TypeError):
+        return None
+    if isinstance(parsed, dict) and parsed.get("tool_error"):
+        detail = parsed.get("detail") or parsed.get("type") or ""
+        return f"{parsed['tool_error']}: {detail}" if detail else str(parsed["tool_error"])
+    return None
+
+
+def _function_matches_step(container: ServiceContainer, state: AnalysisState) -> Any:
+    """The pack's exact-match attribution step, or ``None`` when it cannot run.
+
+    Three things have to be there: a Qdrant memory backend, a static provider
+    that can hash functions, and a mirror path for it to read. Without any
+    one of them there is no entry, because there is nothing that could have
+    been asked; with all three the step is the judge's function-hash read,
+    made before the analysts instead of after them.
+    """
+    cfg = container.config
+    static_path = state.get("static_sample_path")
+    if str(getattr(cfg.memory, "backend", "")) != "qdrant" or not static_path:
+        return None
+    try:
+        provider = container.get_static_provider()
+    except Exception as exc:  # noqa: BLE001 — no provider, no step
+        logger.debug("triage pack: no static provider for function hashes (%s)", exc)
+        return None
+    if not provider.capabilities.provides_function_hashes:
+        return None
+    sha256 = str(state.get("file_hash") or "")
+
+    def step() -> tuple[dict[str, Any], dict[str, Any]]:
+        from maljan.providers.base import StaticJobContext
+        from maljan.tools import knowledge
+
+        job = StaticJobContext(mirror_sample_path=str(static_path), sha256=sha256)
+        hashes = [h for _name, h in provider.function_hashes(job)]
+        args = {
+            "func_hashes": hashes,
+            "qdrant_url": cfg.memory.qdrant_url,
+            "collection": cfg.memory.qdrant_function_hash_collection,
+            "exclude_sample_id": sha256,
+        }
+        api_key = (
+            cfg.memory.qdrant_api_key.get_secret_value() if cfg.memory.qdrant_api_key else None
+        )
+        return args, knowledge.function_matches(
+            hashes,
+            cfg.memory.qdrant_url,
+            collection=cfg.memory.qdrant_function_hash_collection,
+            api_key=api_key,
+            exclude_sample_id=sha256,
+        )
+
+    return step
+
+
+def _knowledge_module() -> Any:
+    """``maljan.tools.knowledge`` when it imports, else ``None``."""
+    try:
+        from maljan.tools import knowledge
+    except Exception:  # noqa: BLE001 — a knowledge module that will not import is absent
+        return None
+    return knowledge
+
+
+def make_triage_node(
+    container: ServiceContainer,
+    *,
+    stage: Any,
+    announces: bool = True,
+    finishes: tuple[str, ...] = (),
+) -> Any:
+    """Factory: the node a triage stage runs as.
+
+    It runs the pack (``pipeline.triage_pack``) over the sample on a worker
+    thread, writes every entry to the evidence ledger and the four facts a
+    later stage's condition may read to ``triage_facts``. It declines, with
+    the reason recorded, when the stage's condition is false, when
+    ``core.triage.enabled`` is off, when the stage withholds the built-in
+    tools, and when there is no sample on disk to read; and it never fails
+    the job — a pack that raised is a stage that ran and says it failed.
+    """
+
+    async def node_fn(state: AnalysisState) -> dict[str, Any]:
+        started = time.monotonic()
+        announce_finished(container, state, tuple(k for k in finishes if k != stage.key))
+
+        runs, reason = stage_runs(stage, state)
+        path = _absolute_host_sample_path(state)
+        if runs and not bool(container.config.triage.enabled):
+            runs, reason = False, "core.triage.enabled is off"
+        if runs and not getattr(stage, "builtin_tools", True):
+            runs, reason = False, "the stage withholds the built-in tools"
+        if runs and not (path and Path(path).is_file()):
+            runs, reason = False, "no sample on disk to read"
+        if not runs:
+            logger.info("stage %s skipped: %s", stage.key, reason)
+            if announces:
+                announce_skipped(container, stage, reason)
+            return stage_record(stage, ran=False, reason=reason)
+
+        if announces:
+            announce_started(container, stage)
+
+        recorder = EvidenceRecorder(
+            PIPELINE, counter=container.get_evidence_counter(), stage=stage.key
+        )
+        cfg = container.config
+        capa_cfg = cfg.static.capa
+        inputs = PackInputs(
+            sample_path=path,
+            sha256=str(state.get("file_hash") or ""),
+            file_type=str(state.get("file_type") or ""),
+            strings_head=int(cfg.triage.strings_head),
+            capa=CapaSettings(
+                rules_dir=str(capa_cfg.rules_dir),
+                signatures_dir=str(capa_cfg.signatures_dir),
+                timeout_s=int(capa_cfg.timeout_seconds),
+                backend=str(capa_cfg.backend),
+            ),
+            sandbox_report=state.get("sandbox_report"),
+            evidence_budget_bytes=int(getattr(cfg.reporting, "evidence_budget_bytes", 0) or 0),
+            budget_s=float(cfg.triage.budget_seconds),
+        )
+
+        def _elapsed_ms() -> int:
+            return int((time.monotonic() - started) * 1000)
+
+        try:
+            result = await asyncio.to_thread(
+                run_pack,
+                recorder,
+                inputs,
+                reputation=_reputation_lookup(container, inputs.sha256),
+                function_matches=_function_matches_step(container, state),
+            )
+        except Exception as exc:  # noqa: BLE001 — the pack never fails the job
+            logger.warning(
+                "triage pack failed (%s: %s); the run goes on without it.", type(exc).__name__, exc
+            )
+            # What was written before the crash is evidence and is kept, under
+            # the same budget a finished pack gets; the crash is the one
+            # failure this path counts.
+            entries = list(recorder.entries)
+            apply_budget(entries, inputs.evidence_budget_bytes)
+            update: dict[str, Any] = {
+                "triage_facts": {
+                    **TriageFacts().to_dict(),
+                    "entries": len(entries),
+                    "failed": 1,
+                    "duration_ms": _elapsed_ms(),
+                    "degradation_reasons": [failure_reason("pack")],
+                },
+                **stage_record(
+                    stage,
+                    ran=True,
+                    reason=f"triage pack failed: {type(exc).__name__}: {exc}",
+                    failure=True,
+                    duration_ms=_elapsed_ms(),
+                ),
+            }
+            if entries:
+                update["evidence_ledger"] = [e.model_dump(mode="json") for e in entries]
+            if stage.key in finishes:
+                announce_finished(container, state, (stage.key,), extra=update.get("stage_results"))
+            return update
+
+        logger.info(
+            "triage pack: %d entries, %d failed, %d ms.",
+            len(result.entries),
+            len(result.failed),
+            result.duration_ms,
+        )
+        update = {
+            "triage_facts": result.to_state(),
+            **stage_record(stage, ran=True, duration_ms=_elapsed_ms()),
+        }
+        if result.entries:
+            update["evidence_ledger"] = [e.model_dump(mode="json") for e in result.entries]
+        if stage.key in finishes:
+            announce_finished(container, state, (stage.key,), extra=update.get("stage_results"))
+        return update
+
+    node_fn.__name__ = f"{stage.key}_triage_node"
+    node_fn.__doc__ = f"The triage pack, run as stage '{stage.key}'."
+    return node_fn
+
+
+# ---------------------------------------------------------------------------
 # Analyst node
 # ---------------------------------------------------------------------------
 
@@ -512,6 +898,42 @@ def _ledger_servers(state: AnalysisState) -> set[str]:
 # ---------------------------------------------------------------------------
 
 
+def pack_text(state: AnalysisState, container: ServiceContainer) -> str:
+    """The triage pack as every agent is shown it, or ``""`` on a run without one.
+
+    Cut at ``reporting.upstream_findings_max_chars``, the same bound the
+    upstream findings block has: both are what a stage is told before it
+    starts, and one budget for the two keeps a long pack from spending a
+    late stage's context.
+    """
+    limit = int(ReportingConfig.model_fields["upstream_findings_max_chars"].default)
+    with suppress(AttributeError, TypeError, ValueError):
+        limit = int(container.config.reporting.upstream_findings_max_chars)
+    return pack_block(pack_entries(state.get("evidence_ledger") or []), limit)
+
+
+def pack_ledger_ids(state: AnalysisState) -> list[str]:
+    """The ids of the pack's entries: what every agent may cite besides its own."""
+    return [entry.id for entry in pack_entries(state.get("evidence_ledger") or [])]
+
+
+def brief_agent(agent: Any, state: AnalysisState, container: ServiceContainer) -> None:
+    """Hand an agent the run's two standing blocks and the ids it may cite.
+
+    Assigned unconditionally, like the pinned sample path: agents are cached
+    across samples, and a block from the previous sample is worse than none.
+    """
+    agent.facts_block = pack_text(state, container)
+    agent.pack_ledger_ids = pack_ledger_ids(state)
+    agent.run_state_block = render_run_state(state)
+    # The routed format, so the platform check compares the agent's
+    # techniques against the sample it is looking at.
+    agent.sample_format = (
+        str(state.get("file_type") or "unknown"),
+        str(state.get("platform") or "unknown"),
+    )
+
+
 def stage_context(state: AnalysisState) -> StageContext:
     """The sample and the run so far, as a stage condition sees them.
 
@@ -544,6 +966,7 @@ def stage_context(state: AnalysisState) -> StageContext:
         has_pcap=bool(isinstance(network, dict) and network),
         has_sandbox_report=bool(report),
         stages=results,
+        triage=TriageFacts.from_dict(state.get("triage_facts") or {}),
     )
 
 
@@ -615,6 +1038,9 @@ def stage_record(
     ).to_dict()
     if agent_reasons:
         entry["agent_reasons"] = dict(agent_reasons)
+    # A stage that ran and went wrong, said as a flag rather than inferred
+    # from a reason beside ``ran: true``: the console draws it as failed.
+    entry["failure"] = bool(ran and failure)
     entry["kind"] = str(getattr(stage, "kind", "analysis"))
     # The reducer adds durations up across a stage's nodes, which is right for
     # a chain and wrong for a fan-out; it needs the mode to tell them apart.
@@ -674,7 +1100,7 @@ def upstream_findings(stage: Any, state: AnalysisState, container: ServiceContai
     if len(lines) <= 2:
         return ""
     block = "\n".join(lines).rstrip()
-    limit = 6000
+    limit = int(ReportingConfig.model_fields["upstream_findings_max_chars"].default)
     with suppress(AttributeError, TypeError, ValueError):
         limit = int(container.config.reporting.upstream_findings_max_chars)
     if limit and len(block) > limit:
@@ -742,6 +1168,8 @@ def _amended_validation(run_summary: Any, tally: ValidationTally) -> dict[str, A
     merged_unresolved = [*(block.get("unresolved") or []), *tally.unresolved]
     if merged_unresolved:
         block["unresolved"] = merged_unresolved
+    # A block from before the row existed reads as a run whose checks all ran.
+    block.setdefault("not_run", [])
     return block
 
 
@@ -765,6 +1193,7 @@ def stage_rollup(
                 "key": stage.key,
                 "kind": stage.kind,
                 "ran": bool(entry.get("ran", False)),
+                "failure": bool(entry.get("failure", False)),
                 "reason": str(entry.get("reason") or ("" if entry else "stage did not report")),
                 "agents": list(entry.get("agents") or stage.agents),
                 "duration_ms": int(entry.get("duration_ms") or 0),
@@ -949,6 +1378,9 @@ def make_stage_agent_node(
                     agent_name: [e.to_captured().model_dump() for e in entries]
                 }
             update.update(_validation_update(bound_agent, agent_name))
+            mode = _nudge_mode(bound_agent)
+            if mode:
+                update["nudge_retry_modes"] = {agent_name: mode}
             return update
 
         try:
@@ -957,6 +1389,10 @@ def make_stage_agent_node(
             role = container.agent_role(agent_name)
 
             agent.pipeline_stage = stage.key
+            # What the pipeline established before this analyst, and the run
+            # as it stands: the pack at the head of its first turn, the run
+            # state in its system turn on every turn.
+            brief_agent(agent, state, container)
             sandbox_report = state.get("sandbox_report")
 
             # The two roles whose tools open the sample by path need the path
@@ -1585,6 +2021,11 @@ def make_negotiation_node(
                     # leaves the mediator on the global setting, which is what
                     # the stage's options were seeded from.
                     consensus_threshold=_debate_threshold(stage),
+                    # The same facts the analysts were given, so the mediator
+                    # weighs their reports against the record rather than
+                    # against each other alone.
+                    facts_block=pack_text(state, container),
+                    run_state=render_run_state(state),
                 ),
                 hard_timeout=mediation_timeout,
                 label="mediation",
@@ -1752,6 +2193,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 return original_reports.get(name, ""), _empty_isr(name, revision_round=iteration)
             data = _build_revision_context(state, container, name)
             agent = container.get_agent(name)
+            brief_agent(agent, state, container)
             own_report = original_reports.get(name, "")
             peer_reports = {k: v for k, v in original_reports.items() if k != name}
             return await asyncio.to_thread(
@@ -1798,6 +2240,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
         # makes anything the revised answer cites unresolvable. Built-in
         # analysts revise without tools; a composed agent does not.
         revision_ledger: list[dict[str, Any]] = []
+        revision_nudge_modes: dict[str, str] = {}
 
         # strict=True: agent_names and results MUST be equal length; mismatch
         # is a programming error and must surface, not be silently truncated.
@@ -1825,6 +2268,11 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     )
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("evidence ledger read skipped for %s: %s", name, exc)
+                # A nudge repaired in this round belongs to this round, not to
+                # the next analysis node that happens to drain the agent.
+                revision_mode = _nudge_mode(container.get_agent(name))
+                if revision_mode:
+                    revision_nudge_modes[name] = revision_mode
                 emit_agent_message(
                     container.event_sink,
                     speaker=name,
@@ -1844,6 +2292,8 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
         out: dict[str, Any] = {"revised_reports": revised, "isr_reports": revised_isrs}
         if revision_ledger:
             out["evidence_ledger"] = revision_ledger
+        if revision_nudge_modes:
+            out["nudge_retry_modes"] = revision_nudge_modes
         return out
 
     node_fn.__name__ = "revision_node"
@@ -1948,9 +2398,30 @@ def make_judge_node(
             # Who named which technique, and how sure each of them was. This is
             # what the judge weighs; nothing here combines the numbers.
             _corroboration = corroboration(isr_reports, _ledger)
-            _technique_count = len(_corroboration)
-            _corroborated = sum(1 for sources in _corroboration.values() if len(sources) > 1)
+            # What the analysts claimed is the technique count; rule matches
+            # carrying tags nobody claimed are counted apart, or richly-firing
+            # rules on benign software read as thirty techniques.
+            _technique_count = sum(
+                1 for row in _corroboration.values() if corroboration_row(row)["claimed_by"]
+            )
+            _rule_only = sum(
+                1
+                for row in _corroboration.values()
+                if corroboration_row(row)["asserted_by"]
+                and not corroboration_row(row)["claimed_by"]
+            )
+            _corroborated = sum(
+                1 for row in _corroboration.values() if len(corroboration_sources(row)) > 1
+            )
             evidence_summary = summarise(isr_reports, _ledger)
+            # What the technique check questioned and the analysts kept, put
+            # in front of the judge beside the evidence summary: the domain,
+            # the platforms, the index's candidates, in the analysts' own rows.
+            _check_note = technique_check_note(state.get("validation_findings"))
+            if _check_note:
+                evidence_summary = (
+                    f"{evidence_summary}\n\n{_check_note}" if evidence_summary else _check_note
+                )
 
             start_time = time.time()
 
@@ -2054,7 +2525,15 @@ def make_judge_node(
                     _hit_name = str(sig.get("name") or "").strip()
                     if _hit_name and _hit_name not in _anti_emu_hits:
                         _anti_emu_hits.append(_hit_name)
-            _degradation_reasons: list[str] = []
+            # What the triage pack could not establish comes first: those
+            # reasons were recorded before any analyst ran, and the judge is
+            # the one node that assembles the run's list. They stay tokens
+            # here, for the run summary; the prompt below gets them as
+            # sentences.
+            _triage_facts = dict(state.get("triage_facts") or {})
+            _degradation_reasons: list[str] = [
+                str(reason) for reason in (_triage_facts.get("degradation_reasons") or [])
+            ]
             # The previous guard required
             # ``_technique_count > 0`` and so silently *missed* the most
             # degraded outcome of all — a run with zero corroboration AND
@@ -2067,10 +2546,16 @@ def make_judge_node(
             # technique count and word the reason for the empty case.
             if _corroborated == 0:
                 _degradation_reasons.append(
-                    f"zero cross-layer corroboration ({_technique_count} single-layer techniques)"
+                    f"zero cross-layer corroboration ({_technique_count} claimed "
+                    f"technique{'s' if _technique_count != 1 else ''})"
                     if _technique_count > 0
-                    else "no techniques mapped (no corroborating evidence)"
+                    else "no techniques claimed (no corroborating evidence)"
                 )
+                if _rule_only:
+                    _degradation_reasons.append(
+                        f"{_rule_only} rule match{'es' if _rule_only != 1 else ''} carry "
+                        "technique tags no analyst claimed"
+                    )
             # A missing sandbox report is itself a
             # degradation, and it was the one cause NOT represented here. With
             # CAPE unreachable ``_submit_to_sandbox`` swallows the error and
@@ -2115,27 +2600,49 @@ def make_judge_node(
             _ungrounded_note = ungrounded_technique_note(state.get("validation_findings"))
             if _ungrounded_note:
                 _degradation_reasons.append(_ungrounded_note)
+            # A check that could not run is a fact about the run, not a
+            # finding about the sample: it is said here and listed under
+            # ``validation.not_run``.
+            _not_run = {str(code) for code in (state.get("validation_not_run") or [])}
+            # The judge's own bundle check asks the same catalogue; when it
+            # cannot be read the judge's attack-patterns went unchecked too.
+            if not validity_check_available(_knowledge_module()):
+                _not_run.add(VALIDITY_CODE)
+            for _code in sorted(_not_run):
+                _degradation_reasons.append(not_run_sentence(_code))
             if _anti_emu_hits:
                 _short = _anti_emu_hits[0]
                 _suffix = f" (+{len(_anti_emu_hits) - 1} more)" if len(_anti_emu_hits) > 1 else ""
                 _degradation_reasons.append(
                     f"sandbox detected anti-emulation behaviour: {_short}{_suffix}"
                 )
-            _degraded_mode = bool(_degradation_reasons)
+            # A pack tool that did not answer is an absence the judge is told
+            # about; only the identity tools, or the pack itself, failing makes
+            # the run degraded on their own. Everything that is not the pack's
+            # keeps the weight it always had.
+            _degraded_mode = run_is_degraded(_degradation_reasons)
             if _degraded_mode:
                 logger.warning("Degraded run detected (%s).", "; ".join(_degradation_reasons))
 
             # The degradation, said to the judge in the prompt. What used to
             # happen instead was a fixed ceiling applied to the finished number
             # in the report node, which told the reader the confidence was
-            # capped and told the judge nothing at all.
+            # capped and told the judge nothing at all. The pack's tokens are
+            # rendered as sentences here and stay tokens in the run summary.
             degradation_note = ""
             if _degradation_reasons:
+                _sentences = "; ".join(reason_sentence(r) for r in _degradation_reasons)
                 degradation_note = (
-                    "RUN QUALITY — this analysis is degraded because "
-                    + "; ".join(_degradation_reasons)
-                    + ". Weigh your confidence accordingly: a verdict drawn from thin "
-                    "evidence should say so in its numbers, not only in its prose."
+                    (
+                        f"RUN QUALITY — this analysis is degraded because {_sentences}. "
+                        "Weigh your confidence accordingly: a verdict drawn from thin "
+                        "evidence should say so in its numbers, not only in its prose."
+                    )
+                    if _degraded_mode
+                    else (
+                        f"RUN QUALITY — {_sentences}. The rest of the pack ran; read a "
+                        "missing tool as an absence of that evidence, not as a finding."
+                    )
                 )
 
             verdict = await judge.give_verdict(
@@ -2151,6 +2658,8 @@ def make_judge_node(
                 # What the run recorded, so a verdict that says the sample is
                 # clean can be asked which entry says so.
                 ledger_ids=[entry.id for entry in _ledger],
+                facts_block=pack_text(state, container),
+                run_state=render_run_state(state),
             )
             # A verdict the judge never expressed as a bundle is the thinnest
             # answer this pipeline can produce — no severity, no reasoning the
@@ -2211,7 +2720,11 @@ def make_judge_node(
                     .set_verdict(decision, len(bundle.objects) if isinstance(bundle, Bundle) else 0)
                     .set_negotiation(negotiation_state, max_iterations=max_iters)
                     .set_isr_stats(isr_reports, no_data=_no_data_analysts)
-                    .set_validation(validation_metrics(_retries, _unresolved, _fed_back))
+                    .set_validation(
+                        validation_metrics(
+                            _retries, _unresolved, _fed_back, not_run=sorted(_not_run)
+                        )
+                    )
                     .set_corroboration(_corroboration)
                     .set_degraded_mode(_degraded_mode, _degradation_reasons)
                     .set_failed_analysts(_failed_analysts)
@@ -2229,6 +2742,8 @@ def make_judge_node(
                     )
                     .set_token_usage(container.get_token_ledger().snapshot())
                     .set_truncation(container.get_truncation_ledger().snapshot())
+                    .set_triage(_triage_facts)
+                    .set_nudge(state.get("nudge_retry_modes") or {})
                     .build()
                 )
                 run_summary_dict = summary.to_dict()
@@ -2303,7 +2818,6 @@ def make_judge_node(
             # Fully gated + fail-safe; never affects the verdict.
             _func_hash_report: list[dict[str, Any]] = []
             _family_rag_report: list[dict[str, Any]] = []
-            _attck_case_report: list[dict[str, Any]] = []
             try:
                 from maljan.core.config import get_settings
 
@@ -2395,46 +2909,6 @@ def make_judge_node(
             except Exception as _e:
                 logger.warning("Family-feature RAG skipped (%s). Verdict unaffected.", _e)
 
-            # ATT&CK case-prior RAG (§4 U2, read side): record the ATT&CK techniques
-            # recurring in behaviourally-similar prior cases (mined from our own LTM)
-            # as report evidence. Same host static profile as the family RAG, different
-            # KB. LLM-centric: these are candidates the analyst weighed, not a verdict.
-            # Fail-safe and gated OFF by default (no corpus -> no rows).
-            try:
-                from maljan.core.config import get_settings as _get_settings3
-
-                _cfg3 = _get_settings3()
-                _host3 = state.get("sample_path")
-                if _cfg3.preprocessing.use_attck_case_rag and _host3:
-                    from maljan.analysis.attck_case_rag import (
-                        retrieve_techniques,
-                    )
-                    from maljan.analysis.attck_case_rag import (
-                        to_report_dicts as _attck_to_report_dicts,
-                    )
-                    from maljan.analysis.family_feature_rag import build_sample_profile_text
-                    from maljan.core.paths import resolve_data
-                    from maljan.extractors.pe_extractor import build_static_analysis
-                    from maljan.memory.attck_case_index import load_attck_case_index
-
-                    _static3 = build_static_analysis(sample_path=str(_host3))
-                    # See the family-RAG block above: relative paths must be
-                    # resolved against the repo root, not the CWD.
-                    _index3 = load_attck_case_index(
-                        str(resolve_data(_cfg3.preprocessing.attck_case_corpus_path))
-                    )
-                    if _static3 is not None and _index3 is not None:
-                        _techs = retrieve_techniques(
-                            build_sample_profile_text(_static3),
-                            _index3,
-                            top_k=_cfg3.preprocessing.attck_case_rag_top_k,
-                            min_score=_cfg3.preprocessing.attck_case_rag_min_score,
-                            max_techniques=_cfg3.preprocessing.attck_case_rag_max_techniques,
-                        )
-                        _attck_case_report = _attck_to_report_dicts(_techs)
-            except Exception as _e:
-                logger.warning("ATT&CK-case RAG skipped (%s). Verdict unaffected.", _e)
-
             emit_agent_message(
                 container.event_sink,
                 speaker="Judge",
@@ -2477,10 +2951,6 @@ def make_judge_node(
                     # similarity), surfaced into FamilyAttribution.family_rag_candidates
                     # by the report node. Empty unless the RAG is enabled with a catalog.
                     "family_rag_candidates": _family_rag_report,
-                    # ATT&CK case-prior RAG candidates (recurring TTPs from similar prior
-                    # cases), surfaced into FamilyAttribution.attck_case_candidates by the
-                    # report node. Empty unless the RAG is enabled with a case corpus.
-                    "attck_case_candidates": _attck_case_report,
                 }
             )
         except Exception as e:  # noqa: BLE001 — per-run fault-isolation boundary
@@ -2628,7 +3098,15 @@ def make_report_node(
         try:
             _static_provider = container.get_static_provider()
             _sample_for_evidence = state.get("sample_path")
-            if _static_provider.capabilities.provides_evidence and _sample_for_evidence:
+            # When the triage pack ran capa or YARA, their entries are already
+            # in the ledger under the pipeline; running the provider again
+            # would pay capa's budget twice and record the pair twice.
+            if rules_already_recorded(state.get("evidence_ledger") or []):
+                logger.info(
+                    "report_node: the triage pack recorded capa/YARA; the static provider is "
+                    "not run again."
+                )
+            elif _static_provider.capabilities.provides_evidence and _sample_for_evidence:
                 # capa is a subprocess with a 900s budget and YARA is a corpus
                 # scan; both are synchronous, and this is the report phase the
                 # worker's heartbeat went quiet in.
@@ -2714,10 +3192,6 @@ def make_report_node(
             _rag_cands = cast("list[dict[str, Any]]", state.get("family_rag_candidates") or [])
             if _rag_cands and getattr(report, "attribution", None) is not None:
                 report.attribution.family_rag_candidates = _rag_cands
-            # Same post-build threading for the ATT&CK case-prior RAG candidates.
-            _attck_cands = cast("list[dict[str, Any]]", state.get("attck_case_candidates") or [])
-            if _attck_cands and getattr(report, "attribution", None) is not None:
-                report.attribution.attck_case_candidates = _attck_cands
             # Attach the captured tool-loop evidence so
             # the Composer can ground the deep technical spine. Already size-
             # capped upstream (schemas.tool_evidence); stored verbatim here.
@@ -2800,7 +3274,12 @@ def make_report_node(
                 # not speak again until 17:55:54, on attempt 1 of 3 — a job
                 # that looked alive purely because of the worker heartbeat.
                 narrative_output = await asyncio.wait_for(
-                    narrative_agent.generate(report, state.get("isr_reports")),
+                    narrative_agent.generate(
+                        report,
+                        state.get("isr_reports"),
+                        facts_block=pack_text(state, container),
+                        run_state=render_run_state(state),
+                    ),
                     timeout=_NARRATIVE_TIMEOUT_SECONDS,
                 )
             except TimeoutError:
@@ -2842,7 +3321,12 @@ def make_report_node(
             composer = None
         if composer is not None:
             try:
-                await composer.compose(report, state.get("isr_reports"))
+                await composer.compose(
+                    report,
+                    state.get("isr_reports"),
+                    facts_block=pack_text(state, container),
+                    run_state=render_run_state(state),
+                )
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "report_node: ReportComposer.compose raised (%s); spine skipped.", exc

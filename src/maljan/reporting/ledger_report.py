@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from maljan.analysis.technique_ids import sigma_technique_ids
 from maljan.reporting.models import EvidenceSection
 
 if TYPE_CHECKING:
@@ -333,7 +334,7 @@ def _sigma(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
             [
                 _text(row.get("title") or row.get("rule") or row.get("id")),
                 _text(row.get("level") or meta.get("level")),
-                _text(row.get("technique_ids") or meta.get("technique_ids")),
+                _text(sigma_technique_ids(row)),
                 _text(row.get("matched_fields")),
             ],
         )

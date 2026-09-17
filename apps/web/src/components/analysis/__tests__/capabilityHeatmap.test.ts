@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  corroborationLists,
+  associatedBy,
   corroborationSources,
   isCorroborated,
   orderedTactics,
@@ -122,6 +124,17 @@ describe("the columns", () => {
 
 describe("what the run summary recorded", () => {
   it("is the sources it listed for that technique", () => {
+    expect(
+      corroborationLists({ T1055: { asserted_by: ["capa"], claimed_by: ["static"] } }, "T1055")
+    ).toEqual({ asserted_by: ["capa"], claimed_by: ["static"] });
+    expect(
+      corroborationSources({ T1055: { asserted_by: ["capa"], claimed_by: ["static"] } }, "T1055")
+    ).toEqual(["capa", "static"]);
+    // A summary stored before the two lists is read as claimed by all of them.
+    expect(corroborationLists({ T1055: ["static", "dynamic"] }, "T1055")).toEqual({
+      asserted_by: [],
+      claimed_by: ["static", "dynamic"],
+    });
     expect(corroborationSources({ T1055: ["static", "dynamic"] }, "T1055")).toEqual([
       "static",
       "dynamic",
@@ -131,5 +144,19 @@ describe("what the run summary recorded", () => {
   it("is nothing for a technique it has no row for", () => {
     expect(corroborationSources({}, "T1055")).toEqual([]);
     expect(corroborationSources(null, "T1055")).toEqual([]);
+  });
+});
+
+describe("a technique the catalogue only associates", () => {
+  it("names the catalogue while both source lists stay empty", () => {
+    const rows = { T1113: { asserted_by: [], claimed_by: [], associated_by: ["api_capability"] } };
+    expect(corroborationSources(rows, "T1113")).toEqual([]);
+    expect(associatedBy(rows, "T1113")).toEqual(["api_capability"]);
+  });
+
+  it("is an empty list for a row without associations and for a missing row", () => {
+    expect(associatedBy({ T1055: { asserted_by: ["capa"], claimed_by: [] } }, "T1055")).toEqual([]);
+    expect(associatedBy({}, "T1113")).toEqual([]);
+    expect(associatedBy(null, "T1113")).toEqual([]);
   });
 });

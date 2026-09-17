@@ -204,10 +204,21 @@ Each sandbox is asked for the options its format needs:
 
 The technique universe spans all three ATT&CK domains. `data/attck_valid_ids.json`
 carries one sorted id list per domain (`enterprise`, `mobile`, `ics`), and
+`data/attck_platforms.json` carries, per technique id, its domain and MITRE
+platforms. The two files come from the same bundles and the same script, so
+they never disagree about which domain an id belongs to. Between them they
+answer the validity and the domain-and-platform halves of the technique check
+with no network and no bundle load (`tools.knowledge.attck_scope`).
+`data/attck_retired_ids.json`, written by the same script from the catalogue it
+overwrites, names the ids a previous release had and the release that retired
+them, so an older report's `T1562.001` is reported as retired rather than as an
+invented id;
 `src/maljan/memory/attck_loader.py` downloads and caches each domain's STIX
-bundle under `~/.cache/maljan/attck/` (or `MALJAN_ATTCK_CACHE`). Enterprise is
-required; Mobile and ICS are additive, and a box that can reach neither keeps
-working with a narrower catalog. Regenerate the id lists with
+bundle under `~/.cache/maljan/attck/` (or `MALJAN_ATTCK_CACHE`) for the names,
+the tactics and the index, and consults it for platforms only when a real id is
+missing from the vendored map. Enterprise is required; Mobile and ICS are
+additive, and a box that can reach neither keeps working with a narrower
+catalog. Regenerate both files with
 `uv run python scripts/knowledge/prepare_attck_malware_fixtures.py`.
 
 ### Rule corpora
@@ -359,8 +370,8 @@ pipeline → Teams) is an ordered list of stages. Each stage is:
 |---|---|
 | `key` | Slug, unique in the team. Names the stage everywhere it is reported. |
 | `label` | Display name; empty means the key. |
-| `kind` | `analysis`, `debate`, `verdict` or `report`. |
-| `agents` | Definition keys this stage runs. Empty on a debate stage. |
+| `kind` | `triage`, `analysis`, `debate`, `verdict` or `report`. |
+| `agents` | Definition keys this stage runs. Empty on a triage or debate stage. |
 | `depends_on` | Earlier stage keys this one runs after. |
 | `when` | Condition deciding whether it runs. Empty means always. |
 | `mode` | `sequential` (default) or `parallel`, for an analysis stage. |
@@ -372,10 +383,35 @@ pipeline → Teams) is an ordered list of stages. Each stage is:
 
 | Team | Stages | What it is for |
 | :-- | :-- | :-- |
-| `default` | `analysis` (static, dynamic, network) → `debate` → `verdict` → `report` | The general case. |
-| `measurement` | The same four, with every tool server withheld | What the ensemble contributes with nothing to call. |
-| `mobile` | `triage` → `android_static` → `dynamic` → `debate` → `verdict` → `report` | An APK or a DEX. |
-| `deep_static` | `triage` → `static` → `reversing` → `network` → `debate` → `verdict` → `report` | Reading the code. |
+| `default` | `triage_pack` → `analysis` (static, dynamic, network) → `debate` → `verdict` → `report` | The general case. |
+| `measurement` | The four after the pack, with every tool server withheld and no pack | What the ensemble contributes with nothing to call and nothing established. |
+| `mobile` | `triage_pack` → `triage` → `android_static` → `dynamic` → `debate` → `verdict` → `report` | An APK or a DEX. |
+| `deep_static` | `triage_pack` → `triage` → `static` → `reversing` → `network` → `debate` → `verdict` → `report` | Reading the code. |
+
+`triage_pack` is a stage of kind `triage`: the pipeline itself running the
+deterministic tools over the sample and writing each result to the evidence
+ledger before any analyst starts (see *The triage pack* in
+[architecture.md](architecture.md)). Every team but `measurement` ships with
+it first, a team written by hand may leave it out, and a stored team gains it
+on upgrade (`make migrate`). Its three settings sit in the Analysis layers
+group: `triage.enabled` (off leaves the stage in place and makes it decline
+with that reason), `triage.strings_head` (how many printable runs the strings
+entry keeps; 300), `triage.reputation` (`auto` asks the enabled reputation
+server once for the sample hash — VirusTotal's own server when enabled, else
+the threat-intel sidecar, never one the team lists in `exclude_servers` — and
+`off` records a skipped entry instead) and `triage.budget_seconds` (1200; a
+step that would start after the budget is spent is recorded as not run). The
+pack runs the real tools in mock mode too, so a local observation run with a
+reputation server enabled makes that one outbound call; a team that withholds
+the server, or `triage.reputation = off`, keeps such a run offline.
+
+The technique check's one heuristic part has three settings in the same
+group: `validation.alignment_gate` (`auto` runs the alignment gate only on a
+worker whose ATT&CK index is already built; `off` never),
+`validation.alignment_gate_build` (false; true lets the first run that wants
+the gate build the index once, on a thread, and go without it) and
+`validation.alignment_threshold` (0.05, the paper's gate). See *The technique
+check* in [architecture.md](architecture.md).
 
 `mobile` and `deep_static` are built from three seeded generic agent
 definitions — `triage`, `android_static` and `reverser` — whose prompts live in
@@ -474,7 +510,7 @@ day when parallel was on. The console clears the mark on the first stage edit
 Python's own grammar with an allow-list on top: comparisons (`==`, `!=`, `in`,
 `not in`, `<`, `<=`, `>`, `>=`), `and`, `or`, `not`, literals, and tuples or
 lists of literals. There are no function calls, no arithmetic, no
-comprehensions and no attribute access except into `stages`. A condition that
+comprehensions and no attribute access except into `stages` and `triage`. A condition that
 does not parse is refused when the team is saved; one that fails at run time
 skips its stage with the reason recorded rather than failing the job. The
 console checks each condition box against the same parser as it loses focus
@@ -494,10 +530,12 @@ The names it may use:
 | `has_sandbox_report` | The same fact, named for readability. |
 | `has_pcap` | Whether the report carries a non-empty network block. |
 | `stages.<key>.<field>` | A stage result: `ran`, `reason`, `claim_count`, `technique_ids`, `finding_count`, `agents`. |
+| `triage.<field>` | What the triage pack established: `has_signature`, `reputation_malicious` (a count, or `None` when no lookup answered with one), `yara_hits`, `capa_hits`. |
 
 `stages["triage"].ran` is the same lookup as `stages.triage.ran`. A stage the
 run never reached reads as one that did not run, so naming a stage that was
-itself skipped is not an error.
+itself skipped is not an error. A team without a triage pack reads `triage`
+as nothing established: `false`, `None`, `0`, `0`.
 
 Examples:
 
@@ -508,6 +546,8 @@ has_pcap and stages.triage.claim_count > 0
 "T1055" in stages.static.technique_ids
 not stages.detonate.ran
 size > 10485760
+triage.yara_hits > 0 or triage.capa_hits > 0
+not triage.has_signature and triage.reputation_malicious != None and triage.reputation_malicious > 0
 ```
 
 ### What a stage reads
@@ -529,6 +569,16 @@ prose in front would leave the agent inventing a path again.
 Injection never changes whether a stage has data. An agent whose loaders
 produced nothing but a "no data available" placeholder is still skipped, with
 or without a block to read.
+
+Two blocks every agent reads regardless of `inject_upstream`: the triage pack,
+one line per fact with its ledger id, at the head of the agent's first human
+turn under *Facts established before analysis*, cut at the same
+`core.reporting.upstream_findings_max_chars`; and the run-state block in the
+system turn — sample, identity, signature, reputation, stages run or skipped,
+ledger count, failed tools, remaining steps and seconds — regenerated on every
+turn. Neither is a setting of the stage: a team without a triage stage has no
+pack and its agents see only the run state. See *The triage pack* in
+[architecture.md](architecture.md).
 
 Which slice of the job an agent reads is its own setting,
 `agents.definitions.<key>.data_sources`. Empty means the slice the agent's

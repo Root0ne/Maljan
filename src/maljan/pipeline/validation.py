@@ -28,6 +28,11 @@ from typing import Any
 
 from pydantic import ValidationError
 
+# The row helpers live with the shape (``analysis.corroboration``) and are
+# re-exported here, where every reader of a run's validation looks for them.
+from maljan.analysis.corroboration import corroboration_row as corroboration_row
+from maljan.analysis.corroboration import corroboration_sources as corroboration_sources
+from maljan.analysis.technique_ids import TECHNIQUE_ID_EXACT_RE
 from maljan.core.logger import logger
 from maljan.schemas.evidence import entry_ids_in
 from maljan.schemas.judgement import SEVERITY_RATINGS
@@ -42,7 +47,6 @@ MAX_SUGGESTIONS = 3
 # as noise rather than as a correction.
 MAX_SCHEMA_VIOLATIONS = 6
 
-_TID_RE = re.compile(r"^T\d{4}(?:\.\d{3})?$")
 
 # The literals a STIX pattern quotes, e.g. ``[file:name = 'x.exe']`` -> ``x.exe``.
 _PATTERN_LITERAL_RE = re.compile(r"'([^']*)'")
@@ -188,7 +192,13 @@ def _cites_a_ledger_entry(claim: Any, cited_by_findings: set[str], citable: set[
 
 
 def validate_isr(
-    isr: Any, *, attck: Any = None, ledger_ids: Sequence[str] | None = None
+    isr: Any,
+    *,
+    attck: Any = None,
+    ledger_ids: Sequence[str] | None = None,
+    sample: Mapping[str, Any] | None = None,
+    alignment: Any = None,
+    alignment_threshold: float = 0.05,
 ) -> list[Violation]:
     """What is wrong with one analyst's structured answer.
 
@@ -198,10 +208,22 @@ def validate_isr(
     rather than failing it: a box that cannot read ATT&CK has a thinner report,
     not a run full of invented violations.
 
-    ``ledger_ids`` are the entries this analyst's own tool calls produced in
-    this run. They decide one thing: a technique claim that cites none of them
-    is asked for one. An analyst with an empty ledger — a measurement profile
-    with no tools at all — is exempt, because it has nothing it could cite.
+    ``ledger_ids`` are the entries this analyst may cite: what its own tool
+    calls produced in this run, and the triage pack's entries, which every
+    agent is shown. They decide one thing: a technique claim that cites none
+    of them is asked for one. An analyst with nothing citable at all — a
+    measurement profile, which has no tools and no pack — is exempt, because
+    it has nothing it could cite.
+
+    ``sample`` carries the routed ``platform`` and ``file_type``; a known
+    technique whose catalogue domain or platforms cannot apply to them is
+    ``attck.platform_mismatch``. ``alignment`` is the gate — a callable of
+    ``(claim_text, technique_id)`` answering the index's gate score and
+    candidates, or ``None`` when the index is cold or the gate is off. A
+    claimed id the index neither ranked nor scored above
+    ``alignment_threshold`` is ``attck.weak_alignment``, with the candidates
+    named; the ranking is written on the claim either way, and no id is ever
+    replaced by a candidate.
     """
     citable = [str(i) for i in (ledger_ids or []) if str(i).strip()]
     known = {i.strip().lower() for i in citable}
@@ -209,6 +231,7 @@ def validate_isr(
     violations: list[Violation] = []
     claims = list(getattr(isr, "claims", None) or [])
     agent = str(getattr(isr, "agent_id", "") or "")
+    scope = expected_technique_scope(sample)
 
     for index, claim in enumerate(claims):
         path = f"{agent}.claims[{index}]" if agent else f"claims[{index}]"
@@ -265,22 +288,229 @@ def validate_isr(
             )
         if not tid or attck is None:
             continue
-        if _technique_is_known(tid, attck):
-            continue
-        suggestions = _suggest_techniques(str(getattr(claim, "claim", "") or ""), attck)
-        hint = f" The closest real techniques are {', '.join(suggestions)}." if suggestions else ""
-        violations.append(
-            Violation(
-                code="attck.unknown_id",
-                message=(
-                    f"TECHNIQUE {tid} is not in the MITRE ATT&CK catalogue.{hint} "
-                    "Use one of them, or omit the technique id."
-                ),
-                path=path,
+        if not _technique_is_known(tid, attck):
+            suggestions = _suggest_techniques(str(getattr(claim, "claim", "") or ""), attck)
+            hint = (
+                f" The closest real techniques are {', '.join(suggestions)}." if suggestions else ""
             )
-        )
+            violations.append(
+                Violation(
+                    code="attck.unknown_id",
+                    message=(
+                        f"TECHNIQUE {tid} is not in the MITRE ATT&CK catalogue"
+                        f"{_retired_note(tid, attck)}.{hint} "
+                        "Use one of them, or omit the technique id."
+                    ),
+                    path=path,
+                )
+            )
+            continue
+        mismatch = platform_mismatch_message(tid, attck, scope)
+        if mismatch:
+            violations.append(Violation(code=PLATFORM_MISMATCH_CODE, message=mismatch, path=path))
+        weak = _weak_alignment(claim, tid, alignment, alignment_threshold)
+        if weak:
+            violations.append(Violation(code=WEAK_ALIGNMENT_CODE, message=weak, path=path))
 
     return violations
+
+
+# ---------------------------------------------------------------------------
+# Domain and platform consistency
+# ---------------------------------------------------------------------------
+
+PLATFORM_MISMATCH_CODE = "attck.platform_mismatch"
+
+# The ATT&CK domain a routed platform belongs to. A platform this table does
+# not name has no domain to check against, and an ``ics`` sample is not a
+# thing the router produces.
+_DOMAIN_BY_PLATFORM: dict[str, str] = {
+    "windows": "enterprise",
+    "linux": "enterprise",
+    "macos": "enterprise",
+    "android": "mobile",
+    "ios": "mobile",
+}
+
+# The routed file types that settle the platform on their own, in the words
+# the catalogue uses. The router's platform is read first; these are for a
+# state whose platform is missing but whose format is not.
+_PLATFORM_BY_FILE_TYPE: dict[str, str] = {
+    "pe": "windows",
+    "elf": "linux",
+    "mach-o": "macos",
+    "apk": "android",
+    "dex": "android",
+    "ipa": "ios",
+}
+
+
+def expected_technique_scope(
+    sample: Mapping[str, Any] | None,
+) -> tuple[str | None, tuple[str, ...]]:
+    """``(domain, MITRE platforms)`` a technique must fit for this sample.
+
+    ``(None, ())`` for a sample whose platform is unknown or cross-platform,
+    which is "do not check": a comparison the router could not make is not
+    one a validator should make either.
+    """
+    from maljan.memory.attck_loader import mitre_platforms
+
+    data = sample if isinstance(sample, Mapping) else {}
+    platform = str(data.get("platform") or "").strip().lower()
+    file_type = str(data.get("file_type") or "").strip().lower()
+    if platform not in _DOMAIN_BY_PLATFORM:
+        platform = _PLATFORM_BY_FILE_TYPE.get(file_type, "")
+    domain = _DOMAIN_BY_PLATFORM.get(platform)
+    if domain is None:
+        return None, ()
+    return domain, tuple(mitre_platforms(platform))
+
+
+def platform_mismatch_message(
+    technique_id: str, attck: Any, scope: tuple[str | None, tuple[str, ...]]
+) -> str:
+    """Why ``technique_id`` cannot apply to a sample in ``scope``, or ``""``.
+
+    The catalogue's own domain and platforms for the id, against the routed
+    ones. Two ways to miss: the id belongs to another domain, or it declares
+    platforms and none of them is the sample's. An id the catalogue carries
+    no platforms for is not questioned — no information is not a mismatch —
+    and neither is a technique whose only platform is ``PRE``: it happens
+    before any host is touched, so no sample's platform can contradict it.
+
+    ``attck_scope`` is asked first: it answers from the vendored files and
+    loads nothing, which is what lets this run inside an analyst's turn.
+    ``attck_lookup`` is the fallback for a knowledge object without it.
+    """
+    expected_domain, expected_platforms = scope
+    if expected_domain is None:
+        return ""
+    lookup = getattr(attck, "attck_scope", None) or getattr(attck, "attck_lookup", None)
+    if lookup is None:
+        return ""
+    try:
+        answer = lookup(technique_id)
+    except Exception as exc:  # noqa: BLE001 — an unanswered lookup is no mismatch
+        logger.debug("validation: the ATT&CK lookup for %s failed (%s).", technique_id, exc)
+        return ""
+    if not isinstance(answer, dict):
+        return ""
+    domain = str(answer.get("domain") or "").strip().lower()
+    platforms = [str(p) for p in (answer.get("platforms") or []) if str(p).strip()]
+    sample_words = f"{expected_domain}-domain, {'/'.join(expected_platforms) or 'any platform'}"
+    if domain and domain != expected_domain:
+        return (
+            f"TECHNIQUE {technique_id} belongs to the ATT&CK {domain} domain"
+            f"{f' (platforms {", ".join(platforms)})' if platforms else ''}; this sample is "
+            f"{sample_words}. Use a technique from the sample's domain, or drop the technique id."
+        )
+    if expected_platforms and platforms and not _pre_only(platforms):
+        wanted = {p.lower() for p in expected_platforms}
+        if not any(p.lower() in wanted for p in platforms):
+            return (
+                f"TECHNIQUE {technique_id} declares the platforms {', '.join(platforms)}; this "
+                f"sample is {sample_words}. Use a technique that applies to it, or drop the "
+                "technique id."
+            )
+    return ""
+
+
+def _pre_only(platforms: Sequence[str]) -> bool:
+    """Whether ``PRE`` is the technique's only platform."""
+    return len(platforms) == 1 and str(platforms[0]).strip().upper() == "PRE"
+
+
+# ---------------------------------------------------------------------------
+# The alignment gate
+# ---------------------------------------------------------------------------
+
+WEAK_ALIGNMENT_CODE = "attck.weak_alignment"
+
+# How many of the index's candidates a claim carries and the feedback names.
+ALIGNMENT_CANDIDATES = 5
+
+
+def _weak_alignment(claim: Any, tid: str, alignment: Any, threshold: float) -> str:
+    """Record the index's ranking on the claim; the feedback when it disagrees.
+
+    ``alignment(text, tid)`` answers ``{gate_score, candidates: [{technique_id,
+    score_gate}, ...]}`` or ``None`` when the index has nothing to say. The
+    ranking is written to ``claim.alignment`` whatever it says, so the judge
+    and the report see it beside the analyst's choice. The violation is raised
+    only when the index both left the id out of its candidates and scored it
+    under the threshold; either alone is a ranking the model may disagree
+    with. The id is never replaced.
+    """
+    if alignment is None:
+        return ""
+    # The claim's own words. ``evidence_ref`` is a ledger id and a quoted
+    # fragment, which is noise in the one input the gate score comes from.
+    text = str(getattr(claim, "claim", "") or "").strip()
+    if not text:
+        return ""
+    try:
+        answer = alignment(text, tid, k=ALIGNMENT_CANDIDATES)
+    except Exception as exc:  # noqa: BLE001 — a gate that cannot answer gates nothing
+        logger.debug("validation: the alignment gate failed for %s (%s).", tid, exc)
+        return ""
+    if not isinstance(answer, dict):
+        return ""
+    candidates = [
+        {
+            "technique_id": str(c.get("technique_id") or "").strip().upper(),
+            "score_gate": float(c.get("score_gate") or 0.0),
+        }
+        for c in answer.get("candidates") or []
+        if isinstance(c, dict) and c.get("technique_id")
+    ]
+    try:
+        gate_score = float(answer.get("gate_score") or 0.0)
+    except (TypeError, ValueError):
+        gate_score = 0.0
+    record = {"gate_score": round(gate_score, 4), "candidates": candidates}
+    if hasattr(claim, "alignment"):
+        claim.alignment = record
+    if any(c["technique_id"] == tid for c in candidates) or gate_score >= threshold:
+        return ""
+    ranked = ", ".join(f"{c['technique_id']} ({c['score_gate']:.2f})" for c in candidates)
+    return (
+        f"TECHNIQUE {tid} aligns weakly with the claim's own text (gate score "
+        f"{gate_score:.2f}, threshold {threshold:.2f}), and the ATT&CK index ranks other "
+        f"techniques for it: {ranked or 'none'}. Keep {tid} if the evidence says so and say "
+        "why in the claim, choose one of the ranked techniques, or drop the technique id."
+    )
+
+
+def technique_check_note(findings: Any) -> str:
+    """What the judge is told about technique claims the check questioned and the analyst kept.
+
+    The platform mismatches and weak alignments that survived their retry,
+    read off the unresolved rows so the judge weighs the same messages the
+    analyst was shown — the domain, the platforms, the candidates. Empty when
+    there are none.
+    """
+    rows: list[Any] = []
+    if isinstance(findings, dict):
+        for entries in findings.values():
+            rows.extend(entries or [])
+    else:
+        rows.extend(findings or [])
+    lines: list[str] = []
+    for row in rows:
+        data = row if isinstance(row, dict) else getattr(row, "__dict__", {}) or {}
+        code = str(data.get("code") or "")
+        if code not in (PLATFORM_MISMATCH_CODE, WEAK_ALIGNMENT_CODE):
+            continue
+        message = " ".join(str(data.get("message") or "").split())
+        lines.append(f"- {code}: {message}")
+    if not lines:
+        return ""
+    return (
+        "TECHNIQUE CHECK — claims the ATT&CK check questioned and the analyst kept. The ids "
+        "are the analysts' own; the check names what disagrees with them and nothing here "
+        "changed them.\n" + "\n".join(lines)
+    )
 
 
 # The id inside an ``isr.ungrounded_technique`` message, which is where the
@@ -313,6 +543,43 @@ def ungrounded_technique_note(findings: Any) -> str:
     if not named:
         return ""
     return "technique claims citing no evidence from this run: " + ", ".join(named)
+
+
+VALIDITY_CODE = "attck.unknown_id"
+
+
+# What the run-quality note says for a check that could not run, per code.
+# A code this table does not know is still named rather than described as
+# something it is not.
+NOT_RUN_SENTENCES: dict[str, str] = {
+    "attck.unknown_id": (
+        "the ATT&CK catalogue could not be read; technique ids were not checked (attck.unknown_id)"
+    ),
+}
+
+
+def not_run_sentence(code: str) -> str:
+    """The run-quality sentence for one check that could not run."""
+    return NOT_RUN_SENTENCES.get(code, f"a validation check could not run ({code})")
+
+
+def validity_check_available(attck: Any) -> bool:
+    """Whether the validity check can run at all on this box.
+
+    ``unknown_technique_ids`` answers "nothing unknown" when the catalogue
+    cannot be read, which is the right thing to *return* and the wrong thing
+    to *report*: a run that checked nothing has to say so. A knowledge module
+    without the question is read as available, so a stub in a test is not
+    told it is broken.
+    """
+    probe = getattr(attck, "catalogue_available", None)
+    if attck is None or probe is None:
+        return attck is not None
+    try:
+        return bool(probe())
+    except Exception as exc:  # noqa: BLE001 — a probe that raises is a catalogue that is not there
+        logger.debug("validation: the catalogue probe failed (%s).", exc)
+        return False
 
 
 def unknown_technique_ids(ids: Sequence[str], attck: Any) -> set[str]:
@@ -363,6 +630,19 @@ def unknown_technique_ids(ids: Sequence[str], attck: Any) -> set[str]:
 def _technique_is_known(technique_id: str, attck: Any) -> bool:
     """Whether the id is a real technique."""
     return not unknown_technique_ids([technique_id], attck)
+
+
+def _retired_note(technique_id: str, attck: Any) -> str:
+    """`` (retired in ATT&CK 19.2)`` when a previous vendored catalogue had the id."""
+    ask = getattr(attck, "attck_retired_in", None)
+    if ask is None:
+        return ""
+    try:
+        release = ask(technique_id)
+    except Exception as exc:  # noqa: BLE001 — a note, not a check
+        logger.debug("validation: the retired-id lookup for %s failed (%s).", technique_id, exc)
+        return ""
+    return f" (retired in ATT&CK {release})" if release else ""
 
 
 def _suggest_techniques(claim_text: str, attck: Any) -> list[str]:
@@ -716,7 +996,7 @@ def _claimed(pattern: re.Pattern[str], text: str) -> bool:
 def _base_technique(technique_id: Any) -> str:
     """``T1055.012`` as ``T1055``; anything else as ""."""
     value = str(technique_id or "").strip().upper()
-    return value.split(".")[0] if _TID_RE.match(value) else ""
+    return value.split(".")[0] if TECHNIQUE_ID_EXACT_RE.match(value) else ""
 
 
 def ungrounded_capabilities(
@@ -842,6 +1122,7 @@ def validate_verdict_bundle(
     """
     violations: list[Violation] = []
     objects = list(getattr(bundle, "objects", None) or [])
+    scope = expected_technique_scope(sample)
 
     haystack = " ".join(sorted(evidence_corpus)).lower() if evidence_corpus else ""
     identity = {value.lower() for value in sample_identity_values(sample)}
@@ -866,7 +1147,7 @@ def validate_verdict_bundle(
             tid = _attack_pattern_technique_id(obj)
             if not tid:
                 continue
-            if not _TID_RE.match(tid):
+            if not TECHNIQUE_ID_EXACT_RE.match(tid):
                 violations.append(
                     Violation(
                         code="stix.unknown_technique",
@@ -883,12 +1164,23 @@ def validate_verdict_bundle(
                         code="stix.unknown_technique",
                         message=(
                             f"the attack-pattern names {tid}, which the MITRE ATT&CK "
-                            "catalogue has no entry for in any domain. Use a real "
-                            "technique id or drop the attack-pattern."
+                            f"catalogue has no entry for in any domain"
+                            f"{_retired_note(tid, attck)}. Use a real technique id or "
+                            "drop the attack-pattern."
                         ),
                         path=f"objects[{index}]",
                     )
                 )
+            elif attck is not None:
+                mismatch = platform_mismatch_message(tid, attck, scope)
+                if mismatch:
+                    violations.append(
+                        Violation(
+                            code=PLATFORM_MISMATCH_CODE,
+                            message=mismatch,
+                            path=f"objects[{index}]",
+                        )
+                    )
 
     assessment = getattr(bundle, "x_maljan_assessment", None)
     severity = getattr(assessment, "severity", None) if assessment is not None else None
@@ -1403,13 +1695,17 @@ def validation_metrics(
     retries: int,
     unresolved: Sequence[tuple[str, Violation]],
     fed_back: Mapping[str, int] | None = None,
+    not_run: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """``run_summary.validation`` from the run's retries, corrections and leftovers.
 
     ``fed_back`` is what the producers were told, by code (see
     :class:`ValidationTally`). It is added to the leftovers rather than
     replacing them: a code that was fed back once and never fixed is two
-    facts about the run, and ``by_code`` is the count of both.
+    facts about the run, and ``by_code`` is the count of both. ``not_run``
+    names the checks that could not run at all — the validity check on a box
+    with no catalogue — which is a different fact from a check that ran and
+    found nothing.
     """
     by_code: dict[str, int] = {code: int(count) for code, count in (fed_back or {}).items()}
     rows: list[dict[str, str]] = []
@@ -1420,26 +1716,126 @@ def validation_metrics(
         "retries": int(retries),
         "by_code": dict(sorted(by_code.items())),
         "unresolved": rows,
+        "not_run": sorted({str(code) for code in (not_run or []) if str(code).strip()}),
     }
+
+
+# What the deterministic sources are called in a corroboration row. The
+# tools that carry their own ATT&CK ids: capa's ``attck`` field, a Sigma rule's
+# tags, a YARA TTP rule's ``meta.technique_id``, ``lolbin_lookup``'s technique
+# id.
+# A tool this table does not name is listed under its own name.
+ASSERTING_SOURCES: dict[str, str] = {
+    "capa": "capa",
+    "sigma_match": "sigma",
+    "sigma_match_sandbox": "sigma",
+    "lolbin_lookup": "lolbin",
+    # Our own YARA TTP rules carry ``meta.technique_id``; a match asserts it.
+    "yara_scan": "yara",
+}
+# ``api_capability`` is deliberately absent: the API catalogue associates a
+# technique with an import set, it does not observe one. Its associations
+# travel under ``associated_by`` and never count as a source.
 
 
 def corroboration(
     isrs: dict[str, Any] | None, ledger: Sequence[Any] | None
-) -> dict[str, list[str]]:
-    """Which sources cite each technique id, by name.
+) -> dict[str, dict[str, Any]]:
+    """Per technique id, who asserted it and who claimed it, by name.
 
-    A count of distinct sources, not a combined confidence. The number that
-    used to live here was a weighted sum over layer weights and cross-layer
+    ``asserted_by`` is the deterministic sources that carry their own ATT&CK
+    ids — a rule that fired names its technique — and ``claimed_by`` is the
+    agents. Two flat lists, no weights, no score: the number that used to
+    live here was a weighted sum over layer weights and cross-layer
     multipliers, and its inputs were constants nobody could derive from
     anything. Two agents and a capa rule naming ``T1055`` is a fact; 0.87 was
-    an opinion with a decimal point.
+    an opinion with a decimal point. A technique nothing asserted is not
+    penalised anywhere; the reader sees the empty list.
 
     The same collection feeds the judge's evidence-summary block, so the metric
     the report carries and the block the judge read cannot disagree.
     """
-    from maljan.pipeline.evidence_summary import collect
+    from maljan.pipeline.evidence_summary import catalogue_associations, collect
 
-    return {
-        tid: sorted(source for source, _confidence in sources)
-        for tid, sources in sorted(collect(isrs, ledger).items())
-    }
+    agents = {str(getattr(isr, "agent_id", "") or name) for name, isr in (isrs or {}).items()}
+    associations = catalogue_associations(ledger)
+    out: dict[str, dict[str, list[str]]] = {}
+    collected = collect(isrs, ledger)
+    for tid in associations:
+        collected.setdefault(tid, [])
+    for tid, sources in sorted(collected.items()):
+        asserted: list[str] = []
+        claimed: list[str] = []
+        for source, _confidence in sources:
+            if source in agents:
+                if source not in claimed:
+                    claimed.append(source)
+            else:
+                label = ASSERTING_SOURCES.get(source, source)
+                if label not in asserted:
+                    asserted.append(label)
+        row: dict[str, Any] = {"asserted_by": sorted(asserted), "claimed_by": sorted(claimed)}
+        if tid in associations:
+            row["associated_by"] = list(associations[tid])
+        # Upstream Sigma rules and the case corpus still name ids the
+        # catalogue retired; the row says so, the way the validity message does.
+        retired = _retired_release(tid)
+        if retired:
+            row["retired_in"] = retired
+        out[tid] = row
+    return out
+
+
+def _retired_release(technique_id: str) -> str | None:
+    try:
+        from maljan.memory.attck_loader import retired_in
+
+        return retired_in(technique_id)
+    except Exception:  # noqa: BLE001 — a note, not a check
+        return None
+
+
+UNSUPPORTED_MALWARE_CODE = "verdict.unsupported_malware"
+
+
+def unsupported_malware_violations(
+    bundle: Any, *, analyst_claims: int, ledger_ids: Sequence[str] | None = None
+) -> list[Violation]:
+    """Whether a Malware verdict on a run with no analysis cites anything.
+
+    The mirror of ``unsupported_benign_violations``, and for the same reason:
+    a verdict is a finding. Malware over zero analyst claims can stand on the
+    run's own record — a reputation entry, a rule hit, a signature the pack
+    established — and the bundle then cites that entry; or it gives way to
+    Suspicious with a rationale that says the run was inconclusive. Which of
+    the two stays the judge's call. This asks once and records what survives,
+    and it grades nothing: any cited entry from this run clears it.
+    """
+    from maljan.pipeline.outcome import decide_from_bundle
+
+    if analyst_claims > 0 or decide_from_bundle(bundle) != "Malware":
+        return []
+    known = {str(entry).strip().lower() for entry in (ledger_ids or []) if str(entry).strip()}
+    if not known:
+        return []
+    try:
+        text = json.dumps(bundle.model_dump(mode="json"), default=str)
+    except Exception as exc:  # noqa: BLE001 — an unreadable bundle cites nothing
+        logger.debug("validation: the bundle could not be read for citations (%s).", exc)
+        text = ""
+    if entry_ids_in(text) & known:
+        return []
+    listed = ", ".join(sorted(known)[:3])
+    return [
+        Violation(
+            code=UNSUPPORTED_MALWARE_CODE,
+            message=(
+                "This verdict is Malware and no analyst made a single claim about the "
+                "sample, so nothing examined it. Malware is a finding and needs evidence: "
+                "cite the ledger entries that establish it — a reputation entry, a YARA or "
+                "capa hit, a Sigma match — or return Suspicious and say in the rationale "
+                f"that the run was inconclusive. The entries this run recorded include {listed}."
+            ),
+            path="objects",
+        )
+    ]

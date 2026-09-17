@@ -365,10 +365,12 @@ class MaljanApp:
             # complete (and the LangGraph channels exist from the first step).
             "function_hash_matches": [],
             "family_rag_candidates": [],
-            "attck_case_candidates": [],
             "validation_findings": {},
             "validation_retries": 0,
             "validation_fed_back": {},
+            "validation_not_run": [],
+            "triage_facts": {},
+            "nudge_retry_modes": {},
         }
 
         result = await self.graph.ainvoke(initial_state)

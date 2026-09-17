@@ -7,12 +7,14 @@
  * testing without mounting React.
  */
 
-export type StageKind = "analysis" | "debate" | "verdict" | "report";
+export type StageKind = "triage" | "analysis" | "debate" | "verdict" | "report";
 
 export interface StageRow {
   key: string;
   kind: StageKind;
   ran: boolean;
+  /** The stage ran and went wrong; `reason` says how. */
+  failure?: boolean;
   reason: string;
   agents: string[];
   duration_ms: number;
@@ -47,6 +49,11 @@ export const KIND_STEPS: Record<
   Exclude<StageKind, "analysis">,
   { id: string; title: string; description: string }
 > = {
+  triage: {
+    id: "triage",
+    title: "Triage pack",
+    description: "The deterministic tools, run by the pipeline and written to the evidence ledger.",
+  },
   debate: {
     id: "negotiation",
     title: "Multi-Agent Negotiation",
@@ -139,7 +146,13 @@ export function pipelineSteps(runSummary: unknown): PipelineStep[] {
 
   const steps: PipelineStep[] = [INGESTION_STEP];
   for (const stage of stages) {
-    const skipped = stage.ran ? "" : stage.reason || "did not run";
+    // A stage that ran and failed — a crashed pack, a mediation that timed
+    // out — says so here rather than drawing as done.
+    const skipped = stage.ran
+      ? stage.failure
+        ? `failed: ${stage.reason || "the stage failed"}`
+        : ""
+      : stage.reason || "did not run";
     if (stage.kind === "analysis") {
       steps.push(...(stage.agents ?? []).map((id) => analystStep(id, stage.key, skipped)));
       continue;
@@ -181,6 +194,10 @@ export function stepStatus(stepId: string, facts: StepFacts): StepStatus {
   if (!facts.hasReport) return "pending";
   switch (stepId) {
     case "ingestion":
+      return "done";
+    // The pack has no finding of its own; a run that reached a report either
+    // ran it or recorded that it declined, and both are over.
+    case "triage":
       return "done";
     case "negotiation":
       if (facts.negotiationFailed) return "failed";

@@ -134,7 +134,7 @@ export interface DebateOptionsEntry {
   sycophancy_check: boolean;
 }
 
-export type StageKind = "analysis" | "debate" | "verdict" | "report";
+export type StageKind = "triage" | "analysis" | "debate" | "verdict" | "report";
 export type StageMode = "parallel" | "sequential";
 export type InjectUpstream = "none" | "findings" | "full";
 

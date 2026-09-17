@@ -27,6 +27,7 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from maljan.analysis.technique_ids import api_capability_hits, sigma_technique_ids
 from maljan.core.logger import logger
 from maljan.reporting.models import (
     DynamicBehavior,
@@ -42,6 +43,7 @@ from maljan.reporting.models import (
     RegistryMod,
     SampleIdentity,
     SandboxSignature,
+    SignatureInfo,
     StaticAnalysis,
     StringIOC,
 )
@@ -173,7 +175,37 @@ def identity_from_ledger(
         platform=str(facts.get("platform") or platform or "unknown"),  # type: ignore[arg-type]
         mime_type=_opt(facts.get("mime")),
         magic_bytes=str(facts.get("magic_hex") or computed.get("magic_hex") or ""),
+        signing=_signing_from_ledger(ledger),
     )
+
+
+def _signing_from_ledger(ledger: list[LedgerEntry]) -> SignatureInfo:
+    """The signature facts as the pack's ``signing_info`` entry states them.
+
+    Signed means any of the three signature kinds the tool looks for is
+    present; the subject and issuer are Authenticode's, or an APK's signer
+    when that is the one present. ``signature_valid`` is set only when the
+    tool reports a chain verdict (``authenticode.valid``); the extractor
+    does not verify chains today, so it stays ``None`` rather than reading
+    "present" as "valid". The entry id travels with the facts.
+    """
+    for entry, data in _payloads(ledger, "signing_info"):
+        auth = _dict_of(data.get("authenticode"))
+        apk = _dict_of(data.get("apk"))
+        macho = _dict_of(data.get("macho"))
+        valid = auth.get("valid")
+        return SignatureInfo(
+            is_signed=bool(auth.get("present") or apk.get("present") or macho.get("present")),
+            signer_subject=_opt(auth.get("subject")) or _opt(apk.get("subject")),
+            signer_issuer=_opt(auth.get("issuer")) or _opt(apk.get("issuer")),
+            signature_valid=valid if isinstance(valid, bool) else None,
+            evidence_id=entry.id,
+        )
+    return SignatureInfo()
+
+
+def _dict_of(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
 
 
 def _hashes_of(sample_path: str | None) -> dict[str, Any]:
@@ -279,16 +311,14 @@ def static_from_ledger(
 
     # capa reaches the report as a tool call like everything else
     # (``providers.static.capa_yara.ledger_entries``); this is what keeps its
-    # capability counters and technique hits in front of the layers that read
-    # ``static``, rather than folding the bundle into the builder by hand.
+    # technique hits in front of the layers that read ``static``, rather than
+    # folding the bundle into the builder by hand.
     for _entry, data in _payloads(ledger, "capa"):
         for row in data.get("capabilities") or []:
             if not isinstance(row, dict):
                 continue
             seen = True
             namespace = str(row.get("namespace") or "")
-            top = namespace.split("/", 1)[0] if namespace else "uncategorised"
-            static.api_capabilities[top] = static.api_capabilities.get(top, 0) + 1
             for technique in row.get("attck") or []:
                 tid = _technique_id(technique)
                 if not tid:
@@ -303,11 +333,30 @@ def static_from_ledger(
                     }
                 )
 
+    # The capability profile is what the knowledge table said about the import
+    # set when the pack asked (``tools.knowledge.api_capability``): a category
+    # per API and the technique rules that list it. Counted here and cited by
+    # the entry's id. Which rules fired is ``api_capability_hits``' answer, the
+    # same one corroboration reads.
+    for entry, data in _payloads(ledger, "api_capability"):
+        rows = [row for row in data.get("capabilities") or [] if isinstance(row, dict)]
+        for row in rows:
+            category = str(row.get("category") or "").strip()
+            if category:
+                static.api_capabilities[category] = static.api_capabilities.get(category, 0) + 1
+        for hit in api_capability_hits(data):
+            static.api_technique_hits.append(
+                {**hit, "source": "api_capability", "evidence_id": entry.id}
+            )
+        if rows:
+            seen = True
+            static.api_capabilities_evidence_ids.append(entry.id)
+
     for artifact in _artifacts(isrs, "imports"):
         for row in _rows_of(artifact):
             if len(row) >= 2:
                 seen = True
-                static.imports.append(ImportRow(dll=row[0], function=row[1], is_suspicious=True))
+                static.imports.append(ImportRow(dll=row[0], function=row[1]))
     for artifact in _artifacts(isrs, "iocs", "indicators"):
         for row in _rows_of(artifact):
             if len(row) >= 2:
@@ -748,10 +797,8 @@ def persistence_from_ledger(
         for row in data.get("matches") or []:
             if not isinstance(row, dict):
                 continue
-            raw_meta = row.get("meta")
-            meta: dict[str, Any] = raw_meta if isinstance(raw_meta, dict) else {}
-            techniques = row.get("technique_ids") or meta.get("technique_ids") or []
-            technique = str(techniques[0]) if techniques else None
+            techniques = sigma_technique_ids(row)
+            technique = techniques[0] if techniques else None
             if technique and not technique.startswith("T1547"):
                 continue
             _add(

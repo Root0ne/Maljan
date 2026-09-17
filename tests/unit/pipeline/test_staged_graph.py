@@ -230,6 +230,7 @@ class TestAStageThatDeclinesToRunSaysSo:
                     "technique_ids": [],
                     "finding_count": 0,
                     "agents": [],
+                    "failure": False,
                     "kind": "analysis",
                     "mode": "sequential",
                     "duration_ms": 0,

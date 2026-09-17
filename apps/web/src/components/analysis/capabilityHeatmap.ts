@@ -1,3 +1,4 @@
+import type { CorroborationRow } from "@/types/malware-report";
 /**
  * The ATT&CK matrix, derived from whatever technique list the report carries.
  *
@@ -194,8 +195,44 @@ export function orderedTactics(tactics: Tactic[]): Tactic[] {
  * rather than conflated. Shown on the card that names the technique.
  */
 export function corroborationSources(
-  corroboration: Record<string, string[]> | null | undefined,
+  corroboration: Record<string, CorroborationRow | string[]> | null | undefined,
   techniqueId: string
 ): string[] {
-  return corroboration?.[techniqueId] ?? [];
+  const lists = corroborationLists(corroboration, techniqueId);
+  return [...lists.asserted_by, ...lists.claimed_by];
+}
+
+/**
+ * The two lists behind one technique: who asserted it (a deterministic
+ * source carrying its own ATT&CK id) and who claimed it (an agent). A summary
+ * stored as a flat list is read as claimed by all of them.
+ */
+export function corroborationLists(
+  corroboration: Record<string, CorroborationRow | string[]> | null | undefined,
+  techniqueId: string
+): CorroborationRow {
+  const row = corroboration?.[techniqueId];
+  if (!row) return { asserted_by: [], claimed_by: [] };
+  if (Array.isArray(row)) return { asserted_by: [], claimed_by: row };
+  return { asserted_by: row.asserted_by ?? [], claimed_by: row.claimed_by ?? [] };
+}
+
+/** The ATT&CK release that retired the id, when the run's corroboration row says so. */
+export function retiredIn(
+  corroboration: Record<string, CorroborationRow | string[]> | null | undefined,
+  techniqueId: string
+): string | null {
+  const row = corroboration?.[techniqueId];
+  if (!row || Array.isArray(row)) return null;
+  return row.retired_in ?? null;
+}
+
+/** The API catalogue's association for the id, shown apart from the sources. */
+export function associatedBy(
+  corroboration: Record<string, CorroborationRow | string[]> | null | undefined,
+  techniqueId: string
+): string[] {
+  const row = corroboration?.[techniqueId];
+  if (!row || Array.isArray(row)) return [];
+  return row.associated_by ?? [];
 }

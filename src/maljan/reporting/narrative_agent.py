@@ -240,16 +240,26 @@ def build_prompt_text(report: MalwareReport) -> str:
         lines.append("  (none)")
     lines.append("")
 
-    # --- Suspicious imports (top 5) -----------------------------------
-    lines.append("Suspicious imports (top 5):")
+    # --- Import capability profile (the pack's api_capability entry) --------
+    lines.append("Import capability profile (as the knowledge table states it):")
     if report.static:
-        suspicious = [imp for imp in report.static.imports if imp.is_suspicious][:5]
-        if suspicious:
-            for imp in suspicious:
-                cat = imp.category or "-"
-                lines.append(f"  - {imp.dll}!{imp.function} ({cat})")
+        ordered = sorted(report.static.api_capabilities.items(), key=lambda kv: -kv[1])
+        if ordered:
+            cited = ", ".join(report.static.api_capabilities_evidence_ids)
+            lines.append(
+                "  "
+                + ", ".join(f"{cat} x{count}" for cat, count in ordered[:8])
+                + (f" [{cited}]" if cited else "")
+            )
         else:
-            lines.append("  (none flagged)")
+            lines.append("  (none stated)")
+        rule_hits = [
+            h for h in report.static.api_technique_hits if h.get("source") == "api_capability"
+        ][:5]
+        for hit in rule_hits:
+            apis = ", ".join(str(a) for a in (hit.get("matched_apis") or [])[:4])
+            cite = f" [{hit['evidence_id']}]" if hit.get("evidence_id") else ""
+            lines.append(f"  - {hit.get('technique_id', '?')} {hit.get('name', '')}: {apis}{cite}")
     else:
         lines.append("  (no static analysis)")
     lines.append("")
@@ -329,7 +339,11 @@ class NarrativeAgent:
         self.validation_tally = ValidationTally()
 
     async def generate(
-        self, report: MalwareReport, isr_reports: Any = None
+        self,
+        report: MalwareReport,
+        isr_reports: Any = None,
+        facts_block: str = "",
+        run_state: str = "",
     ) -> NarrativeOutput | None:
         """Return a ``NarrativeOutput`` or ``None`` if both paths fail.
 
@@ -338,7 +352,7 @@ class NarrativeAgent:
         Both surfaces are wrapped in broad ``except`` so the report node can
         always rely on the fallback narrative.
         """
-        messages = self._build_prompt(report)
+        messages = self._build_prompt(report, facts_block, run_state)
 
         # What this run actually established, so a summary cannot be the first
         # place "command-and-control" or "data exfiltration" appears. Run 3's
@@ -473,10 +487,25 @@ class NarrativeAgent:
         self._record_ungrounded(found)
         return output
 
-    def _build_prompt(self, report: MalwareReport) -> list[BaseMessage]:
+    def _build_prompt(
+        self, report: MalwareReport, facts_block: str = "", run_state: str = ""
+    ) -> list[BaseMessage]:
+        """The system turn and the human turn, the two standing blocks leading the human turn.
+
+        ``facts_block`` is the triage pack as the analysts and the judge saw
+        it and ``run_state`` the run's state block; the summary is written
+        over the same facts, with their ids, and knows which stages ran.
+        """
+        from maljan.pipeline.run_state import with_run_state
+
+        body = build_prompt_text(report)
+        if facts_block:
+            body = f"{facts_block}\n\n{body}"
+        if run_state:
+            body = f"{with_run_state('', run_state)}\n\n{body}"
         return [
             SystemMessage(content=_SYSTEM_PROMPT),
-            HumanMessage(content=build_prompt_text(report)),
+            HumanMessage(content=body),
         ]
 
 

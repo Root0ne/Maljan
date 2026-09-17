@@ -233,22 +233,10 @@ class TestTheFamilyNameShowsItsWorking:
         assert "FormBook" in md
         assert "0.612" in md
 
-    def test_attck_case_priors_are_labelled_advisory(self) -> None:
-        """They describe prior runs, not this sample. Rendering them beside
-        real evidence without saying so would be the more harmful bug."""
-        md = _render(
-            None,
-            attck_case_candidates=[{"technique_id": "T1055", "support": 7, "similarity": 0.548}],
-        )
-        assert "ATT&CK case priors" in md
-        assert "T1055" in md
-        assert "Advisory only" in md
-
     def test_nothing_is_printed_when_there_is_no_evidence(self) -> None:
         md = _render(None)
         assert "Function-hash matches" not in md
         assert "Family-feature RAG candidates" not in md
-        assert "ATT&CK case priors" not in md
 
 
 class TestComputedSignalsThatWereNeverPrinted:

@@ -38,8 +38,10 @@ __all__ = [
     "reset_cache",
 ]
 
-# Tiers that make an import "suspicious". ``informational`` deliberately does
-# not: see ``pe_extractor.classify_import`` for why the two facts are separate.
+# Tiers the catalogue itself calls "suspicious". ``informational`` deliberately
+# is not one: every Windows program reads files and opens keys. The tool that
+# reads this (``tools.knowledge.api_capability``) reports the tier as a
+# catalogue flag, named for where it comes from, not as a finding.
 _SUSPICIOUS_TIERS = frozenset({"high", "medium"})
 _VALID_TIERS = frozenset({"high", "medium", "informational"})
 
@@ -72,6 +74,11 @@ def _variants(name: str) -> tuple[str, ...]:
     if lowered.endswith("a"):
         return (lowered, lowered[:-1] + "w")
     return (lowered,)
+
+
+def canonical_name(name: str) -> str:
+    """The A/W-folded key of an API name, for callers comparing spellings."""
+    return _canonical(name)
 
 
 def _canonical(name: str) -> str:
@@ -156,9 +163,11 @@ class ApiAttckMap:
         report cites what is in the binary, not what the catalog happens to
         call it.
         """
-        # canonical (A/W-folded) name -> the spelling the binary actually uses
+        # canonical (A/W-folded) name -> the spelling the binary actually uses.
+        # Sorted, so which of an A/W pair is cited does not depend on the
+        # process's string hash seed: the record must read the same twice.
         by_canonical: dict[str, str] = {}
-        for name in imported:
+        for name in sorted(imported):
             by_canonical.setdefault(_canonical(name), name)
 
         out: list[tuple[TechniqueRule, list[str]]] = []

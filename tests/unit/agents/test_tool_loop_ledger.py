@@ -336,7 +336,7 @@ class TestPublishing:
 
         captured_tools: list = []
 
-        def _create(llm, tools):
+        def _create(llm, tools, **_kwargs):
             captured_tools.append(tools)
             return MagicMock()
 

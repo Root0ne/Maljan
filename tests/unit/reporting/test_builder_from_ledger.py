@@ -113,10 +113,10 @@ class TestTypedBlocks:
         assert report.static.imports[0].function == "VirtualAllocEx"
         assert report.static.exports == ["StartService"]
         assert report.static.packer_hint == "UPX"
-        # The tool lists imports without a capability label, so the
-        # projection has no profile to build from them.
+        # The format tool lists imports and nothing more; the capability
+        # profile is the pack's ``api_capability`` entry, absent from this run.
         assert report.static.api_capabilities == {}
-        assert report.static.imports[0].is_suspicious is False
+        assert report.static.api_capabilities_evidence_ids == []
 
     def test_dynamic_and_network_are_projected_from_the_sandbox_tools(self) -> None:
         ledger = ledger_from_sandbox(
@@ -243,3 +243,109 @@ class TestEvidenceIndex:
         counter = EvidenceCounter()
         report = _build([entry("identify_file", {"file_type": "PE"}, counter)])
         assert {section.key for section in report.sections} >= {"identity"}
+
+
+class TestTheCapabilityProfile:
+    def test_it_is_the_pack_s_api_capability_entry_cited_by_id(self) -> None:
+        """Counted from the knowledge table's rows, never from a label the
+        extractor put on an import, and the entry id travels with it. The
+        payload is what the tool returns for this import set."""
+        from maljan.tools.knowledge import api_capability
+
+        names = ["VirtualAllocEx", "WriteProcessMemory", "CreateRemoteThread", "RegQueryValueExA"]
+        payload = api_capability(names)
+        counter = EvidenceCounter()
+        ledger = [
+            entry("pe_info", {"imports": [{"dll": "k32", "function": n} for n in names]}, counter),
+            entry("api_capability", payload, counter),
+        ]
+        report = _build(ledger)
+        assert report.static is not None
+        expected = {}
+        for row in payload["capabilities"]:
+            if row["category"]:
+                expected[row["category"]] = expected.get(row["category"], 0) + 1
+        assert report.static.api_capabilities == expected
+        assert report.static.api_capabilities_evidence_ids == [ledger[1].id]
+        hits = [h for h in report.static.api_technique_hits if h["source"] == "api_capability"]
+        assert [h["technique_id"] for h in hits] == ["T1055"]
+        assert hits[0]["evidence_id"] == ledger[1].id
+        assert set(hits[0]["matched_apis"]) >= {"WriteProcessMemory", "CreateRemoteThread"}
+        # One rule, one row, however many APIs cited it.
+        assert len(hits) == 1
+
+    def test_a_rule_under_its_floor_is_not_a_hit(self) -> None:
+        counter = EvidenceCounter()
+        payload = {
+            "capabilities": [
+                {
+                    "api": "WriteProcessMemory",
+                    "category": "process_injection",
+                    "behaviours": ["process_injection"],
+                    "techniques": [
+                        {
+                            "technique_id": "T1055",
+                            "name": "Process Injection",
+                            "matched": ["WriteProcessMemory"],
+                            "min_apis": 2,
+                        }
+                    ],
+                    "catalog_flags": ["suspicious"],
+                }
+            ]
+        }
+        report = _build([entry("api_capability", payload, counter)])
+        assert report.static is not None
+        assert report.static.api_capabilities == {"process_injection": 1}
+        assert report.static.api_technique_hits == []
+
+
+class TestSigningFromThePack:
+    def _signing_entry(self, counter: EvidenceCounter, authenticode: dict[str, Any]) -> Any:
+        return entry(
+            "signing_info",
+            {
+                "authenticode": authenticode,
+                "apk": {"present": False, "schemes": []},
+                "macho": {"present": False},
+            },
+            counter,
+        )
+
+    def test_a_signed_sample_reads_signed_with_its_signer_and_the_entry_id(self) -> None:
+        from maljan.reporting.renderers.markdown import MarkdownRenderer
+
+        counter = EvidenceCounter()
+        signed = self._signing_entry(
+            counter,
+            {"present": True, "subject": "Simon Tatham", "issuer": "Sectigo Public Code Signing"},
+        )
+        report = _build([signed])
+        signing = report.identity.signing
+        assert signing.is_signed is True
+        assert signing.signer_subject == "Simon Tatham"
+        assert signing.signer_issuer == "Sectigo Public Code Signing"
+        assert signing.signature_valid is None  # the tool reports no chain verdict
+        assert signing.evidence_id == signed.id
+        md = MarkdownRenderer().render(report)
+        assert f"| Signed | yes ({signed.id}) |" in md
+        assert "| Signer | Simon Tatham |" in md
+        assert "| Signer issuer | Sectigo Public Code Signing |" in md
+
+    def test_an_unsigned_sample_reads_unsigned_and_still_cites_the_entry(self) -> None:
+        counter = EvidenceCounter()
+        unsigned = self._signing_entry(counter, {"present": False})
+        report = _build([unsigned])
+        assert report.identity.signing.is_signed is False
+        assert report.identity.signing.signer_subject is None
+        assert report.identity.signing.evidence_id == unsigned.id
+
+    def test_a_chain_verdict_is_carried_only_when_the_tool_reports_one(self) -> None:
+        counter = EvidenceCounter()
+        verified = self._signing_entry(counter, {"present": True, "subject": "x", "valid": True})
+        assert _build([verified]).identity.signing.signature_valid is True
+
+    def test_no_entry_means_no_claim_and_no_id(self) -> None:
+        report = _build([])
+        assert report.identity.signing.is_signed is False
+        assert report.identity.signing.evidence_id is None

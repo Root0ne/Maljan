@@ -1,0 +1,73 @@
+{
+  "_meta": {
+    "attck_version": "19.2"
+  },
+  "T1070.001": {
+    "domain": "enterprise",
+    "retired_in": "19.2"
+  },
+  "T1070.002": {
+    "domain": "enterprise",
+    "retired_in": "19.2"
+  },
+  "T1562": {
+    "domain": "enterprise",
+    "retired_in": "19.2"
+  },
+  "T1562.001": {
+    "domain": "enterprise",
+    "retired_in": "19.2"
+  },
+  "T1562.002": {
+    "domain": "enterprise",
+    "retired_in": "19.2"
+  },
+  "T1562.003": {
+    "domain": "enterprise",
+    "retired_in": "19.2"
+  },
+  "T1562.004": {
+    "domain": "enterprise",
+    "retired_in": "19.2"
+  },
+  "T1562.006": {
+    "domain": "enterprise",
+    "retired_in": "19.2"
+  },
+  "T1562.007": {
+    "domain": "enterprise",
+    "retired_in": "19.2"
+  },
+  "T1562.008": {
+    "domain": "enterprise",
+    "retired_in": "19.2"
+  },
+  "T1562.009": {
+    "domain": "enterprise",
+    "retired_in": "19.2"
+  },
+  "T1562.010": {
+    "domain": "enterprise",
+    "retired_in": "19.2"
+  },
+  "T1562.011": {
+    "domain": "enterprise",
+    "retired_in": "19.2"
+  },
+  "T1562.012": {
+    "domain": "enterprise",
+    "retired_in": "19.2"
+  },
+  "T1562.013": {
+    "domain": "enterprise",
+    "retired_in": "19.2"
+  },
+  "T1656": {
+    "domain": "enterprise",
+    "retired_in": "19.2"
+  },
+  "T1672": {
+    "domain": "enterprise",
+    "retired_in": "19.2"
+  }
+}

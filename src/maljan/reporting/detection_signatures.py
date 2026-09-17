@@ -1,9 +1,9 @@
 """Template-based detection signature generator (YARA / Sigma / Suricata).
 
 The deterministic ``MalwareReport`` exposes every IOC the pipeline saw:
-hashes, suspicious imports, registry mods, network endpoints, persistence
-mechanisms. This module pivots those IOCs into draft detection rules that
-SOC teams can paste straight into their tooling.
+hashes, the imports the pack's technique rules matched, registry mods,
+network endpoints, persistence mechanisms. This module pivots those IOCs into
+draft detection rules that SOC teams can paste straight into their tooling.
 
 Three rules at most are produced per report — one per format. Each format
 is skipped when the relevant evidence is absent (no network IOCs → no
@@ -217,6 +217,20 @@ def _yara_gate_reason(report: MalwareReport) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+def _rule_matched_imports(report: MalwareReport) -> list[str]:
+    """API names the pack's technique rules matched, in first-seen order."""
+    out: list[str] = []
+    static = report.static
+    for hit in static.api_technique_hits if static is not None else []:
+        if hit.get("source") != "api_capability":
+            continue
+        for api in hit.get("matched_apis") or []:
+            name = str(api).strip()
+            if name and name not in out:
+                out.append(name)
+    return out
+
+
 def _build_yara(report: MalwareReport) -> DetectionRule | None:
     """Build a single YARA rule that matches the sample by hash and IOC strings.
 
@@ -240,11 +254,14 @@ def _build_yara(report: MalwareReport) -> DetectionRule | None:
             slot = f"$s{len(strings)}"
             strings.append((slot, ioc.value))
             sources.append(f"string:{ioc.kind}:{ioc.value[:80]}")
-        suspicious_imports = [imp for imp in report.static.imports if imp.is_suspicious]
-        for imp in suspicious_imports[: max(0, _MAX_YARA_STRINGS - len(strings))]:
+        # The imports worth a string are the ones a rule fired on: the pack's
+        # ``api_capability`` rows carry the API names that cleared a technique
+        # rule's floor, and the report keeps them under ``api_technique_hits``.
+        # Bare names, since that is how they sit in an import table.
+        for api in _rule_matched_imports(report)[: max(0, _MAX_YARA_STRINGS - len(strings))]:
             slot = f"$s{len(strings)}"
-            strings.append((slot, f"{imp.dll}!{imp.function}"))
-            sources.append(f"import:{imp.dll}!{imp.function}")
+            strings.append((slot, api))
+            sources.append(f"import:{api}")
 
     # Gated above when the seed is a placeholder, so this normally uses the real
     # family; _rule_name_component keeps the name honest anyway should the gate

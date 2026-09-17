@@ -34,6 +34,7 @@ MARGIN = 24
 # One fill per stage kind, so a reader can tell an analysis stage from the
 # debate at a glance without reading the label.
 KIND_FILL: dict[str, str] = {
+    "triage": "#1f2a24",
     "analysis": "#1f2937",
     "debate": "#312e28",
     "verdict": "#26313a",

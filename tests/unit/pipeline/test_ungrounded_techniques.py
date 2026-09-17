@@ -185,12 +185,22 @@ class TestWhatIsNot:
 
         assert UNGROUNDED_TECHNIQUE_CODE not in _codes(validate_isr(isr, ledger_ids=LEDGER))
 
-    def test_an_analyst_with_an_empty_ledger_is_exempt(self) -> None:
-        """A measurement profile has no tools, so it has nothing to cite."""
+    def test_an_analyst_with_nothing_citable_is_exempt(self) -> None:
+        """A measurement profile has no tools and no pack, so it has nothing to cite."""
         isr = _isr(_claim("this claim is speculative"))
 
         assert UNGROUNDED_TECHNIQUE_CODE not in _codes(validate_isr(isr, ledger_ids=[]))
         assert UNGROUNDED_TECHNIQUE_CODE not in _codes(validate_isr(isr))
+
+    def test_the_pack_s_ids_end_the_exemption_for_an_analyst_that_called_nothing(self) -> None:
+        """The citable set is the analyst's own entries plus the pack's; an
+        analyst whose own ledger is empty still has the pack to cite."""
+        isr = _isr(_claim("this claim is speculative"))
+        pack_ids = ["ev_0001", "ev_0002", "ev_0003"]
+
+        assert UNGROUNDED_TECHNIQUE_CODE in _codes(validate_isr(isr, ledger_ids=pack_ids))
+        cited = _isr(_claim("the pack's yara entry [ev_0002] names the injector"))
+        assert UNGROUNDED_TECHNIQUE_CODE not in _codes(validate_isr(cited, ledger_ids=pack_ids))
 
 
 class TestTheEvidenceLineKeepsItsId:

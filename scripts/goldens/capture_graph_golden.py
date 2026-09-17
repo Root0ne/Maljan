@@ -54,6 +54,10 @@ def _analyst_order(drawn: Any, analysts: list[str], parallel: bool) -> list[str]
         return [n[: -len("_analyst")] for n in drawn.nodes if n.endswith("_analyst")]
     nxt = {e.source: e.target for e in drawn.edges if not e.conditional}
     node = nxt.get("__start__", "")
+    # The chain starts after whatever runs before the first analyst: the
+    # triage pack is one node between START and the analysts.
+    while node and not node.endswith("_analyst"):
+        node = nxt.get(node, "")
     order: list[str] = []
     while node.endswith("_analyst"):
         order.append(node[: -len("_analyst")])

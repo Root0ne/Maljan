@@ -108,6 +108,7 @@ def build_capability_matrix(
             continue
 
         tactic_id, tactic_name = _resolve_tactic(index, tactic_slug)
+        domain, platforms = _catalogue_scope(tid)
         cells.append(
             CapabilityCell(
                 tactic=tactic_id or "TA0000",
@@ -118,6 +119,8 @@ def build_capability_matrix(
                 confidence=max(0.0, min(1.0, confidence)),
                 contributing_layers=layers,
                 technique_id_valid=valid,
+                platforms=platforms,
+                domain=domain,
             )
         )
         mappings.append(
@@ -148,6 +151,28 @@ def build_capability_matrix(
 _JUDGE_SOURCE = "judge"
 
 
+def _catalogue_scope(technique_id: str) -> tuple[str, list[str]]:
+    """``(domain, platforms)`` the catalogue declares for the id; empty when it cannot say.
+
+    The FP linter's platform check reads these off the cell. Never raises:
+    a catalogue that cannot be read leaves the cell without a scope, which
+    the linter reads as nothing to check rather than as a mismatch.
+    """
+    try:
+        from maljan.tools import knowledge
+
+        answer = knowledge.attck_lookup(technique_id)
+    except Exception as exc:  # noqa: BLE001 — a knowledge lookup degrades, never raises
+        logger.debug("capability_matrix: no catalogue scope for %s (%s)", technique_id, exc)
+        return "", []
+    if not isinstance(answer, dict):
+        return "", []
+    return (
+        str(answer.get("domain") or ""),
+        [str(p) for p in (answer.get("platforms") or []) if str(p).strip()],
+    )
+
+
 def _unknown_to_the_catalogue(ids: list[str]) -> set[str]:
     """Which of ``ids`` the ATT&CK catalogue has no entry for.
 
@@ -159,7 +184,9 @@ def _unknown_to_the_catalogue(ids: list[str]) -> set[str]:
     labelled — one rule for the model that had the last word.
 
     Never raises. An unreachable catalogue marks nothing rather than marking
-    everything.
+    everything, and records nothing here: ``run_summary.validation.not_run``
+    is written by the analyst loop and the judge node, which are the two
+    places a check that did not run is a fact about the run.
     """
     try:
         from maljan.pipeline.validation import unknown_technique_ids

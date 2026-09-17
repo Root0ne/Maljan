@@ -50,6 +50,7 @@ from maljan.pipeline.validation import (
     drop_ungrounded_indicators,
     retry_with_feedback,
     unsupported_benign_violations,
+    unsupported_malware_violations,
     validate_verdict_bundle,
 )
 from maljan.schemas.evidence import EvidenceCounter, LedgerEntry
@@ -241,6 +242,22 @@ def _identity_prefix(sample: Any) -> str:
     """The identity block as a prompt prefix, with its blank line."""
     block = sample_identity_block(sample)
     return f"{block}\n\n" if block else ""
+
+
+def _standing_blocks(run_state: str, facts_block: str) -> str:
+    """The run-state block and the pack as a prompt prefix, each with its blank line.
+
+    The run state first, between its markers, because it is the shorter and
+    the one a reader orients by; the pack after it, under its own heading.
+    """
+    from maljan.pipeline.run_state import with_run_state
+
+    parts: list[str] = []
+    if run_state:
+        parts.append(with_run_state("", run_state))
+    if facts_block:
+        parts.append(facts_block)
+    return "".join(f"{part}\n\n" for part in parts if part)
 
 
 def _sha256_of(sample: Any) -> str:
@@ -552,6 +569,8 @@ class JudgeAgent:
         consensus_threshold: float | None = None,
         ledger_servers: Iterable[str] | None = None,
         sample: Any = None,
+        facts_block: str = "",
+        run_state: str = "",
     ) -> tuple[AgentArgument, bool]:
         """Find contradictions between expert reports and determine consensus.
 
@@ -647,6 +666,7 @@ class JudgeAgent:
             ),
             (
                 "human",
+                f"{_standing_blocks(run_state, facts_block)}"
                 f"{_identity_prefix(sample)}"
                 f"Expert Reports:\n{reports_text}\n\nPrevious Discussion:\n{history}\n\n"
                 "List the contradictions and give a single agreement_confidence "
@@ -745,13 +765,18 @@ class JudgeAgent:
         current_sample_id: str | None = None,
         sample: Any = None,
         ledger_ids: Sequence[str] | None = None,
+        facts_block: str = "",
+        run_state: str = "",
     ) -> JudgeVerdict:
         """The final decision: a STIX bundle plus the judge's own assessment.
 
         ``evidence_summary`` is the block from ``pipeline.evidence_summary`` —
         who named which technique and how sure each one was. ``degradation_note``
         says why this run is thin, when it is; both go into the prompt because
-        the judge is the component that should be weighing them.
+        the judge is the component that should be weighing them. ``facts_block``
+        is the triage pack as every analyst saw it and ``run_state`` the run's
+        state block; both lead the human turn so the verdict is drawn over the
+        same facts the analysts were given.
 
         The answer is validated (``pipeline.validation.validate_verdict_bundle``)
         and, when something is wrong, handed back once with the problems named.
@@ -805,6 +830,7 @@ class JudgeAgent:
             SystemMessage(content=JUDGE_VERDICT_SYSTEM),
             HumanMessage(
                 content=(
+                    f"{_standing_blocks(run_state, facts_block)}"
                     f"{_identity_prefix(sample)}"
                     f"Expert Reports:\n{reports_text}\n\n"
                     f"Negotiation History:\n{str(history)[:800]}\n\n"
@@ -893,6 +919,10 @@ class JudgeAgent:
             self.logger.debug("Judge verdict: the knowledge tools are unavailable (%s).", exc)
             _knowledge = None  # type: ignore[assignment]
 
+        _analyst_claims = sum(
+            len(getattr(isr, "claims", None) or []) for isr in (isr_reports or {}).values()
+        )
+
         def _validate(bundle: Bundle) -> list[Violation]:
             # A timeout produced no answer, so there is nothing to give
             # feedback about. Reporting no violations ends the loop: a retry
@@ -908,10 +938,12 @@ class JudgeAgent:
                 *assessment_conflict_violations(bundle),
                 *unsupported_benign_violations(
                     bundle,
-                    analyst_claims=sum(
-                        len(getattr(isr, "claims", None) or [])
-                        for isr in (isr_reports or {}).values()
-                    ),
+                    analyst_claims=_analyst_claims,
+                    ledger_ids=ledger_ids,
+                ),
+                *unsupported_malware_violations(
+                    bundle,
+                    analyst_claims=_analyst_claims,
                     ledger_ids=ledger_ids,
                 ),
             ]

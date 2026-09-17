@@ -34,11 +34,13 @@ from maljan.core.exceptions import AgentLoopCancelled, AnalystError
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger, record_response_usage
 from maljan.pipeline.validation import (
+    VALIDITY_CODE,
     ValidationTally,
     Violation,
     mark_invalid_technique_ids,
     retry_with_feedback_sync,
     validate_isr,
+    validity_check_available,
 )
 from maljan.schemas.evidence import ENTRY_ID_RE, EvidenceCounter, LedgerEntry, apply_budget
 from maljan.schemas.isr_models import AgentISR, Artifact, ClaimEvidence, Finding
@@ -225,13 +227,21 @@ def _trim_for_synthesis(msgs: list, budget: int) -> list:
     return [*head, *[m for unit in units for m in unit]]
 
 
-# Range constraints derived from the public MITRE ATT&CK Enterprise dataset.
-# Anything outside these bounds is treated as a hallucination.
-_TECHNIQUE_MIN: int = 1001
-_TECHNIQUE_MAX: int = 1700
+def model_turns_left(max_steps: int, messages: list) -> int:
+    """How many model turns the loop still has, counted the way langgraph counts.
 
-# Explicit placeholders that LLMs sometimes emit when uncertain.
-_INVALID_TIDS: frozenset[str] = frozenset({"T0000", "T0000.000", "T9999", "T1234"})
+    ``max_steps`` is handed to langgraph as ``recursion_limit``, and langgraph
+    counts node executions: an assistant turn is one, and a turn that called
+    tools costs a second for the tool node. So the budget in model turns is
+    half the steps, rounded up, less what the transcript already spent — one
+    per assistant turn plus one per tool round. What the model is told is a
+    number it can act on; the graph's own step count is not.
+    """
+    ai_turns = [m for m in messages if getattr(m, "type", "") == "ai"]
+    tool_rounds = sum(1 for m in ai_turns if getattr(m, "tool_calls", None))
+    used = len(ai_turns) + tool_rounds
+    return max(0, (int(max_steps) - used + 1) // 2)
+
 
 # The one human turn a tool loop gets when its last message is neither a
 # structured report nor a findings block. Exactly one: a model that will not
@@ -261,6 +271,37 @@ def answer_is_isr(text: str) -> bool:
     if not text or not text.strip():
         return False
     return "CLAIM:" in text or has_findings_block(text)
+
+
+def nudge_turns(msgs: list) -> tuple[list, bool]:
+    """The conversation as it can be sent back to the server, and whether it changed.
+
+    An assistant turn that carried a tool call whose arguments never parsed
+    ends the loop: no tool ran, and nothing answered it. Sent back as it is,
+    the server has to render that call into its template and fails on the
+    same arguments, which is the 500 a live nudge got ("Failed to parse tool
+    call arguments as JSON"). The call is dropped, the turn's text kept, and
+    the answer the nudge asks for is what the model says next.
+    """
+    from langchain_core.messages import AIMessage
+
+    out: list = []
+    changed = False
+    for message in msgs:
+        invalid = getattr(message, "invalid_tool_calls", None) or []
+        if isinstance(message, AIMessage) and invalid:
+            changed = True
+            kept_calls = list(getattr(message, "tool_calls", None) or [])
+            content = message.content if isinstance(message.content, str) else ""
+            # A turn that was nothing but the call it could not make is left
+            # out rather than sent as an empty assistant turn, which some
+            # templates render as nothing and a few reject.
+            if not content.strip() and not kept_calls:
+                continue
+            out.append(AIMessage(content=message.content, tool_calls=kept_calls))
+            continue
+        out.append(message)
+    return out, changed
 
 
 def cause_chain(exc: BaseException, limit: int = 4) -> str:
@@ -615,7 +656,11 @@ def parse_structured_claims(text: str) -> list[ClaimEvidence]:
         technique_id: str | None = None
         if technique_match:
             raw_tid = technique_match.group(1).upper()
-            if raw_tid != "NONE" and _technique_id_is_valid(raw_tid):
+            # Kept as written. Whether the id is real, retired or a
+            # placeholder is ``attck.unknown_id``'s question, asked with
+            # feedback and recorded; a parser that dropped it here would be
+            # the silent rewrite this pipeline does not do.
+            if raw_tid != "NONE":
                 technique_id = raw_tid
 
         claims.append(
@@ -629,21 +674,9 @@ def parse_structured_claims(text: str) -> list[ClaimEvidence]:
     return claims
 
 
-def _technique_id_is_valid(tid: str) -> bool:
-    """Return True if a technique ID is within the ATT&CK enterprise range."""
-    if tid in _INVALID_TIDS:
-        return False
-    try:
-        major = int(tid[1:5])
-    except ValueError:
-        return False
-    return _TECHNIQUE_MIN <= major <= _TECHNIQUE_MAX
-
-
 def _extract_technique_ids(text: str) -> list[str]:
-    """Extract all unique valid MITRE ATT&CK technique IDs mentioned in text."""
-    candidates = _TECHNIQUE_RE.findall(text)
-    return list(dict.fromkeys(t for t in candidates if _technique_id_is_valid(t)))
+    """Every distinct technique id mentioned in the text, in order, as written."""
+    return list(dict.fromkeys(_TECHNIQUE_RE.findall(text)))
 
 
 def _messages_text(messages: list) -> str:
@@ -1311,6 +1344,41 @@ def prompt_to_messages(prompt_messages: list[tuple[str, str]]) -> list[BaseMessa
     return built
 
 
+def frame_messages(
+    messages: list[BaseMessage], *, facts_block: str = "", run_state: str = ""
+) -> list[BaseMessage]:
+    """The conversation with the run's two standing blocks in their places.
+
+    ``facts_block`` goes at the head of the first human turn, once: it is the
+    triage pack, and the human turn is where the task and the data are.
+    ``run_state`` goes into the first system turn between its markers,
+    replacing the block already there — the same conversation framed twice
+    carries one block, the newer one. Empty blocks change nothing, so an
+    agent outside a staged run sends exactly what it always sent.
+    """
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    from maljan.pipeline.run_state import RUN_STATE_BEGIN, with_run_state
+    from maljan.pipeline.triage_pack import PACK_HEADING
+
+    out: list[BaseMessage] = list(messages)
+    if run_state or any(
+        isinstance(m, SystemMessage) and RUN_STATE_BEGIN in str(m.content) for m in out
+    ):
+        for index, message in enumerate(out):
+            if isinstance(message, SystemMessage):
+                out[index] = SystemMessage(content=with_run_state(str(message.content), run_state))
+                break
+    if facts_block:
+        for index, message in enumerate(out):
+            if isinstance(message, HumanMessage):
+                content = str(message.content)
+                if PACK_HEADING not in content:
+                    out[index] = HumanMessage(content=f"{facts_block}\n\n{content}")
+                break
+    return out
+
+
 def revision_messages(
     system_prompt: str,
     original_data: str,
@@ -1398,6 +1466,39 @@ class _PriorAnswer:
         self.content = isr.to_text_summary()
 
 
+def alignment_gate(knowledge: Any, cfg_validation: Any, log: Any, name: str) -> Any | None:
+    """The alignment gate for one validation turn, or ``None`` when it does not run.
+
+    ``auto`` runs it only on a worker whose ATT&CK index is already built;
+    with ``alignment_gate_build`` the first run that wanted it starts the
+    build on a thread and goes without, so no analyst's validation turn ever
+    pays for the build. ``off`` never runs it. A knowledge module without the
+    question — a stub — has no gate. A function rather than a method so a
+    duck-typed analyst that borrows ``_validate_isr`` alone still gets it.
+    """
+    mode = str(getattr(cfg_validation, "alignment_gate", "auto") or "auto")
+    if mode != "auto":
+        return None
+    warm = getattr(knowledge, "index_is_warm", None)
+    gate = getattr(knowledge, "technique_alignment", None)
+    if warm is None or gate is None:
+        return None
+    try:
+        if warm():
+            return gate
+        if bool(getattr(cfg_validation, "alignment_gate_build", False)):
+            started = getattr(knowledge, "warm_index_in_background", lambda: False)()
+            if started:
+                log.info(
+                    "%s: the ATT&CK index is being built for the alignment gate; "
+                    "this run goes without it.",
+                    name,
+                )
+    except Exception as exc:  # noqa: BLE001 — a gate that cannot start is no gate
+        log.debug("%s: alignment gate unavailable (%s).", name, exc)
+    return None
+
+
 class BaseAnalyst(ABC):
     """Abstract base class for expert agents."""
 
@@ -1406,6 +1507,14 @@ class BaseAnalyst(ABC):
         self.name = name
         self.tools = tools or []
         self.logger = logger.getChild(self.name.lower())
+        # What the pipeline established before this agent started, rendered
+        # for a prompt, and the ids of the entries it may cite for it. Set by
+        # the node on every run, empty for an agent outside a staged run.
+        self.facts_block: str = ""
+        self.pack_ledger_ids: list[str] = []
+        # The run-state block's body, derived from the state by the node and
+        # regenerated with the remaining budget on every turn of a tool loop.
+        self.run_state_block: str = ""
         # Per-run token ledger (findings-log §4 Item 1). The container attaches
         # the shared ledger in get_agent(); None when an agent runs standalone.
         self.token_ledger: TokenLedger | None = None
@@ -1477,6 +1586,13 @@ class BaseAnalyst(ABC):
         # by the analyst node onto the state's validation channels.
         self.validation_findings: list[Violation] = []
         self.validation_retries: int = 0
+        # The checks that could not run on this analyst's answers — the
+        # validity check on a box with no catalogue — by code, once each.
+        # Drained by the node like the findings are.
+        self.validation_not_run: list[str] = []
+        # The routed ``(file_type, platform)`` of the sample this agent is
+        # working on, set by the node; the platform check reads it.
+        self.sample_format: tuple[str, str] = ("unknown", "unknown")
         # Every violation this analyst was *shown*, by code. A violation the
         # retry fixed leaves no other trace, and a run summary that counts only
         # the leftovers cannot say what the retry was for.
@@ -1485,6 +1601,9 @@ class BaseAnalyst(ABC):
         # after its one nudge. Read by ``_text_to_isr`` so the ISR says why it
         # is empty instead of leaving the reader to infer it from a claim list.
         self._answer_unstructured: bool = False
+        # How the last final-answer nudge had to be sent when the plain way
+        # would not do, or ``None``. The node reads it into the run summary.
+        self._nudge_retry_mode: str | None = None
 
     def _system_prompt(self, fallback: str | Callable[[], str]) -> str:
         """This analyst's system turn for the job it is actually running.
@@ -1720,6 +1839,65 @@ class BaseAnalyst(ABC):
             agent_name=self.name,
         )
 
+    def _run_state_body(self, steps_left: int | None, seconds_left: float | None) -> str:
+        """The node's run-state lines plus this loop's remaining budget."""
+        body = str(getattr(self, "run_state_block", "") or "").rstrip()
+        if not body:
+            return ""
+        budget = []
+        if steps_left is not None:
+            budget.append(f"{max(0, int(steps_left))} model turns")
+        if seconds_left is not None:
+            budget.append(f"{max(0, int(seconds_left))} s")
+        return f"{body}\nbudget remaining: {', '.join(budget)}" if budget else body
+
+    def frame_messages(
+        self,
+        messages: list[BaseMessage],
+        *,
+        steps_left: int | None = None,
+        seconds_left: float | None = None,
+    ) -> list[BaseMessage]:
+        """``messages`` with this agent's facts block and run-state block in place."""
+        return frame_messages(
+            messages,
+            facts_block=str(getattr(self, "facts_block", "") or ""),
+            run_state=self._run_state_body(steps_left, seconds_left),
+        )
+
+    def _run_state_refresher(self, max_steps: int, timeout: float, started: float) -> Any:
+        """The per-turn hook that regenerates the run-state block's budget line.
+
+        Handed to the ReAct executor as its prompt: every model turn goes
+        through it, so the block the model reads says how many steps and
+        seconds this loop has left as of that turn. Nothing accumulates — the
+        block is replaced, not appended — and a loop with no block returns
+        the conversation untouched.
+        """
+
+        def refresh(state: Any) -> list[BaseMessage]:
+            messages = state.get("messages") if isinstance(state, dict) else None
+            if messages is None:
+                messages = getattr(state, "messages", None) or []
+            messages = list(messages)
+            if not str(getattr(self, "run_state_block", "") or ""):
+                return messages
+            # The budget is stated in model turns (``model_turns_left``): the
+            # framing and the tool results cost nothing, an assistant turn
+            # costs one and a tool round costs one more, which is how the
+            # graph's recursion limit is spent.
+            try:
+                return self.frame_messages(
+                    messages,
+                    steps_left=model_turns_left(max_steps, messages),
+                    seconds_left=float(timeout) - (time.monotonic() - started),
+                )
+            except Exception as exc:  # noqa: BLE001 — the block never costs a turn
+                self.logger.debug("%s: run-state refresh skipped (%s).", self.name, exc)
+                return messages
+
+        return refresh
+
     def execute_tool_loop(self, prompt_messages: list) -> str:
         """Executes a tool-calling ReAct loop if tools are available.
 
@@ -1765,12 +1943,27 @@ class BaseAnalyst(ABC):
             elif role == "human":
                 prebuilt.append(HumanMessage(content=content))
 
-        cfg_for_timeout = get_settings()
-        _timeout_overrides = getattr(cfg_for_timeout, "react_agent_timeout_overrides", {}) or {}
-        no_tools_timeout = _timeout_overrides.get(self.name, cfg_for_timeout.react_agent_timeout)
+        cfg = get_settings()
+        # Per-agent timeout override. The static
+        # analyst with 31 Ghidra tools never finishes inside 180 s on
+        # commodity hardware; give it the operator-configured headroom.
+        overrides = getattr(cfg, "react_agent_timeout_overrides", {}) or {}
+        timeout = overrides.get(self.name, cfg.react_agent_timeout)
+        # Per-agent recursion-step override: the
+        # static analyst's Ghidra ReAct loop needs far more than the default
+        # ~4-tool-call budget. Without this it hit the step cap and LangGraph
+        # returned the "need more steps" stop message instead of real claims.
+        step_overrides = getattr(cfg, "react_agent_max_steps_overrides", {}) or {}
+        max_steps = step_overrides.get(self.name, cfg.react_agent_max_steps)
+
+        # The two standing blocks: the pack at the head of the task, the run
+        # state in the system turn with this loop's whole budget still ahead.
+        prebuilt = self.frame_messages(
+            prebuilt, steps_left=model_turns_left(max_steps, []), seconds_left=float(timeout)
+        )
 
         if not self.tools:
-            return self._capture_findings(self._invoke_llm_with_timeout(prebuilt, no_tools_timeout))
+            return self._capture_findings(self._invoke_llm_with_timeout(prebuilt, timeout))
 
         from langgraph.prebuilt import create_react_agent
 
@@ -1799,24 +1992,22 @@ class BaseAnalyst(ABC):
         # The repeat guard is per loop, like the recorder: a second chunk is a
         # new conversation and the model has not seen the first one's answers.
         repeats = RepeatGuard()
-        agent_executor = create_react_agent(
-            self.llm, record_tools(self.pinned_tools(), recorder, repeats)
-        )
 
         messages = prebuilt
 
-        cfg = get_settings()
-        # Per-agent timeout override. The static
-        # analyst with 31 Ghidra tools never finishes inside 180 s on
-        # commodity hardware; give it the operator-configured headroom.
-        overrides = getattr(cfg, "react_agent_timeout_overrides", {}) or {}
-        timeout = overrides.get(self.name, cfg.react_agent_timeout)
-        # Per-agent recursion-step override: the
-        # static analyst's Ghidra ReAct loop needs far more than the default
-        # ~4-tool-call budget. Without this it hit the step cap and LangGraph
-        # returned the "need more steps" stop message instead of real claims.
-        step_overrides = getattr(cfg, "react_agent_max_steps_overrides", {}) or {}
-        max_steps = step_overrides.get(self.name, cfg.react_agent_max_steps)
+        # The run-state block is regenerated on every model turn with the
+        # budget this loop has left, which is why the executor's prompt is a
+        # callable rather than the fixed messages.
+        # The per-turn refresher rides ``create_react_agent(prompt=...)``, which
+        # langgraph 1.x deprecates in favour of ``langchain.agents.create_agent``
+        # and its middleware hook. The contract this loop needs is one call
+        # before every model turn that can replace the system message; that is
+        # what moves when the helper does.
+        agent_executor = create_react_agent(
+            self.llm,
+            record_tools(self.pinned_tools(), recorder, repeats),
+            prompt=self._run_state_refresher(int(max_steps), float(timeout), time.monotonic()),
+        )
 
         # Run the ReAct coroutine on the shared, never-closing agent
         # loop (see ``_get_agent_loop``) instead of a throwaway per-call loop.
@@ -2088,7 +2279,7 @@ class BaseAnalyst(ABC):
         """
         from langchain_core.messages import HumanMessage
 
-        remaining_steps = max_steps - len(msgs)
+        remaining_steps = model_turns_left(max_steps, list(msgs))
         if remaining_steps < 1:
             self.logger.info(
                 "%s: no step budget left for the final-answer nudge.",
@@ -2104,23 +2295,71 @@ class BaseAnalyst(ABC):
             "%s: the loop's last message was not a final report; asking once for one.",
             self.name,
         )
-        turns = [*msgs, HumanMessage(content=FINAL_ANSWER_NUDGE)]
-
-        async def _ask() -> Any:
-            return await asyncio.wait_for(
-                self.llm.ainvoke(turns), timeout=min(remaining_time, float(timeout))
+        sendable, dropped = nudge_turns(msgs)
+        modes: list[str] = ["invalid_tool_calls_dropped"] if dropped else []
+        if dropped:
+            self.logger.warning(
+                "%s: the nudge leaves out a tool call whose arguments never parsed.", self.name
             )
+        turns = [*sendable, HumanMessage(content=FINAL_ANSWER_NUDGE)]
+        budget = min(remaining_time, float(timeout))
+
+        def _ask_with(model: Any, label: str) -> Any:
+            async def _ask() -> Any:
+                return await asyncio.wait_for(model.ainvoke(turns), timeout=budget)
+
+            return _run_coro_blocking(_ask(), budget + 5, label=label)
 
         try:
-            answer = _run_coro_blocking(
-                _ask(), min(remaining_time, float(timeout)) + 5, label=f"nudge:{self.name}"
-            )
-        except Exception as exc:  # noqa: BLE001 — a nudge that fails changes nothing
+            answer = _ask_with(self.llm, f"nudge:{self.name}")
+        except Exception as exc:  # noqa: BLE001 — a nudge that fails is asked one other way
             self.logger.warning("%s: the final-answer nudge failed (%s).", self.name, exc)
-            return None
+            # The other shape the server accepts: the loop's own tools bound
+            # and forbidden, so the transcript renders as the loop rendered
+            # it and the model still has to answer in prose.
+            withheld = self._llm_with_tools_withheld()
+            if withheld is None:
+                self._nudge_retry_mode = "+".join(modes) or None
+                return None
+            try:
+                answer = _ask_with(withheld, f"nudge-tools-none:{self.name}")
+            except Exception as again:  # noqa: BLE001 — changes nothing
+                self.logger.warning(
+                    "%s: the final-answer nudge failed with tools withheld too (%s).",
+                    self.name,
+                    again,
+                )
+                self._nudge_retry_mode = "+".join(modes) or None
+                return None
+            modes.append("tool_choice_none")
+        self._nudge_retry_mode = "+".join(modes) or None
         record_response_usage(self.token_ledger, answer)
         text = str(getattr(answer, "content", "") or "")
         return text or None
+
+    def _llm_with_tools_withheld(self) -> Any | None:
+        """This agent's model with its tools bound and ``tool_choice="none"``, or ``None``.
+
+        ``None`` when the agent has no tools or the model cannot bind them;
+        the caller then has no second way to ask.
+        """
+        tools = list(getattr(self, "tools", None) or [])
+        bind = getattr(self.llm, "bind_tools", None)
+        if not tools or bind is None:
+            return None
+        # The same tools the loop was run with, guards included, so the
+        # server sees the tool list the transcript was produced against. An
+        # agent that cannot pin — one built outside a job — binds them bare.
+        try:
+            pinned = self.pinned_tools()
+        except Exception as exc:  # noqa: BLE001 — the bare tools are the fallback's fallback
+            self.logger.debug("%s: tools bound unpinned for the nudge (%s).", self.name, exc)
+            pinned = tools
+        try:
+            return bind(pinned, tool_choice="none")
+        except Exception as exc:  # noqa: BLE001 — a model that cannot bind has no fallback
+            self.logger.debug("%s: tools could not be bound for the nudge (%s).", self.name, exc)
+            return None
 
     def _record_react_loop(self, *, hit_step_cap: bool) -> None:
         """Count one ReAct loop and whether it exhausted its step budget.
@@ -2267,7 +2506,10 @@ class BaseAnalyst(ABC):
             return ""
 
         budget = synthesis_budget_chars(get_settings(), self.name)
-        trimmed = _trim_for_synthesis(msgs, budget)
+        # The same transcript rule the nudge follows: a tool call whose
+        # arguments never parsed is not sent back to the server.
+        sendable, _dropped = nudge_turns(msgs)
+        trimmed = _trim_for_synthesis(sendable, budget)
         if len(trimmed) < len(msgs):
             self.logger.warning(
                 "%s forced synthesis: trimmed %d of %d messages to fit %d chars.",
@@ -2726,17 +2968,49 @@ class BaseAnalyst(ABC):
             self.logger.debug("Validation skipped, the knowledge tools are unavailable: %s", exc)
             return isr
 
-        # This analyst's own ledger, as it stands when the answer is checked.
-        # It decides whether a technique claim that cites nothing is a
-        # violation: an analyst that called no tool has nothing to cite.
+        # What this analyst may cite: its own ledger as it stands when the
+        # answer is checked, and the triage pack's entries, which every agent
+        # was shown. It decides whether a technique claim that cites nothing
+        # is a violation: an analyst with neither has nothing to cite.
         ledger_ids = [
             str(getattr(entry, "id", ""))
             for entry in (getattr(self, "_evidence_entries", None) or [])
             if getattr(entry, "id", "")
         ]
+        ledger_ids.extend(
+            str(i) for i in (getattr(self, "pack_ledger_ids", None) or []) if str(i).strip()
+        )
+
+        # The validity check answers from the vendored id universe; a box
+        # without it cannot check anything, and says so in the run summary
+        # instead of reporting every id as fine.
+        if not validity_check_available(knowledge):
+            not_run = getattr(self, "validation_not_run", None)
+            if not_run is None:
+                not_run = []
+                self.validation_not_run = not_run
+            if VALIDITY_CODE not in not_run:
+                not_run.append(VALIDITY_CODE)
+            self.logger.warning(
+                "%s: the ATT&CK catalogue is unavailable; technique ids are not checked.",
+                self.name,
+            )
+
+        file_type, platform = getattr(self, "sample_format", ("unknown", "unknown"))
+        sample = {"file_type": file_type, "platform": platform}
+        cfg_validation = getattr(get_settings(), "validation", None)
+        gate = alignment_gate(knowledge, cfg_validation, self.logger, self.name)
+        threshold = float(getattr(cfg_validation, "alignment_threshold", 0.05) or 0.05)
 
         def _validator(candidate: AgentISR) -> list[Violation]:
-            return validate_isr(candidate, attck=knowledge, ledger_ids=ledger_ids)
+            return validate_isr(
+                candidate,
+                attck=knowledge,
+                ledger_ids=ledger_ids,
+                sample=sample,
+                alignment=gate,
+                alignment_threshold=threshold,
+            )
 
         try:
             if not _validator(isr):
@@ -2752,6 +3026,15 @@ class BaseAnalyst(ABC):
         if prompt:
             messages.append(SystemMessage(content=prompt))
         messages.append(HumanMessage(content=self._truncate_input(evidence)))
+        # Framed like every other turn: the feedback asks the analyst to cite
+        # ledger ids, and the pack is where the ids it can cite are written.
+        # Through the module function, so a duck-typed analyst that borrows
+        # this method alone is framed too.
+        messages = frame_messages(
+            messages,
+            facts_block=str(getattr(self, "facts_block", "") or ""),
+            run_state=str(getattr(self, "run_state_block", "") or ""),
+        )
 
         cfg = get_settings()
         timeout = int(
@@ -2812,6 +3095,18 @@ class BaseAnalyst(ABC):
                 ", ".join(sorted({v.code for v in violations})),
             )
         return revised
+
+    def drain_nudge_retry_mode(self) -> str | None:
+        """How the last nudge had to be sent, handed over once."""
+        mode = getattr(self, "_nudge_retry_mode", None)
+        self._nudge_retry_mode = None
+        return str(mode) if mode else None
+
+    def drain_validation_not_run(self) -> list[str]:
+        """The checks that could not run, handed over once."""
+        codes = list(getattr(self, "validation_not_run", None) or [])
+        self.validation_not_run = []
+        return codes
 
     def _revalidate(
         self, isr: AgentISR, validator: Callable[[AgentISR], list[Violation]]

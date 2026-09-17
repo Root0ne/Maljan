@@ -12,9 +12,7 @@
       }
     },
     "edges": [
-      "__start__->dynamic_analyst",
-      "__start__->network_analyst",
-      "__start__->static_analyst",
+      "__start__->triage_pack",
       "dynamic_analyst->negotiation",
       "judge->report",
       "negotiation->judge",
@@ -22,7 +20,10 @@
       "network_analyst->negotiation",
       "report->__end__",
       "revision->negotiation",
-      "static_analyst->negotiation"
+      "static_analyst->negotiation",
+      "triage_pack->dynamic_analyst",
+      "triage_pack->network_analyst",
+      "triage_pack->static_analyst"
     ],
     "nodes": [
       "__end__",
@@ -33,7 +34,8 @@
       "network_analyst",
       "report",
       "revision",
-      "static_analyst"
+      "static_analyst",
+      "triage_pack"
     ]
   },
   "sequential": {
@@ -49,7 +51,7 @@
       }
     },
     "edges": [
-      "__start__->static_analyst",
+      "__start__->triage_pack",
       "dynamic_analyst->network_analyst",
       "judge->report",
       "negotiation->judge",
@@ -57,7 +59,8 @@
       "network_analyst->negotiation",
       "report->__end__",
       "revision->negotiation",
-      "static_analyst->dynamic_analyst"
+      "static_analyst->dynamic_analyst",
+      "triage_pack->static_analyst"
     ],
     "nodes": [
       "__end__",
@@ -68,7 +71,8 @@
       "network_analyst",
       "report",
       "revision",
-      "static_analyst"
+      "static_analyst",
+      "triage_pack"
     ]
   }
 }

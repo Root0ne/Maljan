@@ -98,6 +98,8 @@ _PREFIX_GROUPS: list[tuple[str, str]] = [
     ("sandbox", "sandbox"),
     ("analysis", "analysis"),
     ("preprocessing", "analysis"),
+    ("triage", "analysis"),
+    ("validation", "analysis"),
     ("static", "static"),
     ("mcp", "mcp"),
     ("reporting", "reporting"),
@@ -643,46 +645,6 @@ ANNOTATIONS: dict[str, Annotation] = {
         ),
         "subgroup": "Reference data",
     },
-    "preprocessing.api_behaviour_map_path": {
-        "title": "API behaviour map path",
-        "description": (
-            "Path to the API-behaviour-map catalog JSON used when use_api_behaviour_map "
-            "is enabled. Build it with scripts/knowledge/build_api_capability_db.py."
-        ),
-        "subgroup": "Reference data",
-    },
-    "preprocessing.attck_case_corpus_path": {
-        "title": "ATT&CK case corpus path",
-        "description": (
-            "Path to the ATT&CK case-prior corpus JSON used when use_attck_case_rag is "
-            "enabled. Build it with scripts/knowledge/build_attck_case_kb.py against a populated "
-            "Qdrant long-term-memory store."
-        ),
-        "subgroup": "Reference data",
-    },
-    "preprocessing.attck_case_rag_max_techniques": {
-        "title": "ATT&CK case-RAG max techniques",
-        "description": (
-            "Maximum number of technique IDs surfaced in the ATT&CK case-prior candidate list."
-        ),
-        "subgroup": "Thresholds and limits",
-    },
-    "preprocessing.attck_case_rag_min_score": {
-        "title": "ATT&CK case-RAG min score",
-        "description": (
-            "Minimum similarity score for a case-prior RAG match to be kept. Currently "
-            "inert in practice — measured production queries all score 0.78-0.90 "
-            "regardless of content, so nothing is filtered — but kept rather than "
-            "raised to a value that would appear to work."
-        ),
-        "subgroup": "Thresholds and limits",
-        "advanced": True,
-    },
-    "preprocessing.attck_case_rag_top_k": {
-        "title": "ATT&CK case-RAG top-K",
-        "description": ("Number of prior cases retrieved per query for ATT&CK case-prior RAG."),
-        "subgroup": "Thresholds and limits",
-    },
     "preprocessing.attck_index_backend": {
         "title": "ATT&CK index backend",
         "description": (
@@ -824,29 +786,6 @@ ANNOTATIONS: dict[str, Annotation] = {
         ),
         "subgroup": "Feature switches",
     },
-    "preprocessing.use_api_behaviour_map": {
-        "title": "Use API behaviour map",
-        "description": (
-            "Enables the data-driven Windows-API behaviour catalog (~680 API names "
-            "across 13 behaviour categories) in place of the small hardcoded "
-            "suspicious-imports table. On by default and fail-safe: a missing or "
-            "malformed catalog falls back to the built-in table."
-        ),
-        "subgroup": "Feature switches",
-    },
-    "preprocessing.use_attck_case_rag": {
-        "title": "Use ATT&CK case-prior RAG",
-        "description": (
-            "Enables cross-sample ATT&CK case-prior retrieval: the sample's profile is "
-            "matched against behaviourally-similar prior cases from long-term memory, "
-            "and their technique IDs are aggregated into a ranked candidate list for "
-            "the LLM. Stays off by default — measured evaluation found the production "
-            "query text does not actually reach the corpus effectively (retrieval F1 "
-            "0.111 vs a 0.123 frequency-prior baseline), so enabling it would look like "
-            "corroboration without being one."
-        ),
-        "subgroup": "Feature switches",
-    },
     "preprocessing.use_claim_consistency_gate": {
         "title": "Use claim-consistency gate",
         "description": (
@@ -915,6 +854,76 @@ ANNOTATIONS: dict[str, Annotation] = {
             "malicious core. Fails safe to no hint on error or a stripped binary."
         ),
         "subgroup": "Feature switches",
+    },
+    "triage.enabled": {
+        "title": "Run the triage pack",
+        "description": (
+            "Before any analyst starts, the pipeline runs the deterministic tools "
+            "over the sample (identification, hashes, signature, format facts, "
+            "strings, IoCs, YARA, capa, Sigma, catalogue lookups, the sandbox "
+            "summary, one reputation lookup) and writes each result to the "
+            "evidence ledger as facts of the run. Off leaves the stage in every "
+            "team and makes it decline with that reason."
+        ),
+        "subgroup": "Triage pack",
+    },
+    "triage.strings_head": {
+        "title": "Triage strings head",
+        "description": (
+            "How many printable runs of at least six characters the triage pack "
+            "records from the sample. The full string table stays reachable by "
+            "tool call; this bounds the one open-ended entry in the pack."
+        ),
+        "subgroup": "Triage pack",
+    },
+    "triage.reputation": {
+        "title": "Triage reputation lookup",
+        "description": (
+            "'auto' asks the enabled reputation server once for the sample hash: "
+            "VirusTotal's own server when it is enabled, else the threat-intel "
+            "sidecar. 'off' records a skipped entry instead. The call goes through "
+            "the tool server like any agent's call and is recorded under that "
+            "server."
+        ),
+        "subgroup": "Triage pack",
+    },
+    "triage.budget_seconds": {
+        "title": "Triage pack budget (seconds)",
+        "description": (
+            "How long the whole triage pack may take. capa and YARA carry their own "
+            "budgets; this one is checked between steps, and a step that would start "
+            "after it is spent is recorded as not run rather than started."
+        ),
+        "subgroup": "Triage pack",
+    },
+    "validation.alignment_gate": {
+        "title": "Technique alignment gate",
+        "description": (
+            "Whether an analyst's technique claims are ranked against the ATT&CK index "
+            "as a check ('auto') or not at all ('off'). 'auto' runs the check only when "
+            "this worker has already built the index; the result is a violation the "
+            "analyst answers once and a ranking the judge and the report see. No id is "
+            "ever replaced."
+        ),
+        "subgroup": "Technique check",
+    },
+    "validation.alignment_gate_build": {
+        "title": "Build the ATT&CK index for the gate",
+        "description": (
+            "Lets the first run that needs the alignment gate build the ATT&CK index in "
+            "the background, once per worker; that run skips the gate and the runs after "
+            "it have it. Off leaves the gate to workers that built the index for another "
+            "reason. The build takes seconds and hundreds of megabytes."
+        ),
+        "subgroup": "Technique check",
+    },
+    "validation.alignment_threshold": {
+        "title": "Alignment gate threshold",
+        "description": (
+            "The TF-IDF gate score below which a claimed technique the index did not "
+            "rank among its candidates is questioned. The paper's gate."
+        ),
+        "subgroup": "Technique check",
     },
     "react_agent_max_steps": {
         "title": "ReAct agent default max steps",

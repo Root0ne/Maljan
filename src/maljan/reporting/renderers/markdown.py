@@ -171,9 +171,17 @@ class MarkdownRenderer:
         # `4d5a` is the finding, and the type string alone hides it.
         if ident.magic_bytes:
             lines.append(f"| Magic bytes | `{ident.magic_bytes}` |")
-        lines.append(f"| Signed | {'yes' if ident.signing.is_signed else 'no'} |")
-        if ident.signing.signer_subject:
-            lines.append(f"| Signer | {ident.signing.signer_subject} |")
+        signing = ident.signing
+        cited = f" ({signing.evidence_id})" if signing.evidence_id else ""
+        lines.append(f"| Signed | {'yes' if signing.is_signed else 'no'}{cited} |")
+        if signing.signer_subject:
+            lines.append(f"| Signer | {signing.signer_subject} |")
+        if signing.signer_issuer:
+            lines.append(f"| Signer issuer | {signing.signer_issuer} |")
+        if signing.signature_valid is not None:
+            lines.append(
+                f"| Signature chain | {'valid' if signing.signature_valid else 'invalid'} |"
+            )
         lines.append("")
         lines.append("**Hashes:**")
         lines.append("")
@@ -257,8 +265,11 @@ class MarkdownRenderer:
 
         if static.api_capabilities:
             ordered = sorted(static.api_capabilities.items(), key=lambda kv: -kv[1])
+            cited = ", ".join(static.api_capabilities_evidence_ids)
             lines.append(
-                "**Import capability profile**: "
+                "**Import capability profile**"
+                + (f" ({cited})" if cited else "")
+                + ": "
                 + ", ".join(f"{cat} ×{count}" for cat, count in ordered)
             )
             lines.append("")
@@ -267,20 +278,27 @@ class MarkdownRenderer:
             lines.append("### ATT&CK Techniques Derived From Imports")
             lines.append("")
             lines.append(
-                "_Deterministic: each row is the import table alone — no sandbox, "
-                "no model. This is the audit trail behind the capability matrix._"
+                "_Deterministic: each row is a rule that fired over the import table — "
+                "capa's, or the knowledge table's — no sandbox, no model. The pack's "
+                "rows cite their ledger entry._"
             )
             lines.append("")
-            lines.append("| Technique | Name | Confidence | Imports |")
+            lines.append("| Technique | Name | Source | Imports |")
             lines.append("|---|---|---|---|")
-            for hit in sorted(
+            # By source, then technique: a stated order, so a capa-heavy binary
+            # cannot push the pack's rows off the end of the audit trail.
+            ordered_hits = sorted(
                 static.api_technique_hits,
-                key=lambda h: -float(h.get("confidence") or 0.0),
-            )[:25]:
+                key=lambda h: (str(h.get("source") or ""), str(h.get("technique_id") or "")),
+            )
+            for hit in ordered_hits[:25]:
                 apis = ", ".join(f"`{a}`" for a in (hit.get("matched_apis") or [])[:6])
+                source = str(hit.get("source") or "-")
+                if hit.get("evidence_id"):
+                    source = f"{source} ({hit['evidence_id']})"
                 lines.append(
                     f"| {hit.get('technique_id', '?')} | {hit.get('name', '-')} "
-                    f"| {float(hit.get('confidence') or 0.0):.2f} | {apis} |"
+                    f"| {source} | {apis} |"
                 )
             lines.append("")
 
@@ -303,16 +321,6 @@ class MarkdownRenderer:
                     f"| `{sec.name}` | {sec.virtual_address} | {sec.virtual_size} | "
                     f"{sec.raw_size} | {raw_offset} | {sec.entropy:.2f} | {flag} |"
                 )
-            lines.append("")
-
-        suspicious_imports = [i for i in static.imports if i.is_suspicious]
-        if suspicious_imports:
-            lines.append("### Suspicious Imports")
-            lines.append("")
-            lines.append("| DLL | Function | Category |")
-            lines.append("|---|---|---|")
-            for imp in suspicious_imports[:40]:
-                lines.append(f"| `{imp.dll}` | `{imp.function}` | {imp.category or '-'} |")
             lines.append("")
 
         if static.exports:
@@ -610,22 +618,6 @@ class MarkdownRenderer:
                     f"| {cand.get('malware_category', '-')} "
                     f"| {cand.get('sample_count', '-')} |"
                 )
-        if attr.attck_case_candidates:
-            lines.append("")
-            lines.append("**ATT&CK case priors (techniques recurring in similar prior cases):**")
-            lines.append("")
-            lines.append(
-                "_Advisory only — these are priors from past runs, not evidence from this sample._"
-            )
-            lines.append("")
-            lines.append("| Technique | Support | Similarity |")
-            lines.append("|---|---|---|")
-            for cand in attr.attck_case_candidates[:10]:
-                lines.append(
-                    f"| {cand.get('technique_id', '?')} "
-                    f"| {cand.get('support', '-')} "
-                    f"| {float(cand.get('similarity') or 0.0):.3f} |"
-                )
         if attr.similar_samples:
             lines.append("")
             lines.append("**Similar samples (LTM nearest neighbours):**")
@@ -914,15 +906,54 @@ class MarkdownRenderer:
             lines.append(f"- Report sections with no evidence: {ungrounded}")
         corroboration = run_summary.get("corroboration") or {}
         if corroboration:
-            multi = sum(1 for sources in corroboration.values() if len(sources) > 1)
-            lines.append(f"- TTPs: {len(corroboration)} named, {multi} by more than one source")
+            from maljan.analysis.corroboration import corroboration_sources, technique_label
+
+            multi = sum(1 for row in corroboration.values() if len(corroboration_sources(row)) > 1)
+            asserted = sum(
+                1
+                for row in corroboration.values()
+                if isinstance(row, dict) and row.get("asserted_by")
+            )
+            lines.append(
+                f"- TTPs: {len(corroboration)} named, {multi} by more than one source, "
+                f"{asserted} asserted by a deterministic source"
+            )
         validation = run_summary.get("validation") or {}
         if validation:
             unresolved = validation.get("unresolved") or []
+            not_run = validation.get("not_run") or []
             lines.append(
                 f"- Validation: {validation.get('retries', 0)} feedback retries, "
                 f"{len(unresolved)} finding(s) left unresolved"
+                + (f", checks that could not run: {', '.join(not_run)}" if not_run else "")
             )
+            for row in unresolved:
+                if not isinstance(row, dict):
+                    continue
+                message = " ".join(str(row.get("message") or "").split())
+                lines.append(f"  - `{row.get('code', '')}` ({row.get('agent', '')}): {message}")
+        if corroboration:
+            lines.append("")
+            lines.append("**Corroboration per technique:**")
+            lines.append("")
+            lines.append(
+                "_Catalogue is the API table's association, shown for reference; "
+                "it is not a rule match and counts for nothing._"
+            )
+            lines.append("")
+            lines.append("| Technique | Asserted by | Claimed by | Catalogue |")
+            lines.append("|---|---|---|---|")
+            for tid, row in sorted(corroboration.items()):
+                if isinstance(row, dict):
+                    asserted_by = ", ".join(row.get("asserted_by") or []) or "—"
+                    claimed_by = ", ".join(row.get("claimed_by") or []) or "—"
+                    associated = ", ".join(row.get("associated_by") or []) or "—"
+                else:
+                    asserted_by, claimed_by = "—", ", ".join(str(s) for s in row) or "—"
+                    associated = "—"
+                label = technique_label(str(tid), row if isinstance(row, dict) else None)
+                lines.append(f"| {label} | {asserted_by} | {claimed_by} | {associated} |")
+            lines.append("")
         return "\n".join(lines)
 
     # ------------------------------------------------------------------
