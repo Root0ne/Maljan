@@ -417,10 +417,12 @@ ask itself is a ledger entry under the caller's key with `server="team"`,
 `tool="ask_<key>"`, the task and context as its arguments, the answer as its
 output and the callee's wall clock as its duration — so a report can cite the
 ask (`ev_0012`) or what the specialist looked at (`ev_0009`). The callee's turns
-are charged to the caller's loop budget: the budget line the caller reads
-shrinks by what its specialists spent, the callee never gets more steps or
-seconds than the caller has left, and a caller whose specialists have used its
-steps is ended and synthesises from what they brought back. Two `agent_message`
+carry a budget of their own (`core.agents.delegation_steps`,
+`core.agents.delegation_timeout_seconds`): the caller's step budget is not
+spent by its specialists' work, only its wall clock is, and an ask is cut to
+the time the caller has left and refused when that is below what a first model
+turn needs. A callee that reaches its step cap writes up what it gathered, the
+way an analyst at its own cap does. Two `agent_message`
 events carry the exchange, each with `stage`, `round` and `addressed_to`: the
 caller's ask, addressed to the callee, and the callee's answer with its claims,
 addressed to the caller. The console draws the arrow live, and in the replay
@@ -450,13 +452,16 @@ a colleague that no stage narrows. The settings model refuses the static cases
 at save time: a reference to an agent that does not exist, to the definition
 itself, to the judge or the reporter, or on the judge or the reporter.
 
-One agent does one thing at a time. Each agent carries the job's lock for
-itself, and an ask of it, a second ask of it and its own stage run all take
-that lock, because all three drive the same buffers, the same budget and the
-same call chain. A caller waits for a busy callee only as long as it can still
-read an answer in, and one that does not free up in that time is a refusal like
-the others. An agent asked twice with the same task is served the second time
-and refused the third, by the same repeat guard every tool has.
+One agent does one thing at a time, on both sides. A caller's asks take its own
+lock, so two `ask_*` calls in one assistant turn — which langgraph gathers and
+runs at once — go one after the other rather than putting two nested loops on
+one llama-server slot. An ask of an agent, a second ask of it and its own stage
+run take *its* lock, because all three drive the same buffers and the same call
+chain. The two are different objects, which is what lets an ask made from
+inside an ask still nest. A caller waits for a busy callee only as long as it
+can still read an answer in, and one that does not free up in that time is a
+refusal like the others. An agent asked twice with the same task is served the
+second time and refused the third, by the same repeat guard every tool has.
 
 ### The stage graph
 

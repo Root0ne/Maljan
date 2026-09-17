@@ -30,12 +30,21 @@ an ask that would come back with a server the asking stage withholds is
 refused naming the stage and the servers, because a callee's effective tool
 set is its own definition narrowed by the tool policy of the stage asking.
 
-One agent does one thing at a time. Each agent carries the job's lock for
-itself, and an ask of it, a second ask of it and its own stage run all take
-that lock, because all three drive the same buffers, the same budget and the
-same call chain. A caller waits only as long as it can still read an answer
-in, and a callee that does not free up in that time is a refusal like the
-others.
+One agent does one thing at a time, on both sides. A caller's asks take its
+own ``asks_lock``, so two ``ask_*`` calls in one turn — which langgraph
+gathers — run one after the other rather than putting two nested loops on one
+llama-server slot. An ask of an agent, a second ask of it and its own stage
+run take *its* lock, because all three drive the same buffers and the same
+call chain. The two locks are different objects, which is what lets an ask
+made from inside an ask still nest. A caller waits only as long as it can
+still read an answer in, and a callee that does not free up in that time is a
+refusal like the others.
+
+An ask has a budget of its own: ``core.agents.delegation_steps`` and
+``core.agents.delegation_timeout_seconds``, cut to the time the caller has
+left and to nothing else. A callee derived from its caller's remaining steps
+ran out before it had made a tool call, and the caller's own budget is not
+spent by its specialists' work — only by the wall clock it waits through.
 """
 
 from __future__ import annotations
