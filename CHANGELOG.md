@@ -36,6 +36,14 @@ change landed on `main`.
   The same revision adds `agent_messages.addressed_to`, and the stored
   transcript row is written with the `seq` its event went out under, so a live
   message and its replayed twin are one message.
+- **Changed:** `agent_messages.seq` is now the publisher's run-wide event
+  number rather than the message's position within the report, so it is
+  monotonic and **sparse** — it no longer starts at zero and no longer counts
+  `0..n`. Ordering is unchanged and `ORDER BY seq` still yields the order the
+  messages were said in; a query or fixture that assumed contiguous per-report
+  numbering needs updating. Rows written before this release keep their old
+  numbering and the report endpoint sends their `seq` as `null`, so a client
+  cannot mistake a position for a publisher number and draw the line twice.
 
 - **Each tool server says what it can do on its host, before a run.** The four
   built-in sidecars answer a `capabilities` tool — per tool, its optional

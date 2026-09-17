@@ -138,11 +138,22 @@ function sequencedId(seq: number): string {
   return `seq:${seq}`;
 }
 
-/** The `seq` a live event carries, or `undefined` for a run from before there
- *  were any. Zero is not a sequence number: the publisher's counter starts at
- *  one, so a `0` is a payload that never had the field. */
+/**
+ * The `seq` a message carries, or `undefined` when it carries none.
+ *
+ * Three things mean "none", and all three occur. A live event from a run
+ * published before the publisher numbered anything has no `seq` at all. A
+ * stored row from such a run is sent with `seq: null`, because the API only
+ * emits the field for a run that has a feed — its old column held the
+ * message's position within the report, which is a *different* number from
+ * the same run's live events, and accepting it would key a stored line and
+ * its live twin apart and draw both. And `0` is none either way: the
+ * publisher's counter starts at one, so a zero is a payload that never had
+ * the field.
+ */
 function asSeq(value: unknown): number | undefined {
-  const seq = Number(value ?? 0);
+  if (value === undefined || value === null) return undefined;
+  const seq = Number(value);
   return Number.isFinite(seq) && seq > 0 ? seq : undefined;
 }
 
@@ -282,7 +293,9 @@ export function messagesFromEvents(events: WSEvent[]): TranscriptMessage[] {
 
 /** One `agent_messages` row, as returned by the API. */
 export interface TranscriptRow {
-  seq: number;
+  /** The number the publisher gave this message when it went out. `null` for
+   *  a run recorded before the publisher numbered anything — see `asSeq`. */
+  seq?: number | null;
   speaker: string;
   role: string;
   round: number;
@@ -314,9 +327,12 @@ export interface TranscriptRow {
  * Identity is the row's `seq`, which is the number the publisher gave the
  * message when it went out and therefore the number its live twin carries
  * too: the two collapse into one line by construction rather than by agreeing
- * on a digest of their text. A row from a run recorded before the publisher
- * numbered anything falls back to the derived id, which is what the two
- * sources had in common then.
+ * on a digest of their text.
+ *
+ * A run recorded before the publisher numbered anything has no `seq` on
+ * either side — the API omits it for a run with no feed, precisely so the old
+ * column's `0, 1, 2, …` cannot be mistaken for a publisher number — and both
+ * sources fall back to the derived id, which is what they had in common then.
  */
 export function messagesFromTranscript(
   rows: TranscriptRow[] | null | undefined

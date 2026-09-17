@@ -681,9 +681,22 @@ taken from a Redis `INCR`. Nothing in `src/maljan` numbers anything: the core
 does not know which job it is running under, and a second counter would order
 one conversation two ways. `seq` is the ordering key, the dedupe identity and
 the cursor a client resumes from — `?since=<seq>` on `/ws/analysis/{id}` and
-on `GET /api/v1/jobs/{id}/events` return only what is newer, in order. The
-stored transcript row is written with the number its event went out under, so
-a live message and its replayed twin are one message.
+on `GET /api/v1/jobs/{id}/events` return only what is newer, in order.
+
+The stored transcript row is written with the number its event went out under,
+so a live message and its replayed twin are one message. That changed what
+`agent_messages.seq` means: it used to be the message's position within the
+report, `0, 1, 2, …`, and it is now the publisher's run-wide count, so it is
+**monotonic and sparse** — a conversation of twelve lines in a run that
+published four hundred events has twelve numbers scattered through 1..400.
+Ordering is unchanged, and `ORDER BY seq` is still exactly the order the
+messages were said in; what is no longer true is that the numbers are
+contiguous or that they start at zero. A run recorded before this release
+keeps its old contiguous numbers, which still sort correctly among themselves;
+because those are a *different* number from the same run's live events, the
+report endpoint sends them as `null` rather than let a client mistake one for
+a publisher number (a run is recognised as pre-release by having no
+`job_events` rows).
 
 **Two stores.** Events go to the PubSub channel `analysis:{job_id}` for the
 live fan-out, to the Redis stream `analysis:{job_id}:events` (1 000 entries,

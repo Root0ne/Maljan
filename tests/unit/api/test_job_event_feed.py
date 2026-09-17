@@ -246,6 +246,38 @@ class TestReadingItBack:
         events = asyncio.run(read_events(_Session(), redis_conn, uuid.uuid4()))
         assert _seqs(events) == [1, 2, 3]
 
+    def test_a_cursorless_read_of_a_trimmed_stream_starts_at_the_beginning(self) -> None:
+        """No cursor means "from the beginning", which is ``since=0``.
+
+        A run publishes more than the stream's 1 000-entry cap — two events
+        per tool call plus a delta per model turn makes that ordinary — and
+        the stream no longer reaches back to its own start. A console mounting
+        fresh would otherwise be handed a conversation beginning in the middle
+        of the debate with nothing saying so, while the table holds all of it.
+        """
+        # The stream has been trimmed to its last three events.
+        redis_conn = _FakeRedis(stream=[_stream_entry(seq) for seq in (4, 5, 6)])
+        session = _Session(rows=[_row(seq) for seq in range(1, 7)])
+        events = asyncio.run(read_events(session, redis_conn, uuid.uuid4()))
+        assert _seqs(events) == [1, 2, 3, 4, 5, 6]
+
+    def test_a_cursorless_read_of_an_untrimmed_stream_never_asks_the_table(self) -> None:
+        # The stream reaches back to seq 1, so it is the whole answer and the
+        # hot path stays one Redis call.
+        redis_conn = _FakeRedis(stream=[_stream_entry(seq) for seq in (1, 2, 3)])
+        session = _Session(rows=[_row(99)])
+        events = asyncio.run(read_events(session, redis_conn, uuid.uuid4()))
+        assert _seqs(events) == [1, 2, 3]
+        assert session.statements == []
+
+    def test_a_trimmed_stream_contributes_what_the_table_has_not_got_yet(self) -> None:
+        # The batch writer is up to two seconds behind the publisher, so the
+        # newest events are in the stream and not yet in the table.
+        redis_conn = _FakeRedis(stream=[_stream_entry(seq) for seq in (4, 5, 6, 7)])
+        session = _Session(rows=[_row(seq) for seq in range(1, 6)])
+        events = asyncio.run(read_events(session, redis_conn, uuid.uuid4()))
+        assert _seqs(events) == [1, 2, 3, 4, 5, 6, 7]
+
     def test_an_expired_stream_is_replayed_from_the_table(self) -> None:
         redis_conn = _FakeRedis(stream=[])
         session = _Session(rows=[_row(1), _row(2), _row(3)])
