@@ -10,6 +10,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import HTMLResponse, PlainTextResponse
+from maljan.core.settings_overrides import redact_url
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -375,7 +376,8 @@ async def enqueue_enrichment_job(
     except EnrichmentEnqueueError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Enrichment queue unavailable: {exc}",
+            # arq's failures name the Redis DSN they were configured with.
+            detail=redact_url(f"Enrichment queue unavailable: {exc}"),
         ) from exc
     return {
         "status": "queued" if job_id else "already_queued",

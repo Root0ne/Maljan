@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from fastapi.responses import JSONResponse
 from maljan.core.model_assignments import endpoint_label
 from maljan.core.settings_annotations import GROUP_DESCRIPTIONS, GROUP_ORDER
+from maljan.core.settings_overrides import redact_url
 from maljan.core.virustotal import SERVER_KEY as VIRUSTOTAL_SERVER_KEY
 from maljan.pipeline.conditions import validate_condition
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -424,7 +425,12 @@ async def _probe_response(coro: Awaitable[Any]) -> ProbeResponse:
         result = await coro
     except (Exception, BaseExceptionGroup) as exc:  # noqa: BLE001 - reported, never raised
         logger.warning("probe failed before it ran: %s", type(exc).__name__)
-        return ProbeResponse(ok=False, latency_ms=0, detail=f"{type(exc).__name__}: {exc}")
+        # Through ``redact_url``: what reaches this fence is a driver error —
+        # arq, Redis, Qdrant — and a driver names the connection string it was
+        # configured with, password and all.
+        return ProbeResponse(
+            ok=False, latency_ms=0, detail=redact_url(f"{type(exc).__name__}: {exc}")
+        )
     return ProbeResponse(**vars(result))
 
 

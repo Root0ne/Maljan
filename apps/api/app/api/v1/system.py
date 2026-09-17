@@ -8,6 +8,7 @@ can purge low-signal LTM entries that pre-date the write-time quality gate).
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from maljan.core.settings_overrides import redact_url
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -175,7 +176,9 @@ async def ltm_purge(
         logger.warning("ltm_purge: failed to build memory store: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"memory store unavailable: {exc}",
+            # The store's own error names the URL it was built with, and that
+            # URL may carry an API key or a password.
+            detail=redact_url(f"memory store unavailable: {exc}"),
         ) from exc
 
     backend_name = type(store).__name__

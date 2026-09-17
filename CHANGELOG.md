@@ -439,6 +439,12 @@ change landed on `main`.
 
 ### Fixed
 
+- **Three API responses that could carry a connection string.** The probe
+  route's outer fence, the LTM purge's memory-store failure and the enrichment
+  queue's 503 each answered with `f"{type(exc).__name__}: {exc}"`, and the
+  exceptions that reach them come from arq, Redis and Qdrant, which name the
+  DSN they were configured with — password included. All three go through
+  `redact_url`, which the probe's own transport paths have always used.
 - **A sidecar decides what it will read before it reads it.** `put_sample`
   base64-decoded its whole argument and then applied the 2 GiB ceiling, so an
   oversized upload was materialised twice before being refused; the encoded
