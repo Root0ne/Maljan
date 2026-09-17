@@ -235,6 +235,7 @@ class TestTheJudgeAsks:
         judge asked two would hide it.
         """
         from langchain_core.messages import AIMessage
+
         from maljan.agents.judge_agent import JudgeAgent
 
         sink = _Sink()

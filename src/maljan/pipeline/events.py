@@ -381,8 +381,16 @@ _VALUE_RUN = re.compile(r"[^\s\"'{}\[\](),=]+")
 # whose scheme the pass above has already reduced to a host. A relative path
 # with no marker (``data/samples/a.exe``) is still left alone — it names no
 # host directory, which is the thing that must not travel.
+#
+# A UNC marker has to be a UNC *shape*, not two backslashes: a host-like
+# segment, a separator, and something after it. A leading ``\\`` alone is what
+# a single backslash looks like inside a JSON string, so taking it as the
+# marker cut ``"\\d+"`` — a regex argument — down to ``d+``. Two or more
+# backslashes are accepted at each separator because the whole path arrives
+# doubled when the tool serialised it as JSON.
+_UNC = r"\\{2,}[A-Za-z0-9._-]+\\+."
 _PATH_RUN = re.compile(
-    _AFTER + r"(?P<run>(?:/(?!/)|\./|\.\./|~/|[A-Za-z]:[\\/]|\\\\)" + _UNTIL + r")"
+    _AFTER + r"(?P<run>(?:/(?!/)|\./|\.\./|~/|[A-Za-z]:[\\/]|" + _UNC + r")" + _UNTIL + r")"
 )
 # One argument's value, and the whole summary. Short on purpose: this is the
 # line under a chat bubble that says which call is running, not a record of it.

@@ -287,6 +287,23 @@ class TestArgumentSummaries:
         # JSON escapes each separator, so the value arrives doubled.
         assert ev.scrub('{"path": "C:\\\\Users\\\\x\\\\a.exe"}') == '{"path": "a.exe"}'
 
+    def test_a_unc_marker_needs_a_unc_shape(self) -> None:
+        r"""Two backslashes are not a marker on their own.
+
+        Inside a JSON string a single backslash arrives doubled, so taking
+        ``\\`` for the UNC marker cut a regex argument — ``"\\d+"`` — down to
+        ``d+``. A UNC path is a host-like segment, a separator and something
+        after it, and that is what is required now.
+        """
+        for value in (r'{"re":"\\d+"}', r'{"re":"\\n"}', r'{"re":"\\."}'):
+            assert ev.scrub(value) == value, value
+
+    def test_a_real_unc_path_is_still_cut(self) -> None:
+        assert ev.scrub(r"\\srv\share\x\a.exe") == "a.exe"
+        assert ev.scrub(r"\\192.168.1.5\share\a.exe") == "a.exe"
+        # And doubled again, the way a tool that serialised it as JSON sends it.
+        assert ev.scrub(r'{"p":"\\\\srv\\share\\a.exe"}') == '{"p":"a.exe"}'
+
     def test_a_file_url_keeps_no_more_than_any_other(self) -> None:
         # It has no authority, so everything after the scheme is a host path.
         assert ev.scrub("file:///home/op/data/samples/x/evil.exe") == "file:///…"

@@ -1094,3 +1094,26 @@ def test_an_answer_with_nothing_in_it_at_all_is_still_nothing():
 
     assert probes._said_something("openai", empty) is False
     assert probes._said_something("openai", no_message) is False
+
+
+def test_a_reasoning_field_that_is_not_text_said_nothing():
+    """A structured ``reasoning`` is not an answer.
+
+    Some builds send an object there rather than a string. ``str(value or "")``
+    read a non-empty dict as text — it stringifies to something truthy — so a
+    server that returned an empty ``content`` beside a structured but contentless
+    ``reasoning`` passed a probe it should have failed.
+    """
+    structured = _answer(
+        {"choices": [{"message": {"content": "", "reasoning": {"content": "", "steps": []}}}]}
+    )
+    listed = _answer({"choices": [{"message": {"content": "", "reasoning_content": [{}]}}]})
+
+    assert probes._said_something("openai", structured) is False
+    assert probes._said_something("openai", listed) is False
+
+
+def test_a_reasoning_object_beside_real_text_is_still_an_answer():
+    """The guard drops the field, not the message: text elsewhere still counts."""
+    spoke = _answer({"choices": [{"message": {"content": "ok", "reasoning": {"steps": ["a"]}}}]})
+    assert probes._said_something("openai", spoke) is True

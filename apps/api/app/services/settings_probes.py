@@ -197,6 +197,17 @@ async def complete_one_turn(
     return True, f"{model!r} answered"
 
 
+def _spoken(value: Any) -> str:
+    """One message field as the text it holds, or nothing when it holds none.
+
+    ``str(value or "")`` read a structured ``reasoning`` — an object rather
+    than a string, which some builds send — as an answer, because a non-empty
+    dict stringifies to something truthy. A field that is not text did not say
+    anything this check can read.
+    """
+    return value.strip() if isinstance(value, str) else ""
+
+
 def _said_something(provider: str, answer: httpx.Response) -> bool:
     """Whether the provider's answer carries text or a tool call.
 
@@ -223,9 +234,9 @@ def _said_something(provider: str, answer: httpx.Response) -> bool:
         # is everything this check is asked to establish. An empty body with
         # no reasoning and no tool call is still nothing.
         return bool(
-            str(message.get("content") or "").strip()
-            or str(message.get("reasoning_content") or "").strip()
-            or str(message.get("reasoning") or "").strip()
+            _spoken(message.get("content"))
+            or _spoken(message.get("reasoning_content"))
+            or _spoken(message.get("reasoning"))
             or message.get("tool_calls")
         )
     if provider == "ollama":
