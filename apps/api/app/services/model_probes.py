@@ -117,23 +117,48 @@ AGENT_MODELS_KEY = "core.llm.agents"
 
 
 async def unprobed_models_being_saved(
-    db: AsyncSession, settings: Any, changes: dict[str, Any]
+    db: AsyncSession,
+    settings: Any,
+    changes: dict[str, Any],
+    stored: dict[str, Any] | None = None,
 ) -> list[str]:
-    """Every per-agent model in ``changes`` that no probe has reached.
+    """Every per-agent model this save *moves* that no probe has reached.
 
-    Only the entries this save actually names, and only the ones that carry a
-    model of their own: a save that touches a temperature, or a prompt, or
-    anything outside ``core.llm.agents``, asks nothing of this. The settings
-    that the pairs are read against are the ones being written, so an operator
-    moving an agent to a new endpoint and a new model in one save is judged on
-    the pair they are moving it to.
+    Only the entries whose model or endpoint changed. ``core.llm.agents`` is
+    one JSON leaf and the console stages it whole, so every entry is "named"
+    on every save; asking about all of them would refuse a change to agent B's
+    temperature because agent A carries an untested model, which is a refusal
+    about something the operator did not touch. Each entry is compared with
+    the stored leaf and only the ones that differ in ``provider``, ``model`` or
+    ``base_url`` are asked about; an entry that is new is asked about, because
+    everything about it is a change.
+
+    The settings the pairs are read against are the ones being written, so an
+    operator moving an agent to a new endpoint and a new model in one save is
+    judged on the pair they are moving it to.
     """
     if not getattr(settings.llm, "require_probe", True):
         return []
     entry = changes.get(AGENT_MODELS_KEY)
     if not isinstance(entry, dict) or not entry:
         return []
-    return await unprobed_models(db, settings, [str(name) for name in entry])
+    was = (stored or {}).get(AGENT_MODELS_KEY)
+    before = was if isinstance(was, dict) else {}
+    moved = [
+        str(name)
+        for name, value in entry.items()
+        if _points_somewhere_new(value, before.get(str(name)))
+    ]
+    return await unprobed_models(db, settings, moved)
+
+
+def _points_somewhere_new(now: Any, was: Any) -> bool:
+    """Whether an agent's entry names a model or an endpoint it did not before."""
+    if not isinstance(now, dict):
+        return False
+    if not isinstance(was, dict):
+        return True
+    return any(now.get(field) != was.get(field) for field in ("provider", "model", "base_url"))
 
 
 async def unprobed_models(db: AsyncSession, settings: Any, agents: list[str]) -> list[str]:

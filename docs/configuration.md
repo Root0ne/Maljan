@@ -169,23 +169,31 @@ is an answer, not an error.
 
 ### A model is probed before a job may name it
 
-**What the probe does.** Both the `llm` and the `agent` probe end by asking the
-model for one short answer — one turn, eight tokens, at the endpoint and on the
-model the run will use, through each provider's own completion API
-(`/chat/completions` for an OpenAI-compatible server, `/api/generate` for
-Ollama, `/v1/messages` for Anthropic, `:generateContent` for Gemini). Listing a
-provider's catalogue comes first and is not enough on its own: a server can
-offer a name it will not load, a key can be refused for one model and not
-another, and a misspelling can land on a name the catalogue happens to hold.
-The probe passes only when the call came back.
+**What the probe does.** Both the `llm` and the `agent` probe end by asking for
+one short answer — one turn, eight tokens, at the endpoint and on the model the
+run will use, through each provider's own completion API (`/chat/completions`
+for an OpenAI-compatible server, `/api/generate` for Ollama, `/v1/messages` for
+Anthropic, `:generateContent` for Gemini). Listing a provider's catalogue comes
+first and is not enough on its own: a server can offer a name it will not load,
+a key can be refused for one model and not another, and a misspelling can land
+on a name the catalogue happens to hold. A call that came back with nothing in
+it — an empty `choices`, a candidate that was filtered away — is a failure too.
+The completion gets ninety seconds of its own, because a local server reloads a
+model it had unloaded and a large one is not a ten-second load.
 
-**What is written down.** One row per `(endpoint, model)` pair, with the
-provider, whether the model answered and the sentence the probe came back with.
-The `llm` probe files the selected provider's **expert** model at its own
-endpoint — the one it completed with — and, on Ollama, each per-agent override
-at its own server; it does not file the judge model, which it lists and never
-calls. The `agent` probe files the one pair its agent would use, which is how a
-per-agent endpoint or a per-agent model gets a row of its own.
+**What is written down.** One row per `(endpoint, model)` pair the probe
+actually completed a call with, carrying the provider, whether the model
+answered and the sentence it came back with. The `llm` probe completes one call
+per pair it will file: the selected provider's **expert** model at its own
+endpoint, and every per-agent override at *its* own endpoint, which is how a
+second llama.cpp or a second Ollama host is proved. It does not file the judge
+model, which it lists and never calls. The `agent` probe files the one pair its
+agent would use.
+
+A call that ran out of time leaves **no** row at all — neither a pass nor a
+failure. Nothing was learned about that pair, and writing a cold model down as
+a missing one would lock the operator out of their own jobs; the probe says so
+and asks to be run again once the model is warm.
 
 **Where the gate stands.** Submitting a job reads that record for every model
 the run can reach — the agents its team's stages name, and every agent those

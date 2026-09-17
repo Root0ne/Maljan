@@ -40,7 +40,7 @@ async def test_http_probe_errors_are_redacted(monkeypatch):
 
     transport = httpx.MockTransport(_raise)
     monkeypatch.setattr(
-        probes, "_client", lambda: httpx.AsyncClient(transport=transport, timeout=1)
+        probes, "_client", lambda *_a, **_k: httpx.AsyncClient(transport=transport, timeout=1)
     )
     r = await probes.probe_ghidra(
         {"url": _dsn("http", "ghidra:s3cret", "ghidra:8089"), "auth_token": "t"}

@@ -395,7 +395,7 @@ def _tags(monkeypatch, names, *, reachable=True):
     monkeypatch.setattr(
         settings_probes,
         "_client",
-        lambda: httpx.AsyncClient(transport=httpx.MockTransport(handler), timeout=10),
+        lambda *_a, **_k: httpx.AsyncClient(transport=httpx.MockTransport(handler), timeout=10),
     )
     return calls
 
@@ -502,7 +502,7 @@ class TestTheProbeMakesTheCallTheJobWillMake:
             async def post(self, *_: Any, **__: Any) -> Any:
                 return httpx.Response(404, request=httpx.Request("POST", "http://x"))
 
-        monkeypatch.setattr(settings_probes, "_client", lambda: _Client())
+        monkeypatch.setattr(settings_probes, "_client", lambda *_a, **_k: _Client())
 
         ok, said = await settings_probes.complete_one_turn(
             "openai", endpoint="http://127.0.0.1:8080/v1", model="ghost"
@@ -522,15 +522,75 @@ class TestTheProbeMakesTheCallTheJobWillMake:
                 return None
 
             async def post(self, *_: Any, **__: Any) -> Any:
-                return httpx.Response(200, request=httpx.Request("POST", "http://x"), json={})
+                return httpx.Response(
+                    200,
+                    request=httpx.Request("POST", "http://x"),
+                    json={"choices": [{"message": {"content": "OK"}}]},
+                )
 
-        monkeypatch.setattr(settings_probes, "_client", lambda: _Client())
+        monkeypatch.setattr(settings_probes, "_client", lambda *_a, **_k: _Client())
 
         ok, said = await settings_probes.complete_one_turn(
             "openai", endpoint="http://127.0.0.1:8080/v1", model="qwen"
         )
 
         assert ok is True and "qwen" in said
+
+    @pytest.mark.asyncio
+    async def test_a_two_hundred_with_nothing_in_it_is_not_a_pass(self, monkeypatch) -> None:
+        """A proxy that answers politely for a model it cannot serve."""
+        monkeypatch.undo()
+        from app.services import settings_probes
+
+        class _Client:
+            async def __aenter__(self) -> Any:
+                return self
+
+            async def __aexit__(self, *_: Any) -> None:
+                return None
+
+            async def post(self, *_: Any, **__: Any) -> Any:
+                return httpx.Response(200, request=httpx.Request("POST", "http://x"), json={})
+
+        monkeypatch.setattr(settings_probes, "_client", lambda *_a, **_k: _Client())
+
+        ok, said = await settings_probes.complete_one_turn(
+            "openai", endpoint="http://127.0.0.1:8080/v1", model="qwen"
+        )
+
+        assert ok is False and "answered nothing" in said
+
+    @pytest.mark.asyncio
+    async def test_a_completion_that_timed_out_files_nothing(self, monkeypatch) -> None:
+        """A cold model is not a missing one, and a row would lock the operator out."""
+        monkeypatch.undo()
+        from app.services import settings_probes
+
+        class _Client:
+            async def __aenter__(self) -> Any:
+                return self
+
+            async def __aexit__(self, *_: Any) -> None:
+                return None
+
+            async def post(self, *_: Any, **__: Any) -> Any:
+                raise httpx.ReadTimeout("slow", request=httpx.Request("POST", "http://x"))
+
+        monkeypatch.setattr(settings_probes, "_client", lambda *_a, **_k: _Client())
+
+        verdict, said = await settings_probes.complete_one_turn(
+            "openai", endpoint="http://127.0.0.1:8080/v1", model="qwen"
+        )
+
+        assert verdict is None, "neither a pass nor a failure"
+        assert "still be loading" in said and "Nothing was written down" in said
+        assert str(int(settings_probes.COMPLETION_TIMEOUT)) in said
+
+    @pytest.mark.asyncio
+    async def test_the_completion_gets_its_own_budget(self) -> None:
+        from app.services.settings_probes import COMPLETION_TIMEOUT, TIMEOUT
+
+        assert COMPLETION_TIMEOUT > TIMEOUT, "a cold local model is not a listing"
 
     @pytest.mark.asyncio
     async def test_an_agent_that_names_no_model_is_not_a_pass(self, monkeypatch) -> None:
@@ -541,18 +601,55 @@ class TestTheProbeMakesTheCallTheJobWillMake:
 
         assert ok is False and said == "no model named"
 
-    def test_the_llm_probe_files_only_the_model_it_completed_with(self) -> None:
-        from app.services.settings_probes import models_the_llm_probe_reached
-        from maljan.core.config import Settings
+    @pytest.mark.asyncio
+    async def test_the_llm_probe_files_only_what_it_completed(self, monkeypatch) -> None:
+        """Every filed pair was asked, at its own endpoint, and no other pair is filed."""
+        monkeypatch.undo()
+        import httpx as _httpx
 
-        settings = Settings(
-            _env_file=None,
-            llm={
-                "provider": "ollama",
-                "ollama": {"expert_model": "qwen3.5:9b", "judge_model": "qwen3.5:70b"},
-            },
+        from app.services import settings_probes
+
+        asked: list[tuple[str, str]] = []
+
+        def handler(request: _httpx.Request) -> _httpx.Response:
+            if request.url.path.endswith("/api/generate"):
+                import json as _json
+
+                model = _json.loads(request.content or b"{}").get("model", "")
+                asked.append((f"{request.url.scheme}://{request.url.netloc.decode()}", model))
+                return _httpx.Response(200, json={"response": "OK"})
+            return _httpx.Response(
+                200, json={"models": [{"name": "qwen3:8b"}, {"name": "qwen3:70b"}]}
+            )
+
+        monkeypatch.setattr(
+            settings_probes,
+            "_client",
+            lambda *_a, **_k: _httpx.AsyncClient(
+                transport=_httpx.MockTransport(handler), timeout=10
+            ),
         )
 
-        filed = {model for _endpoint, model, _provider in models_the_llm_probe_reached(settings)}
+        result = await settings_probes.probe_llm(
+            {
+                "provider": "ollama",
+                "ollama_base_url": "http://ollama:11434",
+                "ollama_expert_model": "qwen3:8b",
+                "ollama_judge_model": "qwen3:70b",
+                "agents": {
+                    "network": {
+                        "provider": "ollama",
+                        "model": "qwen3:4b",
+                        "base_url": "http://gpu-box:11434",
+                    }
+                },
+            }
+        )
 
-        assert filed == {"qwen3.5:9b"}, "the judge model was listed, never called"
+        filed = {(p["endpoint"], p["model"]) for p in (result.details or {})["completions"]}
+        assert filed == {
+            ("http://ollama:11434", "qwen3:8b"),
+            ("http://gpu-box:11434", "qwen3:4b"),
+        }
+        assert set(asked) == filed, "every filed pair was the pair that was called"
+        assert not any(model == "qwen3:70b" for _endpoint, model in asked), "the judge was listed"

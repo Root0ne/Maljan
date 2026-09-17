@@ -47,7 +47,6 @@ from app.services.settings_catalog_api import catalog_index, full_catalog, resol
 from app.services.settings_probes import (
     PROBES,
     candidate_settings,
-    models_the_llm_probe_reached,
     run_agent_probe,
     run_mcp_probe,
     run_probe,
@@ -153,7 +152,6 @@ async def _unprobed_models_in(db: AsyncSession, changes: dict[str, Any]) -> list
     on the pair they are moving it to rather than the one they are leaving.
     """
     from app.services.model_probes import unprobed_models_being_saved
-    from app.services.settings_probes import candidate_settings
 
     try:
         stored = await SettingsService(db).load_overrides()
@@ -161,7 +159,7 @@ async def _unprobed_models_in(db: AsyncSession, changes: dict[str, Any]) -> list
     except Exception as exc:  # noqa: BLE001 — a change the model rejects is refused below
         logger.debug("probe gate skipped for this save (%s).", type(exc).__name__)
         return []
-    return await unprobed_models_being_saved(db, settings, changes)
+    return await unprobed_models_being_saved(db, settings, changes, stored)
 
 
 @router.patch("", response_model=PatchResponse)
@@ -495,10 +493,14 @@ async def register_virustotal_agent(
     )
 
 
-async def _write_down_what_was_reached(
-    db: AsyncSession, pairs: list[tuple[str, str, str]], *, ok: bool, detail: str
-) -> None:
-    """File this probe's answer under every model it was taken against.
+async def _write_down_what_was_reached(db: AsyncSession, pairs: list[dict[str, Any]]) -> None:
+    """File a row for every pair the probe actually completed a call with.
+
+    The list comes from the probe itself (``details["completions"]``), so what
+    is written down and what was called are one thing rather than two
+    computations that have to agree. A pair the probe timed out on is not in
+    it: nothing was learned, so nothing is recorded, and the operator is told
+    to try again.
 
     Never raises. A probe is an operator pressing a button and reading a
     sentence; a store that could not be written is a reason to log, not a
@@ -506,10 +508,15 @@ async def _write_down_what_was_reached(
     """
     from app.services.model_probes import record_probe
 
-    for endpoint, model, provider in pairs:
+    for pair in pairs:
         try:
             await record_probe(
-                db, endpoint=endpoint, model=model, provider=provider, ok=ok, detail=detail
+                db,
+                endpoint=str(pair.get("endpoint") or ""),
+                model=str(pair.get("model") or ""),
+                provider=str(pair.get("provider") or ""),
+                ok=bool(pair.get("ok")),
+                detail=str(pair.get("detail") or ""),
             )
         except Exception as exc:  # noqa: BLE001 — the answer still reaches the operator
             logger.warning("probe result not stored: %s", type(exc).__name__)
@@ -537,15 +544,7 @@ async def test_agent(
     """
     stored = await SettingsService(db).load_overrides()
     response = await _probe_response(run_agent_probe(name, body.values, stored))
-    named = (response.details or {}).get("llm") or {}
-    endpoint, model = str(named.get("endpoint") or ""), str(named.get("model") or "")
-    if endpoint and model:
-        await _write_down_what_was_reached(
-            db,
-            [(endpoint, model, str(named.get("provider") or ""))],
-            ok=response.ok,
-            detail=response.detail,
-        )
+    await _write_down_what_was_reached(db, (response.details or {}).get("completions") or [])
     return response
 
 
@@ -561,12 +560,7 @@ async def test_probe(
     stored = await SettingsService(db).load_overrides()
     response = await _probe_response(run_probe(probe, body.values, stored))
     if probe == "llm":
-        try:
-            reached = models_the_llm_probe_reached(candidate_settings(body.values, stored))
-        except Exception as exc:  # noqa: BLE001 — the answer still reaches the operator
-            logger.warning("probed models not derived: %s", type(exc).__name__)
-            reached = []
-        await _write_down_what_was_reached(db, reached, ok=response.ok, detail=response.detail)
+        await _write_down_what_was_reached(db, (response.details or {}).get("completions") or [])
     return response
 
 
