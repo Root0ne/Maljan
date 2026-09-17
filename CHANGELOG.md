@@ -43,7 +43,9 @@ change landed on `main`.
   messages were said in; a query or fixture that assumed contiguous per-report
   numbering needs updating. Rows written before this release keep their old
   numbering and the report endpoint sends their `seq` as `null`, so a client
-  cannot mistake a position for a publisher number and draw the line twice.
+  cannot mistake a position for a publisher number and draw the line twice; it
+  tells the two apart from the rows themselves, so the answer does not change
+  when the event feed ages out.
 
 - **Each tool server says what it can do on its host, before a run.** The four
   built-in sidecars answer a `capabilities` tool — per tool, its optional

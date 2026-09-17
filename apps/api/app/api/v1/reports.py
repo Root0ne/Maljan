@@ -15,7 +15,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.deps import get_current_user, require_active_user
 from app.models.user import User
-from app.schemas.job import IOCEntry, IOCListResponse, ReportDetailResponse
+from app.schemas.job import (
+    AgentMessageResponse,
+    IOCEntry,
+    IOCListResponse,
+    ReportDetailResponse,
+)
 from app.services.report_service import EnrichmentEnqueueError, ReportService
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
@@ -36,6 +41,29 @@ async def list_reports(
     return await svc.list_reports(user=user, page=page, page_size=page_size)
 
 
+def _is_numbered(transcript: list[AgentMessageResponse]) -> bool:
+    """Whether these rows carry publisher numbers or the old positions.
+
+    Read off the rows themselves. The publisher counts the whole run's events
+    from 1 and the conversation is a subset of them, so the largest ``seq`` of
+    a numbered run is at least the number of rows; the old numbering was
+    ``enumerate`` from zero, so its largest is exactly one less than the
+    number of rows. The two cannot be confused, including for a single row:
+    a numbered one is at least 1 and a positioned one is 0.
+
+    This used to ask whether the job had any ``job_events`` row. That is the
+    same fact only until the retention sweep removes those rows — after
+    ``core.events.retention_days`` every finished run would have looked
+    pre-release, and its conversation would have lost both the identity that
+    collapses a line onto its live twin and the ordering that separates two
+    analysts inside one round. The rows outlive the feed; the answer has to
+    come from them.
+    """
+    if not transcript:
+        return False
+    return max(int(line.seq or 0) for line in transcript) >= len(transcript)
+
+
 async def _detail(svc: ReportService, report: Any) -> ReportDetailResponse:
     """One report, with the transcript numbered only if this run was numbered.
 
@@ -44,10 +72,10 @@ async def _detail(svc: ReportService, report: Any) -> ReportDetailResponse:
     before the publisher numbered anything carries its old position within the
     report instead — a different number for the same message — so those lines
     go out with no ``seq`` at all and the client falls back to the identity the
-    two sources had in common then. See ``ReportService.transcript_is_numbered``.
+    two sources had in common then. See ``_is_numbered``.
     """
     detail = ReportDetailResponse.model_validate(report)
-    if detail.transcript and not await svc.transcript_is_numbered(detail.job_id):
+    if detail.transcript and not _is_numbered(detail.transcript):
         detail = detail.model_copy(
             update={"transcript": [m.model_copy(update={"seq": None}) for m in detail.transcript]}
         )

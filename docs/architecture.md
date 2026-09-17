@@ -695,8 +695,9 @@ contiguous or that they start at zero. A run recorded before this release
 keeps its old contiguous numbers, which still sort correctly among themselves;
 because those are a *different* number from the same run's live events, the
 report endpoint sends them as `null` rather than let a client mistake one for
-a publisher number (a run is recognised as pre-release by having no
-`job_events` rows).
+a publisher number. It tells the two apart from the rows themselves: a
+numbered run's largest `seq` is at least its row count, and the old
+`enumerate` numbering's is exactly one less.
 
 **Two stores.** Events go to the PubSub channel `analysis:{job_id}` for the
 live fan-out, to the Redis stream `analysis:{job_id}:events` (1 000 entries,

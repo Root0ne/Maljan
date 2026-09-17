@@ -7,9 +7,11 @@ stored row on the old one would fail to collapse it onto its live twin and
 draw the line twice, which is exactly the duplicate the derived id existed to
 prevent.
 
-A run cannot be asked which world it belongs to, so its feed is asked instead:
-a run published under this release has ``job_events`` rows and a run recorded
-before it has none.
+The rows say which world they belong to on their own: the publisher counts the
+whole run's events from 1, so a numbered conversation's largest ``seq`` is at
+least its row count, while the old ``enumerate`` numbering's is exactly one
+less. Reading it off the feed instead would have been the same answer only
+until the retention sweep deleted it.
 """
 
 from __future__ import annotations
@@ -60,68 +62,115 @@ class _Report:
 
 
 class _Service:
-    """A report service whose only interesting answer is the feed check."""
-
-    def __init__(self, numbered: bool) -> None:
-        self.numbered = numbered
-        self.asked: list[uuid.UUID] = []
-
-    async def transcript_is_numbered(self, job_id: uuid.UUID) -> bool:
-        self.asked.append(job_id)
-        return self.numbered
+    """The service is not consulted at all; the rows answer for themselves."""
 
 
-def _rows() -> list[_Row]:
+def _legacy() -> list[_Row]:
+    """The old numbering: ``enumerate(transcript)``, from zero."""
     return [_Row(0, "one"), _Row(1, "two"), _Row(2, "three")]
 
 
-@pytest.mark.asyncio
-async def test_a_run_with_a_feed_keeps_its_numbers() -> None:
-    svc = _Service(numbered=True)
-    report = _Report([_Row(4, "one"), _Row(9, "two")])
-    detail = await _detail(svc, report)
-    assert [m.seq for m in detail.transcript] == [4, 9]
-    assert svc.asked == [report.job_id]
+def _numbered() -> list[_Row]:
+    """The publisher's numbering: from one, and sparse."""
+    return [_Row(4, "one"), _Row(9, "two"), _Row(31, "three")]
 
 
 @pytest.mark.asyncio
-async def test_a_run_with_no_feed_sends_no_numbers_at_all() -> None:
+async def test_a_numbered_run_keeps_its_numbers() -> None:
+    detail = await _detail(_Service(), _Report(_numbered()))
+    assert [m.seq for m in detail.transcript] == [4, 9, 31]
+
+
+@pytest.mark.asyncio
+async def test_a_legacy_run_sends_no_numbers_at_all() -> None:
     """Every row, not only the first.
 
     The old column started at 0, so a check that treated only 0 as "no
     number" left rows 1..n looking like publisher numbers — which is the
     defect this exists for.
     """
-    svc = _Service(numbered=False)
-    detail = await _detail(svc, _Report(_rows()))
+    detail = await _detail(_Service(), _Report(_legacy()))
     assert [m.seq for m in detail.transcript] == [None, None, None]
 
 
 @pytest.mark.asyncio
+async def test_a_numbered_run_with_no_gaps_is_still_numbered() -> None:
+    # The tightest a publisher-numbered run can be: 1..n, so the largest is
+    # exactly the row count. The legacy shape is one less.
+    detail = await _detail(_Service(), _Report([_Row(1, "one"), _Row(2, "two")]))
+    assert [m.seq for m in detail.transcript] == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_a_one_line_run_is_told_apart_either_way() -> None:
+    numbered = await _detail(_Service(), _Report([_Row(1, "only")]))
+    legacy = await _detail(_Service(), _Report([_Row(0, "only")]))
+    assert [m.seq for m in numbered.transcript] == [1]
+    assert [m.seq for m in legacy.transcript] == [None]
+
+
+@pytest.mark.asyncio
+async def test_a_partly_stamped_run_is_numbered() -> None:
+    # A line that missed its stamp carries 0 (see the worker's rule); the run
+    # is still a numbered one and the stamped lines keep their identity.
+    detail = await _detail(_Service(), _Report([_Row(1, "one"), _Row(0, "two"), _Row(7, "three")]))
+    assert [m.seq for m in detail.transcript] == [1, 0, 7]
+
+
+@pytest.mark.asyncio
+async def test_an_empty_transcript_is_left_alone() -> None:
+    detail = await _detail(_Service(), _Report([]))
+    assert detail.transcript == []
+
+
+@pytest.mark.asyncio
+async def test_the_answer_outlives_the_feed_it_used_to_be_read_from() -> None:
+    """The retention sweep must not silently un-number every finished run.
+
+    The signal used to be "this job has a ``job_events`` row", which
+    ``purge_old_job_events`` deletes after ``core.events.retention_days``.
+    Nothing here consults the feed, so a report read on day 31 answers the
+    same as one read on day 1.
+    """
+    import ast
+    import inspect
+
+    from app.api.v1 import reports
+
+    # The code, without the docstrings — which say why the query went.
+    code = ""
+    for name in ("_is_numbered", "_detail"):
+        tree = ast.parse(inspect.getsource(getattr(reports, name)))
+        function = tree.body[0]
+        body = function.body[1:] if ast.get_docstring(function) else function.body
+        code += "\n".join(ast.unparse(node) for node in body)
+
+    assert "job_events" not in code
+    assert "JobEvent" not in code
+    assert "transcript_is_numbered" not in code
+    # And no round trip of any kind to decide it.
+    assert not inspect.iscoroutinefunction(reports._is_numbered)
+    assert "await" not in code
+
+
+@pytest.mark.asyncio
 async def test_the_numbers_go_out_as_null_on_the_wire() -> None:
-    detail = await _detail(_Service(numbered=False), _Report(_rows()))
+    detail = await _detail(_Service(), _Report(_legacy()))
     assert all(line["seq"] is None for line in detail.model_dump()["transcript"])
 
 
 @pytest.mark.asyncio
 async def test_nothing_else_about_the_report_changes() -> None:
-    report = _Report(_rows())
-    detail = await _detail(_Service(numbered=False), report)
+    report = _Report(_legacy())
+    detail = await _detail(_Service(), report)
     assert detail.verdict == "Malware"
     assert [m.text for m in detail.transcript] == ["one", "two", "three"]
     assert detail.job_id == report.job_id
 
 
 @pytest.mark.asyncio
-async def test_an_empty_transcript_does_not_ask_about_a_feed() -> None:
-    svc = _Service(numbered=False)
-    await _detail(svc, _Report([]))
-    assert svc.asked == []
-
-
-@pytest.mark.asyncio
 async def test_the_schema_accepts_a_line_with_no_number() -> None:
-    line = ReportDetailResponse.model_validate(_Report(_rows())).transcript[0]
+    line = ReportDetailResponse.model_validate(_Report(_legacy())).transcript[0]
     assert line.model_copy(update={"seq": None}).seq is None
 
 
@@ -169,55 +218,3 @@ class TestTheStoredNumber:
         stored = self._stored([{"seq": 1}, {}, {"seq": 3}])
         assert stored == [1, 0, 3]
         assert len(set(stored)) == len(stored)
-
-
-class TestTheFeedCheck:
-    """``transcript_is_numbered`` itself: one existence query, never raising."""
-
-    class _Result:
-        def __init__(self, value: Any) -> None:
-            self._value = value
-
-        def scalar_one_or_none(self) -> Any:
-            return self._value
-
-    class _Db:
-        def __init__(self, value: Any = None, raises: bool = False) -> None:
-            self.value = value
-            self.raises = raises
-            self.statements: list[Any] = []
-
-        async def execute(self, statement: Any) -> Any:
-            self.statements.append(statement)
-            if self.raises:
-                raise RuntimeError("relation does not exist")
-            return TestTheFeedCheck._Result(self.value)
-
-    def _service(self, db: Any) -> Any:
-        from app.services.report_service import ReportService
-
-        return ReportService(db)
-
-    @pytest.mark.asyncio
-    async def test_a_job_with_a_feed_row_is_numbered(self) -> None:
-        db = self._Db(value=uuid.uuid4())
-        assert await self._service(db).transcript_is_numbered(uuid.uuid4()) is True
-
-    @pytest.mark.asyncio
-    async def test_a_job_with_no_feed_row_is_not(self) -> None:
-        service = self._service(self._Db(value=None))
-        assert await service.transcript_is_numbered(uuid.uuid4()) is False
-
-    @pytest.mark.asyncio
-    async def test_the_query_asks_for_one_row_only(self) -> None:
-        db = self._Db(value=None)
-        await self._service(db).transcript_is_numbered(uuid.uuid4())
-        assert "LIMIT" in str(db.statements[0]).upper()
-
-    @pytest.mark.asyncio
-    async def test_a_database_that_refuses_the_check_costs_the_numbers_not_the_report(
-        self,
-    ) -> None:
-        assert (
-            await self._service(self._Db(raises=True)).transcript_is_numbered(uuid.uuid4())
-        ) is False

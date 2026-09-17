@@ -216,9 +216,8 @@ class AgentMessageResponse(BaseModel):
     It is ``None`` for a run recorded before the publisher numbered anything:
     such a row carries its old position within the report, which is a
     different number from the same run's live events, and sending it would
-    have a client draw every line of that run twice. The endpoint decides
-    which world a run belongs to by whether it has a feed at all — see
-    ``ReportService.transcript_is_numbered``.
+    have a client draw every line of that run twice. The endpoint tells the
+    two apart from the rows themselves — see ``app.api.v1.reports._is_numbered``.
     """
 
     seq: int | None = None
