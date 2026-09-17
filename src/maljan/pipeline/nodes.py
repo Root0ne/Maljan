@@ -24,8 +24,9 @@ from maljan.agents.judge_agent import (
     VERDICT_TIMEOUT_CODE,
     VERDICT_TIMEOUT_REASON,
 )
+from maljan.analysis.corroboration import corroboration_row
 from maljan.analysis.run_summary import RunSummaryBuilder
-from maljan.core.config import BUILTIN_AGENTS
+from maljan.core.config import BUILTIN_AGENTS, ReportingConfig
 from maljan.core.container import ServiceContainer
 from maljan.core.exceptions import AnalystError, LLMError
 from maljan.core.logger import logger
@@ -57,6 +58,7 @@ from maljan.pipeline.triage_pack import (
     pack_block,
     pack_entries,
     reason_sentence,
+    rules_already_recorded,
     run_is_degraded,
     run_pack,
 )
@@ -904,7 +906,7 @@ def pack_text(state: AnalysisState, container: ServiceContainer) -> str:
     starts, and one budget for the two keeps a long pack from spending a
     late stage's context.
     """
-    limit = 6000
+    limit = int(ReportingConfig.model_fields["upstream_findings_max_chars"].default)
     with suppress(AttributeError, TypeError, ValueError):
         limit = int(container.config.reporting.upstream_findings_max_chars)
     return pack_block(pack_entries(state.get("evidence_ledger") or []), limit)
@@ -1098,7 +1100,7 @@ def upstream_findings(stage: Any, state: AnalysisState, container: ServiceContai
     if len(lines) <= 2:
         return ""
     block = "\n".join(lines).rstrip()
-    limit = 6000
+    limit = int(ReportingConfig.model_fields["upstream_findings_max_chars"].default)
     with suppress(AttributeError, TypeError, ValueError):
         limit = int(container.config.reporting.upstream_findings_max_chars)
     if limit and len(block) > limit:
@@ -2396,7 +2398,18 @@ def make_judge_node(
             # Who named which technique, and how sure each of them was. This is
             # what the judge weighs; nothing here combines the numbers.
             _corroboration = corroboration(isr_reports, _ledger)
-            _technique_count = len(_corroboration)
+            # What the analysts claimed is the technique count; rule matches
+            # carrying tags nobody claimed are counted apart, or richly-firing
+            # rules on benign software read as thirty techniques.
+            _technique_count = sum(
+                1 for row in _corroboration.values() if corroboration_row(row)["claimed_by"]
+            )
+            _rule_only = sum(
+                1
+                for row in _corroboration.values()
+                if corroboration_row(row)["asserted_by"]
+                and not corroboration_row(row)["claimed_by"]
+            )
             _corroborated = sum(
                 1 for row in _corroboration.values() if len(corroboration_sources(row)) > 1
             )
@@ -2533,10 +2546,16 @@ def make_judge_node(
             # technique count and word the reason for the empty case.
             if _corroborated == 0:
                 _degradation_reasons.append(
-                    f"zero cross-layer corroboration ({_technique_count} single-layer techniques)"
+                    f"zero cross-layer corroboration ({_technique_count} claimed "
+                    f"technique{'s' if _technique_count != 1 else ''})"
                     if _technique_count > 0
-                    else "no techniques mapped (no corroborating evidence)"
+                    else "no techniques claimed (no corroborating evidence)"
                 )
+                if _rule_only:
+                    _degradation_reasons.append(
+                        f"{_rule_only} rule match{'es' if _rule_only != 1 else ''} carry "
+                        "technique tags no analyst claimed"
+                    )
             # A missing sandbox report is itself a
             # degradation, and it was the one cause NOT represented here. With
             # CAPE unreachable ``_submit_to_sandbox`` swallows the error and
@@ -3079,7 +3098,15 @@ def make_report_node(
         try:
             _static_provider = container.get_static_provider()
             _sample_for_evidence = state.get("sample_path")
-            if _static_provider.capabilities.provides_evidence and _sample_for_evidence:
+            # When the triage pack ran capa or YARA, their entries are already
+            # in the ledger under the pipeline; running the provider again
+            # would pay capa's budget twice and record the pair twice.
+            if rules_already_recorded(state.get("evidence_ledger") or []):
+                logger.info(
+                    "report_node: the triage pack recorded capa/YARA; the static provider is "
+                    "not run again."
+                )
+            elif _static_provider.capabilities.provides_evidence and _sample_for_evidence:
                 # capa is a subprocess with a 900s budget and YARA is a corpus
                 # scan; both are synchronous, and this is the report phase the
                 # worker's heartbeat went quiet in.

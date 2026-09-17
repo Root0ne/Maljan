@@ -238,6 +238,12 @@ class CapaYaraStaticProvider(StaticProvider):
         )
 
     def collect_evidence(self, sample_path: str) -> StaticEvidenceBundle | None:
+        """capa and YARA over the sample, for a run whose triage pack did not run them.
+
+        When a triage stage ran, the pack is the producer: its ``capa`` and
+        ``yara_scan`` entries are already in the ledger and the report node
+        does not call this (``triage_pack.rules_already_recorded``).
+        """
         capa_result = self._run_capa(sample_path)
         yara_hits = self._run_yara(sample_path)
         if capa_result is None and not yara_hits:

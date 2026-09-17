@@ -113,3 +113,26 @@ class TestTheJudgeRecordsItsOwnUncheckedIds:
             reason.startswith("the ATT&CK catalogue could not be read")
             for reason in update["degradation_reasons"]
         )
+
+
+class TestTheZeroCorroborationNoteCountsClaims:
+    def test_rule_only_tags_are_stated_apart_from_the_claimed_count(self) -> None:
+        """capa and YARA firing richly on benign software used to read as
+        thirty-three techniques; the count is the analysts' claims, and the
+        rule-only tags are a sentence of their own."""
+        import json
+
+        state = _state([])
+        capa = {
+            "capabilities": [
+                {"rule": "a", "namespace": "", "attck": ["X [T1027]"], "mbc": [], "match_count": 1},
+                {"rule": "b", "namespace": "", "attck": ["X [T1497]"], "mbc": [], "match_count": 1},
+            ]
+        }
+        entry = _capa_entry().model_copy(update={"output": json.dumps(capa), "structured": capa})
+        state["evidence_ledger"] = [entry]
+        update = _run(state)
+        reasons = update["degradation_reasons"]
+        assert "zero cross-layer corroboration (1 claimed technique)" in reasons
+        assert "2 rule matches carry technique tags no analyst claimed" in reasons
+        assert not any("single-layer" in r for r in reasons)

@@ -670,6 +670,23 @@ _HASH_HEAD = 16
 _TEXT_HEAD = 120
 
 
+RULE_TOOLS = ("capa", "yara_scan")
+
+
+def rules_already_recorded(rows: Any) -> bool:
+    """Whether the pack recorded an ``ok`` capa or YARA entry in this run.
+
+    The report node asks before running an evidence-only static provider
+    (``capa_yara``): when the pack ran the two tools, the pack is the
+    producer, and the report reads its entries rather than paying the
+    budget again.
+    """
+    return any(
+        entry.ok and entry.tool in RULE_TOOLS and entry.agent == PIPELINE
+        for entry in pack_entries(rows)
+    )
+
+
 def pack_entries(rows: Any) -> list[LedgerEntry]:
     """The pack's entries out of the run's ledger rows, in ledger order.
 
@@ -731,6 +748,9 @@ def _pack_line(entry: LedgerEntry) -> str:
     render = _RENDERERS.get(entry.tool)
     if entry.tool in ("get_file_report", "check_hash"):
         return f"[{entry.id}] reputation: {_reputation_facts(entry)}"
+    if getattr(entry, "truncated", False) and not entry.output:
+        # apply_budget dropped the result; "recorded" would read as one.
+        return f"[{entry.id}] {label}: output dropped (evidence byte budget); call the tool for it"
     if render is None or data is None:
         return f"[{entry.id}] {label}: {_short(entry.output) or 'recorded'}"
     try:
@@ -989,11 +1009,16 @@ def _api_capability(data: dict[str, Any]) -> str:
             tid = str(cited.get("technique_id") or "") if isinstance(cited, dict) else ""
             if tid and tid not in techniques:
                 techniques.append(tid)
-    text = f"{len(catalogued)} of {len(rows)} APIs in the catalogue"
+    # An association from a reference table, not an observation: BitBlt and
+    # CreateCompatibleDC are listed under screen capture on any GUI program.
+    text = (
+        f"API catalogue associations (reference): {len(catalogued)} of {len(rows)} APIs "
+        "in the catalogue"
+    )
     if behaviours:
         text += f", behaviours {_names(behaviours)}"
     if techniques:
-        text += f", technique rules cited {_names(techniques)}"
+        text += f", associated techniques {_names(techniques)}"
     return text
 
 

@@ -247,3 +247,14 @@ class TestTheCut:
         assert block.startswith(PACK_HEADING + "\n[ev_0001] yara: ")
         assert "cite them" in PACK_HEADING
         assert pack_block([], 1000) == ""
+
+
+class TestABudgetTrimmedEntry:
+    def test_it_says_the_output_was_dropped_rather_than_recorded(self) -> None:
+        from maljan.schemas.evidence import apply_budget
+
+        entry = _entry("capa", '{"capabilities": [{"rule": "x"}]}')
+        apply_budget([entry], 1)
+        assert entry.truncated and entry.output == ""
+        line = render_pack([entry], 0)
+        assert line == "[ev_0001] capa: output dropped (evidence byte budget); call the tool for it"
