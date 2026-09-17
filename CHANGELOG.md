@@ -304,6 +304,20 @@ change landed on `main`.
 
 ### Fixed
 
+- **Our own rule files assert only live ids.** Two API-to-technique rules and
+  one YARA rule carried ids the catalogue retired (T1562.001, T1562.006,
+  T1574.002); they now name what the 19.2 bundle's `revoked-by` points at
+  (T1685, T1574.001), the composer's evasion filter learns T1685, and a test
+  holds every technique id in `data/api_attck_map_v1.json` and
+  `data/yara_ttp_rules.yaml` to `valid_ids()`.
+- **`api_capability` cites the same spelling in every process.** The matcher
+  walked a set, so which of an ANSI/wide pair was cited — and the YARA draft's
+  strings — changed with the hash seed; the set is walked sorted and both
+  spellings cite the rule. Revision `20260920000000` also deletes the stored
+  `preprocessing.use_api_behaviour_map` and `api_behaviour_map_path` rows. The
+  three vendored ATT&CK files carry `_meta.attck_version`, ICS techniques no
+  longer declare the platform "None", and the derived-technique table is
+  ordered by source and id.
 - **The ledger keeps the full parsed result.** `build_entry` parsed
   `structured` from the output it had already cut at `MAX_OUTPUT_CHARS`, so a
   pack result longer than six thousand characters was stored with no
