@@ -77,6 +77,9 @@ export interface GuideDef {
   id: GuideId;
   title: string;
   blurb: string;
+  /** What a first run needs. The hub offers these alone until a model is
+   *  connected, because none of the rest can be tested without one. */
+  firstRun?: boolean;
   /** The console group these keys live in — every step links to it. */
   groupHref: string;
   /** Steps may depend on the choices made so far (the LLM provider decides
@@ -176,6 +179,7 @@ function llmProvider(ctx: GuideContext): string {
 
 const LLM_GUIDE: GuideDef = {
   id: "llm",
+  firstRun: true,
   title: "Connect a language model",
   blurb: "Pick a provider, store its credentials, test the connection and choose the models the analysts and the judge run on.",
   groupHref: "/settings/configuration/models/llm",
@@ -224,18 +228,6 @@ const LLM_GUIDE: GuideDef = {
           const expert = String(c.effective(`core.llm.${p}.expert_model`) ?? "").trim();
           return expert ? null : "pick an expert model";
         },
-      },
-      {
-        id: "limits",
-        title: "Limits",
-        intro: "Token budgets and how many analysts run at once. The defaults are fine to keep.",
-        keys: [
-          "core.llm.expert_max_tokens",
-          "core.llm.judge_max_tokens",
-          "core.llm.parallel_analysts",
-          "core.llm.view_decomposition_mode",
-          "core.llm.view_decomposition_views",
-        ],
       },
       {
         id: "review",
@@ -301,6 +293,7 @@ const STATIC_FIELDS_INTRO: Record<string, string> = {
 
 const STATIC_GUIDE: GuideDef = {
   id: "static",
+  firstRun: true,
   title: "Choose a static analyser",
   blurb: "Pick what the static analyst reverse-engineers with, fill in that tool's settings and test it.",
   groupHref: "/settings/configuration/tools/static",
@@ -349,6 +342,7 @@ const STATIC_GUIDE: GuideDef = {
 
 const SANDBOX_GUIDE: GuideDef = {
   id: "sandbox",
+  firstRun: true,
   title: "Connect a sandbox",
   blurb: "Pick where samples are detonated, describe how to reach it and test the connection.",
   groupHref: "/settings/configuration/tools/sandbox",
@@ -537,6 +531,7 @@ const TOOL_SERVER_GUIDE: GuideDef = {
 
 const AGENT_GUIDE: GuideDef = {
   id: "agent",
+  firstRun: true,
   title: "Create an analyst",
   blurb: "Clone a built-in analyst or start from a blank one, give it tools and a model, then add it to a stage.",
   groupHref: "/settings/configuration/agents/agents",
@@ -690,4 +685,12 @@ export const GUIDES: GuideDef[] = [
 
 export function guideById(id: string): GuideDef | undefined {
   return GUIDES.find((g) => g.id === id);
+}
+
+/** The guides on offer, narrowed to what a first run needs before a model is
+ *  connected. Everything else is an improvement on a pipeline that already
+ *  runs, and offering it first is offering somebody a choice they cannot
+ *  evaluate. */
+export function guidesFor(llmConfigured: boolean): GuideDef[] {
+  return llmConfigured ? GUIDES : GUIDES.filter((g) => g.firstRun);
 }

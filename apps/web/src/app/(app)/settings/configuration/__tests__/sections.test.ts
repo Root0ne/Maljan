@@ -22,6 +22,27 @@ describe("sections", () => {
     expect(resolveGroup(schema, "platform", "llm")).toBeNull();
     expect(resolveGroup(schema, "platform", "mystery")).not.toBeNull();
   });
+  /* A key an operator can edit in two places is a key whose value depends on
+   * which page they were on when they saved. The virtual "Teams" page is
+   * carved out of the agents group precisely so the two never overlap, and
+   * this is what keeps it that way. */
+  it("renders every key in exactly one group", () => {
+    const seen = new Map<string, string>();
+    for (const { section, groups } of groupsBySection(schema)) {
+      for (const group of groups) {
+        const resolved = resolveGroup(schema, section.key, group.key);
+        expect(resolved).not.toBeNull();
+        for (const entry of resolved!.entries) {
+          expect(seen.get(entry.key)).toBeUndefined();
+          seen.set(entry.key, group.path);
+        }
+      }
+    }
+    // And nothing the schema offers is dropped on the way.
+    expect([...seen.keys()].sort()).toEqual(
+      schema.groups.flatMap((g) => g.entries.map((e) => e.key)).sort()
+    );
+  });
   it("links keys to the page that renders them", () => {
     expect(firstGroupPath(schema)).toBe("/settings/configuration/models/llm");
     expect(pathForKey(schema, "core.agents.profile")).toBe("/settings/configuration/agents/profiles");

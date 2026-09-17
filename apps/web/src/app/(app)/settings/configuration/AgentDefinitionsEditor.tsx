@@ -1,8 +1,10 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { Bot } from "lucide-react";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
+import { agentDisplayName, agentKeySuffix } from "./agentNames";
 import Dot from "./Dot";
 import {
   ADD_BUTTON,
@@ -472,9 +474,15 @@ export function AgentDetail({
       {showHeader && (
         <>
           <div className="flex items-center justify-between gap-2 flex-wrap">
-            <span className="text-sm text-text-primary font-mono">
-              {agentKey}
-              <span className="ml-2 text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-border text-text-muted">
+            <span className="flex items-center gap-2 text-sm text-text-primary">
+              <Bot size={16} aria-hidden="true" className="text-text-muted" />
+              {agentDisplayName(agentKey, definitions)}
+              {agentKeySuffix(agentKey, definitions) && (
+                <span className="text-[11px] font-mono text-text-muted">
+                  {agentKeySuffix(agentKey, definitions)}
+                </span>
+              )}
+              <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-border text-text-muted">
                 {agent.role}
               </span>
               {locked && (
@@ -1041,11 +1049,18 @@ export default function AgentDefinitionsEditor({
                     label={item.enabled ? "enabled" : "disabled"}
                     className={item.enabled ? "bg-status-green" : "bg-border"}
                   />
-                  <span className="text-sm font-mono text-text-primary truncate">{key}</span>
+                  {/* The name an operator gave this analyst leads; its key
+                      follows only where the two differ. */}
+                  <span className="text-sm text-text-primary truncate">
+                    {agentDisplayName(key, value)}
+                  </span>
                   {changed && <Dot label="changed" className="bg-accent-strong" />}
                   {anyErrorFor(key) && <Dot label="invalid" className="bg-status-red" />}
                 </div>
                 <div className="flex items-center gap-2 text-[11px] text-text-muted pl-3.5">
+                  {agentKeySuffix(key, value) && (
+                    <span className="font-mono">{agentKeySuffix(key, value)}</span>
+                  )}
                   <span>{item.role}</span>
                   {BUILTIN_AGENT_KEYS.has(key) && <span>built in</span>}
                   {verdict && (

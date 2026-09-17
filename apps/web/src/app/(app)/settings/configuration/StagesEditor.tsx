@@ -10,6 +10,7 @@ import type {
   StageEntry,
   StageKind,
 } from "@/types/settings";
+import { agentDisplayName, agentFullName, agentKeySuffix } from "./agentNames";
 import {
   ADD_BUTTON,
   copyKey,
@@ -292,6 +293,7 @@ export default function StagesEditor({
                   total={stages.length}
                   earlier={stages.slice(0, index).map((s) => s.key)}
                   analysts={analysts}
+                  definitions={definitions}
                   locked={locked}
                   error={errorFor(`${entry.key}.${key}.stages.${stage.key}`)}
                   warning={warningFor(`${entry.key}.${key}.stages.${stage.key}`)}
@@ -360,6 +362,7 @@ function StageCard({
   total,
   earlier,
   analysts,
+  definitions,
   locked,
   error,
   warning,
@@ -373,6 +376,9 @@ function StageCard({
   total: number;
   earlier: string[];
   analysts: string[];
+  /** The agent map, so a stage names its members the way an operator named
+   *  them rather than by the slug the settings map is keyed by. */
+  definitions: Record<string, AgentDefinitionEntry>;
   locked: boolean;
   error: string | undefined;
   warning: string | undefined;
@@ -487,7 +493,12 @@ function StageCard({
           <ul className="mt-2 space-y-1">
             {stage.agents.map((agent) => (
               <li key={agent} className="flex items-center gap-2 text-xs">
-                <span className="font-mono text-text-primary">{agent}</span>
+                <span className="text-text-primary">{agentDisplayName(agent, definitions)}</span>
+                {agentKeySuffix(agent, definitions) && (
+                  <span className="font-mono text-[11px] text-text-muted">
+                    {agentKeySuffix(agent, definitions)}
+                  </span>
+                )}
                 <button
                   type="button"
                   className="text-[11px] text-text-secondary disabled:opacity-40"
@@ -519,7 +530,7 @@ function StageCard({
                 <option value="">choose an enabled agent</option>
                 {unused.map((a) => (
                   <option key={a} value={a}>
-                    {a}
+                    {agentFullName(a, definitions)}
                   </option>
                 ))}
               </select>
