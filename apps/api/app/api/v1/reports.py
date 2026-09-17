@@ -51,6 +51,13 @@ def _is_numbered(transcript: list[AgentMessageResponse]) -> bool:
     number of rows. The two cannot be confused, including for a single row:
     a numbered one is at least 1 and a positioned one is 0.
 
+    The one shape it reads wrong is a run the publisher numbered but mostly
+    failed to stamp: a line it never reached is stored as ``0``, so a
+    transcript of ``[0, 0, 1]`` has a maximum below its count and is served as
+    pre-release. That needs the event loop to have been closing for most of
+    the conversation, and the cost is the identity and the ordering of a run
+    that had almost no feed to begin with.
+
     This used to ask whether the job had any ``job_events`` row. That is the
     same fact only until the retention sweep removes those rows — after
     ``core.events.retention_days`` every finished run would have looked

@@ -197,7 +197,7 @@ class TestTheJudgeAsks:
         judge.pipeline_stage = "verdict"
         judge.logger = type("L", (), {"debug": staticmethod(lambda *a, **k: None)})()
 
-        already: set[int] = set()
+        already: set[str] = set()
         judge._publish_questions(
             [
                 AIMessage(content="Reading the ledger now."),
@@ -222,7 +222,7 @@ class TestTheJudgeAsks:
         judge.logger = type("L", (), {"debug": staticmethod(lambda *a, **k: None)})()
 
         conversation = [AIMessage(content="Is this a packer stub?")]
-        already: set[int] = set()
+        already: set[str] = set()
         judge._publish_questions(conversation, already)
         judge._publish_questions(conversation, already)
         assert len(sink.of("judge_question")) == 1

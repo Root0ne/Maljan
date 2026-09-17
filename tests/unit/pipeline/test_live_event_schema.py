@@ -227,6 +227,20 @@ class TestArgumentSummaries:
         for name in ("author", "authored", "obsession", "tokenizer"):
             assert ev.summarize_args({name: "kept"}) == f"{name}=kept", name
 
+    def test_a_name_written_in_capitals_throughout_is_caught(self) -> None:
+        """There is no case change to split on, so the joined name is searched.
+
+        ``AUTHTOKEN`` and ``SESSIONID`` were one word each and matched
+        nothing. The cost is an all-capitals ``AUTHOR``, which is the price of
+        not letting an all-capitals ``AUTHTOKEN`` through.
+        """
+        for name in ("AUTHTOKEN", "SESSIONID", "APIKEY", "TOKEN2", "X-API-KEY"):
+            assert ev.summarize_args({name: "value"}) == f"{name}=***", name
+
+    def test_capitals_alone_do_not_make_a_name_a_credential(self) -> None:
+        for name in ("PATH", "MIME", "COUNT"):
+            assert ev.summarize_args({name: "kept"}) == f"{name}=kept", name
+
     def test_a_vendor_key_prefix_is_replaced_wherever_it_appears(self) -> None:
         summary = ev.summarize_args({"value": "sk-liveKey", "note": "nvapi-abc"})
         assert summary == "value=***, note=***"
@@ -307,6 +321,36 @@ class TestArgumentSummaries:
     def test_a_file_url_keeps_no_more_than_any_other(self) -> None:
         # It has no authority, so everything after the scheme is a host path.
         assert ev.scrub("file:///home/op/data/samples/x/evil.exe") == "file:///…"
+
+    def test_a_key_is_found_whatever_punctuation_it_is_wrapped_in(self) -> None:
+        """Both credential rules are anchored to the whole run.
+
+        A backtick left inside the run makes ``startswith("sk-")`` false and a
+        trailing ``;`` makes the 24-plus shape fail to match, so the value run
+        has to split off every character that can sit against a key — markdown
+        prose, the angle brackets tool documentation writes placeholders in,
+        and the ``;`` of a ``Set-Cookie`` among them.
+        """
+        key = "sk-liveSecretValue0123456789"
+        assert ev.scrub(f"rotate the key `{key}` today") == "rotate the key `***` today"
+        assert ev.scrub(f"<{key}>") == "<***>"
+
+    def test_an_opaque_run_ended_by_a_semicolon_is_replaced(self) -> None:
+        cookie = "sessionToken=QWxhZGRpbjpvcGVuIHNlc2FtZQ; Path=/"
+        assert ev.scrub(cookie) == "sessionToken=***; Path=/"
+
+    def test_the_wider_split_leaves_a_digest_and_a_url_alone(self) -> None:
+        # Splitting on more characters can only expose a credential run, never
+        # hide one, and neither of these is one.
+        digest = "44d88612fea8a8f36de82e1278abb02f"
+        assert ev.scrub(digest) == digest
+        assert ev.scrub("https://vt.example/v3/files?apikey=SECRETKEY") == "https://vt.example/…"
+
+    def test_a_one_character_url_scheme_is_not_a_drive_letter(self) -> None:
+        # ``a:/`` is also how a drive letter begins; the slash after the colon
+        # has to be a lone one for the path rule to claim it.
+        assert ev.scrub("a://h/x") == "a://h/…"
+        assert ev.scrub("C:/temp/x.exe") == "x.exe"
 
     def test_a_key_in_a_compact_json_body_is_still_replaced(self) -> None:
         body = '{"api_key":"sk-liveSecretValue0123456789"}'

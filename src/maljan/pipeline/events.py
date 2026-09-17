@@ -367,7 +367,18 @@ _URL_RUN = re.compile(_AFTER + r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.\-]*)://(?P<rest
 # One value, for the credential test. Delimited rather than whitespace-split,
 # because a key a tool server echoes arrives as ``{"api_key":"sk-…"}`` with no
 # spaces in it at all.
-_VALUE_RUN = re.compile(r"[^\s\"'{}\[\](),=]+")
+#
+# The class has to hold every character that could sit against a key, because
+# both credential rules are anchored to the whole run: a backtick left inside
+# it makes ``startswith("sk-")`` false, and a trailing ``;`` makes the
+# 24-plus shape fail to match. A key in markdown prose, one in the angle
+# brackets tool documentation writes placeholders in, and one ended by the
+# ``;`` of a ``Set-Cookie`` all have to split cleanly off their punctuation.
+# Splitting on more characters can only expose a credential run and never hide
+# one — a run either rule can fire on is made of ``[A-Za-z0-9_-]`` and nothing
+# else — and the pieces a split leaves behind (``api_key``, ``C``, ``https``)
+# are far too short to match anything.
+_VALUE_RUN = re.compile(r"[^\s\"'`<>;:{}\[\](),=]+")
 # A filesystem path, wherever it starts. A slash alone is not the signal: a
 # MIME type (``application/x-msdownload``), a sub-technique id
 # (``T1055/012``), a date (``2026/09/17``) and a ratio all carry one, and
@@ -378,7 +389,10 @@ _VALUE_RUN = re.compile(r"[^\s\"'{}\[\](),=]+")
 # the marker at position 0 let all three through.
 #
 # ``/`` must not be followed by another ``/``: that is the ``//`` of a URL
-# whose scheme the pass above has already reduced to a host. A relative path
+# whose scheme the pass above has already reduced to a host. A drive letter is
+# held to the same rule for the same reason — one letter and ``:/`` is also
+# how a one-character URL scheme begins, and ``a://h/x`` reduced to nothing at
+# all until the slash after the colon had to be a lone one. A relative path
 # with no marker (``data/samples/a.exe``) is still left alone — it names no
 # host directory, which is the thing that must not travel.
 #
@@ -390,7 +404,7 @@ _VALUE_RUN = re.compile(r"[^\s\"'{}\[\](),=]+")
 # doubled when the tool serialised it as JSON.
 _UNC = r"\\{2,}[A-Za-z0-9._-]+\\+."
 _PATH_RUN = re.compile(
-    _AFTER + r"(?P<run>(?:/(?!/)|\./|\.\./|~/|[A-Za-z]:[\\/]|" + _UNC + r")" + _UNTIL + r")"
+    _AFTER + r"(?P<run>(?:/(?!/)|\./|\.\./|~/|[A-Za-z]:(?:\\|/(?!/))|" + _UNC + r")" + _UNTIL + r")"
 )
 # One argument's value, and the whole summary. Short on purpose: this is the
 # line under a chat bubble that says which call is running, not a record of it.
@@ -439,13 +453,23 @@ def _is_secret_argument(name: str) -> bool:
     ``private_key``) is also tried against the joined name, because ``apiKey``
     and ``api-key`` are the same argument written three ways.
     """
-    words = _name_words(name)
+    raw = str(name)
+    words = _name_words(raw)
     singulars = {word[:-1] for word in words if len(word) > 3 and word.endswith("s")}
-    joined = re.sub(r"[^a-z0-9]+", "", str(name).lower())
+    joined = re.sub(r"[^a-z0-9]+", "", raw.lower())
+    # A name written in capitals throughout carries no case change to split
+    # on, so ``AUTHTOKEN`` and ``SESSIONID`` are one word each and match
+    # nothing. For those, and only those, the joined name is searched for the
+    # listed word instead — the substring check this rule otherwise replaced.
+    # It costs an all-capitals ``AUTHOR``, which is the price of not letting
+    # an all-capitals ``AUTHTOKEN`` through.
+    shouting = not any(char.islower() for char in raw)
     for secret in _SECRET_ARGUMENT_WORDS:
         if secret in words or secret in singulars:
             return True
         if "_" in secret and secret.replace("_", "") in joined:
+            return True
+        if shouting and secret.replace("_", "") in joined:
             return True
     return False
 
