@@ -1,6 +1,12 @@
 other/
 tests/
-apps/web/
 data/
 .venv/
 node_modules/
+# The frontend is scanned (see the semgrep job and `make semgrep`), minus what
+# is not source: its build output, its end-to-end suite and its unit specs.
+apps/web/.next/
+apps/web/out/
+apps/web/e2e/
+*.spec.ts
+*.spec.tsx

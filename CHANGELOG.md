@@ -439,6 +439,13 @@ change landed on `main`.
 
 ### Fixed
 
+- **Semgrep covers the frontend.** The scan ran over `src/ apps/api/ services/
+  scripts/` with `.semgrepignore` excluding `apps/web/`, so every file of the
+  console was outside it and covered by CodeQL alone. The job and `make
+  semgrep` now add `apps/web/src/` with the `p/typescript` and `p/react`
+  rulesets; `.semgrepignore` keeps out only what is not source — build output,
+  the end-to-end suite and the unit specs. 287 rules over 430 files, no
+  findings.
 - **The `readonly` role is documented as the label it is.** It is enforced
   nowhere — no route distinguishes it from `analyst`, so such an account can
   upload a sample, submit a job and cancel its own — and `docs/security.md` and

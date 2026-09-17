@@ -40,9 +40,11 @@ format-check:
 typecheck:
 	uv run mypy src/ apps/api/
 
-# Same rulesets CI runs in the semgrep job, pinned to the same version.
+# Same rulesets CI runs in the semgrep job, pinned to the same version, over
+# the same targets — the frontend included: its files are application code and
+# were covered by CodeQL alone.
 semgrep:
-	uv run --with semgrep==1.176.0 semgrep scan --config p/python --config p/security-audit --error --metrics=off src/ apps/api/ services/ scripts/
+	uv run --with semgrep==1.176.0 semgrep scan --config p/python --config p/security-audit --config p/typescript --config p/react --error --metrics=off src/ apps/api/ services/ scripts/ apps/web/src/
 
 # Full local quality gate (mirrors CI)
 check: lint format-check typecheck test

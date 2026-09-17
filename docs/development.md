@@ -52,7 +52,7 @@ on loopback port 8080.
 | `make lint` / `make format` / `make format-check` | ruff over `src/ tests/ apps/api/ services/ scripts/`. |
 | `make typecheck` | mypy over `src/` and `apps/api/`. |
 | `make check` | lint, format check, typecheck, tests — the local mirror of CI. |
-| `make semgrep` | the two rulesets CI runs, at the pinned version. |
+| `make semgrep` | the four rulesets CI runs, at the pinned version, over the same targets. |
 | `make migrate` | `alembic upgrade head` against `DATABASE_URL`. |
 | `make dev-up` / `dev-down` / `dev-logs` | the compose stack with the development overlay. |
 | `make fe-rebuild` / `worker-restart` | make a source edit real on the production stack. |
@@ -89,7 +89,7 @@ this tree; see [paper.md](paper.md).
 | Job | Contents |
 | :-- | :-- |
 | `quality` | Ruff lint, ruff format check, mypy. Every other job needs it. |
-| `semgrep` | `p/python` and `p/security-audit` at the pinned version, over `src/ apps/api/ services/ scripts/`. |
+| `semgrep` | `p/python`, `p/security-audit`, `p/typescript` and `p/react` at the pinned version, over `src/ apps/api/ services/ scripts/ apps/web/src/`. `.semgrepignore` keeps out what is not source: build output, the end-to-end suite, the unit specs. |
 | `test` | `pytest tests/ -q --tb=short` on Python 3.13. |
 | `test-qdrant` | `tests/unit/test_qdrant_store.py` against a live Qdrant service container. |
 | `frontend` | `tsc --noEmit`, eslint, vitest and a production `next build`. |
