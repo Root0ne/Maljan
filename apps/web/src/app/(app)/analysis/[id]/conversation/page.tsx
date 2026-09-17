@@ -47,7 +47,7 @@ export default function ConversationPage() {
         live={Boolean(live)}
         jobStatus={job?.status ?? null}
       />
-      {report && <AgentsPanel />}
+      {report && <AgentsPanel roster={run.roster} />}
     </div>
   );
 }

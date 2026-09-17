@@ -15,6 +15,7 @@
  * here requires a number to exist.
  */
 
+import { rosterNames } from "@/lib/rosterNames";
 import type { RunEvent } from "@/lib/runStore";
 import type { JobRoster } from "@/types";
 
@@ -279,11 +280,14 @@ function freshState(roster: JobRoster | null): BuilderState {
     last: null,
     textLength: 0,
   };
+  /* The one reading of the roster, with this view's own fallback: a bubble
+   * reads better with a key made readable than with the key. */
+  const names = rosterNames(roster, prettyName);
   for (const stage of roster?.stages ?? []) {
-    state.names.set(`stage:${stage.key}`, stage.label || stage.key);
+    state.names.set(`stage:${stage.key}`, names.stage(stage.key));
   }
   for (const agent of roster?.agents ?? []) {
-    const name = agent.label || prettyName(agent.key);
+    const name = names.agent(agent.key);
     state.names.set(agent.key, name);
     state.participants.set(agent.key, {
       key: agent.key,

@@ -86,10 +86,14 @@ export default function AttackTab() {
     }))
     .filter((t) => t.techniques.length > 0);
 
-  if (rawTechniques.length === 0) {
+  if (activeTactics.length === 0) {
     /* The tab is offered only when the run mapped something, so this is what a
      * direct link to it sees: either the mapping could not be read, which is a
-     * different claim from an empty mapping, or the run mapped nothing. */
+     * different claim from an empty mapping, or the run mapped nothing.
+     *
+     * Read off the parsed matrix rather than the raw array, which is the same
+     * reading the tab rule makes: rows that parse to no technique are not a
+     * mapping, however many of them there are. */
     return (
       <div className="p-8 text-center text-sm text-text-secondary">
         {fetchError ?? "This run mapped no ATT&CK technique."}

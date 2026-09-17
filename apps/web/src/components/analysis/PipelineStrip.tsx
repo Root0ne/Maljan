@@ -14,6 +14,7 @@
  * `ahmet_1` in one place and "ahmet" in the other.
  */
 
+import { rosterNames } from "@/lib/rosterNames";
 import type { JobRoster } from "@/types/events";
 import { formatStageDuration, type StageTimelineRow } from "./stageTimeline";
 
@@ -24,18 +25,6 @@ const STATUS_STYLE: Record<string, string> = {
   pending: "border-border bg-bg-surface text-text-disabled",
 };
 
-/** Every label the roster carries, keyed by what the pipeline publishes. */
-function namesFrom(roster: JobRoster | null): Map<string, string> {
-  const names = new Map<string, string>();
-  for (const agent of roster?.agents ?? []) {
-    if (agent.label) names.set(agent.key, agent.label);
-  }
-  for (const stage of roster?.stages ?? []) {
-    if (stage.label) names.set(`stage:${stage.key}`, stage.label);
-  }
-  return names;
-}
-
 export default function PipelineStrip({
   stages,
   roster = null,
@@ -44,12 +33,12 @@ export default function PipelineStrip({
   roster?: JobRoster | null;
 }) {
   if (stages.length === 0) return null;
-  const names = namesFrom(roster);
+  const names = rosterNames(roster);
 
   return (
     <div className="mt-3 flex flex-wrap gap-2" data-testid="pipeline-strip">
       {stages.map((stage) => {
-        const members = stage.agents.map((key) => names.get(key) ?? key);
+        const members = stage.agents.map(names.agent);
         return (
           <span
             key={stage.key}
@@ -60,7 +49,7 @@ export default function PipelineStrip({
           >
             {/* A name rather than a key, so not monospaced: the roster's
                 label where the run published one, the key where it did not. */}
-            <span className="font-medium">{names.get(`stage:${stage.key}`) ?? stage.key}</span>
+            <span className="font-medium">{names.stage(stage.key)}</span>
             <span className="uppercase tracking-wider">{stage.status}</span>
             {members.length > 0 && (
               <span className="text-text-muted">{members.join(", ")}</span>

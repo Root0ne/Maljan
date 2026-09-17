@@ -137,6 +137,7 @@ async function mockRun(
     events?: typeof FEED;
     status?: string;
     report?: unknown;
+    roster?: unknown;
     onEventsRequest?: () => void;
   } = {},
 ) {
@@ -159,7 +160,7 @@ async function mockRun(
       body: JSON.stringify({
         ...COMPLETED_JOB,
         status: options.status ?? COMPLETED_JOB.status,
-        roster: ROSTER,
+        roster: options.roster === undefined ? ROSTER : options.roster,
       }),
     }),
   );
@@ -199,6 +200,98 @@ test.describe("Conversation", () => {
     await expect(feed).toContainText("one analyst reported");
 
     await expect(alerts(page)).toHaveCount(0);
+  });
+
+  /* The per-agent results table sits one scroll under the participants strip
+   * and the header strip, and drew the registry key where both of those draw
+   * the operator's label — the same three agents, named two ways on one
+   * screen. */
+  test("the agents table names an agent the way the strip above it does", async ({
+    sessionPage: page,
+  }) => {
+    const roster = {
+      agents: [
+        { key: "ahmet_1", label: "Ahmet", role: "static", stages: ["analysis"] },
+        { key: "mehmet", label: "Mehmet", role: "dynamic", stages: ["analysis"] },
+      ],
+      stages: [
+        {
+          key: "analysis",
+          label: "First pass",
+          kind: "analysis",
+          agents: ["ahmet_1", "mehmet"],
+        },
+      ],
+    };
+    await mockRun(page, {
+      roster,
+      report: {
+        ...REPORT,
+        run_summary: {
+          ...REPORT.run_summary,
+          stages: [
+            {
+              key: "analysis",
+              kind: "analysis",
+              ran: true,
+              reason: "",
+              agents: ["ahmet_1", "mehmet"],
+              duration_ms: 1000,
+            },
+          ],
+        },
+        agent_findings: [
+          {
+            agent_name: "ahmet_1",
+            domain: "static",
+            claims: [{ claim: "Imports VirtualAllocEx", confidence: 0.9 }],
+            dissent_items: [],
+            revision_rounds: 0,
+            final_confidence: 0.9,
+            status: "complete",
+            status_reason: null,
+          },
+          {
+            agent_name: "mehmet",
+            domain: "dynamic",
+            claims: [],
+            dissent_items: [],
+            revision_rounds: 0,
+            final_confidence: 0,
+            status: "failed",
+            status_reason: "sandbox unreachable",
+          },
+        ],
+      },
+    });
+    await page.goto(`/analysis/${JOB_ID}/conversation`);
+
+    const table = page.getByRole("table");
+    await expect(table).toContainText("Ahmet");
+    await expect(table).toContainText("Mehmet");
+    await expect(table).toContainText("stage First pass");
+    // Never the slug the pipeline keys the second Ahmet by.
+    await expect(table).not.toContainText("ahmet_1");
+    await expect(alerts(page)).toHaveCount(0);
+  });
+
+  test("a run whose roster names nobody falls back to the key", async ({
+    sessionPage: page,
+  }) => {
+    /* Neither the job nor the feed carries a roster, which is every run
+     * recorded before the pipeline published one. */
+    await mockRun(page, {
+      roster: null,
+      events: FEED.filter((e) => e.type !== "roster"),
+    });
+    await page.goto(`/analysis/${JOB_ID}/conversation`);
+
+    // The fixture's findings are keyed `static` and `dynamic`, and with no
+    // roster those keys are all the table has.
+    const table = page.getByRole("table");
+    await expect(table).toContainText("static");
+    await expect(table).toContainText("dynamic");
+    await expect(table).toContainText("stage analysis");
   });
 
   test("draws a tool call as one line that opens the ledger row", async ({

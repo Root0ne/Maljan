@@ -20,8 +20,13 @@ import { saysSomething } from "./reportSections";
 export default function ArtifactTable({ section }: { section: EvidenceSection }) {
   const rows = rowsOf(section);
   /* A section whose every row said nothing is not drawn at all: a heading over
-   * an empty table is the "No X yet" placeholder in another shape. */
-  if (section.kind === "kv" && rows.length === 0) return null;
+   * an empty table is the "No X yet" placeholder in another shape.
+   *
+   * Its rows are not all it may carry, though. A section is keyed by the tool
+   * that built it and a tool that answered twice in two shapes contributes to
+   * one section, so a `kv` section can hold items or text as well; the section
+   * goes only when it holds nothing at all. */
+  if (section.kind === "kv" && rows.length === 0 && !hasOtherContent(section)) return null;
   return (
     <div className="bg-bg-surface border border-border rounded">
       <div className="px-4 py-3 border-b border-border flex flex-wrap items-center gap-2">
@@ -43,6 +48,11 @@ export default function ArtifactTable({ section }: { section: EvidenceSection })
   );
 }
 
+/** Whether the section carries anything besides its rows. */
+function hasOtherContent(section: EvidenceSection): boolean {
+  return (section.items?.length ?? 0) > 0 || Boolean((section.text ?? "").trim());
+}
+
 /**
  * The rows a section draws.
  *
@@ -58,6 +68,9 @@ function rowsOf(section: EvidenceSection): string[][] {
 }
 
 function SectionBody({ section, rows }: { section: EvidenceSection; rows: string[][] }) {
+  /* A `kv` section that kept no row falls through to whatever else it carries,
+   * which is how a tool that answered once with a dict and once with prose
+   * still shows the prose. */
   if (section.kind === "table" || (section.kind === "kv" && rows.length > 0)) {
     const columns =
       section.columns.length > 0

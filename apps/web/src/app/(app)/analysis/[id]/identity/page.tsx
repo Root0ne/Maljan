@@ -51,12 +51,38 @@ export default function IdentityTab() {
   );
   const showsTypedIdentity = !isCoveredBySection(reportSections, binarySectionKeys("header"));
 
+  /* The ledger's fingerprints lead and the typed block fills in the rest, so a
+   * report with no typed identity still shows what the `hashes` tool answered
+   * — the rows above were taken out of the table on the promise that this
+   * block draws them. */
+  const hashRows = HASH_ROWS.map(({ field, label }) => ({
+    field,
+    label,
+    value: ledgerHashes[field] ?? identity?.hashes?.[field as keyof SampleIdentity["hashes"]] ?? "",
+  })).filter((row) => saysSomething(row.value));
+
+  const hashes = hashRows.length > 0 && (
+    <div className="bg-bg-surface border border-border rounded">
+      <div className="px-4 py-3 border-b border-border">
+        <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+          File Hashes
+        </h2>
+      </div>
+      <div className="p-4 space-y-2">
+        {hashRows.map((row) => (
+          <HashRow key={row.field} label={row.label} value={row.value} />
+        ))}
+      </div>
+    </div>
+  );
+
   if (!identity) {
     return (
       <div className="space-y-4">
         <ArtifactSections sections={evidenceSections} />
+        {hashes}
         <ReputationSection jobId={jobId} enabled={!loading} />
-        {evidenceSections.length === 0 && (
+        {evidenceSections.length === 0 && !hashes && (
           <div className="p-8 text-center text-sm text-text-secondary">
             No identifying tool answered for this sample.
           </div>
@@ -71,12 +97,6 @@ export default function IdentityTab() {
       ? { label: "SIGNED (INVALID)", cls: "text-status-red bg-status-red/10 border-status-red/30" }
       : { label: "SIGNED", cls: "text-status-green bg-status-green/10 border-status-green/30" }
     : { label: "UNSIGNED", cls: "text-text-muted bg-bg-active border-border" };
-
-  const hashRows = HASH_ROWS.map(({ field, label }) => ({
-    field,
-    label,
-    value: ledgerHashes[field] ?? identity.hashes[field as keyof typeof identity.hashes] ?? "",
-  })).filter((row) => saysSomething(row.value));
 
   return (
     <div className="space-y-4">
@@ -133,26 +153,11 @@ export default function IdentityTab() {
       )}
 
       {/* Every fingerprint the run computed, in the one place that holds them.
-        * The ledger's `hashes` entry leads, because it carries the ones the
-        * typed model has no field for; the typed block fills in the rest. A
-        * hash no tool produced is absent rather than drawn as a dash: ssdeep
+        * A hash no tool produced is absent rather than drawn as a dash: ssdeep
         * and tlsh need an optional library and imphash needs an import table,
         * and an empty row reads as a missing value rather than an
         * inapplicable one. */}
-      {hashRows.length > 0 && (
-        <div className="bg-bg-surface border border-border rounded">
-          <div className="px-4 py-3 border-b border-border">
-            <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-              File Hashes
-            </h2>
-          </div>
-          <div className="p-4 space-y-2">
-            {hashRows.map((row) => (
-              <HashRow key={row.field} label={row.label} value={row.value} />
-            ))}
-          </div>
-        </div>
-      )}
+      {hashes}
 
       <ReputationSection jobId={jobId} enabled={!loading} />
 

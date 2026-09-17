@@ -21,6 +21,7 @@
  */
 
 import type { ReportDetailDTO } from "@/lib/api";
+import { hasMappedTechniques } from "./capabilityHeatmap";
 import { sectionsForTab } from "./reportSections";
 import { hasRuleMatches } from "./ruleMatches";
 import { dynamicAnalystClaims } from "./dynamicClaims";
@@ -152,8 +153,14 @@ export function tabHasContent(key: string, report: ReportDetailDTO | null): bool
        * the `/mitre` endpoint whose stored copy is `mitre_techniques`.
        * `corroboration` is read per technique to decorate a card that already
        * exists, so a corroborated id the judge never mapped would offer a tab
-       * that then apologises — which is the thing this rule is for. */
-      return nonEmpty(mr?.ttp_mappings) || nonEmpty(report.mitre_techniques);
+       * that then apologises — which is the thing this rule is for.
+       *
+       * Asked through the parser the tab draws with rather than by counting
+       * rows, so a list of rows that parses to no technique is not a mapping
+       * here either. */
+      return (
+        hasMappedTechniques(mr?.ttp_mappings) || hasMappedTechniques(report.mitre_techniques)
+      );
     case "/attribution":
       return attributionSaysSomething(mr);
     case "/detection":

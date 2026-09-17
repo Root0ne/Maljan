@@ -212,10 +212,9 @@ function DomainCard({ domain }: { domain: NetworkDomain }) {
                 SUSP
               </span>
             )}
-            {/* Both computed by network_extractor and displayed nowhere until
-                2026-07-28. A punycode label is registered precisely so it reads
-                as a brand it is not, so the badge names the brand rather than
-                just saying "punycode". */}
+            {/* A punycode label is registered precisely so it reads as a
+                brand it is not, so the badge names the brand rather than
+                saying "punycode" and leaving the reader to look it up. */}
             {domain.is_punycode && (
               <span
                 className="text-[11px] px-1.5 py-0.5 rounded bg-status-orange/10 text-status-orange shrink-0"

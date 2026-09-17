@@ -95,8 +95,9 @@ export function analysisRows(
 
   /* Newest first, and sorted here rather than trusted from either endpoint:
    * the reports appended above have no place in the jobs order, so without
-   * this a finished run could sit under older ones. A row with no timestamp
-   * keeps the position it was built in. */
+   * this a finished run could sit under older ones. A row whose timestamp
+   * cannot be read sorts as the oldest, which is where a row nothing can date
+   * belongs on a list read newest first. */
   return rows.sort((a, b) => time(b.createdAt) - time(a.createdAt));
 }
 
