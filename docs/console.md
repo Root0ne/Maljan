@@ -49,14 +49,22 @@ in the order the publisher numbered them.
 **Participants.** Everyone the team declares, named by the label the operator
 gave the agent rather than by its registry key, with an initial-avatar and a
 colour that stays the same for one agent across runs. A specialist that no
-stage names is shown with the agents that can task it. Selecting a participant
-narrows the conversation to that participant.
+stage names is shown with the agents that can task it. Each participant
+carries what it has done — lines said, tool calls answered — and that count
+appears here and nowhere else on the screen. Selecting a participant narrows
+the conversation to that participant.
+
+The run's own watchers are not participants. The mediator and the sycophancy
+detector speak as the pipeline and name themselves in the line, so they are
+drawn as notices to the room rather than as members of a team nobody composed
+them into.
 
 **Kinds.** A message is drawn as what it is: speech as a bubble; a tool call as
-one monospaced line with the tool, whether it succeeded, how long it took and a
-chip that opens its row on the EVIDENCE tab; a validator correction and a cap
-notice as centred notes; a judge's question and a delegated ask and answer as
-bubbles with an arrow to the agent addressed; the verdict as a closing card.
+one monospaced line with the tool, whether it succeeded — in the icon's shape
+and in words a screen reader can read — how long it took and a chip that opens
+its row on the EVIDENCE tab; a validator correction and a cap notice as
+centred notes; a judge's question and a delegated ask and answer as bubbles
+with an arrow to the agent addressed; the verdict as a closing card.
 Streamed text appends into the speaker's open bubble and is replaced by the
 message that closes the turn.
 
@@ -74,6 +82,12 @@ run store keyed by job id (`apps/web/src/lib/runStore.ts`), not in the page.
 Navigating away and back re-renders from what the store already holds, and the
 socket outlives the page for a grace period rather than being redialled.
 
+**A long run.** Frames are committed a batch at a time rather than one at a
+time, the conversation is built by continuing the previous walk rather than
+repeating it, and a line that has not changed keeps the object it was drawn
+from — so a three-thousand-event replay draws the line that just arrived
+instead of every line before it.
+
 ## How the console follows a run
 
 One socket per job, opened by the store on the first reader. The store reads
@@ -84,8 +98,10 @@ missed rather than a re-read of the window. The access token travels as the
 
 Every event carries a job-wide `seq`, which is the ordering key, the dedupe
 identity and the resume cursor. A run recorded before the numbering existed
-keeps the order its events arrived in, and a run whose feed has passed the
-retention window replays from the conversation stored on its report.
+keeps the order its events arrived in. A run whose feed has passed the
+retention window replays from the conversation stored on its report instead —
+only then, so stored rows can never be laid over a feed that still has
+something to say.
 
 ## Evidence
 
