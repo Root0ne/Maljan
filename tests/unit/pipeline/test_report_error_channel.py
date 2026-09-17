@@ -72,7 +72,6 @@ def _initial_state() -> dict[str, Any]:
         "degradation_reasons": [],
         "function_hash_matches": [],
         "family_rag_candidates": [],
-        "attck_case_candidates": [],
         "validation_findings": {},
         "validation_retries": 0,
     }

@@ -237,15 +237,6 @@ export const MALWARE_REPORT: MalwareReport = {
         source: "fingerprint_catalog",
       },
     ],
-    attck_case_candidates: [
-      {
-        technique_id: "T1055",
-        support: 7,
-        similarity: 0.548,
-        match_method: "case_rag",
-        source: "attck_case_corpus",
-      },
-    ],
   },
   executive_summary:
     "The sample injects into a running process, establishes Run-key persistence and beacons to a newly registered domain over HTTPS.",

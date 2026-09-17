@@ -610,22 +610,6 @@ class MarkdownRenderer:
                     f"| {cand.get('malware_category', '-')} "
                     f"| {cand.get('sample_count', '-')} |"
                 )
-        if attr.attck_case_candidates:
-            lines.append("")
-            lines.append("**ATT&CK case priors (techniques recurring in similar prior cases):**")
-            lines.append("")
-            lines.append(
-                "_Advisory only — these are priors from past runs, not evidence from this sample._"
-            )
-            lines.append("")
-            lines.append("| Technique | Support | Similarity |")
-            lines.append("|---|---|---|")
-            for cand in attr.attck_case_candidates[:10]:
-                lines.append(
-                    f"| {cand.get('technique_id', '?')} "
-                    f"| {cand.get('support', '-')} "
-                    f"| {float(cand.get('similarity') or 0.0):.3f} |"
-                )
         if attr.similar_samples:
             lines.append("")
             lines.append("**Similar samples (LTM nearest neighbours):**")

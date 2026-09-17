@@ -61,7 +61,6 @@ export default function AttributionTab() {
   // Absent on every report written before these fields existed, hence the fallbacks.
   const hashMatches = attribution.function_hash_matches ?? [];
   const ragCandidates = attribution.family_rag_candidates ?? [];
-  const casePriors = attribution.attck_case_candidates ?? [];
   // An ungrounded family is one the judge named without citing the evidence
   // ids it read the name from. It is kept — a flagged attribution is more
   // useful than a deleted one — and rendered muted + struck through +
@@ -158,19 +157,6 @@ export default function AttributionTab() {
               c.malware_category || "-",
               c.sample_count ?? "-",
             ],
-          }))}
-        />
-      )}
-
-      {casePriors.length > 0 && (
-        <EvidenceTable
-          title={`ATT&CK Case Priors (${casePriors.length})`}
-          note="Techniques that recur in behaviourally-similar prior cases from Maljan's own memory. Advisory only — these describe past runs, not this sample."
-          headers={["Technique", "Support", "Similarity"]}
-          columnClass={["font-mono text-status-blue", "font-mono", "font-mono"]}
-          rows={casePriors.map((c, i) => ({
-            key: `${c.technique_id}-${i}`,
-            cells: [c.technique_id, c.support ?? "-", fmt(c.similarity, 3)],
           }))}
         />
       )}

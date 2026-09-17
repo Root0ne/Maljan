@@ -29,7 +29,7 @@ and the analysis proceeds unchanged. Gated OFF by default
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from maljan.core.logger import logger
 
@@ -83,17 +83,3 @@ def build_attck_case_hint(candidates: list[TechniqueCandidate]) -> str:
         "Do NOT assign a technique on prior-case recurrence alone.\n"
     )
     return "\n".join(lines)
-
-
-def to_report_dicts(candidates: list[TechniqueCandidate]) -> list[dict[str, Any]]:
-    """Convert candidates into FamilyAttribution.attck_case_candidates rows."""
-    return [
-        {
-            "technique_id": c.technique_id,
-            "support": c.support,
-            "similarity": round(c.score, 3),
-            "match_method": "attck-case-rag",
-            "source": "maljan-attck-case-corpus",
-        }
-        for c in candidates
-    ]

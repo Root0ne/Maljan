@@ -2780,7 +2780,6 @@ def make_judge_node(
             # Fully gated + fail-safe; never affects the verdict.
             _func_hash_report: list[dict[str, Any]] = []
             _family_rag_report: list[dict[str, Any]] = []
-            _attck_case_report: list[dict[str, Any]] = []
             try:
                 from maljan.core.config import get_settings
 
@@ -2872,46 +2871,6 @@ def make_judge_node(
             except Exception as _e:
                 logger.warning("Family-feature RAG skipped (%s). Verdict unaffected.", _e)
 
-            # ATT&CK case-prior RAG (§4 U2, read side): record the ATT&CK techniques
-            # recurring in behaviourally-similar prior cases (mined from our own LTM)
-            # as report evidence. Same host static profile as the family RAG, different
-            # KB. LLM-centric: these are candidates the analyst weighed, not a verdict.
-            # Fail-safe and gated OFF by default (no corpus -> no rows).
-            try:
-                from maljan.core.config import get_settings as _get_settings3
-
-                _cfg3 = _get_settings3()
-                _host3 = state.get("sample_path")
-                if _cfg3.preprocessing.use_attck_case_rag and _host3:
-                    from maljan.analysis.attck_case_rag import (
-                        retrieve_techniques,
-                    )
-                    from maljan.analysis.attck_case_rag import (
-                        to_report_dicts as _attck_to_report_dicts,
-                    )
-                    from maljan.analysis.family_feature_rag import build_sample_profile_text
-                    from maljan.core.paths import resolve_data
-                    from maljan.extractors.pe_extractor import build_static_analysis
-                    from maljan.memory.attck_case_index import load_attck_case_index
-
-                    _static3 = build_static_analysis(sample_path=str(_host3))
-                    # See the family-RAG block above: relative paths must be
-                    # resolved against the repo root, not the CWD.
-                    _index3 = load_attck_case_index(
-                        str(resolve_data(_cfg3.preprocessing.attck_case_corpus_path))
-                    )
-                    if _static3 is not None and _index3 is not None:
-                        _techs = retrieve_techniques(
-                            build_sample_profile_text(_static3),
-                            _index3,
-                            top_k=_cfg3.preprocessing.attck_case_rag_top_k,
-                            min_score=_cfg3.preprocessing.attck_case_rag_min_score,
-                            max_techniques=_cfg3.preprocessing.attck_case_rag_max_techniques,
-                        )
-                        _attck_case_report = _attck_to_report_dicts(_techs)
-            except Exception as _e:
-                logger.warning("ATT&CK-case RAG skipped (%s). Verdict unaffected.", _e)
-
             emit_agent_message(
                 container.event_sink,
                 speaker="Judge",
@@ -2954,10 +2913,6 @@ def make_judge_node(
                     # similarity), surfaced into FamilyAttribution.family_rag_candidates
                     # by the report node. Empty unless the RAG is enabled with a catalog.
                     "family_rag_candidates": _family_rag_report,
-                    # ATT&CK case-prior RAG candidates (recurring TTPs from similar prior
-                    # cases), surfaced into FamilyAttribution.attck_case_candidates by the
-                    # report node. Empty unless the RAG is enabled with a case corpus.
-                    "attck_case_candidates": _attck_case_report,
                 }
             )
         except Exception as e:  # noqa: BLE001 — per-run fault-isolation boundary
@@ -3191,10 +3146,6 @@ def make_report_node(
             _rag_cands = cast("list[dict[str, Any]]", state.get("family_rag_candidates") or [])
             if _rag_cands and getattr(report, "attribution", None) is not None:
                 report.attribution.family_rag_candidates = _rag_cands
-            # Same post-build threading for the ATT&CK case-prior RAG candidates.
-            _attck_cands = cast("list[dict[str, Any]]", state.get("attck_case_candidates") or [])
-            if _attck_cands and getattr(report, "attribution", None) is not None:
-                report.attribution.attck_case_candidates = _attck_cands
             # Attach the captured tool-loop evidence so
             # the Composer can ground the deep technical spine. Already size-
             # capped upstream (schemas.tool_evidence); stored verbatim here.

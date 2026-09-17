@@ -212,15 +212,14 @@ class AnalysisState(TypedDict):
 
     # F10 (2026-07-05): attribution side-channels written by the judge node
     # (``make_judge_node``) and read back by the report node to populate
-    # ``FamilyAttribution.function_hash_matches`` / ``family_rag_candidates``
-    # / ``attck_case_candidates``. These MUST be declared channels — a
+    # ``FamilyAttribution.function_hash_matches`` / ``family_rag_candidates``.
+    # These MUST be declared channels — a
     # ``StateGraph(AnalysisState)`` only persists keys present in this
     # TypedDict, so an undeclared write is dropped between nodes and the
     # report node's ``state.get(...)`` always saw ``[]`` (silent data loss
     # on enriched runs with real function-hash / RAG overlap).
     function_hash_matches: list[dict[str, Any]]
     family_rag_candidates: list[dict[str, Any]]
-    attck_case_candidates: list[dict[str, Any]]
 
     # What each analyst was told was wrong with its answer and did not fix,
     # after its one retry (``pipeline.validation``). Per agent, so the run
