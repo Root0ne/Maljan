@@ -25,7 +25,6 @@ class TestTheIndicatorFingerprint:
         "written",
         [
             "http://c2.evil.tld/gate.php",
-            "HTTP://C2.EVIL.TLD/gate.php",
             "  http://c2.evil.tld/gate.php  ",
             "hxxp://c2[.]evil[.]tld/gate.php",
             "hxxp://c2(.)evil(.)tld/gate.php",
@@ -35,6 +34,16 @@ class TestTheIndicatorFingerprint:
         assert indicator_fingerprint("url", written) == indicator_fingerprint(
             "url", "http://c2.evil.tld/gate.php"
         )
+
+    def test_a_url_keeps_its_case_because_a_path_is_case_sensitive(self) -> None:
+        """Folding ``/Gate.php`` onto ``/gate.php`` removes a fact from a report."""
+        assert indicator_fingerprint("url", "http://a.tld/Gate.php") != indicator_fingerprint(
+            "url", "http://a.tld/gate.php"
+        )
+
+    @pytest.mark.parametrize("kind", ["sha256", "domain", "ipv4", "email"])
+    def test_a_value_whose_case_means_nothing_folds(self, kind: str) -> None:
+        assert indicator_fingerprint(kind, "AB.Cd") == indicator_fingerprint(kind, "ab.cd")
 
     def test_a_defanged_mail_address_folds_onto_the_plain_one(self) -> None:
         assert indicator_fingerprint("email", "drop[at]evil.tld") == indicator_fingerprint(
@@ -71,8 +80,14 @@ class TestTheFindingFingerprint:
     def test_a_finding_with_no_technique_is_filed_on_its_title(self) -> None:
         assert finding_fingerprint([], "Packed with UPX") == ("", "packed with upx")
 
-    def test_the_first_technique_is_the_one_it_is_filed_under(self) -> None:
-        assert finding_fingerprint(["T1055", "T1027"], "x")[0] == "T1055"
+    def test_two_findings_that_claim_different_techniques_stay_two(self) -> None:
+        """Folding them would drop the second id with only a count saying so."""
+        assert finding_fingerprint(["T1055", "T1027"], "x") != finding_fingerprint(["T1055"], "x")
+
+    def test_the_order_two_analysts_wrote_them_in_makes_no_difference(self) -> None:
+        assert finding_fingerprint(["T1027", "T1055"], "x") == finding_fingerprint(
+            ["T1055", "T1027"], "x"
+        )
 
     def test_an_empty_title_normalises_to_nothing(self) -> None:
         assert normalised_title(None) == ""
@@ -97,22 +112,38 @@ class TestTheBundleFoldsTheSameIndicatorsTheReportDoes:
             "labels": [label],
         }
 
-    def test_two_spellings_of_one_endpoint_become_one_object(self) -> None:
+    def test_a_defanged_spelling_of_one_endpoint_folds(self) -> None:
         objects = [
-            self._indicator("indicator--1", "[url:value = 'http://C2.Evil.tld/a']", "malicious"),
+            self._indicator("indicator--1", "[url:value = 'http://c2.evil.tld/a']", "malicious"),
             self._indicator("indicator--2", "[url:value = 'hxxp://c2[.]evil[.]tld/a']", "c2"),
         ]
 
         kept = enforce_bundle_integrity(objects)
 
         assert [o["id"] for o in kept] == ["indicator--1"]
-        assert kept[0]["pattern"] == "[url:value = 'http://C2.Evil.tld/a']", "as written"
+        assert kept[0]["pattern"] == "[url:value = 'http://c2.evil.tld/a']", "as written"
         assert kept[0]["labels"] == ["malicious", "c2"], "only the set grows"
+
+    def test_a_url_that_differs_only_in_case_is_two_objects(self) -> None:
+        objects = [
+            self._indicator("indicator--1", "[url:value = 'http://a.tld/Gate.php']", "malicious"),
+            self._indicator("indicator--2", "[url:value = 'http://a.tld/gate.php']", "malicious"),
+        ]
+
+        assert len(enforce_bundle_integrity(objects)) == 2
+
+    def test_a_digest_that_differs_only_in_case_is_one_object(self) -> None:
+        objects = [
+            self._indicator("indicator--1", f"[file:hashes.'SHA-256' = '{'AB' * 32}']", "m"),
+            self._indicator("indicator--2", f"[file:hashes.'SHA-256' = '{'ab' * 32}']", "m"),
+        ]
+
+        assert len(enforce_bundle_integrity(objects)) == 1
 
     def test_a_reference_to_the_folded_object_follows_the_kept_one(self) -> None:
         objects = [
             self._indicator("indicator--1", "[url:value = 'http://a.tld/x']", "malicious"),
-            self._indicator("indicator--2", "[url:value = 'HTTP://A.TLD/x']", "malicious"),
+            self._indicator("indicator--2", "[url:value = 'hxxp://a[.]tld/x']", "malicious"),
             {
                 "type": "relationship",
                 "id": "relationship--1",

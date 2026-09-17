@@ -298,7 +298,7 @@ class TestAMergeOnlyGrowsASet:
             section.key: section
             for section in build_sections(
                 [
-                    _entry("ev_0001", 1, "http://C2.Evil.tld/gate.php", "hard-coded"),
+                    _entry("ev_0001", 1, "http://c2.evil.tld/gate.php", "hard-coded"),
                     _entry("ev_0002", 2, "hxxp://c2[.]evil[.]tld/gate.php", "seen in the sandbox"),
                 ],
                 merges=merges,
@@ -308,7 +308,7 @@ class TestAMergeOnlyGrowsASet:
         rows = sections["iocs"].rows
         assert len(rows) == 1, "one endpoint written two ways is one indicator"
         kind, value, notes, evidence = rows[0]
-        assert (kind, value) == ("url", "http://C2.Evil.tld/gate.php")
+        assert (kind, value) == ("url", "http://c2.evil.tld/gate.php")
         assert notes == "hard-coded", "the first writer's note is kept"
         assert evidence == "ev_0001, ev_0002"
         assert merges.indicators_merged == 1

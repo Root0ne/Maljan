@@ -351,7 +351,9 @@ class TestJudgeToolCallsAreCitable:
 
         captured: list = []
 
-        def _create(llm, tools):
+        def _create(llm, tools, prompt=None):
+            # ``prompt`` is the hook the judge's loop counts its turns on, the
+            # way the analysts' loop does.
             captured.append(tools)
             executor = MagicMock()
             executor.ainvoke = _ainvoke
