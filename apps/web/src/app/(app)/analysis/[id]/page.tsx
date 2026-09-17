@@ -226,8 +226,8 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
             Severity
           </h2>
         </div>
-        <div className="p-4 grid grid-cols-2 gap-4">
-          <div>
+        <div className="p-4 flex flex-wrap gap-x-12 gap-y-4">
+          <div className="max-w-md">
             <div className="text-[11px] text-text-muted uppercase tracking-wider mb-1">
               Rating
             </div>
