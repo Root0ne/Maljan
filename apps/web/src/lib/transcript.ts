@@ -66,6 +66,43 @@ export interface TranscriptMessage {
   ts?: string;
   /** Emission order within the run. Only present on persisted rows. */
   seq?: number;
+  /**
+   * The agent this line was said *to*, when it was said to one agent rather
+   * than to the room: a caller's ask names the callee and the callee's answer
+   * names the caller. Absent on every other line.
+   */
+  addressedTo?: string;
+  /** The team stage the speaker was working in, when the producer said. */
+  stage?: string;
+}
+
+/**
+ * The identity of one message.
+ *
+ * `role:speaker:round` is enough for a line said to the room: a given agent
+ * speaks once per role per round. A line said to one agent is not — a lead
+ * that asks three specialists in one round, or the same one twice, speaks
+ * several times as the same role in the same round — so those carry the
+ * addressee and a count of how many such lines came before, which both the
+ * live stream and the recording reproduce in the same order.
+ */
+function messageId(
+  role: TranscriptRole,
+  speaker: string,
+  round: number,
+  addressedTo: string | undefined,
+  counts: Map<string, number>
+): string {
+  const base = `${role}:${speaker}:${round}`;
+  if (!addressedTo) return base;
+  const key = `${base}->${addressedTo}`;
+  const n = counts.get(key) ?? 0;
+  counts.set(key, n + 1);
+  return `${key}#${n}`;
+}
+
+function asAddressee(value: unknown): string | undefined {
+  return typeof value === "string" && value ? value : undefined;
 }
 
 const ROLES: TranscriptRole[] = [
@@ -157,6 +194,7 @@ function asStrings(value: unknown): string[] {
 export function messagesFromEvents(events: WSEvent[]): TranscriptMessage[] {
   const out: TranscriptMessage[] = [];
   const seen = new Set<string>();
+  const addressed = new Map<string, number>();
 
   for (const event of events) {
     if (event.type !== "agent_message") continue;
@@ -165,11 +203,15 @@ export function messagesFromEvents(events: WSEvent[]): TranscriptMessage[] {
     const role = asRole(d.role);
     const round = Number(d.round ?? 0);
     const text = String(d.text ?? "").trim();
+    const addressedTo = asAddressee(d.addressed_to);
 
     // The stream back-fill and the live socket overlap by design, so the same
-    // message can arrive twice. Identity is (speaker, role, round) — a given
-    // agent speaks once per role per round.
-    const id = `${role}:${speaker}:${round}`;
+    // message can arrive twice; `messageId` says what makes two the same.
+    // A back-filled addressed line and its live twin count once here because
+    // the count is taken before the duplicate is dropped, so the second copy
+    // draws the next number and is kept. That is the one shape this id cannot
+    // collapse; the recording, which carries `seq`, replaces it after the run.
+    const id = messageId(role, speaker, round, addressedTo, addressed);
     if (seen.has(id)) continue;
     seen.add(id);
 
@@ -186,6 +228,8 @@ export function messagesFromEvents(events: WSEvent[]): TranscriptMessage[] {
       claims: asClaims(d.claims),
       dissent: asStrings(d.dissent),
       ts: event.ts,
+      addressedTo,
+      stage: typeof d.stage === "string" && d.stage ? d.stage : undefined,
     });
   }
   return sortTranscript(out);
@@ -207,6 +251,8 @@ export interface TranscriptRow {
   claims?: unknown;
   dissent?: unknown;
   ts?: string | null;
+  addressed_to?: string | null;
+  stage?: string | null;
 }
 
 /**
@@ -226,12 +272,14 @@ export function messagesFromTranscript(
   rows: TranscriptRow[] | null | undefined
 ): TranscriptMessage[] {
   const out: TranscriptMessage[] = [];
+  const addressed = new Map<string, number>();
   for (const row of rows ?? []) {
     const role = asRole(row.role);
     const speaker = String(row.speaker ?? "unknown");
     const round = Number(row.round ?? 0);
+    const addressedTo = asAddressee(row.addressed_to);
     out.push({
-      id: `${role}:${speaker}:${round}`,
+      id: messageId(role, speaker, round, addressedTo, addressed),
       speaker,
       role,
       round,
@@ -247,6 +295,8 @@ export function messagesFromTranscript(
       dissent: asStrings(row.dissent),
       ts: row.ts || undefined,
       seq: Number(row.seq ?? 0),
+      addressedTo,
+      stage: row.stage || undefined,
     });
   }
   return sortTranscript(out);

@@ -100,11 +100,15 @@ export interface McpServerEntry {
  * `kind: "provider"` means "this agent's static provider's tools" and carries
  * nothing else. `kind: "sandbox"` means the job's sandbox report, read through
  * the in-process sandbox tool set, and likewise carries nothing else.
+ * `kind: "agent"` names another definition: the agent gets a tool
+ * `ask_<agent>` that hands that agent a task and returns its answer. The API
+ * writes `agent` only on that kind, so the field is optional here.
  */
 export interface ToolRefEntry {
-  kind: "mcp" | "provider" | "sandbox";
+  kind: "mcp" | "provider" | "sandbox" | "agent";
   server: string | null;
   name: string | null;
+  agent?: string | null;
 }
 
 /**
@@ -117,7 +121,7 @@ export interface ToolRefEntry {
  * exported as-is.
  */
 export interface AgentDefinitionEntry {
-  role: "static" | "dynamic" | "network" | "judge" | "generic" | "report";
+  role: "static" | "dynamic" | "network" | "judge" | "generic" | "lead" | "report";
   label: string;
   prompt: string | null;
   tools: ToolRefEntry[];
