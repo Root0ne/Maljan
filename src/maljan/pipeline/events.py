@@ -335,10 +335,19 @@ _SECRET_ARGUMENT_WORDS = (
 # echoed by an API response travelled verbatim while the same key passed as a
 # bare argument was replaced.
 _CREDENTIAL_PREFIXES = ("sk-", "sk_", "nvapi-", "ghp_", "gho_", "xoxb-")
-# An authorization scheme and the word after it, which the token-by-token pass
-# cannot see as one thing: "Bearer" is a word and the secret is the next one,
-# however short it is.
-_SCHEME_AND_SECRET = re.compile(r"(?i)\b(bearer|basic|token)\s+\S+")
+# Where a run of interest may begin: the start of the text, or right after a
+# character that separates values. Whitespace is not enough — a compact JSON
+# body from a tool server is one whitespace-separated word, and everything
+# worth finding inside it sits behind a quote, a colon, a comma or a brace.
+_AFTER = r"(?:\A|(?<=[\s\"'=:,{\[(]))"
+# Where such a run ends: the next separator that cannot be part of a path, a
+# URL or a key.
+_UNTIL = r"[^\s\"',)\]}]*"
+# An authorization scheme and the secret after it, which no per-value rule can
+# see as one thing: "Bearer" is a word and the secret is the next one, however
+# short it is. Bounded by the same separators rather than by ``\S+``, which
+# used to swallow the closing quote of a JSON string.
+_SCHEME_AND_SECRET = re.compile(r"(?i)\b(bearer|basic|token)\s+[^\s\"',)\]}]+")
 # 24 is above a CRC, a short hash prefix and a ledger id, and below every API
 # key shape this has met.
 _CREDENTIAL_RUN = re.compile(r"(?:[A-Fa-f0-9]{24,}|[A-Za-z0-9_\-]{24,}={0,2})\Z")
@@ -352,20 +361,31 @@ _CREDENTIAL_RUN = re.compile(r"(?:[A-Fa-f0-9]{24,}|[A-Za-z0-9_\-]{24,}={0,2})\Z"
 # is, and widening it to "any hex" would hand back the shape the rule exists
 # to catch.
 _DIGEST = re.compile(r"\A[A-Fa-f0-9]{32}\Z|\A[A-Fa-f0-9]{40}\Z|\A[A-Fa-f0-9]{64}\Z")
-_URL = re.compile(r"\A(?P<scheme>[a-zA-Z][a-zA-Z0-9+.\-]*)://(?P<rest>\S*)\Z")
-# What a filesystem path starts with, and nothing else does. A slash alone is
-# not the signal: a MIME type (``application/x-msdownload``), a sub-technique
-# id (``T1055/012``), a date (``2026/09/17``) and a ratio all carry one, and
+# A URL, wherever it starts. Found before the path pass, so the slashes in
+# ``https://host/x`` are never read as a path.
+_URL_RUN = re.compile(
+    _AFTER + r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.\-]*)://(?P<rest>" + _UNTIL + r")"
+)
+# One value, for the credential test. Delimited rather than whitespace-split,
+# because a key a tool server echoes arrives as ``{"api_key":"sk-…"}`` with no
+# spaces in it at all.
+_VALUE_RUN = re.compile(r"[^\s\"'{}\[\](),=]+")
+# A filesystem path, wherever it starts. A slash alone is not the signal: a
+# MIME type (``application/x-msdownload``), a sub-technique id
+# (``T1055/012``), a date (``2026/09/17``) and a ratio all carry one, and
 # cutting them to their last segment turned readable tool output into
-# nonsense. A relative path with no marker (``data/samples/a.exe``) is left
-# alone under this rule — it names no host directory, which is the thing that
-# must not travel.
-_PATH_START = re.compile(r"\A(?:/|\./|\.\./|~/|[A-Za-z]:[\\/]|\\\\)")
-# The punctuation a token arrives wrapped in, peeled before the rules run and
-# restored after. Kept narrow: these are quoting and separator characters, not
-# characters a path, a URL or a key is made of.
-_PEEL_LEADING = "\"'`([{<"
-_PEEL_TRAILING = "\"'`)]}>,;:"
+# nonsense. What marks a path is how it *begins* — but "begins" is not
+# "begins its whitespace-separated word": a host path travels just as happily
+# after ``--out=``, after a colon, or inside a compact JSON body, and anchoring
+# the marker at position 0 let all three through.
+#
+# ``/`` must not be followed by another ``/``: that is the ``//`` of a URL
+# whose scheme the pass above has already reduced to a host. A relative path
+# with no marker (``data/samples/a.exe``) is still left alone — it names no
+# host directory, which is the thing that must not travel.
+_PATH_RUN = re.compile(
+    _AFTER + r"(?P<run>(?:/(?!/)|\./|\.\./|~/|[A-Za-z]:[\\/]|\\\\)" + _UNTIL + r")"
+)
 # One argument's value, and the whole summary. Short on purpose: this is the
 # line under a chat bubble that says which call is running, not a record of it.
 # 64 rather than a rounder number so a sha256 — the one long value this is
@@ -380,22 +400,44 @@ RESULT_SUMMARY_CHARS = 240
 _REDACTED = "***"
 
 
+def _name_words(name: str) -> set[str]:
+    """The words an argument name is made of, however it was spelled.
+
+    Splitting on separators alone is not enough, and the gap is the shape most
+    tool servers actually use: ``auth_token`` splits into two words and
+    ``authToken`` — the JavaScript spelling, and the norm for an MCP server
+    written in it — splits into none, so a credential named that way was read
+    as one long word matching nothing. The case change is a word boundary, and
+    so is the letter-to-digit change, so ``token2`` is a token.
+
+    Whole words, still: that is what keeps ``author`` and ``obsession`` out of
+    it, which is the thing the substring check got wrong in the other
+    direction.
+    """
+    spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", str(name))
+    spaced = re.sub(r"(?<=[A-Za-z])(?=[0-9])|(?<=[0-9])(?=[A-Za-z])", "_", spaced)
+    return set(re.split(r"[^a-z0-9]+", spaced.lower())) - {""}
+
+
 def _is_secret_argument(name: str) -> bool:
     """Whether this argument's *name* says its value is a credential.
 
-    Matched on whole words rather than on any substring. A plain containment
-    check redacted ``author`` for holding ``auth`` and ``session_id`` is a
-    genuine hit while ``obsession`` is not, so the name is split on the
-    separators argument names actually use and each word is compared whole. A
-    listed word that is itself compound (``api_key``, ``private_key``) is also
-    tried against the joined name, because ``apiKey`` and ``api-key`` are the
-    same argument written three ways.
+    Matched on the whole words the name is made of. A plain containment check
+    redacted ``author`` for holding ``auth``; whole words keep ``author``,
+    ``authored``, ``obsession`` and ``tokenizer`` out of it while ``authToken``
+    and ``sessionId`` are in.
+
+    A simple plural counts as its singular — ``secrets``, ``tokens``,
+    ``passwords``, ``credentials`` are the same argument named for a list of
+    them. A listed word that is itself compound (``api_key``,
+    ``private_key``) is also tried against the joined name, because ``apiKey``
+    and ``api-key`` are the same argument written three ways.
     """
-    lowered = str(name).lower()
-    words = set(re.split(r"[^a-z0-9]+", lowered)) - {""}
-    joined = re.sub(r"[^a-z0-9]+", "", lowered)
+    words = _name_words(name)
+    singulars = {word[:-1] for word in words if len(word) > 3 and word.endswith("s")}
+    joined = re.sub(r"[^a-z0-9]+", "", str(name).lower())
     for secret in _SECRET_ARGUMENT_WORDS:
-        if secret in words:
+        if secret in words or secret in singulars:
             return True
         if "_" in secret and secret.replace("_", "") in joined:
             return True
@@ -412,68 +454,62 @@ def _looks_like_a_credential(token: str) -> bool:
     return bool(_CREDENTIAL_RUN.match(token))
 
 
-def _scrub_url(token: str) -> str | None:
-    """A URL cut back to scheme and host, or ``None`` when this is not one.
+def _shorten_url(found: re.Match[str]) -> str:
+    """One URL, cut back to its scheme and host.
 
     The userinfo is a credential outright, and the query is where one travels
     when it is not in the userinfo, so neither survives. The host stays
-    because which service was called is the fact a reader of the conversation
-    is after.
+    because which service was called is the fact a reader is after. A URL with
+    no authority at all — ``file:///home/op/samples/x.exe`` — keeps its scheme
+    and loses the rest, which is a host path by another spelling.
     """
-    found = _URL.match(token)
-    if not found:
-        return None
     rest = found.group("rest")
     host = rest.split("/", 1)[0].split("?", 1)[0].split("#", 1)[0]
     if "@" in host:
         host = host.rsplit("@", 1)[1]
-    return f"{found.group('scheme')}://{host}/…" if host else token
+    return f"{found.group('scheme')}://{host}/…"
 
 
-def _peel(token: str) -> tuple[str, str, str]:
-    """``token`` split into the punctuation around it and the value inside."""
-    core = token.lstrip(_PEEL_LEADING)
-    lead = token[: len(token) - len(core)]
-    stripped = core.rstrip(_PEEL_TRAILING)
-    return lead, stripped, core[len(stripped) :]
+def _shorten_path(found: re.Match[str]) -> str:
+    """One path, cut to its last segment.
+
+    The sample lives under a per-job directory whose name is an internal
+    identifier and whose prefix is wherever this deployment happens to be
+    installed, and neither belongs in a payload that a browser and a
+    long-lived table both keep; the file name is the part a reader is reading.
+    """
+    run = found.group("run")
+    return run.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1] or run
 
 
-def _scrub_core(core: str) -> str:
-    """One token's value, without the punctuation it arrived wrapped in."""
-    if _looks_like_a_credential(core):
-        return _REDACTED
-    as_url = _scrub_url(core)
-    if as_url is not None:
-        return as_url
-    if _PATH_START.match(core):
-        # A host path is reduced to its last segment. The sample lives under a
-        # per-job directory whose name is an internal identifier and whose
-        # prefix is wherever this deployment happens to be installed, and
-        # neither belongs in a payload that a browser and a long-lived table
-        # both keep; the file name is the part a reader is actually reading.
-        return core.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1] or core
-    return core
-
-
-def _scrub_token(token: str) -> str:
-    """One whitespace-separated word of a value, made safe to publish."""
-    if not token:
-        return token
-    lead, core, tail = _peel(token)
-    if not core:
-        return token
-    return f"{lead}{_scrub_core(core)}{tail}"
+def _hide_credentials(found: re.Match[str]) -> str:
+    value = found.group(0)
+    return _REDACTED if _looks_like_a_credential(value) else value
 
 
 def scrub(text: Any) -> str:
     """Any text on its way into an event payload.
 
-    One whole-string pass first, for the one shape a token-by-token pass
-    cannot see — an authorization scheme and the word after it — then token by
-    token for the rest.
+    Four passes over the whole text, in this order, because each one's output
+    is the next one's input:
+
+    1. an authorization scheme and the secret after it, which no per-value
+       rule can see as one thing;
+    2. URLs, reduced to scheme and host — first, so the ``//`` of a URL is
+       never read as a path;
+    3. values that are shaped like a credential;
+    4. paths, reduced to their last segment.
+
+    Whole-text rather than word by word, and that is the point. A tool server
+    that answers with compact JSON hands this one whitespace-separated word
+    with the key, the URL and the host path all inside it, and a rule anchored
+    to the start of a word found none of them.
     """
-    joined = _SCHEME_AND_SECRET.sub(lambda m: f"{m.group(1)} {_REDACTED}", str(text or ""))
-    return " ".join(_scrub_token(token) for token in joined.split())
+    flat = " ".join(str(text or "").split())
+    flat = _SCHEME_AND_SECRET.sub(lambda m: f"{m.group(1)} {_REDACTED}", flat)
+    flat = _URL_RUN.sub(_shorten_url, flat)
+    flat = _VALUE_RUN.sub(_hide_credentials, flat)
+    return _PATH_RUN.sub(_shorten_path, flat)
 
 
 def _summarize_value(value: Any) -> str:

@@ -205,6 +205,28 @@ class TestArgumentSummaries:
         for name in ("api_key", "apiKey", "api-key", "private_key"):
             assert ev.summarize_args({name: "value"}) == f"{name}=***", name
 
+    def test_a_camelcase_credential_name_is_caught(self) -> None:
+        """The spelling most tool servers actually use.
+
+        An MCP server written in JavaScript names its argument ``authToken``,
+        and a fourteen-character session token has no vendor prefix and no
+        ``Bearer`` word, so no value rule fires either — the name is the only
+        thing that can catch it.
+        """
+        for name in ("authToken", "apiToken", "accessToken", "userPassword", "sessionId"):
+            assert ev.summarize_args({name: "value"}) == f"{name}=***", name
+
+    def test_a_plural_credential_name_is_caught(self) -> None:
+        for name in ("secrets", "tokens", "passwords", "credentials"):
+            assert ev.summarize_args({name: "value"}) == f"{name}=***", name
+
+    def test_a_digit_ends_a_word_too(self) -> None:
+        assert ev.summarize_args({"token2": "value"}) == "token2=***"
+
+    def test_a_word_that_merely_contains_one_is_still_left_alone(self) -> None:
+        for name in ("author", "authored", "obsession", "tokenizer"):
+            assert ev.summarize_args({name: "kept"}) == f"{name}=kept", name
+
     def test_a_vendor_key_prefix_is_replaced_wherever_it_appears(self) -> None:
         summary = ev.summarize_args({"value": "sk-liveKey", "note": "nvapi-abc"})
         assert summary == "value=***, note=***"
@@ -244,6 +266,40 @@ class TestArgumentSummaries:
 
     def test_a_url_still_keeps_only_its_scheme_and_host(self) -> None:
         assert ev.scrub("https://u:p@h/x") == "https://h/…"
+
+    def test_a_path_that_does_not_start_its_word_is_still_cut(self) -> None:
+        """A host path travels wherever it sits, not only at a word boundary.
+
+        Anchoring the marker at the start of a whitespace-separated word let
+        an ``--out=`` option, a colon-separated value and a compact JSON body
+        carry the per-job directory and the install prefix out verbatim.
+        """
+        assert (
+            ev.scrub("run.exe --out=/tmp/maljan/jobs/9f2c-uuid/r.json")
+            == "run.exe --out=r.json"
+        )
+        assert ev.scrub("key:/var/lib/x/y") == "key:y"
+
+    def test_a_compact_json_body_loses_its_host_path(self) -> None:
+        # A tool server that pre-serialises its answer sends no spaces at all,
+        # so the whole body is one whitespace-separated word.
+        body = '{"path":"/home/op/data/samples/ab12/evil.exe","size":1024}'
+        assert ev.scrub(body) == '{"path":"evil.exe","size":1024}'
+
+    def test_a_windows_path_inside_a_json_string_is_cut(self) -> None:
+        # JSON escapes each separator, so the value arrives doubled.
+        assert ev.scrub('{"path": "C:\\\\Users\\\\x\\\\a.exe"}') == '{"path": "a.exe"}'
+
+    def test_a_file_url_keeps_no_more_than_any_other(self) -> None:
+        # It has no authority, so everything after the scheme is a host path.
+        assert ev.scrub("file:///home/op/data/samples/x/evil.exe") == "file:///…"
+
+    def test_a_key_in_a_compact_json_body_is_still_replaced(self) -> None:
+        body = '{"api_key":"sk-liveSecretValue0123456789"}'
+        assert ev.scrub(body) == '{"api_key":"***"}'
+
+    def test_a_scheme_and_its_secret_stop_at_the_closing_quote(self) -> None:
+        assert ev.scrub('{"Authorization": "Bearer abc123"}') == '{"Authorization": "Bearer ***"}'
 
     def test_a_short_word_is_left_alone(self) -> None:
         assert ev.summarize_args({"pattern": "http", "start": 0}) == "pattern=http, start=0"
