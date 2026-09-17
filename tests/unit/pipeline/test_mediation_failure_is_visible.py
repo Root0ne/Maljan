@@ -122,7 +122,13 @@ class TestTheNodeStampsIt:
         argument = result["discussion_history"][0]
         assert argument.status == "failed"
         assert result["is_consensus"] is False
-        # And the live transcript says so too, with the real cause in it.
+        # And the live transcript says so too, naming the class of the
+        # failure. The exception's own words stay in the log above, where an
+        # operator reads them; this line is published to every reader of the
+        # run, and an exception's text can carry a path, a host or a
+        # credential.
         message = next(d for t, d in events if t == "agent_message")
         assert message["status"] == "failed"
-        assert "llama-server went away" in message["text"]
+        assert "[ERROR] Mediation failed" in message["text"]
+        assert "ConnectionError" in message["text"]
+        assert "llama-server went away" not in message["text"]

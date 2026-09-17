@@ -28,6 +28,7 @@ from maljan.pipeline.events import (
     emit_agent_message,
 )
 from maljan.pipeline.nodes import (
+    ROOM_SPEAKER,
     make_negotiation_node,
     make_revision_node,
     make_stage_agent_node,
@@ -257,9 +258,12 @@ class TestStageNodesEmit:
         asyncio.run(node({"iteration_count": 1, "reports": {"network": "f"}, "isr_reports": {}}))
 
         message = rec.messages()[0]
-        assert message["speaker"] == "Mediator"
+        # The mediator is the debate speaking, not a member of the team: it
+        # goes out as the room and names itself in the line.
+        assert message["speaker"] == ROOM_SPEAKER
+        assert message["kind"] == "system"
         assert message["role"] == "negotiator"
-        assert message["text"] == "Agents agree."
+        assert message["text"] == "Mediator: Agents agree."
         assert message["round"] == 2
 
     def test_mediator_failure_is_visible_not_silent(self) -> None:
@@ -428,9 +432,9 @@ class TestSycophancyAndJudgeSpeak:
                 )
             )
 
-        speakers = [m["speaker"] for m in rec.messages()]
-        assert "Sycophancy detector" in speakers
-        notice = next(m for m in rec.messages() if m["speaker"] == "Sycophancy detector")
+        notice = next(m for m in rec.messages() if "Sycophancy detector" in m["text"])
+        assert notice["speaker"] == ROOM_SPEAKER
+        assert notice["kind"] == "system"
         assert notice["role"] == "system"
         assert "without new evidence" in notice["text"]
 
@@ -448,7 +452,8 @@ class TestSycophancyAndJudgeSpeak:
                 node({"iteration_count": 2, "reports": {"network": "f"}, "isr_reports": {}})
             )
 
-        assert [m["speaker"] for m in rec.messages()] == ["Mediator"]
+        texts = [m["text"] for m in rec.messages()]
+        assert texts == ["Mediator: All agree."]
 
 
 class TestAnAddressedMessage:
