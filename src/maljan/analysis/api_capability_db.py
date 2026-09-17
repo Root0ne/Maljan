@@ -76,6 +76,11 @@ def _variants(name: str) -> tuple[str, ...]:
     return (lowered,)
 
 
+def canonical_name(name: str) -> str:
+    """The A/W-folded key of an API name, for callers comparing spellings."""
+    return _canonical(name)
+
+
 def _canonical(name: str) -> str:
     """Fold an API name to one key shared by its ANSI and wide spellings.
 
@@ -158,9 +163,11 @@ class ApiAttckMap:
         report cites what is in the binary, not what the catalog happens to
         call it.
         """
-        # canonical (A/W-folded) name -> the spelling the binary actually uses
+        # canonical (A/W-folded) name -> the spelling the binary actually uses.
+        # Sorted, so which of an A/W pair is cited does not depend on the
+        # process's string hash seed: the record must read the same twice.
         by_canonical: dict[str, str] = {}
-        for name in imported:
+        for name in sorted(imported):
             by_canonical.setdefault(_canonical(name), name)
 
         out: list[tuple[TechniqueRule, list[str]]] = []

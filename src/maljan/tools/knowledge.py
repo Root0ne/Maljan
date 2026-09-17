@@ -340,7 +340,11 @@ def api_capability(
     presented as this tool's finding. A bare ``suspicious: true`` would be a
     verdict, and the tools state facts.
     """
-    from maljan.analysis.api_capability_db import load_api_attck_map, load_api_behaviour_db
+    from maljan.analysis.api_capability_db import (
+        canonical_name,
+        load_api_attck_map,
+        load_api_behaviour_db,
+    )
 
     names = [str(n).strip() for n in (api_names or []) if str(n).strip()]
     behaviours = load_api_behaviour_db(str(resolve_data(behaviour_map)))
@@ -351,7 +355,9 @@ def api_capability(
         category, suspicious = behaviours.classify(name) if behaviours else (None, False)
         cited: list[dict[str, Any]] = []
         for rule, matched in cleared:
-            if name not in matched:
+            # Compared by the A/W-folded key, so an import table holding both
+            # spellings has both rows cite the rule, in every process alike.
+            if canonical_name(name) not in {canonical_name(m) for m in matched}:
                 continue
             cited.append(
                 {

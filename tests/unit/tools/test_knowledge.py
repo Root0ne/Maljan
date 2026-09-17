@@ -217,3 +217,33 @@ class TestDegradation:
         assert knowledge.function_matches([], qdrant_url="http://unreachable:6333") == {
             "matches": []
         }
+
+
+class TestTheCitationIsTheSameInEveryProcess:
+    _NAMES = ["RegCreateKeyExA", "RegCreateKeyExW", "RegSetValueExA", "RegSetValueExW"]
+
+    def _run(self, seed: str) -> dict:
+        import json
+        import os
+        import subprocess
+        import sys
+
+        code = (
+            "import json; from maljan.tools import knowledge; "
+            f"print(json.dumps(knowledge.api_capability({self._NAMES!r})))"
+        )
+        env = {**os.environ, "PYTHONHASHSEED": seed}
+        out = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True, env=env, check=True
+        ).stdout
+        return json.loads(out.strip().splitlines()[-1])
+
+    def test_two_hash_seeds_cite_the_same_apis(self) -> None:
+        """Set iteration order changes with the seed; the record must not."""
+        first, second = self._run("1"), self._run("5")
+        assert first == second
+        cited = {row["api"]: row["techniques"] for row in first["capabilities"]}
+        for name in self._NAMES:
+            assert cited[name], f"{name} cites nothing"
+        # Both spellings of a pair cite the rule, with the same matched list.
+        assert cited["RegCreateKeyExA"] == cited["RegCreateKeyExW"]
