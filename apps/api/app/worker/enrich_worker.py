@@ -220,7 +220,10 @@ async def purge_old_job_events(ctx: dict) -> dict[str, Any]:
                     # what age means here; a row that somehow carries none
                     # falls back to when it was written, so nothing can sit in
                     # the table for ever by having no clock.
-                    or_(JobEvent.ts < cutoff, JobEvent.ts.is_(None) & (JobEvent.created_at < cutoff))
+                    or_(
+                        JobEvent.ts < cutoff,
+                        JobEvent.ts.is_(None) & (JobEvent.created_at < cutoff),
+                    )
                 )
             )
             await db.commit()

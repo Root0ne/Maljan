@@ -93,9 +93,7 @@ async def _from_table(
     if since is not None:
         query = query.where(JobEvent.seq > since)
     try:
-        rows = (
-            (await db.execute(query.order_by(JobEvent.seq).limit(limit))).scalars().all()
-        )
+        rows = (await db.execute(query.order_by(JobEvent.seq).limit(limit))).scalars().all()
     except Exception as exc:  # noqa: BLE001 — a replay never 500s
         logger.warning(f"Event table read failed for job={log_safe(job_id)}: {log_safe(exc)}")
         return []

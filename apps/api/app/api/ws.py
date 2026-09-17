@@ -171,9 +171,7 @@ async def _replay(websocket: WebSocket, job_id: str, since: int) -> None:
             log_safe(job_id),
         )
     except Exception as exc:  # noqa: BLE001 — a replay never closes a socket
-        logger.warning(
-            "WebSocket replay failed (job=%s): %s", log_safe(job_id), log_safe(exc)
-        )
+        logger.warning("WebSocket replay failed (job=%s): %s", log_safe(job_id), log_safe(exc))
 
 
 @router.websocket("/ws/analysis/{job_id}")

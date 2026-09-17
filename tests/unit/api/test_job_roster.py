@@ -61,9 +61,7 @@ def _overrides(monkeypatch: pytest.MonkeyPatch, stored: dict[str, Any]) -> None:
 @pytest.mark.asyncio
 async def test_a_non_admin_owner_is_given_the_labels(monkeypatch: pytest.MonkeyPatch) -> None:
     _overrides(monkeypatch, {})
-    response = await get_job(
-        job_id=uuid.uuid4(), user=_User(), svc=_Service(_Job()), db=_Session()
-    )
+    response = await get_job(job_id=uuid.uuid4(), user=_User(), svc=_Service(_Job()), db=_Session())
     roster = response.roster
     assert roster is not None
     keys = {agent.key for agent in roster.agents}
@@ -226,8 +224,6 @@ async def test_no_exception_text_reaches_the_response(
         raise RuntimeError("password=hunter2 at /home/op/secrets.env")
 
     monkeypatch.setattr("app.services.settings_service.SettingsService.load_overrides", load)
-    response = await get_job(
-        job_id=uuid.uuid4(), user=_User(), svc=_Service(_Job()), db=_Session()
-    )
+    response = await get_job(job_id=uuid.uuid4(), user=_User(), svc=_Service(_Job()), db=_Session())
     assert response.roster.agents == []
     assert "hunter2" not in response.model_dump_json()

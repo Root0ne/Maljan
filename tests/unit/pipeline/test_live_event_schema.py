@@ -177,9 +177,8 @@ class TestArgumentSummaries:
         assert summary == "value=***, note=***"
 
     def test_a_command_line_loses_every_host_path_it_names(self) -> None:
-        summary = ev.summarize_args(
-            {"cmd": "/opt/maljan/bin/run.sh /home/op/data/samples/ab12/evil.exe --out /tmp/x/r.json"}
-        )
+        line = "/opt/maljan/bin/run.sh /home/op/data/samples/ab12/evil.exe --out /tmp/x/r.json"
+        summary = ev.summarize_args({"cmd": line})
         assert "/home/op" not in summary
         assert "/opt/maljan" not in summary
         assert "/tmp/x" not in summary

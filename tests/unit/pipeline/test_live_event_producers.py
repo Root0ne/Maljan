@@ -11,6 +11,7 @@ import asyncio
 from typing import Any
 
 from langchain_core.tools import StructuredTool
+
 from maljan.agents.evidence_recorder import EvidenceRecorder, RepeatGuard, record_tools
 from maljan.pipeline.validation import Violation, retry_with_feedback, retry_with_feedback_sync
 from maljan.schemas.evidence import EvidenceCounter
@@ -29,7 +30,10 @@ class _Sink:
 
 def _recorder(sink: _Sink | None = None, *, stage: str = "analysis") -> EvidenceRecorder:
     return EvidenceRecorder(
-        "static", counter=EvidenceCounter(), stage=stage, sink=sink  # type: ignore[arg-type]
+        "static",
+        counter=EvidenceCounter(),
+        stage=stage,
+        sink=sink,  # type: ignore[arg-type]
     )
 
 
@@ -184,6 +188,7 @@ class TestValidationFeedbackReachesTheConversation:
 class TestTheJudgeAsks:
     def test_only_a_turn_that_ends_in_a_question_is_published(self) -> None:
         from langchain_core.messages import AIMessage
+
         from maljan.agents.judge_agent import JudgeAgent
 
         sink = _Sink()
@@ -207,6 +212,7 @@ class TestTheJudgeAsks:
 
     def test_a_question_is_published_once_however_often_the_hook_runs(self) -> None:
         from langchain_core.messages import AIMessage
+
         from maljan.agents.judge_agent import JudgeAgent
 
         sink = _Sink()
@@ -223,6 +229,7 @@ class TestTheJudgeAsks:
 
     def test_a_question_that_delegates_names_the_agent_it_asks(self) -> None:
         from langchain_core.messages import AIMessage
+
         from maljan.agents.judge_agent import JudgeAgent
 
         sink = _Sink()

@@ -63,7 +63,7 @@ class _Rows:
     def __init__(self, rows: list[Any]) -> None:
         self._rows = rows
 
-    def scalars(self) -> "_Rows":
+    def scalars(self) -> _Rows:
         return self
 
     def all(self) -> list[Any]:
@@ -89,7 +89,7 @@ class _Session:
     async def commit(self) -> None:
         self.commits += 1
 
-    async def __aenter__(self) -> "_Session":
+    async def __aenter__(self) -> _Session:
         return self
 
     async def __aexit__(self, *exc: object) -> bool:
@@ -338,9 +338,7 @@ class TestTheEventsEndpoint:
             async def aclose(self) -> None:
                 return None
 
-        monkeypatch.setattr(
-            "redis.asyncio.from_url", lambda *a, **k: _Conn()
-        )
+        monkeypatch.setattr("redis.asyncio.from_url", lambda *a, **k: _Conn())
         body = await jobs_module.get_job_events(
             job_id=uuid.uuid4(),
             limit=10,
