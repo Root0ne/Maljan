@@ -360,8 +360,8 @@ change landed on `main`.
   team's agents would call and refuses with 422 naming the agent, the model,
   the endpoint and the probe's last message; the console shows the same
   sentence on the submit form. A changed endpoint or model finds no row and is
-  refused until it is probed. `core.llm.require_probe` (on) turns the gate off
-  for an air-gapped batch run.
+  refused until it is probed. `core.llm.require_probe` is on; turning it off is
+  the only way past, for an air-gapped batch run.
 - **The same indicator or finding said twice is written once.**
   `reporting.dedupe` says what makes two indicators one — the kind and the
   value with its case, its padding and its defanging undone — and both the

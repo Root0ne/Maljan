@@ -184,10 +184,10 @@ judge models at its own endpoint, and on Ollama each per-agent override at its
 own server; an agent sitting on a different provider or its own endpoint is
 recorded by its own **Test** button in the agent editor.
 
-`core.llm.require_probe` (on) turns the gate off. It is there for an
-air-gapped batch run, where the endpoint is known good and nobody is at a
-console to press a button, and it is the only way past — a job cannot ask to
-skip it.
+`core.llm.require_probe` is on, and turning it off is the only way past the
+gate — a job cannot ask to skip it. It is there for an air-gapped batch run,
+where the endpoint is known good and nobody is at a console to press a
+button.
 
 ### Format routing and the sandbox
 
