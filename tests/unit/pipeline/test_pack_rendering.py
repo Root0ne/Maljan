@@ -178,10 +178,23 @@ class TestTheLines:
             "reputation",
             "no reputation server is enabled",
             ok=False,
-            error="no reputation server is enabled (virustotal, threatintel); no lookup was made",
+            error="not run: no reputation server is enabled (virustotal, threatintel)",
         )
         # A call the pipeline did not make is not a failure and is not called one.
-        assert render_pack([entry], 0).startswith("[ev_0001] reputation: not done (no reputation")
+        assert render_pack([entry], 0).startswith(
+            "[ev_0001] reputation: not done (not run: no reputation"
+        )
+
+    def test_a_reputation_lookup_that_was_made_and_broke_says_failed(self) -> None:
+        entry = _entry(
+            "reputation",
+            "TimeoutError: the server did not answer",
+            ok=False,
+            error="TimeoutError: the server did not answer",
+        )
+        line = render_pack([entry], 0)
+        assert line.startswith("[ev_0001] reputation: failed (TimeoutError")
+        assert "not done" not in line
 
     def test_a_step_the_budget_stopped_is_not_done_either(self) -> None:
         entry = _entry(

@@ -13,15 +13,17 @@ written.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 import pytest
 
-from maljan.agents.base_agent import BaseAnalyst
+from maljan.agents.base_agent import BaseAnalyst, alignment_gate
 from maljan.pipeline.validation import (
     PLATFORM_MISMATCH_CODE,
     VALIDITY_CODE,
     WEAK_ALIGNMENT_CODE,
+    _weak_alignment,
     corroboration,
     corroboration_sources,
     expected_technique_scope,
@@ -165,7 +167,7 @@ class TestPlatformMismatchInTheVerdict:
     def test_a_mobile_attack_pattern_on_a_windows_sample_is_questioned(self) -> None:
         violations = validate_verdict_bundle(self._bundle("T1417"), attck=_Attck(), sample=PE)
         assert PLATFORM_MISMATCH_CODE in _codes(violations)
-        assert "the attack-pattern's TECHNIQUE T1417" in violations[0].message
+        assert violations[0].message.startswith("TECHNIQUE T1417 belongs to")
 
     def test_a_fitting_attack_pattern_passes(self) -> None:
         assert validate_verdict_bundle(self._bundle("T1055"), attck=_Attck(), sample=PE) == []
@@ -177,7 +179,7 @@ class TestPlatformMismatchInTheVerdict:
 def _gate(candidates: list[tuple[str, float]], gate_score: float):
     seen: list[tuple[str, str]] = []
 
-    def alignment(text: str, technique_id: str) -> dict[str, Any]:
+    def alignment(text: str, technique_id: str, k: int = 5) -> dict[str, Any]:
         seen.append((text, technique_id))
         return {
             "gate_score": gate_score,
@@ -302,7 +304,7 @@ class TestTheGateRunsOnlyOnAWarmIndex:
             return None, "stopped"
 
         monkeypatch.setattr(knowledge, "_hybrid_index", _slow_build)
-        monkeypatch.setattr(knowledge, "_WARMING", threading.Event())
+        monkeypatch.setattr(knowledge, "_WARM_STARTED", False)
         assert knowledge.warm_index_in_background() is True
         # A second caller while the first build runs starts nothing.
         assert knowledge.warm_index_in_background() is False
@@ -343,7 +345,7 @@ class _Knowledge:
     def index_is_warm(self) -> bool:
         return self.warm
 
-    def technique_alignment(self, text: str, technique_id: str) -> dict[str, Any]:
+    def technique_alignment(self, text: str, technique_id: str, k: int = 5) -> dict[str, Any]:
         return {"gate_score": 1.0, "candidates": []}
 
     def warm_index_in_background(self) -> bool:
@@ -351,27 +353,31 @@ class _Knowledge:
         return True
 
 
+def _policy_gate(knowledge: Any, cfg: Any) -> Any | None:
+    return alignment_gate(knowledge, cfg, logging.getLogger("test"), "static")
+
+
 class TestTheGatePolicy:
     def test_auto_on_a_warm_worker_runs_the_gate(self) -> None:
         agent = _Analyst()
-        assert agent._alignment_gate(_Knowledge(warm=True), _Cfg()) is not None
+        assert alignment_gate(_Knowledge(warm=True), _Cfg(), agent.logger, agent.name) is not None
 
     def test_auto_on_a_cold_worker_runs_nothing_and_builds_nothing_by_default(self) -> None:
         knowledge_stub = _Knowledge(warm=False)
-        assert _Analyst()._alignment_gate(knowledge_stub, _Cfg()) is None
+        assert _policy_gate(knowledge_stub, _Cfg()) is None
         assert knowledge_stub.builds == 0
 
     def test_the_build_switch_starts_one_build_and_this_run_still_goes_without(self) -> None:
         knowledge_stub = _Knowledge(warm=False)
-        assert _Analyst()._alignment_gate(knowledge_stub, _Cfg(build=True)) is None
+        assert _policy_gate(knowledge_stub, _Cfg(build=True)) is None
         assert knowledge_stub.builds == 1
 
     def test_off_never_runs_it(self) -> None:
         knowledge_stub = _Knowledge(warm=True)
-        assert _Analyst()._alignment_gate(knowledge_stub, _Cfg(gate="off")) is None
+        assert _policy_gate(knowledge_stub, _Cfg(gate="off")) is None
 
     def test_a_knowledge_module_without_the_question_has_no_gate(self) -> None:
-        assert _Analyst()._alignment_gate(object(), _Cfg()) is None
+        assert _policy_gate(object(), _Cfg()) is None
 
 
 class TestValidityAvailability:
@@ -543,4 +549,57 @@ class TestTheMatrixCarriesTheCatalogueScope:
         assert "mobile domain" in warnings[0].message
         assert lint_report(_Report(), "android") == [] or all(
             w.field != "capability_matrix.T1417" for w in lint_report(_Report(), "android")
+        )
+
+
+class TestTheWarmerIsSticky:
+    def test_a_failed_build_is_remembered_and_nothing_starts_again(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from maljan.tools import knowledge
+
+        starts: list[int] = []
+
+        def _failing_build() -> tuple[Any, str]:
+            starts.append(1)
+            return None, "no model"
+
+        monkeypatch.setattr(knowledge, "_hybrid_index", _failing_build)
+        monkeypatch.setattr(knowledge, "_WARM_STARTED", False)
+        assert knowledge.warm_index_in_background() is True
+        for _ in range(200):
+            if starts:
+                break
+            time.sleep(0.01)
+        assert starts == [1]
+        # The failure is remembered as an attempt: no second thread, no second log line.
+        assert knowledge.warm_index_in_background() is False
+        assert starts == [1]
+
+
+class TestTheGateRanksTheClaimAlone:
+    def test_the_evidence_reference_is_not_part_of_the_ranked_text(self) -> None:
+        seen: list[str] = []
+
+        def _alignment(text: str, tid: str, k: int = 5) -> dict[str, Any]:
+            seen.append(text)
+            return {"gate_score": 1.0, "candidates": []}
+
+        claim = _claim("T1055")
+        claim.evidence_ref = "[ev_0001] import table: VirtualAllocEx"
+        _weak_alignment(claim, "T1055", _alignment, 0.05)
+        assert seen == [claim.claim]
+        assert "ev_0001" not in seen[0]
+
+
+class TestTheNotRunSentence:
+    def test_the_catalogue_code_has_its_sentence_and_another_code_is_named(self) -> None:
+        from maljan.pipeline.validation import not_run_sentence
+
+        assert not_run_sentence("attck.unknown_id").startswith(
+            "the ATT&CK catalogue could not be read"
+        )
+        assert not_run_sentence("attck.unknown_id").endswith("(attck.unknown_id)")
+        assert not_run_sentence("some.other_check") == (
+            "a validation check could not run (some.other_check)"
         )

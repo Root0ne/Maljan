@@ -355,9 +355,7 @@ class _Pack:
 
     def _record_not_run(self, tool: str, args: dict[str, Any], spent: float) -> None:
         """The entry for a step the budget stopped before it started."""
-        message = (
-            f"{_NOT_RUN_PREFIX} the pack's budget of {int(spent)} s was spent before this step"
-        )
+        message = f"{NOT_RUN_PREFIX} the pack's budget of {int(spent)} s was spent before this step"
         entry = self.recorder.record(
             tool=tool,
             args=args,
@@ -743,14 +741,16 @@ def _pack_line(entry: LedgerEntry) -> str:
 
 
 # How an entry the pipeline wrote about a call it did not make begins.
-_NOT_RUN_PREFIX = "not run:"
+NOT_RUN_PREFIX = "not run:"
 
 
 def _was_not_made(entry: LedgerEntry) -> bool:
-    """Whether a failed entry records a call that was never made."""
-    if entry.server == PIPELINE and entry.tool == "reputation":
-        return True
-    return str(entry.error or entry.output or "").startswith(_NOT_RUN_PREFIX)
+    """Whether a failed entry records a call that was never made.
+
+    The message says so, whatever the tool: a reputation lookup that was
+    skipped writes the prefix, one that was made and broke does not.
+    """
+    return str(entry.error or entry.output or "").startswith(NOT_RUN_PREFIX)
 
 
 def _short(text: str | None, limit: int = _TEXT_HEAD) -> str:

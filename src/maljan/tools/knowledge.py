@@ -105,7 +105,10 @@ def index_is_warm() -> bool:
         return _HYBRID_INDEX is not None
 
 
-_WARMING = threading.Event()
+# Set under ``_INDEX_LOCK`` by the one call that starts the background build,
+# and never cleared: a build that failed is remembered as attempted, so no
+# later run starts another and every later caller is answered ``False``.
+_WARM_STARTED = False
 
 
 def warm_index_in_background() -> bool:
@@ -113,21 +116,17 @@ def warm_index_in_background() -> bool:
 
     For the caller that may not wait: the alignment gate on a worker that has
     not built the index yet. ``True`` when a build was started by this call,
-    ``False`` when one is already running or the index is already there. A
-    build that fails is remembered the way a foreground failure is, so the
-    next caller is told rather than made to wait again.
+    ``False`` when one was already started in this process — running,
+    finished or failed — or the index is already there. Check and set happen
+    under one lock, so two analysts in parallel start one build, not two.
     """
-    if index_is_warm() or _WARMING.is_set():
-        return False
-    _WARMING.set()
+    global _WARM_STARTED
+    with _INDEX_LOCK:
+        if _HYBRID_INDEX is not None or _WARM_STARTED:
+            return False
+        _WARM_STARTED = True
 
-    def _build() -> None:
-        try:
-            _hybrid_index()
-        finally:
-            _WARMING.clear()
-
-    threading.Thread(target=_build, name="maljan-attck-index", daemon=True).start()
+    threading.Thread(target=_hybrid_index, name="maljan-attck-index", daemon=True).start()
     return True
 
 

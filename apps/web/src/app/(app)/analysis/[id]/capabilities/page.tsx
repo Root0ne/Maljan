@@ -132,7 +132,9 @@ export default function AttackTab() {
 
                 {/* Technique cards */}
                 <div className="space-y-px">
-                  {tactic.techniques.map((tech) => (
+                  {tactic.techniques.map((tech) => {
+                    const lists = corroborationLists(corroboration, tech.id);
+                    return (
                     <div
                       key={`${tactic.id}-${tech.id}`}
                       className="bg-bg-elevated border border-border px-3 py-2.5 hover:bg-bg-active transition-colors"
@@ -195,8 +197,8 @@ export default function AttackTab() {
                       {corroborationSources(corroboration, tech.id).length > 0 && (
                         <details className="mt-1">
                           <summary className="text-[10px] uppercase tracking-wider text-text-muted cursor-pointer">
-                            Asserted by {corroborationLists(corroboration, tech.id).asserted_by.length}
-                            , claimed by {corroborationLists(corroboration, tech.id).claimed_by.length}
+                            Asserted by {lists.asserted_by.length}
+                            , claimed by {lists.claimed_by.length}
                           </summary>
                           <div className="mt-1 space-y-1">
                             <div>
@@ -204,10 +206,10 @@ export default function AttackTab() {
                                 Asserted by
                               </span>
                               <ul className="space-y-0.5">
-                                {corroborationLists(corroboration, tech.id).asserted_by.length === 0 && (
+                                {lists.asserted_by.length === 0 && (
                                   <li className="text-[11px] text-text-muted">no deterministic source</li>
                                 )}
-                                {corroborationLists(corroboration, tech.id).asserted_by.map((source) => (
+                                {lists.asserted_by.map((source) => (
                                   <li key={`a-${source}`} className="text-[11px] font-mono text-text-secondary">
                                     {source}
                                   </li>
@@ -219,7 +221,7 @@ export default function AttackTab() {
                                 Claimed by
                               </span>
                               <ul className="space-y-0.5">
-                                {corroborationLists(corroboration, tech.id).claimed_by.map((source) => (
+                                {lists.claimed_by.map((source) => (
                                   <li key={`c-${source}`} className="text-[11px] font-mono text-text-secondary">
                                     {source}
                                   </li>
@@ -230,7 +232,8 @@ export default function AttackTab() {
                         </details>
                       )}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             ))}

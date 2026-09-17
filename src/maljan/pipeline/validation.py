@@ -428,11 +428,13 @@ def _weak_alignment(claim: Any, tid: str, alignment: Any, threshold: float) -> s
     """
     if alignment is None:
         return ""
-    text = " ".join(str(getattr(claim, key, "") or "") for key in ("claim", "evidence_ref")).strip()
+    # The claim's own words. ``evidence_ref`` is a ledger id and a quoted
+    # fragment, which is noise in the one input the gate score comes from.
+    text = str(getattr(claim, "claim", "") or "").strip()
     if not text:
         return ""
     try:
-        answer = alignment(text, tid)
+        answer = alignment(text, tid, k=ALIGNMENT_CANDIDATES)
     except Exception as exc:  # noqa: BLE001 — a gate that cannot answer gates nothing
         logger.debug("validation: the alignment gate failed for %s (%s).", tid, exc)
         return ""
@@ -443,7 +445,7 @@ def _weak_alignment(claim: Any, tid: str, alignment: Any, threshold: float) -> s
             "technique_id": str(c.get("technique_id") or "").strip().upper(),
             "score_gate": float(c.get("score_gate") or 0.0),
         }
-        for c in (answer.get("candidates") or [])[:ALIGNMENT_CANDIDATES]
+        for c in answer.get("candidates") or []
         if isinstance(c, dict) and c.get("technique_id")
     ]
     try:
@@ -528,6 +530,21 @@ def ungrounded_technique_note(findings: Any) -> str:
 
 
 VALIDITY_CODE = "attck.unknown_id"
+
+
+# What the run-quality note says for a check that could not run, per code.
+# A code this table does not know is still named rather than described as
+# something it is not.
+NOT_RUN_SENTENCES: dict[str, str] = {
+    "attck.unknown_id": (
+        "the ATT&CK catalogue could not be read; technique ids were not checked (attck.unknown_id)"
+    ),
+}
+
+
+def not_run_sentence(code: str) -> str:
+    """The run-quality sentence for one check that could not run."""
+    return NOT_RUN_SENTENCES.get(code, f"a validation check could not run ({code})")
 
 
 def validity_check_available(attck: Any) -> bool:
@@ -1076,6 +1093,7 @@ def validate_verdict_bundle(
     """
     violations: list[Violation] = []
     objects = list(getattr(bundle, "objects", None) or [])
+    scope = expected_technique_scope(sample)
 
     haystack = " ".join(sorted(evidence_corpus)).lower() if evidence_corpus else ""
     identity = {value.lower() for value in sample_identity_values(sample)}
@@ -1124,12 +1142,12 @@ def validate_verdict_bundle(
                     )
                 )
             elif attck is not None:
-                mismatch = platform_mismatch_message(tid, attck, expected_technique_scope(sample))
+                mismatch = platform_mismatch_message(tid, attck, scope)
                 if mismatch:
                     violations.append(
                         Violation(
                             code=PLATFORM_MISMATCH_CODE,
-                            message=f"the attack-pattern's {mismatch}",
+                            message=mismatch,
                             path=f"objects[{index}]",
                         )
                     )

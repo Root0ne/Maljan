@@ -108,7 +108,7 @@ def build_capability_matrix(
             continue
 
         tactic_id, tactic_name = _resolve_tactic(index, tactic_slug)
-        scope = _catalogue_scope(tid)
+        domain, platforms = _catalogue_scope(tid)
         cells.append(
             CapabilityCell(
                 tactic=tactic_id or "TA0000",
@@ -119,8 +119,8 @@ def build_capability_matrix(
                 confidence=max(0.0, min(1.0, confidence)),
                 contributing_layers=layers,
                 technique_id_valid=valid,
-                platforms=scope[1],
-                domain=scope[0],
+                platforms=platforms,
+                domain=domain,
             )
         )
         mappings.append(
@@ -184,7 +184,9 @@ def _unknown_to_the_catalogue(ids: list[str]) -> set[str]:
     labelled — one rule for the model that had the last word.
 
     Never raises. An unreachable catalogue marks nothing rather than marking
-    everything.
+    everything, and records nothing here: ``run_summary.validation.not_run``
+    is written by the analyst loop and the judge node, which are the two
+    places a check that did not run is a fact about the run.
     """
     try:
         from maljan.pipeline.validation import unknown_technique_ids

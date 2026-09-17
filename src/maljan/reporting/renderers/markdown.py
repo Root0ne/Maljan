@@ -904,17 +904,6 @@ class MarkdownRenderer:
                 f"- TTPs: {len(corroboration)} named, {multi} by more than one source, "
                 f"{asserted} asserted by a deterministic source"
             )
-            lines.append("")
-            lines.append("| Technique | Asserted by | Claimed by |")
-            lines.append("|---|---|---|")
-            for tid, row in sorted(corroboration.items()):
-                if isinstance(row, dict):
-                    asserted_by = ", ".join(row.get("asserted_by") or []) or "—"
-                    claimed_by = ", ".join(row.get("claimed_by") or []) or "—"
-                else:
-                    asserted_by, claimed_by = "—", ", ".join(str(s) for s in row) or "—"
-                lines.append(f"| {tid} | {asserted_by} | {claimed_by} |")
-            lines.append("")
         validation = run_summary.get("validation") or {}
         if validation:
             unresolved = validation.get("unresolved") or []
@@ -929,6 +918,20 @@ class MarkdownRenderer:
                     continue
                 message = " ".join(str(row.get("message") or "").split())
                 lines.append(f"  - `{row.get('code', '')}` ({row.get('agent', '')}): {message}")
+        if corroboration:
+            lines.append("")
+            lines.append("**Corroboration per technique:**")
+            lines.append("")
+            lines.append("| Technique | Asserted by | Claimed by |")
+            lines.append("|---|---|---|")
+            for tid, row in sorted(corroboration.items()):
+                if isinstance(row, dict):
+                    asserted_by = ", ".join(row.get("asserted_by") or []) or "—"
+                    claimed_by = ", ".join(row.get("claimed_by") or []) or "—"
+                else:
+                    asserted_by, claimed_by = "—", ", ".join(str(s) for s in row) or "—"
+                lines.append(f"| {tid} | {asserted_by} | {claimed_by} |")
+            lines.append("")
         return "\n".join(lines)
 
     # ------------------------------------------------------------------

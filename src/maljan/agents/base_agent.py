@@ -3089,10 +3089,6 @@ class BaseAnalyst(ABC):
             )
         return revised
 
-    def _alignment_gate(self, knowledge: Any, cfg_validation: Any) -> Any | None:
-        """The alignment gate for this run, or ``None``; see :func:`alignment_gate`."""
-        return alignment_gate(knowledge, cfg_validation, self.logger, self.name)
-
     def drain_nudge_retry_mode(self) -> str | None:
         """How the last nudge had to be sent, handed over once."""
         mode = getattr(self, "_nudge_retry_mode", None)

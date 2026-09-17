@@ -49,6 +49,7 @@ from maljan.pipeline.run_state import render_run_state
 from maljan.pipeline.state import AgentArgument, AnalysisState, _merge_stage_results
 from maljan.pipeline.sycophancy_detector import build_revision_directive, detect_sycophancy
 from maljan.pipeline.triage_pack import (
+    NOT_RUN_PREFIX,
     PIPELINE,
     CapaSettings,
     PackInputs,
@@ -60,13 +61,16 @@ from maljan.pipeline.triage_pack import (
     run_pack,
 )
 from maljan.pipeline.validation import (
+    VALIDITY_CODE,
     ValidationTally,
     Violation,
     corroboration,
     corroboration_sources,
+    not_run_sentence,
     technique_check_note,
     ungrounded_technique_note,
     validation_metrics,
+    validity_check_available,
 )
 from maljan.reporting.ledger_report import section_is_grounded
 from maljan.schemas.evidence import LedgerEntry, apply_budget
@@ -534,13 +538,16 @@ def _reputation_lookup(container: ServiceContainer, sha256: str) -> Any:
     from maljan.core.config import ALL_SERVERS, ToolRef
 
     def _skip(recorder: Any, why: str) -> Any:
+        # The prefix is what tells the pack's rendering a call that was never
+        # made from one that was made and failed (``triage_pack._was_not_made``).
+        message = f"{NOT_RUN_PREFIX} {why}"
         return recorder.record(
             tool="reputation",
             args={"sha256": sha256},
             server=PIPELINE,
-            output=why,
+            output=message,
             ok=False,
-            error=why,
+            error=message,
             started_at=time.time(),
         )
 
@@ -694,6 +701,15 @@ def _function_matches_step(container: ServiceContainer, state: AnalysisState) ->
         )
 
     return step
+
+
+def _knowledge_module() -> Any:
+    """``maljan.tools.knowledge`` when it imports, else ``None``."""
+    try:
+        from maljan.tools import knowledge
+    except Exception:  # noqa: BLE001 — a knowledge module that will not import is absent
+        return None
+    return knowledge
 
 
 def make_triage_node(
@@ -2568,12 +2584,13 @@ def make_judge_node(
             # A check that could not run is a fact about the run, not a
             # finding about the sample: it is said here and listed under
             # ``validation.not_run``.
-            _not_run = sorted({str(code) for code in (state.get("validation_not_run") or [])})
-            if _not_run:
-                _degradation_reasons.append(
-                    "the ATT&CK catalogue could not be read; technique ids were not checked "
-                    f"({', '.join(_not_run)})"
-                )
+            _not_run = {str(code) for code in (state.get("validation_not_run") or [])}
+            # The judge's own bundle check asks the same catalogue; when it
+            # cannot be read the judge's attack-patterns went unchecked too.
+            if not validity_check_available(_knowledge_module()):
+                _not_run.add(VALIDITY_CODE)
+            for _code in sorted(_not_run):
+                _degradation_reasons.append(not_run_sentence(_code))
             if _anti_emu_hits:
                 _short = _anti_emu_hits[0]
                 _suffix = f" (+{len(_anti_emu_hits) - 1} more)" if len(_anti_emu_hits) > 1 else ""
@@ -2685,7 +2702,9 @@ def make_judge_node(
                     .set_negotiation(negotiation_state, max_iterations=max_iters)
                     .set_isr_stats(isr_reports, no_data=_no_data_analysts)
                     .set_validation(
-                        validation_metrics(_retries, _unresolved, _fed_back, not_run=_not_run)
+                        validation_metrics(
+                            _retries, _unresolved, _fed_back, not_run=sorted(_not_run)
+                        )
                     )
                     .set_corroboration(_corroboration)
                     .set_degraded_mode(_degraded_mode, _degradation_reasons)

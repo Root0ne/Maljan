@@ -187,6 +187,19 @@ Two producers use it:
   spelling and is flagged `technique_id_valid=False`; the report, the STIX
   minting step and the FP linter read the flag.
 
+* **The judge** (`agents/judge_agent.py`) — `validate_verdict_bundle` reports an
+  indicator whose pattern names a value no tool in the run saw, an
+  attack-pattern with an unresolvable id, a severity outside the enum, and a
+  family named with no evidence ids. An ungrounded indicator that survives the
+  retry is dropped, because a STIX consumer has no way to read a caveat — and
+  recorded, because the false positive is a fact about the run. Two symmetric
+  rules ask what a verdict over zero analyst claims rests on:
+  `verdict.unsupported_benign` asks for the entry that establishes Benign (a
+  signature is the usual one) and `verdict.unsupported_malware` for the entries
+  that establish Malware (a reputation entry, a rule hit); either way the
+  alternative offered is Suspicious with an inconclusive rationale, the judge
+  is asked once, and the second answer is kept as given.
+
 ### The technique check
 
 Four parts, all in `pipeline/validation.py` and `tools/knowledge.py`, none of
@@ -228,19 +241,6 @@ analyst wrote stays the id in the report.
 What the check questioned and the analyst kept reaches the judge as a
 `TECHNIQUE CHECK` block beside the evidence summary, and the report's
 validation section lists the unresolved rows with their messages.
-* **The judge** (`agents/judge_agent.py`) — `validate_verdict_bundle` reports an
-  indicator whose pattern names a value no tool in the run saw, an
-  attack-pattern with an unresolvable id, a severity outside the enum, and a
-  family named with no evidence ids. An ungrounded indicator that survives the
-  retry is dropped, because a STIX consumer has no way to read a caveat — and
-  recorded, because the false positive is a fact about the run. Two symmetric
-  rules ask what a verdict over zero analyst claims rests on:
-  `verdict.unsupported_benign` asks for the entry that establishes Benign (a
-  signature is the usual one) and `verdict.unsupported_malware` for the entries
-  that establish Malware (a reputation entry, a rule hit); either way the
-  alternative offered is Suspicious with an inconclusive rationale, the judge
-  is asked once, and the second answer is kept as given.
-
 What the judge decides is the judge's: `severity` (with its rationale),
 `malware_category` and `family` come back on the bundle under
 `x_maljan_assessment` and the report prints them as answered. A severity nobody
