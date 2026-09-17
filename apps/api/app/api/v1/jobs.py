@@ -260,6 +260,17 @@ async def get_job(
     return JobResponse.model_validate(job).model_copy(update={"roster": roster})
 
 
+def _delegation_depth(overrides: dict[str, Any]) -> int:
+    """How far the roster follows an ``ask_<key>`` chain: what the asks get."""
+    from maljan.core.config import AgentsConfig
+
+    default = int(AgentsConfig.model_fields["delegation_depth"].default)
+    try:
+        return max(1, int(overrides.get("core.agents.delegation_depth", default)))
+    except (TypeError, ValueError):
+        return default
+
+
 async def _roster_for_job(db: AsyncSession, job: Any) -> dict[str, Any]:
     """Who can speak in this job's run, by key, label, role and stage.
 
@@ -293,7 +304,9 @@ async def _roster_for_job(db: AsyncSession, job: Any) -> dict[str, Any]:
             # team somebody is still editing, and its members are still the
             # ones who would speak.
             document = ProfileDefinition.model_validate(document).model_dump(mode="json")
-        return roster_payload(document, effective_definitions(overrides))
+        return roster_payload(
+            document, effective_definitions(overrides), depth=_delegation_depth(overrides)
+        )
     except Exception as exc:  # noqa: BLE001 — a label is never worth a 500
         # The type and not the message: an exception raised while reading the
         # settings store can carry a stored value in its text, and this line

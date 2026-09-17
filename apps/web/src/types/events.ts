@@ -159,7 +159,12 @@ export interface RosterAgent {
   key: string;
   label: string;
   role: string;
+  /** The stages this agent speaks in. Empty for a specialist that no stage
+   *  names — one a lead reaches through its `ask_<key>` tools. */
   stages: string[];
+  /** The agents that can task this one, when no stage names it. Absent on an
+   *  agent a stage names: nothing had to ask it to be there. */
+  via?: string[];
 }
 
 export interface RosterStage {

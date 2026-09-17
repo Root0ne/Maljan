@@ -669,7 +669,26 @@ def emit_agent_message_delta(
     )
 
 
-def roster_payload(profile: Any, definitions: Any) -> dict[str, Any]:
+def _field(obj: Any, name: str, fallback: Any = "") -> Any:
+    """One attribute of a model or one key of the document it dumps to."""
+    if isinstance(obj, dict):
+        return obj.get(name, fallback)
+    return getattr(obj, name, fallback)
+
+
+def _asks_of(definition: Any) -> list[str]:
+    """Every agent this definition can task, from its ``ask_<key>`` tools."""
+    asked: list[str] = []
+    for ref in list(_field(definition, "tools", []) or []):
+        if str(_field(ref, "kind", "")) != "agent":
+            continue
+        callee = str(_field(ref, "agent", "") or "")
+        if callee and callee not in asked:
+            asked.append(callee)
+    return asked
+
+
+def roster_payload(profile: Any, definitions: Any, depth: int = 2) -> dict[str, Any]:
     """Everyone who can speak in this run, and the stages they speak in.
 
     Read off the team the job runs rather than off the messages as they
@@ -680,15 +699,27 @@ def roster_payload(profile: Any, definitions: Any) -> dict[str, Any]:
     that omits it sends the console back to the registry key it was trying to
     replace.
 
+    The stages are not the whole team. A lead-shaped profile names one agent
+    and reaches its specialists through ``ToolRef(kind="agent")`` — a live
+    ``team_lead`` run rostered three participants and then produced messages
+    from five more — so the walk follows those references from each stage
+    agent, ``depth`` hops deep, which is the same bound
+    ``core.agents.delegation_depth`` puts on the asks themselves. A specialist
+    is listed with ``stages: []`` and a ``via`` naming the agents that can
+    task it; a stage agent carries no ``via``, because nothing had to ask it
+    to be there. ``stages`` itself is unchanged: a specialist belongs to no
+    step of the team, which is the fact that made it invisible.
+
+    A definition that is disabled is not reachable — an ask of it is refused
+    by name — so it is not listed. A cycle is walked once: the traversal keeps
+    what it has already reached, and delegation refuses an ask back up its own
+    chain anyway.
+
     Accepts the pydantic models or the plain documents they dump to, because
     the worker holds the models and the API holds the stored documents, and
     one shape of roster is the point.
     """
-
-    def field(obj: Any, name: str, fallback: Any = "") -> Any:
-        if isinstance(obj, dict):
-            return obj.get(name, fallback)
-        return getattr(obj, name, fallback)
+    field = _field
 
     stages_out: list[dict[str, Any]] = []
     agents_out: dict[str, dict[str, Any]] = {}
@@ -719,6 +750,37 @@ def roster_payload(profile: Any, definitions: Any) -> dict[str, Any]:
             )
             if key not in entry["stages"]:
                 entry["stages"].append(key)
+
+    # The specialists, breadth first from the agents the stages named, so a
+    # callee reached from two callers is listed once with both of them.
+    named_by_a_stage = set(agents_out)
+    frontier = list(agents_out)
+    for _hop in range(max(0, int(depth))):
+        next_frontier: list[str] = []
+        for caller in frontier:
+            for callee in _asks_of(definition_map.get(caller)):
+                definition = definition_map.get(callee)
+                if definition is None or field(definition, "enabled", True) is False:
+                    continue
+                first_time = callee not in agents_out
+                entry = agents_out.setdefault(
+                    callee,
+                    {
+                        "key": callee,
+                        "label": str(field(definition, "label", "") or callee),
+                        "role": str(field(definition, "role", "") or ""),
+                        "stages": [],
+                    },
+                )
+                if callee not in named_by_a_stage:
+                    via = entry.setdefault("via", [])
+                    if caller not in via:
+                        via.append(caller)
+                if first_time:
+                    next_frontier.append(callee)
+        frontier = next_frontier
+        if not frontier:
+            break
     return {"agents": list(agents_out.values()), "stages": stages_out}
 
 

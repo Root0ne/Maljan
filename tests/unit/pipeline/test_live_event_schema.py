@@ -422,6 +422,96 @@ class TestRoster:
         )
         assert from_models == from_documents
 
+    def test_a_specialist_a_lead_can_ask_is_on_the_roster(self) -> None:
+        """The defect a live ``team_lead`` run showed.
+
+        The stage list named three participants and the run then produced
+        messages from five more: the specialists are the lead's tools, not
+        stages, so nothing had put them on the roster and the console had no
+        name for the first delegated message that arrived.
+        """
+        from maljan.core.config import _builtin_definitions, _builtin_profiles
+
+        payload = ev.roster_payload(
+            _builtin_profiles()["team_lead"], _builtin_definitions(), depth=2
+        )
+        by_key = {a["key"]: a for a in payload["agents"]}
+
+        # The specialists: reachable only through the lead's ask tools.
+        for key in ("static", "dynamic", "network", "reverser", "triage"):
+            assert key in by_key, key
+            assert by_key[key]["via"] == ["lead"], key
+            assert by_key[key]["stages"] == [], key
+            assert by_key[key]["label"], key
+            assert by_key[key]["role"], key
+
+        # The agents the stages name carry no ``via``.
+        for key in ("lead", "judge", "reporter"):
+            assert "via" not in by_key[key], key
+            assert by_key[key]["stages"], key
+
+        # The stage list itself is unchanged by any of it.
+        assert [s["key"] for s in payload["stages"]] == [
+            "triage_pack",
+            "lead",
+            "verdict",
+            "report",
+        ]
+
+    def test_the_walk_stops_at_the_depth_the_asks_stop_at(self) -> None:
+        profile = {
+            "stages": [{"key": "lead", "label": "Lead", "kind": "analysis", "agents": ["a"]}]
+        }
+        definitions = {
+            "a": {"role": "lead", "label": "A", "tools": [{"kind": "agent", "agent": "b"}]},
+            "b": {"role": "generic", "label": "B", "tools": [{"kind": "agent", "agent": "c"}]},
+            "c": {"role": "generic", "label": "C", "tools": [{"kind": "agent", "agent": "d"}]},
+            "d": {"role": "generic", "label": "D"},
+        }
+        one = {a["key"] for a in ev.roster_payload(profile, definitions, depth=1)["agents"]}
+        two = {a["key"] for a in ev.roster_payload(profile, definitions, depth=2)["agents"]}
+        assert one == {"a", "b"}
+        assert two == {"a", "b", "c"}
+
+    def test_a_callee_two_agents_can_ask_is_listed_once_with_both(self) -> None:
+        profile = {
+            "stages": [{"key": "lead", "label": "Lead", "kind": "analysis", "agents": ["a", "b"]}]
+        }
+        definitions = {
+            "a": {"role": "lead", "label": "A", "tools": [{"kind": "agent", "agent": "c"}]},
+            "b": {"role": "lead", "label": "B", "tools": [{"kind": "agent", "agent": "c"}]},
+            "c": {"role": "generic", "label": "C"},
+        }
+        agents = ev.roster_payload(profile, definitions, depth=2)["agents"]
+        specialists = [a for a in agents if a["key"] == "c"]
+        assert len(specialists) == 1
+        assert specialists[0]["via"] == ["a", "b"]
+
+    def test_a_disabled_specialist_is_not_listed(self) -> None:
+        # An ask of it is refused by name, so it can never speak.
+        profile = {
+            "stages": [{"key": "lead", "label": "Lead", "kind": "analysis", "agents": ["a"]}]
+        }
+        definitions = {
+            "a": {"role": "lead", "label": "A", "tools": [{"kind": "agent", "agent": "b"}]},
+            "b": {"role": "generic", "label": "B", "enabled": False},
+        }
+        keys = {a["key"] for a in ev.roster_payload(profile, definitions)["agents"]}
+        assert keys == {"a"}
+
+    def test_a_cycle_is_walked_once(self) -> None:
+        profile = {
+            "stages": [{"key": "lead", "label": "Lead", "kind": "analysis", "agents": ["a"]}]
+        }
+        definitions = {
+            "a": {"role": "lead", "label": "A", "tools": [{"kind": "agent", "agent": "b"}]},
+            "b": {"role": "generic", "label": "B", "tools": [{"kind": "agent", "agent": "a"}]},
+        }
+        agents = ev.roster_payload(profile, definitions, depth=5)["agents"]
+        assert [a["key"] for a in agents] == ["a", "b"]
+        # ``a`` is named by a stage, so being asked back does not give it one.
+        assert "via" not in agents[0]
+
     def test_the_roster_is_emitted_under_its_own_type(self) -> None:
         recorded, sink = _sink()
         ev.emit_roster(sink, ev.roster_payload(self._profile(), self._definitions()))

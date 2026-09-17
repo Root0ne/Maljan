@@ -195,6 +195,79 @@ async def test_a_team_still_being_edited_is_read_as_it_stands(
 
 
 @pytest.mark.asyncio
+async def test_a_lead_s_specialists_are_named_before_they_speak(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The seeded ``team_lead`` team, as the endpoint serves it.
+
+    A live run of this team rostered three participants and then produced
+    messages from five more, because the specialists are the lead's tools
+    rather than stages. They are on the roster now, with the agent that can
+    task them.
+    """
+    _overrides(monkeypatch, {})
+    response = await get_job(
+        job_id=uuid.uuid4(),
+        user=_User(),
+        svc=_Service(_Job(config={"profile": "team_lead"})),
+        db=_Session(),
+    )
+    by_key = {a.key: a for a in response.roster.agents}
+
+    for key in ("static", "dynamic", "network", "reverser", "triage"):
+        assert key in by_key, key
+        assert by_key[key].via == ["lead"], key
+        assert by_key[key].stages == [], key
+        assert by_key[key].label, key
+
+    for key in ("lead", "judge", "reporter"):
+        assert by_key[key].via is None, key
+        assert by_key[key].stages, key
+
+    assert [s.key for s in response.roster.stages] == [
+        "triage_pack",
+        "lead",
+        "verdict",
+        "report",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_the_walk_follows_the_configured_delegation_depth(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stored = {
+        "core.agents.delegation_depth": 1,
+        "core.agents.definitions": {
+            "boss": {
+                "role": "lead",
+                "label": "Boss",
+                "tools": [{"kind": "agent", "agent": "hand"}],
+            },
+            "hand": {
+                "role": "generic",
+                "label": "Hand",
+                "tools": [{"kind": "agent", "agent": "deep"}],
+            },
+            "deep": {"role": "generic", "label": "Deep"},
+        },
+        "core.agents.profiles": {
+            "chain": {
+                "stages": [{"key": "lead", "label": "Lead", "kind": "analysis", "agents": ["boss"]}]
+            }
+        },
+    }
+    _overrides(monkeypatch, stored)
+    response = await get_job(
+        job_id=uuid.uuid4(),
+        user=_User(),
+        svc=_Service(_Job(config={"profile": "chain"})),
+        db=_Session(),
+    )
+    assert {a.key for a in response.roster.agents} == {"boss", "hand"}
+
+
+@pytest.mark.asyncio
 async def test_a_missing_job_is_still_a_404(monkeypatch: pytest.MonkeyPatch) -> None:
     from fastapi import HTTPException
 
@@ -251,7 +324,9 @@ def test_the_run_and_the_job_endpoint_describe_the_same_team() -> None:
 
     from_the_run = _roster_for(_Container())
     from_the_store = roster_payload(
-        effective_profiles({})[settings.agents.profile], effective_definitions({})
+        effective_profiles({})[settings.agents.profile],
+        effective_definitions({}),
+        depth=int(settings.agents.delegation_depth),
     )
     assert from_the_run == from_the_store
     assert [a["key"] for a in from_the_run["agents"]]

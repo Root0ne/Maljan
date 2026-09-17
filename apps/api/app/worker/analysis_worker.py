@@ -1600,7 +1600,14 @@ def _roster_for(container: Any) -> dict[str, Any]:
     try:
         from maljan.pipeline.events import roster_payload
 
-        return roster_payload(container.active_profile(), container.config.agents.definitions)
+        agents = container.config.agents
+        return roster_payload(
+            container.active_profile(),
+            agents.definitions,
+            # The same bound the asks themselves run under, so the roster
+            # names exactly the agents that can be reached and no more.
+            depth=int(agents.delegation_depth),
+        )
     except Exception as exc:  # noqa: BLE001 — a roster never costs a run
         logger.warning("Could not build the roster for this run (%s).", exc)
         return {"agents": [], "stages": []}

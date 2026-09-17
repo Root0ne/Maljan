@@ -63,12 +63,19 @@ class JobCreateRequest(BaseModel):
 
 class RosterAgent(BaseModel):
     """One participant of a run: its key, the label it is drawn under, its
-    role, and the stages it speaks in."""
+    role, the stages it speaks in, and who can task it.
+
+    A specialist that no stage names — the agents a lead reaches through its
+    ``ask_<key>`` tools — has an empty ``stages`` and a ``via`` naming the
+    agents that can task it. An agent a stage names carries no ``via``:
+    nothing had to ask it to be there.
+    """
 
     key: str
     label: str
     role: str
     stages: list[str] = []
+    via: list[str] | None = None
 
 
 class RosterStage(BaseModel):
