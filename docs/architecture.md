@@ -516,6 +516,18 @@ caller. Two rules hold across all of them: they report facts rather than
 verdicts (a packer section name is a match, not "packed"), and an optional
 dependency that is missing costs one tool's answer, never the server.
 
+Each sidecar also answers `capabilities`: which of its tools need an optional
+library, a binary or a setting, and which of those are present on its host,
+probed when the server starts. The registry keeps the manifest on the server's
+entry when it attaches, the settings probe returns it so the console's server
+card names the unavailable tools before a run, and an analysis stage records
+each bound tool the manifest marks unavailable as
+`server.<key>.<tool>_unavailable(<reason>); <remedy>` when it starts. A tool
+that cannot answer returns an error with a code and an authored remediation
+(`maljan.tools.errors`) rather than raising, and the sidecars' guards rewrite
+an implementation's flat error into that shape. See *Writing a tool server* in
+[configuration.md](configuration.md).
+
 The `dynamic` analyst's tools are the exception: its sandbox report is already
 in the worker's memory, so `ToolRef(kind="sandbox")` resolves to in-process
 tools over that report (`src/maljan/providers/sandbox_tools.py`) with no
@@ -577,6 +589,21 @@ lookup — go through the same recorder under `agent="judge"`, so a verdict that
 leans on one can cite it. An agent's ask of another agent is an entry under
 `server="team"`, `tool="ask_<key>"`, and the calls the asked agent made are
 entries under its own key (see *Delegation*).
+
+A call that failed is an entry with `ok` false whichever way it failed: a
+tool that raised, and a tool that returned an error. The entry keeps the
+message in `error` and, when the tool authored one, the remedy in
+`remediation`; `run_summary.evidence.failures` lists each distinct failure
+once with its count, the report header prints that list, and the console's
+evidence row shows the message and the remedy under the call.
+
+The tool loop also meters itself. `budget_tick` events carry an agent's steps
+against its cap and seconds against its limit every five steps and at the end
+of each loop; `stage_ended_at_cap` says which cap ended the work when one did
+(`steps`, `time`, `repeats`, or the triage pack's `budget_seconds`); and
+`run_summary.budget` sums the spend per agent, with the caps it hit, so a
+reader learns that an analyst ran out of steps from the summary and the
+pipeline panel rather than from a log line.
 That stamp is what makes a report checkable: the model can cite the call it read
 a fact from, a report section lists the entries it was built from, and `GET
 /api/v1/jobs/{id}/evidence` serves those entries back.

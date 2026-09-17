@@ -8,6 +8,34 @@ change landed on `main`.
 
 ### Added
 
+- **Each tool server says what it can do on its host, before a run.** The four
+  built-in sidecars answer a `capabilities` tool — per tool, its optional
+  library, binary or setting, whether it is present, the reason it is not and
+  its timeout — computed by probing when the server starts
+  (`maljan.tools.capabilities`). The registry reads it once per job and keeps
+  it on the server's entry; `POST /api/v1/settings/test/mcp` returns it under
+  `details.capabilities` and the console's server card lists the unavailable
+  tools with their reason; an analysis stage records each bound tool its
+  server's manifest marks unavailable as
+  `server.<key>.<tool>_unavailable(<reason>); <remedy>` when it starts, once,
+  and such a reason does not make the run degraded by itself.
+- **A tool failure names its remedy.** Sidecar tools return
+  `{"error": {"code", "message", "remediation"}, "tool"}` with codes
+  `missing_dependency`, `timeout`, `bad_argument`, `no_such_file`,
+  `unsupported_format`, `not_configured` and `tool_failed`
+  (`maljan.tools.errors`); the guards map exceptions to codes and rewrite an
+  implementation's flat `{"error": "<text>"}` into the shape, which is still
+  accepted from any server. A returned error is now a failed ledger entry
+  (`ok` false, `error` the message, the new `remediation` the hint; revision
+  `20260922000000` adds the two columns), `run_summary.evidence.failures`
+  lists each distinct failure once with its count, the report header prints
+  the list with the remedies, and the console's evidence row shows both.
+- **The budget meter.** `budget_tick` events (per agent: steps used and cap,
+  elapsed and limit, prompt chars, ledger entries) every five steps and at
+  the end of each tool loop; `stage_ended_at_cap` when a cap ended the work
+  (`steps`, `time`, `repeats`, or the triage pack's `budget_seconds`);
+  `run_summary.budget` per agent (loops, steps, seconds, delegated steps, the
+  caps hit); the console's pipeline panel names the cap beside the step.
 - **An agent can ask another agent, as a tool call.** `ToolRef(kind="agent",
   agent=<key>)` on a definition binds a tool `ask_<key>` (`task`, optional
   `context`) described from the callee's label and role. Calling it runs the

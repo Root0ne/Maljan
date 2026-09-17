@@ -709,6 +709,66 @@ and the system temp directory is shared. Each file is created with
 every `put_sample*` call prunes entries past the TTL, so a long-lived server
 does not accumulate samples without bound.
 
+## Writing a tool server
+
+Any MCP server works: Maljan reads its manifest and calls its tools. Two
+optional conventions make a server a better citizen of a run, and the four
+built-in sidecars follow both.
+
+**The capability manifest.** A tool named `capabilities`, taking no argument,
+answers what the server can do on the host it runs on:
+
+```json
+{"server": "analysis", "version": "1.0.0",
+ "tools": [{"name": "document_info", "optional_dependency": "olefile",
+            "available": false, "reason": "olefile is not installed",
+            "timeout_s": null, "remediation": "install the optional tool libraries: uv sync --extra tools",
+            "without": "the PDF and OOXML halves"}]}
+```
+
+Compute it when the server starts, by probing — an import, a `which`, an
+environment variable — never by asserting; `maljan.tools.capabilities.manifest`
+does that for a list of `ToolNeeds` and is what the sidecars use. The registry
+reads the manifest once per job when it attaches the server and keeps it on
+the server's entry; the connection test (`POST /api/v1/settings/test/mcp`)
+returns it under `details.capabilities`, and the console's server card lists
+the unavailable tools with their reason before any run. When a stage starts,
+each tool an agent binds that its server's manifest marks unavailable is
+recorded once as `server.<key>.<tool>_unavailable(<reason>); <remediation>`
+in the run's degradation reasons, instead of being discovered by a failed call
+mid-run. An unavailable tool does not make the run degraded on its own; a
+server that could not be attached still does.
+
+**Errors that name their remedy.** A tool that cannot answer returns, never
+raises:
+
+```json
+{"error": {"code": "missing_dependency",
+           "message": "olefile is not installed",
+           "remediation": "install the optional tool libraries: uv sync --extra tools"},
+ "tool": "document_info"}
+```
+
+The codes are `missing_dependency`, `timeout`, `bad_argument`, `no_such_file`,
+`unsupported_format`, `not_configured` and `tool_failed`; a code of your own is
+kept as written. `maljan.tools.errors.tool_error(code, message, tool=...)`
+builds the shape with the authored remediation for the code, and each sidecar's
+guard maps an exception it catches to a code. The older flat shape,
+`{"error": "<text>"}`, is still read: the sidecars rewrite it into the
+structured one on the way out, inferring the code from the text, and the
+ledger reads either. A returned error is a failed ledger entry: `ok` false,
+`error` the message, `remediation` the hint — the report header lists each
+distinct failure once with its remedy, the console's evidence row shows both,
+and `GET /api/v1/jobs/{id}/evidence` serves them.
+
+**The budget meter** needs nothing from a server. The tool loop emits
+`budget_tick` every five steps and once more when it ends (steps used against
+the cap, seconds against the limit, prompt characters, ledger entries so far)
+and `stage_ended_at_cap` when a cap ended the work — `steps`, `time`,
+`repeats` or, for the triage pack, `budget_seconds`; `run_summary.budget` sums
+the spend per agent with the caps it hit, and the console's pipeline panel
+says beside the step which cap ended it.
+
 ## Export and import
 
 `GET /api/v1/settings/export` (admin) returns the configuration as JSON and
