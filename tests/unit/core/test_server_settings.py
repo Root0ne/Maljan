@@ -26,7 +26,9 @@ def test_the_two_sidecars_are_seeded_with_todays_launch_parameters():
     assert network.command == sys.executable
     assert network.args == ["services/network-mcp/server.py"]
     assert network.cwd == "services/network-mcp"
-    assert network.env_allow == []
+    # The two that say which directories a capture may be read from, and
+    # nothing else: no credential of any kind reaches this sidecar.
+    assert network.env_allow == ["MALJAN_STAGING_DIR", "MALJAN_SAMPLE_ROOTS"]
     assert network.agents == ["network"]
     assert network.tools is None, "None means every tool, which is today's behaviour"
 
