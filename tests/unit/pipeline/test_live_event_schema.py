@@ -274,10 +274,7 @@ class TestArgumentSummaries:
         an ``--out=`` option, a colon-separated value and a compact JSON body
         carry the per-job directory and the install prefix out verbatim.
         """
-        assert (
-            ev.scrub("run.exe --out=/tmp/maljan/jobs/9f2c-uuid/r.json")
-            == "run.exe --out=r.json"
-        )
+        assert ev.scrub("run.exe --out=/tmp/maljan/jobs/9f2c-uuid/r.json") == "run.exe --out=r.json"
         assert ev.scrub("key:/var/lib/x/y") == "key:y"
 
     def test_a_compact_json_body_loses_its_host_path(self) -> None:

@@ -363,9 +363,7 @@ _CREDENTIAL_RUN = re.compile(r"(?:[A-Fa-f0-9]{24,}|[A-Za-z0-9_\-]{24,}={0,2})\Z"
 _DIGEST = re.compile(r"\A[A-Fa-f0-9]{32}\Z|\A[A-Fa-f0-9]{40}\Z|\A[A-Fa-f0-9]{64}\Z")
 # A URL, wherever it starts. Found before the path pass, so the slashes in
 # ``https://host/x`` are never read as a path.
-_URL_RUN = re.compile(
-    _AFTER + r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.\-]*)://(?P<rest>" + _UNTIL + r")"
-)
+_URL_RUN = re.compile(_AFTER + r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.\-]*)://(?P<rest>" + _UNTIL + r")")
 # One value, for the credential test. Delimited rather than whitespace-split,
 # because a key a tool server echoes arrives as ``{"api_key":"sk-…"}`` with no
 # spaces in it at all.
