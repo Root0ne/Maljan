@@ -486,9 +486,9 @@ const ROLE_ORDER: Record<TranscriptRole, number> = {
  * "no agent findings" for the entire duration of every analysis.
  *
  * Persisted messages take precedence on conflict because they are the record —
- * they carry the final revision round and the stored status. Identity is the
- * shared `role:speaker:round` key, so the same message from both sources
- * collapses to one.
+ * they carry the final revision round and the stored status. Identity is what
+ * `messageId` says it is — who spoke, in which round, and a digest of what was
+ * said — so the same message from both sources collapses to one.
  */
 export function mergeTranscripts(
   persisted: TranscriptMessage[],

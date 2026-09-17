@@ -45,11 +45,14 @@ change landed on `main`.
   calls are ledger entries under its own key; the ask is an entry under
   `server="team"`, `tool="ask_<key>"`, with the callee's wall clock as its
   duration; two `agent_message` events carry the exchange with `stage`,
-  `round` and `addressed_to`. The callee shares the caller's remaining steps
-  and seconds and what it spends is charged to the caller's loop, whose budget
-  line says so. Guards, each a readable tool error: `core.agents.delegation_depth`
-  (2), a cycle back up the call chain, a callee that is undefined or disabled,
-  and not enough budget left to ask. The settings model and the API refuse a
+  `round` and `addressed_to`. An ask carries a budget of its own —
+  `core.agents.delegation_steps` (12) and `core.agents.delegation_timeout_seconds`
+  (300) — cut to the time the caller has left and to nothing else: a caller's
+  own step budget is not spent by its specialists' work, only its wall clock
+  is. Guards, each a readable tool error: `core.agents.delegation_depth` (2),
+  a cycle back up the call chain, a callee that is undefined or disabled, a
+  callee whose servers the asking stage withholds, and not enough time left to
+  ask. The settings model and the API refuse a
   reference to an unknown agent, to the definition itself, to the judge or the
   reporter, and any such reference on those two. A new seeded definition
   `lead` (role `lead`, `src/maljan/agents/prompts/lead.md`) references
@@ -423,9 +426,12 @@ change landed on `main`.
   nothing else; the caller's own step budget is not reduced by what its
   specialists spend, and an ask is refused only when the caller has less time
   left than a first model turn needs. A loop that reaches the graph's own step
-  cap writes up what it gathered instead of raising a recursion error. The
-  seeded `lead` gets 40 steps and a 1800 s stage, and the `ask_<key>` tool's
-  description tells the model what an ask costs and roughly how many fit.
+  cap writes up what it gathered instead of raising a recursion error. A budget
+  row counts its own agent's turns and nothing else, with what its specialists
+  spent beside it as `delegated_steps`, so `steps_used` can no longer pass
+  `max_steps`. The seeded `lead` gets 40 steps and a 1800 s stage, and the
+  `ask_<key>` tool's description and `lead.md` both tell the model that an ask
+  has a budget of its own and costs it wall clock.
 - **A caller asks one agent at a time.** langgraph gathers a turn's tool calls,
   so a model that emitted two `ask_*` calls ran two nested loops at once — two
   analysts against one llama-server slot, which is the re-prefill timeout this
@@ -469,13 +475,13 @@ change landed on `main`.
   onto a callee is given back afterwards, its findings and artifacts travel to
   the caller with the callee named as their source, and a `lead` may carry a
   provider reference like the generic agent it otherwise is.
-- **The transcript draws a delegated round once.** An addressed line is
-  identified by a digest of what it says rather than by a counter taken before
-  the duplicate check, so the stream back-fill and the live socket no longer
-  show every ask and answer twice; recorded rows that share an identity — a
-  lead's report and its asks, which the table cannot yet tell apart — carry
-  their own `seq`. The agent editor offers **Ask another agent** only where a
-  reference can be saved.
+- **The transcript draws a delegated round once.** Every line is identified by
+  who spoke, in which round, and a digest of what was said — never by a counter
+  taken before the duplicate check, and never by the addressee, which only the
+  live copy has — so the stream back-fill, the live socket and the stored rows
+  all collapse onto one line. Two recorded rows that say the same thing in the
+  same round carry their own `seq`. The agent editor offers **Ask another
+  agent** only where a reference can be saved.
 - **The budget a model is told is in model turns.** The run-state line
   reported graph steps as turns, about twice the truth (a tool round is two
   graph steps); `model_turns_left` counts what langgraph counts and the
