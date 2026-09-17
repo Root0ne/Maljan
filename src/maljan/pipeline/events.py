@@ -648,11 +648,28 @@ def scrub(text: Any) -> str:
     with the key, the URL and the host path all inside it, and a rule anchored
     to the start of a word found none of them.
     """
-    flat = " ".join(str(text or "").split())
-    flat = _SCHEME_AND_SECRET.sub(lambda m: f"{m.group(1)} {_REDACTED}", flat)
-    flat = _URL_RUN.sub(_shorten_url, flat)
-    flat = _VALUE_RUN.sub(_hide_credentials, flat)
-    return _PATH_RUN.sub(_shorten_path, flat)
+    return _scrub_line(" ".join(str(text or "").split()))
+
+
+def _scrub_line(line: str) -> str:
+    """The four passes, over text that is already one line."""
+    line = _SCHEME_AND_SECRET.sub(lambda m: f"{m.group(1)} {_REDACTED}", line)
+    line = _URL_RUN.sub(_shorten_url, line)
+    line = _VALUE_RUN.sub(_hide_credentials, line)
+    return _PATH_RUN.sub(_shorten_path, line)
+
+
+def scrub_keeping_layout(text: Any) -> str:
+    """The same four passes, with the text's own lines and indentation kept.
+
+    For a field a reader reads as prose rather than skims as a summary — an
+    analyst's report, a correction, a failure's detail. ``scrub`` collapses
+    whitespace because a one-line summary has no use for any of it; doing that
+    to a written report turns it into a wall of text and flattens the lists
+    and code blocks in it. Every rule is applied to each line on its own,
+    which is exactly what ``scrub`` does to the single line it makes.
+    """
+    return "\n".join(_scrub_line(line) for line in str(text or "").splitlines())
 
 
 def describe_exception(exc: BaseException) -> str:

@@ -128,9 +128,13 @@ class AgentMessage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     the sycophancy detector's intervention.
 
     This table is that stream, written down. The worker tees every
-    ``agent_message`` event as it is published and persists the list verbatim,
-    so the conversation a reader sees a month later is not a reconstruction of
-    the live one — it is the same recording. Columns mirror the payload built by
+    ``agent_message`` event as it is published and persists the list as it was
+    published — scrubbed of credential shapes, URL userinfo and host paths by
+    the publisher, exactly as the socket saw it — so the conversation a reader
+    sees a month later is not a reconstruction of the live one, and not a more
+    revealing version of it either: it is the same recording. The verbatim
+    text of a tool call stays on the evidence ledger, behind the report's
+    ownership check. Columns mirror the payload built by
     ``maljan.pipeline.events.emit_agent_message`` field for field; the frontend
     maps them straight onto its transcript model with no reshaping.
 

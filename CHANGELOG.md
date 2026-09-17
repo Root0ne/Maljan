@@ -439,6 +439,18 @@ change landed on `main`.
 
 ### Fixed
 
+- **The publisher scrubs every event, so a producer that forgets cannot leak.**
+  `scrub` was applied by two of the seven producers, so
+  `agent_message.text`/`report`, `validation_feedback.message` and
+  `stage_ended_at_cap.detail` went out untouched — a credential the model
+  echoed was redacted while it streamed as a delta and then published in the
+  clear in the closing message, its `job_events` row and the stored transcript.
+  `_publish_event` now applies it once to every string field of every payload,
+  recursively through nested lists and dicts and leaving keys alone, before the
+  event reaches Redis, the socket and the table; the transcript recorder's copy
+  is scrubbed with it, so a replayed run reads exactly as the live one did.
+  Prose keeps its own line breaks and indentation (`scrub_keeping_layout`), so
+  a report is not flattened into a wall of text on its way out.
 - **A published failure says what kind it was, never what it said.** Five
   handlers in `pipeline/nodes.py` put `str(exc)` into an `agent_message` — the
   analyst failure and crash paths, the mediator, the revision hand-back and the

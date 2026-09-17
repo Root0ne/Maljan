@@ -416,6 +416,25 @@ async def _next_seq(redis_conn: aioredis.Redis, job_id: str) -> int:
     return seq
 
 
+def scrubbed(value: Any) -> Any:
+    """``value`` with every string inside it scrubbed, however deeply it sits.
+
+    Keys are left as they are: a key is a field name the console switches on,
+    not text somebody wrote. Numbers, booleans and ``None`` keep their type,
+    so a payload that goes through this is still the payload the reader
+    expects — only its prose has been through ``maljan.pipeline.events.scrub``.
+    """
+    from maljan.pipeline.events import scrub_keeping_layout
+
+    if isinstance(value, str):
+        return scrub_keeping_layout(value)
+    if isinstance(value, dict):
+        return {key: scrubbed(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [scrubbed(item) for item in value]
+    return value
+
+
 async def _publish_event(
     redis_conn: aioredis.Redis,
     job_id: str,
@@ -459,7 +478,17 @@ async def _publish_event(
     seq = await _next_seq(redis_conn, job_id)
     if stamp is not None:
         stamp["seq"] = seq
-    stamped = {**(data or {}), "seq": seq}
+        # The recorder's copy is the same message, so it reads the same way: a
+        # credential redacted on the socket and printed in the clear on the
+        # replay would be one conversation told two ways, which is the thing
+        # one shared transcript model exists to prevent. In place, because the
+        # recorder is already holding this dict.
+        stamp.update(scrubbed({k: v for k, v in stamp.items() if k != "seq"}))
+    # Scrubbed here, once, for all three sinks. Seven producers build these
+    # payloads and a new one cannot be relied on to remember; the publisher is
+    # where the wire begins, so it is where the guarantee belongs. Producers
+    # may still scrub — doing it twice changes nothing.
+    stamped = {**scrubbed(data or {}), "seq": seq}
     ts = datetime.now(UTC).isoformat()
     payload = {
         "type": event_type,

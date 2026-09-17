@@ -440,3 +440,136 @@ class TestTheEventsEndpoint:
         )
         assert seen == {"since": 8, "limit": 10}
         assert body["count"] == 1
+
+
+class TestThePublisherIsTheGuarantee:
+    """Every string on the wire is scrubbed once, where the wire begins.
+
+    Seven producers build these payloads and two of them scrubbed. A delta and
+    the ``agent_message`` that closes the same turn carry the same model text,
+    so a credential the model echoed was redacted while it streamed and then
+    published in the clear in the closing message, its ``job_events`` row and
+    the stored transcript. A producer may still scrub — this is the guarantee
+    that one which forgets cannot leak.
+    """
+
+    SECRET = "sk-" + "P" * 32
+    HOST_PATH = "/home/operator/maljan/data/samples/ab12/evil.exe"
+
+    def _published(self, redis_conn: _FakeRedis) -> list[dict[str, Any]]:
+        return [json.loads(message) for _channel, message in redis_conn.published]
+
+    def _publish(self, event_type: str, data: dict[str, Any]) -> tuple[Any, _Session]:
+        redis_conn = _FakeRedis()
+        session = _Session()
+        job_id = str(uuid.uuid4())
+        _start_event_feed(job_id, _factory(session))
+
+        async def run() -> None:
+            await _publish_event(redis_conn, job_id, event_type, data)
+            await stop_feed(job_id)
+
+        asyncio.run(run())
+        return redis_conn, session
+
+    def test_an_agent_message_loses_the_key_and_the_path_everywhere(self) -> None:
+        redis_conn, session = self._publish(
+            "agent_message",
+            {
+                "speaker": "static",
+                "text": f"the key is {self.SECRET}",
+                "report": f"I read {self.HOST_PATH} and found it packed",
+            },
+        )
+
+        (published,) = self._published(redis_conn)
+        assert self.SECRET not in json.dumps(published)
+        assert "/home/operator" not in json.dumps(published)
+        assert published["data"]["text"] == "the key is ***"
+        assert published["data"]["report"] == "I read evil.exe and found it packed"
+        # The same payload, in the table that outlives the stream.
+        (row,) = session.added
+        assert self.SECRET not in json.dumps(row.payload)
+        assert "/home/operator" not in json.dumps(row.payload)
+
+    def test_a_validation_feedback_message_is_scrubbed(self) -> None:
+        redis_conn, _session = self._publish(
+            "validation_feedback",
+            {"stage": "analysis", "code": "ungrounded", "message": f"see {self.HOST_PATH}"},
+        )
+
+        (published,) = self._published(redis_conn)
+        assert published["data"]["message"] == "see evil.exe"
+
+    def test_a_cap_detail_is_scrubbed(self) -> None:
+        redis_conn, _session = self._publish(
+            "stage_ended_at_cap",
+            {"stage": "analysis", "cap": "time", "detail": f"gave up reading {self.HOST_PATH}"},
+        )
+
+        (published,) = self._published(redis_conn)
+        assert published["data"]["detail"] == "gave up reading evil.exe"
+
+    def test_it_reaches_into_nested_structures(self) -> None:
+        redis_conn, _session = self._publish(
+            "agent_message",
+            {
+                "speaker": "static",
+                "claims": [
+                    {"claim": f"it reads {self.HOST_PATH}", "evidence_ref": self.SECRET},
+                    {"claim": "nothing here"},
+                ],
+                "nested": {"deep": {"deeper": [self.SECRET]}},
+            },
+        )
+
+        (published,) = self._published(redis_conn)
+        blob = json.dumps(published)
+        assert self.SECRET not in blob
+        assert "/home/operator" not in blob
+        assert published["data"]["claims"][0]["claim"] == "it reads evil.exe"
+        assert published["data"]["claims"][1]["claim"] == "nothing here"
+
+    def test_keys_are_left_alone(self) -> None:
+        """A key is a field name the console reads; only values are text."""
+        redis_conn, _session = self._publish(
+            "roster", {"agents": [{"key": "static", "label": "Static"}]}
+        )
+
+        (published,) = self._published(redis_conn)
+        assert published["data"]["agents"][0]["key"] == "static"
+        assert set(published["data"]["agents"][0]) == {"key", "label"}
+
+    def test_numbers_and_flags_keep_their_type(self) -> None:
+        redis_conn, _session = self._publish(
+            "tool_call_finished",
+            {"tool": "strings", "ok": False, "duration_ms": 1234, "confidence": 0.5, "x": None},
+        )
+
+        (published,) = self._published(redis_conn)
+        data = published["data"]
+        assert data["ok"] is False
+        assert data["duration_ms"] == 1234
+        assert data["confidence"] == 0.5
+        assert data["x"] is None
+        assert data["seq"] == 1
+
+    def test_the_recorders_copy_is_scrubbed_too(self) -> None:
+        """The transcript is the same recording, so it reads the same way."""
+        redis_conn = _FakeRedis()
+        job_id = str(uuid.uuid4())
+        recorded: dict[str, Any] = {"text": f"the key is {self.SECRET}"}
+
+        async def run() -> None:
+            await _publish_event(
+                redis_conn,
+                job_id,
+                "agent_message",
+                {"text": f"the key is {self.SECRET}"},
+                stamp=recorded,
+            )
+
+        asyncio.run(run())
+
+        assert recorded["seq"] == 1
+        assert self.SECRET not in recorded["text"]
