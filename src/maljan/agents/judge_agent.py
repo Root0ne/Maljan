@@ -50,6 +50,7 @@ from maljan.pipeline.validation import (
     drop_ungrounded_indicators,
     retry_with_feedback,
     unsupported_benign_violations,
+    unsupported_malware_violations,
     validate_verdict_bundle,
 )
 from maljan.schemas.evidence import EvidenceCounter, LedgerEntry
@@ -918,6 +919,10 @@ class JudgeAgent:
             self.logger.debug("Judge verdict: the knowledge tools are unavailable (%s).", exc)
             _knowledge = None  # type: ignore[assignment]
 
+        _analyst_claims = sum(
+            len(getattr(isr, "claims", None) or []) for isr in (isr_reports or {}).values()
+        )
+
         def _validate(bundle: Bundle) -> list[Violation]:
             # A timeout produced no answer, so there is nothing to give
             # feedback about. Reporting no violations ends the loop: a retry
@@ -933,10 +938,12 @@ class JudgeAgent:
                 *assessment_conflict_violations(bundle),
                 *unsupported_benign_violations(
                     bundle,
-                    analyst_claims=sum(
-                        len(getattr(isr, "claims", None) or [])
-                        for isr in (isr_reports or {}).values()
-                    ),
+                    analyst_claims=_analyst_claims,
+                    ledger_ids=ledger_ids,
+                ),
+                *unsupported_malware_violations(
+                    bundle,
+                    analyst_claims=_analyst_claims,
                     ledger_ids=ledger_ids,
                 ),
             ]

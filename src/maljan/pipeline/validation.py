@@ -1445,3 +1445,49 @@ def corroboration(
         tid: sorted(source for source, _confidence in sources)
         for tid, sources in sorted(collect(isrs, ledger).items())
     }
+
+
+UNSUPPORTED_MALWARE_CODE = "verdict.unsupported_malware"
+
+
+def unsupported_malware_violations(
+    bundle: Any, *, analyst_claims: int, ledger_ids: Sequence[str] | None = None
+) -> list[Violation]:
+    """Whether a Malware verdict on a run with no analysis cites anything.
+
+    The mirror of ``unsupported_benign_violations``, and for the same reason:
+    a verdict is a finding. Malware over zero analyst claims can stand on the
+    run's own record — a reputation entry, a rule hit, a signature the pack
+    established — and the bundle then cites that entry; or it gives way to
+    Suspicious with a rationale that says the run was inconclusive. Which of
+    the two stays the judge's call. This asks once and records what survives,
+    and it grades nothing: any cited entry from this run clears it.
+    """
+    from maljan.pipeline.outcome import decide_from_bundle
+
+    if analyst_claims > 0 or decide_from_bundle(bundle) != "Malware":
+        return []
+    known = {str(entry).strip().lower() for entry in (ledger_ids or []) if str(entry).strip()}
+    if not known:
+        return []
+    try:
+        text = json.dumps(bundle.model_dump(mode="json"), default=str)
+    except Exception as exc:  # noqa: BLE001 — an unreadable bundle cites nothing
+        logger.debug("validation: the bundle could not be read for citations (%s).", exc)
+        text = ""
+    if entry_ids_in(text) & known:
+        return []
+    listed = ", ".join(sorted(known)[:3])
+    return [
+        Violation(
+            code=UNSUPPORTED_MALWARE_CODE,
+            message=(
+                "This verdict is Malware and no analyst made a single claim about the "
+                "sample, so nothing examined it. Malware is a finding and needs evidence: "
+                "cite the ledger entries that establish it — a reputation entry, a YARA or "
+                "capa hit, a Sigma match — or return Suspicious and say in the rationale "
+                f"that the run was inconclusive. The entries this run recorded include {listed}."
+            ),
+            path="objects",
+        )
+    ]
