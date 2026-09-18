@@ -238,8 +238,11 @@ export default function ConversationPanel({
                   : "No message matches the current filters."}
             </p>
           ) : (
-            stages.map((stage) => (
-              <section key={stage.key || "run"} className="space-y-3">
+            /* A section with no key is a run's own lines rather than a stage,
+               and a failed run ends with a second one holding its failure, so
+               the position is what tells those two apart. */
+            stages.map((stage, index) => (
+              <section key={stage.key || `run-${index}`} className="space-y-3">
                 {stage.key && (
                   <StageHeader
                     label={stage.label || stage.key}

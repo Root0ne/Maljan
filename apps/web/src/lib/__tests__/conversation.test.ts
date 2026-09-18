@@ -224,6 +224,37 @@ describe("a run that failed", () => {
     expect(closing.text).toBe("Analysis failed. See server logs for details.");
   });
 
+  it("is drawn after every stage, wherever the run was when it failed", () => {
+    const { stages } = buildConversation(
+      [
+        event("stage_started", { stage: "analysis", kind: "analysis" }),
+        event("agent_message", { stage: "analysis", speaker: "lead", text: "reading imports" }),
+        event("error", { status: "failed", error_id: "abc123abc123", message: "Analysis failed." }),
+      ],
+      ROSTER,
+    );
+
+    expect(itemsOf(stages)).toEqual(["analysis/0/says", "/0/run_failed"]);
+  });
+
+  it("is drawn after a line that was said outside every stage", () => {
+    /* A run replayed from its stored conversation files every line it has no
+     * stage for under one keyless section, and that section is the first one.
+     * The failure closes the run, not that section. */
+    const { stages } = buildConversation(
+      [
+        event("agent_message", { speaker: "lead", text: "said before any stage" }),
+        event("stage_started", { stage: "analysis", kind: "analysis" }),
+        event("agent_message", { stage: "analysis", speaker: "lead", text: "reading imports" }),
+        event("error", { status: "failed", message: "Analysis failed." }),
+      ],
+      ROSTER,
+    );
+
+    expect(itemsOf(stages)).toEqual(["/0/says", "analysis/0/says", "/0/run_failed"]);
+    expect(stages[stages.length - 1].rounds[0].items).toHaveLength(1);
+  });
+
   it("says the run failed when the event carried no words of its own", () => {
     const { stages } = buildConversation([event("error", { status: "failed" })], ROSTER);
 
@@ -312,6 +343,49 @@ describe("one violation, one line", () => {
     expect(stages[0].rounds[0].items[0].feedback).toEqual([
       { state: "retried", message: "cite a call", retryIndex: 1 },
     ]);
+  });
+
+  it("starts a new line where a violation that ended is raised again", () => {
+    /* A second revision round can raise the same violation the first one
+     * settled. Folding it back into the settled line would file it under the
+     * round the run had already moved on from. */
+    const { stages } = buildConversation(
+      [
+        feedback({ state: "retried", path: "static.claims[2]" }),
+        feedback({ state: "resolved", path: "static.claims[2]" }),
+        event("agent_message", { stage: "a", speaker: "lead", round: 1, text: "revised again" }),
+        feedback({ state: "retried", path: "static.claims[2]", retry_index: 2 }),
+        feedback({ state: "survived", path: "static.claims[2]", retry_index: 2 }),
+      ],
+      ROSTER,
+    );
+
+    const items = stages[0].rounds.flatMap((round) => round.items);
+    expect(items.map((i) => i.kind)).toEqual(["validation_feedback", "says", "validation_feedback"]);
+    expect(items[0].feedback?.map((f) => f.state)).toEqual(["retried", "resolved"]);
+    expect(items[2].feedback?.map((f) => f.state)).toEqual(["retried", "survived"]);
+    expect(items.map((i) => i.round)).toEqual([0, 1, 1]);
+  });
+
+  it("lands on its own line when the speaker streamed the turn it corrects", () => {
+    /* A finished message replaces the bubble its own deltas opened, and every
+     * line filed after that bubble moves up one. A violation whose first state
+     * was recorded before the replacement must move with them, or its second
+     * state overwrites the message the agent had just finished saying. */
+    const { stages } = buildConversation(
+      [
+        event("agent_message_delta", { stage: "a", agent: "lead", text_delta: "Reading " }),
+        feedback({ state: "retried", path: "static.claims[2]" }),
+        event("agent_message", { stage: "a", speaker: "lead", text: "the imports resolve at runtime" }),
+        feedback({ state: "survived", path: "static.claims[2]" }),
+      ],
+      ROSTER,
+    );
+
+    const items = stages[0].rounds[0].items;
+    expect(items.map((i) => i.kind)).toEqual(["validation_feedback", "says"]);
+    expect(items[0].feedback?.map((f) => f.state)).toEqual(["retried", "survived"]);
+    expect(items[1].text).toBe("the imports resolve at runtime");
   });
 
   it("carries the last retry number and message the violation was published with", () => {

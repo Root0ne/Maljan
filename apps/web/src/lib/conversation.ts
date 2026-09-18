@@ -317,6 +317,9 @@ interface BuilderState {
   /** Where each violation's line sits, so the next thing the run says about
    *  it lands on that line rather than under it. */
   feedback: Map<string, Slot>;
+  /** The line a failed run ends on, held apart from the stages so that it is
+   *  drawn after all of them whenever in the run it arrived. */
+  closing: ConversationItem | null;
   /** How many events of the array have been folded. */
   consumed: number;
   /** The last event folded, which is how a continuation is recognised. */
@@ -339,6 +342,7 @@ function freshState(roster: JobRoster | null): BuilderState {
     streaming: new Map(),
     pending: new Map(),
     feedback: new Map(),
+    closing: null,
     consumed: 0,
     last: null,
     textLength: 0,
@@ -659,8 +663,15 @@ function fold(state: BuilderState, event: RunEvent): void {
      * keeps two violations of one code on different claims apart. A run that
      * published no locator folds on the pair, which is the whole key it has.
      * The line keeps the place of the first event, because that is when the
-     * violation happened. */
+     * violation happened.
+     *
+     * Only an open violation folds. A second revision round can raise one the
+     * first round settled, and that is a violation the run came back to rather
+     * than the same one still being argued — a line of its own, where it
+     * happened, instead of one more state on a line filed under a round the
+     * run had already left. */
     const key = `${stageKey}|${speaker}|${code}|${path}`;
+    const ended = entry.state !== "retried";
     const open = state.feedback.get(key);
     if (open) {
       const current = open.stage.items[open.index];
@@ -670,6 +681,7 @@ function fold(state: BuilderState, event: RunEvent): void {
         retryIndex: entry.retryIndex,
         feedback: [...(current.feedback ?? []), entry],
       });
+      if (ended) state.feedback.delete(key);
       return;
     }
     const slot = push(state, stage, {
@@ -689,7 +701,10 @@ function fold(state: BuilderState, event: RunEvent): void {
       retryIndex: entry.retryIndex,
       feedback: [entry],
     });
-    state.feedback.set(key, slot);
+    /* A violation the producer was never shown — the judge's own late checks
+     * arrive as `survived` once — is closed on arrival, and nothing later
+     * folds into it. */
+    if (!ended) state.feedback.set(key, slot);
     return;
   }
 
@@ -717,13 +732,17 @@ function fold(state: BuilderState, event: RunEvent): void {
   if (event.type === "error") {
     /* The line a failed run ends on. The worker publishes one sentence to
      * every reader and the id it filed the traceback under as its own field,
-     * so nothing here reads an id out of a sentence. */
-    const stage = draftOf(state, stageKey);
-    push(state, stage, {
+     * so nothing here reads an id out of a sentence.
+     *
+     * It is held rather than filed under a stage: the event names none, and a
+     * run replayed from its stored conversation keeps every stageless line in
+     * one section that comes before the stages — which is where the failure
+     * ended up, opening the conversation it closed. `snapshot` puts it last. */
+    const closing: ConversationItem = {
       id,
       kind: "run_failed",
-      stage: stageKey,
-      round: stage.round,
+      stage: "",
+      round: 0,
       speaker: "",
       displayName: "",
       text: text(data.message) || "The run failed.",
@@ -732,7 +751,9 @@ function fold(state: BuilderState, event: RunEvent): void {
       claims: [],
       dissent: [],
       errorId: text(data.error_id) || undefined,
-    });
+    };
+    state.textLength += closing.text.length - (state.closing?.text.length ?? 0);
+    state.closing = closing;
     return;
   }
 
@@ -785,21 +806,37 @@ function intoRounds(items: ConversationItem[]): ConversationRound[] {
 }
 
 function snapshot(state: BuilderState): Conversation {
+  const stages = state.order.map((key) => {
+    const stage = state.stages.get(key) as StageDraft;
+    return {
+      key: stage.key,
+      label: stage.label,
+      kind: stage.kind,
+      state: stage.state,
+      reason: stage.reason,
+      durationMs: stage.durationMs,
+      rounds: intoRounds(stage.items),
+    };
+  });
+  /* How the run ended, after everything it did. A section of its own, keyed
+   * by nothing so that no stage header is drawn over it, holding the one
+   * line. The item itself is the object the builder has held all along, so a
+   * drawn row is not remounted by a later snapshot. */
+  if (state.closing) {
+    stages.push({
+      key: "",
+      label: "",
+      kind: "",
+      state: "done",
+      reason: "",
+      durationMs: 0,
+      rounds: [{ round: state.closing.round, items: [state.closing] }],
+    });
+  }
   return {
     participants: [...state.participants.values()].map((p) => ({ ...p })),
     textLength: state.textLength,
-    stages: state.order.map((key) => {
-      const stage = state.stages.get(key) as StageDraft;
-      return {
-        key: stage.key,
-        label: stage.label,
-        kind: stage.kind,
-        state: stage.state,
-        reason: stage.reason,
-        durationMs: stage.durationMs,
-        rounds: intoRounds(stage.items),
-      };
-    }),
+    stages,
   };
 }
 
