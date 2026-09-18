@@ -1,5 +1,11 @@
-import type { AgentDefinitionEntry, CatalogEntry, McpServerEntry } from "@/types/settings";
+import type { CatalogEntry, McpServerEntry } from "@/types/settings";
 import type { AgentLLMOverride } from "./AgentDefinitionsEditor";
+import {
+  AGENT_DEFINITIONS_KEY,
+  displayedDefinitions,
+  type DefinitionMap,
+  type StagedDefinitionMap,
+} from "./agentStaging";
 import type { SettingsContextValue } from "./SettingsContext";
 
 /**
@@ -39,9 +45,15 @@ export function buildFieldRowProps(ctx: SettingsContextValue, entry: CatalogEntr
     llmAgentsStaged: ctx.pending["core.llm.agents"],
     llmGlobal,
     onChangeLlmAgents: (v: Record<string, AgentLLMOverride>) => ctx.stage("core.llm.agents", v),
-    definitions: (ctx.pending["core.agents.definitions"] ??
-      ctx.values["core.agents.definitions"]?.value ??
-      {}) as Record<string, AgentDefinitionEntry>,
+    // Read through the pair, like every other reader of this leaf. A staged
+    // built-in carries its role and its switch and nothing else, so taking the
+    // pending value raw left the stage cards and the analyst picker naming
+    // five built-ins by key — "static" where they had read "Static analyst" a
+    // moment before — for as long as an agent-map edit was unapplied.
+    definitions: displayedDefinitions(
+      (ctx.pending[AGENT_DEFINITIONS_KEY] ?? null) as StagedDefinitionMap | null,
+      (ctx.values[AGENT_DEFINITIONS_KEY]?.value ?? {}) as DefinitionMap,
+    ),
     activeProfile: (ctx.pending["core.agents.profile"] ??
       ctx.values["core.agents.profile"]?.value ??
       "default") as string,

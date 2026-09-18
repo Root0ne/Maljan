@@ -1,10 +1,18 @@
 "use client";
 
+import { probeDetail } from "@/lib/probeDetail";
 import { useRef, useState } from "react";
 import { Bot } from "lucide-react";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import { agentDisplayName, agentKeySuffix } from "./agentNames";
+import {
+  BUILTIN_AGENT_KEYS,
+  cloneDefinition,
+  displayedDefinitions,
+  stagedDefinitions,
+  type StagedDefinitionMap,
+} from "./agentStaging";
 import Dot from "./Dot";
 import {
   ADD_BUTTON,
@@ -28,14 +36,6 @@ import type {
 const input =
   "w-full bg-bg-deep border border-border rounded px-2 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent";
 
-/** Re-seeded by the settings model, so they lock rather than delete. */
-export const BUILTIN_AGENT_KEYS = new Set([
-  "static",
-  "dynamic",
-  "network",
-  "judge",
-  "reporter",
-]);
 /** Roles that read a static provider; the others have nothing to point at. */
 /* The roles that pick a static provider of their own: the built-in static
    analyst, and the two that are a prompt rather than a class. A `lead` is
@@ -52,15 +52,6 @@ const ROLE_CHOICES: AgentDefinitionEntry["role"][] = [
  *  reporter are not analysts and the settings model refuses a reference to
  *  either. */
 const ASKABLE_ROLES = new Set(["static", "dynamic", "network", "generic", "lead"]);
-
-export const EMPTY_DEFINITION: AgentDefinitionEntry = {
-  role: "generic",
-  label: "",
-  prompt: "",
-  tools: [],
-  static_provider: null,
-  enabled: true,
-};
 
 /**
  * One entry of `llm.agents`, mirroring `maljan.core.config.AgentLLMConfig`.
@@ -106,43 +97,6 @@ export interface LlmGlobalFallback {
 const RESOLVE_INPUTS = new Set<keyof AgentDefinitionEntry>([
   "role", "prompt", "tools", "static_provider",
 ]);
-
-/**
- * The definition map with a new entry at `key`: a copy of `from` when one is
- * named, else a blank generic agent.
- *
- * A clone starts from what its source *resolves to*, so an operator can see
- * and edit the built-in prompt rather than guessing it: the source's own
- * `prompt` when it has one, else the resolved text of a probe already made
- * against the source, else `null` — still "the built-in prompt" — with the
- * editor's usual hint to press Resolve first.
- *
- * Shared with the setup guide's "Start from" step so a clone means exactly
- * the same thing wherever it is made.
- */
-export function cloneDefinition(
-  definitions: Record<string, AgentDefinitionEntry>,
-  key: string,
-  from?: string,
-  sourceProbe?: ProbeResult | "running"
-): Record<string, AgentDefinitionEntry> {
-  const source = from ? definitions[from] : undefined;
-  const resolvedDetails =
-    sourceProbe && sourceProbe !== "running" && sourceProbe.ok
-      ? (sourceProbe.details as AgentProbeDetails | null)
-      : null;
-  return {
-    ...definitions,
-    [key]: source
-      ? {
-          ...source,
-          label: source.label ? `${source.label} (copy)` : key,
-          prompt: source.prompt ?? resolvedDetails?.prompt ?? null,
-          tools: source.tools.map((t) => ({ ...t })),
-        }
-      : { ...EMPTY_DEFINITION },
-  };
-}
 
 /** One field's validation message, under the field the API named. */
 function FieldError({ message }: { message?: string }) {
@@ -365,13 +319,12 @@ export function AgentDetail({
     onChangeLlmAgents({ ...llmAgents, [key]: stored });
   };
 
-  const remove = (key: string) => {
-    if (BUILTIN_AGENT_KEYS.has(key)) {
-      put(key, { enabled: false });
-      return;
-    }
-    onChange(removeEntry(definitions, key));
-  };
+  /** Removes an agent from the map. The header offers it only where `locked`
+   *  is false; note that `BUILTIN_AGENT_KEYS` is the set the settings model
+   *  locks, which is smaller than the set it re-seeds — the seeded generic
+   *  agents come back on the next load whether or not they are removed here,
+   *  which predates this editor. */
+  const remove = (key: string) => onChange(removeEntry(definitions, key));
 
   const sameRef = (a: ToolRefEntry, b: ToolRefEntry) =>
     a.kind === b.kind &&
@@ -448,7 +401,7 @@ export function AgentDetail({
           className={`text-[11px] ${result.ok ? "text-status-green" : "text-status-red"}`}
           role="status"
         >
-          {result.ok ? "ok" : "failed"} · {result.latency_ms} ms · {result.detail}
+          {result.ok ? "ok" : "failed"} · {result.latency_ms} ms · {probeDetail(result.detail)}
           {details ? ` · prompt ${details.prompt_chars} chars` : ""}
         </p>
       )}
@@ -482,9 +435,13 @@ export function AgentDetail({
                   {agentKeySuffix(agentKey, definitions)}
                 </span>
               )}
-              <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-border text-text-muted">
-                {agent.role}
-              </span>
+              {/* The role names what this agent is; where it is also the
+                  key, the key beside it has already said so. */}
+              {agent.role !== agentKey && (
+                <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-bg-elevated text-text-muted">
+                  {agent.role}
+                </span>
+              )}
               {locked && (
                 <span className="ml-2 text-[10px] uppercase tracking-wider text-text-muted">
                   built in
@@ -513,13 +470,19 @@ export function AgentDetail({
                   Clone
                 </button>
               )}
-              <button
-                type="button"
-                className="text-xs text-text-secondary"
-                onClick={() => remove(agentKey)}
-              >
-                {locked ? "Disable" : "Remove"}
-              </button>
+              {/* A built-in has no Remove, and the switch beside this is
+                  already how it is turned off. Two controls for one state,
+                  worded in opposite directions, only raised the question of
+                  whether they did the same thing. */}
+              {!locked && (
+                <button
+                  type="button"
+                  className="text-xs text-text-secondary"
+                  onClick={() => remove(agentKey)}
+                >
+                  Remove
+                </button>
+              )}
             </div>
           </div>
 
@@ -942,22 +905,26 @@ export default function AgentDefinitionsEditor({
    *  agent lands under that field on that agent's detail instead of a
    *  leaf-wide banner nobody can trace back to the offending definition. */
   errors: Record<string, string>;
-  onChange: (value: Record<string, AgentDefinitionEntry>) => void;
+  /** Stages the whole leaf. Built-ins arrive narrowed to what may be edited
+   *  about them, which is what `stagedDefinitions` is for. */
+  onChange: (value: StagedDefinitionMap) => void;
 }) {
-  const value = (staged ?? current?.value ?? entry.default ?? {}) as Record<
-    string,
-    AgentDefinitionEntry
-  >;
-  const llmAgents = (llmAgentsStaged ?? llmAgentsCurrent?.value ?? {}) as Record<
-    string,
-    AgentLLMOverride
-  >;
   /** What is stored right now, for the "changed" dot. An agent differs when
    *  either of the two leaves it spans has been edited: the definition itself,
    *  or its entry in the LLM override map. */
   const savedDefs = (current?.value ?? entry.default ?? {}) as Record<
     string,
     AgentDefinitionEntry
+  >;
+  /* What the editor draws is the stored map with the staged edits over it, not
+   * the staged map itself: a built-in is staged as its role and its switch
+   * alone (see `agentStaging`), which is not enough to draw a row with. */
+  const value = displayedDefinitions(staged as StagedDefinitionMap | null, savedDefs);
+  const stage = (next: Record<string, AgentDefinitionEntry>) =>
+    onChange(stagedDefinitions(next, savedDefs));
+  const llmAgents = (llmAgentsStaged ?? llmAgentsCurrent?.value ?? {}) as Record<
+    string,
+    AgentLLMOverride
   >;
   const savedLlm = (llmAgentsCurrent?.value ?? {}) as Record<string, AgentLLMOverride>;
   const [newKey, setNewKey] = useState("");
@@ -985,7 +952,7 @@ export default function AgentDefinitionsEditor({
     }
     setKeyError(null);
     setNewKey("");
-    onChange(cloneDefinition(value, key, from, resolve.probes[from ?? ""]));
+    stage(cloneDefinition(value, key, from, resolve.probes[from ?? ""]));
     // A clone starts with the source's LLM override too, if it has one — the
     // override lives outside the definition, so cloning the definition alone
     // would silently drop it and leave the clone on the global default.
@@ -1061,7 +1028,7 @@ export default function AgentDefinitionsEditor({
                   {agentKeySuffix(key, value) && (
                     <span className="font-mono">{agentKeySuffix(key, value)}</span>
                   )}
-                  <span>{item.role}</span>
+                  {item.role !== key && <span>{item.role}</span>}
                   {BUILTIN_AGENT_KEYS.has(key) && <span>built in</span>}
                   {verdict && (
                     <span
@@ -1107,7 +1074,7 @@ export default function AgentDefinitionsEditor({
           key={selected}
           agentKey={selected}
           definitions={value}
-          onChange={onChange}
+          onChange={stage}
           llmAgents={llmAgents}
           onChangeLlmAgents={onChangeLlmAgents}
           llmGlobal={llmGlobal}

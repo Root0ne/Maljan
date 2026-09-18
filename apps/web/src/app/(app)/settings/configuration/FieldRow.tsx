@@ -67,7 +67,7 @@ function CopyKeyButton({ settingKey }: { settingKey: string }) {
   );
 }
 
-function Description({ text, full }: { text: string; full: boolean }) {
+function Description({ text, full, about }: { text: string; full: boolean; about: string }) {
   const [expanded, setExpanded] = useState(false);
   if (!text) return null;
   const head = firstSentence(text);
@@ -82,9 +82,12 @@ function Description({ text, full }: { text: string; full: boolean }) {
   return (
     <p className="text-xs text-text-secondary mt-1">
       {expanded ? text : head}{" "}
+      {/* Seven links reading "more" on one page told a screen-reader user
+          seven times that there was more of something. */}
       <button
         type="button"
         aria-expanded={expanded}
+        aria-label={`${expanded ? "Less" : "More"} about ${about}`}
         className="text-[11px] text-accent-strong"
         onClick={() => setExpanded((v) => !v)}
       >
@@ -224,15 +227,30 @@ export default function FieldRow({
       )}
       {!guide && (
         <div className="flex gap-3 mt-1">
+          {/* Both are destructive and both were 11px grey text with nothing
+              about them that said "button". The text stays small; the box
+              around it is the affordance, and clears the 24px minimum.
+
+              Which setting they belong to is a *description*, not a name: an
+              `aria-label` here replaced the accessible name with something the
+              button does not say, which is a Label-in-Name failure (WCAG
+              2.5.3) as well as a broken locator. The row's own label carries
+              the context instead. */}
           {dirty && (
-            <button type="button" className="text-[11px] text-text-secondary" onClick={onUnstage}>
+            <button
+              type="button"
+              aria-describedby={labelId}
+              className="h-6 rounded border border-border px-2 text-[11px] text-text-secondary hover:text-text-primary hover:border-text-muted"
+              onClick={onUnstage}
+            >
               Discard
             </button>
           )}
           {source === "ui" && entry.editable && (
             <button
               type="button"
-              className="text-[11px] text-text-secondary"
+              aria-describedby={labelId}
+              className="h-6 rounded border border-border px-2 text-[11px] text-text-secondary hover:text-text-primary hover:border-text-muted"
               title="Removes the stored value now, without Apply"
               onClick={onReset}
             >
@@ -267,13 +285,13 @@ export default function FieldRow({
               className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${
                 source === "ui"
                   ? "bg-accent/20 text-accent-strong"
-                  : "bg-border text-text-muted"
+                  : "bg-bg-elevated text-text-muted"
               }`}
             >
               {SOURCE_LABEL[source]}
             </span>
           )}
-          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-border text-text-muted">
+          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-bg-elevated text-text-muted">
             {APPLIES_LABEL[entry.applies]}
           </span>
           {dirty && (
@@ -281,7 +299,7 @@ export default function FieldRow({
           )}
         </div>
       )}
-      <Description text={entry.description} full={guide} />
+      <Description text={entry.description} full={guide} about={entry.title} />
       {!entry.editable && entry.reason && (
         <p className="text-[11px] text-text-muted mt-1">{entry.reason}</p>
       )}

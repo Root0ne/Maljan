@@ -135,17 +135,24 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
   // banner. ``explanation`` is shown as small muted text below each rule.
   const fpWarnings: FpWarning[] = runSummary?.fp_warnings ?? [];
   const hasErrorWarning = fpWarnings.some((w) => w.severity === "error");
+  /* The linter writes one explanation per rule, so a run that tripped one rule
+     three times carried the same paragraph three times. Said once where they
+     agree, listed where they do not. */
+  const explanations = [
+    ...new Set(fpWarnings.map((w) => (w.explanation ?? "").trim()).filter(Boolean)),
+  ];
+  const sharedExplanation = explanations.length === 1 ? explanations[0] : null;
   const evidence = runSummary?.evidence ?? null;
   const ungroundedSections = runSummary?.sections_without_evidence ?? 0;
 
   return (
-    <div className="grid grid-cols-2 gap-4">
+    <div className="flex flex-col gap-4">
       <DownloadBar reportId={reportId} mr={mr} shortHash={shortHash} />
 
       {isDegraded && (
         <div
           role="alert"
-          className="col-span-2 flex items-start gap-3 rounded border border-status-orange/40 bg-status-orange/10 p-3 text-sm"
+          className="flex items-start gap-3 rounded border border-status-orange/40 bg-status-orange/10 p-3 text-sm"
         >
           <span className="font-semibold text-status-orange shrink-0">
             DEGRADED RUN
@@ -179,40 +186,59 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
       {fpWarnings.length > 0 && (
         <details
           open={hasErrorWarning}
-          className="col-span-2 rounded border border-status-orange/40 bg-status-orange/10 p-3 text-sm"
+          className="rounded border border-status-orange/40 bg-status-orange/10 p-3 text-sm"
         >
-          <summary className="flex items-center gap-3 cursor-pointer select-none">
-            <span className="font-semibold text-status-orange">
-              QA WARNINGS
-            </span>
-            <span className="text-xs text-text-muted">
-              {fpWarnings.length} finding{fpWarnings.length === 1 ? "" : "s"}
-              {hasErrorWarning ? " (errors present)" : ""}
+          {/* `display:flex` on the `<summary>` itself suppresses Chromium's
+              disclosure triangle, so this box gave no sign that it opened
+              while the RUN RECORD beside it did. The flex row is a child. */}
+          <summary className="cursor-pointer select-none">
+            <span className="inline-flex items-center gap-3 align-middle">
+              <span className="font-semibold text-status-orange">
+                QA WARNINGS
+              </span>
+              <span className="text-xs text-text-muted">
+                {countLabel(fpWarnings.length, "finding")}
+                {hasErrorWarning ? " (errors present)" : ""}
+              </span>
             </span>
           </summary>
           <ul className="mt-2 space-y-2 text-text-secondary">
             {fpWarnings.map((w, i) => (
               <li key={i} className="space-y-0.5">
+                {/* The field is named in the sentence rather than repeated
+                    under it as `field: defensive_recommendations[1]`, which
+                    restated what the message had just said. */}
                 <p className="text-xs">
                   <code className="font-mono font-semibold">{w.rule}</code>{" "}
                   <span className="uppercase text-text-muted">
                     [{w.severity}]
                   </span>{" "}
                   {w.message}
+                  {w.field ? (
+                    <>
+                      {" "}
+                      <span className="text-text-muted">
+                        (at <code className="font-mono">{w.field}</code>)
+                      </span>
+                    </>
+                  ) : null}
                 </p>
-                {w.field && (
-                  <p className="text-[11px] font-mono text-text-muted">
-                    field: {w.field}
-                  </p>
-                )}
-                {w.explanation && (
-                  <p className="text-[11px] text-text-muted">
-                    {w.explanation}
-                  </p>
-                )}
               </li>
             ))}
           </ul>
+          {/* One explanation for the group. Each warning used to carry its
+              own copy of the same two sentences, verbatim, three times over. */}
+          {sharedExplanation ? (
+            <p className="mt-2 text-[11px] text-text-muted">{sharedExplanation}</p>
+          ) : (
+            <ul className="mt-2 space-y-1">
+              {explanations.map((text, i) => (
+                <li key={i} className="text-[11px] text-text-muted">
+                  {text}
+                </li>
+              ))}
+            </ul>
+          )}
         </details>
       )}
 
@@ -224,7 +250,7 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
           every tab can see them; repeating them here made the same two facts
           read twice on the one tab that also carries the argument for them. */}
       {(mr.severity || mr.malware_category) && (
-        <div className="bg-bg-surface border border-border rounded col-span-2">
+        <div className="bg-bg-surface border border-border rounded">
           <div className="px-4 py-3 border-b border-border">
             <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
               Severity
@@ -279,13 +305,13 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
           listing the first five of each here was the same finding twice, and
           the shorter of the two copies. */}
       {jobId && (ttpCount > 0 || net.domains + net.ips + net.urls > 0) && (
-        <div className="col-span-2 bg-bg-surface border border-border rounded">
+        <div className="bg-bg-surface border border-border rounded">
           <div className="px-4 py-3 border-b border-border">
             <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
               Findings
             </h2>
           </div>
-          <div className="p-4 grid grid-cols-5 gap-3 text-center">
+          <div className="p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 text-center">
             <CountLink
               label="Techniques"
               value={ttpCount}
@@ -309,7 +335,7 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
           of it is not — a section with neither a ledger entry nor a named
           finding behind it is a defect, and this is where it shows. */}
       {evidence && (
-        <div className="col-span-2 bg-bg-surface border border-border rounded">
+        <div className="bg-bg-surface border border-border rounded">
           <div className="px-4 py-3 border-b border-border flex items-center gap-3">
             <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
               Evidence
@@ -323,7 +349,7 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
               </Link>
             )}
           </div>
-          <div className="p-4 grid grid-cols-5 gap-3 text-center">
+          <div className="p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 text-center">
             <Stat label="Calls" value={evidence.entries ?? 0} />
             <Stat label="Succeeded" value={evidence.ok ?? 0} accent="text-status-green" />
             <Stat
@@ -351,7 +377,7 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
       {/* Executive summary — drawn when the run wrote one. A heading over an
           apology is a section that exists to say it has nothing. */}
       {(mr.executive_summary.trim() || mr.capabilities_narrative.length > 0) && (
-        <div className="col-span-2 bg-bg-reading border border-border rounded">
+        <div className="bg-bg-reading border border-border rounded">
           <div className="px-4 py-3 border-b border-border">
             <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
               Executive Summary
@@ -443,11 +469,11 @@ function RunRecord({
   );
 
   return (
-    <details className="col-span-2 bg-bg-surface border border-border rounded">
+    <details className="bg-bg-surface border border-border rounded">
       <summary className="px-4 py-3 cursor-pointer select-none text-xs font-medium text-text-primary uppercase tracking-wider">
         Run record
       </summary>
-      <div className="px-4 pb-4 grid grid-cols-2 gap-6 text-xs text-text-secondary">
+      <div className="px-4 pb-4 grid grid-cols-1 md:grid-cols-2 gap-6 text-xs text-text-secondary">
         <div>
           <h3 className="text-[11px] uppercase tracking-wider text-text-muted mb-1.5">
             Configuration
@@ -607,7 +633,7 @@ function DownloadBar({
   const mispDisabled = !mr.misp_attributes || mr.misp_attributes.length === 0;
 
   return (
-    <div className="col-span-2 flex flex-wrap items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       <span className="text-[11px] text-text-muted uppercase tracking-wider mr-1">
         Export
       </span>
@@ -658,14 +684,20 @@ function DownloadBar({
       >
         {busy === "timeline" ? "fetching..." : "\u2193 Timeline"}
       </button>
+      {/* A disabled control never surfaces its own `title`, so the reason it
+          is disabled was written somewhere nobody could read it. */}
       <button
         onClick={downloadMisp}
         disabled={mispDisabled}
-        title={mispDisabled ? "No MISP attributes generated for this report" : undefined}
         className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted disabled:text-text-disabled disabled:cursor-not-allowed"
       >
         ↓ MISP attributes
       </button>
+      {mispDisabled && (
+        <span className="text-[11px] text-text-muted">
+          this run generated no MISP attributes
+        </span>
+      )}
       <EnrichButton reportId={reportId} />
       {error && (
         <div

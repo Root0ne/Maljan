@@ -67,7 +67,7 @@ export default function AttributionTab() {
             Family Attribution
           </h2>
         </div>
-        <div className="p-4 grid grid-cols-3 gap-4">
+        <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           <Field
             label="Family"
             value={familyDisplay}
@@ -89,9 +89,16 @@ export default function AttributionTab() {
                 : "-"
             }
           />
-          <Field label="Actor" value={attribution.actor || "(unknown)"} />
-          <Field label="Campaign" value={attribution.campaign || "(unknown)"} />
+          {attribution.actor && <Field label="Actor" value={attribution.actor} />}
+          {attribution.campaign && <Field label="Campaign" value={attribution.campaign} />}
         </div>
+        {/* A row whose value is "(unknown)" is a field the schema has rather
+            than a fact about the sample. */}
+        {!attribution.actor && !attribution.campaign && (
+          <p className="px-4 pb-3 -mt-2 text-[11px] text-text-muted">
+            No actor and no campaign were named.
+          </p>
+        )}
         {!attribution.family && (
           <div className="px-4 pb-3 -mt-2 text-[11px] text-text-muted">
             No specific malware family was attributed. The behavioural{" "}
@@ -219,7 +226,7 @@ function EvidenceTable({
           <thead>
             <tr className="text-left text-text-muted border-b border-border-light">
               {headers.map((h) => (
-                <th key={h} className="px-4 py-2 font-medium">
+                <th key={h} scope="col" className="px-4 py-2 font-medium">
                   {h}
                 </th>
               ))}

@@ -63,7 +63,7 @@ export default function SetupHubPage() {
               </p>
               <Link
                 href={`/settings/setup/${guide.id}`}
-                className="inline-block mt-3 px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent text-white rounded hover:bg-accent-hover"
+                className="inline-block mt-3 px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent-fill text-white rounded hover:bg-accent-fill-hover"
               >
                 Start
               </Link>

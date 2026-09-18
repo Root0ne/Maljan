@@ -747,6 +747,135 @@ change landed on `main`.
 
 ### Fixed
 
+- **The console stopped clipping itself.** `main` is a flex item, so its
+  `min-width: auto` let it grow to its content's min-content width instead of
+  constraining it: the Detection tab's Suricata block took it to 2542 px
+  inside a 1440 px window and the shell's `overflow:hidden` cut off 1120 px
+  with no scrollbar anywhere to reach it, and the Conversation tab lost its
+  right edge the same way. `min-w-0` on the column and on `main` makes every
+  `overflow-x-auto` inside them engage as it was meant to.
+- **A phone-width layout, and a test that keeps one.** Twenty-one
+  unconditional multi-column grids meant the dashboard kept four stat columns
+  at 375 px with every label clipped, twenty-seven elements past the viewport
+  and no document scroll to reach them. Every grid now starts at one or two
+  columns and widens at a breakpoint, the jobs filter rail stacks, and
+  `styleRules.test.ts` fails on an unconditional `grid-cols-3` or wider.
+- **A custom agent can be saved.** The agents editor staged the whole
+  definition map, so adding one agent re-sent every built-in exactly as it had
+  come back from `GET /settings`, and the API compares a built-in in the body
+  field by field against its seed. A store written before a seed's tool list
+  changed holds `tools: []` on every built-in; the settings model reads that as
+  "not set" and `agent_map.validate_definitions` did not, so every save
+  touching the agent map was refused with "'judge' is built in; clone it to
+  change it" on the four built-ins whose seed has tools. Both halves are
+  fixed: the validator applies the same normalisation the settings model does,
+  and the console stages a built-in as the only two things that may be changed
+  about it — its role and its switch — while drawing the stored entry behind
+  it.
+- **Validation re-runs on the edit.** `useSettings` cleared only the error
+  keyed at the leaf it staged, so a composite leaf's field messages
+  (`core.agents.definitions.ahmet.prompt`) survived every later edit and "a
+  generic agent needs a prompt" went on being printed under a prompt that had
+  one. The review panel also counted rows rather than fields, announcing "1
+  field needs attention" above five messages joined with semicolons into one
+  run-on sentence for a screen reader; the count is of fields and the messages
+  are a list.
+- **The verdict and the severity of a run are reconciled where they
+  disagree.** A run headlined Malicious · 0.95 over a severity card reading
+  Informational 0.5/10 and prose calling the sample legitimate. Neither is
+  overruled — both are the judge's — but the header now names the
+  disagreement once, "Judge: Malicious 0.95 · Severity: Informational", with
+  the sentence that says to read the severity card before quoting either.
+- **Facts printed twice, printed once.** The filename was the `h1` and the
+  "Sample:" line under it; the confidence was `92/100` in the header and
+  `Confidence 0.92.` in the summary paragraph; the search palette printed each
+  row's verdict twice and gave eight runs of one file no way to tell them
+  apart; the agents list printed the key as the key and again as the role; a
+  stage card printed its key in its header and in its Key field; `size`
+  appeared in both of IDENTITY's tables. Each is now in one place, and the
+  palette's rows carry the run's age and its id.
+- **The enrichment banner stopped announcing the past.** The analysis layout
+  walked the event feed from zero, so every `enrichment_complete` in a
+  finished run's history re-toasted "Threat intel enrichment finished" in the
+  present tense on every visit. The refetch still happens; the toast is for
+  events that arrive while the page is open.
+- **WCAG 2.1 AA on the primary button, and the controls a keyboard could not
+  reach.** White on `--accent` measured 3.09:1 on every primary button in the
+  console, so filled buttons use a new `--accent-fill` (4.63:1) and `--accent`
+  keeps its borders, icons and washes. The upload zone was a bare `div` with
+  its file input hidden by `display:none` — unreachable by keyboard and absent
+  from the accessibility tree — and is a button over a visually-hidden input;
+  the analyze dialog returns focus to what opened it; the settings badges move
+  off `--border`, which is the one surface the text-tier contrast analysis
+  never covered; message timestamps move off the disabled tier; every page
+  gains a skip link and an `h1`; every table header gains `scope`; the guide's
+  step chips carry `aria-current` on the button rather than on the list item;
+  and the search palette's rows have ids the combobox names with
+  `aria-activedescendant`.
+- **The audit log says who did it.** It had no actor column at all, a raw
+  action key, a Resource column reading "settings" on every row and an IP
+  column of em dashes, over 1766 entries with no filter. The action is read as
+  a sentence, the actor is drawn, a column every row on the page leaves empty
+  is not drawn, and the action filter goes to the endpoint, which narrows the
+  whole log rather than the twenty rows on screen.
+- **Machine names and machine values are read back before they are drawn.** A
+  section with no typed panel had its tool's own keys as column headers
+  (`optional_dependency`, `technique_ids`) beside hand-written ones, and the
+  binary header tables printed the constants the file format stores — `machine
+  34404`, `subsystem 2`, `timestamp 1566949827`, `entry point 321264`. They
+  now read as sentences and as their named constants, a human size, a UTC date
+  and a hex entry point, and a field nothing knows is drawn as it arrived. The
+  analyze dialog's provider and team menus are labelled rather than keyed, the
+  evidence ledger runs its stage through the same reading as the stage strip,
+  and its Agent and Server columns — "pipeline" on fifteen of forty rows — are
+  one column.
+- **A column that says nothing is not a column.** A column whose every row
+  holds the same value is stated once above the table; one that is empty on
+  every row is dropped. The NETWORK indicator table spent two of its four
+  columns on one evidence id and forty dashes.
+- **Sign out is offered where it works.** Under `NEXT_PUBLIC_AUTH_DISABLED`
+  the handler is an explicit no-op and the header drew the button anyway, so
+  pressing it left the reader on the same page as the same user with nothing
+  said.
+- **The QA warnings box shows that it opens.** `display:flex` on the
+  `<summary>` suppresses Chromium's disclosure triangle, so the box gave no
+  sign of being a disclosure while the RUN RECORD beside it did; the shared
+  explanation is stated once for the group instead of repeated verbatim under
+  each warning, and the field a warning names is named in its sentence rather
+  than restated under it.
+- **The fallback narrative stopped contradicting itself.** It reported "11
+  ATT&CK techniques:" and then listed five, with no ellipsis and no "and 6
+  more"; it pointed the reader at "the Static, Dynamic and Network sections
+  below" whether or not the run filled them, and called tabs sections; and it
+  restated a confidence the header above it already carried, in a different
+  notation. It now says which of the five it is naming, names the tabs the
+  report actually has, and leaves the confidence to the one place that prints
+  it.
+- **The console minors the walkthrough named.** A finished conversation is no
+  longer a live region, so changing a filter does not queue a 23,000-character
+  transcript for re-announcement, and the filter reports "n of m shown" as a
+  status; the jobs list moves the verdict and its labelled confidence inside
+  the link, so dozens of runs of one file are no longer dozens of identically
+  named links, and announces the filtered count; a failed probe says what a
+  `ConnectError` means before quoting it; the two destructive actions on a
+  secret row say what each of them destroys; the "more" toggles say what they
+  are more about; the per-row destructive actions have a button's box and
+  clear the 24 px minimum; a rule key no longer rides in front of the sentence
+  it already reads as; two participants who share a name carry their keys; the
+  DEFENSE tab has a heading; the 404's two links are styled alike; the
+  attribution card's empty rows are one sentence; and the profile form carries
+  `autocomplete` and states its password rule before it is broken.
+- **Six places where the web tree and the code it mirrors had drifted.** A
+  `delegation_answer` left its speaker drawn as working for the rest of the
+  run although it is the callee's own closing line; `EvidenceSummary` did not
+  declare the `failures` the report header prints; `AgentMessageEventData` did
+  not declare the five fields the conversation view reads on a tool line; the
+  section map's comment counted sixteen catalog groups where there are
+  seventeen; the redirect table's comment counted twelve tabs and five where
+  neither number is in the tree; and `REPUTATION_TOOLS` knew two of the three
+  tool names the pipeline recognises.
+- **`core.agents.profiles` is titled "Team definitions".** Its page is already
+  called Teams, so the two headings sat on top of each other.
 - **The worker no longer holds a transaction while the models run.** The
   analysis task kept one session open for the whole job: it read the settings,
   and the backend then sat `idle in transaction` for as long as the analysis

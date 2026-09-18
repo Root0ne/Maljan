@@ -132,7 +132,7 @@ export default function SettingsApiKeysPage() {
           </div>
           <button
             type="submit"
-            className="h-9 px-4 text-xs bg-accent text-white rounded hover:bg-accent-hover"
+            className="h-9 px-4 text-xs bg-accent-fill text-white rounded hover:bg-accent-fill-hover"
           >
             Create
           </button>
@@ -189,6 +189,9 @@ export default function SettingsApiKeysPage() {
       )}
 
       {/* Key list */}
+      <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+        Issued keys
+      </h2>
       {apiKeysLoading ? (
         <div className="text-xs text-text-muted">Loading API keys...</div>
       ) : apiKeysError ? (

@@ -477,9 +477,14 @@ function fold(state: BuilderState, event: RunEvent): void {
     const who = participantOf(state, speaker, text(data.display_name) || undefined);
     if (who) {
       who.messages += 1;
-      /* A line that closes a turn leaves its speaker done; an ask, an answer
-       * or a tool line means it is still working. */
-      who.state = kind === "says" || kind === "verdict" ? "done" : "working";
+      /* A line that closes a turn leaves its speaker done. A `delegation_ask`
+       * is a caller waiting on an answer, so the caller is still working; a
+       * `delegation_answer` is the callee's own closing line, and the callee
+       * was being drawn as working for the rest of the run. */
+      who.state =
+        kind === "says" || kind === "verdict" || kind === "delegation_answer"
+          ? "done"
+          : "working";
     }
     const addressedTo = text(data.addressed_to) || undefined;
     push(state, stage, {

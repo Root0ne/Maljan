@@ -136,14 +136,14 @@ export default function DashboardPage() {
   if (loading) {
     return (
       <div>
-        <div className="grid grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           <StatCardSkeleton />
           <StatCardSkeleton />
           <StatCardSkeleton />
           <StatCardSkeleton />
         </div>
-        <div className="grid grid-cols-3 gap-4">
-          <div className="col-span-2 bg-bg-surface border border-border rounded animate-pulse">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="lg:col-span-2 bg-bg-surface border border-border rounded animate-pulse">
             <div className="h-10 border-b border-border" />
             <div className="p-4 space-y-3">
               {Array.from({ length: 5 }).map((_, i) => (
@@ -186,6 +186,10 @@ export default function DashboardPage() {
 
   return (
     <div>
+      {/* The page's own name. Visually hidden because the rail already says
+          where the reader is; an outline that starts at h2 does not. */}
+      <h1 className="sr-only">Dashboard</h1>
+
       {/* Mock-mode banner: operators
           frequently miss the worker log line announcing mock mode. Red
           banner makes the configuration impossible to overlook. */}
@@ -206,7 +210,7 @@ export default function DashboardPage() {
       )}
 
       {/* Stats Row */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <StatCard label="Total Analyses" value={stats?.total_jobs ?? 0} />
         <StatCard
           label="Completed"
@@ -224,9 +228,9 @@ export default function DashboardPage() {
         />
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Recent Analyses */}
-        <div className="col-span-2 bg-bg-surface border border-border rounded">
+        <div className="lg:col-span-2 bg-bg-surface border border-border rounded">
           <div className="flex items-center justify-between px-4 py-3 border-b border-border">
             <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
               Latest runs
@@ -296,7 +300,10 @@ export default function DashboardPage() {
                     .join(", ")}`}
                 >
                 <ResponsiveContainer width="100%" height={180}>
-                  <PieChart>
+                  {/* The labelled wrapper above is the chart's one node in the
+                      accessibility tree; Recharts' own surface and pie would
+                      otherwise be two more tab stops with no name. */}
+                  <PieChart accessibilityLayer={false} tabIndex={-1} role="presentation">
                     <Pie
                       data={verdictData}
                       cx="50%"
@@ -305,6 +312,7 @@ export default function DashboardPage() {
                       outerRadius={70}
                       dataKey="value"
                       strokeWidth={0}
+                      tabIndex={-1}
                     >
                       {verdictData.map((_, i) => (
                         <Cell key={i} fill={verdictColors[i]} />

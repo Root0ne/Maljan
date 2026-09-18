@@ -29,8 +29,12 @@ test.describe("Analyses", () => {
   }) => {
     await page.goto("/jobs");
 
-    // "Analyses — 1 result"; only rendered on success.
-    await expect(page.getByRole("heading", { name: /^Analyses/ })).toBeVisible();
+    /* Two headings start with "Analyses" now: the page's own, which is
+     * visually hidden because the rail already says where the reader is, and
+     * the list's, which counts what it holds and is only rendered on success.
+     * The outline used to begin at the second one. */
+    await expect(page.getByRole("heading", { name: "Analyses", exact: true })).toBeAttached();
+    await expect(page.getByRole("heading", { name: /^Analyses — / })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Filters" })).toBeVisible();
     await expect(page.getByRole("link", { name: /invoice_scan\.exe/ })).toBeVisible();
     // The verdict the Reports page used to carry, on the row it belongs to.
@@ -68,7 +72,10 @@ test.describe("Samples", () => {
   test("lists samples with their hash and size", async ({ authenticatedPage: page }) => {
     await page.goto("/samples");
 
-    await expect(page.getByRole("heading", { name: /^Samples/ })).toBeVisible();
+    // The page's own heading, and the list's own count. See the note on the
+    // analyses list above.
+    await expect(page.getByRole("heading", { name: "Samples", exact: true })).toBeAttached();
+    await expect(page.getByRole("heading", { name: /^Samples — / })).toBeVisible();
     // The table and its column headers are not rendered at all when the list is
     // empty, so this doubles as proof the row exists.
     await expect(page.getByRole("columnheader", { name: "Filename" })).toBeVisible();
@@ -187,10 +194,33 @@ test.describe("Audit log", () => {
     await page.goto("/audit");
 
     await expect(page.getByRole("heading", { name: "Audit Logs" })).toBeVisible();
-    await expect(page.getByText("job.create")).toBeVisible();
+    // The action reads as a sentence, the actor is drawn at all, and the IP
+    // column survives because this fixture row has one.
+    await expect(page.getByText("Job create")).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: "Who" })).toBeVisible();
     await expect(page.getByText("10.0.0.5")).toBeVisible();
     await expect(page.getByText("1 total entry")).toBeVisible();
     await expectNoAlerts(page);
+  });
+
+  /* The log had no way to narrow 1766 entries but Previous and Next. */
+  test("narrows the log by action, through the endpoint", async ({
+    authenticatedPage: page,
+  }) => {
+    const asked: string[] = [];
+    await page.route("**/api/v1/audit/logs?**", (route) => {
+      asked.push(new URL(route.request().url()).searchParams.get("action") ?? "");
+      return route.fulfill({
+        json: { items: [], total: 0, page: 1, page_size: 20, pages: 0 },
+      });
+    });
+    await page.goto("/audit");
+
+    await page.getByLabel("Action").fill("settings");
+    await page.getByRole("button", { name: "Filter" }).click();
+
+    await expect(page.getByText("No entry matches “settings”.")).toBeVisible();
+    expect(asked).toContain("settings");
   });
 
   test("a failed fetch is reported, not disguised as an empty log", async ({
