@@ -110,6 +110,14 @@ class OllamaConfig(BaseModel):
     judge_model: str = "qwen3.5:9b"
     keep_alive: str = "30m"
     num_ctx: Annotated[int, Field(ge=1)] = 32768
+    # Ollama's own ``think`` switch, the counterpart of the OpenAI-compatible
+    # ``disable_thinking`` above. A reasoning model served by Ollama spends its
+    # output budget in the thinking channel and answers with an empty string;
+    # turning this on spends it on the answer. Off by default, because a model
+    # that cannot think is not told to stop — Ollama answers a ``think`` it
+    # does not understand with an error, and most tags are not reasoning
+    # models.
+    disable_thinking: bool = False
 
 
 class GeminiConfig(BaseModel):

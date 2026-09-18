@@ -425,6 +425,18 @@ ANNOTATIONS: dict[str, Annotation] = {
         "probe": "llm",
         "subgroup": "Ollama",
     },
+    "llm.ollama.disable_thinking": {
+        "title": "Ollama disable thinking",
+        "description": (
+            "When true, sends think=false to Ollama so a reasoning model spends its "
+            "output budget on the answer instead of on its own chain of thought. "
+            "Leave it off for models that do not reason: Ollama refuses the field "
+            "for a model that does not support it."
+        ),
+        "probe": "llm",
+        "subgroup": "Ollama",
+        "advanced": True,
+    },
     "llm.ollama.keep_alive": {
         "title": "Ollama keep-alive",
         "description": (

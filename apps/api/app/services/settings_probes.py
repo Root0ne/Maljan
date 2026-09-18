@@ -220,7 +220,23 @@ def _said_something(provider: str, answer: httpx.Response) -> bool:
             or message.get("tool_calls")
         )
     if provider == "ollama":
-        return bool(str(payload.get("response") or "").strip())
+        # Thinking counts, for the same reason ``reasoning_content`` counts
+        # above: a reasoning model given eight tokens spends them in its
+        # thinking channel and answers with an empty ``response``. The model
+        # loaded and the endpoint spoke, which is everything this check is
+        # asked to establish — and refusing it locked every reasoning model on
+        # Ollama out of a deployment that gates jobs on the probe. ``/api/chat``
+        # puts the same two fields under ``message``; a proxy may answer in
+        # either shape, so both are read.
+        message = payload.get("message")
+        message = message if isinstance(message, dict) else {}
+        return bool(
+            _spoken(payload.get("response"))
+            or _spoken(payload.get("thinking"))
+            or _spoken(message.get("content"))
+            or _spoken(message.get("thinking"))
+            or message.get("tool_calls")
+        )
     if provider == "anthropic":
         content = payload.get("content")
         if not isinstance(content, list) or not content:
@@ -281,15 +297,21 @@ def _completion_request(
             },
         )
     if provider == "ollama":
+        body: dict[str, Any] = {
+            "model": model,
+            "prompt": COMPLETION_PROMPT,
+            "stream": False,
+            "options": {"num_predict": COMPLETION_MAX_TOKENS},
+        }
+        # Only when the deployment asked for it. Ollama refuses ``think`` for a
+        # model that has no thinking mode, so sending it always would fail the
+        # models that never had the problem.
+        if disable_thinking:
+            body["think"] = False
         return (
             f"{base or 'http://localhost:11434'}/api/generate",
             {},
-            {
-                "model": model,
-                "prompt": COMPLETION_PROMPT,
-                "stream": False,
-                "options": {"num_predict": COMPLETION_MAX_TOKENS},
-            },
+            body,
         )
     if provider == "anthropic":
         return (
@@ -503,7 +525,12 @@ async def _probe_llm_ollama(v: dict[str, Any]) -> ProbeResult:
             False, _ms(t0), f"{len(models)} models available; missing {missing}", models
         )
     pairs = _pairs_to_file(v, "ollama", base, str(expert))
-    reached, broken, untried = await _complete_each_pair("ollama", pairs, "")
+    reached, broken, untried = await _complete_each_pair(
+        "ollama",
+        pairs,
+        "",
+        disable_thinking=bool(v.get("ollama_disable_thinking")),
+    )
     return _completed(t0, reached, broken, untried, f"{len(models)} models available", models)
 
 
@@ -993,10 +1020,15 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
             endpoint=endpoint,
             model=str(llm_model or ""),
             api_key=_provider_key(settings, llm_provider),
-            # An agent's own endpoint gets the body its own run would carry;
-            # both settings are global to the OpenAI block and ignored by the
-            # other three providers.
-            disable_thinking=bool(settings.llm.openai.disable_thinking),
+            # An agent's own endpoint gets the body its own run would carry.
+            # Each provider is asked about its own thinking switch — the two
+            # are spelled differently and read by different code — and
+            # ``compat`` belongs to the OpenAI block alone.
+            disable_thinking=(
+                bool(settings.llm.ollama.disable_thinking)
+                if llm_provider == "ollama"
+                else bool(settings.llm.openai.disable_thinking)
+            ),
             compat=str(settings.llm.openai.compat or "auto"),
         )
         detail = f"{detail}; {said}"
@@ -1321,6 +1353,7 @@ _INPUTS: dict[str, dict[str, str]] = {
         "core.llm.ollama.base_url": "ollama_base_url",
         "core.llm.ollama.expert_model": "ollama_expert_model",
         "core.llm.ollama.judge_model": "ollama_judge_model",
+        "core.llm.ollama.disable_thinking": "ollama_disable_thinking",
         "core.llm.gemini.api_key": "gemini_api_key",
         "core.llm.gemini.expert_model": "gemini_expert_model",
         "core.llm.gemini.judge_model": "gemini_judge_model",

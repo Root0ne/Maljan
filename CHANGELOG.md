@@ -767,6 +767,16 @@ change landed on `main`.
   one measured run published 71 events and kept 70, and the missing one was
   gone for good once the Redis stream expired. The enrichment task now opens
   the job's feed for that one line and closes it again.
+- **A reasoning model on Ollama can be selected again.** The probe gives a
+  model eight tokens and reads its answer; a reasoning model spends them in its
+  thinking channel and answers with an empty `response`, so every one of them
+  failed — and with `core.llm.require_probe` on, the API then refused to create
+  any job at all. The probe reads Ollama's `thinking` as an answer now, the way
+  it already read an OpenAI-compatible `reasoning_content`, and
+  `core.llm.ollama.disable_thinking` sends `think: false` so the budget is
+  spent on the answer instead. It is off by default, because Ollama refuses the
+  field for a model with no thinking mode, and the same value is sent by the
+  agents' calls and by the probe.
 - **The console stopped clipping itself.** `main` is a flex item, so its
   `min-width: auto` let it grow to its content's min-content width instead of
   constraining it: the Detection tab's Suricata block took it to 2542 px

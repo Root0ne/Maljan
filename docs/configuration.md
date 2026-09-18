@@ -192,6 +192,14 @@ The OpenAI-compatible body carries the same `chat_template_kwargs.enable_thinkin
 switch a run would send, under the same `llm.openai.compat` rule and at every
 endpoint asked, and a reply whose only text is `reasoning_content` counts as an
 answer: a model that reasoned is a model that loaded on a key that was accepted.
+Ollama is asked the same way and read the same way. Its thinking arrives in its
+own `thinking` field, which counts as an answer for the same reason — without
+that, every reasoning model served by Ollama failed the probe, because eight
+tokens are spent thinking and `response` comes back empty, and with
+`llm.require_probe` on the deployment could then create no job at all.
+`llm.ollama.disable_thinking` sends `think: false`, so the budget is spent on
+the answer instead; it is off by default, because Ollama refuses the field for
+a model that has no thinking mode.
 The completion gets ninety seconds of its own, because a local server reloads a
 model it had unloaded and a large one is not a ten-second load.
 
