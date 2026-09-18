@@ -27,6 +27,7 @@ import type { RunConnection, RunEvent } from "@/lib/runStore";
 import { useToolCounts } from "@/lib/useToolCounts";
 import type { JobRoster } from "@/types";
 import { agentInitials } from "./agentIdentity";
+import FailureRow from "./FailureRow";
 import MessageBubble from "./MessageBubble";
 import NoticeRow from "./NoticeRow";
 import ParticipantsBar from "./ParticipantsBar";
@@ -345,6 +346,9 @@ const Item = memo(function Item({
   const group = groupOf(item.kind);
   if (group === "tools") {
     return <ToolCallRow item={item} jobId={jobId} showSpeaker={first} />;
+  }
+  if (item.kind === "run_failed") {
+    return <FailureRow item={item} />;
   }
   if (group === "notices") {
     return <NoticeRow item={item} />;

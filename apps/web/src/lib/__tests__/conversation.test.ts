@@ -5,6 +5,7 @@ import {
   filterConversation,
   groupOf,
   toolCallsFromFeed,
+  type ConversationItem,
   type ConversationStage,
 } from "@/lib/conversation";
 import type { RunEvent } from "@/lib/runStore";
@@ -199,6 +200,36 @@ describe("kinds", () => {
     );
 
     expect(stages[0].rounds[0].items[0].kind).toBe("says");
+  });
+});
+
+describe("a run that failed", () => {
+  it("closes the conversation on what the worker published", () => {
+    const { stages } = buildConversation(
+      [
+        event("agent_message", { stage: "analysis", speaker: "lead", text: "reading imports" }),
+        event("error", {
+          status: "failed",
+          error_id: "5f3a9c1d4e2b48f7a0c6d8e1b3f5a7c9",
+          message: "Analysis failed. See server logs for details.",
+        }),
+      ],
+      ROSTER,
+    );
+
+    const closing = stages[stages.length - 1].rounds[0].items.at(-1) as ConversationItem;
+    expect(closing.kind).toBe("run_failed");
+    expect(groupOf(closing.kind)).toBe("notices");
+    expect(closing.errorId).toBe("5f3a9c1d4e2b48f7a0c6d8e1b3f5a7c9");
+    expect(closing.text).toBe("Analysis failed. See server logs for details.");
+  });
+
+  it("says the run failed when the event carried no words of its own", () => {
+    const { stages } = buildConversation([event("error", { status: "failed" })], ROSTER);
+
+    const closing = stages[0].rounds[0].items[0];
+    expect(closing.text).toBe("The run failed.");
+    expect(closing.errorId).toBeUndefined();
   });
 });
 

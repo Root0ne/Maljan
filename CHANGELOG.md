@@ -1722,6 +1722,14 @@ change landed on `main`.
   unauthenticated health endpoint, so a wrong bearer token passed the test and
   every job then failed with 401 on the tool schema. It now fetches the schema
   itself and lists the tools it found.
+- **A failed run points at its error id.** The worker publishes no exception
+  text — a message it did not write itself can name a host path — so a failure
+  reaches the console as the class of the exception, or the sentence the worker
+  composed, followed by the id its log entries are filed under. The run header
+  showed none of it and the conversation simply stopped. Both now draw the
+  failure, with the id as its own labelled, selectable value beside a copy
+  control and one sentence saying that the API and worker logs carry the rest
+  under it.
 - **One violation is one line in the conversation.** A validator finding is
   published as the producer is shown it and again as the retry fixes it or
   fails to, and the console drew the three states identically — one violation

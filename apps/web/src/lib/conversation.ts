@@ -66,7 +66,10 @@ export type ItemKind =
   | "delegation_ask"
   | "delegation_answer"
   | "validation_feedback"
-  | "tool_call";
+  | "tool_call"
+  /** How a run that failed ends. Published by the worker rather than said by
+   *  anybody, and never a kind an `agent_message` names. */
+  | "run_failed";
 
 /** The three things a reader filters by: speech, machine work, and the notes
  *  the room makes about both. */
@@ -136,6 +139,9 @@ export interface ConversationItem {
   /** Every state one violation passed through, oldest first. The last of them
    *  is where the violation ended up. */
   feedback?: FeedbackEntry[];
+  /** The id the logs file a failed run's details under, on the line that
+   *  closes such a run. */
+  errorId?: string;
 }
 
 export interface ConversationRound {
@@ -243,7 +249,9 @@ function kindOf(value: unknown): ItemKind {
 
 export function groupOf(kind: ItemKind): ItemGroup {
   if (kind === "tool_call") return "tools";
-  if (kind === "validation_feedback" || kind === "system") return "notices";
+  if (kind === "validation_feedback" || kind === "system" || kind === "run_failed") {
+    return "notices";
+  }
   return "says";
 }
 
@@ -702,6 +710,28 @@ function fold(state: BuilderState, event: RunEvent): void {
       seq: event.seq,
       claims: [],
       dissent: [],
+    });
+    return;
+  }
+
+  if (event.type === "error") {
+    /* The line a failed run ends on. The worker publishes one sentence to
+     * every reader and the id it filed the traceback under as its own field,
+     * so nothing here reads an id out of a sentence. */
+    const stage = draftOf(state, stageKey);
+    push(state, stage, {
+      id,
+      kind: "run_failed",
+      stage: stageKey,
+      round: stage.round,
+      speaker: "",
+      displayName: "",
+      text: text(data.message) || "The run failed.",
+      ts: event.ts,
+      seq: event.seq,
+      claims: [],
+      dissent: [],
+      errorId: text(data.error_id) || undefined,
     });
     return;
   }

@@ -1,0 +1,63 @@
+/**
+ * Reading a failure's error id off what the worker published.
+ *
+ * The shapes are the two `failure_reason` writes — the sentence the worker
+ * composed for an operator, and the bare class of everything else — plus the
+ * two a console has to survive: a failure with no id at all, which is every
+ * run recorded before the id existed, and one whose text carries two.
+ */
+
+import { describe, expect, it } from "vitest";
+
+import { runFailure } from "@/lib/runFailure";
+
+const ID = "5f3a9c1d4e2b48f7a0c6d8e1b3f5a7c9";
+const OTHER = "0011223344556677889900aabbccddee";
+
+describe("a failure's error id", () => {
+  it("comes off a sentence the worker wrote", () => {
+    expect(runFailure(`The sandbox provider cannot take this sample. (error id ${ID})`)).toEqual({
+      sentence: "The sandbox provider cannot take this sample.",
+      errorId: ID,
+    });
+  });
+
+  it("comes off a bare exception class", () => {
+    expect(runFailure(`ValueError (error id ${ID})`)).toEqual({
+      sentence: "ValueError",
+      errorId: ID,
+    });
+  });
+
+  it("is absent from a failure that carries none, which is left as it was", () => {
+    expect(runFailure("ValueError: the sample could not be read")).toEqual({
+      sentence: "ValueError: the sample could not be read",
+      errorId: null,
+    });
+  });
+
+  it("is the first of two, which is the failure the run ended on", () => {
+    const failure = runFailure(
+      `RuntimeError (error id ${ID}) while recording (error id ${OTHER})`,
+    );
+
+    expect(failure.errorId).toBe(ID);
+    expect(failure.sentence).toBe(`RuntimeError while recording (error id ${OTHER})`);
+  });
+
+  it("is the field, where the API answers with one", () => {
+    /* The `error` event states the id on its own key, and its message is the
+     * one sentence the worker publishes to every reader. */
+    const failure = runFailure("Analysis failed. See server logs for details.", ID);
+
+    expect(failure).toEqual({
+      sentence: "Analysis failed. See server logs for details.",
+      errorId: ID,
+    });
+  });
+
+  it("survives a run that recorded no failure text", () => {
+    expect(runFailure(null)).toEqual({ sentence: "", errorId: null });
+    expect(runFailure(undefined)).toEqual({ sentence: "", errorId: null });
+  });
+});
