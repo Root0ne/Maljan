@@ -807,7 +807,6 @@ change landed on `main`.
   now raised as `StatedFailure` — the class `AbsentAnalysisError` already
   belonged to — and only that class keeps its message on `job.error_message`;
   everything else still arrives as its class name plus the error id.
-
 - **Four documented facts that had drifted from the code.** The delegation
   section said a lead's 1800 s stage had room for five asks where
   `_asks_that_fit` computes six and the `ask_<key>` description gives the model

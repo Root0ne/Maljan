@@ -793,29 +793,47 @@ JOB_OWNER_REFRESH_SECONDS = 30
 WORKER_ID = f"{platform.node()}:{os.getpid()}"
 
 
+def canonical_job_id(job_id: str) -> str:
+    """One spelling of a job id, whatever spelling arrived.
+
+    A claim comes in as arq passed it and the sweep spells the same job from
+    its database row, and ``uuid.UUID`` accepts the uppercase, brace-wrapped
+    and unhyphenated forms of one id. Two spellings would mean a key written
+    under one and looked for under the other — a live job with no heartbeat as
+    far as the sweep can tell. Anything that does not parse is left as it is:
+    this is a spelling, never a gate.
+    """
+    try:
+        return str(uuid.UUID(job_id))
+    except (ValueError, AttributeError, TypeError):
+        return job_id
+
+
 def job_owner_key(job_id: str) -> str:
     """Where this job's owner writes that it is still running it."""
-    return f"{JOB_OWNER_KEY_PREFIX}{job_id}"
+    return f"{JOB_OWNER_KEY_PREFIX}{canonical_job_id(job_id)}"
 
 
-# The jobs this process is running right now. The sweep skips them whatever
-# Redis says: a heartbeat that could not be written is a Redis problem, and a
-# worker that failed its own live job over one would be a worse one.
+# The jobs this process is running right now, under the one spelling. The sweep
+# skips them whatever Redis says: a heartbeat that could not be written is a
+# Redis problem, and a worker that failed its own live job over one would be a
+# worse one.
 _OWNED_JOBS: set[str] = set()
 
 
 async def claim_job(redis_conn: Any, job_id: str) -> bool:
     """Say this worker is running this job, for the next TTL. Never raises."""
-    _OWNED_JOBS.add(job_id)
+    canonical = canonical_job_id(job_id)
+    _OWNED_JOBS.add(canonical)
     try:
-        await redis_conn.set(job_owner_key(job_id), WORKER_ID, ex=JOB_OWNER_TTL_SECONDS)
+        await redis_conn.set(job_owner_key(canonical), WORKER_ID, ex=JOB_OWNER_TTL_SECONDS)
     except Exception as exc:  # noqa: BLE001 — a heartbeat never costs a run
         logger.warning(
             "Could not write the owner heartbeat for job %s (%s); the sweep skips "
             "the jobs this process is running, so the run is unaffected.",
-            job_id,
+            canonical,
             type(exc).__name__,
-            extra={"job_id": job_id, "component": "worker.lifecycle"},
+            extra={"job_id": canonical, "component": "worker.lifecycle"},
         )
         return False
     return True
@@ -823,24 +841,25 @@ async def claim_job(redis_conn: Any, job_id: str) -> bool:
 
 async def release_job(redis_conn: Any, job_id: str) -> None:
     """Stop claiming this job, on every way out of it. Never raises."""
-    _OWNED_JOBS.discard(job_id)
+    canonical = canonical_job_id(job_id)
+    _OWNED_JOBS.discard(canonical)
     try:
-        await redis_conn.delete(job_owner_key(job_id))
+        await redis_conn.delete(job_owner_key(canonical))
     except Exception as exc:  # noqa: BLE001 — the key expires on its own
         logger.debug(
             "Could not drop the owner heartbeat for job %s (%s); it expires in %ds.",
-            job_id,
+            canonical,
             type(exc).__name__,
             JOB_OWNER_TTL_SECONDS,
-            extra={"job_id": job_id},
+            extra={"job_id": canonical},
         )
 
 
 async def hold_job_owner(redis_conn: Any, job_id: str) -> None:
     """Refresh this job's claim until the task running this is cancelled.
 
-    Three refreshes inside one TTL, so a missed write — a Redis blip, a loop
-    that was busy — does not expire the claim on its own.
+    Two refreshes inside one TTL, so a missed write — a Redis blip, a loop that
+    was busy — does not expire the claim on its own.
     """
     while True:
         await asyncio.sleep(JOB_OWNER_REFRESH_SECONDS)
@@ -1023,9 +1042,11 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         # Before the row is touched, so there is no moment in which a job says
         # ``running`` and no worker says it is running it. Refreshed by a task
         # of its own for as long as the run lasts, and dropped by the
-        # ``finally`` below on success, failure and cancellation alike.
-        await claim_job(redis_conn, job_id)
-        owner_task = asyncio.create_task(hold_job_owner(redis_conn, job_id))
+        # ``finally`` below on success, failure and cancellation alike. Under
+        # the id as it parsed, which is the spelling the sweep reads back out
+        # of the database.
+        await claim_job(redis_conn, str(job_uuid))
+        owner_task = asyncio.create_task(hold_job_owner(redis_conn, str(job_uuid)))
 
         # Everything this run needs out of the database before the models
         # start, in one short session that is closed again before the

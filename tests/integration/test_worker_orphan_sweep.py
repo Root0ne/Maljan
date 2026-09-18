@@ -23,6 +23,7 @@ from app.worker.analysis_worker import (
     JOB_OWNER_TTL_SECONDS,
     WORKER_ID,
     _sweep_orphan_jobs,
+    claim_job,
     job_owner_key,
     sweep_orphans_forever,
 )
@@ -147,6 +148,34 @@ async def test_a_job_this_process_is_running_is_never_swept() -> None:
     _OWNED_JOBS.add(str(mine))
 
     await _sweep_orphan_jobs(factory, _redis({}))
+
+    assert updates_to(factory, "analysis_jobs") == []
+
+
+@pytest.mark.asyncio
+async def test_a_claim_under_another_spelling_of_the_id_still_protects_the_job() -> None:
+    """``uuid.UUID`` accepts spellings the database never writes.
+
+    arq hands the task whatever the caller enqueued under, and the sweep spells
+    the same job from its row. A claim written under the uppercase form and
+    looked for under the canonical one would be a live job with no heartbeat as
+    far as the sweep can tell — so both sides canonicalise.
+    """
+    job_id = uuid.uuid4()
+    shouted = str(job_id).upper()
+    redis = _redis({})
+
+    await claim_job(redis, shouted)
+
+    # Written under the one spelling, and remembered under it.
+    assert redis.set.call_args.args[0] == job_owner_key(str(job_id))
+    assert str(job_id) in _OWNED_JOBS
+    assert shouted not in _OWNED_JOBS
+
+    # And the sweep, reading the row's own spelling, leaves the job alone even
+    # though this Redis holds no key for it at all.
+    factory = _factory([_row(job_id, age_seconds=JOB_OWNER_TTL_SECONDS + 600)])
+    await _sweep_orphan_jobs(factory, redis)
 
     assert updates_to(factory, "analysis_jobs") == []
 
