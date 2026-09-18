@@ -219,6 +219,9 @@ export const MOCK_SYSTEM_STATUS = {
   app_version: "0.1.0",
   mock_mode_allowed: false,
   enrichment_enabled: true,
+  // What a single-process install answers: the enrichment is queued beside the
+  // analyses, so there is no second worker to be missing.
+  enrichment_worker: "not_required",
   has_virustotal_key: true,
   has_abuseipdb_key: false,
 };

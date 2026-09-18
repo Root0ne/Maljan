@@ -464,6 +464,15 @@ change landed on `main`.
   redialling and re-reading; the socket outlives the page by a grace period.
   Events order and dedupe on the publisher's `seq`, and a run recorded before
   the numbering existed keeps the order its events arrived in.
+- **The dashboard says when enrichment has nobody to run it.**
+  `GET /api/v1/system/status` reports `enrichment_worker`, and the console
+  draws one notice for the single state an operator can act on: enrichment
+  queued for a worker of its own with nothing reading that queue, which leaves
+  every finished analysis holding its VirusTotal and AbuseIPDB lookups while
+  the report reads as though there were none to make. The notice names what is
+  waiting and the setting it is waiting on, `api.enrichment_dedicated_worker`.
+  Nothing is drawn where enrichment runs beside the analyses, where its worker
+  is up, or against an API that does not answer with the field.
 
 ### Changed
 

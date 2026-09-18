@@ -9,6 +9,7 @@ import type { DashboardStatsDTO, JobDTO, SystemStatusDTO } from "@/lib/api";
 import { sampleLabel } from "@/lib/analyses";
 import { formatDuration, timeAgo } from "@/lib/report-utils";
 import { verdictBucket } from "@/lib/verdict";
+import { enrichmentWorkerNotice } from "./enrichmentNotice";
 import {
   PieChart,
   Pie,
@@ -184,6 +185,8 @@ export default function DashboardPage() {
     VERDICT_COLORS.benign,
   ];
 
+  const enrichment = enrichmentWorkerNotice(systemStatus?.enrichment_worker);
+
   return (
     <div>
       {/* The page's own name. Visually hidden because the rail already says
@@ -205,6 +208,23 @@ export default function DashboardPage() {
             real pipeline. Verdicts produced under this gate must not be
             treated as production findings. Unset
             <code> MOCK_MODE_ALLOWED</code> and restart the API to disable.
+          </span>
+        </div>
+      )}
+
+      {/* Enrichment queued for a worker that is not there. Said in words
+          rather than left to a colour, and only in the one state an operator
+          can do something about; the rest of what the field can say is the
+          system working. */}
+      {enrichment && (
+        <div
+          role="status"
+          className="mb-4 flex flex-wrap items-start gap-x-3 gap-y-1 rounded border border-status-orange/40 bg-status-orange/10 p-3 text-sm"
+        >
+          <span className="font-semibold text-status-orange">{enrichment.label}</span>
+          <span className="text-text-secondary">{enrichment.detail}</span>
+          <span className="text-text-muted">
+            Setting: <code>{enrichment.setting}</code>
           </span>
         </div>
       )}
