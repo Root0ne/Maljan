@@ -757,6 +757,23 @@ change landed on `main`.
   walk now starts on the first pair, stays inside the block rather than inside
   the file, and refuses to read a block whose two size fields disagree, because
   a footer that does not agree with itself was not a block footer.
+- **A run of bytes shaped like a hostname was published as infrastructure.**
+  The string sweep over one PE returned twenty-five domains, fifteen of them
+  fragments of longer names (`rosoft.com` out of a resource that had been cut
+  short before `microsoft.com`), rows of a detection-name table (`jector.SA`,
+  `Bifrose.IE`) or identifiers. Each was exported as a STIX indicator and each
+  cost a reputation lookup — 452 s of the enrichment slot for one report. The
+  domain pattern now takes an underscore as a token boundary; a name that is
+  the tail of a longer one found in the same sample is dropped unless it ends
+  at a label boundary, so `sectigo.com` under `crl.sectigo.com` is kept and
+  `rosoft.com` is not; a candidate that is nothing but a public suffix
+  (`co.uk`, `ne.jp`) is not a name; and a lowercase label wearing a shouted
+  country code is read as a table row rather than a host. Every row the scan
+  produces now carries `source: "strings"`, `NetworkDomain` records where the
+  name came from, and a name only the byte image knows is neither exported as
+  an indicator nor sent to a paid provider until a second source — the
+  sandbox, an analyst artefact or a reputation record — knows it too. It is
+  still in the report's network block, labelled.
 - **Four documented facts that had drifted from the code.** The delegation
   section said a lead's 1800 s stage had room for five asks where
   `_asks_that_fit` computes six and the `ask_<key>` description gives the model

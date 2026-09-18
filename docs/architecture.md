@@ -809,3 +809,10 @@ The API renders the report as Markdown, HTML and PDF, and exposes the STIX 2.1
 bundle, a MITRE view, the extracted indicators, the detection signatures that
 fired and a timeline. Post-hoc enrichment fills VirusTotal, AbuseIPDB, WHOIS and
 GeoIP reputation into the indicator set after the verdict has shipped.
+
+Each domain in the network block records where it came from — `sandbox` for a
+name the sample resolved or requested, `analyst` for one an agent put in an
+artefact, `strings` for a run of bytes in the file that has the shape of a
+hostname. The last is the weakest claim there is, so a `strings` domain is
+printed in the report and left out of the STIX indicator set and out of the
+reputation lookups until a second source knows the same name.

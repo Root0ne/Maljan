@@ -307,6 +307,12 @@ class NetworkDomain(BaseModel):
     # IDN/punycode homograph signals.
     is_punycode: bool = False
     homograph_target: str | None = None
+    # Where the name came from. ``sandbox`` is a resolution or a request the
+    # sample actually made, ``analyst`` an agent's own artefact, ``strings`` a
+    # run of bytes in the file that has the shape of a hostname — which is a
+    # far weaker claim and was being published as though it were the same one.
+    # ``None`` for a producer that does not record it.
+    source: Literal["sandbox", "analyst", "strings"] | None = None
     # Filled asynchronously by the threat-intel enrichment worker.
     reputation: dict[str, Any] | None = None
 

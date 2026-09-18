@@ -18,6 +18,7 @@ import ipaddress
 import math
 import unicodedata
 from dataclasses import dataclass
+from typing import Any
 
 # Domains we never want to flag as suspicious — common SaaS / OS update
 # infrastructure. Extend rather than replace.
@@ -516,6 +517,33 @@ def _is_emittable_ip(ip: str) -> bool:
     ):
         return False
     return str(addr) != "255.255.255.255"
+
+
+def domain_is_corroborated(source: Any, reputation: Any) -> bool:
+    """Whether anything but the sample's own byte image knows this name.
+
+    A string sweep turns any run of bytes shaped like a hostname into a
+    "domain": a truncated resource left `rosoft.com` beside `microsoft.com`,
+    an identifier table left `jector.SA`. Those are strings, and the report
+    prints them as strings. Publishing them as indicators, or spending a paid
+    reputation lookup on each, states something no one observed.
+
+    Corroboration is a second source: the sandbox resolved the name, an
+    analyst put it in an artefact, or a reputation provider has a record that
+    names it. A source this layer does not know about is left alone — only
+    ``strings`` is held back.
+    """
+    if source != "strings":
+        return True
+    if not isinstance(reputation, dict):
+        return False
+    for key in ("malicious", "suspicious"):
+        try:
+            if int(reputation.get(key) or 0) > 0:
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
 
 
 def _is_emittable_domain(fqdn: str) -> bool:

@@ -32,6 +32,12 @@ _MIN_STRING_LENGTH = 6
 _MAX_STRINGS_SCANNED = 200_000
 _MAX_IOC_STRINGS = 120
 
+# What every row this module produces was read out of. One value today, and a
+# field rather than an assumption: downstream a name seen on the wire and a
+# name found in the byte image carry different weight, and the consumers had
+# no way to tell them apart.
+_IOC_SOURCE = "strings"
+
 
 _URL_RE = re.compile(rb"https?://[A-Za-z0-9._\-/?=&%:#~+]+")
 _IP_RE = re.compile(rb"\b(?:\d{1,3}\.){3}\d{1,3}\b")
@@ -45,8 +51,12 @@ _REG_RE = re.compile(rb"HK(?:LM|CU|CR|U|CC)[\\\\][A-Za-z0-9_\-\\\\ ./]+")
 # every report unless the sample happened to embed escaped text.
 _PATH_RE = re.compile(rb"(?:[A-Za-z]:[\\/]|/)[A-Za-z0-9_\-./\\ ]+")
 _EMAIL_RE = re.compile(rb"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+# The lookarounds are the token boundary. An underscore cannot appear in a
+# hostname label, so a match that begins or ends against one is the tail or the
+# head of an identifier — `evil_payload.com` is a symbol name, and the
+# `payload.com` inside it was being published as a domain.
 _DOMAIN_RE = re.compile(
-    rb"(?<![A-Za-z0-9.])(?:[A-Za-z0-9-]{1,63}\.){1,3}[A-Za-z]{2,24}(?![A-Za-z0-9.])"
+    rb"(?<![A-Za-z0-9._])(?:[A-Za-z0-9-]{1,63}\.){1,3}[A-Za-z]{2,24}(?![A-Za-z0-9._])"
 )
 _MUTEX_RE = re.compile(rb"\\BaseNamedObjects\\[A-Za-z0-9_\-]+")
 _PRINTABLE_RE = re.compile(rb"[\x20-\x7e]{%d,}" % _MIN_STRING_LENGTH)
@@ -129,8 +139,12 @@ def _iter_strings(blob: bytes) -> Iterator[str]:
 def iter_string_iocs(blob: bytes) -> list[dict[str, Any]]:
     """Scan binary strings for typed indicators of compromise.
 
-    Rows are ``{"kind": ..., "value": ..., "notes": ...}``; ``notes`` is the
-    sub-label a secret or wallet pattern carries and ``None`` otherwise.
+    Rows are ``{"kind": ..., "value": ..., "notes": ..., "source": ...}``;
+    ``notes`` is the sub-label a secret or wallet pattern carries and ``None``
+    otherwise. ``source`` is always ``"strings"`` and is there so a consumer
+    can tell a name a sandbox watched the sample resolve from a name that was
+    lying in its byte image, which are not the same claim and were being
+    published as though they were.
     """
     iocs: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
@@ -147,7 +161,7 @@ def iter_string_iocs(blob: bytes) -> list[dict[str, Any]]:
             return
         seen.add(key)
         per_kind[kind] += 1
-        iocs.append({"kind": kind, "value": decoded, "notes": notes})
+        iocs.append({"kind": kind, "value": decoded, "notes": notes, "source": _IOC_SOURCE})
 
     def _all_quotas_full() -> bool:
         return all(per_kind[kind] >= quota for kind, quota in _IOC_QUOTAS.items())
@@ -186,7 +200,30 @@ def iter_string_iocs(blob: bytes) -> list[dict[str, Any]]:
         for hit in _ONION_RE.findall(text):
             _add("domain", hit, notes="tor_hidden_service")
 
-    return iocs[:_MAX_IOC_STRINGS]
+    return _without_fragment_domains(iocs)[:_MAX_IOC_STRINGS]
+
+
+def _without_fragment_domains(iocs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop a domain that is the tail of a longer name found in the same sample.
+
+    A printable run does not have to begin where the string does: a compressed
+    or truncated resource left `rosoft.com` in the scan of a binary that also
+    carried `microsoft.com`, and the fragment was published as a domain
+    indicator and looked up at a paid reputation provider. A parent at a label
+    boundary is a different thing — `sectigo.com` under `crl.sectigo.com` is a
+    registrable name in its own right — so only a tail that cuts into a label
+    is dropped.
+    """
+    names = [row["value"].lower() for row in iocs if row["kind"] == "domain"]
+    fragments = {
+        name
+        for name in names
+        for other in names
+        if other != name and other.endswith(name) and not other[: -len(name)].endswith(".")
+    }
+    if not fragments:
+        return iocs
+    return [row for row in iocs if row["kind"] != "domain" or row["value"].lower() not in fragments]
 
 
 def _is_meaningful_ip(ip: str) -> bool:
@@ -346,6 +383,77 @@ _NAMESPACE_TOKENS = frozenset(
 # check below has to know about them.
 _MULTIPART_TLD_SECOND_LEVELS = frozenset(
     {"co", "com", "net", "org", "ac", "gov", "edu", "mil", "or", "ne", "in", "web"}
+)
+
+# Two-part public suffixes: the registry's own level, under which names are
+# registered and which is therefore not itself a name. A binary that embeds a
+# public-suffix table — every browser engine and every TLS stack does — was
+# handing back dozens of these as domains.
+#
+# Written out rather than derived from the set above, because that set answers
+# a different question and combining it with a country code would reject
+# `web.de` and `in.ua`, which are ordinary registrable names.
+_TWO_PART_PUBLIC_SUFFIXES = frozenset(
+    {
+        "ac.jp",
+        "ac.uk",
+        "co.id",
+        "co.il",
+        "co.in",
+        "co.jp",
+        "co.kr",
+        "co.nz",
+        "co.th",
+        "co.uk",
+        "co.za",
+        "com.ar",
+        "com.au",
+        "com.br",
+        "com.cn",
+        "com.eg",
+        "com.hk",
+        "com.mx",
+        "com.my",
+        "com.ng",
+        "com.ph",
+        "com.pl",
+        "com.ru",
+        "com.sa",
+        "com.sg",
+        "com.tr",
+        "com.tw",
+        "com.ua",
+        "com.vn",
+        "edu.au",
+        "edu.tr",
+        "go.jp",
+        "gov.au",
+        "gov.tr",
+        "gov.uk",
+        "me.uk",
+        "ne.jp",
+        "net.au",
+        "net.br",
+        "net.cn",
+        "net.in",
+        "net.nz",
+        "net.ru",
+        "net.sa",
+        "net.tr",
+        "net.uk",
+        "or.jp",
+        "or.kr",
+        "org.au",
+        "org.br",
+        "org.cn",
+        "org.in",
+        "org.nz",
+        "org.ru",
+        "org.sa",
+        "org.tr",
+        "org.uk",
+        "org.za",
+    }
 )
 
 # A positive TLD check, complementing the negative suffix list. Without one,
@@ -614,6 +722,20 @@ def _looks_like_domain(text: str) -> bool:
     # Positive TLD check. A hostname ends in a real TLD; `Collections.Generic`
     # does not.
     if labels[-1] not in _KNOWN_TLDS:
+        return False
+
+    # Nothing registrable in it. `co.uk` and `ne.jp` are the registry's own
+    # level, not names, and a sample carrying a public-suffix table was
+    # handing back a page of them.
+    if lower in _TWO_PART_PUBLIC_SUFFIXES:
+        return False
+
+    # A hostname is written in one case. A lowercase name wearing a shouted
+    # country code — `jector.SA`, `Bifrose.IE`, `workbench.nL` — is a row out
+    # of a detection-name table or an identifier, and five such labels reached
+    # a live report as C2 domains. A name spelled wholly in capitals is still
+    # a spelling of that name, so it survives.
+    if any(ch.isupper() for ch in text.rsplit(".", 1)[1]) and not text.isupper():
         return False
 
     # Namespace shape. Most .NET identifiers die on the TLD check already

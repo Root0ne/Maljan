@@ -31,6 +31,7 @@ from maljan.agents._indicator_denylists import (
     URL_DENY_HOSTS,
 )
 from maljan.core.logger import logger
+from maljan.extractors.network_extractor import domain_is_corroborated
 from maljan.reporting.models import (
     MalwareReport,
     NetworkDomain,
@@ -413,6 +414,14 @@ def _ip_pattern(value: str) -> str:
 def _indicator_for_domain(domain: NetworkDomain) -> Indicator | None:
     fqdn = domain.fqdn.strip()
     if not fqdn:
+        return None
+    if not domain_is_corroborated(domain.source, domain.reputation):
+        # A run of bytes that has the shape of a hostname is not an
+        # observation of infrastructure. One PE's string sweep put fifteen
+        # such fragments into a published bundle, each as an indicator a
+        # downstream consumer would block on. They stay in the report's
+        # network block, labelled with where they came from; they are not
+        # offered to the world until a second source knows the name.
         return None
     pattern = f"[domain-name:value = '{_escape_stix(fqdn)}']"
     name = f"Domain {fqdn}"

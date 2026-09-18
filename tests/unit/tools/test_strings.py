@@ -165,7 +165,12 @@ class TestIocsFromText:
         result = tool.iocs_from_text("key AKIAIOSFODNN7EXAMPLE in the config")
         secrets = [row for row in result["iocs"] if row["kind"] == "secret"]
         assert secrets == [
-            {"kind": "secret", "value": "AKIAIOSFODNN7EXAMPLE", "notes": "aws_access_key"}
+            {
+                "kind": "secret",
+                "value": "AKIAIOSFODNN7EXAMPLE",
+                "notes": "aws_access_key",
+                "source": "strings",
+            }
         ]
 
     def test_kinds_narrows_the_answer_without_changing_the_scan(self) -> None:
@@ -176,6 +181,56 @@ class TestIocsFromText:
         assert set(everything["kinds"]) >= {"url", "ip", "domain"}
         assert just_urls["kinds"] == ["url"]
         assert [row["value"] for row in just_urls["iocs"]] == ["http://evil-c2-host.top/a"]
+
+
+class TestDomainsReadOutOfStrings:
+    """A printable run cut mid-word still ends in a real TLD.
+
+    Every case here was produced by a real sample in a live run: the scan
+    returned twenty-five "domains" for one PE, of which fifteen were fragments
+    of longer names, identifier tables or detection labels. Each was published
+    as a STIX indicator and each cost a reputation lookup.
+    """
+
+    def _domains(self, text: str) -> list[str]:
+        return [
+            row["value"] for row in tool.iocs_from_text(text)["iocs"] if row["kind"] == "domain"
+        ]
+
+    def test_a_fragment_of_a_longer_host_is_dropped_for_the_whole_one(self) -> None:
+        """A run beginning mid-word yielded `rosoft.com` beside `microsoft.com`."""
+        text = "rosoft.com/win/2004/08/events/event\nproxy bypass list: microsoft.com"
+        found = self._domains(text)
+        assert "microsoft.com" in found
+        assert "rosoft.com" not in found
+
+    def test_a_parent_domain_at_a_label_boundary_is_kept(self) -> None:
+        """`sectigo.com` under `crl.sectigo.com` is a registrable name, not a fragment."""
+        found = self._domains("http://crl.sectigo.com/a.crl and https://sectigo.com/CPS")
+        assert "crl.sectigo.com" in found
+        assert "sectigo.com" in found
+
+    def test_a_detection_label_wearing_a_country_code_is_not_a_host(self) -> None:
+        """`Bifrose.IE`, `jector.SA`, `workbench.nL` — a host is written in one case."""
+        found = self._domains("Trojan:Bifrose.IE jector.SA =[workbench.nL mucod.FR")
+        assert found == []
+
+    def test_a_host_written_wholly_in_capitals_survives_the_case_check(self) -> None:
+        """One case throughout is a spelling; a lowercase name with a shouted
+        country code is a label out of a table."""
+        assert self._domains("connect to WWW.EXAMPLE-C2.TOP now") == ["WWW.EXAMPLE-C2.TOP"]
+
+    def test_a_bare_public_suffix_has_nothing_registrable_in_it(self) -> None:
+        assert self._domains("suffixes are co.uk and com.br and ne.jp") == []
+
+    def test_a_match_that_begins_after_an_underscore_is_an_identifier(self) -> None:
+        """An underscore cannot appear in a hostname label, so the run is code."""
+        assert self._domains("field_name evil_payload.com beside real-c2.top") == ["real-c2.top"]
+
+    def test_every_row_says_where_it_came_from(self) -> None:
+        rows = tool.iocs_from_text("http://evil-c2-host.top/gate.php from 45.77.12.34")["iocs"]
+        assert rows
+        assert {row["source"] for row in rows} == {"strings"}
 
 
 class TestIocsFromFile:
