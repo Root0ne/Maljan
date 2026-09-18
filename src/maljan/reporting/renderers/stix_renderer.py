@@ -99,25 +99,31 @@ class ExtendedSTIXRenderer:
         #    in the report and zero attack-patterns in the bundle; another
         #    exported three attack-patterns with no ATT&CK reference at all.
         #
-        #    What the judge said *about* those techniques stays. Its `uses`
+        #    What the judge said *about* those techniques stays. Its
         #    relationships carry the confidence, the evidence basis and the
         #    contributing agents it put on each one, and they point at objects
-        #    that are about to be replaced — so the refs move to the rebuilt
-        #    object of the same technique before the originals go, and the
-        #    annotations travel unedited. A relationship to a technique the
-        #    checks rejected has nothing to move to and goes with it.
+        #    that are about to be replaced — so both ends of every ref move to
+        #    the rebuilt object of the same technique before the originals go,
+        #    and the annotations travel unedited. A relationship to a technique
+        #    the checks rejected has nothing to move to: it is taken out here,
+        #    with the technique, and counted as that technique's loss rather
+        #    than left to the integrity pass, which would count it a second
+        #    time as a dangling ref of the judge's bundle.
         linked: set[str] = set()
         if base_bundle is not None:
             self._normalize_judge_timestamps(base_bundle.objects)
             remap = _technique_remap(report, base_bundle)
+            gone = _rejected_pattern_ids(base_bundle, remap)
             for obj in base_bundle.objects:
                 if getattr(obj, "type", "") == "attack-pattern":
                     continue
-                moved, technique = _with_remapped_target(obj, remap)
+                if _points_at(obj, gone):
+                    continue
+                moved, technique = _relinked(obj, remap)
                 if technique:
                     linked.add(technique)
                 objects.append(moved)
-            self.unlinked = _unlinked_techniques(base_bundle, remap)
+            self.unlinked = _unlinked_techniques(base_bundle, gone)
 
         # 2) Identity SDO for Maljan itself.
         identity = Identity(
@@ -397,39 +403,68 @@ def _technique_remap(report: MalwareReport, base_bundle: Bundle) -> dict[str, st
     return remap
 
 
-def _with_remapped_target(obj: Any, remap: dict[str, str]) -> tuple[Any, str]:
-    """``obj`` pointing at the rebuilt technique, and that technique's id.
+def _relinked(obj: Any, remap: dict[str, str]) -> tuple[Any, str]:
+    """``obj`` pointing at the rebuilt technique, and the technique it now uses.
 
-    A copy rather than a write: the judge's bundle is stored as the run's own
-    record and a renderer that edited it would change what the run says it
-    answered. ``("", …)`` for anything that is not a relationship to a
-    rebuilt technique.
+    Both ends: a judge relationship is usually ``malware --uses--> technique``,
+    and one sourced at the technique would dangle just as surely. A copy rather
+    than a write: the judge's bundle is stored as the run's own record and a
+    renderer that edited it would change what the run says it answered.
+
+    The second value is the technique of a ``uses`` edge from the sample —
+    the one edge the rebuild would otherwise mint a second, unannotated copy
+    of. It is ``""`` for every other shape, which keeps the minted edge for a
+    technique the judge only related some other way.
     """
     if getattr(obj, "type", "") != "relationship":
         return obj, ""
+    source = str(getattr(obj, "source_ref", "") or "")
     target = str(getattr(obj, "target_ref", "") or "")
-    published_id = remap.get(target)
-    if not published_id:
+    update = {
+        key: remap[ref]
+        for key, ref in (("source_ref", source), ("target_ref", target))
+        if ref in remap
+    }
+    if not update:
         return obj, ""
+    moved = obj.model_copy(update=update)
+    if str(getattr(obj, "relationship_type", "") or "") != "uses" or target not in remap:
+        return moved, ""
     technique = str(getattr(obj, "x_maljan_technique_id", "") or "").strip().upper()
-    return obj.model_copy(update={"target_ref": published_id}), technique or published_id
+    return moved, technique or remap[target]
 
 
-def _unlinked_techniques(base_bundle: Bundle, remap: dict[str, str]) -> list[tuple[str, int]]:
-    """Per technique the checks rejected, how many judge relationships went with it."""
-    dropped: dict[str, str] = {}
+def _rejected_pattern_ids(base_bundle: Bundle, remap: dict[str, str]) -> dict[str, str]:
+    """``judge object id -> technique`` for the attack-patterns nothing published."""
+    gone: dict[str, str] = {}
     for obj in base_bundle.objects:
         object_id = str(getattr(obj, "id", "") or "")
         if getattr(obj, "type", "") != "attack-pattern" or object_id in remap:
             continue
-        dropped[object_id] = _declared_technique(obj) or str(getattr(obj, "name", "") or "")
+        gone[object_id] = _declared_technique(obj) or str(getattr(obj, "name", "") or "")
+    return gone
+
+
+def _points_at(obj: Any, gone: dict[str, str]) -> bool:
+    """Whether a relationship names an attack-pattern that is not published."""
+    if getattr(obj, "type", "") != "relationship":
+        return False
+    return str(getattr(obj, "source_ref", "") or "") in gone or (
+        str(getattr(obj, "target_ref", "") or "") in gone
+    )
+
+
+def _unlinked_techniques(base_bundle: Bundle, gone: dict[str, str]) -> list[tuple[str, int]]:
+    """Per technique the checks rejected, how many judge relationships went with it."""
     counts: dict[str, int] = {}
     for obj in base_bundle.objects:
         if getattr(obj, "type", "") != "relationship":
             continue
-        label = dropped.get(str(getattr(obj, "target_ref", "") or ""))
-        if label:
-            counts[label] = counts.get(label, 0) + 1
+        for ref in (getattr(obj, "source_ref", ""), getattr(obj, "target_ref", "")):
+            label = gone.get(str(ref or ""))
+            if label:
+                counts[label] = counts.get(label, 0) + 1
+                break
     return sorted(counts.items())
 
 

@@ -120,9 +120,11 @@ def _empty_isr(agent_name: str, revision_round: int = 0) -> AgentISR:
 def _note_unlinked_techniques(report: Any, unlinked: Sequence[tuple[str, int]]) -> None:
     """Record the judge annotations that went with a rejected technique.
 
-    One row per technique, under the code the STIX check already uses for an
-    id it could not resolve, so a reader of ``run_summary.validation`` finds
-    the annotation's fate beside the reason the technique was dropped.
+    One row per technique, under a code of its own — the technique's own
+    rejection is recorded under ``attck.unknown_id`` or
+    ``stix.unknown_technique``, and this says what that rejection cost the
+    export — so a reader of ``run_summary.validation`` finds the annotation's
+    fate beside the reason the technique was dropped.
     """
     if not unlinked:
         return

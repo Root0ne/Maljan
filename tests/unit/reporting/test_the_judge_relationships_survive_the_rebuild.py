@@ -19,7 +19,7 @@ from typing import Any
 from maljan.agents.judge_postprocess import enforce_bundle_integrity
 from maljan.reporting.builder import MalwareReportBuilder
 from maljan.reporting.models import MalwareReport
-from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
+from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer, _pattern_id_for
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 from maljan.schemas.stix_models import Bundle, ConfidenceAnnotatedRelationship
 
@@ -209,6 +209,97 @@ class TestARelationshipToATechniqueThatWasDropped:
         assert row["agent"] == "judge"
         assert INVENTED in row["message"]
         assert "2 judge relationship(s)" in row["message"]
+
+
+class TestTheRefsThatAreMoved:
+    """Both ends, and only the edge the mint would duplicate."""
+
+    @staticmethod
+    def _bundle_with(relationship: dict[str, Any]) -> dict[str, Any]:
+        stix = _judge_bundle(KNOWN)
+        stix["objects"].append(relationship)
+        return stix
+
+    def test_a_relationship_sourced_at_a_technique_is_moved_too(self) -> None:
+        """Its source is about to be replaced, so it dangles unless it moves."""
+        pattern_id = "attack-pattern--d4e5f6a7-b8c9-4123-9efa-234567890100"
+        stix = self._bundle_with(
+            {
+                "type": "relationship",
+                "id": "relationship--d4e5f6a7-b8c9-4123-9efa-234567890300",
+                "relationship_type": "related-to",
+                "source_ref": pattern_id,
+                "target_ref": MALWARE_ID,
+                "x_maljan_confidence": 0.44,
+                "x_maljan_technique_id": KNOWN,
+            }
+        )
+        report = _report(stix, _isr(KNOWN))
+
+        bundle = ExtendedSTIXRenderer().render(report, Bundle.model_validate(stix))
+        after = Bundle(objects=enforce_bundle_integrity(list(bundle.objects)))
+
+        sourced = [
+            obj for obj in after.objects if getattr(obj, "relationship_type", "") == "related-to"
+        ]
+        assert [rel.x_maljan_confidence for rel in sourced] == [0.44]
+        assert sourced[0].source_ref == _pattern_id_for(KNOWN)
+
+    def test_another_relationship_type_does_not_take_the_used_edge_with_it(self) -> None:
+        """Only a ``uses`` edge from the sample is the one the mint would repeat."""
+        stix = _judge_bundle()
+        stix["objects"].append(
+            {
+                "type": "attack-pattern",
+                "id": "attack-pattern--d4e5f6a7-b8c9-4123-9efa-234567890199",
+                "name": KNOWN,
+                "external_references": [{"source_name": "mitre-attack", "external_id": KNOWN}],
+            }
+        )
+        stix["objects"].append(
+            {
+                "type": "relationship",
+                "id": "relationship--d4e5f6a7-b8c9-4123-9efa-234567890301",
+                "relationship_type": "related-to",
+                "source_ref": MALWARE_ID,
+                "target_ref": "attack-pattern--d4e5f6a7-b8c9-4123-9efa-234567890199",
+                "x_maljan_confidence": 0.31,
+                "x_maljan_technique_id": KNOWN,
+            }
+        )
+        report = _report(stix, _isr(KNOWN))
+
+        bundle = ExtendedSTIXRenderer().render(report, Bundle.model_validate(stix))
+
+        edges = {
+            (getattr(obj, "relationship_type", ""), getattr(obj, "target_ref", ""))
+            for obj in bundle.objects
+            if getattr(obj, "type", "") == "relationship"
+        }
+        assert ("uses", _pattern_id_for(KNOWN)) in edges
+        assert ("related-to", _pattern_id_for(KNOWN)) in edges
+
+
+class TestWhatAnUnlinkedRelationshipCosts:
+    def test_it_is_not_also_counted_as_a_bundle_defect(self) -> None:
+        """It was removed on purpose, so the integrity pass finds nothing to prune.
+
+        The ledger's dangling count is the repair-versus-reject measurement;
+        an object this renderer took out deliberately is not a defect of the
+        judge's bundle and must not read as one.
+        """
+        from maljan.core.truncation_ledger import TruncationLedger
+
+        stix = _judge_bundle(KNOWN, INVENTED)
+        report = _report(stix, _isr(KNOWN, INVENTED))
+        ledger = TruncationLedger()
+        renderer = ExtendedSTIXRenderer()
+
+        renderer.render(report, Bundle.model_validate(stix), ledger=ledger)
+
+        assert renderer.unlinked == [(INVENTED, 1)]
+        dropped = ledger.snapshot().get("integrity_dropped") or {}
+        assert not dropped.get("dangling_relationship")
 
 
 class TestTheFallbackBundleKeepsThemToo:

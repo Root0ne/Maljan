@@ -809,10 +809,12 @@ change landed on `main`.
   a technique id is stored as a technique. The judge's own `uses` relationships
   travel with their techniques: each is re-linked to the rebuilt attack-pattern
   of the same id with its confidence, evidence basis and contributing agents
-  unedited, so the uncertainty annotation that makes these bundles worth
-  exporting is not pruned as dangling, and a relationship whose technique the
-  checks rejected is recorded in `run_summary.validation` as
-  `stix.unlinked_technique` rather than counted as an integrity defect. An
+  unedited — both ends of the ref, so one sourced at a technique moves too —
+  and the uncertainty annotation that makes these bundles worth exporting is no
+  longer pruned as dangling. A relationship whose technique the checks rejected
+  is taken out with that technique and recorded in `run_summary.validation` as
+  `stix.unlinked_technique`, so it is counted once, as the technique's loss,
+  and not again as a defect of the judge's bundle. An
   attack-pattern with a name and no id is asked for one (`attck.missing_id`)
   instead of skipping every ATT&CK check — which is why the Mobile-domain check never ran on an Android
   sample's techniques — and one that survives is reported as a behaviour, in
