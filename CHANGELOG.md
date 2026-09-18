@@ -747,6 +747,15 @@ change landed on `main`.
 
 ### Fixed
 
+- **An empty tool output is no longer explained by a cause that did not
+  happen.** The evidence panel printed "The output was dropped to keep this
+  agent inside its byte budget" for *any* entry whose `output` was empty — a
+  failed call included, directly under the failure row it had just drawn —
+  because the flag that records a budget trim was dropped at persistence.
+  `truncated`, `repeated_of`, `symbol` and `started_at` are now columns
+  (`20260926000000`), the worker writes them, `GET /jobs/{id}/evidence` returns
+  them, and the sentence is shown only for an entry that says it was trimmed.
+  A call that simply answered with nothing now reads as that.
 - **A replayed conversation is the conversation again, not a reconstruction of
   it.** `agent_messages` kept none of `kind`, `stage` or `display_name`,
   although the live `agent_message` payload has carried all three and both the

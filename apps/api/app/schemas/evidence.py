@@ -28,9 +28,19 @@ class EvidenceEntryResponse(BaseModel):
     args_raw: str | None = None
     output: str = ""
     structured: Any | None = None
+    # Whether the output was dropped to keep the agent inside its byte budget.
+    # It is the only thing that says so, and a reader has to say it from this
+    # rather than from an empty ``output``: a failed call is empty too.
+    truncated: bool = False
+    # The earlier identical call this one was answered from, the label the
+    # recorder parsed out of the arguments, and the run-clock time the call
+    # started at. ``None`` where the row predates the columns.
+    repeated_of: str | None = None
+    symbol: str | None = None
+    started_at: float | None = None
     created_at: datetime | None = None
 
-    @field_validator("args_repaired", mode="before")
+    @field_validator("args_repaired", "truncated", mode="before")
     @classmethod
     def _absent_is_false(cls, value: Any) -> bool:
         """A row written before the column existed made an ordinary call."""

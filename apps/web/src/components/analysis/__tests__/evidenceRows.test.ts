@@ -9,6 +9,7 @@ import {
   argsDetail,
   argsSummary,
   deepLinkView,
+  emptyOutputNote,
   evidenceQuery,
   formatCallDuration,
   mergeOptions,
@@ -173,5 +174,27 @@ describe("a call's duration", () => {
     expect(formatCallDuration(0)).toBe("0 ms");
     expect(formatCallDuration(999)).toBe("999 ms");
     expect(formatCallDuration(1_500)).toBe("1.5 s");
+  });
+});
+
+describe("what an empty output is explained by", () => {
+  it("names the byte budget only for an entry that says it was trimmed", () => {
+    const note = emptyOutputNote(entry({ output: "", truncated: true }));
+    expect(note).toContain("byte budget");
+    expect(note).toContain("its outcome stand");
+  });
+
+  it("does not explain a failed call as a trimmed one", () => {
+    /* A failed call has an empty output too. Reading the emptiness as a trim
+     * printed the budget sentence directly under the failure row. */
+    const note = emptyOutputNote(
+      entry({ output: "", ok: false, error: "the tool server did not answer" }),
+    );
+    expect(note).not.toContain("byte budget");
+    expect(note).toBe("This call recorded no output.");
+  });
+
+  it("asserts nothing for a row recorded before the flag existed", () => {
+    expect(emptyOutputNote(entry({ output: "" }))).toBe("This call recorded no output.");
   });
 });

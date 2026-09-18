@@ -647,6 +647,13 @@ its outcome and its timing and drops its output, and the count of what was
 dropped reaches the run summary. The ledger lands in the pipeline state as an
 append-only list and is persisted with the report, in the same transaction.
 
+An entry that lost its output that way says so with `truncated`, and the
+column is the only thing that says it: a call that failed carries an empty
+output too, so a reader inferring the trim from the emptiness explains a
+failure with a cause that did not happen. `truncated` is persisted alongside
+`repeated_of` (the earlier identical call a repeat was answered from), `symbol`
+and `started_at`, and the evidence endpoint returns all four.
+
 ## Events
 
 A run narrates itself. Every node, every tool wrapper and every retry loop
@@ -684,6 +691,13 @@ does not know which job it is running under, and a second counter would order
 one conversation two ways. `seq` is the ordering key, the dedupe identity and
 the cursor a client resumes from — `?since=<seq>` on `/ws/analysis/{id}` and
 on `GET /api/v1/jobs/{id}/events` return only what is newer, in order.
+
+The stored transcript row carries the payload its event carried: its `kind`,
+the `stage` it was said in, the addressee of a delegated line and the
+`display_name` its speaker was known by. A replay therefore groups by stage and
+keeps the arrow between an ask and its answer, rather than re-deriving a kind
+that cannot distinguish the two. A run recorded before those columns existed
+carries none of them, and the console falls back to deriving what it can.
 
 The stored transcript row is written with the number its event went out under,
 so a live message and its replayed twin are one message. That changed what
