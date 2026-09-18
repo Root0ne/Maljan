@@ -122,6 +122,62 @@ class TestEnrichWorkerHappy:
         redis.publish.assert_awaited()
 
 
+class TestEnrichWorkerSessionLifetime:
+    @pytest.mark.asyncio
+    async def test_no_session_is_open_across_the_reputation_lookups(self) -> None:
+        """The lookups are third-party HTTP and took 452 s on one live report.
+
+        A session held across them is a backend ``idle in transaction`` for
+        the whole of it. The task reads the payload, closes, looks up, and
+        opens a second session to write the result.
+        """
+        fake_report = MagicMock()
+        fake_report.id = uuid.uuid4()
+        fake_report.job_id = uuid.uuid4()
+        fake_report.malware_report = _malware_report_dict()
+
+        open_sessions: list[Any] = []
+        open_during_lookups: list[int] = []
+
+        class _Session:
+            def __init__(self) -> None:
+                self.get = AsyncMock(return_value=fake_report)
+                self.commit = AsyncMock()
+
+            async def __aenter__(self) -> Any:
+                open_sessions.append(self)
+                return self
+
+            async def __aexit__(self, *exc: Any) -> bool:
+                open_sessions.remove(self)
+                return False
+
+        sessions: list[_Session] = []
+
+        def _factory() -> _Session:
+            session = _Session()
+            sessions.append(session)
+            return session
+
+        async def _lookups(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+            open_during_lookups.append(len(open_sessions))
+            return payload
+
+        ctx = {"redis": AsyncMock(), "db_session": _factory}
+        get_patch, get_secret_patch = _enabled_patch()
+        with (
+            patch("maljan.enrichment.enrich_malware_report", new=_lookups),
+            get_patch,
+            get_secret_patch,
+        ):
+            result = await enrich_threat_intel(ctx, str(fake_report.id))
+
+        assert result["status"] == "ok"
+        assert open_during_lookups == [0]
+        assert len(sessions) == 2
+        assert open_sessions == []
+
+
 class TestEnrichWorkerSkips:
     @pytest.mark.asyncio
     async def test_invalid_uuid(self) -> None:
@@ -188,8 +244,12 @@ class TestEnrichWorkerErrorIsContained:
             result = await enrich_threat_intel(ctx, str(fake_report.id))
 
         assert result["status"] == "error"
-        # commit must NOT have been called when the orchestrator blew up.
-        db.commit.assert_not_awaited()
+        # The read session commits to end its own read transaction — the
+        # lookups run with no session open at all — so what must not have
+        # happened is the write: the report is never reopened and its payload
+        # is the one it arrived with.
+        assert db.get.await_count == 1
+        assert fake_report.malware_report == _malware_report_dict()
 
 
 # ---------------------------------------------------------------------------

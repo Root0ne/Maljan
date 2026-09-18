@@ -17,6 +17,7 @@ import pytest
 import pytest_asyncio
 
 from app.worker.analysis_worker import WorkerSettings, run_analysis
+from tests.integration._session_probe import updates_in
 
 
 def _dsn(scheme: str, userinfo: str, rest: str) -> str:
@@ -89,6 +90,29 @@ async def mock_ctx(mock_db_session: AsyncMock) -> dict[str, Any]:
         "redis": redis,
         "db_session": lambda: mock_db_session,
     }
+
+
+def _answer_reads(session: AsyncMock, answers: list[Any]) -> list[Any]:
+    """Answer each read in turn, and keep every statement the run executed.
+
+    The worker fires ``UPDATE`` statements between the reads and those need no
+    row payload, so anything past the answers gets a bare ``MagicMock``. The
+    list this returns is where a test reads the job's status changes from: the
+    run writes them as statements now, against a row it does not keep loaded,
+    because the session that read the job is closed before the pipeline runs.
+    """
+    recorded: list[Any] = []
+    pending = list(answers)
+
+    async def _execute(*args: Any, **kwargs: Any) -> MagicMock:
+        if args:
+            recorded.append(args[0])
+        if pending:
+            return pending.pop(0)
+        return MagicMock()
+
+    session.execute = _execute
+    return recorded
 
 
 def _make_job(
@@ -175,22 +199,7 @@ async def test_mock_pipeline_completes(
             m.scalar_one.return_value = obj
         return m
 
-    exec_results = [_make_result(job), _make_result(sample)]
-    call_count = 0
-
-    async def _fake_execute(*args: Any, **kwargs: Any) -> MagicMock:
-        nonlocal call_count
-        # The worker fires extra ``UPDATE`` statements for ``started_at``/
-        # ``completed_at`` after the job-timestamp fix. Those
-        # don't need a row payload — return an empty MagicMock so the
-        # commit/refresh path doesn't blow up.
-        if call_count >= len(exec_results):
-            return MagicMock()
-        res = exec_results[call_count]
-        call_count += 1
-        return res
-
-    mock_db_session.execute = _fake_execute
+    recorded = _answer_reads(mock_db_session, [_make_result(job), _make_result(sample)])
 
     # Mock mode requires BOTH the
     # env/job flag AND ``api.mock_mode_allowed=True``. Without the second
@@ -213,8 +222,9 @@ async def test_mock_pipeline_completes(
 
     assert result["status"] == "completed"
     assert result["verdict"] == "Malware"
-    assert job.status == "completed"
-    assert job.completed_at is not None
+    statuses = updates_in(recorded, "analysis_jobs")
+    assert [u["status"] for u in statuses] == ["running", "completed"]
+    assert statuses[-1]["completed_at"] is not None
     assert mock_db_session.commit.call_count >= 2  # running + completed
 
 
@@ -243,18 +253,7 @@ async def test_report_less_pipeline_result_fails_the_job(
             m.scalar_one.return_value = obj
         return m
 
-    exec_results = [_make_result(job), _make_result(sample)]
-    call_count = 0
-
-    async def _fake_execute(*args: Any, **kwargs: Any) -> MagicMock:
-        nonlocal call_count
-        if call_count >= len(exec_results):
-            return MagicMock()
-        res = exec_results[call_count]
-        call_count += 1
-        return res
-
-    mock_db_session.execute = _fake_execute
+    recorded = _answer_reads(mock_db_session, [_make_result(job), _make_result(sample)])
 
     from app import config as api_config
 
@@ -274,10 +273,15 @@ async def test_report_less_pipeline_result_fails_the_job(
     api_config._settings = None
 
     assert result["status"] == "failed"
-    assert "ValueError: boom" in result["error"]
-    assert job.status == "failed"
-    assert job.error_message is not None
-    assert "ValueError: boom" in job.error_message
+    # The reason is the class of what was raised and the id of the log entry
+    # holding the rest: ``error_message`` is a field of ``JobResponse``, and
+    # the pipeline's own message can name a path or a connection string.
+    assert result["error"].startswith("RuntimeError (error id ")
+    assert "boom" not in result["error"]
+    failed = [u for u in updates_in(recorded, "analysis_jobs") if u["status"] == "failed"]
+    assert len(failed) == 1
+    assert failed[0]["error_message"] == result["error"]
+    assert failed[0]["completed_at"] is not None
 
 
 @pytest.mark.asyncio
@@ -319,18 +323,7 @@ async def test_reporting_disabled_completes_without_a_malware_report(
             m.scalar_one.return_value = obj
         return m
 
-    exec_results = [_make_result(job), _make_result(sample)]
-    call_count = 0
-
-    async def _fake_execute(*args: Any, **kwargs: Any) -> MagicMock:
-        nonlocal call_count
-        if call_count >= len(exec_results):
-            return MagicMock()
-        res = exec_results[call_count]
-        call_count += 1
-        return res
-
-    mock_db_session.execute = _fake_execute
+    recorded = _answer_reads(mock_db_session, [_make_result(job), _make_result(sample)])
 
     from app import config as api_config
 
@@ -355,8 +348,9 @@ async def test_reporting_disabled_completes_without_a_malware_report(
     api_config._settings = None
 
     assert result["status"] == "completed"
-    assert job.status == "completed"
-    assert job.error_message is None
+    statuses = updates_in(recorded, "analysis_jobs")
+    assert [u["status"] for u in statuses] == ["running", "completed"]
+    assert "error_message" not in statuses[-1]
 
 
 @pytest.mark.asyncio
@@ -376,22 +370,7 @@ async def test_pipeline_failure_sets_failed_status(
             m.scalar_one.return_value = obj
         return m
 
-    exec_results = [_make_result(job), _make_result(sample)]
-    call_count = 0
-
-    async def _fake_execute(*args: Any, **kwargs: Any) -> MagicMock:
-        nonlocal call_count
-        # The worker fires extra ``UPDATE`` statements for ``started_at``/
-        # ``completed_at`` after the job-timestamp fix. Those
-        # don't need a row payload — return an empty MagicMock so the
-        # commit/refresh path doesn't blow up.
-        if call_count >= len(exec_results):
-            return MagicMock()
-        res = exec_results[call_count]
-        call_count += 1
-        return res
-
-    mock_db_session.execute = _fake_execute
+    recorded = _answer_reads(mock_db_session, [_make_result(job), _make_result(sample)])
 
     # Force MaljanApp to blow up by mocking the class where it is defined.
     with patch("maljan.app.MaljanApp") as mock_app_cls:
@@ -400,9 +379,11 @@ async def test_pipeline_failure_sets_failed_status(
         result = await run_analysis(mock_ctx, str(job.id))
 
     assert result["status"] == "failed"
-    assert "Simulated pipeline crash" in result["error"]
-    assert job.status == "failed"
-    assert job.error_message is not None
+    assert result["error"].startswith("RuntimeError (error id ")
+    assert "Simulated pipeline crash" not in result["error"]
+    failed = [u for u in updates_in(recorded, "analysis_jobs") if u["status"] == "failed"]
+    assert len(failed) == 1
+    assert failed[0]["completed_at"] is not None
 
 
 @pytest.mark.asyncio
@@ -455,24 +436,16 @@ async def test_mock_mode_with_an_attached_report_fails_with_a_worded_message(
     # ``list(res.scalars().all())`` to come back ``[]``, same as every other
     # test in this file relies on for that call), then the sandbox-report row
     # lookup this task's own attach-path added.
-    exec_results = [
-        _make_result(job),
-        _make_result(sample),
-        MagicMock(),
-        MagicMock(),
-        report_result,
-    ]
-    call_count = 0
-
-    async def _fake_execute(*args: Any, **kwargs: Any) -> MagicMock:
-        nonlocal call_count
-        if call_count >= len(exec_results):
-            return MagicMock()
-        res = exec_results[call_count]
-        call_count += 1
-        return res
-
-    mock_db_session.execute = _fake_execute
+    recorded = _answer_reads(
+        mock_db_session,
+        [
+            _make_result(job),
+            _make_result(sample),
+            MagicMock(),
+            MagicMock(),
+            report_result,
+        ],
+    )
 
     from app import config as api_config
 
@@ -488,11 +461,12 @@ async def test_mock_mode_with_an_attached_report_fails_with_a_worded_message(
 
     assert result["status"] == "failed"
     assert "AttributeError" not in result["error"]
-    assert "cannot accept an uploaded report" in result["error"]
-    assert job.status == "failed"
-    assert job.error_message is not None
-    assert "AttributeError" not in job.error_message
-    assert "cannot accept an uploaded report" in job.error_message
+    # The wording itself is in the log entry the id names; what the job says
+    # is the class the worker raised deliberately for this case.
+    assert result["error"].startswith("ValueError (error id ")
+    failed = [u for u in updates_in(recorded, "analysis_jobs") if u["status"] == "failed"]
+    assert len(failed) == 1
+    assert failed[0]["error_message"] == result["error"]
 
 
 # ---------------------------------------------------------------------------
@@ -653,18 +627,7 @@ async def test_worker_removes_private_sample_copies_after_success(
             m.scalar_one.return_value = obj
         return m
 
-    exec_results = [_make_result(job), _make_result(sample)]
-    call_count = 0
-
-    async def _fake_execute(*args: Any, **kwargs: Any) -> MagicMock:
-        nonlocal call_count
-        if call_count >= len(exec_results):
-            return MagicMock()
-        res = exec_results[call_count]
-        call_count += 1
-        return res
-
-    mock_db_session.execute = _fake_execute
+    _answer_reads(mock_db_session, [_make_result(job), _make_result(sample)])
 
     from app.worker import sample_files
 
@@ -723,18 +686,7 @@ async def test_worker_removes_private_sample_copies_after_pipeline_failure(
             m.scalar_one.return_value = obj
         return m
 
-    exec_results = [_make_result(job), _make_result(sample)]
-    call_count = 0
-
-    async def _fake_execute(*args: Any, **kwargs: Any) -> MagicMock:
-        nonlocal call_count
-        if call_count >= len(exec_results):
-            return MagicMock()
-        res = exec_results[call_count]
-        call_count += 1
-        return res
-
-    mock_db_session.execute = _fake_execute
+    _answer_reads(mock_db_session, [_make_result(job), _make_result(sample)])
 
     from app.worker import sample_files
 
@@ -954,18 +906,7 @@ async def test_override_load_failure_falls_back_to_default_settings(
             m.scalar_one.return_value = obj
         return m
 
-    exec_results = [_make_result(job), _make_result(sample)]
-    call_count = 0
-
-    async def _fake_execute(*args: Any, **kwargs: Any) -> MagicMock:
-        nonlocal call_count
-        if call_count >= len(exec_results):
-            return MagicMock()
-        res = exec_results[call_count]
-        call_count += 1
-        return res
-
-    mock_db_session.execute = _fake_execute
+    _answer_reads(mock_db_session, [_make_result(job), _make_result(sample)])
 
     async def _boom(_db: Any) -> dict[str, Any]:
         raise ConnectionError(f"{_dsn('postgres', 'maljan:s3cret', 'db:5432/maljan')} unreachable")

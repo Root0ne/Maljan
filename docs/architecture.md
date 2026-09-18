@@ -46,6 +46,47 @@ operator can reconfigure.
 6. Threat-intelligence enrichment runs afterwards as its own job, so it never
    delays the verdict.
 
+### What the worker holds while a run is in flight
+
+No database transaction. The worker opens one session before the models start
+— the job row, its sample, the stored settings, any attached sandbox report,
+and the move to `running` — and closes it again before the pipeline is built.
+The run's writes open sessions of their own: the event feed's batches as they
+fill, and one transaction at the end for the report, the agent findings, the
+evidence ledger, the transcript and the completion, which go together because
+the report's sections cite the ledger's ids.
+
+A session held for the length of an analysis is a backend sitting `idle in
+transaction` for as long as the run takes. One was measured at 13 minutes 51
+seconds, holding an `AccessShareLock` on `analysis_jobs`, `analysis_reports`
+and `runtime_settings`: a migration's `ALTER TABLE analysis_reports` queued
+behind it, every read of that table queued behind the ALTER, and
+`GET /api/v1/jobs/{id}` timed out for four minutes while `/health` answered in
+milliseconds. The enrichment task follows the same rule — it reads the
+report's payload, closes, spends as long as the reputation lookups take
+(452 s on one measured report), and opens a second session to write the
+result.
+
+A failed run records its failure through a session of its own. The session the
+run was writing through is the one most likely to be unusable — a terminated
+backend leaves every statement on it raising `PendingRollbackError` — and that
+is how a job came to publish its `error` event and still read `running`, with
+no error and no `completed_at`, for as long as the worker stayed up. What the
+row then says is the class of the exception and the id of the log entry
+holding the rest: `error_message` is a field of `JobResponse`, so an
+exception's own message put there is published, and a failure names a path or
+a connection string as readily as anything else.
+
+A `running` row with no live owner is repaired at worker boot. Ownership is
+read from the queue: arq holds `arq:in-progress:<job id>` for a job a worker
+has claimed, and writes its health key every `health_check_interval`, so a job
+that is claimed while a worker is alive is left alone however long it has been
+running, up to `job_timeout`. Everything else that has been `running` longer
+than the grace period (`ORPHAN_JOB_GRACE_SECONDS`, five minutes) is marked
+`failed` with a reason saying so. When Redis cannot be reached, ownership
+cannot be established and only jobs past `job_timeout` are swept, because the
+alternative is a sweep that fails a run another worker is performing.
+
 ## Format routing
 
 The platform never refuses a sample for its format. The first thing a job does

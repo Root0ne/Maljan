@@ -747,6 +747,33 @@ change landed on `main`.
 
 ### Fixed
 
+- **The worker no longer holds a transaction while the models run.** The
+  analysis task kept one session open for the whole job: it read the settings,
+  and the backend then sat `idle in transaction` for as long as the analysis
+  took — 13 minutes 51 seconds on the run that found it — holding an
+  `AccessShareLock` on `analysis_jobs`, `analysis_reports` and
+  `runtime_settings`. A migration's `ALTER TABLE analysis_reports` queued
+  behind it, every read of that table queued behind the ALTER, and
+  `GET /api/v1/jobs/{id}` timed out for four minutes while `/health` answered
+  in milliseconds. The task now reads the job, its sample, the stored settings
+  and any attached sandbox report in one short session, closes it before the
+  pipeline is built, and opens another for the report, findings, evidence,
+  transcript and completion — which stay in one transaction, because the
+  report's sections cite the ledger's ids. The enrichment task is the same
+  shape: it reads the payload, closes, spends as long as the reputation
+  lookups take (452 s on one measured report) with no session open, and writes
+  through a second one. Cancellation is unchanged, including the feed flush a
+  cancelled run ends with.
+- **A failed job says so, even when its own session is gone.** The failure
+  path wrote through the session the run had been using, which is exactly the
+  session a terminated backend leaves raising `PendingRollbackError`: the run
+  published its `error` event, arq recorded the task as failed, and the row
+  still read `running` with no error and no `completed_at` an hour later. The
+  failure is now recorded through a new session, and what the row says is the
+  class of the exception and the id of the log entry holding the rest, because
+  `error_message` is a field of `JobResponse` and an exception's message names
+  host paths and connection strings. A `cancelled` row is left alone.
+
 - **Four documented facts that had drifted from the code.** The delegation
   section said a lead's 1800 s stage had room for five asks where
   `_asks_that_fit` computes six and the `ask_<key>` description gives the model
