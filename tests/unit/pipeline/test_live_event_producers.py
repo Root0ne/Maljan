@@ -81,7 +81,10 @@ class TestTheRecorderFeedsTheConversation:
         assert "/etc/maljan" not in finished["summary"]
         assert "RuntimeError" not in finished["summary"]
 
-    def test_a_refused_repeat_still_closes_the_bubble_it_opened(self) -> None:
+    def test_a_refused_repeat_announces_nothing(self) -> None:
+        """No tool runs, so there is no call to draw: the notice is a message
+        to the model, and a start with no finish would leave the console
+        holding a bubble open for a call that never happened."""
         sink = _Sink()
         recorder = _recorder(sink)
 
@@ -93,8 +96,8 @@ class TestTheRecorderFeedsTheConversation:
         for _ in range(3):
             wrapped.invoke({"path": "/x"})
 
-        assert len(sink.of("tool_call_started")) == 3
-        assert len(sink.of("tool_call_finished")) == 3
+        assert len(sink.of("tool_call_started")) == 2
+        assert len(sink.of("tool_call_finished")) == 2
 
     def test_a_recorder_without_a_sink_is_silent_and_still_records(self) -> None:
         recorder = _recorder(None)
@@ -139,11 +142,15 @@ class TestValidationFeedbackReachesTheConversation:
             agent="static",
             stage="analysis",
         )
-        (event,) = sink.of("validation_feedback")
-        assert event["code"] == "technique_unknown"
-        assert event["agent"] == "static"
-        assert event["stage"] == "analysis"
-        assert event["retry_index"] == 1
+        shown, outcome = sink.of("validation_feedback")
+        assert shown["code"] == "technique_unknown"
+        assert shown["agent"] == "static"
+        assert shown["stage"] == "analysis"
+        assert shown["retry_index"] == 1
+        assert shown["state"] == "retried"
+        # And what became of it, which nothing used to publish.
+        assert outcome["code"] == "technique_unknown"
+        assert outcome["state"] == "resolved"
 
     def test_a_loop_with_nobody_to_tell_publishes_nothing(self) -> None:
         answers = iter(["first", "second"])
@@ -183,6 +190,95 @@ class TestValidationFeedbackReachesTheConversation:
             )
         )
         assert sink.of("validation_feedback")[0]["agent"] == "judge"
+
+
+class TestEveryViolationSaysWhatBecameOfIt:
+    """A reader of the conversation sees every violation the run recorded.
+
+    Only the batch that triggered a retry used to be published: the ones that
+    survived it and the ones the retry introduced were in the run summary and
+    nowhere a reader could watch. One run showed two corrections in the feed
+    beside a summary recording ten unresolved findings.
+    """
+
+    @staticmethod
+    def _rows(sink: _Sink) -> list[tuple[str, str]]:
+        return [(row["code"], row["state"]) for row in sink.of("validation_feedback")]
+
+    @staticmethod
+    def _keys(sink: _Sink) -> list[tuple[str, str, str]]:
+        return [(row["agent"], row["code"], row["path"]) for row in sink.of("validation_feedback")]
+
+    @staticmethod
+    def _loop(sink: _Sink, rounds: list[list[Violation]]) -> None:
+        answers = iter(["first", "second", "third"])
+        remaining = list(rounds)
+
+        def validator(_parsed: Any) -> list[Violation]:
+            return remaining.pop(0) if remaining else []
+
+        retry_with_feedback_sync(
+            lambda _turns: next(answers),
+            ["turn"],
+            [validator],
+            parse=lambda a: a,
+            sink=sink,  # type: ignore[arg-type]
+            agent="static",
+            stage="analysis",
+        )
+
+    def test_a_violation_that_survived_its_retry_is_published(self) -> None:
+        sink = _Sink()
+        kept = Violation(code="attck.unknown_id", message="T9999 is not in the catalogue")
+
+        self._loop(sink, [[kept], [kept]])
+
+        assert self._rows(sink) == [
+            ("attck.unknown_id", "retried"),
+            ("attck.unknown_id", "survived"),
+        ]
+
+    def test_a_violation_the_retry_introduced_is_published_once(self) -> None:
+        sink = _Sink()
+        first = Violation(code="isr.empty_evidence", message="cite the artifact")
+        introduced = Violation(code="attck.unknown_id", message="T9999 is not in the catalogue")
+
+        self._loop(sink, [[first], [introduced]])
+
+        assert self._rows(sink) == [
+            ("isr.empty_evidence", "retried"),
+            ("isr.empty_evidence", "resolved"),
+            ("attck.unknown_id", "survived"),
+        ]
+
+    def test_the_two_lines_about_one_violation_fold_together(self) -> None:
+        """``(agent, code, path)``, so a reader can draw one line per violation."""
+        sink = _Sink()
+        kept = Violation(
+            code="attck.unknown_id",
+            message="T9999 is not in the catalogue",
+            path="static.claims[2]",
+        )
+
+        self._loop(sink, [[kept], [kept]])
+
+        assert self._keys(sink) == [("static", "attck.unknown_id", "static.claims[2]")] * 2
+
+    def test_two_claims_with_the_same_code_do_not_fold(self) -> None:
+        sink = _Sink()
+        first = Violation(code="attck.unknown_id", message="T9999", path="static.claims[0]")
+        second = Violation(code="attck.unknown_id", message="T8888", path="static.claims[1]")
+
+        self._loop(sink, [[first, second], []])
+
+        assert len(set(self._keys(sink))) == 2
+
+    def test_an_answer_that_needed_no_correction_publishes_nothing(self) -> None:
+        sink = _Sink()
+
+        self._loop(sink, [[]])
+
+        assert self._rows(sink) == []
 
 
 class TestTheJudgeAsks:

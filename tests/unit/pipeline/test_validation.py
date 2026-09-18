@@ -182,7 +182,11 @@ class TestValidateVerdictBundle:
 
         assert validate_verdict_bundle(bundle, attck=_Attck()) == []
 
-    def test_an_attack_pattern_with_no_mitre_reference_at_all_is_not_questioned(self):
+    def test_an_attack_pattern_with_no_mitre_reference_at_all_is_asked_for_one(self):
+        """It names a behaviour and no technique, and every ATT&CK check keys
+        on the id — so this object used to pass through unchecked and be
+        published as a technique with an empty id. It is asked once; kept, the
+        report carries it as a behaviour."""
         bundle = Bundle(
             objects=[  # type: ignore[list-item]
                 AttackPattern(
@@ -192,7 +196,10 @@ class TestValidateVerdictBundle:
             ]
         )
 
-        assert validate_verdict_bundle(bundle, attck=_Attck()) == []
+        violations = validate_verdict_bundle(bundle, attck=_Attck())
+
+        assert [v.code for v in violations] == ["attck.missing_id"]
+        assert "Custom detection" in violations[0].message
 
     def test_a_severity_outside_the_enum_is_reported(self):
         bundle = Bundle()

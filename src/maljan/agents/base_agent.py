@@ -35,6 +35,7 @@ from maljan.core.exceptions import AgentLoopCancelled, AnalystError
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger, record_response_usage
 from maljan.pipeline.validation import (
+    ALIGNMENT_MARGIN,
     VALIDITY_CODE,
     ValidationTally,
     Violation,
@@ -1924,6 +1925,19 @@ class BaseAnalyst(BudgetMeter, ABC):
         # chunked run it arrives once per chunk.
         self._findings_buffer: list[Finding] = []
         self._artifacts_buffer: list[Artifact] = []
+        # The answers of the asks this agent made, as the specialists' own
+        # ISRs. A lead's report is the only channel its chunk has out of a
+        # stage, so a lead whose loop died with six answered asks behind it
+        # took those answers down with it: the ledger held 52 entries and the
+        # stage merged nothing. They are kept here, labelled with the agent
+        # that produced them, and they are what the salvage below and the
+        # stage's merge fall back to.
+        self._delegated_isrs: list[AgentISR] = []
+        # How many of them a salvage turn has already been shown. The buffer
+        # itself is never drained: the stage promotes every answered ask, and
+        # a chunked lead's later salvage would otherwise re-read the first
+        # chunk's answers as if they were its own.
+        self._asks_already_synthesised = 0
         # Declared here rather than only in the subclasses that populate them,
         # because ``close_tools`` below has to be able to release them for any
         # analyst. ``toolkit`` is an MCP toolkit or a Ghidra HTTP client
@@ -3242,17 +3256,142 @@ class BaseAnalyst(BudgetMeter, ABC):
             return self._analyze_isr_guarded(data)
 
     def _analyze_isr_guarded(self, data: str) -> AgentISR:
+        # Whatever the loop is given, kept where the handlers below can reach
+        # it: the salvage needs the same text the analysis had, and asking for
+        # it again inside a handler is how a failing truncate would raise out
+        # of the branch that is reporting a different failure.
+        truncated = data
         try:
             truncated = self._truncate_input(data)
             isr = self.analyze_isr(truncated)
+            if not isr.claims:
+                # An analyst whose loop ended without a report answers with an
+                # empty ISR rather than raising, so the salvage belongs here as
+                # much as on the failure path below: a lead's cap arrives as
+                # "no claims" and takes every answered ask with it.
+                salvaged = self._synthesise_from_answered_asks()
+                if salvaged is not None and salvaged.claims:
+                    isr = salvaged
             return self._validate_isr(self._apply_consistency_gate(isr, truncated), truncated)
         except AnalystError:
+            salvaged = self._salvaged_isr(truncated)
+            if salvaged is not None:
+                return salvaged
             raise
         except Exception as e:
             self.logger.error("ISR analysis failed: %s", describe_exception_for_log(e))
+            salvaged = self._salvaged_isr(truncated)
+            if salvaged is not None:
+                return salvaged
             raise AnalystError(
                 f"{self.name} ISR analysis failed: {describe_exception_for_log(e)}"
             ) from e
+
+    def _salvaged_isr(self, evidence: str) -> AgentISR | None:
+        """A report written from the answered asks, checked like any other.
+
+        Through the same gate and the same validation the ordinary path takes:
+        a salvaged report that cites what it cannot see is the failure mode
+        the gate exists for, and it is the report most likely to.
+
+        ``evidence`` is the text the analysis was given, already truncated by
+        the caller. Nothing here may raise: this runs inside the handler that
+        is reporting the original failure, and a salvage that threw would
+        replace that failure with its own.
+        """
+        try:
+            salvaged = self._synthesise_from_answered_asks()
+            if salvaged is None:
+                return None
+            return self._validate_isr(self._apply_consistency_gate(salvaged, evidence), evidence)
+        except Exception as exc:  # noqa: BLE001 — the original failure is the one to report
+            self.logger.error(
+                "%s: the salvaged report could not be checked: %s",
+                self.name,
+                describe_exception_for_log(exc),
+            )
+            return None
+
+    def answered_asks(self) -> list[AgentISR]:
+        """The specialists' own ISRs, for the asks this agent got answers to.
+
+        A peek rather than a drain: the stage node reads it when a lead's own
+        report never arrived, and it is the lead's loop that owns the buffer.
+        """
+        return list(getattr(self, "_delegated_isrs", None) or [])
+
+    def remember_answered_ask(self, isr: AgentISR) -> None:
+        """Keep a specialist's answer where the salvage and the stage can find it."""
+        if isr is None:
+            return
+        buffer = getattr(self, "_delegated_isrs", None)
+        if isinstance(buffer, list):
+            buffer.append(isr)
+
+    def _synthesise_from_answered_asks(self) -> AgentISR | None:
+        """One bounded turn that writes a lead's report from the asks it got back.
+
+        A lead delegates, and its own report is the only way its stage hears
+        about the answers. When the loop dies — the wall-clock cap, most of
+        all, which is what an 1,800 s lead chunk hits — the transcript it died
+        in is gone and the answers go with it. They do not have to: the
+        specialists' ISRs are on this agent, and one turn over them produces
+        the report the loop was about to write.
+
+        ``None`` when there is nothing to synthesise from or the turn itself
+        failed, and then the caller's own failure stands: the stage promotes
+        the specialists' answers instead, which loses the lead's synthesis but
+        no completed ask.
+        """
+        answers = self.answered_asks()[self._asks_already_synthesised :]
+        if not answers:
+            return None
+        # A chunked lead re-enters this loop once per chunk, and the answers it
+        # got in the first chunk are not answers to the second chunk's asks.
+        # The buffer keeps all of them — the stage promotes every one — and
+        # each salvage turn is shown only what came in since the last.
+        self._asks_already_synthesised = len(self.answered_asks())
+        self.logger.warning(
+            "%s: the loop ended without a report and %d ask(s) had been answered; "
+            "synthesising from those answers.",
+            self.name,
+            len(answers),
+        )
+        from langchain_core.messages import HumanMessage, SystemMessage
+
+        blocks = [
+            f"ANSWER FROM {isr.agent_id}:\n{isr.to_text_summary()}"
+            for isr in answers
+            if isr is not None
+        ]
+        prompt = self._system_prompt("")
+        messages: list[Any] = []
+        if prompt:
+            messages.append(SystemMessage(content=prompt))
+        messages.append(
+            HumanMessage(
+                content=(
+                    "Your own analysis turn ended before you wrote your report, and the "
+                    "specialists you asked have answered. Using ONLY those answers, write "
+                    "your FINAL answer now in the exact format the system prompt "
+                    "requested. Do not call any tools. Cite the evidence ids the answers "
+                    "cite, and attribute each point to the specialist that made it.\n\n"
+                    + "\n\n".join(blocks)
+                )
+            )
+        )
+        try:
+            text = self._invoke_llm_with_timeout(messages, _SYNTHESIS_MIN_SECONDS)
+        except Exception as exc:  # noqa: BLE001 — a salvage that fails leaves the failure
+            self.logger.error(
+                "%s: synthesis from the answered asks failed: %s",
+                self.name,
+                describe_exception_for_log(exc),
+            )
+            return None
+        if not answer_is_isr(text):
+            return None
+        return self._text_to_isr(self._capture_findings(text), 0)
 
     def safe_analyze_isr_chunked(self, chunks: list) -> AgentISR:
         """Analyze a list of TextChunk objects, merging their ISRs.
@@ -3583,8 +3722,17 @@ class BaseAnalyst(BudgetMeter, ABC):
         cfg_validation = getattr(get_settings(), "validation", None)
         gate = alignment_gate(knowledge, cfg_validation, self.logger, self.name)
         threshold = float(getattr(cfg_validation, "alignment_threshold", 0.05) or 0.05)
+        margin = float(getattr(cfg_validation, "alignment_margin", ALIGNMENT_MARGIN))
+        challenges = bool(getattr(cfg_validation, "weak_alignment", False))
+        # One weak-alignment batch per turn. The ranking is recorded on every
+        # claim every time; what is bounded is the asking, because a second
+        # batch would spend another full model turn on a check whose first
+        # batch the analyst has already answered.
+        asked: list[bool] = []
 
         def _validator(candidate: AgentISR) -> list[Violation]:
+            first = not asked
+            asked.append(True)
             return validate_isr(
                 candidate,
                 attck=knowledge,
@@ -3592,6 +3740,8 @@ class BaseAnalyst(BudgetMeter, ABC):
                 sample=sample,
                 alignment=gate,
                 alignment_threshold=threshold,
+                alignment_margin=margin,
+                weak_alignment_challenges=challenges and first,
             )
 
         try:

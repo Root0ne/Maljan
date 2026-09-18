@@ -7,11 +7,14 @@ A projection, and only a projection. Two inputs:
   - ``isr_reports`` — the analysts' own claims, which add the technique ids and
     the evidence quotes the judge did not carry over.
 
-An id the ATT&CK catalogue does not have is carried through and marked
-(``technique_id_valid``), not dropped: it is the producer's answer, and the
-report is where a reader is told it does not resolve. That holds for the judge
-as much as for an analyst — the judge's ids are checked here because the judge
-has no later loop to be told in.
+An id the ATT&CK catalogue does not have is carried through to the matrix and
+marked (``technique_id_valid``), not dropped: it is the producer's answer, and
+the report is where a reader is told it does not resolve. That holds for the
+judge as much as for an analyst — the judge's ids are checked here because the
+judge has no later loop to be told in. It does not reach ``ttp_mappings``,
+which is the *published* technique list every other technique surface of the
+report is built from, and which therefore names only techniques this run
+found.
 
 Neither input is adjusted here. The cap this module used to apply — halving the
 confidence of an obfuscation or injection claim whose supporting static
@@ -109,6 +112,12 @@ def build_capability_matrix(
 
         tactic_id, tactic_name = _resolve_tactic(index, tactic_slug)
         domain, platforms = _catalogue_scope(tid)
+        # The cell keeps an id the catalogue rejected, marked: it is the
+        # producer's answer and deleting it would delete the record of it. The
+        # mapping does not, because ``ttp_mappings`` is the published technique
+        # list — the report's ATT&CK section, its References, the STIX
+        # attack-patterns and ``/reports/{id}/mitre`` are all built from it —
+        # and an id the check rejected is not a technique this run found.
         cells.append(
             CapabilityCell(
                 tactic=tactic_id or "TA0000",
@@ -123,6 +132,13 @@ def build_capability_matrix(
                 domain=domain,
             )
         )
+        if not valid:
+            logger.info(
+                "capability_matrix: %s stays in the matrix marked and out of the published "
+                "technique list; the ATT&CK catalogue has no entry for it.",
+                tid,
+            )
+            continue
         mappings.append(
             TTPMapping(
                 technique_id=tid,
@@ -291,6 +307,33 @@ def _judge_technique_ids(stix_output: dict[str, Any] | None) -> list[str]:
                     found.append(tid)
                 break
     return found
+
+
+def unmapped_behaviours(stix_output: dict[str, Any] | None) -> list[str]:
+    """What the judge named as an attack-pattern without naming a technique.
+
+    The validator asks for the id once; an object that comes back without one
+    still describes something the judge observed, and dropping it silently is
+    how three of them reached one report's ``/mitre`` as techniques with an
+    empty ``technique_id``. They are reported here instead, as behaviours,
+    which is what they are — and they are not published as ATT&CK techniques
+    on any surface.
+    """
+    names: list[str] = []
+    for obj in _judge_objects(stix_output):
+        if obj.get("type") != "attack-pattern":
+            continue
+        refs = obj.get("external_references") or []
+        if any(isinstance(ref, dict) and str(ref.get("external_id") or "").strip() for ref in refs):
+            continue
+        name = str(obj.get("name") or "").strip()
+        if name and name.upper().split()[0].rstrip(":").startswith("T"):
+            # The id is in the name, which ``_attack_pattern_technique_id``
+            # reads; it is a mapped technique and belongs to the matrix.
+            continue
+        if name and name not in names:
+            names.append(name[:200])
+    return names
 
 
 def _judge_relationship_rows(

@@ -296,24 +296,37 @@ class TestFallbackBundleFailsClosed:
         bundle = judge._fallback_bundle_from_text("[TIMEOUT]", {}, self._isr("T1055.001", "T1027"))
         assert self._emitted(bundle) == {"T1055.001", "T1027"}
 
+    @staticmethod
+    def _record(bundle) -> dict:
+        """The object carrying the fallback record.
+
+        The malware object when the verdict is Malware, and the note when it is
+        not: a bundle whose verdict is Suspicious carries no malware object, so
+        the record of the degraded path lives on the note instead.
+        """
+        return next(o for o in bundle.model_dump()["objects"] if o["type"] in {"malware", "note"})
+
     def test_what_was_dropped_is_recorded_rather_than_discarded(self, judge) -> None:
-        malware = next(
-            o
-            for o in judge._fallback_bundle_from_text(
+        record = self._record(
+            judge._fallback_bundle_from_text(
                 "T1486 and T1490 look likely.", {}, self._isr("T1055.001")
-            ).model_dump()["objects"]
-            if o["type"] == "malware"
+            )
         )
-        assert malware["x_maljan_model_only_technique_ids"] == ["T1486", "T1490"]
-        assert malware["x_maljan_degraded_path"] is True
+        assert record["x_maljan_model_only_technique_ids"] == ["T1486", "T1490"]
+        assert record["x_maljan_degraded_path"] is True
+
+    def test_what_was_dropped_is_recorded_on_a_malware_verdict_too(self, judge) -> None:
+        record = self._record(
+            judge._fallback_bundle_from_text(
+                "This is malware; T1486 and T1490 look likely.", {}, self._isr("T1055.001")
+            )
+        )
+        assert record["type"] == "malware"
+        assert record["x_maljan_model_only_technique_ids"] == ["T1486", "T1490"]
 
     def test_no_empty_custom_property_when_nothing_was_dropped(self, judge) -> None:
-        malware = next(
-            o
-            for o in judge._fallback_bundle_from_text(
-                "T1055.001 only.", {}, self._isr("T1055.001")
-            ).model_dump()["objects"]
-            if o["type"] == "malware"
+        malware = self._record(
+            judge._fallback_bundle_from_text("T1055.001 only.", {}, self._isr("T1055.001"))
         )
         assert "x_maljan_model_only_technique_ids" not in malware, (
             "an empty array serialised as present is one of the two conformance "

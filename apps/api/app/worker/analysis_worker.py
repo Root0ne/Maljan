@@ -2162,11 +2162,18 @@ def _extract_mitre(result: dict) -> list | None:
     """Extract MITRE ATT&CK techniques for the legacy ``mitre_techniques`` column.
 
     Preference order:
-      1. ``malware_report.ttp_mappings`` — the deterministic mapper output
-         (technique_id + name + evidence quotes + confidence).
+      1. ``malware_report.ttp_mappings`` — the published technique list, which
+         every other technique surface of the report is built from.
       2. ``stix_bundle_extended`` / ``stix_output`` — fall back to walking the
          STIX bundle for ``attack-pattern`` SDOs when the report builder did
          not run (mock mode without a configured pipeline, legacy rows).
+
+    An entry with no technique id is not written on either path. One audited
+    run served three of them from the fallback — ``/mitre`` listed three
+    techniques with an empty ``technique_id`` while ``ttp_mappings`` was empty
+    — because the judge's attack-patterns carried names and no ATT&CK
+    reference. A behaviour with no technique id is reported as a behaviour, in
+    the report's own ``unmapped_behaviours``, and never as a technique.
     """
     mr = result.get("malware_report") or {}
     mappings = mr.get("ttp_mappings") or []
@@ -2198,9 +2205,12 @@ def _extract_mitre(result: dict) -> list | None:
         # a missing field; losing the run is not.
         refs = obj.get("external_references")
         first = refs[0] if isinstance(refs, list) and refs and isinstance(refs[0], dict) else {}
+        technique_id = str(first.get("external_id") or "").strip()
+        if not technique_id:
+            continue
         techniques.append(
             {
-                "technique_id": first.get("external_id", ""),
+                "technique_id": technique_id,
                 "name": obj.get("name", ""),
                 "description": obj.get("description", ""),
             }

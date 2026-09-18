@@ -24,7 +24,7 @@ import json
 import re
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, get_args, get_origin
 
 from pydantic import ValidationError
 
@@ -34,7 +34,13 @@ from maljan.analysis.corroboration import corroboration_row as corroboration_row
 from maljan.analysis.corroboration import corroboration_sources as corroboration_sources
 from maljan.analysis.technique_ids import TECHNIQUE_ID_EXACT_RE
 from maljan.core.logger import logger
-from maljan.pipeline.events import EventSink, emit_validation_feedback
+from maljan.pipeline.events import (
+    VALIDATION_RESOLVED,
+    VALIDATION_RETRIED,
+    VALIDATION_SURVIVED,
+    EventSink,
+    emit_validation_feedback,
+)
 from maljan.schemas.evidence import entry_ids_in
 from maljan.schemas.judgement import SEVERITY_RATINGS
 
@@ -42,6 +48,13 @@ from maljan.schemas.judgement import SEVERITY_RATINGS
 # line of feedback; a longer list reads as a menu and the model picks from the
 # middle of it.
 MAX_SUGGESTIONS = 3
+
+# How far a candidate has to beat the claimed id's own score before the gate
+# says anything. The index scores a *correct* id near zero often enough that a
+# bare threshold questioned almost every claim: 81 of the 92 feedback rows in
+# one audited run, 33 of 33 in another. The default is the measured one — see
+# ``tests/fixtures/attck_alignment_recorded.json`` and docs/architecture.md.
+ALIGNMENT_MARGIN = 0.20
 
 # How many schema complaints one feedback turn carries. A model that answered
 # with the wrong shape produces one error per field, and a wall of them reads
@@ -200,6 +213,8 @@ def validate_isr(
     sample: Mapping[str, Any] | None = None,
     alignment: Any = None,
     alignment_threshold: float = 0.05,
+    alignment_margin: float = ALIGNMENT_MARGIN,
+    weak_alignment_challenges: bool = False,
 ) -> list[Violation]:
     """What is wrong with one analyst's structured answer.
 
@@ -220,11 +235,13 @@ def validate_isr(
     technique whose catalogue domain or platforms cannot apply to them is
     ``attck.platform_mismatch``. ``alignment`` is the gate — a callable of
     ``(claim_text, technique_id)`` answering the index's gate score and
-    candidates, or ``None`` when the index is cold or the gate is off. A
-    claimed id the index neither ranked nor scored above
-    ``alignment_threshold`` is ``attck.weak_alignment``, with the candidates
-    named; the ranking is written on the claim either way, and no id is ever
-    replaced by a candidate.
+    candidates, or ``None`` when the index is cold or the gate is off. The
+    ranking is narrowed to the sample's own domain and platforms and written on
+    the claim whatever it says; it becomes ``attck.weak_alignment`` only with
+    ``weak_alignment_challenges`` on, and then only for a claimed id that scores
+    under ``alignment_threshold`` while an in-scope candidate from another
+    tactic beats it by ``alignment_margin``. No id is ever replaced by a
+    candidate.
     """
     citable = [str(i) for i in (ledger_ids or []) if str(i).strip()]
     known = {i.strip().lower() for i in citable}
@@ -309,7 +326,16 @@ def validate_isr(
         mismatch = platform_mismatch_message(tid, attck, scope)
         if mismatch:
             violations.append(Violation(code=PLATFORM_MISMATCH_CODE, message=mismatch, path=path))
-        weak = _weak_alignment(claim, tid, alignment, alignment_threshold)
+        weak = _weak_alignment(
+            claim,
+            tid,
+            alignment,
+            alignment_threshold,
+            attck=attck,
+            scope=scope,
+            margin=alignment_margin,
+            challenge=weak_alignment_challenges,
+        )
         if weak:
             violations.append(Violation(code=WEAK_ALIGNMENT_CODE, message=weak, path=path))
 
@@ -432,16 +458,98 @@ WEAK_ALIGNMENT_CODE = "attck.weak_alignment"
 ALIGNMENT_CANDIDATES = 5
 
 
-def _weak_alignment(claim: Any, tid: str, alignment: Any, threshold: float) -> str:
+def _base_id(technique_id: str) -> str:
+    """The parent technique of an id: ``T1055.001`` -> ``T1055``."""
+    return str(technique_id or "").split(".")[0]
+
+
+def _catalogue_answer(technique_id: str, attck: Any, question: str) -> dict[str, Any]:
+    """One catalogue answer about an id, or ``{}`` when it cannot be had."""
+    lookup = getattr(attck, question, None)
+    if lookup is None:
+        return {}
+    try:
+        answer = lookup(technique_id)
+    except Exception as exc:  # noqa: BLE001 — an unanswered lookup narrows nothing
+        logger.debug("validation: the %s lookup for %s failed (%s).", question, technique_id, exc)
+        return {}
+    return answer if isinstance(answer, dict) else {}
+
+
+def _within_scope(technique_id: str, attck: Any, scope: tuple[str | None, tuple[str, ...]]) -> bool:
+    """Whether a technique could apply to a sample in ``scope``.
+
+    The same question ``platform_mismatch_message`` answers about a claimed id,
+    asked about a *candidate* before it is proposed. Without it the index
+    offered Mobile and ICS techniques as better fits for a Windows PE — the
+    ranking is domain-blind, so ``T1406`` and ``T0885`` came back for a claim
+    about a PE's imports and the analyst was asked to consider them.
+    """
+    expected_domain, expected_platforms = scope
+    if expected_domain is None:
+        return True
+    answer = _catalogue_answer(technique_id, attck, "attck_scope") or _catalogue_answer(
+        technique_id, attck, "attck_lookup"
+    )
+    if not answer:
+        return True
+    domain = str(answer.get("domain") or "").strip().lower()
+    if domain and domain != expected_domain:
+        return False
+    platforms = [str(p) for p in (answer.get("platforms") or []) if str(p).strip()]
+    if not platforms or _pre_only(platforms):
+        return True
+    wanted = {p.lower() for p in expected_platforms}
+    return not wanted or any(p.lower() in wanted for p in platforms)
+
+
+def _tactics(technique_id: str, attck: Any) -> set[str]:
+    """The tactics the catalogue gives a technique, lowercased."""
+    answer = _catalogue_answer(technique_id, attck, "attck_lookup")
+    return {str(t).strip().lower() for t in (answer.get("tactics") or []) if str(t).strip()}
+
+
+def _disagrees_with(candidate_id: str, tid: str, attck: Any) -> bool:
+    """Whether proposing ``candidate_id`` contradicts the claim's own id.
+
+    A candidate from the same technique family (``T1055`` beside ``T1055.001``)
+    or from the same tactic is the index naming another rung of the behaviour
+    the analyst already named, which is a ranking preference and not a reason
+    to spend a model turn. A candidate from another tactic is the index saying
+    the claim describes something else.
+    """
+    if _base_id(candidate_id) == _base_id(tid):
+        return False
+    claimed = _tactics(tid, attck)
+    return not (claimed and claimed & _tactics(candidate_id, attck))
+
+
+def _weak_alignment(
+    claim: Any,
+    tid: str,
+    alignment: Any,
+    threshold: float,
+    *,
+    attck: Any = None,
+    scope: tuple[str | None, tuple[str, ...]] = (None, ()),
+    margin: float = ALIGNMENT_MARGIN,
+    challenge: bool = False,
+) -> str:
     """Record the index's ranking on the claim; the feedback when it disagrees.
 
     ``alignment(text, tid)`` answers ``{gate_score, candidates: [{technique_id,
     score_gate}, ...]}`` or ``None`` when the index has nothing to say. The
-    ranking is written to ``claim.alignment`` whatever it says, so the judge
-    and the report see it beside the analyst's choice. The violation is raised
-    only when the index both left the id out of its candidates and scored it
-    under the threshold; either alone is a ranking the model may disagree
-    with. The id is never replaced.
+    ranking is written to ``claim.alignment`` whatever it says — narrowed to
+    the sample's own ATT&CK domain and platforms, so nothing out of scope is
+    ever proposed — and the judge and the report see it beside the analyst's
+    choice.
+
+    The feedback is the narrow case: the gate challenges only when it is turned
+    on, the claimed id scores under the threshold, the index did not rank the
+    claimed id itself among its in-scope candidates, no in-scope candidate
+    names the same family or tactic, and the best of the ones that do disagree
+    beats the claimed id by ``margin``. Everything else is a ranking the model
+    may disagree with, and the id is never replaced either way.
     """
     if alignment is None:
         return ""
@@ -457,7 +565,7 @@ def _weak_alignment(claim: Any, tid: str, alignment: Any, threshold: float) -> s
         return ""
     if not isinstance(answer, dict):
         return ""
-    candidates = [
+    candidates: list[dict[str, Any]] = [
         {
             "technique_id": str(c.get("technique_id") or "").strip().upper(),
             "score_gate": float(c.get("score_gate") or 0.0),
@@ -465,6 +573,7 @@ def _weak_alignment(claim: Any, tid: str, alignment: Any, threshold: float) -> s
         for c in answer.get("candidates") or []
         if isinstance(c, dict) and c.get("technique_id")
     ]
+    candidates = [c for c in candidates if _within_scope(str(c["technique_id"]), attck, scope)]
     try:
         gate_score = float(answer.get("gate_score") or 0.0)
     except (TypeError, ValueError):
@@ -472,13 +581,31 @@ def _weak_alignment(claim: Any, tid: str, alignment: Any, threshold: float) -> s
     record = {"gate_score": round(gate_score, 4), "candidates": candidates}
     if hasattr(claim, "alignment"):
         claim.alignment = record
-    if any(c["technique_id"] == tid for c in candidates) or gate_score >= threshold:
+    if not challenge or gate_score >= threshold:
         return ""
-    ranked = ", ".join(f"{c['technique_id']} ({c['score_gate']:.2f})" for c in candidates)
+    if scope[0] is None:
+        # A sample whose domain the router could not settle has no scope to
+        # score inside, and a comparison that cannot be made is not one to
+        # challenge on.
+        return ""
+    if any(str(c["technique_id"]) == tid for c in candidates):
+        # The index ranked the claimed id itself, in scope. Wherever it put it,
+        # it did not fail to think of it, and a candidate it happened to score
+        # higher is a preference between two techniques the index considers
+        # applicable — not the disagreement this check is for.
+        return ""
+    disagreeing = [c for c in candidates if _disagrees_with(str(c["technique_id"]), tid, attck)]
+    if not disagreeing:
+        return ""
+    best = max(disagreeing, key=lambda c: float(c["score_gate"]))
+    if float(best["score_gate"]) - gate_score < margin:
+        return ""
+    ranked = ", ".join(f"{c['technique_id']} ({c['score_gate']:.2f})" for c in disagreeing)
     return (
         f"TECHNIQUE {tid} aligns weakly with the claim's own text (gate score "
-        f"{gate_score:.2f}, threshold {threshold:.2f}), and the ATT&CK index ranks other "
-        f"techniques for it: {ranked or 'none'}. Keep {tid} if the evidence says so and say "
+        f"{gate_score:.2f}, threshold {threshold:.2f}), and the ATT&CK index ranks "
+        f"{best['technique_id']} ({best['score_gate']:.2f}) and other techniques from this "
+        f"sample's own domain above it: {ranked}. Keep {tid} if the evidence says so and say "
         "why in the claim, choose one of the ranked techniques, or drop the technique id."
     )
 
@@ -547,6 +674,11 @@ def ungrounded_technique_note(findings: Any) -> str:
 
 
 VALIDITY_CODE = "attck.unknown_id"
+
+# A technique named with no id. Its own code because the answer is different
+# from an id that does not resolve: there is nothing to look up, and a
+# behaviour the model could not map is still a behaviour the report can carry.
+MISSING_ID_CODE = "attck.missing_id"
 
 
 # What the run-quality note says for a check that could not run, per code.
@@ -694,6 +826,58 @@ def _claim_index(path: str) -> int | None:
 # ---------------------------------------------------------------------------
 # Anything with a pydantic schema
 # ---------------------------------------------------------------------------
+
+
+def keep_known_keys(model: Any, payload: Any) -> tuple[Any, list[str]]:
+    """``payload`` narrowed to the fields ``model`` declares, and what was dropped.
+
+    The report sections forbid unknown keys, deliberately: a model that invents
+    a field has invented its content too. But refusing the whole object over
+    one extra key cost two reports their conclusion and their technical
+    analysis — ``sophistication_rating`` and ``text`` beside fields that were
+    all correct — and the report then simply had no conclusion, with nothing
+    saying why. The known subset is kept, the extra keys are named, and the
+    caller records them as a degradation reason.
+
+    Recursive through the declared sub-models, because the keys the models
+    invented were nested inside the section objects rather than beside them.
+    Paths come back dotted, as a reader of the reason reads them.
+    """
+    dropped: list[str] = []
+
+    def _walk(target: Any, value: Any, path: str) -> Any:
+        fields = getattr(target, "model_fields", None)
+        if not isinstance(value, dict) or not isinstance(fields, dict):
+            return value
+        kept: dict[str, Any] = {}
+        for key, item in value.items():
+            if key not in fields:
+                dropped.append(f"{path}{key}")
+                continue
+            kept[key] = _walk_field(fields[key], item, f"{path}{key}.")
+        return kept
+
+    def _walk_field(field: Any, value: Any, path: str) -> Any:
+        annotation = getattr(field, "annotation", None)
+        origin = get_origin(annotation)
+        nested = [
+            arg
+            for arg in ([annotation, *get_args(annotation)])
+            if isinstance(arg, type) and hasattr(arg, "model_fields")
+        ]
+        if not nested:
+            return value
+        if isinstance(value, list):
+            return [_walk(nested[0], item, f"{path}{index}.") for index, item in enumerate(value)]
+        if origin in (dict, Mapping) and isinstance(value, dict):
+            # A mapping of models: the keys are the caller's own, not fields,
+            # so the sub-model is asked about each *value*. Walked as the
+            # dict itself, every key would be reported dropped and the field
+            # would come back empty.
+            return {key: _walk(nested[-1], item, f"{path}{key}.") for key, item in value.items()}
+        return _walk(nested[0], value, path)
+
+    return _walk(model, payload, ""), dropped
 
 
 def schema_violations(model: Any, payload: Any, *, code: str) -> list[Violation]:
@@ -1147,6 +1331,27 @@ def validate_verdict_bundle(
         elif kind == "attack-pattern":
             tid = _attack_pattern_technique_id(obj)
             if not tid:
+                # A technique with a name and no id used to skip every check
+                # below, because all of them key on the id — which is how an
+                # Android sample's attack-patterns reached a report with the
+                # Mobile-domain check never having run on them, and how three
+                # of them were published as ATT&CK techniques with an empty
+                # `technique_id`. It is asked for once here; if it survives,
+                # the report carries it as an unmapped behaviour.
+                name = str(getattr(obj, "name", "") or "").strip()
+                violations.append(
+                    Violation(
+                        code=MISSING_ID_CODE,
+                        message=(
+                            f"the attack-pattern {name!r} names no MITRE ATT&CK technique id. "
+                            "Give its external_references a mitre-attack entry with the "
+                            "external_id (T#### or T####.###), or drop the object and say "
+                            "what was observed in the assessment: a behaviour with no "
+                            "technique id is reported as a behaviour, not as a technique."
+                        ),
+                        path=f"objects[{index}]",
+                    )
+                )
                 continue
             if not TECHNIQUE_ID_EXACT_RE.match(tid):
                 violations.append(
@@ -1639,14 +1844,65 @@ class _FeedbackFeed:
 
     def announce(self, violations: Sequence[Violation], retry_index: int) -> None:
         for violation in violations:
-            emit_validation_feedback(
-                self.sink,
-                stage=self.stage,
-                agent=self.agent,
-                code=str(violation.code),
-                message=str(violation.message),
-                retry_index=retry_index,
-            )
+            self._emit(violation, retry_index, VALIDATION_RETRIED)
+
+    def outcome(
+        self,
+        shown: Sequence[Violation],
+        remaining: Sequence[Violation],
+        retry_index: int,
+    ) -> None:
+        """What became of every violation this loop saw.
+
+        One line per violation, and the ones that were never fed back are here
+        too: a retry introduces violations of its own, and a reader of the
+        conversation used to see only the batch that triggered the retry —
+        two lines beside a run whose summary recorded ten unresolved findings.
+        """
+        left = {(v.code, v.path) for v in remaining}
+        seen: set[tuple[str, str]] = set()
+        for violation in shown:
+            key = (violation.code, violation.path)
+            if key in left or key in seen:
+                continue
+            seen.add(key)
+            self._emit(violation, retry_index, VALIDATION_RESOLVED)
+        for violation in remaining:
+            self._emit(violation, retry_index, VALIDATION_SURVIVED)
+
+    def _emit(self, violation: Violation, retry_index: int, state: str) -> None:
+        emit_validation_feedback(
+            self.sink,
+            stage=self.stage,
+            agent=self.agent,
+            code=str(violation.code),
+            message=str(violation.message),
+            retry_index=retry_index,
+            state=state,
+            # The producer's own locator, so the two lines about one violation
+            # fold together and two violations of one code on different claims
+            # do not.
+            path=str(violation.path),
+        )
+
+
+def announce_unresolved(
+    sink: EventSink | None,
+    *,
+    agent: str,
+    stage: str,
+    violations: Sequence[Violation],
+    retry_index: int = 0,
+) -> None:
+    """Publish findings nobody was shown, as findings that survived.
+
+    For a producer that records a violation outside the retry loop — the judge
+    appends the timeout, the fallback and its two verdict checks after it —
+    where the run summary carried a row the conversation never showed.
+    """
+    feed = _feed(sink, agent, stage)
+    if feed is not None and violations:
+        feed.outcome([], violations, retry_index)
 
 
 def _feed(sink: EventSink | None, agent: str, stage: str) -> _FeedbackFeed | None:
@@ -1684,10 +1940,11 @@ async def retry_with_feedback[T](
     — :class:`ValidationTally` is what the callers pass.
 
     ``sink``, ``agent`` and ``stage`` put the same correction into the live
-    conversation, as one ``validation_feedback`` per violation, so a reader
-    watching the run sees why an agent is answering a second time. A caller
-    with nobody to tell — the CLI, a test, the report composer — passes no
-    sink and nothing is emitted.
+    conversation, as one ``validation_feedback`` per violation — ``retried``
+    where the producer is shown it, then ``resolved`` or ``survived`` once this
+    loop knows which, including for the violations the retry itself introduced.
+    A caller with nobody to tell — the CLI, a test, the report composer —
+    passes no sink and nothing is emitted.
     """
     feed = _feed(sink, agent, stage)
     turns = list(messages)
@@ -1695,13 +1952,17 @@ async def retry_with_feedback[T](
     parsed = parse(answer)
     violations = _collect(parsed, validators)
     retries = 0
+    shown: list[Violation] = []
     while violations and retries < max_retries:
         _announce_feedback(violations, on_feedback, feed, retries + 1)
+        shown.extend(violations)
         turns = _with_feedback(turns, answer, violations)
         retries += 1
         answer = await run(turns)
         parsed = parse(answer)
         violations = _collect(parsed, validators)
+    if feed is not None:
+        feed.outcome(shown, violations, retries)
     return parsed, violations, retries
 
 
@@ -1730,13 +1991,17 @@ def retry_with_feedback_sync[T](
     parsed = parse(answer)
     violations = _collect(parsed, validators)
     retries = 0
+    shown: list[Violation] = []
     while violations and retries < max_retries:
         _announce_feedback(violations, on_feedback, feed, retries + 1)
+        shown.extend(violations)
         turns = _with_feedback(turns, answer, violations)
         retries += 1
         answer = run(turns)
         parsed = parse(answer)
         violations = _collect(parsed, validators)
+    if feed is not None:
+        feed.outcome(shown, violations, retries)
     return parsed, violations, retries
 
 

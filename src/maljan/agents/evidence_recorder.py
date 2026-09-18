@@ -225,6 +225,19 @@ class EvidenceRecorder:
             args_summary=summarize_args(args),
         )
 
+    def entry_failed(self, entry_id: str) -> bool:
+        """Whether the entry with this id recorded a failure.
+
+        Asked by the repeat guard, which points at an earlier entry and has to
+        say what is in it: one live notice sent a model to ``[ev_0017]`` for
+        "the result", and ``ev_0017`` was a call that had raised.
+        """
+        wanted = str(entry_id or "").strip()
+        for entry in reversed(self.entries):
+            if entry.id == wanted:
+                return not entry.ok
+        return False
+
     def record(
         self,
         *,
@@ -430,18 +443,36 @@ def _do_something_else(tool: str, unused_args: Sequence[str]) -> str:
 
 
 def repeat_notice(
-    tool: str, entry_id: str, unused_args: Sequence[str] = (), *, last_warning: bool = False
+    tool: str,
+    entry_id: str,
+    unused_args: Sequence[str] = (),
+    *,
+    last_warning: bool = False,
+    failed: bool = False,
 ) -> str:
     """What the model is told instead of the same answer a third time.
 
-    ``last_warning`` carries the same sentence the served notice carries, for
-    the same reason: the call before the last one is where saying it can still
-    change what the model does. A loop that repeats one call reaches the end
-    through this branch rather than through the served one.
+    A message to the model and nothing else: no tool ran, so there is no entry
+    to write and no id to hand out. It used to be recorded as a successful
+    call — ``ok=true``, ``duration_ms=0`` — which inflated the ledger, inflated
+    the report's "tool call(s) recorded" line, and gave the model a citable
+    evidence id whose entry held no evidence.
+
+    ``failed`` says the entry it points at is a failure rather than an answer,
+    which is the difference between "the result is in [ev_0017]" and the truth
+    about a call that raised. ``last_warning`` carries the same sentence the
+    served notice carries, for the same reason: the call before the last one is
+    where saying it can still change what the model does. A loop that repeats
+    one call reaches the end through this branch rather than through the served
+    one.
     """
+    where = (
+        f"You already called {tool} with these arguments and it failed, in [{entry_id}]"
+        if failed
+        else f"You already called {tool} with these arguments; the result is in [{entry_id}]"
+    )
     return (
-        f"You already called {tool} with these arguments; the result is in "
-        f"[{entry_id}]. Do not call it again with these arguments; "
+        f"{where}. Do not call it again with these arguments; "
         f"{_do_something_else(tool, unused_args)}{_ENDING_SENTENCE if last_warning else ''}"
     )
 
@@ -546,18 +577,16 @@ def _record_tool(
         if first is None:
             return None
         repeats.note_repeat()
-        message = repeat_notice(
-            name, first, _unused(kwargs), last_warning=repeats.warning_of_the_end()
+        # Told to the model, written nowhere. No tool ran: an entry here would
+        # be a successful call that made none, and the id on it would be an
+        # evidence id a report could cite for evidence that does not exist.
+        return repeat_notice(
+            name,
+            first,
+            _unused(kwargs),
+            last_warning=repeats.warning_of_the_end(),
+            failed=recorder.entry_failed(first),
         )
-        entry = recorder.record(
-            tool=name,
-            args=kwargs,
-            server=server,
-            output=message,
-            started_at=time.time(),
-            repeated_of=first,
-        )
-        return f"[{entry.id}]\n{message}"
 
     def _note(kwargs: dict[str, Any], entry_id: str) -> None:
         """Count the call against the repeat budget, however it turned out.
@@ -664,14 +693,14 @@ def _record_tool(
     if func is not None:
 
         def wrapped_func(**kwargs: Any) -> str:  # noqa: F811
-            # Announced before the guard is consulted, so every finish the
-            # console sees has a start behind it: the refused repeat writes a
-            # ledger entry like any other call and would otherwise close a
-            # bubble that was never opened.
-            recorder.call_started(tool=name, args=kwargs, server=server)
+            # The guard first, and nothing is announced when it refuses: no
+            # tool runs, no entry is written, and a start with no finish behind
+            # it would leave the console holding a bubble open for a call that
+            # never happened.
             answered = _already_answered(kwargs)
             if answered is not None:
                 return answered
+            recorder.call_started(tool=name, args=kwargs, server=server)
             # Two clocks: the wall clock says when the call happened and
             # correlates with a log line, the monotonic one measures how long
             # it took and cannot go backwards.
@@ -685,10 +714,10 @@ def _record_tool(
     if coroutine is not None:
 
         async def wrapped_coroutine(**kwargs: Any) -> str:  # noqa: F811
-            recorder.call_started(tool=name, args=kwargs, server=server)
             answered = _already_answered(kwargs)
             if answered is not None:
                 return answered
+            recorder.call_started(tool=name, args=kwargs, server=server)
             started, wall_clock = time.monotonic(), time.time()
             repeated = _served_again(kwargs)
             try:

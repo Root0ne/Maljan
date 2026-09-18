@@ -288,7 +288,28 @@ Two producers use it:
   signature is the usual one) and `verdict.unsupported_malware` for the entries
   that establish Malware (a reputation entry, a rule hit); either way the
   alternative offered is Suspicious with an inconclusive rationale, the judge
-  is asked once, and the second answer is kept as given.
+  is asked once, and the second answer is kept as given. Both rules run over
+  the bundle that is actually reported, on every way the round can end — a
+  bundle, a malformed answer the retry fixed, prose the model stood by twice,
+  JSON that is not a bundle, and no answer at all. Where the loop ran them they
+  were fed back once; on the endings that produce a verdict out of text nothing
+  is asked again and what they find is recorded in `run_summary.validation`
+  beside the verdict it describes, once each.
+
+* **A judge that did not answer with a bundle** — the pipeline builds one from
+  whatever text there was, and that bundle states its verdict in
+  `x_maljan_fallback_verdict` rather than implying it through its objects. The
+  verdict is `extracted` when it was read out of the judge's own text and
+  `pipeline` when there was nothing to read, which is what a timeout leaves; a
+  verdict that is not Malware carries no `malware` object, and the record of
+  the degraded path travels on a note instead. `pipeline.outcome
+  .decide_from_bundle` reads the statement and counts nothing. Before this the
+  fallback bundle carried a `malware` object unconditionally, so the bundle's
+  shape decided the verdict: a signed sample with a clean reputation entry, no
+  analyst claim and no technique was reported as Malware because the judge
+  timed out, while the extraction in the same run had read "Suspicious" out of
+  the text. Such a verdict also carries no confidence — see
+  `verdict_fallback` below.
 
 ### The technique check
 
@@ -323,20 +344,56 @@ decides.
    the feedback names the technique, its domain and platforms and the
    sample's. `CapabilityCell` carries `domain` and `platforms` from the
    catalogue and the FP linter's C1 reads them.
-3. **Alignment** (`attck.weak_alignment`, the paper's gate, heuristic). For
-   every technique an analyst keeps, the claim text is ranked against the
-   hybrid ATT&CK index; the claimed id's own TF-IDF gate score and the index's
-   top candidates are written on the claim (`ClaimEvidence.alignment`). The
-   violation is raised only when the index neither ranked the id among its
-   candidates nor scored it at or above `validation.alignment_threshold`
-   (0.05); the feedback lists the candidates and says the analyst may keep
-   the id and say why. The ranking lives on the ISR record
-   (`ClaimEvidence.alignment`) and in the judge's `TECHNIQUE CHECK` block; the
-   report shows it only for a technique the gate questioned and the analyst
-   kept. It runs only when the index is warm in this worker
-   (`validation.alignment_gate = auto`); `validation.alignment_gate_build`
-   lets the first run that wants it start the build on a thread and go
-   without. The index never substitutes an id.
+3. **Alignment** (`attck.weak_alignment`, the paper's gate, heuristic, and the
+   only part that is off by default). For every technique an analyst keeps, the
+   claim text is ranked against the hybrid ATT&CK index; the claimed id's own
+   TF-IDF gate score and the index's candidates — narrowed to the sample's own
+   ATT&CK domain and platforms, so nothing out of scope is ever proposed — are
+   written on the claim (`ClaimEvidence.alignment`). The ranking lives on the
+   ISR record and in the judge's `TECHNIQUE CHECK` block; the report shows it
+   only for a technique the gate questioned and the analyst kept. It runs only
+   when the index is warm in this worker (`validation.alignment_gate = auto`);
+   `validation.alignment_gate_build` lets the first run that wants it start the
+   build on a thread and go without. The index never substitutes an id.
+
+   Whether that ranking may also *question* a claim is
+   `validation.weak_alignment`, and it is false. The end-to-end audit measured
+   the cost of the check as it stood: the index is domain-blind, so a claim
+   about a Windows PE was answered with Mobile and ICS candidates (`T1406`,
+   `T1471` for `T1027`; `T0885`, `T0874`, `T1639` for `T1071.001`), and it
+   scores a *correct* id near zero often enough that 81 of 92 corrections in
+   one run, 16 of 19 in another and 33 of 33 in a third were of this kind —
+   each batch a full extra model turn. With the setting on, a claim is
+   questioned only when all four hold: the claimed id scores under
+   `validation.alignment_threshold` (0.05); the index did not rank the claimed
+   id itself among its in-scope candidates (wherever it ranked it, it did not
+   fail to think of it); no in-scope candidate names the claim's own technique
+   family or tactic; and the best of the ones that do disagree beats the
+   claimed id's score by `validation.alignment_margin` (0.20). At most one
+   weak-alignment batch is sent per agent turn.
+
+   Measured on the audit's own recordings (188 corrections, 105 distinct
+   rankings, replayed in `tests/fixtures/attck_alignment_recorded.json`): of
+   the 36 rankings whose claimed id the audit read as right for its sample —
+   `T1027`, `T1071.001`, `T1055`, `T1547.001` and the ids the ELF run
+   published, which are the ones this corpus holds rankings for — the narrowed
+   rule questions none, where the shipped check questioned all of them. Of the
+   other 69 it questions 5, each naming a candidate from the sample's own
+   domain and another tactic that beats the claim by the margin. Two of the six
+   audited runs are absent from the corpus because they produced no
+   weak-alignment correction at all: the APK run and the Ollama-backed pair. So
+   is `T1497.001`, which the brief names and which no run questioned.
+
+   The "not ranked" conjunct cannot be measured on those recordings — the
+   shipped gate fired only where the index had *not* ranked the claimed id, so
+   none of the 105 rankings contains it. The fixture carries 105 derived rows
+   for it, each a recorded ranking with the claimed id put back at the gate
+   score the index gave it, marked as derived: the rule questions **none** of
+   them, including the five its recorded twins are questioned on.
+
+   That is the bar the setting is held to, and it is the reason the default
+   stays off: 5 questions over 105 rankings is a small enough yield that a run
+   pays the turn only when an operator asks for it.
 4. **Corroboration** (exact). Per technique in the run, `asserted_by` — the
    deterministic sources carrying their own ATT&CK ids: capa's `attck`
    field, a Sigma rule's technique tags, a YARA TTP rule's
@@ -362,6 +419,18 @@ What the judge decides is the judge's: `severity` (with its rationale),
 assessed prints as "not assessed" rather than defaulting to Informational; a
 family the judge could not cite evidence for is kept and flagged unverified
 rather than silently zeroed.
+
+A verdict no judge decided carries no confidence. The judge node writes
+`verdict_fallback` on the state whenever its own body raised, or the bundle
+being reported carries `x_maljan_fallback_verdict` — which is what a bundle
+this pipeline built out of text says about itself, however the round ended;
+the report node reads that one channel and
+sets `overall_confidence` to `None` rather than deriving a number from the
+analysts' confidence in their own claims, and the header prints "not assessed".
+The reason is recorded once: a judge that raised is filed under
+`verdict.fallback` by the report node, and a judge that answered with something
+other than a bundle has already filed `verdict.fallback` or `verdict.timeout`
+itself, so the summary carries one row and not two.
 
 Two metrics record the outcome:
 
@@ -517,7 +586,18 @@ carry a budget of their own (`core.agents.delegation_steps`,
 spent by its specialists' work, only its wall clock is, and an ask is cut to
 the time the caller has left and refused when that is below what a first model
 turn needs. A callee that reaches its step cap writes up what it gathered, the
-way an analyst at its own cap does. Two `agent_message`
+way an analyst at its own cap does — and so, now, does a caller. A lead's
+report is the only channel its stage has, so a lead whose own loop ended
+without one used to take every answered ask down with it: one audited chunk
+spent 1,830 s, collected six answers and 52 ledger entries, and merged zero
+claims. The lead is given one bounded turn to write its report from the answers
+it already holds, and when that turn produces nothing either the specialists'
+own ISRs are promoted into the stage's merge, with their own claims and
+confidences untouched. Every answered ask is promoted, in the order it was
+asked: a lead asks the same specialist about the imports, then the strings,
+then the packer, and those are three answers, so the key carries the agent and
+the ask's number (`deep_static#2`) rather than the agent alone. Nothing is
+promoted beside a report that exists. Two `agent_message`
 events carry the exchange, each with `stage`, `round` and `addressed_to`: the
 caller's ask, addressed to the callee, and the callee's answer with its claims,
 addressed to the caller. The console draws the arrow live, and in the replay
@@ -762,7 +842,7 @@ and the console draws the running analysis from them.
 | `agent_message_delta` | the analyst loop, behind `core.events.stream_deltas` | `stage`, `agent`, `text_delta` |
 | `tool_call_started` | the evidence recorder | `stage`, `agent`, `tool`, `server`, `args_summary` |
 | `tool_call_finished` | the evidence recorder, as each entry is written | `stage`, `agent`, `tool`, `server`, `evidence_id`, `ok`, `duration_ms`, `summary` |
-| `validation_feedback` | `pipeline/validation.retry_with_feedback` | `stage`, `agent`, `code`, `message`, `retry_index` |
+| `validation_feedback` | `pipeline/validation.retry_with_feedback` | `stage`, `agent`, `code`, `message`, `retry_index`, `state`, `path` |
 | `judge_question` | the judge's ReAct loop | `stage`, `text`, `addressed_to` |
 | `budget_tick` / `stage_ended_at_cap` | the budget meter | see *The evidence ledger* |
 | `enrichment_complete` | the enrichment worker, after the run | `report_id`, `domains_enriched`, `ips_enriched`, `similar_samples` |
@@ -774,6 +854,14 @@ and the console draws the running analysis from them.
 with `addressed_to` naming the other side, which is what draws a delegated
 exchange as an arrow between two participants rather than as two lines to the
 room.
+
+A violation is published as `retried` where the producer is shown it and again
+as `resolved` or `survived` once the loop knows which; one the retry introduced
+is published once. `(agent, code, path)` is the key those two lines share, so a
+reader that draws one line per violation folds on it, and two violations of one
+code on different claims stay apart. A finding the producer was never shown —
+the judge appends its timeout, its fallback and its two verdict checks after
+the loop — is published once, as `survived`.
 
 **Sequence.** The publisher stamps every event with `seq`, a per-job counter
 taken from a Redis `INCR`. Nothing in `src/maljan` numbers anything: the core
@@ -859,6 +947,14 @@ cannot carry: the import list, the permission set, the endpoints.
 Anything that fails validation is dropped and counted rather than repaired, and
 the block is stripped before the prose reaches the transcript or the report.
 
+A repeated tool call is a message to the model and nothing else. The third
+identical `(tool, arguments)` call in one loop is not run; the model is told
+which entry already holds the answer, and whether that entry was an answer or a
+failure. Nothing is written to the ledger for it and nothing is drawn in the
+console: no tool ran, and recording it as a successful call — which it was —
+inflated the ledger, the report's tool-call count, and gave the model an
+evidence id it could cite for evidence that did not exist.
+
 ## Reporting
 
 Every run emits a structured `MalwareReport` (`src/maljan/reporting/`), and it
@@ -882,10 +978,43 @@ is assembled from what the run gathered rather than recomputed beside it:
   arithmetic over constants chosen in the builder, by code that had read no
   evidence.
 * The capability matrix is a projection of the judge's technique list and the
-  analysts' claims, carrying each source's own confidence unadjusted.
+  analysts' claims, carrying each source's own confidence unadjusted. It is
+  where an id the ATT&CK check rejected stays on the record, marked
+  `technique_id_valid=False` and spelled as the producer wrote it.
+* `ttp_mappings` is the *published* technique list, and every other technique
+  surface is built from it: the report's ATT&CK section, its References, the
+  `attack-pattern` objects of the STIX bundle — minted with ids derived from
+  the technique id, so the same technique is the same object across exports —
+  and the `mitre_techniques` column behind `/reports/{id}/mitre`. What the
+  judge said *about* a technique travels with it: its relationship, with the
+  confidence, the evidence basis and the contributing agents it annotated, is
+  re-linked at both ends to the rebuilt object of the same technique and
+  carried unedited, and the rebuild mints no second `uses` edge for a technique
+  the judge already used. A relationship to a technique the checks rejected is
+  removed with that technique and recorded in `run_summary.validation` as
+  `stix.unlinked_technique` — counted once, as the technique's loss, and not
+  again by the integrity pass as a dangling ref. An id the
+  catalogue check rejected is in the matrix and in none of those. The three
+  surfaces used to be built from three sources and disagreed inside single
+  runs: ten techniques in one report against zero attack-patterns in its
+  bundle; three attack-patterns with no ATT&CK reference and ids copied out of
+  the STIX documentation against an empty `ttp_mappings`; a rejected id
+  published in all three.
+* An attack-pattern with a name and no technique id is asked for one
+  (`attck.missing_id`) — before this it skipped every ATT&CK check, because all
+  of them key on the id, which is why the Mobile-domain check never ran on an
+  Android sample's techniques. One that survives is reported as a behaviour, in
+  `report.unmapped_behaviours` and under its own heading in the markdown, and
+  is never published as a technique.
 * `run_summary.evidence` counts the calls and `run_summary.sections_without_
   evidence` counts the sections that can name neither an entry nor a finding —
   the number that says whether the report is standing on anything.
+* The section-wise composer keeps the fields a section's schema declares and
+  drops the ones it does not, rather than refusing the whole section over an
+  invented key — which is how two runs shipped with no conclusion. What it
+  dropped, and any section it lost outright (still off-schema after its retry,
+  timed out, or failed), is added to the report's degradation reasons, which
+  the header prints under **Notes** on a run that is not otherwise degraded.
 * `qa/fp_linter.py` runs last and reports; it changes nothing. Its findings land
   in `run_summary.fp_warnings`, including C6 (a section or TTP row with nothing
   citable behind it) and C7 (a technique id the validation loop could not get

@@ -962,6 +962,117 @@ change landed on `main`.
   the general-purpose environment every child gets is unchanged. Proven through
   the real spawn path — a live sidecar started the way the registry starts one
   reads a file under an exported root and still refuses one outside every root.
+- **The repeat guard's notice is a message to the model and nothing else.** A
+  refused third call to the same tool with the same arguments was written to
+  the evidence ledger as a *successful* call — `ok=true`, `duration_ms=0` —
+  which inflated the ledger, inflated the report's "tool call(s) recorded, N
+  failed" line, and handed the model a citable evidence id for an entry holding
+  no evidence. No tool ran, so nothing is recorded, nothing is announced to the
+  console, and the notice points at the earlier entry and says whether that
+  entry was an answer or a failure: one live notice sent a model to `[ev_0017]`
+  for "the result", and `ev_0017` had raised.
+- **A report section is no longer lost to a key its schema does not declare.**
+  The sections forbid unknown keys, so one invented field took the whole
+  section with it: two audited runs shipped with no conclusion and no technical
+  analysis, and nothing in the report said so. The fields the schema declares
+  are kept, the ones it does not are named as a degradation reason, and a
+  section that is genuinely lost — its shape still wrong after the retry, its
+  round timed out or failed — is named in the report's notes with the reason.
+- **A lead that never wrote its report no longer takes its specialists'
+  answers with it.** A lead's report is the only channel its chunk has out of a
+  stage, so a loop that ended without one lost every completed ask: one audited
+  chunk spent 1,830 s, had six specialist asks answered and 52 evidence entries
+  recorded, and merged zero claims. The answers are kept on the caller as the
+  specialists' own ISRs; a lead that produced no claims is given one bounded
+  turn to write its report from them — the forced synthesis the analysts
+  already use — and when that turn produces nothing either, the specialists'
+  ISRs are promoted into the stage's merge with their claims and confidences
+  exactly as they made them. Every answered ask is promoted, in order and
+  keyed by the agent and the ask's number (`deep_static#2`): three asks to one
+  specialist are three answers, and keyed by the agent alone the second and
+  third were dropped. Nothing is promoted beside a report that exists.
+- **Every violation a run recorded reaches the conversation, with what became
+  of it.** Only the batch that triggered a correction turn was published, so a
+  reader watching a run saw neither the violations that survived the retry nor
+  the ones the retry introduced — two `validation_feedback` events in one run's
+  feed beside a summary recording ten unresolved findings. Each violation now
+  carries a `state`: `retried` where the producer is shown it, then `resolved`
+  or `survived` once the loop knows which, and a violation the retry introduced
+  is published once, as `survived`, and so are the findings the judge records
+  after its loop, which reached the run summary and never the conversation.
+  The fields the console keys on — `code`, `agent`, `stage`, `retry_index` —
+  are unchanged; `path` is added beside them, so `(agent, code, path)` folds
+  the two lines about one violation together and keeps two violations of one
+  code on different claims apart.
+- **One source for the techniques a report publishes.** A report's three
+  technique surfaces were built from three sources and disagreed inside single
+  runs: one run exported ten techniques and a STIX bundle with no
+  `attack-pattern` at all; another served three techniques from
+  `/reports/{id}/mitre` with an empty `technique_id`, none in `ttp_mappings`,
+  and three attack-patterns carrying no ATT&CK reference and ids copied out of
+  the STIX documentation; a third published `T1063` — which the validator had
+  already reported as absent from the catalogue — in the report, in the bundle
+  and in the References section. `ttp_mappings` is now the published list and
+  carries no id the catalogue check rejected (the id stays in the capability
+  matrix, marked, spelled as the producer wrote it), the bundle's
+  attack-patterns are minted from that list with ids derived from the technique
+  id and an ATT&CK external reference each, the References section and the
+  `mitre_techniques` column are built from the same list, and no entry without
+  a technique id is stored as a technique. The judge's own `uses` relationships
+  travel with their techniques: each is re-linked to the rebuilt attack-pattern
+  of the same id with its confidence, evidence basis and contributing agents
+  unedited — both ends of the ref, so one sourced at a technique moves too —
+  and the uncertainty annotation that makes these bundles worth exporting is no
+  longer pruned as dangling. A relationship whose technique the checks rejected
+  is taken out with that technique and recorded in `run_summary.validation` as
+  `stix.unlinked_technique`, so it is counted once, as the technique's loss,
+  and not again as a defect of the judge's bundle. An
+  attack-pattern with a name and no id is asked for one (`attck.missing_id`)
+  instead of skipping every ATT&CK check — which is why the Mobile-domain
+  check never ran on an Android sample's techniques — and one that survives is
+  reported as a behaviour, in the new `MalwareReport.unmapped_behaviours` and
+  under its own heading in the markdown.
+- **The ATT&CK alignment gate scores inside the sample's own scope, and asks
+  nothing unless it is turned on.** The index that ranks a claim's text is
+  domain-blind, so a technique claim about a Windows PE was answered with
+  Mobile and ICS candidates, and it scores a correct id near zero often enough
+  that the check questioned 81 of 92 technique claims in one audited run and 33
+  of 33 in another — each batch a full extra model turn. The candidates are now
+  narrowed to the routed sample's ATT&CK domain and platforms before anything
+  is recorded or proposed; a claim is questioned only when its id scores under
+  `validation.alignment_threshold` and an in-scope candidate from neither its
+  own technique family nor any of its tactics beats it by the new
+  `validation.alignment_margin` (0.20); and at most one weak-alignment batch is
+  sent per agent turn. The question itself is behind the new
+  `validation.weak_alignment`, which is off: the ranking is still recorded on
+  every claim and shown to the judge. An index that ranked the claimed id
+  itself in scope questions nothing, wherever it ranked it. Over the audit's
+  own 105 distinct rankings, replayed as a fixture, the narrowed rule questions
+  none of the 36 claims whose id the audit read as right for its sample and 5
+  of the other 69, and none of the 105 derived rows that put the claimed id
+  back into its own ranking; docs/architecture.md carries the measurement.
+- **A judge that never answered no longer produces the verdict "Malware".** The
+  bundle the pipeline builds when the judge's answer was not a bundle carried a
+  `malware` object whatever verdict it was carrying, and the pipeline read the
+  verdict back off the objects — so the "Suspicious" the extraction had read
+  out of the judge's own text was overridden by the bundle's shape, and a
+  signed sample with a clean reputation entry in its own pack, no analyst claim
+  and no technique was reported as Malware because the verdict round timed out.
+  The fallback bundle now states its verdict in `x_maljan_fallback_verdict`
+  (`extracted` from the judge's own text, or `pipeline` when there was nothing
+  to read, which is what a timeout leaves), its object set follows that verdict
+  — no `malware` object for a verdict that is not Malware, and a `note`
+  carrying the degraded-path record instead — and `decide_from_bundle` reads
+  the statement rather than counting objects. `verdict.unsupported_benign` and
+  `verdict.unsupported_malware` run over that bundle on the timeout path too,
+  where the loop used to return before they could be asked; they annotate and
+  change nothing, and they run on every way the round can end: a bundle, a
+  malformed answer the retry fixed, prose the model stood by twice, JSON that
+  is not a bundle, and no answer at all. Such a verdict also takes the path a
+  judge that raised already took: `overall_confidence` is `null`, the header
+  reads "not assessed", and the run summary carries the code once rather than
+  twice — asked off the bundle's own mark rather than off the violation codes,
+  so a fallback built from JSON that was not a bundle is one too.
 - **Four documented facts that had drifted from the code.** The delegation
   section said a lead's 1800 s stage had room for five asks where
   `_asks_that_fit` computes six and the `ask_<key>` description gives the model
