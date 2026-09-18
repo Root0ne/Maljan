@@ -132,7 +132,7 @@ export default function SettingsApiKeysPage() {
           </div>
           <button
             type="submit"
-            className="h-9 px-4 text-xs bg-accent text-white rounded hover:bg-accent-hover"
+            className="h-9 px-4 text-xs bg-accent-fill text-white rounded hover:bg-accent-fill-hover"
           >
             Create
           </button>

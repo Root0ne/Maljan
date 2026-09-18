@@ -89,6 +89,7 @@ function SectionBody({ section, rows }: { section: EvidenceSection; rows: string
               {columns.map((column) => (
                 <th
                   key={column}
+                  scope="col"
                   className="px-4 py-2 text-left text-[10px] font-medium uppercase tracking-wider text-text-muted"
                 >
                   {column}

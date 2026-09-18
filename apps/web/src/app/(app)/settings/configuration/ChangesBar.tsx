@@ -87,7 +87,7 @@ export default function ChangesBar() {
               <button
                 type="button"
                 disabled={saving}
-                className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent text-white rounded hover:bg-accent-hover disabled:opacity-50"
+                className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent-fill text-white rounded hover:bg-accent-fill-hover disabled:opacity-50"
                 onClick={onApply}
               >
                 {saving ? "Saving…" : "Confirm and apply"}
@@ -150,7 +150,7 @@ export default function ChangesBar() {
           </span>
           <button
             type="button"
-            className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent text-white rounded hover:bg-accent-hover"
+            className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent-fill text-white rounded hover:bg-accent-fill-hover"
             onClick={() => setReviewing(true)}
           >
             Review

@@ -49,6 +49,7 @@ function SamplesPageContent() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const reportFileRef = useRef<HTMLInputElement>(null);
 
   /* ── The submit dialog ──────────────────────────────── */
   const [submitFor, setSubmitFor] = useState<SampleRow | null>(null);
@@ -61,6 +62,8 @@ function SamplesPageContent() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const firstFieldRef = useRef<HTMLSelectElement>(null);
+  /** What opened the dialog, so closing it can give the focus back. */
+  const submitTriggerRef = useRef<HTMLElement | null>(null);
   /* M9 (final review): the target sample of the *in-flight* report upload,
    * updated synchronously (a ref, not state) wherever the dialog's target
    * sample changes — opened, reopened for a different sample, or closed —
@@ -90,6 +93,8 @@ function SamplesPageContent() {
     activeSubmitSampleIdRef.current = null;
     setSubmitFor(null);
     resetSubmitDialogFields();
+    submitTriggerRef.current?.focus();
+    submitTriggerRef.current = null;
   }, [resetSubmitDialogFields]);
 
   async function handleReportChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -261,6 +266,7 @@ function SamplesPageContent() {
 
   return (
     <div>
+      <h1 className="sr-only">Samples</h1>
       {actionError && (
         <div
           role="alert"
@@ -275,8 +281,14 @@ function SamplesPageContent() {
         </div>
       )}
 
-      {/* Upload Area */}
-      <div
+      {/* Upload area. The visible zone is the button, because it was a bare
+          `div onClick` with the real control hidden by `display:none` — which
+          takes the input out of the accessibility tree as well as out of the
+          page, so the only way to add a sample was a mouse (WCAG 2.1.1,
+          4.1.2). The input keeps its place in the tree and is hidden the way
+          a visually-hidden control is hidden. */}
+      <button
+        type="button"
         onDragOver={(e) => {
           e.preventDefault();
           setDragOver(true);
@@ -284,31 +296,32 @@ function SamplesPageContent() {
         onDragLeave={() => setDragOver(false)}
         onDrop={onDrop}
         onClick={() => fileRef.current?.click()}
-        className={`mb-6 border border-dashed rounded p-6 text-center cursor-pointer ${
+        className={`mb-6 w-full border border-dashed rounded p-6 text-center ${
           dragOver
             ? "border-accent bg-accent/5"
             : "border-border hover:border-text-muted"
         }`}
       >
         <Upload size={18} aria-hidden="true" className="mx-auto mb-2 text-text-muted" />
-        <p className="text-sm text-text-secondary">
+        <span className="block text-sm text-text-secondary">
           {uploading
             ? "Uploading..."
-            : "Drop a file here or click to upload"}
-        </p>
-        <p className="text-xs text-text-muted mt-1">
+            : "Drop a file here or choose one to upload"}
+        </span>
+        <span className="block text-xs text-text-muted mt-1">
           Executables, mobile apps, scripts, documents, archives
-        </p>
-        <input
-          ref={fileRef}
-          type="file"
-          className="hidden"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) handleUpload(file);
-          }}
-        />
-      </div>
+        </span>
+      </button>
+      <input
+        ref={fileRef}
+        type="file"
+        aria-label="Sample to upload"
+        className="sr-only"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) handleUpload(file);
+        }}
+      />
 
       {/* Samples Table */}
       <div className="bg-bg-surface border border-border rounded">
@@ -326,11 +339,11 @@ function SamplesPageContent() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-border">
-                  <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider">Filename</th>
-                  <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider">SHA256</th>
-                  <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-24">Size</th>
-                  <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-36">Uploaded</th>
-                  <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-32">Actions</th>
+                  <th scope="col" className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider">Filename</th>
+                  <th scope="col" className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider">SHA256</th>
+                  <th scope="col" className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-24">Size</th>
+                  <th scope="col" className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-36">Uploaded</th>
+                  <th scope="col" className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-32">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border-light">
@@ -371,7 +384,7 @@ function SamplesPageContent() {
                             setActionError(null);
                             openSubmitDialog(s);
                           }}
-                          className="px-2.5 py-1 text-xs bg-accent text-white rounded hover:bg-accent-hover"
+                          className="px-2.5 py-1 text-xs bg-accent-fill text-white rounded hover:bg-accent-fill-hover"
                         >
                           Analyze
                         </button>
@@ -404,7 +417,7 @@ function SamplesPageContent() {
                 type="button"
                 aria-label="Close"
                 onClick={() => setDetailSample(null)}
-                className="text-text-muted hover:text-text-primary"
+                className="flex h-6 w-6 items-center justify-center text-text-muted hover:text-text-primary"
               >
                 <X size={16} aria-hidden="true" />
               </button>
@@ -466,7 +479,7 @@ function SamplesPageContent() {
                 type="button"
                 aria-label="Close"
                 onClick={closeSubmitDialog}
-                className="text-text-muted hover:text-text-primary"
+                className="flex h-6 w-6 items-center justify-center text-text-muted hover:text-text-primary"
               >
                 <X size={16} aria-hidden="true" />
               </button>
@@ -546,12 +559,21 @@ function SamplesPageContent() {
                 </label>
                 <input
                   id="sandbox-report"
+                  ref={reportFileRef}
                   type="file"
                   accept=".json,.json.gz"
                   onChange={handleReportChange}
                   disabled={reportUploading}
-                  className="w-full text-text-secondary"
+                  className="sr-only"
                 />
+                <button
+                  type="button"
+                  disabled={reportUploading}
+                  onClick={() => reportFileRef.current?.click()}
+                  className="px-2.5 py-1.5 text-xs border border-border text-text-secondary rounded hover:bg-bg-hover disabled:text-text-disabled"
+                >
+                  Choose a report file
+                </button>
                 {reportUploading && (
                   <p className="text-text-muted mt-1">Uploading...</p>
                 )}
@@ -585,7 +607,7 @@ function SamplesPageContent() {
                   type="button"
                   disabled={submitting}
                   onClick={() => startAnalysis(submitFor.id)}
-                  className="px-2.5 py-1 text-xs bg-accent text-white rounded hover:bg-accent-hover disabled:opacity-50"
+                  className="px-2.5 py-1 text-xs bg-accent-fill text-white rounded hover:bg-accent-fill-hover disabled:opacity-50"
                 >
                   Start analysis
                 </button>

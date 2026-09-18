@@ -219,7 +219,7 @@ function EvidenceTable({
           <thead>
             <tr className="text-left text-text-muted border-b border-border-light">
               {headers.map((h) => (
-                <th key={h} className="px-4 py-2 font-medium">
+                <th key={h} scope="col" className="px-4 py-2 font-medium">
                   {h}
                 </th>
               ))}

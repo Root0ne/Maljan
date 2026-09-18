@@ -58,10 +58,10 @@ export default function AuditLogsPage() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-border">
-                <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-48">Time</th>
-                <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider">Action</th>
-                <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider">Resource</th>
-                <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider">IP Address</th>
+                <th scope="col" className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-48">Time</th>
+                <th scope="col" className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider">Action</th>
+                <th scope="col" className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider">Resource</th>
+                <th scope="col" className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider">IP Address</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border-light">

@@ -180,14 +180,14 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-left text-[10px] uppercase tracking-wider text-text-muted border-b border-border">
-                  <th className="px-3 py-2 font-medium">ID</th>
-                  <th className="px-3 py-2 font-medium">Stage</th>
-                  <th className="px-3 py-2 font-medium">Agent</th>
-                  <th className="px-3 py-2 font-medium">Server</th>
-                  <th className="px-3 py-2 font-medium">Tool</th>
-                  <th className="px-3 py-2 font-medium">Arguments</th>
-                  <th className="px-3 py-2 font-medium text-right">Duration</th>
-                  <th className="px-3 py-2 font-medium">Result</th>
+                  <th scope="col" className="px-3 py-2 font-medium">ID</th>
+                  <th scope="col" className="px-3 py-2 font-medium">Stage</th>
+                  <th scope="col" className="px-3 py-2 font-medium">Agent</th>
+                  <th scope="col" className="px-3 py-2 font-medium">Server</th>
+                  <th scope="col" className="px-3 py-2 font-medium">Tool</th>
+                  <th scope="col" className="px-3 py-2 font-medium">Arguments</th>
+                  <th scope="col" className="px-3 py-2 font-medium text-right">Duration</th>
+                  <th scope="col" className="px-3 py-2 font-medium">Result</th>
                 </tr>
               </thead>
               <tbody>

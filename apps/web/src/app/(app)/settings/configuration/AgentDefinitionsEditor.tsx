@@ -478,7 +478,7 @@ export function AgentDetail({
               {/* The role names what this agent is; where it is also the
                   key, the key beside it has already said so. */}
               {agent.role !== agentKey && (
-                <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-border text-text-muted">
+                <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-bg-elevated text-text-muted">
                   {agent.role}
                 </span>
               )}

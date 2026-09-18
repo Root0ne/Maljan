@@ -8,6 +8,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <AuthProvider>
       <div className="flex h-screen overflow-hidden">
+        {/* The first thing the keyboard reaches, and visible once it has it:
+            without this every page begins with five rail links, the search box
+            and the account menu before any content. */}
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:fixed focus:left-2 focus:top-2 focus:z-50 focus:rounded focus:border focus:border-accent focus:bg-bg-surface focus:px-3 focus:py-1.5 focus:text-xs focus:text-text-primary"
+        >
+          Skip to content
+        </a>
         <Sidebar />
         {/* `min-w-0` on both flex children, and it is not cosmetic. A flex item
             defaults to `min-width: auto`, so it grows to its content's
@@ -23,7 +32,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           style={{ marginLeft: "var(--sidebar-width)" }}
         >
           <Header />
-          <main className="flex-1 min-w-0 overflow-y-auto p-6">
+          <main id="main-content" tabIndex={-1} className="flex-1 min-w-0 overflow-y-auto p-6">
             {children}
           </main>
         </div>

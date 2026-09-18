@@ -88,7 +88,7 @@ export default function MessageBubble({
             {confidence && (
               <span className="font-mono text-[11px] text-text-muted">{confidence}</span>
             )}
-            <span className="font-mono text-[11px] text-text-disabled">{clock(item.ts)}</span>
+            <span className="font-mono text-[11px] text-text-tertiary">{clock(item.ts)}</span>
           </div>
         )}
 
@@ -159,7 +159,7 @@ export default function MessageBubble({
                   {claim.evidence_ref && (
                     <span className="block font-mono text-text-muted">{claim.evidence_ref}</span>
                   )}
-                  <span className="text-text-disabled">
+                  <span className="text-text-tertiary">
                     {claim.technique_id ? `${claim.technique_id} · ` : ""}
                     {Math.round(claim.confidence * 100)}%
                   </span>

@@ -59,10 +59,10 @@ export default function SectionRail() {
           const Icon = SECTION_ICON[section.icon];
           return (
           <div key={section.key}>
-            <h3 className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-text-muted px-2 mb-1">
+            <h2 className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-text-muted px-2 mb-1">
               <Icon size={16} aria-hidden="true" />
               {section.title}
-            </h3>
+            </h2>
             <ul className="space-y-0.5">
               {groups.map((group) => {
                 const active = pathname === group.path;

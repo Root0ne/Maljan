@@ -267,13 +267,13 @@ export default function FieldRow({
               className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${
                 source === "ui"
                   ? "bg-accent/20 text-accent-strong"
-                  : "bg-border text-text-muted"
+                  : "bg-bg-elevated text-text-muted"
               }`}
             >
               {SOURCE_LABEL[source]}
             </span>
           )}
-          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-border text-text-muted">
+          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-bg-elevated text-text-muted">
             {APPLIES_LABEL[entry.applies]}
           </span>
           {dirty && (

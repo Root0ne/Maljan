@@ -186,6 +186,10 @@ export default function DashboardPage() {
 
   return (
     <div>
+      {/* The page's own name. Visually hidden because the rail already says
+          where the reader is; an outline that starts at h2 does not. */}
+      <h1 className="sr-only">Dashboard</h1>
+
       {/* Mock-mode banner: operators
           frequently miss the worker log line announcing mock mode. Red
           banner makes the configuration impossible to overlook. */}
@@ -296,7 +300,10 @@ export default function DashboardPage() {
                     .join(", ")}`}
                 >
                 <ResponsiveContainer width="100%" height={180}>
-                  <PieChart>
+                  {/* The labelled wrapper above is the chart's one node in the
+                      accessibility tree; Recharts' own surface and pie would
+                      otherwise be two more tab stops with no name. */}
+                  <PieChart accessibilityLayer={false} tabIndex={-1} role="presentation">
                     <Pie
                       data={verdictData}
                       cx="50%"
@@ -305,6 +312,7 @@ export default function DashboardPage() {
                       outerRadius={70}
                       dataKey="value"
                       strokeWidth={0}
+                      tabIndex={-1}
                     >
                       {verdictData.map((_, i) => (
                         <Cell key={i} fill={verdictColors[i]} />

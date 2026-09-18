@@ -174,6 +174,7 @@ function AnalysesList() {
 
   return (
     <div>
+      <h1 className="sr-only">Analyses</h1>
       {refreshError && (
         <div
           role="alert"
@@ -187,7 +188,7 @@ function AnalysesList() {
         <div className="w-full md:w-48 shrink-0">
           <div className="bg-bg-surface border border-border rounded p-3">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-xs font-medium text-text-primary uppercase tracking-wider">Filters</h3>
+              <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">Filters</h2>
               {filter !== "all" && (
                 <button
                   onClick={() => setFilter("all")}
