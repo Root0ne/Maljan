@@ -63,6 +63,18 @@ function signingBlockFor(fileType: string | null | undefined) {
 
 const SIGNING_FIELDS: ReadonlySet<string> = new Set(["authenticode", "apk", "macho"]);
 
+/**
+ * Rows `signing_info` carries that are about the tool rather than the sample.
+ *
+ * `format` repeats the routing answer `identify_file` already states two rows
+ * above, and `applicable` says this format has no code-signing scheme to look
+ * for — which is not a finding about the sample, and is exactly the kind of
+ * row the signing block was split out to stop drawing. The exported report
+ * leaves both out; this is the reader's side of the same rule, for a report
+ * stored while the two were still being written.
+ */
+const TOOL_FIELDS: ReadonlySet<string> = new Set(["format", "applicable"]);
+
 /** The `k=v, k=v` prose a dict value is flattened into, back as pairs. */
 function pairsOf(value: string): Map<string, string> {
   const pairs = new Map<string, string>();
@@ -132,6 +144,8 @@ export function readIdentitySection(
       if (saysSomething(value)) hashes[field as HashField] = value.trim();
       continue;
     }
+
+    if (TOOL_FIELDS.has(field)) continue;
 
     if (SIGNING_FIELDS.has(field)) {
       const applies = routed ? field === routed.field : pairsOf(value).get("present") === "yes";

@@ -74,3 +74,97 @@ def test_the_identity_and_signature_sections_cite_the_pack_s_ids() -> None:
     assert rows["authenticode"].startswith("present=yes")
     assert "Simon Tatham" in rows["authenticode"]
     assert identity.evidence_ids == ["ev_0001", "ev_0002", "ev_0003"]
+
+
+def _signing_pack(payload: dict, file_type: str = "pe") -> list:
+    """The three identity tools, with one signing answer to project."""
+    return [
+        _pack_entry("identify_file", {"file_type": file_type, "platform": "windows"}, 1),
+        _pack_entry("hashes", {"sha256": "b" * 64}, 2),
+        _pack_entry("signing_info", payload, 3),
+    ]
+
+
+def _identity_rows(pack: list) -> dict[str, str]:
+    sections = {section.key: section for section in build_sections(pack)}
+    return dict(sections["identity"].rows)
+
+
+class TestOneSigningRowForTheRoutedFormat:
+    """What the table says about a signature, per format.
+
+    ``signing_info`` answers for the routed format alone and carries the
+    routed ``format`` alongside its answer. Neither that nor the
+    ``applicable`` flag a format with no scheme gets is a fact about the
+    sample: one repeats what ``identify_file`` says two rows above, and the
+    other is a statement about what the tool looks for, under the heading that
+    exists for what was found.
+    """
+
+    def test_a_pe_carries_its_authenticode_row_and_nothing_else(self) -> None:
+        rows = _identity_rows(
+            _signing_pack(
+                {
+                    "format": "pe",
+                    "authenticode": {"present": True, "subject": "Simon Tatham"},
+                }
+            )
+        )
+
+        assert rows["authenticode"].startswith("present=yes")
+        assert "format" not in rows
+        assert "apk" not in rows and "macho" not in rows
+
+    def test_an_apk_carries_its_apk_row(self) -> None:
+        rows = _identity_rows(
+            _signing_pack(
+                {"format": "apk", "apk": {"present": True, "schemes": ["v2"]}}, file_type="apk"
+            )
+        )
+
+        assert rows["apk"].startswith("present=yes")
+        assert "format" not in rows
+        assert "authenticode" not in rows
+
+    def test_a_macho_carries_its_macho_row(self) -> None:
+        rows = _identity_rows(
+            _signing_pack({"format": "mach-o", "macho": {"present": False}}, file_type="mach-o")
+        )
+
+        assert rows["macho"] == "present=no"
+        assert "format" not in rows
+
+    def test_a_format_with_no_signing_scheme_carries_no_signing_row(self) -> None:
+        """An ELF, a document, an archive: the table simply has nothing to say."""
+        rows = _identity_rows(
+            _signing_pack({"format": "elf", "applicable": False}, file_type="elf")
+        )
+
+        assert "applicable" not in rows
+        assert "format" not in rows
+        assert not {"authenticode", "apk", "macho"} & set(rows)
+        # The rest of the identity block is untouched.
+        assert rows["file type"] == "elf"
+        assert rows["sha256"] == "b" * 64
+
+    def test_the_entry_is_not_cited_where_it_contributed_nothing(self) -> None:
+        pack = _signing_pack({"format": "elf", "applicable": False}, file_type="elf")
+        sections = {section.key: section for section in build_sections(pack)}
+
+        assert sections["identity"].evidence_ids == ["ev_0001", "ev_0002"]
+
+    def test_a_report_recorded_before_the_tool_answered_once_still_projects(self) -> None:
+        """All three blocks, as a run made before this change recorded them."""
+        rows = _identity_rows(
+            _signing_pack(
+                {
+                    "authenticode": {"present": False},
+                    "apk": {"present": True, "schemes": ["v1"]},
+                    "macho": {"present": False},
+                }
+            )
+        )
+
+        assert rows["authenticode"] == "present=no"
+        assert rows["apk"].startswith("present=yes")
+        assert rows["macho"] == "present=no"

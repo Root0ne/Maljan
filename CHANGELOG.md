@@ -788,7 +788,12 @@ change landed on `main`.
   and reads the bytes only when it is called with nothing else, which also
   stops a `.docx` being asked about Android signing because it is a zip. The
   console keeps choosing between three blocks as a fallback for reports
-  recorded before this.
+  recorded before this. The identity table shows one signing row, for the
+  routed format, and none at all for a format with no signing scheme —
+  the routed `format` and the `applicable` flag are facts about what the tool
+  looks for, so neither is drawn as a row, in the export or in the console.
+  A JAR or an IPA, which used to reach the APK check because they are zips,
+  now reports no signature rather than an Android one.
 - **A verdict no model produced no longer carries a confidence.** When the
   judge's body raised, the pipeline wrote a conservative "Suspicious" verdict
   of its own — correctly, so a run is not lost — and the report then filled the
