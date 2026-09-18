@@ -726,22 +726,28 @@ def _name_the_signer(info: SignatureInfo, blob: bytes, at: int, size: int) -> No
         from cryptography.hazmat.primitives import hashes
         from cryptography.hazmat.primitives.serialization import pkcs7
 
+        from maljan.extractors.authenticode import publisher_certificate
+
         certificates = pkcs7.load_der_pkcs7_certificates(der)
     except Exception:  # noqa: BLE001 — an unreadable blob leaves the names unset
         return
-    if not certificates:
+    # The publisher is the certificate the SignerInfo names. A timestamped
+    # file carries the timestamp authority's chain in the same bundle, so
+    # "the certificate that issued none of the others" names the authority
+    # about as often as it names the publisher. When nothing settles it the
+    # answer is no name at all: the file is still reported as signed, and a
+    # reader is not handed a publisher that might be a timestamp service.
+    signer = publisher_certificate(der, list(certificates))
+    if signer is None:
         return
-    # The signer is the leaf: the one certificate in the bundle that did not
-    # issue any of the others. Authenticode carries the chain, and reporting
-    # the root as the signer would name the wrong party.
-    issuers = {c.issuer for c in certificates}
-    leaf = next((c for c in certificates if c.subject not in issuers), certificates[0])
     try:
-        info.signer_subject = leaf.subject.rfc4514_string()
-        info.signer_issuer = leaf.issuer.rfc4514_string()
-        info.signer_thumbprint = leaf.fingerprint(hashes.SHA1()).hex()
+        info.signer_subject = signer.subject.rfc4514_string()
+        info.signer_issuer = signer.issuer.rfc4514_string()
+        info.signer_thumbprint = signer.fingerprint(hashes.SHA1()).hex()
     except Exception:  # noqa: BLE001 — a malformed name is no name, not a crash
-        return
+        info.signer_subject = None
+        info.signer_issuer = None
+        info.signer_thumbprint = None
 
 
 def _safe_imphash(blob: bytes) -> str | None:

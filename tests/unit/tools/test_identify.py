@@ -240,12 +240,17 @@ class TestSigningInfo:
         assert "authenticode" in result
 
 
+CODE_SIGNING_USAGE = "1.3.6.1.5.5.7.3.3"
+TIME_STAMPING_USAGE = "1.3.6.1.5.5.7.3.8"
+
+
 def _a_certificate(
     common_name: str,
     *,
     issuer_name: str | None = None,
     issuer_key: Any = None,
     authority: bool = False,
+    usages: tuple[str, ...] = (),
 ) -> tuple[Any, Any]:
     """A throwaway certificate and its key, generated for this test alone."""
     from cryptography import x509
@@ -255,7 +260,7 @@ def _a_certificate(
 
     key = ec.generate_private_key(ec.SECP256R1())
     opened = datetime(2026, 1, 1, tzinfo=UTC)
-    certificate = (
+    builder = (
         x509.CertificateBuilder()
         .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)]))
         .issuer_name(
@@ -266,28 +271,53 @@ def _a_certificate(
         .not_valid_before(opened)
         .not_valid_after(opened + timedelta(days=365))
         .add_extension(x509.BasicConstraints(ca=authority, path_length=None), critical=True)
-        .sign(issuer_key or key, hashes.SHA256())
     )
-    return certificate, key
+    if usages:
+        builder = builder.add_extension(
+            x509.ExtendedKeyUsage([x509.ObjectIdentifier(oid) for oid in usages]), critical=False
+        )
+    return builder.sign(issuer_key or key, hashes.SHA256()), key
 
 
-def _authenticode_blob() -> tuple[bytes, Any]:
-    """A PKCS#7 SignedData carrying a publisher certificate and its issuer."""
+def _authenticode_blob(extra: tuple[Any, ...] = (), *, publisher_usages: tuple[str, ...] = ()):
+    """A PKCS#7 SignedData carrying a publisher certificate and its issuer.
+
+    ``extra`` is whatever else the producer put in the bundle — a timestamp
+    authority's chain, a cross-signing root — which is where the wrong answer
+    used to come from.
+    """
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.serialization import pkcs7
 
     authority, authority_key = _a_certificate("Maljan Test Root CA", authority=True)
     publisher, publisher_key = _a_certificate(
-        "Maljan Test Publisher", issuer_name="Maljan Test Root CA", issuer_key=authority_key
+        "Maljan Test Publisher",
+        issuer_name="Maljan Test Root CA",
+        issuer_key=authority_key,
+        usages=publisher_usages,
     )
-    der = (
+    builder = (
         pkcs7.PKCS7SignatureBuilder()
         .set_data(b"authenticode")
         .add_signer(publisher, publisher_key, hashes.SHA256())
         .add_certificate(authority)
-        .sign(serialization.Encoding.DER, [pkcs7.PKCS7Options.DetachedSignature])
     )
+    for certificate in extra:
+        builder = builder.add_certificate(certificate)
+    der = builder.sign(serialization.Encoding.DER, [pkcs7.PKCS7Options.DetachedSignature])
     return der, publisher
+
+
+def _a_timestamp_chain() -> tuple[Any, ...]:
+    """A timestamp authority's root and signer, as a timestamped file carries them."""
+    root, root_key = _a_certificate("Maljan Test TSA Root", authority=True)
+    signer, _key = _a_certificate(
+        "Maljan Test Time Stamping Signer",
+        issuer_name="Maljan Test TSA Root",
+        issuer_key=root_key,
+        usages=(TIME_STAMPING_USAGE,),
+    )
+    return root, signer
 
 
 def _signed_pe(pkcs7_der: bytes) -> bytes:
@@ -381,3 +411,84 @@ class TestWhoSignedIt:
             "issuer": None,
             "thumbprint": None,
         }
+
+
+class TestTheTimestampAuthorityIsNeverThePublisher:
+    """A timestamped file carries two chains, so two certificates look like leaves.
+
+    Picking "the one that issued none of the others" then picks whichever the
+    producer wrote first, and over the local corpus that named a timestamp
+    authority as the publisher on four signed binaries out of seventeen. The
+    publisher is the certificate the SignerInfo names.
+    """
+
+    def _subject(self, tmp_path: Path, der: bytes) -> str | None:
+        result = identify.signing_info(_write(tmp_path, "s.exe", _signed_pe(der)), file_type="pe")
+        assert result["authenticode"]["present"] is True
+        return result["authenticode"]["subject"]
+
+    def test_an_embedded_timestamp_chain_does_not_become_the_signer(self, tmp_path: Path) -> None:
+        pytest.importorskip("pefile")
+        der, _publisher = _authenticode_blob(_a_timestamp_chain())
+        subject = self._subject(tmp_path, der)
+        assert "Maljan Test Publisher" in (subject or "")
+        assert "Time Stamping" not in (subject or "")
+
+    def test_a_counter_signature_leaves_the_publisher_alone(self, tmp_path: Path) -> None:
+        """A counter-signature adds its signer to the same certificate set."""
+        pytest.importorskip("pefile")
+        counter, _key = _a_certificate("Maljan Test Counter Signer", usages=(TIME_STAMPING_USAGE,))
+        der, publisher = _authenticode_blob((counter,))
+        subject = self._subject(tmp_path, der)
+        assert subject == publisher.subject.rfc4514_string()
+
+    def test_a_cross_signed_chain_still_names_the_publisher(self, tmp_path: Path) -> None:
+        """A second root that also issued the publisher's authority is in the bundle."""
+        pytest.importorskip("pefile")
+        cross, _key = _a_certificate("Maljan Test Cross Root", authority=True)
+        der, publisher = _authenticode_blob((cross,))
+        assert self._subject(tmp_path, der) == publisher.subject.rfc4514_string()
+
+    def test_the_thumbprint_follows_the_name(self, tmp_path: Path) -> None:
+        pytest.importorskip("pefile")
+        from cryptography.hazmat.primitives import hashes
+
+        der, publisher = _authenticode_blob(_a_timestamp_chain())
+        result = identify.signing_info(_write(tmp_path, "s.exe", _signed_pe(der)), file_type="pe")
+        assert result["authenticode"]["thumbprint"] == publisher.fingerprint(hashes.SHA1()).hex()
+
+
+class TestWhenNothingDecidesNoPublisherIsNamed:
+    """A name that might be the timestamp authority's is worse than no name."""
+
+    def test_an_unreadable_signer_identifier_falls_back_to_the_key_usage(self) -> None:
+        from maljan.extractors.authenticode import publisher_certificate
+
+        publisher, _key = _a_certificate("Maljan Test Publisher", usages=(CODE_SIGNING_USAGE,))
+        stamper, _stamper_key = _a_certificate(
+            "Maljan Test Time Stamping Signer", usages=(TIME_STAMPING_USAGE,)
+        )
+        picked = publisher_certificate(b"not a signed data blob", [stamper, publisher])
+        assert picked is publisher
+
+    def test_two_candidates_with_no_key_usage_name_nobody(self) -> None:
+        from maljan.extractors.authenticode import publisher_certificate
+
+        first, _a = _a_certificate("Maljan Test One")
+        second, _b = _a_certificate("Maljan Test Two")
+        assert publisher_certificate(b"", [first, second]) is None
+
+    def test_a_blob_that_names_nobody_leaves_the_pack_without_a_publisher(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Still reported as signed — the signature is there — and unattributed."""
+        pytest.importorskip("pefile")
+        from maljan.extractors import authenticode
+
+        monkeypatch.setattr(authenticode, "publisher_certificate", lambda der, certs: None)
+        der, _publisher = _authenticode_blob()
+        result = identify.signing_info(_write(tmp_path, "s.exe", _signed_pe(der)), file_type="pe")
+        assert result["authenticode"]["present"] is True
+        assert result["authenticode"]["subject"] is None
+        assert result["authenticode"]["issuer"] is None
+        assert result["authenticode"]["thumbprint"] is None

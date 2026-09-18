@@ -806,6 +806,17 @@ change landed on `main`.
   tool for this sample produced a result, and speaks only when none did, which
   is still the true answer for a package whose `apk_info` could not load its
   library.
+- **The timestamp authority was named as the publisher.** A timestamped PE
+  carries the timestamp service's chain in the same PKCS#7 certificate set as
+  its own, so the set has two leaves and "the certificate that issued none of
+  the others" picked whichever the producer wrote first: over the local corpus
+  that named a time-stamping certificate as the publisher on four signed
+  binaries out of seventeen. The publisher is now the certificate the
+  `SignerInfo` names, by issuer and serial number, read with a small
+  definite-length DER walk; failing that, the leaf whose extended key usage
+  carries code signing and not time stamping; and failing that, no publisher
+  at all, because a name that might be the timestamp service's is worse than
+  none. The file is still reported as signed either way.
 - **A signed binary reached the pack anonymous.** `signing_info` reported
   `authenticode present` and left the subject and issuer for "an enrichment
   step", and no such step exists — so the strongest benign fact a run could
