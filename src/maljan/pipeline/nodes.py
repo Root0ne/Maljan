@@ -50,11 +50,13 @@ from maljan.pipeline.events import (
 )
 from maljan.pipeline.evidence_summary import summarise
 from maljan.pipeline.outcome import (
+    VERDICT_READ_FALLBACK,
     corrected_reasons,
     decide_from_bundle,
     normalise_verdict,
     unrecognised_verdict_reason,
     verdict_for_run,
+    verdict_reading,
 )
 from maljan.pipeline.run_state import render_run_state
 from maljan.pipeline.state import AgentArgument, AnalysisState, _merge_stage_results
@@ -3243,6 +3245,16 @@ def make_judge_node(
                     .build()
                 )
                 run_summary_dict = summary.to_dict()
+                # How the verdict above was arrived at, as one word a consumer
+                # can branch on. The degradation reasons already say it in a
+                # sentence, and a sentence is not something an API client or a
+                # console can read: `Suspicious` with no confidence is the
+                # judge's own conclusion on one run and "the judge's answer
+                # could not be read" on the next, and only this tells them
+                # apart.
+                run_summary_dict["verdict_reading"] = (
+                    verdict_reading(bundle) if isinstance(bundle, Bundle) else VERDICT_READ_FALLBACK
+                )
                 logger.info(
                     "RunSummary built: verdict=%s, rounds=%d, techniques=%d, "
                     "validation retries=%d, unresolved=%d",

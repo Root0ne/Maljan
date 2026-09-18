@@ -205,6 +205,32 @@ def stated_confidence(bundle: Any) -> float | None:
         return None
 
 
+# How a run's verdict was arrived at, as one word. The degradation reasons
+# already say it in a sentence, and a sentence is not something an API client
+# or a console can branch on: ``Suspicious`` with no confidence is the judge's
+# own conclusion on one run and "the judge's answer could not be read" on the
+# next, and those are different facts about the sample.
+VERDICT_READ_STATED = "stated"
+VERDICT_READ_UNRECOGNISED = "unrecognised"
+VERDICT_READ_UNSTATED = "unstated"
+VERDICT_READ_FALLBACK = "fallback"
+
+
+def verdict_reading(bundle: Any) -> str:
+    """Which of the four ways :func:`decide_from_bundle` read this bundle.
+
+    The same order it reads them in, so the answer cannot disagree with the
+    verdict beside it. A stored run that predates the field carries none, and a
+    reader that finds none draws nothing new.
+    """
+    if getattr(bundle, "x_maljan_fallback_verdict", None) is not None:
+        return VERDICT_READ_FALLBACK
+    stated = read_stated_verdict(bundle)
+    if stated.recognised is not None:
+        return VERDICT_READ_STATED
+    return VERDICT_READ_UNRECOGNISED if stated.unrecognised else VERDICT_READ_UNSTATED
+
+
 def unrecognised_verdict_reason(bundle: Any) -> str:
     """Why this run's verdict is the inconclusive one, or ``""``.
 

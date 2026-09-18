@@ -593,9 +593,22 @@ def network_from_ledger(
         if not value:
             return
         if kind == "domain":
-            if not _is_emittable_domain(value):
+            # What somebody watched is never dropped here. The reserved and
+            # private-use names a sandbox resolved are exactly the lateral
+            # movement an analyst reads a case for, and dropping them at the
+            # projection erased them from the report as well as from the
+            # export, with nothing recorded — while the URL carrying the same
+            # host survived and was refused at the export with a row. The
+            # export still refuses to publish one, and says so.
+            #
+            # A name only the string sweep produced is the one exception, and
+            # it is unchanged: a run of bytes that happens to end in ``.local``
+            # is not an observation of anything.
+            if source == "strings" and not _is_emittable_domain(value):
                 return
             value = value.lower().strip().rstrip(".")
+            if not value:
+                return
             known = domains.get(value)
             if known is not None:
                 # The same name from a second source is the corroboration the

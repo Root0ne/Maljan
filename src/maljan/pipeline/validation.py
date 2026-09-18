@@ -265,7 +265,8 @@ def validate_isr(
                 Violation(
                     code="isr.confidence_range",
                     message=(
-                        f"CONFIDENCE is {confidence!r}; it must be a number between 0.0 and 1.0."
+                        f"CONFIDENCE is {safe_finding_value(confidence)!r}; it must be a number "
+                        "between 0.0 and 1.0."
                     ),
                     path=path,
                 )
@@ -297,8 +298,9 @@ def validate_isr(
                 Violation(
                     code=UNGROUNDED_TECHNIQUE_CODE,
                     message=(
-                        f"TECHNIQUE {tid} cites no evidence id from this run. Name the "
-                        f"ledger entry it was read from, for example {shown}, or drop the "
+                        f"TECHNIQUE {safe_finding_value(tid)} cites no evidence id from this "
+                        f"run. Name the ledger entry it was read from, for example {shown}, "
+                        "or drop the "
                         "technique: a technique nothing in the run establishes is read "
                         "downstream as a finding."
                     ),
@@ -316,7 +318,7 @@ def validate_isr(
                 Violation(
                     code="attck.unknown_id",
                     message=(
-                        f"TECHNIQUE {tid} is not in the MITRE ATT&CK catalogue"
+                        f"TECHNIQUE {safe_finding_value(tid)} is not in the MITRE ATT&CK catalogue"
                         f"{_retired_note(tid, attck)}.{hint} "
                         "Use one of them, or omit the technique id."
                     ),
@@ -448,7 +450,7 @@ def platform_mismatch_message(
     sample_words = f"{expected_domain}-domain, {'/'.join(expected_platforms) or 'any platform'}"
     if domain and domain != expected_domain:
         return (
-            f"TECHNIQUE {technique_id} belongs to the ATT&CK {domain} domain"
+            f"TECHNIQUE {safe_finding_value(technique_id)} belongs to the ATT&CK {domain} domain"
             f"{f' (platforms {", ".join(platforms)})' if platforms else ''}; this sample is "
             f"{sample_words}. Use a technique from the sample's domain, or drop the technique id."
         )
@@ -456,7 +458,8 @@ def platform_mismatch_message(
         wanted = {p.lower() for p in expected_platforms}
         if not any(p.lower() in wanted for p in platforms):
             return (
-                f"TECHNIQUE {technique_id} declares the platforms {', '.join(platforms)}; this "
+                f"TECHNIQUE {safe_finding_value(technique_id)} declares the platforms "
+                f"{', '.join(platforms)}; this "
                 f"sample is {sample_words}. Use a technique that applies to it, or drop the "
                 "technique id."
             )
@@ -622,10 +625,11 @@ def _weak_alignment(
         return ""
     ranked = ", ".join(f"{c['technique_id']} ({c['score_gate']:.2f})" for c in disagreeing)
     return (
-        f"TECHNIQUE {tid} aligns weakly with the claim's own text (gate score "
+        f"TECHNIQUE {safe_finding_value(tid)} aligns weakly with the claim's own text (gate score "
         f"{gate_score:.2f}, threshold {threshold:.2f}), and the ATT&CK index ranks "
         f"{best['technique_id']} ({best['score_gate']:.2f}) and other techniques from this "
-        f"sample's own domain above it: {ranked}. Keep {tid} if the evidence says so and say "
+        f"sample's own domain above it: {ranked}. Keep {safe_finding_value(tid)} if the evidence "
+        "says so and say "
         "why in the claim, choose one of the ranked techniques, or drop the technique id."
     )
 
@@ -926,7 +930,7 @@ def schema_violations(model: Any, payload: Any, *, code: str) -> list[Violation]
             for error in exc.errors()
         ][:MAX_SCHEMA_VIOLATIONS]
     except Exception as exc:  # noqa: BLE001 — a coercion failure is still a finding
-        return [Violation(code=code, message=str(exc))]
+        return [Violation(code=code, message=safe_finding_value(exc))]
     return []
 
 
@@ -1342,8 +1346,9 @@ def validate_verdict_bundle(
                     Violation(
                         code="stix.ungrounded_indicator",
                         message=(
-                            f"{problem} Emit indicators only for values a tool in this run "
-                            "actually saw, and prefer zero indicators to an invented one."
+                            f"{safe_finding_value(problem)} Emit indicators only for values a "
+                            "tool in this run actually saw, and prefer zero indicators to an "
+                            "invented one."
                         ),
                         path=f"objects[{index}]",
                     )
@@ -1363,7 +1368,8 @@ def validate_verdict_bundle(
                     Violation(
                         code=MISSING_ID_CODE,
                         message=(
-                            f"the attack-pattern {name!r} names no MITRE ATT&CK technique id. "
+                            f"the attack-pattern {safe_finding_value(name)!r} names no MITRE "
+                            "ATT&CK technique id. "
                             "Give its external_references a mitre-attack entry with the "
                             "external_id (T#### or T####.###), or drop the object and say "
                             "what was observed in the assessment: a behaviour with no "
@@ -1378,8 +1384,8 @@ def validate_verdict_bundle(
                     Violation(
                         code="stix.unknown_technique",
                         message=(
-                            f"the attack-pattern names {tid}, which is not shaped like a "
-                            "MITRE ATT&CK technique id (T#### or T####.###)."
+                            f"the attack-pattern names {safe_finding_value(tid)}, which is "
+                            "not shaped like a MITRE ATT&CK technique id (T#### or T####.###)."
                         ),
                         path=f"objects[{index}]",
                     )
@@ -1389,8 +1395,8 @@ def validate_verdict_bundle(
                     Violation(
                         code="stix.unknown_technique",
                         message=(
-                            f"the attack-pattern names {tid}, which the MITRE ATT&CK "
-                            f"catalogue has no entry for in any domain"
+                            f"the attack-pattern names {safe_finding_value(tid)}, which the "
+                            "MITRE ATT&CK catalogue has no entry for in any domain"
                             f"{_retired_note(tid, attck)}. Use a real technique id or "
                             "drop the attack-pattern."
                         ),
@@ -1416,7 +1422,7 @@ def validate_verdict_bundle(
             Violation(
                 code="verdict.severity_enum",
                 message=(
-                    f"severity.rating is {rating!r}; it must be one of "
+                    f"severity.rating is {safe_finding_value(rating)!r}; it must be one of "
                     f"{', '.join(SEVERITY_RATINGS)}."
                 ),
                 path="severity.rating",
@@ -1430,7 +1436,7 @@ def validate_verdict_bundle(
                 Violation(
                     code="attribution.ungrounded_family",
                     message=(
-                        f"family {family.name!r} cites no evidence ids; list "
+                        f"family {safe_finding_value(family.name)!r} cites no evidence ids; list "
                         "the ledger entries the name came from, or drop the attribution."
                     ),
                     path="family.evidence_ids",
@@ -1481,7 +1487,10 @@ def _schema_message(model: Any, error: Mapping[str, Any]) -> str:
     list is short, it is exactly what the model needs to answer again, and it
     costs one line of the feedback turn.
     """
-    message = str(error.get("msg") or "is not valid")
+    # Pydantic's own sentence about the field. It does not normally echo the
+    # value, and a finding row is not the place to find out that it sometimes
+    # does.
+    message = safe_finding_value(error.get("msg") or "is not valid")
     kind = str(error.get("type") or "")
     if kind not in ("extra_forbidden", "missing"):
         return message
@@ -1827,6 +1836,10 @@ def _indicator_problem(
 
     if not pattern.strip():
         return "the indicator has an empty pattern."
+    # Raw here, deliberately: these are what the denylists and the corpus are
+    # matched against, and a scrubbed path would answer a different question
+    # from the one this check asks. The sentence they end up in is what the
+    # caller wraps, because that is what is stored and shown.
     literals = [str(v).strip() for v in _PATTERN_LITERAL_RE.findall(pattern) if str(v).strip()]
     if not literals:
         return "the indicator pattern quotes no value."
@@ -1841,17 +1854,29 @@ def _indicator_problem(
         for literal in literals:
             host = _url_host(literal)
             if host and any(host.endswith(d) or d in host for d in URL_DENY_HOSTS):
-                return f"the URL host in {literal!r} is documentation or vendor infrastructure."
+                return (
+                    f"the URL host in {safe_finding_value(literal)!r} is documentation or "
+                    "vendor infrastructure."
+                )
         if not any(_found(literal) for literal in literals):
-            return f"the URL {literals[0]!r} appears nowhere in this run's evidence."
+            return (
+                f"the URL {safe_finding_value(literals[0])!r} appears nowhere in this run's "
+                "evidence."
+            )
         return ""
 
     if stripped.startswith("[file:name"):
         for literal in literals:
             if COMPILE_ARTIFACT_RE.search(literal):
-                return f"{literal!r} is a compiler or toolchain artefact, not an indicator."
+                return (
+                    f"{safe_finding_value(literal)!r} is a compiler or toolchain artefact, "
+                    "not an indicator."
+                )
             if FOREIGN_CLASS_REF_RE.match(literal):
-                return f"{literal!r} is a class reference from a library, not a file on disk."
+                return (
+                    f"{safe_finding_value(literal)!r} is a class reference from a library, "
+                    "not a file on disk."
+                )
         for literal in literals:
             lowered = literal.lower()
             if (
@@ -1862,7 +1887,8 @@ def _indicator_problem(
             ):
                 return ""
         return (
-            f"{literals[0]!r} has no file extension, no filesystem anchor and was not "
+            f"{safe_finding_value(literals[0])!r} has no file extension, no filesystem anchor "
+            "and was not "
             "observed at runtime, so nothing says it is a real path."
         )
 
@@ -1873,7 +1899,8 @@ def _indicator_problem(
     if any(_found(literal) for literal in literals):
         return ""
     return (
-        f"the indicator pattern names {', '.join(literals)}, which appears nowhere "
+        f"the indicator pattern names {safe_finding_value(', '.join(literals))}, which "
+        "appears nowhere "
         "in the evidence this run collected."
     )
 

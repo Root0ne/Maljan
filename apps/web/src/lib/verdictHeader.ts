@@ -21,6 +21,7 @@
 
 import { verdictBucket, verdictLabel } from "./verdict";
 import type { VerdictBucket } from "./verdict";
+import type { VerdictReading } from "@/lib/api";
 import type { MalwareReport, SeverityRating } from "@/types/malware-report";
 
 /**
@@ -136,3 +137,37 @@ export const VERDICT_CONFLICT_NOTE =
   "The verdict and the severity rating of this run disagree. Both are the " +
   "judge's own; read the severity card and the conversation before quoting " +
   "either.";
+
+/**
+ * What to say beside a verdict the judge did not state.
+ *
+ * Three of the four readings publish the inconclusive verdict, which is one of
+ * the same three words a judge may state, so the word alone cannot be read: a
+ * `Suspicious` the judge concluded and a `Suspicious` the pipeline fell back to
+ * look identical. The markdown header has said which since the reading existed;
+ * this is the same sentence for the two surfaces a reader actually opens.
+ *
+ * `stated`, and an absent reading — every report stored before the field —
+ * draw nothing.
+ */
+const READING_NOTES: Partial<Record<VerdictReading, string>> = {
+  unrecognised:
+    "The judge answered with something this pipeline could not read as a " +
+    "verdict, so the verdict above is not the judge's. Its own answer is in " +
+    "the degraded-run reasons, and no confidence is published for it.",
+  unstated:
+    "The judge stated no verdict, so the verdict above was read from the " +
+    "objects in its bundle rather than from anything it said, and no " +
+    "confidence is published for it.",
+  fallback:
+    "The judge did not answer with a bundle, so the verdict above was read " +
+    "out of its text, or written by the pipeline when there was no text to " +
+    "read, and no confidence is published for it.",
+};
+
+/** The one-line note a reading earns beside the verdict, or `null`. */
+export function verdictReadingNote(
+  reading: VerdictReading | null | undefined,
+): string | null {
+  return (reading && READING_NOTES[reading]) || null;
+}

@@ -38,6 +38,7 @@ import { verdictBucket } from "@/lib/verdict";
 import {
   assessedSeverity,
   verdictHeadline,
+  verdictReadingNote,
   VERDICT_CONFLICT_NOTE,
 } from "@/lib/verdictHeader";
 import { getErrorMessage, isApiStatus } from "@/lib/errors";
@@ -271,6 +272,7 @@ export default function AnalysisLayout({
     report?.overall_confidence,
     assessedSeverity(report?.malware_report),
   );
+  const readingNote = verdictReadingNote(report?.verdict_reading);
   const category = report?.malware_category ?? "";
   // Prefer a readable sample identity (filename, then hash prefix) over
   // the opaque sample_id UUID — available from the job even during the live run,
@@ -418,6 +420,14 @@ export default function AnalysisLayout({
 
               {headline.conflict && (
                 <p className="mb-1 text-xs text-status-orange">{VERDICT_CONFLICT_NOTE}</p>
+              )}
+
+              {/* Three of the four readings publish one of the same three
+                  words a judge may state, so the verdict above cannot be read
+                  on its own. The markdown report has said which since the
+                  reading existed; this is that sentence, here. */}
+              {readingNote && (
+                <p className="mb-1 text-xs text-status-orange">{readingNote}</p>
               )}
 
               {failure && <FailureNote failure={failure} className="mb-1.5" />}

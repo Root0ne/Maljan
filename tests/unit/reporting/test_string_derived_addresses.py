@@ -125,8 +125,14 @@ class TestWhetherAnAddressCouldBeInfrastructure:
                 assert address_is_publishable(address, source) is False, (address, source)
 
     def test_a_private_address_depends_on_who_saw_it(self) -> None:
-        """A sandbox watching the sample reach 10.0.0.5 is lateral movement."""
-        for address in ("10.0.0.5", "172.16.0.1", "192.168.1.1"):
+        """A sandbox watching the sample reach 10.0.0.5 is lateral movement.
+
+        ``100.64.0.0/10`` is the shared space a carrier puts between its
+        subscribers and the internet. It belongs here rather than among the
+        addresses nothing could act on, and it is named rather than reached
+        through ``is_private``, which answers False for it.
+        """
+        for address in ("10.0.0.5", "172.16.0.1", "192.168.1.1", "100.64.0.1", "100.127.255.254"):
             assert address_is_publishable(address, "sandbox") is True, address
             assert address_is_publishable(address, "analyst") is True, address
             assert address_is_publishable(address, "strings") is False, address

@@ -83,6 +83,12 @@ async def _detail(svc: ReportService, report: Any) -> ReportDetailResponse:
     two sources had in common then. See ``_is_numbered``.
     """
     detail = ReportDetailResponse.model_validate(report)
+    # How the verdict was read, lifted out of the run summary the pipeline
+    # already writes rather than derived here a second time. A stored report
+    # without it keeps ``None``, and a client that finds none draws nothing.
+    reading = (report.run_summary or {}).get("verdict_reading")
+    if isinstance(reading, str) and reading:
+        detail = detail.model_copy(update={"verdict_reading": reading})
     if detail.transcript and not _is_numbered(detail.transcript):
         detail = detail.model_copy(
             update={"transcript": [m.model_copy(update={"seq": None}) for m in detail.transcript]}

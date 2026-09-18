@@ -36,7 +36,6 @@ from maljan.agents._indicator_denylists import (
 from maljan.core.logger import logger
 from maljan.extractors.network_extractor import (
     corroboration_reason,
-    domain_is_corroborated,
     host_is_public,
     ip_corroboration_reason,
     url_corroboration_reason,
@@ -72,6 +71,15 @@ _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 # own bundle keeps the object.
 MALWARE_UNDER_BENIGN_CODE = "stix.malware_object_under_benign"
 UNPUBLISHABLE_URL_CODE = "stix.unpublishable_url"
+UNPUBLISHABLE_DOMAIN_CODE = "stix.unpublishable_domain"
+
+# The sources whose rows are worth a recorded decline. Something a sandbox
+# watched, an agent wrote down or the judge asserted is an observation, and a
+# reader is owed a sentence when one does not reach the export. A string
+# sweep's own output is not: it produces up to forty rows a run that were never
+# going to be published, and forty unresolved findings nobody can act on bury
+# the ones somebody can.
+_OBSERVED_SOURCES = ("sandbox", "analyst", "judge")
 
 # The bands the indicator cap spends its budget in, best first. The sample's
 # own hashes are what every consumer of the bundle came for; then the network
@@ -167,8 +175,23 @@ def impossible_host_sentence(value: str, whose: str) -> str:
     """The recorded sentence for a URL no host could ever answer for."""
     return (
         f"the URL indicator for {safe_finding_value(value)!r} is not in the exported bundle: its "
-        f"host is not a name or address that could exist. It is unchanged in {whose}."
+        f"host is not a name or address that could exist outside the analysed network. It is "
+        f"unchanged in {whose}."
     )
+
+
+def unpublishable_domain_sentence(fqdn: str) -> str:
+    """The recorded sentence for a name somebody watched that no export may carry."""
+    return (
+        f"the domain indicator for {safe_finding_value(fqdn)!r} is not in the exported bundle: it "
+        "is a name that does not resolve outside the analysed network. The report's network block "
+        "keeps the row with the source that saw it."
+    )
+
+
+def _observed(source: Any) -> bool:
+    """Whether this row is somebody's observation rather than a string sweep's."""
+    return str(source or "").strip().lower() in _OBSERVED_SOURCES
 
 
 def _judge_indicator_problem(indicator: Indicator) -> tuple[str, str] | None:
@@ -402,10 +425,10 @@ class ExtendedSTIXRenderer:
                     _queue(url_ind, _BAND_NETWORK, url.source or "strings")
                     continue
                 # A host nothing could answer for is worth telling a reader
-                # about whoever wrote the row down; a row held back only for
-                # want of a second source is the string rule working, and the
-                # rule working is not a finding.
-                if not host_is_public(url_host(url.url)):
+                # about when somebody watched the row; a string sweep's own
+                # cut-offs were never going to be published, and recording
+                # forty of them a run buries the findings a reader can act on.
+                if _observed(url.source) and not host_is_public(url_host(url.url)):
                     self.declined.append(
                         (
                             UNPUBLISHABLE_URL_CODE,
@@ -416,6 +439,18 @@ class ExtendedSTIXRenderer:
                 dom_ind = _indicator_for_domain(domain)
                 if dom_ind is not None:
                     _queue(dom_ind, _BAND_NETWORK, domain.source)
+                    continue
+                # The name a sandbox resolved stays in the report either way;
+                # what is recorded is that the export does not carry it, and
+                # the reason. A name only the string sweep produced is held
+                # back by the corroboration rule, which is the rule working.
+                if _observed(domain.source) and not host_is_public(domain.fqdn):
+                    self.declined.append(
+                        (
+                            UNPUBLISHABLE_DOMAIN_CODE,
+                            unpublishable_domain_sentence(domain.fqdn),
+                        )
+                    )
 
         # 6) StringIOC → Indicator.
         #
@@ -759,14 +794,58 @@ def _escape_stix(value: str) -> str:
     return value.replace("\\", "\\\\").replace("'", "\\'")
 
 
+# The network kinds, and the one place a pattern for any of them is written.
+# Nothing else in the tree builds one: a path that wrote its own would be a
+# path that had not asked :func:`network_publish_reason`, which is how a
+# version number out of a strings table came to be exported as malicious
+# infrastructure two sections after the network block had refused the same
+# address. ``tests/unit/reporting/test_one_network_publish_rule.py`` fails if a
+# second place starts writing one.
+NETWORK_KINDS: tuple[str, ...] = ("domain", "ip", "url")
+
+
+def network_pattern(kind: str, value: str) -> str | None:
+    """The STIX pattern for one network endpoint, or ``None`` for another kind."""
+    quoted = _escape_stix(value)
+    if kind == "url":
+        return f"[url:value = '{quoted}']"
+    if kind == "domain":
+        return f"[domain-name:value = '{quoted}']"
+    if kind != "ip":
+        return None
+    try:
+        family = "ipv6-addr" if ipaddress.ip_address(quoted).version == 6 else "ipv4-addr"
+    except ValueError:
+        family = "ipv4-addr"
+    return f"[{family}:value = '{quoted}']"
+
+
+def network_publish_reason(
+    kind: str, value: str, source: Any, reputation: Any = None
+) -> str | None:
+    """Why this run may publish one network endpoint, or ``None``.
+
+    One rule for the three kinds, and every path that can mint a network
+    indicator asks it: the network block's own rows, the string rows that reach
+    the bundle through ``static.interesting_strings``, and the judge's own
+    indicator objects. It used to be three rules on four paths, and the path
+    nobody had named published what the other three refused.
+    """
+    if kind == "domain":
+        if not host_is_public(value):
+            return None
+        return corroboration_reason(source, reputation, value)
+    if kind == "ip":
+        return ip_corroboration_reason(value, source, reputation)
+    if kind == "url":
+        return url_corroboration_reason(value, source, reputation)
+    return None
+
+
 def _stix_pattern_for_string_ioc(ioc: StringIOC) -> str | None:
     value = _escape_stix(ioc.value)
-    if ioc.kind == "url":
-        return f"[url:value = '{value}']"
-    if ioc.kind == "domain":
-        return f"[domain-name:value = '{value}']"
-    if ioc.kind == "ip":
-        return _ip_pattern(value)
+    if ioc.kind in NETWORK_KINDS:
+        return network_pattern(ioc.kind, ioc.value)
     if ioc.kind == "email":
         return f"[email-addr:value = '{value}']"
     if ioc.kind == "mutex":
@@ -800,7 +879,9 @@ def _publishable_domains(report: Any) -> frozenset[str]:
     return frozenset(
         domain.fqdn.strip().lower().rstrip(".")
         for domain in network.domains
-        if domain.fqdn and domain_is_corroborated(domain.source, domain.reputation, domain.fqdn)
+        if domain.fqdn
+        and network_publish_reason("domain", domain.fqdn, domain.source, domain.reputation)
+        is not None
     )
 
 
@@ -822,20 +903,22 @@ def _accept_string_ioc(
     stripped = pattern.lstrip()
     value = (ioc.value or "").strip()
 
-    # Domains: the corroboration rule, the same one the network block is
-    # gated by. Every `domain` row here came out of the string scan, so an
-    # uncorroborated one is a run of bytes shaped like a hostname.
-    if stripped.startswith("[domain-name:value"):
-        return value.lower().rstrip(".") in publishable_domains
-
-    # URLs: the corroboration rule, then the denylist of developer and build
-    # hosts. Every ``url`` row here came out of the string scan, so it is
-    # string-derived by construction and asks the predicate as one.
-    if stripped.startswith("[url:value"):
-        host = _extract_url_host(value)
-        if host and any(host.endswith(d) or d in host for d in URL_DENY_HOSTS):
-            return False
-        return url_corroboration_reason(value, "strings") is not None
+    # Every network kind asks the one publish rule, and every row here came out
+    # of the string scan, so every one of them asks it as ``strings``. A domain
+    # asks it through the network block's own answer, which is where the same
+    # name's reputation and its stronger source live; the other two ask it
+    # directly. The addresses used to fall past all of this to ``return True``
+    # below, so a version number written with dots in it was exported as
+    # malicious infrastructure while the network block was refusing the very
+    # same address.
+    if ioc.kind in NETWORK_KINDS:
+        if ioc.kind == "domain":
+            return value.lower().rstrip(".") in publishable_domains
+        if ioc.kind == "url":
+            host = _extract_url_host(value)
+            if host and any(host.endswith(d) or d in host for d in URL_DENY_HOSTS):
+                return False
+        return network_publish_reason(ioc.kind, value, "strings") is not None
 
     # file:name: acceptance-based admission + per-report cap.
     if stripped.startswith("[file:name"):
@@ -877,20 +960,19 @@ def _looks_like_real_path(value: str) -> bool:
     return False
 
 
-def _ip_pattern(value: str) -> str:
-    try:
-        addr = ipaddress.ip_address(value)
-    except ValueError:
-        return f"[ipv4-addr:value = '{value}']"
-    family = "ipv6-addr" if addr.version == 6 else "ipv4-addr"
-    return f"[{family}:value = '{value}']"
-
-
 def _indicator_for_domain(domain: NetworkDomain) -> Indicator | None:
+    """The name as an indicator, or ``None`` when this run may not publish it.
+
+    Two ways to be refused, and they are different facts: a name nothing but
+    the sample's own byte image knows, which is the string sweep's own output
+    and is held back silently; and a name that does not resolve outside the
+    analysed network — reserved, private-use, or a single label — which is
+    refused whoever watched it, and recorded when somebody did.
+    """
     fqdn = domain.fqdn.strip()
     if not fqdn:
         return None
-    admitted = corroboration_reason(domain.source, domain.reputation, fqdn)
+    admitted = network_publish_reason("domain", fqdn, domain.source, domain.reputation)
     if admitted is None:
         # A run of bytes that has the shape of a hostname is not an
         # observation of infrastructure. One PE's string sweep put fifteen
@@ -899,10 +981,10 @@ def _indicator_for_domain(domain: NetworkDomain) -> Indicator | None:
         # network block, labelled with where they came from; they are not
         # offered to the world until a second source knows the name.
         return None
-    pattern = f"[domain-name:value = '{_escape_stix(fqdn)}']"
-    name = f"Domain {fqdn}"
+    pattern = network_pattern("domain", fqdn)
+    assert pattern is not None  # noqa: S101 - a domain always has one
     return Indicator(
-        name=name,
+        name=f"Domain {fqdn}",
         pattern=pattern,
         pattern_type="stix",
         indicator_types=["malicious-activity"] if domain.is_suspicious else ["anomalous-activity"],
@@ -935,10 +1017,11 @@ def _indicator_for_ip(ip: NetworkIP) -> Indicator | None:
     address = ip.address.strip()
     if not address:
         return None
-    admitted = ip_corroboration_reason(address, ip.source, ip.reputation)
+    admitted = network_publish_reason("ip", address, ip.source, ip.reputation)
     if admitted is None:
         return None
-    pattern = _ip_pattern(_escape_stix(address))
+    pattern = network_pattern("ip", address)
+    assert pattern is not None  # noqa: S101 - an address always has one
     return Indicator(
         name=f"IP {address}",
         pattern=pattern,
@@ -969,10 +1052,11 @@ def _indicator_for_url(url: NetworkURL, report: Any = None) -> Indicator | None:
     # "unrecorded" is how one of them ends up publishing what the other ranks
     # as noise. Only a row persisted before the field existed reaches this.
     source = url.source or "strings"
-    admitted = url_corroboration_reason(url.url, source, _host_reputation(report, host))
+    admitted = network_publish_reason("url", url.url, source, _host_reputation(report, host))
     if admitted is None:
         return None
-    pattern = f"[url:value = '{_escape_stix(url.url)}']"
+    pattern = network_pattern("url", url.url)
+    assert pattern is not None  # noqa: S101 - a URL always has one
     return Indicator(
         name=f"URL {url.url[:48]}",
         pattern=pattern,

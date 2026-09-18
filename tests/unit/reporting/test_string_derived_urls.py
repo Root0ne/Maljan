@@ -174,8 +174,9 @@ class TestWhetherTheHostCouldExist:
     def test_a_private_network_names_its_own_machines(self) -> None:
         """Publishing one is a low-value indicator and a small disclosure.
 
-        The suffixes are reserved for exactly this, and the rule that reads
-        them is the one the domains already consult, so both kinds get it.
+        Asked where an indicator is minted, so a name a sandbox resolved is
+        still in the report's network block with the source that saw it. It
+        used to be asked at the projection, which erased the observation.
         """
         for host in ("sub.corp.internal", "printer.alt", "nas.home.arpa"):
             assert host_is_public(host) is False, host
@@ -371,14 +372,23 @@ class TestWhatTheBundleCarries:
         assert not any("url:value" in pattern for pattern in _patterns(bundle))
         assert renderer.declined == []
 
-    def test_an_impossible_host_is_recorded_whoever_wrote_the_row(self) -> None:
-        """The reason is true for every source, and a reader is owed it."""
-        for source in ("sandbox", "analyst", "strings", None):
+    def test_an_impossible_host_is_recorded_when_somebody_watched_the_row(self) -> None:
+        for source in ("sandbox", "analyst"):
             renderer = ExtendedSTIXRenderer()
 
             renderer.render(_report([NetworkURL(url="http://localho", source=source)]))
 
             assert [code for code, _why in renderer.declined] == [UNPUBLISHABLE_URL_CODE], source
+
+    def test_a_string_sweep_cut_off_is_not_a_finding_anybody_can_act_on(self) -> None:
+        """One report's forty of them would bury the rows a reader can act on."""
+        renderer = ExtendedSTIXRenderer()
+
+        renderer.render(
+            _report([NetworkURL(url=url, source="strings") for url in (*CUT_OFF, PLAUSIBLE)])
+        )
+
+        assert renderer.declined == []
 
     def test_a_declined_url_never_carries_a_credential_into_the_record(self) -> None:
         from tests.credential_shapes import prefixed_key

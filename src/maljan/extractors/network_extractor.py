@@ -52,11 +52,7 @@ _BENIGN_DOMAINS: frozenset[str] = frozenset(
     }
 )
 
-# Reserved and special-use suffixes that must never be emitted as network IOCs.
-# ``.internal``, ``.alt`` and ``.home.arpa`` name a private network's own
-# machines: publishing one is a low-value indicator in a shared bundle and a
-# mild disclosure of how the analysis network is named. Every rule that asks
-# ``_is_emittable_domain`` gets them, which is the domains and the URLs both.
+# RFC 6761/6762 reserved suffixes that must never be emitted as network IOCs.
 _RESERVED_DOMAIN_SUFFIXES: tuple[str, ...] = (
     ".local",
     ".localhost",
@@ -64,10 +60,17 @@ _RESERVED_DOMAIN_SUFFIXES: tuple[str, ...] = (
     ".example",
     ".invalid",
     ".arpa",
-    ".home.arpa",
-    ".internal",
-    ".alt",
 )
+
+# The suffixes a private network names its own machines with. Publishing one is
+# a low-value indicator in a shared bundle and a small disclosure of how the
+# analysis network is named, so no export carries one — but that is an export
+# decision and not a projection one. A sandbox that resolved
+# ``fileserver.corp.internal`` watched the sample resolve it, which is the
+# thing an analyst reading a lateral-movement case most needs to see, and the
+# report's network block keeps the row with its source. Only ``host_is_public``
+# consults these, which is asked where an indicator is minted.
+_PRIVATE_USE_SUFFIXES: tuple[str, ...] = (".internal", ".alt", ".home.arpa")
 _RESERVED_DOMAIN_NAMES: frozenset[str] = frozenset({"localhost", "localhost.localdomain"})
 
 # Substrings that strongly suggest C2 / commodity-malware infra.
@@ -654,6 +657,8 @@ def host_is_public(host: Any) -> bool:
         return not (address.is_loopback or address.is_unspecified or address.is_link_local)
     if not _is_emittable_domain(name):
         return False
+    if any(name.endswith(suffix) for suffix in _PRIVATE_USE_SUFFIXES):
+        return False
     labels = name.split(".")
     if not all(_LABEL_RE.match(label) for label in labels):
         return False
@@ -683,6 +688,14 @@ _DOCUMENTATION_NETWORKS = (
     ipaddress.ip_network("203.0.113.0/24"),
     ipaddress.ip_network("2001:db8::/32"),
 )
+
+# The shared address space a carrier puts between its subscribers and the
+# internet. It is somebody's infrastructure the way a private range is — the
+# sandbox can really reach one — and it is nobody's the way a version number
+# is, so it belongs beside the private ranges rather than among the addresses
+# that are never published. Named rather than reached through ``is_private``,
+# which answers False for it.
+_SHARED_ADDRESS_SPACE = ipaddress.ip_network("100.64.0.0/10")
 
 # The address every reader of the report would recognise as not an endpoint.
 _BROADCAST_ADDRESS = "255.255.255.255"
@@ -714,7 +727,7 @@ def address_is_publishable(address: Any, source: Any = None) -> bool:
         return False
     if any(parsed in network for network in _DOCUMENTATION_NETWORKS):
         return False
-    if parsed.is_private:
+    if parsed.is_private or parsed in _SHARED_ADDRESS_SPACE:
         return str(source or "").strip().lower() not in ("", "strings")
     return True
 
