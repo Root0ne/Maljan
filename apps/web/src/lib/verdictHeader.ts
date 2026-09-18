@@ -10,9 +10,9 @@
  *
  * The console does not get to pick a winner: the verdict is the judge's and
  * the severity is the judge's, and overruling either here would be this view
- * inventing a finding. What it can do is say so. When the severity a verdict
- * implies and the severity the run actually assessed are more than one band
- * apart, the header carries both, attributed, in one line.
+ * inventing a finding. What it can do is say so. Where the two contradict
+ * each other — and only there, see `CONTRADICTS` — the header carries both,
+ * attributed, in one line.
  *
  * The confidence is printed here and nowhere else, in one notation, which is
  * the other half of the same rule: it used to read `92/100` in the header and
@@ -23,41 +23,47 @@ import { verdictBucket, verdictLabel } from "./verdict";
 import type { VerdictBucket } from "./verdict";
 import type { SeverityRating } from "@/types/malware-report";
 
-/** Severity ratings from least to most severe, which is what "a band" means. */
-export const SEVERITY_ORDER: SeverityRating[] = [
-  "Informational",
-  "Low",
-  "Medium",
-  "High",
-  "Critical",
-];
-
 /**
- * The severity band each verdict implies.
+ * The severity a verdict has to be read against before it contradicts it.
  *
- * Inclusive index pairs into `SEVERITY_ORDER`. A verdict of Malicious is
- * consistent with Medium and above, Benign with Low and below, and Suspicious
- * with everything in between; an unknown verdict implies nothing, so it can
- * never disagree with anything.
+ * Narrow on purpose. A Malicious verdict at Low severity is what adware,
+ * unwanted programs and riskware look like on a coherent report, and telling
+ * that reader the run disagrees with itself — and not to trust either number —
+ * would spend exactly the trust this rule exists to protect. Two shapes are
+ * left, and both are the kind a reader has to be told about:
+ *
+ * * a malicious verdict over the lowest rating there is, or over no rating at
+ *   all, which is the PuTTY run the audit found: "Malicious 0.95" over
+ *   "Informational 0.5/10" and prose calling the sample legitimate;
+ * * a benign verdict over High or Critical, which is the same fault mirrored.
+ *
+ * Suspicious sits between the two by definition and can disagree with nothing;
+ * an unknown verdict implies nothing, so it disagrees with nothing either.
  */
-const IMPLIED_BAND: Record<VerdictBucket, [number, number] | null> = {
-  malicious: [2, 4],
-  suspicious: [1, 3],
-  benign: [0, 1],
-  unknown: null,
+const CONTRADICTS: Partial<Record<VerdictBucket, ReadonlySet<SeverityRating | "none">>> = {
+  malicious: new Set<SeverityRating | "none">(["Informational", "none"]),
+  benign: new Set<SeverityRating | "none">(["High", "Critical"]),
 };
 
-/** Whether the verdict and the assessed severity are more than a band apart. */
+/**
+ * Whether the verdict and the assessed severity contradict each other.
+ *
+ * `rating` distinguishes two absences that are not the same claim. `null` is a
+ * run that has a severity block and a judge that assessed no rating into it —
+ * a malicious verdict with nothing behind it, which is worth saying.
+ * `undefined` is a run with no structured report at all: one still going, or
+ * one written before the report payload existed. There is no severity there to
+ * disagree with, and announcing a contradiction would be this view inventing
+ * one out of a report that has not been written yet.
+ */
 export function verdictSeverityConflict(
   verdict: string | null | undefined,
   rating: SeverityRating | null | undefined,
 ): boolean {
-  if (!rating) return false;
-  const band = IMPLIED_BAND[verdictBucket(verdict)];
-  if (!band) return false;
-  const at = SEVERITY_ORDER.indexOf(rating);
-  if (at < 0) return false;
-  return at < band[0] || at > band[1];
+  if (rating === undefined) return false;
+  const against = CONTRADICTS[verdictBucket(verdict)];
+  if (!against) return false;
+  return against.has(rating ?? "none");
 }
 
 /**
@@ -95,10 +101,14 @@ export function verdictHeadline(
   if (!verdictSeverityConflict(verdict, rating)) {
     return { text: `${label} · Confidence: ${number}`, conflict: false };
   }
-  return {
-    text: `Judge: ${label} ${number} · Severity: ${rating}`,
-    conflict: true,
-  };
+  const severity = rating ?? "not assessed";
+  // The number is labelled only where it is not one: "Malicious 0.95" reads as
+  // a confidence in the place a reader expects one, but "Malicious not
+  // assessed" does not read as anything.
+  const judged = confidence === null || confidence === undefined
+    ? `${label} · Confidence: ${number}`
+    : `${label} ${number}`;
+  return { text: `Judge: ${judged} · Severity: ${severity}`, conflict: true };
 }
 
 /** The sentence under a disagreeing header, which says what to do about it. */

@@ -239,7 +239,13 @@ export default function AnalysisLayout({
 
   /* Derive header data strictly from real API data — no mock fallback */
   const verdict = verdictBucket(report?.verdict);
-  const severityRating = report?.malware_report?.severity?.rating ?? null;
+  /* `undefined` while there is no structured report to carry a severity, and
+   * `null` once there is one and the judge assessed no rating into it — the
+   * second contradicts a malicious verdict, the first is a run that has not
+   * finished being written. */
+  const severityRating = report?.malware_report
+    ? (report.malware_report.severity?.rating ?? null)
+    : undefined;
   const headline = verdictHeadline(
     report?.verdict,
     report?.overall_confidence,
@@ -351,7 +357,6 @@ export default function AnalysisLayout({
                       ? "border border-status-orange/40 bg-status-orange/10 text-status-orange"
                       : `bg-bg-active ${v.text}`
                   }`}
-                  title={headline.conflict ? VERDICT_CONFLICT_NOTE : undefined}
                 >
                   {headline.text}
                 </span>

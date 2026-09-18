@@ -50,9 +50,18 @@ present the two as unrelated facts two cards apart — a reader had no way to
 know which to believe. Neither is overruled here: both are the judge's, and
 picking a winner would be the console inventing a finding. Instead the header
 says so, in one line — "Judge: Malicious 0.95 · Severity: Informational" —
-with the sentence that names the disagreement under it. The band each verdict
-implies is in `apps/web/src/lib/verdictHeader.ts`; a rating one band out is
-not a disagreement. A stage names itself and its members by
+with the sentence that names the disagreement under it.
+
+The rule is deliberately narrow (`apps/web/src/lib/verdictHeader.ts`). Two
+shapes contradict: a malicious verdict over Informational, or over a severity
+block the judge assessed no rating into; and a benign verdict over High or
+Critical. Nothing else does. A malicious verdict at Low severity is what
+adware, unwanted programs and riskware look like on a report that is not
+contradicting itself, and telling that reader not to trust either number would
+spend the trust this rule exists to protect. A Suspicious verdict sits between
+the two by definition, a verdict the console does not recognise implies
+nothing, and a run with no structured report yet has no severity to disagree
+with. A stage names itself and its members by
 the labels an operator gave them — the same names the conversation and the
 per-agent results table use. One selector answers for all of them
 (`apps/web/src/lib/rosterNames.ts`), reading the roster the job carries and
