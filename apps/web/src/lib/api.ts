@@ -142,7 +142,8 @@ export interface SystemStatusDTO {
 
 export interface AuditLogDTO {
   id: string;
-  user_id: string;
+  /** Null for the security events that have no authenticated principal. */
+  user_id: string | null;
   /** Who that id belongs to, as the admin users list shows them. */
   actor: string | null;
   action: string;

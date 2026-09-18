@@ -166,7 +166,12 @@ export default function AuditLogsPage() {
                       </td>
                     )}
                     <td className="px-4 py-2.5">
-                      <span className="text-xs text-text-secondary font-mono">{row.actor}</span>
+                      <span
+                        className={`text-xs text-text-secondary${row.actorId ? "" : " font-mono"}`}
+                        title={row.actorId || undefined}
+                      >
+                        {row.actor}
+                      </span>
                     </td>
                     {columns.ip && (
                       <td className="px-4 py-2.5">

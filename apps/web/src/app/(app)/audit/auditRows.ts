@@ -4,8 +4,9 @@
  * The log had four columns and two of them were noise: RESOURCE read
  * "settings" on every visible row, restating the prefix of the ACTION beside
  * it, and IP ADDRESS was an em dash on all twenty. What it did not have was an
- * actor — the one thing an audit log exists to record — although the endpoint
- * has carried `user_id` all along.
+ * actor — the one thing an audit log exists to record. The endpoint carries
+ * the actor's name beside `user_id`, so the name is what the row says, with
+ * the id kept behind it.
  *
  * So the columns are decided from the page rather than written down: a column
  * every row leaves empty is not drawn, and the resource is folded into the
@@ -23,6 +24,12 @@ export interface AuditRow {
   /** The resource, when it is not already the action's own prefix. */
   resource: string;
   actor: string;
+  /**
+   * The actor's id, when the cell shows a name rather than the id itself. The
+   * page keeps it as the cell's title, so two people under one display name
+   * stay apart; it is empty when the id is already what the cell says.
+   */
+  actorId: string;
   ip: string;
 }
 
@@ -40,12 +47,19 @@ export function actionLabel(action: string): string {
 /**
  * Who did it.
  *
- * The endpoint carries the actor's id and not their name, so the id is what
- * this can honestly show; `user_id` is null for the events that have no
+ * The endpoint resolves `user_id` to a name — the display name, or the local
+ * part of the e-mail — and that name is what the row shows. It is null for a
+ * principal the users table no longer holds, and eight characters of the id
+ * stand in for it there. Both are null for the events that have no
  * authenticated principal — a failed sign-in, a lockout, a replayed refresh
  * token — and those are the platform's own, not nobody's.
  */
-export function actorLabel(userId: string | null | undefined): string {
+export function actorLabel(
+  actor: string | null | undefined,
+  userId: string | null | undefined
+): string {
+  const name = (actor ?? "").trim();
+  if (name) return name;
   const id = (userId ?? "").trim();
   return id ? id.slice(0, 8) : "the platform";
 }
@@ -64,14 +78,19 @@ function resourceOf(log: AuditLogDTO): string {
 
 /** One page of log entries, as rows. */
 export function auditRows(logs: AuditLogDTO[]): AuditRow[] {
-  return logs.map((log) => ({
-    id: log.id,
-    at: log.created_at,
-    action: actionLabel(log.action),
-    resource: resourceOf(log),
-    actor: actorLabel(log.user_id),
-    ip: (log.ip_address ?? "").trim(),
-  }));
+  return logs.map((log) => {
+    const actor = actorLabel(log.actor, log.user_id);
+    const id = (log.user_id ?? "").trim();
+    return {
+      id: log.id,
+      at: log.created_at,
+      action: actionLabel(log.action),
+      resource: resourceOf(log),
+      actor,
+      actorId: actor === id.slice(0, 8) || !id ? "" : id,
+      ip: (log.ip_address ?? "").trim(),
+    };
+  });
 }
 
 /** Which of the optional columns this page has anything to put in. */

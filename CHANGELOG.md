@@ -816,7 +816,9 @@ change landed on `main`.
   name — what the admin users list already shows an admin — so the log's actor
   column no longer reads as eight characters of a UUID. One query names a whole
   page; an event with no authenticated principal, and a user who has since been
-  deleted, both leave it empty.
+  deleted, both leave it empty. The console draws that name and keeps the id as
+  the cell's title, so two people under one display name stay apart, and it
+  falls back to the short id where the endpoint has no name to give.
 - **A probe that could not read a catalogue says where it tried.** "model list:
   connection refused" was the same sentence whichever endpoint was configured.
   It now names the endpoint as scheme and host through `endpoint_label`, which

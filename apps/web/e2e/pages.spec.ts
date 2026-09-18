@@ -194,10 +194,11 @@ test.describe("Audit log", () => {
     await page.goto("/audit");
 
     await expect(page.getByRole("heading", { name: "Audit Logs" })).toBeVisible();
-    // The action reads as a sentence, the actor is drawn at all, and the IP
+    // The action reads as a sentence, the actor is drawn by name, and the IP
     // column survives because this fixture row has one.
     await expect(page.getByText("Job create")).toBeVisible();
     await expect(page.getByRole("columnheader", { name: "Who" })).toBeVisible();
+    await expect(page.getByText("Ada Lovelace")).toBeVisible();
     await expect(page.getByText("10.0.0.5")).toBeVisible();
     await expect(page.getByText("1 total entry")).toBeVisible();
     await expectNoAlerts(page);
