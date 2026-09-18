@@ -9,6 +9,7 @@ import {
   type AgentLLMOverride,
 } from "../../configuration/AgentDefinitionsEditor";
 import {
+  AGENT_DEFINITIONS_KEY as DEFINITIONS_KEY,
   BUILTIN_AGENT_KEYS,
   displayedDefinitions,
   stagedDefinitions,
@@ -19,7 +20,6 @@ import { copyKey, mapKeyError } from "../../configuration/mapEditorHelpers";
 import { useSettingsContext } from "../../configuration/SettingsContext";
 import { stateString, type GuideStepProps } from "./types";
 
-const DEFINITIONS_KEY = "core.agents.definitions";
 const LLM_AGENTS_KEY = "core.llm.agents";
 /** The radio value for "not a clone". */
 const BLANK = " blank";

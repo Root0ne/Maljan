@@ -1,4 +1,7 @@
-import { BUILTIN_AGENT_KEYS } from "../configuration/agentStaging";
+import {
+  AGENT_DEFINITIONS_KEY,
+  BUILTIN_AGENT_KEYS,
+} from "../configuration/agentStaging";
 import type { GuideId } from "./guides";
 
 /** Reads the value a key currently has — staged if it is staged, else stored.
@@ -81,7 +84,7 @@ function llmStatus(effective: EffectiveValue, isSet: IsSet): string {
 }
 
 function agentStatus(effective: EffectiveValue): string {
-  const custom = countEnabled(effective("core.agents.definitions"), (k) => BUILTIN_AGENTS.has(k));
+  const custom = countEnabled(effective(AGENT_DEFINITIONS_KEY), (k) => BUILTIN_AGENTS.has(k));
   const profile = text(effective("core.agents.profile")) || "default";
   const head =
     custom === 0
