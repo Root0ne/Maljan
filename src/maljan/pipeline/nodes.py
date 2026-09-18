@@ -49,7 +49,13 @@ from maljan.pipeline.events import (
     summarize_claims,
 )
 from maljan.pipeline.evidence_summary import summarise
-from maljan.pipeline.outcome import corrected_reasons, decide_from_bundle, verdict_for_run
+from maljan.pipeline.outcome import (
+    corrected_reasons,
+    decide_from_bundle,
+    normalise_verdict,
+    unrecognised_verdict_reason,
+    verdict_for_run,
+)
 from maljan.pipeline.run_state import render_run_state
 from maljan.pipeline.state import AgentArgument, AnalysisState, _merge_stage_results
 from maljan.pipeline.sycophancy_detector import build_revision_directive, detect_sycophancy
@@ -411,7 +417,7 @@ def mean_claim_confidence(isrs: Any) -> float | None:
 
 
 def _overall_confidence(assessment: Any, *, judged: bool = True) -> float | None:
-    """The judge's confidence in its own verdict, or ``None``.
+    """The judge's confidence in the verdict the judge itself stated, or ``None``.
 
     One answer, because the verdict has one author. The judge decides the
     verdict and says how sure it is, and that number is the run's. There is no
@@ -420,10 +426,17 @@ def _overall_confidence(assessment: Any, *, judged: bool = True) -> float | None
     puts a number on a decision nobody rated. ``None`` says the confidence was
     not assessed, which is the fact.
 
+    A number is published only *with* a verdict the judge stated and this
+    pipeline could read. On the two other paths the verdict is not the judge's
+    — the object set's fail-safe reading, or the inconclusive verdict a word
+    nobody can read falls to — and putting the judge's number beside either is
+    how a signed utility came to be published as "Malware @ 1.00": that number
+    was real and it was about something else.
+
     ``judged`` is false when the judge never answered and the verdict is the
     pipeline's own fallback, which nobody put a number on either.
     """
-    if not judged:
+    if not judged or normalise_verdict(getattr(assessment, "verdict", None)) is None:
         return None
     declared = getattr(assessment, "confidence", None)
     if declared is None:
@@ -3121,6 +3134,14 @@ def make_judge_node(
             bundle = verdict.bundle
             stix_output: dict[str, Any] = bundle.model_dump() if isinstance(bundle, Bundle) else {}
             decision = decide_from_bundle(bundle) if isinstance(bundle, Bundle) else "Suspicious"
+            # A verdict the judge wrote in a word this pipeline cannot read is
+            # published as the inconclusive one, and the judge's own word goes
+            # with it: the header prints the degradation reasons directly under
+            # the verdict, so the two are read together.
+            _unreadable = unrecognised_verdict_reason(bundle) if isinstance(bundle, Bundle) else ""
+            if _unreadable:
+                _degradation_reasons.append(_unreadable)
+                _degraded_mode = True
             # An empty bundle over an empty run is not a clean sample. The
             # judge emitted no malware object because there was nothing to
             # emit one from -- no tool call was recorded and no analyst
@@ -3865,8 +3886,6 @@ def make_report_node(
             except Exception as exc:  # noqa: BLE001
                 logger.warning("report_node: detection rule generation failed (%s).", exc)
 
-        markdown = MarkdownRenderer().render(report)
-
         extended_dump: dict[str, Any] | None = None
         if cfg is None or cfg.include_extended_stix:
             try:
@@ -3928,6 +3947,13 @@ def make_report_node(
                     break
 
             report.stix_bundle_extended = extended_dump
+
+        # The markdown is rendered last of everything that writes to the
+        # report, so it carries what the export declined as well as what the
+        # run's producers were told: the declines are written into
+        # ``run_summary.validation`` above, and ``report.md`` prints that
+        # block. Rendered before them, it named neither.
+        markdown = MarkdownRenderer().render(report)
 
         # Post-pipeline FP linter. Run after every other
         # mutation has happened (narrative + detection sigs + STIX dump)

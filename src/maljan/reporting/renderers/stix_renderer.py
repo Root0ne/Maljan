@@ -37,6 +37,7 @@ from maljan.core.logger import logger
 from maljan.extractors.network_extractor import (
     corroboration_reason,
     domain_is_corroborated,
+    host_is_public,
     url_corroboration_reason,
     url_host,
 )
@@ -69,9 +70,32 @@ _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 MALWARE_UNDER_BENIGN_CODE = "stix.malware_object_under_benign"
 UNPUBLISHABLE_URL_CODE = "stix.unpublishable_url"
 
-# Which of the three priority kinds an indicator belongs to, by its pattern.
-# The cap spends its budget in this order: hashes, then network indicators,
-# then the file names, which are the noisiest thing a string sweep produces.
+# The bands the indicator cap spends its budget in, best first. The sample's
+# own hashes are what every consumer of the bundle came for; then the network
+# indicators somebody observed or a second source knows, which is what a
+# blocklist is made of; then the other hashes the judge carried, which describe
+# the sample by another route; then the file names, the noisiest thing a string
+# sweep produces.
+_BAND_OWN_HASH = 0
+_BAND_NETWORK = 1
+_BAND_JUDGE_HASH = 2
+_BAND_FILE_NAME = 3
+
+# How strong the origin of a network indicator is, which orders the band.
+# Something a sandbox watched outranks something an agent or the judge wrote
+# down, which outranks a run of bytes in the file that a second source happened
+# to know. A producer that recorded no source has not made the weak claim, so
+# it is read as an observation — the same reading ``corroboration_reason``
+# gives it.
+_NETWORK_SOURCE_RANK: dict[str, int] = {"sandbox": 2, "analyst": 1, "judge": 1, "strings": 0}
+_UNRECORDED_SOURCE_RANK = 2
+
+# The patterns that name the sample rather than an endpoint. Matched anywhere in
+# the pattern rather than at its start, because the judge writes compound ones —
+# ``[file:extensions['pe'].pe_imphash = … OR file:hashes.'SHA-1' = …]`` is a
+# hash indicator whichever comparison it leads with.
+_HASH_PATTERN_MARKERS = ("file:hashes", "imphash")
+
 _NETWORK_PATTERN_PREFIXES = (
     "[url:value",
     "[domain-name:value",
@@ -84,15 +108,79 @@ _NETWORK_PATTERN_PREFIXES = (
 # URL.
 _PATTERN_LITERALS_RE = re.compile(r"'([^']*)'")
 
+# How much of a value reaches a finding row. The row is stored with the report
+# and printed verbatim by the console, so what goes in it is scrubbed the way
+# an event payload is and then bounded: a pattern is model-written text and a
+# finding is not the place to discover how long it can be.
+_FINDING_VALUE_LIMIT = 200
 
-def _indicator_kind(pattern: str) -> str:
-    """``hash``, ``network`` or ``string`` for one indicator pattern."""
+
+def safe_finding_value(value: Any) -> str:
+    """One value, made safe to store in a finding row and to print.
+
+    ``pipeline.events.scrub`` is the project's one answer to "this text is
+    about to be persisted and shown": it cuts a URL back to its scheme and
+    host, which takes the userinfo — a credential outright — with it, and
+    redacts credential-shaped runs. The bound is on top of it, because a host
+    can be as long as a model cares to write.
+    """
+    from maljan.pipeline.events import scrub
+
+    return scrub(value)[:_FINDING_VALUE_LIMIT]
+
+
+def _indicator_band(pattern: str) -> int:
+    """Which cap band one indicator pattern belongs to, the sample's own aside."""
     stripped = (pattern or "").lstrip()
-    if stripped.startswith("[file:hashes"):
-        return "hash"
+    if any(marker in stripped for marker in _HASH_PATTERN_MARKERS):
+        return _BAND_JUDGE_HASH
     if any(stripped.startswith(prefix) for prefix in _NETWORK_PATTERN_PREFIXES):
-        return "network"
-    return "string"
+        return _BAND_NETWORK
+    return _BAND_FILE_NAME
+
+
+def _network_rank(source: Any) -> int:
+    """How strong one network indicator's origin is, for the cap's own order."""
+    name = str(source or "").strip().lower()
+    if not name:
+        return _UNRECORDED_SOURCE_RANK
+    return _NETWORK_SOURCE_RANK.get(name, _UNRECORDED_SOURCE_RANK)
+
+
+def _within_the_indicator_cap(
+    objects: list[Any], order: dict[str, tuple[int, int, int]]
+) -> list[Any]:
+    """``objects`` with the lowest-priority indicators removed, or ``objects`` itself.
+
+    The cap is over every indicator the bundle would carry, whoever minted it,
+    and it is spent in the order the report's own linter describes: the
+    sample's hashes, the network indicators somebody observed or a second
+    source knows, the other hashes the judge carried, the file names. An
+    indicator nothing queued — one that arrived in the judge's bundle and was
+    merged into another by the integrity pass keeps the first writer's id, so
+    this is rare — sorts last rather than raising.
+    """
+    indicators = [obj for obj in objects if getattr(obj, "type", "") == "indicator"]
+    if len(indicators) <= MAX_TOTAL_INDICATORS:
+        return objects
+    last = (_BAND_FILE_NAME + 1, 0, len(order))
+    ranked = sorted(indicators, key=lambda obj: order.get(obj.id, last))
+    kept = {obj.id for obj in ranked[:MAX_TOTAL_INDICATORS]}
+    logger.warning(
+        "stix_renderer: total indicator cap (%d) exceeded by %d; the lowest-priority "
+        "indicator(s) are not exported.",
+        MAX_TOTAL_INDICATORS,
+        len(indicators) - MAX_TOTAL_INDICATORS,
+    )
+    return [obj for obj in objects if getattr(obj, "type", "") != "indicator" or obj.id in kept]
+
+
+def impossible_host_sentence(value: str, whose: str) -> str:
+    """The recorded sentence for a URL no host could ever answer for."""
+    return (
+        f"the URL indicator for {safe_finding_value(value)!r} is not in the exported bundle: its "
+        f"host is not a name or address that could exist. It is unchanged in {whose}."
+    )
 
 
 def _judge_indicator_problem(indicator: Indicator) -> tuple[str, str] | None:
@@ -102,18 +190,18 @@ def _judge_indicator_problem(indicator: Indicator) -> tuple[str, str] | None:
     rows do, and the answer for one that fails it is the one this pipeline
     gives everywhere else: not published, recorded, never rewritten. A URL is
     the only kind asked so far — it is the one the string sweep feeds and the
-    one a cut-off host reaches a consumer through.
+    one a cut-off host reaches a consumer through. The judge's own assertion is
+    the URL's source, so the only way one of its objects fails is the host
+    question, and the sentence says exactly that.
     """
     pattern = (indicator.pattern or "").lstrip()
     if not pattern.startswith("[url:value"):
         return None
     for literal in _PATTERN_LITERALS_RE.findall(pattern):
-        if url_corroboration_reason(literal, "judge") is None:
+        if not host_is_public(url_host(literal)):
             return (
                 UNPUBLISHABLE_URL_CODE,
-                f"the URL indicator for {literal!r} is not in the exported bundle: its host is "
-                "not a name or address that could exist. It is unchanged in the judge's own "
-                "bundle.",
+                impossible_host_sentence(literal, "the judge's own bundle"),
             )
     return None
 
@@ -261,24 +349,22 @@ class ExtendedSTIXRenderer:
             if uses is not None:
                 objects.append(uses)
 
-        # Collect indicators per-kind, then apply
-        # MAX_TOTAL_INDICATORS as a hard cap with priority order
-        # (hashes > network > file:name strings). The 2026-05-29 Linux
-        # ELF audit found 19 indicators leaking past the ≤15 ceiling
-        # because the per-kind cap (MAX_FILE_NAME_INDICATORS=10) ignored
-        # hashes and network IOCs.
-        by_kind: dict[str, list[Indicator]] = {"hash": [], "network": [], "string": []}
-        # The ``indicates`` edge a published indicator still needs, by the id of
-        # the indicator it belongs to, so an indicator the cap leaves out does
-        # not put a dangling edge in the bundle.
-        indicates: dict[str, Relationship] = {}
+        # Every indicator that could be in the bundle, each with the key the
+        # cap will order it by: its band, how strong its origin is, and where
+        # it was collected. The cap runs after the integrity pass rather than
+        # here, so a slot is never spent on a row that pass is about to
+        # deduplicate away; see the end of this method.
+        order: dict[str, tuple[int, int, int]] = {}
 
-        # The judge's own indicators, sorted into the same three kinds as the
-        # minted ones and ahead of them, because they are the verdict's.
-        for carried_indicator in carried:
-            by_kind[_indicator_kind(carried_indicator.pattern)].append(carried_indicator)
+        def _queue(indicator: Indicator, band: int, source: Any = None) -> None:
+            order[indicator.id] = (band, -_network_rank(source), len(order))
+            objects.append(indicator)
 
-        # 4) Indicator for the file hash itself (always present).
+        # 4) Indicator for the file hash itself (always present), in a band of
+        #    its own: it names the sample, which is what every consumer of this
+        #    bundle came for, and it used to queue behind whatever hashes the
+        #    judge happened to write.
+        sample_hash_id: str | None = None
         sha256 = report.identity.hashes.sha256
         if sha256 and _SHA256_RE.match(sha256):
             indicator = Indicator(
@@ -287,19 +373,57 @@ class ExtendedSTIXRenderer:
                 pattern_type="stix",
                 indicator_types=["malicious-activity"],
             )
-            by_kind["hash"].append(indicator)
+            _queue(indicator, _BAND_OWN_HASH)
+            sample_hash_id = indicator.id
             if malware_id is not None:
-                indicates[indicator.id] = Relationship(
-                    relationship_type="indicates",
-                    source_ref=indicator.id,
-                    target_ref=malware_id,
+                objects.append(
+                    Relationship(
+                        relationship_type="indicates",
+                        source_ref=indicator.id,
+                        target_ref=malware_id,
+                    )
                 )
 
-        # 5) StringIOC → Indicator.
+        # 5) Network IP/URL/domain → Indicator, in the order the priority rule
+        #    names them, so a tie inside the band breaks the way it is written
+        #    down.
+        #
+        #    Before the string rows, not after them, and that order is load
+        #    bearing: a corroborated string row and the network row that
+        #    corroborated it are the same indicator written twice, the
+        #    integrity pass keeps whichever was queued first, and the one worth
+        #    keeping is the one that carries the observation.
+        if report.network is not None:
+            for ip in report.network.ips[:40]:
+                ip_ind = _indicator_for_ip(ip)
+                if ip_ind is not None:
+                    _queue(ip_ind, _BAND_NETWORK, getattr(ip, "source", None))
+            for url in report.network.urls[:40]:
+                url_ind = _indicator_for_url(url, report)
+                if url_ind is not None:
+                    _queue(url_ind, _BAND_NETWORK, url.source)
+                    continue
+                # Something a sandbox watched or an agent wrote down is not a
+                # string sweep's leftover, so a reader is told when one does
+                # not reach the export. A string-derived URL that simply lacks
+                # a second source is the rule working and is not a finding.
+                if url.source not in (None, "strings") and not host_is_public(url_host(url.url)):
+                    self.declined.append(
+                        (
+                            UNPUBLISHABLE_URL_CODE,
+                            impossible_host_sentence(url.url, "the report's network block"),
+                        )
+                    )
+            for domain in report.network.domains[:40]:
+                dom_ind = _indicator_for_domain(domain)
+                if dom_ind is not None:
+                    _queue(dom_ind, _BAND_NETWORK, domain.source)
+
+        # 6) StringIOC → Indicator.
         #
         # Which names this run may publish at all. One rule, read once, and
         # every path that mints a domain indicator asks it: the network block
-        # below, and the string rows here, which are the same names arriving
+        # above, and the string rows here, which are the same names arriving
         # by a second road.
         publishable_domains = _publishable_domains(report)
 
@@ -331,47 +455,17 @@ class ExtendedSTIXRenderer:
                         ["anomalous-activity"] if is_file_name else ["malicious-activity"]
                     ),
                 )
-                by_kind[_indicator_kind(pattern)].append(ind)
+                # String-derived by construction, and only here at all because
+                # a second source knew the name; the band reads the pattern and
+                # the rank reads that origin, so it never outranks a row the
+                # sandbox watched.
+                _queue(ind, _indicator_band(pattern), "strings")
 
-        # 6) Network domain/IP/URL → Indicator.
-        if report.network is not None:
-            for domain in report.network.domains[:40]:
-                dom_ind = _indicator_for_domain(domain)
-                if dom_ind is not None:
-                    by_kind["network"].append(dom_ind)
-            for ip in report.network.ips[:40]:
-                ip_ind = _indicator_for_ip(ip)
-                if ip_ind is not None:
-                    by_kind["network"].append(ip_ind)
-            for url in report.network.urls[:40]:
-                url_ind = _indicator_for_url(url, report)
-                if url_ind is not None:
-                    by_kind["network"].append(url_ind)
-
-        # 6.5) Apply the total-indicator cap with priority order, over every
-        #      indicator that would be in the bundle rather than over the ones
-        #      this renderer happened to mint.
-        budget = MAX_TOTAL_INDICATORS
-        dropped_counts = {"hash": 0, "network": 0, "string": 0}
-        for kind in ("hash", "network", "string"):
-            for ind in by_kind[kind]:
-                if budget <= 0:
-                    dropped_counts[kind] += 1
-                    continue
-                objects.append(ind)
-                edge = indicates.get(ind.id)
-                if edge is not None:
-                    objects.append(edge)
-                budget -= 1
-        if sum(dropped_counts.values()):
-            logger.warning(
-                "stix_renderer: total indicator cap (%d) exceeded; dropped "
-                "hash=%d network=%d string=%d",
-                MAX_TOTAL_INDICATORS,
-                dropped_counts["hash"],
-                dropped_counts["network"],
-                dropped_counts["string"],
-            )
+        # 6.5) The judge's own indicators, banded by their patterns. They are
+        #      queued last within their bands: the judge asserts, a sandbox
+        #      observes, and the order says which is which.
+        for carried_indicator in carried:
+            _queue(carried_indicator, _indicator_band(carried_indicator.pattern), "judge")
 
         # 7) ObservedData for the process tree roots.
         if report.dynamic is not None and report.dynamic.process_tree:
@@ -386,8 +480,19 @@ class ExtendedSTIXRenderer:
                 objects.append(observed)
 
         # 8) Note wraps the executive summary; abstract is the verdict.
+        #
+        #    A STIX note is about something, and ``object_refs`` is required
+        #    and may not be empty. A Benign verdict has no malware object for
+        #    it to be about, so it is about the object that stands for the
+        #    sample instead — the indicator carrying the sample's own hash,
+        #    which is in a band of its own and therefore cannot be capped out
+        #    from under the reference. A bundle carrying neither is a bundle
+        #    with nothing the note could truthfully be about, and then there is
+        #    no note: the summary is in the report, which is where a reader
+        #    reads it.
         summary = report.executive_summary.strip()
-        if summary:
+        about = malware_id or sample_hash_id
+        if summary and about is not None:
             note = Note(
                 abstract=(
                     f"{report.verdict} — confidence "
@@ -398,35 +503,57 @@ class ExtendedSTIXRenderer:
                     )
                 ),
                 content=summary,
-                object_refs=[malware_id] if malware_id is not None else [],
+                object_refs=[about],
             )
             objects.append(note)
 
         # 9) Report SDO bundles every object_ref. Pre-existing AttackPattern
         #    objects are referenced too so the report stays the single root.
-        report_sdo = Report(
-            name=f"Maljan analysis of {sha256[:12] if sha256 else 'sample'}",
-            description=(
-                f"Verdict: {report.verdict}. "
-                + (
-                    f"Severity {report.severity.overall_score}/10 ({report.severity.rating})."
-                    if report.severity
-                    else "Severity not assessed."
+        #    A report with nothing to reference is not emitted: ``object_refs``
+        #    is required and a required list may not be empty, and a bundle
+        #    holding only this pipeline's identity has nothing to report on.
+        refs = [obj.id for obj in objects if obj is not identity]
+        if refs:
+            objects.append(
+                Report(
+                    name=f"Maljan analysis of {sha256[:12] if sha256 else 'sample'}",
+                    description=(
+                        f"Verdict: {report.verdict}. "
+                        + (
+                            f"Severity {report.severity.overall_score}/10 "
+                            f"({report.severity.rating})."
+                            if report.severity
+                            else "Severity not assessed."
+                        )
+                    ),
+                    published=report.generated_at,
+                    report_types=["malware-analysis"],
+                    object_refs=refs,
                 )
-            ),
-            published=report.generated_at,
-            report_types=["malware-analysis"],
-            object_refs=[obj.id for obj in objects if obj is not identity],
-        )
-        objects.append(report_sdo)
+            )
 
-        # Final referential-integrity + dedup pass over the assembled bundle —
-        # also collapses indicators duplicated across the judge base bundle and
-        # the renderer's synthesized set, and prunes any ref dangling from
-        # upstream drops. See judge_postprocess.enforce_bundle_integrity.
+        # Referential-integrity + dedup pass over the assembled bundle — it
+        # collapses indicators duplicated across the judge base bundle and the
+        # renderer's synthesized set, and prunes any ref dangling from upstream
+        # drops. See judge_postprocess.enforce_bundle_integrity.
+        #
+        # It runs *before* the cap, which is the whole reason the cap moved
+        # here. A string row and the network row it was corroborated by are the
+        # same indicator written twice; capping first spent two of fifteen
+        # slots on a pair this pass then folded into one, so a bundle over the
+        # cap shipped under it and the rows it lost were the ones the priority
+        # order exists to keep — five observed C2 addresses, on the probe that
+        # found this. Deduplicated first, the cap keeps exactly as many
+        # indicators as there is room for.
         from maljan.agents.judge_postprocess import enforce_bundle_integrity
 
-        return Bundle(objects=enforce_bundle_integrity(objects, ledger=ledger))
+        objects = enforce_bundle_integrity(objects, ledger=ledger)
+        capped = _within_the_indicator_cap(objects, order)
+        if capped is objects:
+            return Bundle(objects=objects)
+        # Only what the cap orphaned is left to sweep, and it is the cap's
+        # doing rather than the pass's, so this one is not counted again.
+        return Bundle(objects=enforce_bundle_integrity(capped))
 
     @staticmethod
     def _normalize_judge_timestamps(objects: list[Any]) -> None:

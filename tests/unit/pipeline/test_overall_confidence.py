@@ -11,6 +11,11 @@ The judge decides the verdict and says how sure it is of it. That number is the
 verdict's; when the judge gives none the report says "not assessed", which is a
 different fact from zero and from an average of something else.
 
+A number is published only *with* a verdict the judge stated and this pipeline
+could read. PuTTY's `1.0` was real and was about the judge's own assessment; the
+verdict printed beside it was the object set's, and the two together read as
+certainty about a decision the judge had not made.
+
 ``mean_claim_confidence`` stays, for the one reader that wants it as what it is:
 the analysts' confidence in their own claims.
 """
@@ -72,7 +77,10 @@ class TestWhoDecides:
         assert _overall_confidence(assessment) == 0.9
 
     def test_nothing_when_the_judge_abstained(self) -> None:
-        assert _overall_confidence(JudgeAssessment(malware_category="loader")) is None
+        assert (
+            _overall_confidence(JudgeAssessment(verdict="Malware", malware_category="loader"))
+            is None
+        )
 
     def test_nothing_when_there_is_no_assessment_at_all(self) -> None:
         assert _overall_confidence(None) is None
@@ -81,11 +89,19 @@ class TestWhoDecides:
         assessment = JudgeAssessment(verdict="Malware", confidence=0.9)
         assert _overall_confidence(assessment, judged=False) is None
 
+    def test_nothing_when_the_judge_stated_no_verdict_for_the_number(self) -> None:
+        """The verdict is then the object set's fail-safe, and the number is not about it."""
+        assert _overall_confidence(JudgeAssessment(confidence=1.0)) is None
+
+    def test_nothing_when_the_word_it_stated_cannot_be_read(self) -> None:
+        assert _overall_confidence(JudgeAssessment(verdict="Malicious", confidence=0.95)) is None
+
     def test_a_judge_confidence_of_zero_is_still_the_judge_speaking(self) -> None:
-        assert _overall_confidence(JudgeAssessment(confidence=0.0)) == 0.0
+        assert _overall_confidence(JudgeAssessment(verdict="Benign", confidence=0.0)) == 0.0
 
     def test_a_confidence_that_is_not_a_number_is_not_assessed(self) -> None:
         class _Odd:
+            verdict = "Malware"
             confidence = "very"
 
         assert _overall_confidence(_Odd()) is None

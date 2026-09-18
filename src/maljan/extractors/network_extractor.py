@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import ipaddress
 import math
+import re
 import unicodedata
 from dataclasses import dataclass
 from typing import Any
@@ -597,32 +598,59 @@ def url_host(raw_url: Any) -> str:
         return ""
 
 
+# One DNS label: letters, digits and hyphens, not starting or ending with a
+# hyphen, at most sixty-three characters. The internet's own rule, which is the
+# only rule that can be applied to a name nobody has tried to resolve.
+_LABEL_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
+
+# The last label of a name that could exist: two or more letters, or a
+# punycode label. Deliberately a shape and not a list — a 136-entry list of
+# TLDs omits `gov`, `edu`, `mobi`, every punycode TLD and most African and
+# Middle-Eastern ccTLDs, and a sandbox-observed request to a university host is
+# not a string sweep's cut-off.
+_PUBLIC_SUFFIX_RE = re.compile(r"^(?:[a-z]{2,}|xn--[a-z0-9-]+)$")
+
+
 def host_is_public(host: Any) -> bool:
     """Whether ``host`` is a name or address that could exist on the internet.
 
     A string sweep cuts hostnames wherever the surrounding bytes end, and the
     pieces are shaped like URLs: ``http://localho``, ``https://q``,
-    ``http://3271``, ``https://fs01n5.sends``. Five of them were published as
-    STIX indicators in one live run, each one something a consumer would block
-    on. The two questions that settle it are the ones the domain rules already
-    answer — is the name reserved or single-label, and does it end in a TLD
-    that exists — with an address literal allowed on its own if it is not
-    loopback or unspecified, since an address needs no name to resolve.
-    """
-    from maljan.tools.strings import _KNOWN_TLDS
+    ``http://3271``. Five of them were published as STIX indicators in one live
+    run, each one something a consumer would block on.
 
+    This asks one question only — could anything ever answer for this host —
+    and it is deliberately the weakest question in the chain. Whether an
+    endpoint that *could* exist is published is
+    :func:`corroboration_reason`'s decision, not this one, so a plausible name
+    the file's bytes alone know about is still held back for want of a second
+    source rather than for the shape of its name.
+
+    A Tor address is first, and for the reason it is first everywhere else:
+    ``.onion`` never resolves, its own checksum is the only thing that can
+    confirm it, and holding it to any other rule makes the strongest
+    string-derived indicator there is unpublishable by every path.
+    """
     name = str(host or "").strip().lower().rstrip(".")
     if not name:
         return False
+    if name.endswith(_TOR_SUFFIX):
+        # The suffix is reserved for hidden services and nothing else can ever
+        # answer under it, so the checksum is the whole question: a valid
+        # address is a host, and a name that merely ends in ``.onion`` is not.
+        return tor_hidden_service(name)
     try:
         address = ipaddress.ip_address(name.strip("[]"))
     except ValueError:
         pass
     else:
-        return not (address.is_loopback or address.is_unspecified)
+        return not (address.is_loopback or address.is_unspecified or address.is_link_local)
     if not _is_emittable_domain(name):
         return False
-    return name.rsplit(".", 1)[-1] in _KNOWN_TLDS
+    labels = name.split(".")
+    if not all(_LABEL_RE.match(label) for label in labels):
+        return False
+    return bool(_PUBLIC_SUFFIX_RE.match(labels[-1]))
 
 
 def url_corroboration_reason(raw_url: Any, source: Any, reputation: Any = None) -> str | None:

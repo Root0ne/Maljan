@@ -34,6 +34,9 @@ from maljan.schemas.stix_models import Bundle
 ENTERPRISE = "T1027"
 # Mobile, and the id the APK's own analyst never offered.
 MOBILE = "T1406"
+# Enterprise by the matrix it is filed in, and ``PRE`` by the only platform it
+# declares: it happens before any host is touched, so no sample contradicts it.
+PRE_ONLY = "T1583"
 
 ANDROID = {"platform": "android", "file_type": "apk"}
 WINDOWS = {"platform": "windows", "file_type": "pe"}
@@ -166,6 +169,55 @@ class TestWhatIsLeftAlone:
                 stix_output=None, isr_reports=_isr(ENTERPRISE), sample=sample
             )
             assert [m.technique_id for m in mappings] == [ENTERPRISE], sample
+
+    def test_a_technique_that_happens_before_any_host_is_published(self) -> None:
+        """``PRE`` is not a platform a sample can contradict, so nor is its domain.
+
+        ATT&CK keeps every PRE technique in the enterprise matrix and mobile
+        has none, so asking the domain first made each of them cross-domain on
+        an Android sample — and once the report read that answer to decide what
+        to publish, an infostealer's C2 registration lost its technique from
+        every surface.
+        """
+        for tid in (PRE_ONLY, f"{PRE_ONLY}.001"):
+            _cells, mappings = build_capability_matrix(
+                stix_output=None, isr_reports=_isr(tid), sample=ANDROID
+            )
+            assert [m.technique_id for m in mappings] == [tid], tid
+
+    def test_it_is_not_marked_in_the_matrix_either(self) -> None:
+        cells, _mappings = build_capability_matrix(
+            stix_output=None, isr_reports=_isr(PRE_ONLY), sample=ANDROID
+        )
+
+        assert [cell.not_published for cell in cells] == [""]
+
+    def test_the_check_itself_says_nothing_about_it(self) -> None:
+        from maljan.pipeline.validation import expected_technique_scope, platform_mismatch_message
+        from maljan.tools import knowledge
+
+        scope = expected_technique_scope(ANDROID)
+
+        assert platform_mismatch_message(PRE_ONLY, knowledge, scope) == ""
+        assert platform_mismatch_message(ENTERPRISE, knowledge, scope) != ""
+
+    def test_the_linter_still_says_which_matrix_it_comes_from(self) -> None:
+        """Published, and flagged: the two are different answers about it.
+
+        The false-positive linter compares the matrix a technique is filed in
+        against the sample's, which for a PRE technique on an APK is still a
+        difference worth printing. What it is not is a reason to withhold the
+        technique.
+        """
+        from maljan.qa.fp_linter import lint_report
+
+        report = _report(ANDROID, PRE_ONLY)
+
+        assert [m.technique_id for m in report.ttp_mappings] == [PRE_ONLY]
+        assert any(
+            warning.rule == "C1" and PRE_ONLY in warning.message
+            for warning in lint_report(report, "android")
+        )
 
     def test_an_ungrounded_technique_is_still_published(self) -> None:
         """A claim that cites no evidence is advisory, and stays advisory."""

@@ -1,8 +1,9 @@
 """No component may quietly rewrite what an agent decided.
 
-This is the phase's direction, enforced rather than described. Five names carry
-a decision somebody made: a claim's ``technique_id`` and ``confidence``, and a
-report's ``severity``, ``malware_category`` and ``family``. Every layer that
+This is the phase's direction, enforced rather than described. Six names carry
+a decision somebody made: a claim's ``technique_id`` and ``confidence``, the
+judge's own ``verdict``, and a report's ``severity``, ``malware_category`` and
+``family``. Every layer that
 used to write one of them wrote it over an answer that already existed — the
 cascade over the analyst's confidence, the autocorrect over its technique id,
 the report builder's arithmetic over a severity the judge was never asked for.
@@ -37,8 +38,13 @@ from typing import Any
 
 SRC = Path(__file__).resolve().parents[2] / "src" / "maljan"
 
-# The names that carry a decision.
-GUARDED = frozenset({"technique_id", "confidence", "severity", "malware_category", "family"})
+# The names that carry a decision. ``verdict`` is the one the whole run is
+# printed under: the judge states it, the pipeline reads it and nothing else
+# may write it, which is how a signed utility came to be published as malware
+# over a judge that had called it benign.
+GUARDED = frozenset(
+    {"technique_id", "confidence", "severity", "malware_category", "family", "verdict"}
+)
 
 # Where a write to one of them is the answer rather than an override of one.
 EXEMPT_PATHS = ("schemas/", "tools/", "pipeline/validation.py")

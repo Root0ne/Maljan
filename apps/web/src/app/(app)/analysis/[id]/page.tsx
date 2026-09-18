@@ -8,6 +8,7 @@ import { api } from "@/lib/api";
 import { countLabel, downloadBlob, downloadObject } from "@/lib/report-utils";
 import { getErrorMessage } from "@/lib/errors";
 import { ENRICH_BUTTON_LABEL, ENRICH_STATUS_MESSAGE } from "@/lib/enrichment";
+import { validationRowText } from "@/lib/validationRows";
 import { SEVERITY_STYLES } from "@/types/malware-report";
 import type { FpWarning, MalwareReport } from "@/types/malware-report";
 
@@ -509,7 +510,7 @@ function RunRecord({
             </li>
             {(validation?.unresolved ?? []).map((item, i) => (
               <li key={i} className="text-status-orange">
-                {item.agent} left {item.code} unfixed: {item.message}
+                {validationRowText(item)}
               </li>
             ))}
             {retryMode.map(([agent, mode]) => (

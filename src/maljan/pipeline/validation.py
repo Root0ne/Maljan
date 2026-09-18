@@ -401,10 +401,27 @@ def platform_mismatch_message(
 
     The catalogue's own domain and platforms for the id, against the routed
     ones. Two ways to miss: the id belongs to another domain, or it declares
-    platforms and none of them is the sample's. An id the catalogue carries
-    no platforms for is not questioned — no information is not a mismatch —
-    and neither is a technique whose only platform is ``PRE``: it happens
-    before any host is touched, so no sample's platform can contradict it.
+    platforms and none of them is the sample's.
+
+    Four things are not a miss, and the function answers ``""`` for each in
+    turn before it compares anything. A sample whose platform the router could
+    not settle, or that is cross-platform, has no scope to check against. A
+    knowledge object with no lookup cannot be asked. A lookup that raises or
+    answers something other than a mapping has not answered. And a technique
+    whose only platform is ``PRE`` happens before any host is touched, so no
+    sample's platform can contradict it — including its *domain*, which is why
+    that carve-out is asked before the domain comparison and not after it.
+    ATT&CK keeps every PRE technique in the enterprise matrix and mobile has
+    none, so asking the domain first made every PRE id cross-domain on an
+    Android sample. While this check only annotated, that produced a warning;
+    now that the report reads it to decide what to publish, it removed real
+    techniques — ``T1583 Acquire Infrastructure`` off an Android infostealer's
+    C2 registration — from every published surface.
+
+    A fifth is not a miss on the platform comparison alone: a technique the
+    catalogue carries no platforms for is not questioned there, because no
+    information is not a mismatch. It is still questioned on its domain, which
+    the catalogue did answer.
 
     ``attck_scope`` is asked first: it answers from the vendored files and
     loads nothing, which is what lets this run inside an analyst's turn.
@@ -425,6 +442,8 @@ def platform_mismatch_message(
         return ""
     domain = str(answer.get("domain") or "").strip().lower()
     platforms = [str(p) for p in (answer.get("platforms") or []) if str(p).strip()]
+    if _pre_only(platforms):
+        return ""
     sample_words = f"{expected_domain}-domain, {'/'.join(expected_platforms) or 'any platform'}"
     if domain and domain != expected_domain:
         return (
@@ -432,7 +451,7 @@ def platform_mismatch_message(
             f"{f' (platforms {", ".join(platforms)})' if platforms else ''}; this sample is "
             f"{sample_words}. Use a technique from the sample's domain, or drop the technique id."
         )
-    if expected_platforms and platforms and not _pre_only(platforms):
+    if expected_platforms and platforms:
         wanted = {p.lower() for p in expected_platforms}
         if not any(p.lower() in wanted for p in platforms):
             return (
@@ -1536,43 +1555,61 @@ def assessment_violations(bundle: Any) -> list[Violation]:
 
 
 UNSTATED_VERDICT_CODE = "verdict.unstated"
+UNRECOGNISED_VERDICT_CODE = "verdict.unrecognised"
 
 
-def unstated_verdict_violations(bundle: Any) -> list[Violation]:
-    """Whether the judge stated the verdict rather than leaving it to be inferred.
+def stated_verdict_violations(bundle: Any) -> list[Violation]:
+    """Whether the judge stated a verdict, and whether it can be read.
 
-    The bundle's object set is a picture of a decision, not the decision. When
-    the judge states none, ``pipeline.outcome.decide_from_bundle`` falls back
-    to reading the objects and a ``malware`` object written "strictly as a
-    container for the object type in STIX" becomes a Malware verdict. That
-    fallback stays, for stored runs and for a model that omitted the field,
-    and this is the row saying it was used.
+    Two different faults with two different consequences, so two codes.
+
+    The field is **absent**: the object set decides, because there is nothing
+    else to go on. A ``malware`` object written "strictly as a container for
+    the object type in STIX" then becomes a Malware verdict, which is the
+    fail-safe and not an answer — so `verdict.unstated` records that it was
+    used. The fallback stays for stored runs and for a model that omitted the
+    field.
+
+    The field **says something this pipeline cannot read**: the objects decide
+    nothing. The run publishes the inconclusive verdict, the judge's own word
+    travels to the report beside it, and `verdict.unrecognised` asks once for a
+    word from the vocabulary — quoting what the judge wrote, because a
+    correction that does not repeat the mistake is one the model cannot locate.
 
     A bundle this pipeline built out of text states its own verdict in
     ``x_maljan_fallback_verdict`` and is not asked for a second one.
     """
     if getattr(bundle, "x_maljan_fallback_verdict", None) is not None:
         return []
-    from maljan.pipeline.outcome import stated_verdict
+    from maljan.pipeline.outcome import INCONCLUSIVE_VERDICT, read_stated_verdict
 
-    if stated_verdict(bundle):
+    stated = read_stated_verdict(bundle)
+    if stated.recognised is not None:
         return []
-    assessment = getattr(bundle, "x_maljan_assessment", None)
-    written = str(getattr(assessment, "verdict", "") or "").strip()
-    named = (
-        f"x_maljan_assessment.verdict says {written!r}, which is not one of them"
-        if written
-        else "x_maljan_assessment states no verdict"
-    )
+    listed = ", ".join(VERDICT_VALUES)
+    if stated.unrecognised:
+        return [
+            Violation(
+                code=UNRECOGNISED_VERDICT_CODE,
+                message=(
+                    f"x_maljan_assessment.verdict says {stated.written!r}, which is not one of "
+                    f"{listed}. Answer with one of those three words exactly; put anything you "
+                    "want to qualify it with in severity.rationale. Until it is one of them this "
+                    f"run publishes {INCONCLUSIVE_VERDICT} and no confidence, and your own word "
+                    "is printed beside it."
+                ),
+                path="x_maljan_assessment.verdict",
+            )
+        ]
     return [
         Violation(
             code=UNSTATED_VERDICT_CODE,
             message=(
-                f"{named}. State it: set x_maljan_assessment.verdict to one of "
-                f"{', '.join(VERDICT_VALUES)}, and set x_maljan_assessment.confidence to "
-                "how sure you are of it. Write a malware object only for a sample you "
-                "conclude is malware; without the field the verdict is read off the "
-                "objects, which is a guess at what you meant."
+                "x_maljan_assessment states no verdict. State it: set "
+                f"x_maljan_assessment.verdict to one of {listed}, and set "
+                "x_maljan_assessment.confidence to how sure you are of it. Write a malware "
+                "object only for a sample you conclude is malware; without the field the "
+                "verdict is read off the objects, which is a guess at what you meant."
             ),
             path="x_maljan_assessment.verdict",
         )

@@ -59,7 +59,7 @@ from maljan.pipeline.validation import (
     assessment_violations,
     drop_ungrounded_indicators,
     retry_with_feedback,
-    unstated_verdict_violations,
+    stated_verdict_violations,
     unsupported_benign_violations,
     unsupported_malware_violations,
     validate_verdict_bundle,
@@ -1093,7 +1093,7 @@ class JudgeAgent(BudgetMeter):
             be told the sample is one thing and the report another.
             """
             return [
-                *unstated_verdict_violations(bundle),
+                *stated_verdict_violations(bundle),
                 *unsupported_benign_violations(
                     bundle,
                     analyst_claims=_analyst_claims,
