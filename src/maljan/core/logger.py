@@ -17,6 +17,9 @@ def setup_logger(name: str = "maljan", level: int = logging.INFO) -> logging.Log
     """
     logger = logging.getLogger(name)
 
+    # Called once, at this module's import. Calling it again after a host has
+    # run ``hand_over_to_root`` would put the second writer back and restore
+    # the duplicate line it exists to remove.
     if not logger.handlers:
         logger.setLevel(level)
 

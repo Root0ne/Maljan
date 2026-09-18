@@ -624,8 +624,8 @@ class TestAToolTheHostCannotRunIsNotOffered:
         assert "uv sync" in (missing.remediation or "")
 
     def test_a_tool_that_still_answers_a_subset_is_kept(self, patched) -> None:
-        """`archive_list` without py7zr still lists a zip, and run 8's whole
-        archive analysis came from it."""
+        """`archive_list` without py7zr still lists a zip, and withholding it
+        would cost a whole archive analysis to save a 7z failure."""
         handle = self._handle(
             patched,
             ["archive_list"],

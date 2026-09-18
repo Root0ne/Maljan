@@ -54,9 +54,15 @@ _EMAIL_RE = re.compile(rb"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 # The lookarounds are the token boundary. An underscore cannot appear in a
 # hostname label, so a match that begins or ends against one is the tail or the
 # head of an identifier — `evil_payload.com` is a symbol name, and the
-# `payload.com` inside it was being published as a domain.
+# `payload.com` inside it was being published as a domain. An `@` before the
+# match means the run is an address, which the e-mail pattern above has
+# already typed: `admin@example.com` was also yielding a bare `example.com`
+# row, so one string became two indicators. A hyphen is excluded for the same
+# reason as the underscore, and it has to be: with `@` refused, the scan would
+# otherwise retry inside the address and pull `c2-host.top` out of the middle
+# of `evil-c2-host.top`.
 _DOMAIN_RE = re.compile(
-    rb"(?<![A-Za-z0-9._])(?:[A-Za-z0-9-]{1,63}\.){1,3}[A-Za-z]{2,24}(?![A-Za-z0-9._])"
+    rb"(?<![A-Za-z0-9._@-])(?:[A-Za-z0-9-]{1,63}\.){1,3}[A-Za-z]{2,24}(?![A-Za-z0-9._])"
 )
 _MUTEX_RE = re.compile(rb"\\BaseNamedObjects\\[A-Za-z0-9_\-]+")
 _PRINTABLE_RE = re.compile(rb"[\x20-\x7e]{%d,}" % _MIN_STRING_LENGTH)
@@ -745,12 +751,15 @@ def _looks_like_domain(text: str) -> bool:
     if lower in _TWO_PART_PUBLIC_SUFFIXES:
         return False
 
-    # A hostname is written in one case. A lowercase name wearing a shouted
-    # country code — `jector.SA`, `Bifrose.IE`, `workbench.nL` — is a row out
-    # of a detection-name table or an identifier, and five such labels reached
-    # a live report as C2 domains. A name spelled wholly in capitals is still
-    # a spelling of that name, so it survives.
-    if any(ch.isupper() for ch in text.rsplit(".", 1)[1]) and not text.isupper():
+    # A lowercase name wearing a shouted two-letter country code —
+    # `jector.SA`, `Bifrose.IE`, `workbench.nL`, `mucod.FR`, `Deftool.CZ` — is
+    # a row out of a detection-name table, and five such labels reached a live
+    # report as C2 domains. Only that shape: a name spelled wholly in capitals
+    # is a spelling of the name, and `Evil.COM` is a hostname somebody
+    # capitalised, so the rule asks for the two-letter code it was written
+    # for rather than for an upper-case letter in any suffix at all.
+    tld = text.rsplit(".", 1)[1]
+    if len(tld) == 2 and any(ch.isupper() for ch in tld) and not text.isupper():
         return False
 
     # Namespace shape. Most .NET identifiers die on the TLD check already

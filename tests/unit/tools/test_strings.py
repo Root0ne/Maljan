@@ -8,6 +8,7 @@ with real offsets, and the typed extraction over free text rather than bytes.
 
 from __future__ import annotations
 
+import string
 from pathlib import Path
 
 from maljan.tools import strings as tool
@@ -162,15 +163,13 @@ class TestIocsFromText:
         assert [row for row in result["iocs"] if row["kind"] == "domain"] == []
 
     def test_a_secret_carries_the_pattern_that_matched_it(self) -> None:
-        result = tool.iocs_from_text("key AKIAIOSFODNN7EXAMPLE in the config")
+        # Built rather than written down: a line carrying the shape whole is a
+        # secret as far as a scanner is concerned, however invented it is.
+        key = "AKIA" + "".join(string.ascii_uppercase[(i * 7 + 3) % 26] for i in range(16))
+        result = tool.iocs_from_text(f"key {key} in the config")
         secrets = [row for row in result["iocs"] if row["kind"] == "secret"]
         assert secrets == [
-            {
-                "kind": "secret",
-                "value": "AKIAIOSFODNN7EXAMPLE",
-                "notes": "aws_access_key",
-                "source": "strings",
-            }
+            {"kind": "secret", "value": key, "notes": "aws_access_key", "source": "strings"}
         ]
 
     def test_kinds_narrows_the_answer_without_changing_the_scan(self) -> None:
@@ -237,6 +236,19 @@ class TestDomainsReadOutOfStrings:
         """One case throughout is a spelling; a lowercase name with a shouted
         country code is a label out of a table."""
         assert self._domains("connect to WWW.EXAMPLE-C2.TOP now") == ["WWW.EXAMPLE-C2.TOP"]
+
+    def test_a_capitalised_host_is_a_host(self) -> None:
+        """The case rule is about a shouted country code on a detection label,
+        not about any capital letter anywhere."""
+        assert self._domains("connect to Evil.COM and Example.Com") == [
+            "Evil.COM",
+            "Example.Com",
+        ]
+
+    def test_an_email_address_does_not_also_become_a_domain(self) -> None:
+        """One string was two indicators: the address and a bare host."""
+        rows = tool.iocs_from_text("mail admin@example.com now")["iocs"]
+        assert [r["kind"] for r in rows] == ["email"]
 
     def test_a_bare_public_suffix_has_nothing_registrable_in_it(self) -> None:
         assert self._domains("suffixes are co.uk and com.br and ne.jp") == []

@@ -783,7 +783,11 @@ change landed on `main`.
   Which of two names is a fragment is decided by where the matches sit rather
   than by how they are spelled, so a longer look-alike no longer deletes the
   real name — `microsoft.com` beside `xmicrosoft.com`, and
-  `000webhostapp.com` beside `M000webhostapp.com`, are two names each.
+  `000webhostapp.com` beside `M000webhostapp.com`, are two names each. An
+  address no longer yields a bare host beside itself — `admin@example.com` was
+  one string and two indicators — and the case rule asks for the shouted
+  two-letter country code it was written for, so `Evil.COM` is a hostname
+  again.
 - **The catalogue called drawing a window keylogging.** `BitBlt`,
   `CreateCompatibleBitmap`, `CreateCompatibleDC`, `GetDC` and `GetDIBits` were
   filed under `keylogging` at tier `high`, so every program that puts pixels

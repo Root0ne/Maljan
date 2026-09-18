@@ -40,6 +40,7 @@ def _write(tmp_path: Path, name: str, blob: bytes) -> str:
 APK_SIG_BLOCK_MAGIC = b"APK Sig Block 42"
 APK_SCHEME_V2 = 0x7109871A
 APK_SCHEME_V3 = 0xF05368C0
+APK_SCHEME_V31 = 0x1B93AD61
 # The padding pair apksigner writes to align the block; not a scheme.
 APK_PADDING_ID = 0x42726577
 
@@ -170,6 +171,12 @@ class TestSigningInfo:
         result = identify.signing_info(apk, file_type="apk")
         assert result["apk"]["present"] is True
         assert result["apk"]["schemes"] == ["v3"]
+
+    def test_a_rotated_key_reports_scheme_v3_1(self, tmp_path: Path) -> None:
+        """v3.1 carries a rotated signing key beside v3, and its id is its own."""
+        block = _signing_block([APK_SCHEME_V3, APK_SCHEME_V31])
+        result = identify.signing_info(_apk_with_block(tmp_path, "rot.apk", block), "apk")
+        assert result["apk"]["schemes"] == ["v3", "v3.1"]
 
     def test_an_apk_signed_with_v2_and_v3_names_both_and_skips_the_padding_pair(
         self, tmp_path: Path
