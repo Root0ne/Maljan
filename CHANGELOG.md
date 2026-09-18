@@ -747,6 +747,82 @@ change landed on `main`.
 
 ### Fixed
 
+- **Enrichment stopped taking the slot an analysis was waiting for.** The
+  post-verdict reputation lookups were queued beside the analyses, where the
+  worker's one-job-at-a-time rule — which exists so two analyses never share a
+  model — applied to them as well: a measured enrichment spent 451.98 s at
+  VirusTotal while the next analysis sat `pending` for 4 minutes 33 seconds.
+  Enrichment now has a queue and a worker of its own
+  (`arq app.worker.enrich_worker.EnrichmentWorkerSettings`, in
+  `docker-compose.yml` as `enrichment-worker`), and the analysis worker
+  reads only its own queue. A deployment that would rather run one process
+  reads only its own queue. The setting ships **off**, so a release taken and
+  run unchanged keeps one process rather than queueing for a worker nobody
+  started — and on that shared queue the enrichment now yields: it re-enqueues
+  itself a minute later while an analysis is waiting, up to half an hour, after
+  which it runs anyway, so the analysis no longer waits out an enrichment that
+  was queued a second before it; the compose stack runs the second worker and
+  turns it on beside it, and an operator's saved value wins over both. With it
+  on and nothing reading the queue, the worker logs one warning naming the
+  command that reads it and `GET /api/v1/system/status` reports
+  `enrichment_worker: "down"` — the queued enrichments are kept and run when a
+  worker starts. Concurrency is `ENRICHMENT_MAX_JOBS` (default 2), sized
+  against the reputation providers' per-key rate limits rather than per job.
+- **The enrichment's own event is kept with the rest of the run's.** Every
+  event takes a sequence number from the job's counter, so the rows stored for
+  a job have to equal the last number issued — the invariant the events
+  endpoint pages by. `enrichment_complete` is published after the run has
+  ended and the feed has been closed, so it took a number and stored nothing:
+  one measured run published 71 events and kept 70, and the missing one was
+  gone for good once the Redis stream expired. The enrichment task now opens
+  the job's feed for that one line and closes it again, and seeds the job's
+  sequence counter from the table first: the counter is a Redis key with the
+  stream's 24-hour life, so enriching an older report used to start again at 1,
+  collide with the row that already held that number and lose the event the
+  same way.
+- **A reasoning model on Ollama can be selected again.** The probe gives a
+  model eight tokens and reads its answer; a reasoning model spends them in its
+  thinking channel and answers with an empty `response`, so every one of them
+  failed — and with `core.llm.require_probe` on, the API then refused to create
+  any job at all. The probe reads Ollama's `thinking` as an answer now, the way
+  it already read an OpenAI-compatible `reasoning_content`, and
+  `core.llm.ollama.disable_thinking` sends `think: false` so the budget is
+  spent on the answer instead. It is off by default, because Ollama refuses the
+  field for a model with no thinking mode, and the same value is sent by the
+  agents' calls and by the probe.
+- **The evidence ledger can be read as a timeline.** Every row carried the
+  flush time as its `created_at`, because the ledger is written in one batch
+  when the run ends: one measured run's thirty entries had a single distinct
+  value between them. A row is now stamped with the moment its call returned
+  (`started_at + duration_ms`, both already on the entry), and a call the
+  recorder never stamped keeps the write time rather than an invented one.
+- **An upload no longer stops the process while it travels.** The MinIO client
+  is synchronous and was called straight from the request handlers, so a sample
+  of a hundred megabytes — or a slow store — held the event loop for the whole
+  transfer: no other request, no WebSocket frame, not even `/health`. The
+  sample upload, the sandbox-report upload and read, the deletes and the
+  worker's own sample download all go through a worker thread now, and a
+  source guard fails the build if a new one is added on the loop.
+- **A cancel between two heartbeat polls still writes its row.** The worker
+  polls the cancel flag every fifteen seconds; a cancellation that arrived
+  between two polls reached the task as a bare `CancelledError` and was
+  re-raised with nothing recorded. The task now reads the same flag where the
+  cancellation lands: the operator's cancel writes `cancelled` through a
+  session of its own, and a cancellation with no flag — arq's job timeout, a
+  worker shutting down — is left to the periodic sweep, which is what repairs
+  a row whose worker is gone.
+- **An audit row says who did it.** `AuditLogResponse` carries the actor's
+  display name, or the local part of their e-mail when the account has no
+  name — what the admin users list already shows an admin — so the log's actor
+  column no longer reads as eight characters of a UUID. One query names a whole
+  page; an event with no authenticated principal, and a user who has since been
+  deleted, both leave it empty. The console draws that name and keeps the id as
+  the cell's title, so two people under one display name stay apart, and it
+  falls back to the short id where the endpoint has no name to give.
+- **A probe that could not read a catalogue says where it tried.** "model list:
+  connection refused" was the same sentence whichever endpoint was configured.
+  It now names the endpoint as scheme and host through `endpoint_label`, which
+  drops the path and any credential in front of it.
 - **The console stopped clipping itself.** `main` is a flex item, so its
   `min-width: auto` let it grow to its content's min-content width instead of
   constraining it: the Detection tab's Suricata block took it to 2542 px
@@ -935,7 +1011,11 @@ change landed on `main`.
   from constants, not exception text from a driver or the filesystem. They are
   now raised as `StatedFailure` — the class `AbsentAnalysisError` already
   belonged to — and only that class keeps its message on `job.error_message`;
-  everything else still arrives as its class name plus the error id.
+  everything else still arrives as its class name plus the error id. A
+  `StatedFailure` whose message the event scrubber would change is marked
+  unpublishable rather than refused: the job says the class name, the sentence
+  goes to the log under the same error id, and a test walks every site that
+  raises one so a bad sentence fails a build rather than a job.
 - **The sample roots reach a configured deployment's sidecars, not only a
   fresh one.** The `analysis` and `network` sidecars read a path argument only
   inside the directories `MALJAN_SAMPLE_ROOTS` names, and they learn them from

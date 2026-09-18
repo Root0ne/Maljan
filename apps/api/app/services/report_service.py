@@ -438,16 +438,15 @@ class ReportService:
         if not report:
             return None
         try:
+            from app.worker.enrich_worker import enqueue_enrichment
+
             pool = await self._get_arq_redis()
-            job = await pool.enqueue_job(
-                "enrich_threat_intel",
-                str(report_id),
-                _job_id=f"enrich:{report_id}",
-            )
+            # One place knows the task's name and the queue it belongs on, so
+            # the operator's button and the automatic path cannot drift apart.
+            return await enqueue_enrichment(pool, report_id)
         except Exception as exc:  # noqa: BLE001
             logger.error("enrich enqueue failed: %s", exc)
             raise EnrichmentEnqueueError(str(exc)) from exc
-        return job.job_id if job is not None else None
 
     async def get_negotiation_timeline(
         self,

@@ -87,7 +87,7 @@ The backend exposes seventeen groups, in this order:
 | Agents | The analysts, the active profile and the ReAct limits. |
 | Live events | The conversation feed the console draws a running analysis from, and how long the record of one is kept. |
 | Tracing | LangSmith tracing of model calls. |
-| Enrichment / threat intelligence | Lookups for the indicators a report names. |
+| Enrichment / threat intelligence | Lookups for the indicators a report names, and whether they run on the enrichment worker or beside the analyses. |
 | API | Request limits and login protection; applied immediately. |
 | Deployment (read-only) | Bootstrap values, shown for reference. |
 
@@ -177,6 +177,41 @@ audit row (`settings.probe`) naming the probe, the endpoints it was pointed at
 succeeded. The values themselves are never in the row. The routes are
 admin-only, as they have always been; what was missing was the record.
 
+### Where the enrichment runs
+
+`api.enrichment_dedicated_worker` decides whether a report's reputation lookups
+are queued for the enrichment worker or beside the analyses, and it ships off:
+a deployment that runs one process keeps working. On the shared queue the
+enrichment yields — it re-enqueues itself a minute later whenever an analysis
+is waiting, up to a total of 30 minutes, after which it runs anyway — so an
+analysis submitted after an enrichment does not wait for the whole of it, and
+the enrichment is never starved. Turn it on where the second process actually runs
+— the compose stack starts one and sets the default beside it. With it on and
+nothing reading that queue, the analysis worker logs one warning at startup and
+`GET /api/v1/system/status` reports `enrichment_worker` as `down`; the
+enrichments stay queued and run when a worker appears.
+
+Flipping the setting takes effect on the next enrichment: an arq job id is one
+per report *and queue*, so a report queued under the old setting can be queued
+again for the other worker straight away, and two triggers for one report on
+one queue still coalesce into one job. What does not move is an enrichment
+already sitting in the queue it was put in — it runs when that queue's worker
+runs, which for the analysis queue is between analyses.
+
+One consequence of that, if a flip happens while an enrichment is still queued:
+the report can be enriched twice, once from each queue. Both runs read the
+report and write the same fields, and both completion events take their own
+sequence numbers, so the feed's count still matches its last number; what it
+costs is a second set of provider lookups against a rate-limited key and two
+completion events for one report. Flipping the setting when nothing is queued
+avoids it.
+
+That worker runs `ENRICHMENT_MAX_JOBS` (default 2) at a time. More than one
+because each job waits on somebody else's HTTP; not many more because they
+share one VirusTotal key and one AbuseIPDB key, and those providers rate-limit
+per key rather than per job. `api.enrichment_max_lookups` still caps each
+report; this multiplies how many reports are in flight against the same limit.
+
 ### A model is probed before a job may name it
 
 **What the probe does.** Both the `llm` and the `agent` probe end by asking for
@@ -192,6 +227,14 @@ The OpenAI-compatible body carries the same `chat_template_kwargs.enable_thinkin
 switch a run would send, under the same `llm.openai.compat` rule and at every
 endpoint asked, and a reply whose only text is `reasoning_content` counts as an
 answer: a model that reasoned is a model that loaded on a key that was accepted.
+Ollama is asked the same way and read the same way. Its thinking arrives in its
+own `thinking` field, which counts as an answer for the same reason — without
+that, every reasoning model served by Ollama failed the probe, because eight
+tokens are spent thinking and `response` comes back empty, and with
+`llm.require_probe` on the deployment could then create no job at all.
+`llm.ollama.disable_thinking` sends `think: false`, so the budget is spent on
+the answer instead; it is off by default, because Ollama refuses the field for
+a model that has no thinking mode.
 The completion gets ninety seconds of its own, because a local server reloads a
 model it had unloaded and a large one is not a ten-second load.
 

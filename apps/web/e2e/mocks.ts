@@ -259,6 +259,7 @@ export const MOCK_REPORT_SUMMARY = {
 export const MOCK_AUDIT_LOG = {
   id: "log-1",
   user_id: "user-1",
+  actor: "Ada Lovelace",
   action: "job.create",
   resource_type: "job",
   resource_id: "job-1abc2def-0000-0000-0000-000000000000",

@@ -65,6 +65,65 @@ def _minio_client() -> Any:
     )
 
 
+def _store_sample_bytes_blocking(storage_path: str, source: str, content_type: str) -> None:
+    client = _minio_client()
+
+    if not client.bucket_exists(settings.minio_bucket):
+        client.make_bucket(settings.minio_bucket)
+        logger.info("MinIO bucket created: %s", settings.minio_bucket)
+        # MinIO defaults
+        # to private buckets, but an operator can mis-configure
+        # ``MINIO_BROWSER_ALLOW_PUBLIC_BUCKETS`` or a prior process
+        # could have left the bucket public. Set an explicit deny
+        # policy on every new bucket so a malware corpus is never
+        # served unauthenticated. We deny anonymous reads at the
+        # ``s3:GetObject`` level — the API path still works because
+        # it presigns via the configured access key.
+        _deny_anonymous_policy = (
+            '{"Version":"2012-10-17","Statement":[{'
+            '"Effect":"Deny","Principal":{"AWS":["*"]},'
+            '"Action":["s3:GetObject","s3:PutObject","s3:ListBucket"],'
+            f'"Resource":["arn:aws:s3:::{settings.minio_bucket}",'
+            f'"arn:aws:s3:::{settings.minio_bucket}/*"],'
+            '"Condition":{"StringEquals":{"aws:PrincipalType":"Anonymous"}}}]}'
+        )
+        try:
+            client.set_bucket_policy(settings.minio_bucket, _deny_anonymous_policy)
+            logger.info(
+                "MinIO bucket policy set (anonymous-deny): %s",
+                settings.minio_bucket,
+            )
+        except Exception as policy_exc:
+            # Failure to set the policy is non-fatal but loud —
+            # operators must verify bucket privacy out-of-band.
+            logger.warning(
+                "MinIO set_bucket_policy failed for '%s' (%s). "
+                "Verify the bucket is not anonymously readable.",
+                settings.minio_bucket,
+                policy_exc,
+            )
+
+    client.fput_object(
+        settings.minio_bucket,
+        storage_path,
+        source,
+        content_type=content_type,
+    )
+
+
+async def store_sample_bytes(*, storage_path: str, source: Any, content_type: str) -> None:
+    """Put one sample's bytes in the object store, off the event loop.
+
+    Everything the store needs doing for an upload — the bucket check, the
+    deny-anonymous policy a fresh bucket gets, and the transfer itself — is
+    synchronous, and a sample may be a hundred megabytes. On the loop that is
+    a hundred megabytes during which this process answers no request, sends no
+    WebSocket frame and fails its own health check; in a thread it is one
+    context switch.
+    """
+    await asyncio.to_thread(_store_sample_bytes_blocking, storage_path, str(source), content_type)
+
+
 def _streaming_hashes(file: UploadFile, dest: Path, max_bytes: int) -> tuple[str, str, str, int]:
     """Stream the upload to ``dest`` and return (sha256, sha1, md5, size).
 
@@ -353,49 +412,14 @@ async def upload_sample(
             await _audit_upload(request, user, sample_row, deduplicated=False, shared_storage=True)
             return sample_row
 
-        # Stream to MinIO from the temp file (no extra RAM copy).
+        # Stream to MinIO from the temp file (no extra RAM copy), in a thread
+        # of its own: the client is synchronous, and a hundred megabytes sent
+        # from the event loop is a hundred megabytes during which this process
+        # answers nothing else.
         try:
-            client = _minio_client()
-
-            if not client.bucket_exists(settings.minio_bucket):
-                client.make_bucket(settings.minio_bucket)
-                logger.info("MinIO bucket created: %s", settings.minio_bucket)
-                # MinIO defaults
-                # to private buckets, but an operator can mis-configure
-                # ``MINIO_BROWSER_ALLOW_PUBLIC_BUCKETS`` or a prior process
-                # could have left the bucket public. Set an explicit deny
-                # policy on every new bucket so a malware corpus is never
-                # served unauthenticated. We deny anonymous reads at the
-                # ``s3:GetObject`` level — the API path still works because
-                # it presigns via the configured access key.
-                _deny_anonymous_policy = (
-                    '{"Version":"2012-10-17","Statement":[{'
-                    '"Effect":"Deny","Principal":{"AWS":["*"]},'
-                    '"Action":["s3:GetObject","s3:PutObject","s3:ListBucket"],'
-                    f'"Resource":["arn:aws:s3:::{settings.minio_bucket}",'
-                    f'"arn:aws:s3:::{settings.minio_bucket}/*"],'
-                    '"Condition":{"StringEquals":{"aws:PrincipalType":"Anonymous"}}}]}'
-                )
-                try:
-                    client.set_bucket_policy(settings.minio_bucket, _deny_anonymous_policy)
-                    logger.info(
-                        "MinIO bucket policy set (anonymous-deny): %s",
-                        settings.minio_bucket,
-                    )
-                except Exception as policy_exc:
-                    # Failure to set the policy is non-fatal but loud —
-                    # operators must verify bucket privacy out-of-band.
-                    logger.warning(
-                        "MinIO set_bucket_policy failed for '%s' (%s). "
-                        "Verify the bucket is not anonymously readable.",
-                        settings.minio_bucket,
-                        policy_exc,
-                    )
-
-            client.fput_object(
-                settings.minio_bucket,
-                storage_path,
-                str(tmp_path),
+            await store_sample_bytes(
+                storage_path=storage_path,
+                source=tmp_path,
                 content_type=detected_mime or "application/octet-stream",
             )
         except Exception as exc:

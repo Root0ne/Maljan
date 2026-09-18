@@ -26,6 +26,13 @@ class AuditLogResponse(BaseModel):
     # made the endpoint raise ResponseValidationError -> 500 as soon as such a
     # row appeared.
     user_id: uuid.UUID | None
+    # Who that id belongs to, as the admin users list already shows them: the
+    # display name, or the local part of the e-mail when there is no name. An
+    # audit log whose actor column holds eight characters of a UUID answers
+    # "who did this" with "look it up somewhere else". ``None`` for the events
+    # that have no authenticated principal, and for a user who has since been
+    # deleted.
+    actor: str | None = None
     action: str
     resource_type: str | None
     # ``AuditLog.resource_id`` is a String(255), not a UUID column (migration
