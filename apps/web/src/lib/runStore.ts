@@ -525,11 +525,19 @@ function topSeq(page: IncomingEvent[]): number {
  * become that cursor, so a frame committing between two pages cannot make the
  * next page skip the run's middle. The store dedupes on `seq`, so an event
  * both the socket and a page carry is held once.
+ *
+ * Every page is answered to the entry that asked for it. A run can be reset or
+ * evicted while a page is in flight — leaving the page is what makes it
+ * evictable in the first place — and folding by job id would put the whole run
+ * back in the map, under an entry nobody reads and only the next eviction can
+ * remove. The reading stops instead, silently: a run the store was told to
+ * forget has no reader to tell anything to.
  */
 async function backfill(entry: RunEntry): Promise<void> {
   if (entry.asked) return;
   entry.asked = true;
   const jobId = entry.state.jobId;
+  const held = () => runs.get(jobId) === entry;
   try {
     /* No cursor on the first page: the whole run, from its first event, which
      * the events table answers once the stream has been trimmed. */
@@ -537,6 +545,7 @@ async function backfill(entry: RunEntry): Promise<void> {
     let truncated: string | null = null;
     for (;;) {
       const page = await transport.readEvents(jobId, since);
+      if (!held()) return;
       applyRunEvents(jobId, page);
       /* A page short of the cap is the end of the recording. The count
        * against the cap is the whole of what the endpoint says about that. */
@@ -553,14 +562,19 @@ async function backfill(entry: RunEntry): Promise<void> {
       }
       since = top;
     }
-    if (entry.state.feedError !== truncated) patch(entry, { feedError: truncated });
+    if (truncated) patch(entry, { feedError: truncated });
   } catch (error) {
+    if (!held()) return;
     patch(entry, {
       feedError: `Earlier events could not be replayed (${getErrorMessage(error)}). The conversation starts from here.`,
     });
   } finally {
-    entry.backfilled = true;
-    hydrate(entry);
+    /* The stored conversation stands in for a feed that answered nothing, and
+     * that too would fold events into a run nobody is holding. */
+    if (held()) {
+      entry.backfilled = true;
+      hydrate(entry);
+    }
   }
 }
 

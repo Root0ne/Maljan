@@ -340,6 +340,28 @@ describe("the recorded conversation", () => {
     expect(analysis[1].addressedToName).toBe("Lead analyst");
   });
 
+  it("closes a replayed run on its failure, after what was said", async () => {
+    /* A failed run whose feed kept only the failure. The stored rows carry no
+     * number, so they sort after the numbered failure event and used to be
+     * folded into the same keyless section behind it — the conversation
+     * opening on the line that ends it. */
+    const { transport } = fakeTransport([
+      event("error", { seq: 1, status: "failed", error_id: "5f3a9c1d4e2b", message: "Analysis failed." }),
+    ]);
+    configureRunTransport(transport);
+    resetConversationCache();
+    hydrateRunTranscript(JOB, ROWS);
+    subscribeRun(JOB, () => {});
+    await vi.advanceTimersByTimeAsync(0);
+
+    const run = getRun(JOB);
+    const items = buildConversation(run.events, run.roster).stages.flatMap((stage) =>
+      stage.rounds.flatMap((round) => round.items),
+    );
+    expect(items.map((i) => i.kind)).toEqual(["says", "verdict", "run_failed"]);
+    expect(items[2].errorId).toBe("5f3a9c1d4e2b");
+  });
+
   it("waits for the feed to answer before standing in for it", () => {
     hydrateRunTranscript(JOB, ROWS);
 
@@ -423,6 +445,68 @@ describe("the back-fill", () => {
     expect(reads).toBe(2);
     expect(getRun(JOB).events).toHaveLength(BACKFILL_LIMIT);
     expect(getRun(JOB).feedError).toContain("only part of this run");
+  });
+
+  it("drops a page that comes back for a run the store was told to forget", async () => {
+    /* A reader who leaves is why a long run is evicted at all: the pages keep
+     * arriving, and folding one by job id would put the whole run back in the
+     * map under an entry nobody is reading. */
+    const { transport, reads } = pagingTransport(recorded(2500));
+    let pages = 0;
+    configureRunTransport({
+      async readEvents(jobId, since) {
+        pages += 1;
+        const page = await transport.readEvents(jobId, since);
+        if (pages === 1) resetRun(JOB);
+        return page;
+      },
+      connect() {
+        return { close() {} };
+      },
+    });
+
+    subscribeRun(JOB, () => {});
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(reads).toEqual([undefined]);
+    expect(getRun(JOB).events).toHaveLength(0);
+    expect(getRun(JOB).jobId).toBe("");
+  });
+
+  it("leaves a fresh reader of the same run unpolluted by the abandoned read", async () => {
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const reads: (number | undefined)[] = [];
+    let call = 0;
+    configureRunTransport({
+      async readEvents(_jobId, since) {
+        call += 1;
+        reads.push(since);
+        if (call === 1) {
+          await held;
+          // A full page, so an unguarded loop would also ask for a second one.
+          return recorded(BACKFILL_LIMIT);
+        }
+        return [event("agent_message", { seq: 1, text: "read again" })];
+      },
+      connect() {
+        return { close() {} };
+      },
+    });
+
+    subscribeRun(JOB, () => {});
+    await vi.advanceTimersByTimeAsync(0);
+    resetRun(JOB);
+    subscribeRun(JOB, () => {});
+    await vi.advanceTimersByTimeAsync(0);
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(reads).toHaveLength(2);
+    expect(getRun(JOB).events.map((e) => e.data.text)).toEqual(["read again"]);
+    expect(getRun(JOB).feedError).toBeNull();
   });
 
   it("keeps one copy of an event that arrives while a page is in flight", async () => {
