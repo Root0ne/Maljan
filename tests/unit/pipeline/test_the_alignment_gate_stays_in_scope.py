@@ -38,9 +38,11 @@ FIXTURE = json.loads(
 
 # What the narrowed gate sends over the audit's own rankings. Zero over the ids
 # the audit read as right for their sample; the rest is the measurement
-# docs/architecture.md carries.
+# docs/architecture.md carries. ``RANKED`` is the derived corpus: the same
+# rankings with the claimed id in them, where the rule says nothing at all.
 CHALLENGED_SCOPED = 0
 CHALLENGED_OTHER = 5
+CHALLENGED_RANKED = 0
 
 
 class _Attck:
@@ -188,6 +190,46 @@ class TestTheCorrectionsThatAreStillSent:
                 if c["technique_id"] in _named_ids(messages[0])
             )
             assert best - row["gate_score"] >= ALIGNMENT_MARGIN
+
+
+class TestAnIndexThatRankedTheClaimedIdItself:
+    """The other half of the rule, on rows the recorded corpus cannot hold.
+
+    The shipped gate fired only where the index had not ranked the claimed id,
+    so no recorded ranking contains it. ``ranked_claims`` puts it back where
+    the index scored it: wherever the index placed the claimed id, it did not
+    fail to think of it, and a candidate it happened to score higher is a
+    preference between two techniques it considers applicable.
+    """
+
+    def test_a_ranked_claim_is_never_challenged(self) -> None:
+        questioned = [row["derived_from"] for row in _rows("ranked_claims") if _checked(row)[1]]
+
+        assert questioned == []
+        assert len(questioned) == CHALLENGED_RANKED
+
+    def test_the_rows_it_is_derived_from_still_are(self) -> None:
+        """The control: the same rankings without the claimed id in them."""
+        derived = {row["derived_from"] for row in _rows("ranked_claims")}
+        sent = [
+            f"{row['run']}/{row['agent']}/{row['technique_id']}"
+            for row in _rows("other_claims")
+            if _checked(row)[1]
+        ]
+
+        assert len(sent) == CHALLENGED_OTHER
+        assert set(sent) <= derived, "every challenge has a derived twin that is silent"
+
+    def test_the_claimed_id_is_the_only_difference(self) -> None:
+        row = next(r for r in _rows("ranked_claims") if r["candidates"])
+        origin = next(
+            r
+            for r in _rows("other_claims") + _rows("scoped_claims")
+            if f"{r['run']}/{r['agent']}/{r['technique_id']}" == row["derived_from"]
+        )
+
+        added = [c for c in row["candidates"] if c not in origin["candidates"]]
+        assert added == [{"technique_id": row["technique_id"], "score_gate": row["gate_score"]}]
 
 
 class TestTheGateThatIsOff:

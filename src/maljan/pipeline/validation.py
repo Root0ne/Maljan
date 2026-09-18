@@ -545,10 +545,11 @@ def _weak_alignment(
     choice.
 
     The feedback is the narrow case: the gate challenges only when it is turned
-    on, the claimed id scores under the threshold, no in-scope candidate names
-    the same family or tactic, and the best of the ones that do disagree beats
-    the claimed id by ``margin``. Everything else is a ranking the model may
-    disagree with, and the id is never replaced either way.
+    on, the claimed id scores under the threshold, the index did not rank the
+    claimed id itself among its in-scope candidates, no in-scope candidate
+    names the same family or tactic, and the best of the ones that do disagree
+    beats the claimed id by ``margin``. Everything else is a ranking the model
+    may disagree with, and the id is never replaced either way.
     """
     if alignment is None:
         return ""
@@ -586,6 +587,12 @@ def _weak_alignment(
         # A sample whose domain the router could not settle has no scope to
         # score inside, and a comparison that cannot be made is not one to
         # challenge on.
+        return ""
+    if any(str(c["technique_id"]) == tid for c in candidates):
+        # The index ranked the claimed id itself, in scope. Wherever it put it,
+        # it did not fail to think of it, and a candidate it happened to score
+        # higher is a preference between two techniques the index considers
+        # applicable — not the disagreement this check is for.
         return ""
     disagreeing = [c for c in candidates if _disagrees_with(str(c["technique_id"]), tid, attck)]
     if not disagreeing:

@@ -2082,7 +2082,7 @@
   }
  },
  "distinct_rows": 105,
- "note": "Recorded by the end-to-end audit: every gate score and every candidate ranking below is what the live ATT&CK index answered for that claim. 'scoped_claims' are the ids the audit read as right for their sample; 'other_claims' are the rest. 'claim' is the run's own published text for the id where it published one, and the catalogue's name for it where it did not, which 'claim_source' says.",
+ "note": "Recorded by the end-to-end audit: every gate score and every candidate ranking below is what the live ATT&CK index answered for that claim. 'scoped_claims' are the ids the audit read as right for their sample; 'other_claims' are the rest. 'claim' is the run's own published text for the id where it published one, and the catalogue's name for it where it did not, which 'claim_source' says. 'ranked_claims' are derived rows, not recordings: each is a recorded ranking with the claimed id inserted into it at the gate score the index gave that id, which is the case the shipped gate could not produce and the case the 'absent from the candidates' conjunct is about.",
  "other_claims": [
   {
    "agent": "static",
@@ -4429,6 +4429,4208 @@
     "platform": "windows"
    },
    "technique_id": "T1548"
+  }
+ ],
+ "ranked_claims": [
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.11,
+     "technique_id": "T1001"
+    },
+    {
+     "score_gate": 0.1,
+     "technique_id": "T1102.003"
+    },
+    {
+     "score_gate": 0.1,
+     "technique_id": "T1481.003"
+    },
+    {
+     "score_gate": 0.08,
+     "technique_id": "T1102.002"
+    },
+    {
+     "score_gate": 0.08,
+     "technique_id": "T1481.002"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1071"
+    }
+   ],
+   "claim": "Application Layer Protocol",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-def-llama/static/T1071",
+   "gate_score": 0.0,
+   "run": "m5-A-def-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1071"
+  },
+  {
+   "agent": "network",
+   "candidates": [
+    {
+     "score_gate": 0.1,
+     "technique_id": "T1665"
+    },
+    {
+     "score_gate": 0.1,
+     "technique_id": "T1041"
+    },
+    {
+     "score_gate": 0.07,
+     "technique_id": "T1567.003"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1481.002"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1590.002"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1071"
+    }
+   ],
+   "claim": "Application Layer Protocol",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/network/T1071",
+   "gate_score": 0.0,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1071"
+  },
+  {
+   "agent": "network",
+   "candidates": [
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1574"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1625"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1678"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1059"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T1620"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1497.002"
+    }
+   ],
+   "claim": "Command and Scripting Interpreter",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/network/T1059",
+   "gate_score": 0.02,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1059"
+  },
+  {
+   "agent": "network",
+   "candidates": [
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1590"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1016.001"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1071"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T0811"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T1592.002"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1591.003"
+    }
+   ],
+   "claim": "Application Layer Protocol",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/network/T1071",
+   "gate_score": 0.02,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1071"
+  },
+  {
+   "agent": "network",
+   "candidates": [
+    {
+     "score_gate": 0.4,
+     "technique_id": "T1574.001"
+    },
+    {
+     "score_gate": 0.19,
+     "technique_id": "T1055.001"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1620"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1546.009"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1220"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1055"
+    }
+   ],
+   "claim": "Process Injection",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/network/T1055",
+   "gate_score": 0.02,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1055"
+  },
+  {
+   "agent": "network",
+   "candidates": [
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1471"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1560"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1027.006"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1406"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1532"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1027"
+    }
+   ],
+   "claim": "Obfuscated Files or Information",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/network/T1027",
+   "gate_score": 0.03,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1027"
+  },
+  {
+   "agent": "network",
+   "candidates": [
+    {
+     "score_gate": 0.14,
+     "technique_id": "T1041"
+    },
+    {
+     "score_gate": 0.1,
+     "technique_id": "T1646"
+    },
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1481.003"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1481.002"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1102.002"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1071"
+    }
+   ],
+   "claim": "Application Layer Protocol",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/network/T1071",
+   "gate_score": 0.0,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1071"
+  },
+  {
+   "agent": "network",
+   "candidates": [
+    {
+     "score_gate": 0.12,
+     "technique_id": "T1481.003"
+    },
+    {
+     "score_gate": 0.12,
+     "technique_id": "T1102.003"
+    },
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1481.002"
+    },
+    {
+     "score_gate": 0.08,
+     "technique_id": "T1102.002"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1016.001"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1071"
+    }
+   ],
+   "claim": "Application Layer Protocol",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/network/T1071",
+   "gate_score": 0.0,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1071"
+  },
+  {
+   "agent": "network",
+   "candidates": [
+    {
+     "score_gate": 0.22,
+     "technique_id": "T1568.002"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1481.002"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1637.001"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1568.001"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T1590.002"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1071"
+    }
+   ],
+   "claim": "Application Layer Protocol",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/network/T1071",
+   "gate_score": 0.0,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1071"
+  },
+  {
+   "agent": "network",
+   "candidates": [
+    {
+     "score_gate": 0.16,
+     "technique_id": "T1102.002"
+    },
+    {
+     "score_gate": 0.16,
+     "technique_id": "T1102.003"
+    },
+    {
+     "score_gate": 0.15,
+     "technique_id": "T1481.003"
+    },
+    {
+     "score_gate": 0.15,
+     "technique_id": "T1481.002"
+    },
+    {
+     "score_gate": 0.13,
+     "technique_id": "T1001"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1071"
+    }
+   ],
+   "claim": "Application Layer Protocol",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/network/T1071",
+   "gate_score": 0.02,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1071"
+  },
+  {
+   "agent": "network",
+   "candidates": [
+    {
+     "score_gate": 0.12,
+     "technique_id": "T1027"
+    },
+    {
+     "score_gate": 0.07,
+     "technique_id": "T1027.006"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1625"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1059"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1027.008"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1406"
+    }
+   ],
+   "claim": "Command and Scripting Interpreter",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/network/T1059",
+   "gate_score": 0.04,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1059"
+  },
+  {
+   "agent": "network",
+   "candidates": [
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1546.015"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1574"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1625"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1678"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1059"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T1620"
+    }
+   ],
+   "claim": "Command and Scripting Interpreter",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/network/T1059",
+   "gate_score": 0.02,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1059"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1102.002"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1102.003"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1016.001"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1071"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T1481.002"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T1481.003"
+    }
+   ],
+   "claim": "Application Layer Protocol",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/static/T1071",
+   "gate_score": 0.03,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1071"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.2,
+     "technique_id": "T1055.002"
+    },
+    {
+     "score_gate": 0.14,
+     "technique_id": "T1074"
+    },
+    {
+     "score_gate": 0.1,
+     "technique_id": "T1027.009"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1406"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1027.004"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T1027"
+    }
+   ],
+   "claim": "Obfuscated Files or Information",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/static/T1027",
+   "gate_score": 0.01,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1027"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.15,
+     "technique_id": "T1583.001"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1481.002"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1102.002"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1568.002"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1590.002"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1071"
+    }
+   ],
+   "claim": "Application Layer Protocol",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/static/T1071",
+   "gate_score": 0.0,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1071"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.22,
+     "technique_id": "T1665"
+    },
+    {
+     "score_gate": 0.1,
+     "technique_id": "T1422.001"
+    },
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1016.001"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1481.002"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1102.002"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1071"
+    }
+   ],
+   "claim": "Application Layer Protocol",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/static/T1071",
+   "gate_score": 0.0,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1071"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.07,
+     "technique_id": "T1027.006"
+    },
+    {
+     "score_gate": 0.07,
+     "technique_id": "T1027.012"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1406"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1027"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1030"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1071"
+    }
+   ],
+   "claim": "Application Layer Protocol",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/static/T1071",
+   "gate_score": 0.0,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1071"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1560"
+    },
+    {
+     "score_gate": 0.07,
+     "technique_id": "T1532"
+    },
+    {
+     "score_gate": 0.07,
+     "technique_id": "T1030"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1406"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1027"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1560.003"
+    }
+   ],
+   "claim": "Obfuscated Files or Information",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/static/T1027",
+   "gate_score": 0.03,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1027"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.18,
+     "technique_id": "T1532"
+    },
+    {
+     "score_gate": 0.13,
+     "technique_id": "T1560"
+    },
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1027.015"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1406"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1560.002"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1027"
+    }
+   ],
+   "claim": "Obfuscated Files or Information",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/static/T1027",
+   "gate_score": 0.02,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1027"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1574.013"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1406"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1027"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T0873"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T1027.004"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T1564.012"
+    }
+   ],
+   "claim": "Obfuscated Files or Information",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/static/T1027",
+   "gate_score": 0.03,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1027"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.14,
+     "technique_id": "T1055.002"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1406.002"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1406"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T1027.012"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T1027"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1055"
+    }
+   ],
+   "claim": "Process Injection",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/static/T1055",
+   "gate_score": 0.0,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1055"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.21,
+     "technique_id": "T1589.002"
+    },
+    {
+     "score_gate": 0.15,
+     "technique_id": "T1041"
+    },
+    {
+     "score_gate": 0.11,
+     "technique_id": "T1646"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1481.002"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1102.002"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1071"
+    }
+   ],
+   "claim": "Application Layer Protocol",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/static/T1071",
+   "gate_score": 0.02,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1071"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.15,
+     "technique_id": "T1041"
+    },
+    {
+     "score_gate": 0.12,
+     "technique_id": "T1646"
+    },
+    {
+     "score_gate": 0.12,
+     "technique_id": "T1567.003"
+    },
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1048.003"
+    },
+    {
+     "score_gate": 0.07,
+     "technique_id": "T1639.001"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1071"
+    }
+   ],
+   "claim": "Application Layer Protocol",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/static/T1071",
+   "gate_score": 0.0,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1071"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.16,
+     "technique_id": "T1041"
+    },
+    {
+     "score_gate": 0.12,
+     "technique_id": "T1646"
+    },
+    {
+     "score_gate": 0.12,
+     "technique_id": "T1567.003"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1481.002"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1102.002"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1071"
+    }
+   ],
+   "claim": "Application Layer Protocol",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/static/T1071",
+   "gate_score": 0.0,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1071"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.13,
+     "technique_id": "T1074"
+    },
+    {
+     "score_gate": 0.1,
+     "technique_id": "T1005"
+    },
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1564.012"
+    },
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1567.002"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1406"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1083"
+    }
+   ],
+   "claim": "File and Directory Discovery",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/static/T1083",
+   "gate_score": 0.04,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1083"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.29,
+     "technique_id": "T1574.001"
+    },
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1055.001"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1406"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1620"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1129"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1574"
+    }
+   ],
+   "claim": "Hijack Execution Flow",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/static/T1574",
+   "gate_score": 0.0,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1574"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.01,
+     "technique_id": "T0849"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T1056.002"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1417.002"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1001.001"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1010"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1055"
+    }
+   ],
+   "claim": "Process Injection",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/static/T1055",
+   "gate_score": 0.0,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1055"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.12,
+     "technique_id": "T1055"
+    },
+    {
+     "score_gate": 0.1,
+     "technique_id": "T1564.010"
+    },
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1036.011"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1134.002"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1059"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T1543"
+    }
+   ],
+   "claim": "Command and Scripting Interpreter",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/static/T1059",
+   "gate_score": 0.02,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1059"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1481.003"
+    },
+    {
+     "score_gate": 0.07,
+     "technique_id": "T1481.002"
+    },
+    {
+     "score_gate": 0.07,
+     "technique_id": "T1102.002"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1016.001"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1132"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T1071"
+    }
+   ],
+   "claim": "Application Layer Protocol",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/static/T1071",
+   "gate_score": 0.01,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1071"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.12,
+     "technique_id": "T1574.001"
+    },
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1055.001"
+    },
+    {
+     "score_gate": 0.08,
+     "technique_id": "T1221"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1620"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1129"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1574"
+    }
+   ],
+   "claim": "Hijack Execution Flow",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/static/T1574",
+   "gate_score": 0.0,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1574"
+  },
+  {
+   "agent": "dynamic",
+   "candidates": [
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1560"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1027.006"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1406"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1532"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1030"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1027"
+    }
+   ],
+   "claim": "Obfuscated Files or Information",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/dynamic/T1027",
+   "gate_score": 0.03,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1027"
+  },
+  {
+   "agent": "network",
+   "candidates": [
+    {
+     "score_gate": 0.13,
+     "technique_id": "T1041"
+    },
+    {
+     "score_gate": 0.12,
+     "technique_id": "T1048.003"
+    },
+    {
+     "score_gate": 0.12,
+     "technique_id": "T1665"
+    },
+    {
+     "score_gate": 0.11,
+     "technique_id": "T1646"
+    },
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1030"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1071.001"
+    }
+   ],
+   "claim": "Web Protocols",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/network/T1071.001",
+   "gate_score": 0.05,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1071.001"
+  },
+  {
+   "agent": "network",
+   "candidates": [
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1481.003"
+    },
+    {
+     "score_gate": 0.08,
+     "technique_id": "T1102.003"
+    },
+    {
+     "score_gate": 0.07,
+     "technique_id": "T1481.002"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1102.002"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1016.001"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T1071.001"
+    }
+   ],
+   "claim": "Web Protocols",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/network/T1071.001",
+   "gate_score": 0.01,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1071.001"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.16,
+     "technique_id": "T1055.002"
+    },
+    {
+     "score_gate": 0.07,
+     "technique_id": "T1027.009"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1406.002"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1406"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T1027"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1027.002"
+    }
+   ],
+   "claim": "Obfuscated Files or Information",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/static/T1027",
+   "gate_score": 0.01,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1027"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1678"
+    },
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1574"
+    },
+    {
+     "score_gate": 0.08,
+     "technique_id": "T1622"
+    },
+    {
+     "score_gate": 0.07,
+     "technique_id": "T1497.003"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1027"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1574.013"
+    }
+   ],
+   "claim": "Obfuscated Files or Information",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/static/T1027",
+   "gate_score": 0.04,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1027"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.21,
+     "technique_id": "T1589.002"
+    },
+    {
+     "score_gate": 0.15,
+     "technique_id": "T1041"
+    },
+    {
+     "score_gate": 0.11,
+     "technique_id": "T1646"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1481.002"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1102.002"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1071"
+    }
+   ],
+   "claim": "Application Layer Protocol",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/static/T1071",
+   "gate_score": 0.02,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1071"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.08,
+     "technique_id": "T1481.003"
+    },
+    {
+     "score_gate": 0.08,
+     "technique_id": "T1102.003"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1481.002"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1102.002"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1016.001"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1071"
+    }
+   ],
+   "claim": "Application Layer Protocol",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/static/T1071",
+   "gate_score": 0.0,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1071"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.1,
+     "technique_id": "T1406"
+    },
+    {
+     "score_gate": 0.07,
+     "technique_id": "T1027"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1027.006"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1048"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1560.001"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1105"
+    }
+   ],
+   "claim": "Ingress Tool Transfer",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/static/T1105",
+   "gate_score": 0.02,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1105"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.08,
+     "technique_id": "T1406"
+    },
+    {
+     "score_gate": 0.07,
+     "technique_id": "T1564.012"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1027.015"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1027"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T1074"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T1074.001"
+    }
+   ],
+   "claim": "Obfuscated Files or Information",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/static/T1027",
+   "gate_score": 0.05,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1027"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.16,
+     "technique_id": "T1041"
+    },
+    {
+     "score_gate": 0.12,
+     "technique_id": "T1646"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1132"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1481.002"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1102.002"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1071"
+    }
+   ],
+   "claim": "Application Layer Protocol",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/static/T1071",
+   "gate_score": 0.0,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1071"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1481.003"
+    },
+    {
+     "score_gate": 0.07,
+     "technique_id": "T1481.002"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1102.002"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1016.001"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1132"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1071"
+    }
+   ],
+   "claim": "Application Layer Protocol",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-A-lead-llama/static/T1071",
+   "gate_score": 0.0,
+   "run": "m5-A-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1071"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1552.002"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T0894"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1218.009"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1218.010"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T1553.003"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1518.001"
+    }
+   ],
+   "claim": "The binary imports `RegOpenKeyEx`, `RegQueryValueEx`, and `RegSetValueEx`, indicating it reads from and writes to the Windows Registry, likely for storing session data, saved hosts, or user preference",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-def-llama/static/T1518.001",
+   "gate_score": 0.0,
+   "run": "m5-B-def-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1518.001"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.26,
+     "technique_id": "T1027.007"
+    },
+    {
+     "score_gate": 0.13,
+     "technique_id": "T1574.001"
+    },
+    {
+     "score_gate": 0.12,
+     "technique_id": "T1574.006"
+    },
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1055.001"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1620"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1106"
+    }
+   ],
+   "claim": "The binary imports `LoadLibrary` and `GetProcAddress`, which are commonly used for dynamic linking and can be used to load malicious DLLs or resolve function addresses at runtime to evade static analy",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-def-llama/static/T1106",
+   "gate_score": 0.02,
+   "run": "m5-B-def-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1106"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.3,
+     "technique_id": "T1546.004"
+    },
+    {
+     "score_gate": 0.26,
+     "technique_id": "T1059.004"
+    },
+    {
+     "score_gate": 0.14,
+     "technique_id": "T0894"
+    },
+    {
+     "score_gate": 0.1,
+     "technique_id": "T1574.005"
+    },
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1218"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1204"
+    }
+   ],
+   "claim": "The binary imports `ShellExecuteEx`, which is used to execute shell commands or open files, potentially used to launch other programs or scripts.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-def-llama/static/T1204",
+   "gate_score": 0.03,
+   "run": "m5-B-def-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1204"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.08,
+     "technique_id": "T1639"
+    },
+    {
+     "score_gate": 0.07,
+     "technique_id": "T0874"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1048"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T0885"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1481.002"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1071.001"
+    }
+   ],
+   "claim": "The binary imports `WinHttpOpen`, `WinHttpConnect`, and `WinHttpSendRequest`, indicating the use of the Windows HTTP API for network communication, potentially for checking for updates or communicatin",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-def-llama/static/T1071.001",
+   "gate_score": 0.02,
+   "run": "m5-B-def-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1071.001"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.15,
+     "technique_id": "T1027.007"
+    },
+    {
+     "score_gate": 0.11,
+     "technique_id": "T1574.006"
+    },
+    {
+     "score_gate": 0.08,
+     "technique_id": "T1055.001"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1129"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T1106"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T0874"
+    }
+   ],
+   "claim": "The binary imports `LoadLibrary` and `GetProcAddress`, which are commonly used for dynamic linking and can be used to load malicious DLLs or resolve function addresses at runtime to evade static analy",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-def-llama/static/T1106",
+   "gate_score": 0.01,
+   "run": "m5-B-def-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1106"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1083"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1546.018"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1574.006"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1197"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T0874"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1003.001"
+    }
+   ],
+   "claim": "The binary imports `GetDiskFreeSpace`, `GetDriveType`, and `GetVolumeInformation`, which are used to retrieve disk information, potentially for targeting specific drives or storage.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-def-llama/static/T1083",
+   "gate_score": 0.05,
+   "run": "m5-B-def-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1083"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.1,
+     "technique_id": "T1574.007"
+    },
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1574.005"
+    },
+    {
+     "score_gate": 0.08,
+     "technique_id": "T1080"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1574.009"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1135"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T1083"
+    }
+   ],
+   "claim": "The binary imports `GetDiskFreeSpace`, `GetDriveType`, and `GetVolumeInformation`, which are used to retrieve disk information, potentially for targeting specific drives or storage.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-def-llama/static/T1083",
+   "gate_score": 0.01,
+   "run": "m5-B-def-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1083"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.21,
+     "technique_id": "T1124"
+    },
+    {
+     "score_gate": 0.19,
+     "technique_id": "T1497.003"
+    },
+    {
+     "score_gate": 0.13,
+     "technique_id": "T1547.003"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1082"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1070.006"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1053.006"
+    }
+   ],
+   "claim": "The binary imports `GetSystemInfo`, `GetNativeSystemInfo`, and `GetVersionEx`, which are used to retrieve system information, potentially to tailor behavior to the specific environment.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-def-llama/static/T1082",
+   "gate_score": 0.04,
+   "run": "m5-B-def-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1082"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.29,
+     "technique_id": "T1124"
+    },
+    {
+     "score_gate": 0.14,
+     "technique_id": "T1547.003"
+    },
+    {
+     "score_gate": 0.11,
+     "technique_id": "T1678"
+    },
+    {
+     "score_gate": 0.1,
+     "technique_id": "T1497.003"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1082"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1070.006"
+    }
+   ],
+   "claim": "The binary imports `GetSystemInfo`, `GetNativeSystemInfo`, and `GetVersionEx`, which are used to retrieve system information, potentially to tailor behavior to the specific environment.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-def-llama/static/T1082",
+   "gate_score": 0.05,
+   "run": "m5-B-def-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1082"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.08,
+     "technique_id": "T1614.001"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1082"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T1027.008"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T1106"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T0834"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T0874"
+    }
+   ],
+   "claim": "The binary imports `GetSystemInfo`, `GetNativeSystemInfo`, and `GetVersionEx`, which are used to retrieve system information, potentially to tailor behavior to the specific environment.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-def-llama/static/T1082",
+   "gate_score": 0.04,
+   "run": "m5-B-def-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1082"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.26,
+     "technique_id": "T1614.001"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1082"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1106"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T0834"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T1027.008"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1575"
+    }
+   ],
+   "claim": "The binary imports `GetSystemInfo`, `GetNativeSystemInfo`, and `GetVersionEx`, which are used to retrieve system information, potentially to tailor behavior to the specific environment.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-def-llama/static/T1082",
+   "gate_score": 0.04,
+   "run": "m5-B-def-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1082"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1033"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T0894"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1548.001"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1003.008"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T0849"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1082"
+    }
+   ],
+   "claim": "The binary imports `GetSystemInfo`, `GetNativeSystemInfo`, and `GetVersionEx`, which are used to retrieve system information, potentially to tailor behavior to the specific environment.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-def-llama/static/T1082",
+   "gate_score": 0.0,
+   "run": "m5-B-def-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1082"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.25,
+     "technique_id": "T1134.001"
+    },
+    {
+     "score_gate": 0.24,
+     "technique_id": "T1134"
+    },
+    {
+     "score_gate": 0.2,
+     "technique_id": "T1550.001"
+    },
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1528"
+    },
+    {
+     "score_gate": 0.08,
+     "technique_id": "T1635"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1082"
+    }
+   ],
+   "claim": "The binary imports `GetSystemInfo`, `GetNativeSystemInfo`, and `GetVersionEx`, which are used to retrieve system information, potentially to tailor behavior to the specific environment.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-def-llama/static/T1082",
+   "gate_score": 0.05,
+   "run": "m5-B-def-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1082"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.08,
+     "technique_id": "T1033"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T0894"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1083"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1564.004"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1552.001"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1003.008"
+    }
+   ],
+   "claim": "The binary imports `GetDiskFreeSpace`, `GetDriveType`, and `GetVolumeInformation`, which are used to retrieve disk information, potentially for targeting specific drives or storage.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-def-llama/static/T1083",
+   "gate_score": 0.04,
+   "run": "m5-B-def-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1083"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.25,
+     "technique_id": "T1012"
+    },
+    {
+     "score_gate": 0.2,
+     "technique_id": "T1552.002"
+    },
+    {
+     "score_gate": 0.16,
+     "technique_id": "T1574.011"
+    },
+    {
+     "score_gate": 0.16,
+     "technique_id": "T1112"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1218.009"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T1518.001"
+    }
+   ],
+   "claim": "The binary imports `RegOpenKeyEx`, `RegQueryValueEx`, and `RegSetValueEx`, indicating it reads from and writes to the Windows Registry, likely for storing session data, saved hosts, or user preference",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-def-llama/static/T1518.001",
+   "gate_score": 0.01,
+   "run": "m5-B-def-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1518.001"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1546.018"
+    },
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1547.002"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1543.004"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1547.013"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1053.005"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1546.010"
+    }
+   ],
+   "claim": "The binary imports `GetUserStartupTask`, `GetUserStartupTaskName`, and `GetUserStartupTaskPath`, which are used to retrieve user startup task information, potentially for persistence.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-def-llama/static/T1053.005",
+   "gate_score": 0.05,
+   "run": "m5-B-def-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1053.005"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.25,
+     "technique_id": "T1602.002"
+    },
+    {
+     "score_gate": 0.18,
+     "technique_id": "T1574.011"
+    },
+    {
+     "score_gate": 0.14,
+     "technique_id": "T1554"
+    },
+    {
+     "score_gate": 0.11,
+     "technique_id": "T1552.001"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1645"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1113"
+    }
+   ],
+   "claim": "The binary accesses the Registry for configuration storage, which is a common persistence/configuration mechanism.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/static/T1113",
+   "gate_score": 0.0,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1113"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.24,
+     "technique_id": "T1563.001"
+    },
+    {
+     "score_gate": 0.12,
+     "technique_id": "T1481.003"
+    },
+    {
+     "score_gate": 0.11,
+     "technique_id": "T1102.003"
+    },
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1481.002"
+    },
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1102.002"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1071"
+    }
+   ],
+   "claim": "The binary connects to SSH servers, which is its primary function, but the network activity could be used for C2 if compromised.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/static/T1071",
+   "gate_score": 0.05,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1071"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.23,
+     "technique_id": "T1027.009"
+    },
+    {
+     "score_gate": 0.11,
+     "technique_id": "T1574.005"
+    },
+    {
+     "score_gate": 0.1,
+     "technique_id": "T1027.001"
+    },
+    {
+     "score_gate": 0.07,
+     "technique_id": "T1027.006"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1406"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1027"
+    }
+   ],
+   "claim": "The binary exhibits high entropy in its .rsrc section and contains YARA hits for obfuscation and packing, suggesting code hiding or evasion techniques.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/static/T1027",
+   "gate_score": 0.04,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1027"
+  },
+  {
+   "agent": "network",
+   "candidates": [
+    {
+     "score_gate": 0.16,
+     "technique_id": "T1554"
+    },
+    {
+     "score_gate": 0.12,
+     "technique_id": "T1546.006"
+    },
+    {
+     "score_gate": 0.1,
+     "technique_id": "T1645"
+    },
+    {
+     "score_gate": 0.08,
+     "technique_id": "T1546.004"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1505"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1547.001"
+    }
+   ],
+   "claim": "The binary has capabilities for registry modification and persistence, indicating potential for maintaining access or modifying system configuration.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/network/T1547.001",
+   "gate_score": 0.04,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1547.001"
+  },
+  {
+   "agent": "network",
+   "candidates": [
+    {
+     "score_gate": 0.46,
+     "technique_id": "T1115"
+    },
+    {
+     "score_gate": 0.38,
+     "technique_id": "T1414"
+    },
+    {
+     "score_gate": 0.31,
+     "technique_id": "T1641.001"
+    },
+    {
+     "score_gate": 0.16,
+     "technique_id": "T1646"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1645"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T1056.001"
+    }
+   ],
+   "claim": "The binary contains strings and capabilities associated with keylogging and clipboard access, indicating potential data theft or credential harvesting.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/network/T1056.001",
+   "gate_score": 0.01,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1056.001"
+  },
+  {
+   "agent": "network",
+   "candidates": [
+    {
+     "score_gate": 0.16,
+     "technique_id": "T1584.002"
+    },
+    {
+     "score_gate": 0.11,
+     "technique_id": "T1554"
+    },
+    {
+     "score_gate": 0.1,
+     "technique_id": "T1557.003"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1557"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1071"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1645"
+    }
+   ],
+   "claim": "The binary connects to SSH servers, which is its primary function, but the network activity could be used for C2 if compromised.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/network/T1071",
+   "gate_score": 0.05,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1071"
+  },
+  {
+   "agent": "reverser",
+   "candidates": [
+    {
+     "score_gate": 0.12,
+     "technique_id": "T1554"
+    },
+    {
+     "score_gate": 0.1,
+     "technique_id": "T1574.005"
+    },
+    {
+     "score_gate": 0.08,
+     "technique_id": "T1645"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1453"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1577"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1059.003"
+    }
+   ],
+   "claim": "Windows Command Shell",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/reverser/T1059.003",
+   "gate_score": 0.0,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1059.003"
+  },
+  {
+   "agent": "reverser",
+   "candidates": [
+    {
+     "score_gate": 0.25,
+     "technique_id": "T1563.001"
+    },
+    {
+     "score_gate": 0.17,
+     "technique_id": "T1554"
+    },
+    {
+     "score_gate": 0.11,
+     "technique_id": "T1027.008"
+    },
+    {
+     "score_gate": 0.07,
+     "technique_id": "T1645"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1505.005"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1056.001"
+    }
+   ],
+   "claim": "The binary contains strings and capabilities associated with keylogging and clipboard access, indicating potential data theft or credential harvesting.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/reverser/T1056.001",
+   "gate_score": 0.02,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1056.001"
+  },
+  {
+   "agent": "reverser",
+   "candidates": [
+    {
+     "score_gate": 0.16,
+     "technique_id": "T1027.001"
+    },
+    {
+     "score_gate": 0.14,
+     "technique_id": "T1564"
+    },
+    {
+     "score_gate": 0.1,
+     "technique_id": "T1027.006"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1406"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T0849"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1027"
+    }
+   ],
+   "claim": "The binary exhibits high entropy in its .rsrc section and contains YARA hits for obfuscation and packing, suggesting code hiding or evasion techniques.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/reverser/T1027",
+   "gate_score": 0.02,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1027"
+  },
+  {
+   "agent": "reverser",
+   "candidates": [
+    {
+     "score_gate": 0.15,
+     "technique_id": "T1574.010"
+    },
+    {
+     "score_gate": 0.1,
+     "technique_id": "T0894"
+    },
+    {
+     "score_gate": 0.08,
+     "technique_id": "T1574.005"
+    },
+    {
+     "score_gate": 0.08,
+     "technique_id": "T1645"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1059.003"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T0849"
+    }
+   ],
+   "claim": "Windows Command Shell",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/reverser/T1059.003",
+   "gate_score": 0.05,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1059.003"
+  },
+  {
+   "agent": "reverser",
+   "candidates": [
+    {
+     "score_gate": 0.15,
+     "technique_id": "T1027.001"
+    },
+    {
+     "score_gate": 0.13,
+     "technique_id": "T1027.008"
+    },
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1027.006"
+    },
+    {
+     "score_gate": 0.08,
+     "technique_id": "T1406"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1027"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T1056.001"
+    }
+   ],
+   "claim": "The binary contains strings and capabilities associated with keylogging and clipboard access, indicating potential data theft or credential harvesting.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/reverser/T1056.001",
+   "gate_score": 0.01,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1056.001"
+  },
+  {
+   "agent": "dynamic",
+   "candidates": [
+    {
+     "score_gate": 0.11,
+     "technique_id": "T1074"
+    },
+    {
+     "score_gate": 0.11,
+     "technique_id": "T1074.002"
+    },
+    {
+     "score_gate": 0.07,
+     "technique_id": "T1639.001"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1030"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1406"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1027"
+    }
+   ],
+   "claim": "The binary exhibits high entropy in its .rsrc section and contains YARA hits for obfuscation and packing, suggesting code hiding or evasion techniques.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/dynamic/T1027",
+   "gate_score": 0.04,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1027"
+  },
+  {
+   "agent": "network",
+   "candidates": [
+    {
+     "score_gate": 0.14,
+     "technique_id": "T1554"
+    },
+    {
+     "score_gate": 0.11,
+     "technique_id": "T1574.010"
+    },
+    {
+     "score_gate": 0.08,
+     "technique_id": "T1645"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1574.005"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T0894"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1547.001"
+    }
+   ],
+   "claim": "The binary has capabilities for registry modification and persistence, indicating potential for maintaining access or modifying system configuration.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/network/T1547.001",
+   "gate_score": 0.0,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1547.001"
+  },
+  {
+   "agent": "network",
+   "candidates": [
+    {
+     "score_gate": 0.1,
+     "technique_id": "T1018"
+    },
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1554"
+    },
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1046"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1422.001"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1563.001"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1071"
+    }
+   ],
+   "claim": "The binary connects to SSH servers, which is its primary function, but the network activity could be used for C2 if compromised.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/network/T1071",
+   "gate_score": 0.02,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1071"
+  },
+  {
+   "agent": "network",
+   "candidates": [
+    {
+     "score_gate": 0.11,
+     "technique_id": "T1106"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1580"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1027.008"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1027.004"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1010"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1113"
+    }
+   ],
+   "claim": "The binary accesses the Registry for configuration storage, which is a common persistence/configuration mechanism.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/network/T1113",
+   "gate_score": 0.02,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1113"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1633"
+    },
+    {
+     "score_gate": 0.08,
+     "technique_id": "T1497"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1632"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1497.002"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T1633.001"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T1547.001"
+    }
+   ],
+   "claim": "The binary has capabilities for registry modification and persistence, indicating potential for maintaining access or modifying system configuration.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/static/T1547.001",
+   "gate_score": 0.01,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1547.001"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.28,
+     "technique_id": "T1564.010"
+    },
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1055"
+    },
+    {
+     "score_gate": 0.08,
+     "technique_id": "T1622"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1424"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T0873"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1027"
+    }
+   ],
+   "claim": "The binary exhibits high entropy in its .rsrc section and contains YARA hits for obfuscation and packing, suggesting code hiding or evasion techniques.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/static/T1027",
+   "gate_score": 0.02,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1027"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.18,
+     "technique_id": "T1041"
+    },
+    {
+     "score_gate": 0.13,
+     "technique_id": "T1646"
+    },
+    {
+     "score_gate": 0.07,
+     "technique_id": "T1481.002"
+    },
+    {
+     "score_gate": 0.07,
+     "technique_id": "T1102.002"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1665"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T1071"
+    }
+   ],
+   "claim": "The binary connects to SSH servers, which is its primary function, but the network activity could be used for C2 if compromised.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/static/T1071",
+   "gate_score": 0.01,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1071"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.1,
+     "technique_id": "T1583.002"
+    },
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1481.003"
+    },
+    {
+     "score_gate": 0.07,
+     "technique_id": "T1481.002"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1102.002"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T1071.004"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1071"
+    }
+   ],
+   "claim": "The binary connects to SSH servers, which is its primary function, but the network activity could be used for C2 if compromised.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/static/T1071",
+   "gate_score": 0.0,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1071"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.19,
+     "technique_id": "T1417.001"
+    },
+    {
+     "score_gate": 0.14,
+     "technique_id": "T1056.001"
+    },
+    {
+     "score_gate": 0.11,
+     "technique_id": "T1453"
+    },
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1056.003"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1547.004"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1048"
+    }
+   ],
+   "claim": "The binary has capabilities for keylogging, indicating potential for credential harvesting.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/static/T1048",
+   "gate_score": 0.02,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1048"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.13,
+     "technique_id": "T1055.003"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1055.004"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1620"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1678"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1625.001"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1053"
+    }
+   ],
+   "claim": "Scheduled Task/Job",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/static/T1053",
+   "gate_score": 0.04,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1053"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1027.008"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1027.009"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1574.005"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1620"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1027.004"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1059"
+    }
+   ],
+   "claim": "Command and Scripting Interpreter",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/static/T1059",
+   "gate_score": 0.02,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1059"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.07,
+     "technique_id": "T1583.002"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1568.002"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T1071.004"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1584.002"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1568.001"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1071"
+    }
+   ],
+   "claim": "The binary connects to SSH servers, which is its primary function, but the network activity could be used for C2 if compromised.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/static/T1071",
+   "gate_score": 0.0,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1071"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.19,
+     "technique_id": "T1564.008"
+    },
+    {
+     "score_gate": 0.12,
+     "technique_id": "T1114"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1048"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1667"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1098.002"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1071.003"
+    }
+   ],
+   "claim": "The binary has capabilities for keylogging, indicating potential for credential harvesting.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/static/T1048",
+   "gate_score": 0.04,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1048"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.07,
+     "technique_id": "T1599.001"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1011"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T0885"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T0884"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1695.002"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T1071"
+    }
+   ],
+   "claim": "The binary connects to SSH servers, which is its primary function, but the network activity could be used for C2 if compromised.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/static/T1071",
+   "gate_score": 0.01,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1071"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.14,
+     "technique_id": "T1027.009"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1584.001"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1027.006"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1684.002"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1071"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1635.001"
+    }
+   ],
+   "claim": "The binary connects to SSH servers, which is its primary function, but the network activity could be used for C2 if compromised.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/static/T1071",
+   "gate_score": 0.04,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1071"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.24,
+     "technique_id": "T1497"
+    },
+    {
+     "score_gate": 0.23,
+     "technique_id": "T1633"
+    },
+    {
+     "score_gate": 0.1,
+     "technique_id": "T1497.002"
+    },
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1453"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1211"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1056"
+    }
+   ],
+   "claim": "Input Capture",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/static/T1056",
+   "gate_score": 0.02,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1056"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.1,
+     "technique_id": "T1406"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1027.009"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1027.008"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1027"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1620"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1625.001"
+    }
+   ],
+   "claim": "The binary exhibits high entropy in its .rsrc section and contains YARA hits for obfuscation and packing, suggesting code hiding or evasion techniques.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/static/T1027",
+   "gate_score": 0.03,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1027"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.29,
+     "technique_id": "T1574.011"
+    },
+    {
+     "score_gate": 0.22,
+     "technique_id": "T1112"
+    },
+    {
+     "score_gate": 0.18,
+     "technique_id": "T1552.002"
+    },
+    {
+     "score_gate": 0.11,
+     "technique_id": "T1137.002"
+    },
+    {
+     "score_gate": 0.1,
+     "technique_id": "T1036.005"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1547"
+    }
+   ],
+   "claim": "Boot or Logon Autostart Execution",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/static/T1547",
+   "gate_score": 0.03,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1547"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1678"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1625"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1055.003"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1625.001"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1027"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T0837"
+    }
+   ],
+   "claim": "The binary exhibits high entropy in its .rsrc section and contains YARA hits for obfuscation and packing, suggesting code hiding or evasion techniques.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/static/T1027",
+   "gate_score": 0.02,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1027"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.19,
+     "technique_id": "T1417.001"
+    },
+    {
+     "score_gate": 0.14,
+     "technique_id": "T1056.001"
+    },
+    {
+     "score_gate": 0.11,
+     "technique_id": "T1453"
+    },
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1056.003"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1547.004"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1056"
+    }
+   ],
+   "claim": "Input Capture",
+   "claim_source": "catalogue name for the id",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/static/T1056",
+   "gate_score": 0.0,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1056"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.15,
+     "technique_id": "T1055.002"
+    },
+    {
+     "score_gate": 0.08,
+     "technique_id": "T1574.005"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1220"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1027.004"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1027"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T1027.008"
+    }
+   ],
+   "claim": "The binary exhibits high entropy in its .rsrc section and contains YARA hits for obfuscation and packing, suggesting code hiding or evasion techniques.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/static/T1027",
+   "gate_score": 0.02,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1027"
+  },
+  {
+   "agent": "lead",
+   "candidates": [
+    {
+     "score_gate": 0.24,
+     "technique_id": "T1563.001"
+    },
+    {
+     "score_gate": 0.12,
+     "technique_id": "T1481.003"
+    },
+    {
+     "score_gate": 0.11,
+     "technique_id": "T1102.003"
+    },
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1481.002"
+    },
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1102.002"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1071"
+    }
+   ],
+   "claim": "The binary connects to SSH servers, which is its primary function, but the network activity could be used for C2 if compromised.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/lead/T1071",
+   "gate_score": 0.05,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1071"
+  },
+  {
+   "agent": "lead",
+   "candidates": [
+    {
+     "score_gate": 0.2,
+     "technique_id": "T1112"
+    },
+    {
+     "score_gate": 0.14,
+     "technique_id": "T1554"
+    },
+    {
+     "score_gate": 0.13,
+     "technique_id": "T1574.010"
+    },
+    {
+     "score_gate": 0.08,
+     "technique_id": "T1645"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1543"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1547.001"
+    }
+   ],
+   "claim": "The binary has capabilities for registry modification and persistence, indicating potential for maintaining access or modifying system configuration.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/lead/T1547.001",
+   "gate_score": 0.04,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1547.001"
+  },
+  {
+   "agent": "lead",
+   "candidates": [
+    {
+     "score_gate": 0.14,
+     "technique_id": "T1056.001"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1003"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1212"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1110.004"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T0859"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1048"
+    }
+   ],
+   "claim": "The binary has capabilities for keylogging, indicating potential for credential harvesting.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/lead/T1048",
+   "gate_score": 0.0,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1048"
+  },
+  {
+   "agent": "lead",
+   "candidates": [
+    {
+     "score_gate": 0.31,
+     "technique_id": "T1602.002"
+    },
+    {
+     "score_gate": 0.2,
+     "technique_id": "T1602"
+    },
+    {
+     "score_gate": 0.16,
+     "technique_id": "T1574.011"
+    },
+    {
+     "score_gate": 0.13,
+     "technique_id": "T1554"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1645"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1113"
+    }
+   ],
+   "claim": "The binary accesses the Registry for configuration storage, which is a common persistence/configuration mechanism.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/lead/T1113",
+   "gate_score": 0.0,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1113"
+  },
+  {
+   "agent": "lead",
+   "candidates": [
+    {
+     "score_gate": 0.23,
+     "technique_id": "T1678"
+    },
+    {
+     "score_gate": 0.14,
+     "technique_id": "T0837"
+    },
+    {
+     "score_gate": 0.14,
+     "technique_id": "T1574.010"
+    },
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1574"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1625"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1499"
+    }
+   ],
+   "claim": "The binary has capabilities for delay execution, which could be used to evade detection or wait for specific conditions.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/lead/T1499",
+   "gate_score": 0.0,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1499"
+  },
+  {
+   "agent": "lead",
+   "candidates": [
+    {
+     "score_gate": 0.21,
+     "technique_id": "T1622"
+    },
+    {
+     "score_gate": 0.17,
+     "technique_id": "T1633"
+    },
+    {
+     "score_gate": 0.12,
+     "technique_id": "T1546.006"
+    },
+    {
+     "score_gate": 0.08,
+     "technique_id": "T1633.001"
+    },
+    {
+     "score_gate": 0.07,
+     "technique_id": "T1645"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1548"
+    }
+   ],
+   "claim": "The binary has capabilities for PEB access, which could be used to detect debuggers or sandbox environments.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-B-lead-llama/lead/T1548",
+   "gate_score": 0.0,
+   "run": "m5-B-lead-llama",
+   "sample": {
+    "file_type": "pe",
+    "platform": "windows"
+   },
+   "technique_id": "T1548"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.16,
+     "technique_id": "T1041"
+    },
+    {
+     "score_gate": 0.12,
+     "technique_id": "T1646"
+    },
+    {
+     "score_gate": 0.11,
+     "technique_id": "T1001"
+    },
+    {
+     "score_gate": 0.08,
+     "technique_id": "T1102.002"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1481.002"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1071"
+    }
+   ],
+   "claim": "The binary contains network-related IOCs including IP addresses, domains, and HTTP paths, suggesting it is designed for command-and-control (C2) communication or data exfiltration.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-ELF-def-llama/static/T1071",
+   "gate_score": 0.03,
+   "run": "m5-ELF-def-llama",
+   "sample": {
+    "file_type": "elf",
+    "platform": "linux"
+   },
+   "technique_id": "T1071"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.12,
+     "technique_id": "T1554"
+    },
+    {
+     "score_gate": 0.07,
+     "technique_id": "T1574.005"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1679"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1645"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1195.001"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1036"
+    }
+   ],
+   "claim": "The binary contains paths related to Dropbear and temporary directories, suggesting it may install or drop additional components (like a SSH backdoor) or use temporary files for persistence or staging",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-ELF-def-llama/static/T1036",
+   "gate_score": 0.0,
+   "run": "m5-ELF-def-llama",
+   "sample": {
+    "file_type": "elf",
+    "platform": "linux"
+   },
+   "technique_id": "T1036"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1027.008"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1554"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1481.002"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1645"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T0849"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T1059"
+    }
+   ],
+   "claim": "The binary is submitted as \"mirai.elf\" and contains strings related to network communication and temporary file creation, consistent with the Mirai botnet family which typically scans for vulnerabilit",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-ELF-def-llama/static/T1059",
+   "gate_score": 0.01,
+   "run": "m5-ELF-def-llama",
+   "sample": {
+    "file_type": "elf",
+    "platform": "linux"
+   },
+   "technique_id": "T1059"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.13,
+     "technique_id": "T1546.006"
+    },
+    {
+     "score_gate": 0.1,
+     "technique_id": "T1554"
+    },
+    {
+     "score_gate": 0.1,
+     "technique_id": "T1574.010"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1574.005"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1027.004"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1053"
+    }
+   ],
+   "claim": "The binary does not appear to have any persistence mechanisms explicitly listed in the IOCs, but the presence of /tmp paths suggests potential for dropping files.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-ELF-def-llama/static/T1053",
+   "gate_score": 0.04,
+   "run": "m5-ELF-def-llama",
+   "sample": {
+    "file_type": "elf",
+    "platform": "linux"
+   },
+   "technique_id": "T1053"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.41,
+     "technique_id": "T1548.001"
+    },
+    {
+     "score_gate": 0.16,
+     "technique_id": "T1027.001"
+    },
+    {
+     "score_gate": 0.11,
+     "technique_id": "T1574.010"
+    },
+    {
+     "score_gate": 0.1,
+     "technique_id": "T1554"
+    },
+    {
+     "score_gate": 0.06,
+     "technique_id": "T1574.005"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1055"
+    }
+   ],
+   "claim": "The binary does not appear to have any process injection capabilities based on the static analysis, as no relevant API imports were found.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-ELF-def-llama/static/T1055",
+   "gate_score": 0.0,
+   "run": "m5-ELF-def-llama",
+   "sample": {
+    "file_type": "elf",
+    "platform": "linux"
+   },
+   "technique_id": "T1055"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.16,
+     "technique_id": "T1574.006"
+    },
+    {
+     "score_gate": 0.13,
+     "technique_id": "T1546.006"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1574.005"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1620"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1574.001"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1055"
+    }
+   ],
+   "claim": "The binary does not appear to have any process injection capabilities based on the static analysis, as no relevant API imports were found.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-ELF-def-llama/static/T1055",
+   "gate_score": 0.0,
+   "run": "m5-ELF-def-llama",
+   "sample": {
+    "file_type": "elf",
+    "platform": "linux"
+   },
+   "technique_id": "T1055"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.39,
+     "technique_id": "T1037.004"
+    },
+    {
+     "score_gate": 0.11,
+     "technique_id": "T1546.006"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1027.008"
+    },
+    {
+     "score_gate": 0.05,
+     "technique_id": "T1574.005"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1027.004"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1053"
+    }
+   ],
+   "claim": "The binary does not appear to have any persistence mechanisms explicitly listed in the IOCs, but the presence of /tmp paths suggests potential for dropping files.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-ELF-def-llama/static/T1053",
+   "gate_score": 0.03,
+   "run": "m5-ELF-def-llama",
+   "sample": {
+    "file_type": "elf",
+    "platform": "linux"
+   },
+   "technique_id": "T1053"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.15,
+     "technique_id": "T1027.001"
+    },
+    {
+     "score_gate": 0.14,
+     "technique_id": "T1546.006"
+    },
+    {
+     "score_gate": 0.07,
+     "technique_id": "T1574.005"
+    },
+    {
+     "score_gate": 0.02,
+     "technique_id": "T1037"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1620"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T0849"
+    }
+   ],
+   "claim": "The binary does not appear to have any dotfile or profile modification based on the static analysis.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-ELF-def-llama/static/T1037",
+   "gate_score": 0.02,
+   "run": "m5-ELF-def-llama",
+   "sample": {
+    "file_type": "elf",
+    "platform": "linux"
+   },
+   "technique_id": "T1037"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.09,
+     "technique_id": "T1574.006"
+    },
+    {
+     "score_gate": 0.08,
+     "technique_id": "T1574.010"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1574.005"
+    },
+    {
+     "score_gate": 0.03,
+     "technique_id": "T1027.008"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1620"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1055"
+    }
+   ],
+   "claim": "The binary does not appear to have any process injection capabilities based on the static analysis, as no relevant API imports were found.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-ELF-def-llama/static/T1055",
+   "gate_score": 0.0,
+   "run": "m5-ELF-def-llama",
+   "sample": {
+    "file_type": "elf",
+    "platform": "linux"
+   },
+   "technique_id": "T1055"
+  },
+  {
+   "agent": "static",
+   "candidates": [
+    {
+     "score_gate": 0.45,
+     "technique_id": "T1548.001"
+    },
+    {
+     "score_gate": 0.21,
+     "technique_id": "T1574.010"
+    },
+    {
+     "score_gate": 0.13,
+     "technique_id": "T1574.005"
+    },
+    {
+     "score_gate": 0.04,
+     "technique_id": "T1027.008"
+    },
+    {
+     "score_gate": 0.01,
+     "technique_id": "T1620"
+    },
+    {
+     "score_gate": 0.0,
+     "technique_id": "T1055"
+    }
+   ],
+   "claim": "The binary does not appear to have any process injection capabilities based on the static analysis, as no relevant API imports were found.",
+   "claim_source": "published evidence quote",
+   "constructed": "the claimed id inserted into its own ranking at its gate score",
+   "derived_from": "m5-ELF-def-llama/static/T1055",
+   "gate_score": 0.0,
+   "run": "m5-ELF-def-llama",
+   "sample": {
+    "file_type": "elf",
+    "platform": "linux"
+   },
+   "technique_id": "T1055"
   }
  ],
  "recorded_rows": 188,

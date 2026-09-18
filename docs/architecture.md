@@ -278,22 +278,36 @@ decides.
    scores a *correct* id near zero often enough that 81 of 92 corrections in
    one run, 16 of 19 in another and 33 of 33 in a third were of this kind —
    each batch a full extra model turn. With the setting on, a claim is
-   questioned only when the claimed id scores under
-   `validation.alignment_threshold` (0.05) and an in-scope candidate that
-   disagrees with it — neither from its own technique family nor from any of
-   its tactics — beats its score by `validation.alignment_margin` (0.20). At
-   most one weak-alignment batch is sent per agent turn.
+   questioned only when all four hold: the claimed id scores under
+   `validation.alignment_threshold` (0.05); the index did not rank the claimed
+   id itself among its in-scope candidates (wherever it ranked it, it did not
+   fail to think of it); no in-scope candidate names the claim's own technique
+   family or tactic; and the best of the ones that do disagree beats the
+   claimed id's score by `validation.alignment_margin` (0.20). At most one
+   weak-alignment batch is sent per agent turn.
 
    Measured on the audit's own recordings (188 corrections, 105 distinct
    rankings, replayed in `tests/fixtures/attck_alignment_recorded.json`): of
    the 36 rankings whose claimed id the audit read as right for its sample —
-   `T1027`, `T1071.001`, `T1055`, `T1547.001`, `T1497.001` and the ids the ELF
-   and APK runs published — the narrowed rule questions none, where the shipped
-   check questioned all of them. Of the other 69 it questions 5, each naming a
-   candidate from the sample's own domain and another tactic that beats the
-   claim by the margin. That is the bar the setting is held to, and it is the
-   reason the default stays off: 5 questions over 105 rankings is a small
-   enough yield that a run pays the turn only when an operator asks for it.
+   `T1027`, `T1071.001`, `T1055`, `T1547.001` and the ids the ELF run
+   published, which are the ones this corpus holds rankings for — the narrowed
+   rule questions none, where the shipped check questioned all of them. Of the
+   other 69 it questions 5, each naming a candidate from the sample's own
+   domain and another tactic that beats the claim by the margin. Two of the six
+   audited runs are absent from the corpus because they produced no
+   weak-alignment correction at all: the APK run and the Ollama-backed pair. So
+   is `T1497.001`, which the brief names and which no run questioned.
+
+   The "not ranked" conjunct cannot be measured on those recordings — the
+   shipped gate fired only where the index had *not* ranked the claimed id, so
+   none of the 105 rankings contains it. The fixture carries 105 derived rows
+   for it, each a recorded ranking with the claimed id put back at the gate
+   score the index gave it, marked as derived: the rule questions **none** of
+   them, including the five its recorded twins are questioned on.
+
+   That is the bar the setting is held to, and it is the reason the default
+   stays off: 5 questions over 105 rankings is a small enough yield that a run
+   pays the turn only when an operator asks for it.
 4. **Corroboration** (exact). Per technique in the run, `asserted_by` — the
    deterministic sources carrying their own ATT&CK ids: capa's `attck`
    field, a Sigma rule's technique tags, a YARA TTP rule's

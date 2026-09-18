@@ -826,10 +826,12 @@ change landed on `main`.
   `validation.alignment_margin` (0.20); and at most one weak-alignment batch is
   sent per agent turn. The question itself is behind the new
   `validation.weak_alignment`, which is off: the ranking is still recorded on
-  every claim and shown to the judge. Over the audit's own 105 distinct
-  rankings, replayed as a fixture, the narrowed rule questions none of the 36
-  claims whose id the audit read as right for its sample and 5 of the other 69;
-  docs/architecture.md carries the measurement.
+  every claim and shown to the judge. An index that ranked the claimed id
+  itself in scope questions nothing, wherever it ranked it. Over the audit's
+  own 105 distinct rankings, replayed as a fixture, the narrowed rule questions
+  none of the 36 claims whose id the audit read as right for its sample and 5
+  of the other 69, and none of the 105 derived rows that put the claimed id
+  back into its own ranking; docs/architecture.md carries the measurement.
 
 - **A judge that never answered no longer produces the verdict "Malware".** The
   bundle the pipeline builds when the judge's answer was not a bundle carried a
