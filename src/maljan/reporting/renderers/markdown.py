@@ -109,13 +109,29 @@ class MarkdownRenderer:
         badge = self._verdict_badge(report.verdict)
         sha256 = report.identity.hashes.sha256 or "unknown"
         generated = report.generated_at.isoformat()
+        # "not assessed" rather than 0.00: a confidence of zero is an
+        # assessment, and a verdict the pipeline wrote because the judge never
+        # answered has none. The same word the severity block uses for the
+        # same reason.
+        confidence = (
+            "not assessed"
+            if report.overall_confidence is None
+            else f"{report.overall_confidence:.2f}"
+        )
         header = (
             f"# Malware Analysis Report\n\n"
             f"**Verdict**: {badge}  \n"
             f"**Sample SHA256**: `{sha256}`  \n"
             f"**Generated**: {generated}  \n"
-            f"**Overall Confidence**: {report.overall_confidence:.2f}"
+            f"**Overall Confidence**: {confidence}"
         )
+        if report.overall_confidence is None:
+            header += (
+                "\n\n> **[NO JUDGE VERDICT]** The judge did not answer, so this "
+                "verdict was written by the pipeline rather than decided by a "
+                "model, and no confidence was assessed for it. The analysts' own "
+                "reports below stand; the decision above does not rest on them."
+            )
         if report.degraded_mode:
             reasons = "; ".join(report.degradation_reasons) or "low analyst/sandbox data"
             header += (

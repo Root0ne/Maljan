@@ -201,7 +201,11 @@ def build_prompt_text(report: MalwareReport) -> str:
         "DETERMINISTIC FINDINGS",
         "----------------------",
         f"Verdict: {report.verdict}",
-        f"Overall confidence: {report.overall_confidence:.2f}",
+        (
+            "Overall confidence: not assessed"
+            if report.overall_confidence is None
+            else f"Overall confidence: {report.overall_confidence:.2f}"
+        ),
         (
             f"Severity: {report.severity.rating} ({report.severity.overall_score:.1f}/10)"
             if report.severity

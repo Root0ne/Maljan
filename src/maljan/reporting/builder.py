@@ -89,7 +89,7 @@ class MalwareReportBuilder:
         run_summary: dict[str, Any] | None,
         discussion_history: list[dict[str, Any]] | None,
         final_decision: str,
-        overall_confidence: float = 0.0,
+        overall_confidence: float | None = 0.0,
         judge_assessment: Any | None = None,
         malware_category: str | None = None,
         degraded_mode: bool = False,
@@ -338,8 +338,13 @@ class MalwareReportBuilder:
             report.executive_summary = (
                 f"Sample classified as {verdict.lower()}. Best-guess family: {family}. "
                 f"Pipeline reported {len(report.ttp_mappings)} ATT&CK techniques: "
-                f"{ttp_summary}. Confidence {report.overall_confidence:.2f}. "
-                "This is an auto-generated summary (no LLM available); review the "
+                f"{ttp_summary}. "
+                + (
+                    "Confidence not assessed. "
+                    if report.overall_confidence is None
+                    else f"Confidence {report.overall_confidence:.2f}. "
+                )
+                + "This is an auto-generated summary (no LLM available); review the "
                 "detailed sections for evidence."
             )
         report.capabilities_narrative = [

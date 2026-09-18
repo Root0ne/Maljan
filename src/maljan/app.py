@@ -373,6 +373,9 @@ class MaljanApp:
             "malware_report_markdown": None,
             "stix_bundle_extended": None,
             "report_error": None,
+            # No verdict has been written by anything yet, least of all by
+            # this pipeline standing in for a judge that did not answer.
+            "verdict_fallback": None,
             "degraded_mode": False,
             "degradation_reasons": [],
             # F10: declared AnalysisState channels, populated later by the

@@ -229,7 +229,14 @@ class ExtendedSTIXRenderer:
         summary = report.executive_summary.strip()
         if summary:
             note = Note(
-                abstract=f"{report.verdict} — confidence {report.overall_confidence:.2f}",
+                abstract=(
+                    f"{report.verdict} — confidence "
+                    + (
+                        "not assessed"
+                        if report.overall_confidence is None
+                        else f"{report.overall_confidence:.2f}"
+                    )
+                ),
                 content=summary,
                 object_refs=[malware_id],
             )

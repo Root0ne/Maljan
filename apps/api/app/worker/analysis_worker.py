@@ -1784,7 +1784,7 @@ def _roster_for(container: Any) -> dict[str, Any]:
         return {"agents": [], "stages": []}
 
 
-def _extract_confidence(result: dict) -> float:
+def _extract_confidence(result: dict) -> float | None:
     """Extract overall confidence from the pipeline result.
 
     The ``MalwareReport`` is the authoritative source and is checked first; the
@@ -1793,12 +1793,17 @@ def _extract_confidence(result: dict) -> float:
     and the confidence history are three places one number is written, and a
     reader who saw the DEGRADED RUN banner next to a confidence the report did
     not carry was reading whichever of them this function happened to reach.
+
+    A report that carries the key explicitly set to ``None`` has said that no
+    confidence was assessed — the verdict is the pipeline's own, written
+    because the judge never answered — and that answer is final. Falling
+    through to the confidence history there would take the analysts' certainty
+    in their own claims and print it beside a decision none of them made.
     """
     malware_report = result.get("malware_report")
-    if isinstance(malware_report, dict):
-        conf = malware_report.get("overall_confidence")
-        if conf is not None:
-            return float(conf)
+    if isinstance(malware_report, dict) and "overall_confidence" in malware_report:
+        conf = malware_report["overall_confidence"]
+        return None if conf is None else float(conf)
 
     # From run_summary if available
     run_summary = result.get("run_summary")

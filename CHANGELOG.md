@@ -747,6 +747,19 @@ change landed on `main`.
 
 ### Fixed
 
+- **A verdict no model produced no longer carries a confidence.** When the
+  judge's body raised, the pipeline wrote a conservative "Suspicious" verdict
+  of its own — correctly, so a run is not lost — and the report then filled the
+  missing confidence from the mean of the analysts' confidence in their *own
+  claims*, printing 0.92 on the front page beside a decision none of them made.
+  The comment at the failure site still said the report node capped it, which
+  it has not done since the cap was removed. Such a verdict now carries
+  `overall_confidence` `null`, the report header reads "not assessed" and says
+  the judge did not answer, and the run summary records the note under
+  `verdict.fallback` with the class of the failure. The console's header shows
+  "Confidence: not assessed" rather than 0/100, and
+  `analysis_reports.overall_confidence` is nullable (`20260926000000`) so the
+  distinction survives being stored.
 - **The run-summary golden pins the summary a run is stored with.** It pinned
   `RunSummary.to_dict()` while its docstring claimed to cover "what the API
   stores", which is that dict plus four keys written onto it afterwards:

@@ -39,6 +39,11 @@ def _load():
 def _tables(conn) -> None:
     conn.execute(sa.text("CREATE TABLE agent_messages (id TEXT PRIMARY KEY, seq INTEGER)"))
     conn.execute(sa.text("CREATE TABLE evidence_entries (id TEXT PRIMARY KEY, entry_id TEXT)"))
+    conn.execute(
+        sa.text(
+            "CREATE TABLE analysis_reports (id TEXT PRIMARY KEY, overall_confidence FLOAT NOT NULL)"
+        )
+    )
     conn.commit()
 
 
@@ -49,6 +54,10 @@ def _old_rows(conn) -> None:
     )
     conn.execute(
         sa.text("INSERT INTO evidence_entries (id, entry_id) VALUES (:i, 'ev_0001')"),
+        {"i": str(uuid.uuid4())},
+    )
+    conn.execute(
+        sa.text("INSERT INTO analysis_reports (id, overall_confidence) VALUES (:i, 0.91)"),
         {"i": str(uuid.uuid4())},
     )
     conn.commit()
@@ -133,6 +142,56 @@ def test_an_entry_recorded_before_the_upgrade_reads_as_untrimmed_and_unlinked() 
         assert row.repeated_of is None
         assert row.symbol is None
         assert row.started_at is None
+
+
+def test_a_report_may_say_that_no_confidence_was_assessed() -> None:
+    """The column could not hold "nothing assessed one", so it held a number."""
+    engine = sa.create_engine("sqlite://")
+    with engine.connect() as conn:
+        _upgraded(conn)
+        assert _columns(conn, "analysis_reports")["overall_confidence"]["nullable"] is True
+        conn.execute(
+            sa.text("INSERT INTO analysis_reports (id, overall_confidence) VALUES (:i, NULL)"),
+            {"i": str(uuid.uuid4())},
+        )
+        conn.commit()
+        stored = (
+            conn.execute(
+                sa.text(
+                    "SELECT overall_confidence FROM analysis_reports ORDER BY overall_confidence"
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert stored == [None, 0.91]
+
+
+def test_the_downgrade_says_what_it_costs_a_report_with_no_confidence() -> None:
+    """A zero, because the older schema cannot express the difference."""
+    from alembic.operations import Operations
+    from alembic.runtime.migration import MigrationContext
+
+    engine = sa.create_engine("sqlite://")
+    with engine.connect() as conn:
+        module = _upgraded(conn)
+        conn.execute(
+            sa.text("INSERT INTO analysis_reports (id, overall_confidence) VALUES (:i, NULL)"),
+            {"i": str(uuid.uuid4())},
+        )
+        conn.commit()
+        with Operations.context(MigrationContext.configure(conn)):
+            module.downgrade()
+        stored = (
+            conn.execute(
+                sa.text(
+                    "SELECT overall_confidence FROM analysis_reports ORDER BY overall_confidence"
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert stored == [0.0, 0.91]
 
 
 def test_upgrade_downgrade_upgrade_is_a_clean_round_trip() -> None:

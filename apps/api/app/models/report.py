@@ -23,7 +23,10 @@ class AnalysisReport(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     # Verdict
     verdict: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    overall_confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    # ``NULL`` when nothing assessed a confidence: a verdict the pipeline
+    # wrote itself because the judge never answered has none, and storing 0.0
+    # there would print "0/100" for a run that reached no number at all.
+    overall_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     malware_category: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     # Structured data (stored as JSONB for flexibility)
@@ -55,7 +58,10 @@ class AnalysisReport(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     def __repr__(self) -> str:
-        return f"<AnalysisReport verdict={self.verdict} confidence={self.overall_confidence:.2f}>"
+        confidence = (
+            "not assessed" if self.overall_confidence is None else f"{self.overall_confidence:.2f}"
+        )
+        return f"<AnalysisReport verdict={self.verdict} confidence={confidence}>"
 
 
 class AgentFinding(UUIDPrimaryKeyMixin, TimestampMixin, Base):

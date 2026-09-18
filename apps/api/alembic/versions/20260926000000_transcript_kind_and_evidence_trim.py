@@ -25,7 +25,17 @@ is false-defaulted like ``args_repaired`` before it. A row written before this
 revision therefore reads as what it is: a row whose value was never recorded,
 which every reader is required to fall back from rather than treat as a fact.
 
-Downgrade drops the seven columns.
+``analysis_reports.overall_confidence`` becomes nullable for the same reason.
+A verdict the pipeline wrote itself, because the judge raised, has no
+confidence: nothing assessed one. The column could not say that, so the number
+stored there was the mean of the analysts' confidence in their own claims —
+a number about their reports, printed on the front page beside a decision none
+of them made. ``NULL`` is the fact, and the header says "not assessed".
+
+Downgrade drops the seven columns and restores the NOT NULL. It has to write a
+zero into every row that says "not assessed", because the older schema has no
+way to express the difference; that is a loss the downgrade cannot avoid and
+the reason it is recorded here.
 
 Revision ID: 20260926000000
 Revises: 20260925000000
@@ -55,8 +65,19 @@ def upgrade() -> None:
     op.add_column("evidence_entries", sa.Column("symbol", sa.String(length=200), nullable=True))
     op.add_column("evidence_entries", sa.Column("started_at", sa.Float(), nullable=True))
 
+    op.alter_column(
+        "analysis_reports", "overall_confidence", existing_type=sa.Float(), nullable=True
+    )
+
 
 def downgrade() -> None:
+    op.execute(
+        "UPDATE analysis_reports SET overall_confidence = 0 WHERE overall_confidence IS NULL"
+    )
+    op.alter_column(
+        "analysis_reports", "overall_confidence", existing_type=sa.Float(), nullable=False
+    )
+
     op.drop_column("evidence_entries", "started_at")
     op.drop_column("evidence_entries", "symbol")
     op.drop_column("evidence_entries", "repeated_of")

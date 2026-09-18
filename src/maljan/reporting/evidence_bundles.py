@@ -227,7 +227,11 @@ def bundle_for(
             "binary": base,
             "facts": {
                 "verdict": report.verdict,
-                "confidence": round(report.overall_confidence, 2),
+                "confidence": (
+                    None
+                    if report.overall_confidence is None
+                    else round(report.overall_confidence, 2)
+                ),
                 "category": report.malware_category,
                 "severity": report.severity.rating if report.severity else None,
                 "top_ttps": [
@@ -262,7 +266,11 @@ def bundle_for(
             "facts": {
                 "verdict": report.verdict,
                 "severity": report.severity.rating if report.severity else None,
-                "confidence": round(report.overall_confidence, 2),
+                "confidence": (
+                    None
+                    if report.overall_confidence is None
+                    else round(report.overall_confidence, 2)
+                ),
                 "degraded": report.degraded_mode,
             },
         }

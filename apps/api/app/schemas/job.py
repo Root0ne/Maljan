@@ -252,7 +252,9 @@ class ReportDetailResponse(BaseModel):
     id: uuid.UUID
     job_id: uuid.UUID
     verdict: str
-    overall_confidence: float
+    # ``None`` when nothing assessed one. A client shows "not assessed" for it
+    # rather than 0, which is a confidence and a different statement.
+    overall_confidence: float | None
     malware_category: str | None
     stix_bundle: dict | None
     mitre_techniques: list | None
