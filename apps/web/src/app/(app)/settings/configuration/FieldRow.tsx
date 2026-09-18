@@ -229,11 +229,17 @@ export default function FieldRow({
         <div className="flex gap-3 mt-1">
           {/* Both are destructive and both were 11px grey text with nothing
               about them that said "button". The text stays small; the box
-              around it is the affordance, and clears the 24px minimum. */}
+              around it is the affordance, and clears the 24px minimum.
+
+              Which setting they belong to is a *description*, not a name: an
+              `aria-label` here replaced the accessible name with something the
+              button does not say, which is a Label-in-Name failure (WCAG
+              2.5.3) as well as a broken locator. The row's own label carries
+              the context instead. */}
           {dirty && (
             <button
               type="button"
-              aria-label={`Discard the staged change to ${entry.title}`}
+              aria-describedby={labelId}
               className="h-6 rounded border border-border px-2 text-[11px] text-text-secondary hover:text-text-primary hover:border-text-muted"
               onClick={onUnstage}
             >
@@ -243,7 +249,7 @@ export default function FieldRow({
           {source === "ui" && entry.editable && (
             <button
               type="button"
-              aria-label={`Remove the stored value of ${entry.title}`}
+              aria-describedby={labelId}
               className="h-6 rounded border border-border px-2 text-[11px] text-text-secondary hover:text-text-primary hover:border-text-muted"
               title="Removes the stored value now, without Apply"
               onClick={onReset}
