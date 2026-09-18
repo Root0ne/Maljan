@@ -2147,25 +2147,29 @@ async def _sweep_orphan_jobs(db_session: async_sessionmaker, redis_conn: Any = N
     else:
         abandoned = {job_id for job_id in still_within if job_id not in claimed}
 
-    groups = [(over_timeout, _SWEPT_OVER_TIMEOUT), (abandoned, _SWEPT_ABANDONED)]
+    groups = [
+        (ids, reason)
+        for ids, reason in ((over_timeout, _SWEPT_OVER_TIMEOUT), (abandoned, _SWEPT_ABANDONED))
+        if ids
+    ]
     affected: list[str] = []
-    async with db_session() as db:
-        for ids, reason in groups:
-            if not ids:
-                continue
-            result = await db.execute(
-                update(AnalysisJob)
-                .where(
-                    AnalysisJob.id.in_([uuid.UUID(job_id) for job_id in ids]),
-                    # Re-checked in the statement: a worker may have finished
-                    # one of these between the read above and this write.
-                    AnalysisJob.status == "running",
+    if groups:
+        async with db_session() as db:
+            for ids, reason in groups:
+                result = await db.execute(
+                    update(AnalysisJob)
+                    .where(
+                        AnalysisJob.id.in_([uuid.UUID(job_id) for job_id in ids]),
+                        # Re-checked in the statement: a worker may have
+                        # finished one of these between the read above and
+                        # this write.
+                        AnalysisJob.status == "running",
+                    )
+                    .values(status="failed", completed_at=func.now(), error_message=reason)
+                    .returning(AnalysisJob.id)
                 )
-                .values(status="failed", completed_at=func.now(), error_message=reason)
-                .returning(AnalysisJob.id)
-            )
-            affected.extend(str(row[0]) for row in result.all())
-        await db.commit()
+                affected.extend(str(row[0]) for row in result.all())
+            await db.commit()
 
     if affected:
         logger.warning(
