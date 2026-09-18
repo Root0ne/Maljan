@@ -879,6 +879,33 @@ Those two, plus `MALJAN_STAGING_TTL_HOURS` above, are the whole of what the
 `analysis` sidecar's `env_allow` carries; the `network` sidecar's carries the
 two in this table and nothing else. Neither sees a credential of any kind.
 
+**How the variable reaches a sidecar.** A stdio child is started with a built
+environment rather than the worker's own: the general-purpose names (`PATH`,
+`HOME`, the locale and temp ones), then exactly the names that server's
+`env_allow` lists, then its `env` map. `MALJAN_SAMPLE_ROOTS` is therefore named
+on the two file-reading built-ins and on no others — a variable that says where
+this host keeps malware is not something every child Maljan starts has any
+business reading. A tool server an operator adds receives it only when they
+put the name in its own `env_allow`, which is the same switch a server of
+theirs that takes paths would need anyway.
+
+The environment is copied into the child when it is spawned, so the roots have
+to be complete before a job's first sidecar starts — and they are: the worker
+exports its download directory and sample mirrors at startup, the mirror step
+and a sandbox capture fetch name theirs while the run is still assembling its
+inputs, and a run that was handed a sample path names that file's directory
+before the pipeline builds. A job's servers are attached after all of it, and a
+sidecar held over from an earlier job is closed and started again for the new
+job, so nothing has to be restarted mid-run for a root to take effect.
+
+The `env_allow` of a *built-in* is the shipped list plus whatever an admin
+added to it, and it cannot be made shorter. The registry is stored as one row
+holding every server, written whole whenever anything in it is saved, so
+without that floor a deployment that had configured its servers before a
+sidecar gained a variable would keep starting that sidecar without it — which
+for `MALJAN_SAMPLE_ROOTS` means every tool call on the run's own sample
+refused with `path_outside_roots`.
+
 A refusal is the ordinary structured error with the code `path_outside_roots`
 and a remedy, and it names no host path.
 

@@ -317,3 +317,26 @@ async def test_the_mask_for_a_secret_leaf_means_unchanged(key):
 
     assert result.applied == ["core.llm.provider"]
     assert svc.box.decrypt(stored.value) == "sk-real"
+
+
+@pytest.mark.asyncio
+async def test_the_server_editor_shows_the_environment_names_a_built_in_really_gets(key):
+    """A registry row saved before a sidecar gained a variable is repaired on
+    load, so the editor shows what the child is started with rather than what
+    the row happens to hold."""
+    from maljan.core.config import Settings
+    from maljan.tools.roots import SAMPLE_ROOTS_ENV
+
+    stored: dict[str, Any] = {}
+    for name, server in Settings(_env_file=None).mcp.servers.items():
+        entry = server.model_dump(mode="json")
+        entry.pop("auth_token", None)
+        entry["env_allow"] = [n for n in entry["env_allow"] if n != SAMPLE_ROOTS_ENV]
+        stored[name] = entry
+    rows = [RuntimeSetting(key="core.mcp.servers", value=stored, is_secret=False)]
+
+    shown = (await svc.SettingsService(make_db(rows)).values())["core.mcp.servers"].value
+
+    assert SAMPLE_ROOTS_ENV in shown["analysis"]["env_allow"]
+    assert SAMPLE_ROOTS_ENV in shown["network"]["env_allow"]
+    assert SAMPLE_ROOTS_ENV not in shown["knowledge"]["env_allow"]

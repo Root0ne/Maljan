@@ -22,7 +22,7 @@ Heterogeneous Model Ensemble:
 import contextvars
 import re
 import sys
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from pathlib import PurePosixPath
 from typing import Annotated, Any, Literal
 
@@ -817,6 +817,39 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
     }
 
 
+def builtin_env_allow(key: str, configured: Iterable[str]) -> list[str]:
+    """The names a built-in's child may read: the shipped ones, then the operator's.
+
+    A built-in sidecar's environment needs belong to the code that ships with
+    it. ``analysis`` and ``network`` refuse a path argument that lands outside
+    the directories ``MALJAN_SAMPLE_ROOTS`` names, so a child that cannot read
+    that variable refuses the very sample its run is about — with the error a
+    real escape attempt gets, in the ledger and in front of the model.
+
+    The registry is stored as a single row holding every server, written whole
+    whenever an operator saves anything in it: a token, a server of their own,
+    a built-in switched off. Each save therefore pins the built-ins' launch
+    parameters as they stood that day, and re-seeding only the *missing* keys
+    left a name added to a sidecar afterwards reaching fresh installs alone.
+    Applying the shipped names as a floor is what makes a change to a
+    built-in's environment reach a deployment that has been configured.
+
+    Operator names are kept, after the shipped ones, so an ``env_allow`` an
+    admin added to a built-in still carries what they put there. A server key
+    that is not a built-in is not touched at all: what a server an operator
+    added may read is entirely theirs to say.
+    """
+    shipped = _builtin_servers().get(key)
+    if shipped is None:
+        return list(dict.fromkeys(configured))
+    return _env_allow_floor(shipped.env_allow, configured)
+
+
+def _env_allow_floor(shipped: Iterable[str], configured: Iterable[str]) -> list[str]:
+    """``shipped`` first, then whatever else ``configured`` names, each once."""
+    return list(dict.fromkeys([*shipped, *configured]))
+
+
 class MCPConfig(BaseModel):
     """The operator-visible registry of tool servers.
 
@@ -840,9 +873,14 @@ class MCPConfig(BaseModel):
         keeps every other field they set. An override written before a built-in
         existed simply gains it. Neither can end with a run silently missing a
         sidecar the pipeline assumes.
+
+        ``env_allow`` is the one field a stored entry does not get to shrink —
+        see ``builtin_env_allow``.
         """
         for key, default in _builtin_servers().items():
-            self.servers.setdefault(key, default)
+            stored = self.servers.setdefault(key, default)
+            if stored is not default:
+                stored.env_allow = _env_allow_floor(default.env_allow, stored.env_allow)
         return self
 
 

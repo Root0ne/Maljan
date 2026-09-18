@@ -257,3 +257,39 @@ async def test_the_probe_returns_the_manifest_and_counts_the_unavailable(monkeyp
 async def test_a_server_without_a_manifest_has_no_details():
     result = await probe_mcp({"name": "r2custom", "entry": {"enabled": True, "command": "r2mcp"}})
     assert result.ok is True and result.details is None
+
+
+@pytest.mark.asyncio
+async def test_a_built_in_is_probed_with_the_environment_names_it_ships_with():
+    """A row stored before a sidecar gained a variable must not make the
+    connection test launch a different server than the run launches."""
+    from maljan.core.config import Settings
+    from maljan.tools.roots import SAMPLE_ROOTS_ENV
+
+    stored = Settings(_env_file=None).mcp.servers["analysis"].model_dump(mode="json")
+    stored.pop("auth_token", None)
+    stored["env_allow"] = [n for n in stored["env_allow"] if n != SAMPLE_ROOTS_ENV]
+
+    result = await run_mcp_probe("analysis", {}, {"core.mcp.servers": {"analysis": stored}})
+
+    assert result.ok is True
+    assert SAMPLE_ROOTS_ENV in _Handle.made[-1].config.env_allow
+
+
+@pytest.mark.asyncio
+async def test_a_server_the_operator_added_is_probed_with_exactly_its_own_names():
+    from maljan.tools.roots import SAMPLE_ROOTS_ENV
+
+    result = await run_mcp_probe(
+        "r2custom",
+        {},
+        {
+            "core.mcp.servers": {
+                "r2custom": {"enabled": True, "command": "r2mcp", "env_allow": ["R2_HOME"]}
+            }
+        },
+    )
+
+    assert result.ok is True
+    assert _Handle.made[-1].config.env_allow == ["R2_HOME"]
+    assert SAMPLE_ROOTS_ENV not in _Handle.made[-1].config.env_allow

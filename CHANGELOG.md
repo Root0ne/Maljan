@@ -747,6 +747,25 @@ change landed on `main`.
 
 ### Fixed
 
+- **The sample roots reach a configured deployment's sidecars, not only a
+  fresh one.** The `analysis` and `network` sidecars read a path argument only
+  inside the directories `MALJAN_SAMPLE_ROOTS` names, and they learn them from
+  their own `env_allow` — but the registry of tool servers is stored as a
+  single row holding every server, written whole each time anything in it is
+  saved, and a built-in that was already in that row kept every field it had
+  been saved with. A deployment that had configured its servers before the
+  confinement shipped therefore went on starting both sidecars without the
+  variable, and every analyst tool call on the run's own sample came back
+  refused with `path_outside_roots` — the error meant for a path the sample's
+  author chose. A built-in's `env_allow` is now the shipped names plus
+  whatever an admin added — on load, on save, in the editor's own view and in
+  the connection test, which launches the server a run launches — so a name a
+  sidecar gains reaches a deployment that has been configured rather than a
+  fresh install alone. A server an operator added is untouched: it sees
+  the roots only when its own `env_allow` lists them, and the general-purpose
+  environment every child gets is unchanged. Proven through the real spawn
+  path — a live sidecar started the way the registry starts one reads a file
+  under an exported root and still refuses one outside every root.
 - **Four documented facts that had drifted from the code.** The delegation
   section said a lead's 1800 s stage had room for five asks where
   `_asks_that_fit` computes six and the `ask_<key>` description gives the model

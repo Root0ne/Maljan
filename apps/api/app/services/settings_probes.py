@@ -12,7 +12,7 @@ from typing import Any
 
 import httpx
 from maljan.core import virustotal
-from maljan.core.config import MCPServerConfig
+from maljan.core.config import BUILTIN_SERVER_KEYS, MCPServerConfig, builtin_env_allow
 from maljan.core.logger import logger
 from maljan.core.model_assignments import endpoint_for, endpoint_label, endpoint_where
 from maljan.core.paths import resolve_data
@@ -756,16 +756,23 @@ async def handshake(config: MCPServerConfig, name: str) -> tuple[list[str], dict
         await handle.aclose()
 
 
-def _probe_config(entry: dict[str, Any]) -> MCPServerConfig:
+def _probe_config(entry: dict[str, Any], name: str = "") -> MCPServerConfig:
     """The entry as configured, forced on and un-narrowed.
 
     A probe answers "what does this server offer"; a disabled entry or an
     empty allow-list are answers to a different question ("what may the model
     call"), and applying them here would make the manifest unreadable exactly
     when the operator needs it to pick from.
+
+    A built-in is started with the shipped environment names a job starts it
+    with (``builtin_env_allow``), rather than with whatever a stored row holds:
+    the probe exists so that the console tests the same server the run gets.
     """
     config = MCPServerConfig.model_validate(entry)
-    return config.model_copy(update={"enabled": True, "tools": None})
+    update: dict[str, Any] = {"enabled": True, "tools": None}
+    if name in BUILTIN_SERVER_KEYS:
+        update["env_allow"] = builtin_env_allow(name, config.env_allow)
+    return config.model_copy(update=update)
 
 
 async def probe_mcp(v: dict[str, Any]) -> ProbeResult:
@@ -773,7 +780,7 @@ async def probe_mcp(v: dict[str, Any]) -> ProbeResult:
     t0 = time.perf_counter()
     name = str(v.get("name") or "server")
     try:
-        config = _probe_config(dict(v.get("entry") or {}))
+        config = _probe_config(dict(v.get("entry") or {}), name)
     except ValidationError as exc:
         fields = _validation_detail(exc)
         return ProbeResult(False, _ms(t0), f"invalid server settings: {fields}")
