@@ -33,7 +33,8 @@ import {
 } from "@/lib/runStore";
 import { useRun } from "@/lib/useRun";
 import { formatDateTime, formatDuration } from "@/lib/report-utils";
-import { verdictBucket, verdictLabel } from "@/lib/verdict";
+import { verdictBucket } from "@/lib/verdict";
+import { verdictHeadline, VERDICT_CONFLICT_NOTE } from "@/lib/verdictHeader";
 import { getErrorMessage, isApiStatus } from "@/lib/errors";
 import type { VerdictBucket } from "@/lib/verdict";
 
@@ -198,13 +199,20 @@ export default function AnalysisLayout({
    * enrichment lands or when the run finishes, without waiting for the poll
    * to come back round. */
   const lastEventCursor = useRef(0);
+  /* The store folds the whole recorded feed in one commit, so the first batch
+   * to arrive is this run's history. An `enrichment_complete` in it happened
+   * hours ago: worth one refetch, never worth announcing in the present tense
+   * every time the run is opened. */
+  const feedIsLive = useRef(false);
   useEffect(() => {
     if (events.length <= lastEventCursor.current) return;
+    const replaying = !feedIsLive.current;
+    feedIsLive.current = true;
     for (let i = lastEventCursor.current; i < events.length; i++) {
       const e = events[i];
       if (e.type === "enrichment_complete" || e.type === "completed") {
         refetchRef.current?.();
-        if (e.type === "enrichment_complete") {
+        if (e.type === "enrichment_complete" && !replaying) {
           setEnrichmentToast("Threat intel enrichment finished. Report refreshed.");
           setTimeout(() => setEnrichmentToast(null), 5000);
         }
@@ -231,17 +239,16 @@ export default function AnalysisLayout({
 
   /* Derive header data strictly from real API data — no mock fallback */
   const verdict = verdictBucket(report?.verdict);
-  /* "not assessed" rather than 0/100: a run whose judge never answered has no
-   * confidence, and 0 is a confidence — the lowest one there is. */
-  const confidence =
-    report?.overall_confidence == null
-      ? null
-      : Math.round(report.overall_confidence * 100);
+  const severityRating = report?.malware_report?.severity?.rating ?? null;
+  const headline = verdictHeadline(
+    report?.verdict,
+    report?.overall_confidence,
+    severityRating,
+  );
   const category = report?.malware_category ?? "";
   // Prefer a readable sample identity (filename, then hash prefix) over
   // the opaque sample_id UUID — available from the job even during the live run,
   // before the rich report's identity payload lands.
-  const sampleId = job?.sample_id ?? "";
   const jobSampleLabel =
     job?.sample_filename ||
     (job?.sample_sha256 ? `${job.sample_sha256.slice(0, 16)}…` : "");
@@ -338,11 +345,15 @@ export default function AnalysisLayout({
                 <h1 className="text-lg font-semibold text-text-primary truncate max-w-full" title={headerTitle}>
                   {headerTitle}
                 </h1>
-                <span className={`text-xs px-2 py-0.5 rounded bg-bg-active ${v.text}`}>
-                  {verdictLabel(report?.verdict)}
-                </span>
-                <span className="text-xs text-text-secondary bg-bg-active px-2 py-0.5 rounded">
-                  {confidence === null ? "Confidence: not assessed" : `Confidence: ${confidence}/100`}
+                <span
+                  className={`text-xs px-2 py-0.5 rounded ${
+                    headline.conflict
+                      ? "border border-status-orange/40 bg-status-orange/10 text-status-orange"
+                      : `bg-bg-active ${v.text}`
+                  }`}
+                  title={headline.conflict ? VERDICT_CONFLICT_NOTE : undefined}
+                >
+                  {headline.text}
                 </span>
                 {headerSubtitle && (
                   <span className="text-xs text-text-secondary bg-bg-active px-2 py-0.5 rounded">
@@ -373,13 +384,14 @@ export default function AnalysisLayout({
                 )}
               </div>
 
+              {headline.conflict && (
+                <p className="mb-1 text-xs text-status-orange">{VERDICT_CONFLICT_NOTE}</p>
+              )}
+
+              {/* The sample is the `h1` above. A "Sample:" line under it was
+                  the same filename a second time, and for a hash-named sample
+                  the same hash. */}
               <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-text-secondary">
-                <div>
-                  <span className="text-text-muted">Sample: </span>
-                  <code className="font-mono">
-                    {fileName || jobSampleLabel || sampleId.slice(0, 12)}
-                  </code>
-                </div>
                 <div>
                   <span className="text-text-muted">Duration: </span>
                   {duration}
