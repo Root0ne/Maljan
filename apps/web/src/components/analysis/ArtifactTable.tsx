@@ -32,10 +32,8 @@ export default function ArtifactTable({ section }: { section: EvidenceSection })
   return (
     <div className="bg-bg-surface border border-border rounded">
       <div className="px-4 py-3 border-b border-border flex flex-wrap items-center gap-2">
-        {/* A tool that named its section gets its name; one that did not gets
-            its key read back rather than printed as a key. */}
         <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-          {section.title || humaniseKey(section.key)}
+          {sectionTitle(section)}
         </h2>
         <span className="text-[10px] font-mono text-text-muted">{section.key}</span>
         <span className="ml-auto flex items-center gap-2">
@@ -50,6 +48,23 @@ export default function ArtifactTable({ section }: { section: EvidenceSection })
       <SectionBody section={section} rows={rows} />
     </div>
   );
+}
+
+/**
+ * What a section is titled.
+ *
+ * A tool that named its section keeps its name. One that did not has a title
+ * derived from its key on the way out — "Ioc", "Ioc count" — and that is read
+ * back here, alongside the key fallback for a section with no title at all.
+ * The derivation is recognised rather than assumed: a title is only re-read
+ * when it is what reading the key would have produced anyway, so a title
+ * somebody wrote keeps every capital they put in it.
+ */
+function sectionTitle(section: EvidenceSection): string {
+  const key = humaniseKey(section.key);
+  const title = (section.title ?? "").trim();
+  if (!title) return key;
+  return title.toLowerCase() === key.toLowerCase() ? key : title;
 }
 
 /** Whether the section carries anything besides its rows. */

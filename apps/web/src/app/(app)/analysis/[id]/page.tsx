@@ -684,14 +684,20 @@ function DownloadBar({
       >
         {busy === "timeline" ? "fetching..." : "\u2193 Timeline"}
       </button>
+      {/* A disabled control never surfaces its own `title`, so the reason it
+          is disabled was written somewhere nobody could read it. */}
       <button
         onClick={downloadMisp}
         disabled={mispDisabled}
-        title={mispDisabled ? "No MISP attributes generated for this report" : undefined}
         className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted disabled:text-text-disabled disabled:cursor-not-allowed"
       >
         ↓ MISP attributes
       </button>
+      {mispDisabled && (
+        <span className="text-[11px] text-text-muted">
+          this run generated no MISP attributes
+        </span>
+      )}
       <EnrichButton reportId={reportId} />
       {error && (
         <div
