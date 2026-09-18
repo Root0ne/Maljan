@@ -217,6 +217,27 @@ class ServerCapabilities:
             )
         return out
 
+    def unusable(self) -> frozenset[str]:
+        """The tools this host cannot run, and which answer nothing without it.
+
+        A tool the model is offered is a tool the model will spend a step on.
+        One run was handed four of them, got four failures back, and the
+        degradation that explained why went to the log and the run summary
+        rather than to the agent holding the tool. So these are kept off the
+        list the model is given — they stay in the manifest, with the reason
+        and the remedy, which is what an operator needs and what the degraded
+        block prints.
+
+        A tool that declares what it still answers is not one of them:
+        ``archive_list`` without py7zr still lists a zip, and withholding it
+        would cost a whole archive analysis to save a 7z failure.
+        """
+        return frozenset(
+            name
+            for name, cell in self.tools.items()
+            if not cell.get("available", True) and not cell.get("without")
+        )
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "server": self.server,

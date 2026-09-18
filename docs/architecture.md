@@ -558,9 +558,13 @@ Each sidecar also answers `capabilities`: which of its tools need an optional
 library, a binary or a setting, and which of those are present on its host,
 probed when the server starts. The registry keeps the manifest on the server's
 entry when it attaches, the settings probe returns it so the console's server
-card names the unavailable tools before a run, and an analysis stage records
-each bound tool the manifest marks unavailable as
-`server.<key>.<tool>_unavailable(<reason>); <remedy>` when it starts. A tool
+card names the unavailable tools before a run, and each tool the manifest
+marks unavailable is recorded as
+`server.<key>.<tool>_unavailable(<reason>); <remedy>`. A tool marked
+unavailable is also kept out of the list the model is given, because offering
+one is offering a step that can only fail — unless the manifest says what the
+tool still answers without its library, in which case it is offered and the
+reason says what is missing from its answer. A tool
 that cannot answer returns an error with a code and an authored remediation
 (`maljan.tools.errors`) rather than raising, and the sidecars' guards rewrite
 an implementation's flat error into that shape. See *Writing a tool server* in

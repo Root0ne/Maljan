@@ -816,6 +816,18 @@ change landed on `main`.
   No chain verdict is claimed: `signature_valid` stays unset, because deciding
   whether a certificate is trusted needs a root store this process does not
   have. `SignatureInfo` gains `signer_thumbprint`.
+- **A tool the host cannot run is no longer offered to the model.** One run
+  reported `22/22 tools exposed` while `apk_info`, `archive_list`,
+  `document_info` and `macho_info` were unavailable on that host: the
+  degradation was logged and recorded, and the model was handed the tool
+  anyway, spent a step on it and got a failure back. The registry now drops a
+  tool the server's own manifest marks unavailable from the list the model is
+  given, unless the manifest says what the tool still answers without its
+  library — `archive_list` without py7zr still lists a zip, and withholding it
+  would cost an archive analysis to save a 7z failure. The manifest is
+  unchanged and still names every tool with its reason and remedy, and the
+  degradation reason is now said where the tool is withheld rather than where
+  it would have been bound, so the degraded block reads as it did before.
 - **Four documented facts that had drifted from the code.** The delegation
   section said a lead's 1800 s stage had room for five asks where
   `_asks_that_fit` computes six and the `ask_<key>` description gives the model
