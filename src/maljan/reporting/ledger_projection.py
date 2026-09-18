@@ -198,6 +198,7 @@ def _signing_from_ledger(ledger: list[LedgerEntry]) -> SignatureInfo:
             is_signed=bool(auth.get("present") or apk.get("present") or macho.get("present")),
             signer_subject=_opt(auth.get("subject")) or _opt(apk.get("subject")),
             signer_issuer=_opt(auth.get("issuer")) or _opt(apk.get("issuer")),
+            signer_thumbprint=_opt(auth.get("thumbprint")) or _opt(apk.get("thumbprint")),
             signature_valid=valid if isinstance(valid, bool) else None,
             evidence_id=entry.id,
         )

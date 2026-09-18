@@ -76,6 +76,10 @@ class SignatureInfo(BaseModel):
     is_signed: bool = False
     signer_subject: str | None = None
     signer_issuer: str | None = None
+    # SHA-1 over the signer certificate, which is how Windows, VirusTotal and
+    # every signing-certificate feed name one. The identifier the subject and
+    # issuer above were read from.
+    signer_thumbprint: str | None = None
     signature_valid: bool | None = None
     # The pack's ``signing_info`` entry these facts were read from.
     evidence_id: str | None = None

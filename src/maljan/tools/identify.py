@@ -195,6 +195,7 @@ def signing_info(path: str, file_type: str | None = None) -> dict[str, Any]:
             "present": bool(info.is_signed),
             "subject": info.signer_subject,
             "issuer": info.signer_issuer,
+            "thumbprint": info.signer_thumbprint,
         }
     elif scheme == "apk":
         out["apk"] = _apk_signing(target, blob)

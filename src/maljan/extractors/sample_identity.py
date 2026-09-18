@@ -691,11 +691,57 @@ def _extract_signing(blob: bytes | None) -> SignatureInfo:
         ]
         if security_dir.Size and security_dir.VirtualAddress:
             info.is_signed = True
-            # Subject / issuer extraction needs ASN.1 parsing; surface the
-            # presence flag here and let an enrichment step fill the names.
+            _name_the_signer(info, blob, security_dir.VirtualAddress, security_dir.Size)
     except Exception:  # noqa: BLE001
         pass
     return info
+
+
+def _name_the_signer(info: SignatureInfo, blob: bytes, at: int, size: int) -> None:
+    """Fill subject, issuer and thumbprint from the certificate table.
+
+    A signed binary used to reach the report as bare "authenticode present" —
+    the subject and issuer were left to "an enrichment step", and no such step
+    exists — so the strongest benign fact a run could hold arrived anonymous
+    and the one analyst that spoke never had a publisher to weigh.
+
+    Reading the names is not verifying the chain. ``signature_valid`` stays
+    ``None``, because deciding whether this certificate is trusted needs a
+    root store this process does not have, and a tool that reported "signed"
+    when it means "carries a signature blob" would be stating a verdict it
+    never checked.
+    """
+    # WIN_CERTIFICATE: dwLength, wRevision, wCertificateType, then the DER
+    # PKCS#7 SignedData. ``VirtualAddress`` is a file offset for this one
+    # directory, not an RVA.
+    header = blob[at : at + 8]
+    if len(header) < 8:
+        return
+    declared = int.from_bytes(header[:4], "little")
+    length = min(declared, size) - 8
+    if length <= 0:
+        return
+    der = blob[at + 8 : at + 8 + length]
+    try:
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.serialization import pkcs7
+
+        certificates = pkcs7.load_der_pkcs7_certificates(der)
+    except Exception:  # noqa: BLE001 — an unreadable blob leaves the names unset
+        return
+    if not certificates:
+        return
+    # The signer is the leaf: the one certificate in the bundle that did not
+    # issue any of the others. Authenticode carries the chain, and reporting
+    # the root as the signer would name the wrong party.
+    issuers = {c.issuer for c in certificates}
+    leaf = next((c for c in certificates if c.subject not in issuers), certificates[0])
+    try:
+        info.signer_subject = leaf.subject.rfc4514_string()
+        info.signer_issuer = leaf.issuer.rfc4514_string()
+        info.signer_thumbprint = leaf.fingerprint(hashes.SHA1()).hex()
+    except Exception:  # noqa: BLE001 — a malformed name is no name, not a crash
+        return
 
 
 def _safe_imphash(blob: bytes) -> str | None:

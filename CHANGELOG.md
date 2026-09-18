@@ -806,6 +806,16 @@ change landed on `main`.
   tool for this sample produced a result, and speaks only when none did, which
   is still the true answer for a package whose `apk_info` could not load its
   library.
+- **A signed binary reached the pack anonymous.** `signing_info` reported
+  `authenticode present` and left the subject and issuer for "an enrichment
+  step", and no such step exists — so the strongest benign fact a run could
+  hold named nobody, and on a signed, 0/74-clean binary the only analyst that
+  spoke never had a publisher to weigh. The signer's subject, issuer and SHA-1
+  thumbprint are now read out of the PKCS#7 blob in the certificate table, the
+  signer being the certificate in the bundle that issued none of the others.
+  No chain verdict is claimed: `signature_valid` stays unset, because deciding
+  whether a certificate is trusted needs a root store this process does not
+  have. `SignatureInfo` gains `signer_thumbprint`.
 - **Four documented facts that had drifted from the code.** The delegation
   section said a lead's 1800 s stage had room for five asks where
   `_asks_that_fit` computes six and the `ask_<key>` description gives the model

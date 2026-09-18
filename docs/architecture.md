@@ -103,8 +103,10 @@ them; a fact a model may or may not ask for is not a fact a run can rely on.
 The pack is the same code the `analysis` sidecar serves, called in-process, in
 a fixed order so the ids a sample produces are the same from one run to the
 next: `identify_file` and `hashes`; `signing_info` for the routed format alone
-(Authenticode for a PE, the APK signing block for an APK, `LC_CODE_SIGNATURE`
-for a Mach-O, and for anything else the fact that it has no signing scheme);
+(Authenticode for a PE, with the signer's subject, issuer and thumbprint read
+out of the certificate table and no chain verdict claimed; the APK signing
+block for an APK; `LC_CODE_SIGNATURE` for a Mach-O; and for anything else the
+fact that it has no signing scheme);
 the format tool the routed type selects (`pe_info`, `elf_info`, `macho_info`,
 `apk_info`, `document_info` or `archive_list`, which carry the section
 entropies, the packer signature hits and the import rows); a `strings` head

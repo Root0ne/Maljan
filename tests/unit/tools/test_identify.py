@@ -12,7 +12,11 @@ from __future__ import annotations
 import hashlib
 import struct
 import zipfile
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
+
+import pytest
 
 from maljan.tools import identify
 
@@ -234,3 +238,146 @@ class TestSigningInfo:
         result = identify.signing_info(_write(tmp_path, "s.exe", PE_STUB))
         assert result["format"] == "pe"
         assert "authenticode" in result
+
+
+def _a_certificate(
+    common_name: str,
+    *,
+    issuer_name: str | None = None,
+    issuer_key: Any = None,
+    authority: bool = False,
+) -> tuple[Any, Any]:
+    """A throwaway certificate and its key, generated for this test alone."""
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    opened = datetime(2026, 1, 1, tzinfo=UTC)
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)]))
+        .issuer_name(
+            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, issuer_name or common_name)])
+        )
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(opened)
+        .not_valid_after(opened + timedelta(days=365))
+        .add_extension(x509.BasicConstraints(ca=authority, path_length=None), critical=True)
+        .sign(issuer_key or key, hashes.SHA256())
+    )
+    return certificate, key
+
+
+def _authenticode_blob() -> tuple[bytes, Any]:
+    """A PKCS#7 SignedData carrying a publisher certificate and its issuer."""
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.serialization import pkcs7
+
+    authority, authority_key = _a_certificate("Maljan Test Root CA", authority=True)
+    publisher, publisher_key = _a_certificate(
+        "Maljan Test Publisher", issuer_name="Maljan Test Root CA", issuer_key=authority_key
+    )
+    der = (
+        pkcs7.PKCS7SignatureBuilder()
+        .set_data(b"authenticode")
+        .add_signer(publisher, publisher_key, hashes.SHA256())
+        .add_certificate(authority)
+        .sign(serialization.Encoding.DER, [pkcs7.PKCS7Options.DetachedSignature])
+    )
+    return der, publisher
+
+
+def _signed_pe(pkcs7_der: bytes) -> bytes:
+    """A PE32 whose security directory points at ``pkcs7_der``.
+
+    Hand-built for the same reason the import-table fixtures are: the one
+    thing under test is the certificate table, and every other field is here
+    only so that ``pefile`` will walk to it.
+    """
+    opt = bytearray()
+    opt += struct.pack("<HBB", 0x10B, 14, 29)
+    opt += struct.pack("<III", 0x200, 0, 0)
+    opt += struct.pack("<III", 0x1000, 0x1000, 0x1000)
+    opt += struct.pack("<III", 0x400000, 0x1000, 0x200)
+    opt += struct.pack("<HHHHHH", 6, 0, 0, 0, 6, 0)
+    opt += struct.pack("<I", 0)
+    opt += struct.pack("<II", 0x2000, 0x200)
+    opt += struct.pack("<IHH", 0, 3, 0x8140)
+    opt += struct.pack("<IIII", 0x100000, 0x1000, 0x100000, 0x1000)
+    opt += struct.pack("<II", 0, 16)
+    # The WIN_CERTIFICATE is at a file offset, not an RVA — the one data
+    # directory of the sixteen that is addressed that way.
+    certificate = struct.pack("<IHH", len(pkcs7_der) + 8, 0x0200, 0x0002) + pkcs7_der
+    directories = [(0, 0)] * 16
+    directories[4] = (0x400, len(certificate))
+    for rva, size in directories:
+        opt += struct.pack("<II", rva, size)
+
+    file_header = struct.pack("<HHIIIHH", 0x14C, 1, 0x5F5E0FF, 0, 0, len(opt), 0x0102)
+    headers = bytearray(0x200)
+    headers[0:2] = b"MZ"
+    headers[0x3C:0x40] = struct.pack("<I", 0x40)
+    at = 0x40
+    headers[at : at + 4] = b"PE\x00\x00"
+    at += 4
+    headers[at : at + len(file_header)] = file_header
+    at += len(file_header)
+    headers[at : at + len(opt)] = opt
+    at += len(opt)
+    headers[at : at + 40] = struct.pack(
+        "<8sIIIIIIHHI", b".text\x00\x00\x00", 0x200, 0x1000, 0x200, 0x200, 0, 0, 0, 0, 0xC0000040
+    )
+    return bytes(headers) + b"\x00" * 0x200 + certificate
+
+
+class TestWhoSignedIt:
+    """A signed binary was reported as `authenticode present` and nothing else.
+
+    The subject and issuer were left for "an enrichment step" that does not
+    exist, so the strongest benign fact a run had — a code-signing certificate
+    naming its publisher — reached every agent anonymous. Reading the names
+    out of the PKCS#7 blob is not verifying the chain, and nothing here claims
+    it is: `valid` stays unset.
+    """
+
+    def test_the_publisher_and_its_issuer_are_named(self, tmp_path: Path) -> None:
+        pytest.importorskip("pefile")
+        der, publisher = _authenticode_blob()
+        result = identify.signing_info(_write(tmp_path, "s.exe", _signed_pe(der)), file_type="pe")
+        assert result["authenticode"]["present"] is True
+        assert "Maljan Test Publisher" in result["authenticode"]["subject"]
+        assert "Maljan Test Root CA" in result["authenticode"]["issuer"]
+
+    def test_the_thumbprint_is_the_certificate_the_names_came_from(self, tmp_path: Path) -> None:
+        pytest.importorskip("pefile")
+        from cryptography.hazmat.primitives import hashes
+
+        der, publisher = _authenticode_blob()
+        result = identify.signing_info(_write(tmp_path, "s.exe", _signed_pe(der)), file_type="pe")
+        assert result["authenticode"]["thumbprint"] == publisher.fingerprint(hashes.SHA1()).hex()
+
+    def test_the_signer_is_the_leaf_and_not_its_authority(self, tmp_path: Path) -> None:
+        """The blob carries the chain; the one that signed the file is the one
+        nothing else in it issued."""
+        pytest.importorskip("pefile")
+        der, _publisher = _authenticode_blob()
+        result = identify.signing_info(_write(tmp_path, "s.exe", _signed_pe(der)), file_type="pe")
+        assert "Maljan Test Root CA" not in result["authenticode"]["subject"]
+
+    def test_no_chain_verdict_is_claimed(self, tmp_path: Path) -> None:
+        pytest.importorskip("pefile")
+        der, _publisher = _authenticode_blob()
+        result = identify.signing_info(_write(tmp_path, "s.exe", _signed_pe(der)), file_type="pe")
+        assert result["authenticode"].get("valid") is None
+
+    def test_an_unsigned_pe_names_nobody(self, tmp_path: Path) -> None:
+        result = identify.signing_info(_write(tmp_path, "s.exe", PE_STUB), file_type="pe")
+        assert result["authenticode"] == {
+            "present": False,
+            "subject": None,
+            "issuer": None,
+            "thumbprint": None,
+        }
