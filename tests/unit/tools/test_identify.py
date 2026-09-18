@@ -73,11 +73,26 @@ class TestHashes:
 
 
 class TestSigningInfo:
-    def test_an_unsigned_binary_reports_every_scheme_absent(self, tmp_path: Path) -> None:
-        result = identify.signing_info(_write(tmp_path, "s.bin", ELF_HEADER + b"\x00" * 512))
+    """One answer, about the format this sample was routed as.
+
+    The three schemes used to be reported together, so a PE carried "apk
+    present=no" and "macho present=no" beside the row that was about it —
+    statements about what the tool looks for, read downstream as findings
+    about the sample.
+    """
+
+    def test_a_format_with_no_signing_scheme_says_so_once(self, tmp_path: Path) -> None:
+        result = identify.signing_info(
+            _write(tmp_path, "s.bin", ELF_HEADER + b"\x00" * 512), file_type="elf"
+        )
+        assert result == {"format": "elf", "applicable": False}
+
+    def test_a_pe_is_asked_about_authenticode_and_nothing_else(self, tmp_path: Path) -> None:
+        result = identify.signing_info(_write(tmp_path, "s.exe", PE_STUB), file_type="pe")
+        assert result["format"] == "pe"
         assert result["authenticode"]["present"] is False
-        assert result["apk"]["present"] is False
-        assert result["macho"]["present"] is False
+        assert "apk" not in result
+        assert "macho" not in result
 
     def test_a_v1_signed_apk_is_found_from_its_meta_inf_certificate(self, tmp_path: Path) -> None:
         apk = tmp_path / "app.apk"
@@ -85,20 +100,42 @@ class TestSigningInfo:
             archive.writestr("AndroidManifest.xml", b"\x03\x00\x08\x00binary manifest")
             archive.writestr("classes.dex", b"dex\n035\x00")
             archive.writestr("META-INF/CERT.RSA", b"\x30\x82 fake pkcs7")
-        result = identify.signing_info(str(apk))
+        result = identify.signing_info(str(apk), file_type="apk")
+        assert result["format"] == "apk"
         assert result["apk"]["present"] is True
         assert result["apk"]["schemes"] == ["v1"]
         assert result["apk"]["cert_files"] == ["META-INF/CERT.RSA"]
+        assert "authenticode" not in result
+
+    def test_a_zip_that_is_not_an_apk_is_not_asked_about_apk_signing(self, tmp_path: Path) -> None:
+        """A .docx is a zip. Nothing about it is an Android signing scheme."""
+        document = tmp_path / "letter.docx"
+        with zipfile.ZipFile(document, "w") as archive:
+            archive.writestr("word/document.xml", b"<w:document/>")
+        assert identify.signing_info(str(document)) == {"format": "unknown", "applicable": False}
+        assert identify.signing_info(str(document), file_type="docx") == {
+            "format": "docx",
+            "applicable": False,
+        }
 
     def test_a_macho_load_command_chain_without_a_signature_says_so(self, tmp_path: Path) -> None:
         # One LC_SEGMENT_64 (0x19) command and nothing else.
         command = struct.pack("<II", 0x19, 16) + b"\x00" * 8
-        result = identify.signing_info(_write(tmp_path, "bin", _macho_64(command, 1)))
+        result = identify.signing_info(
+            _write(tmp_path, "bin", _macho_64(command, 1)), file_type="mach-o"
+        )
         assert result["macho"] == {"present": False}
 
     def test_a_macho_carrying_lc_code_signature_is_reported_as_signed(self, tmp_path: Path) -> None:
         commands = struct.pack("<II", 0x19, 16) + b"\x00" * 8
         commands += struct.pack("<II", 0x1D, 16) + b"\x00" * 8
         result = identify.signing_info(_write(tmp_path, "bin", _macho_64(commands, 2)))
+        assert result["format"] == "mach-o"
         assert result["macho"]["present"] is True
         assert result["macho"]["load_command"] == "LC_CODE_SIGNATURE"
+
+    def test_the_bytes_answer_when_the_caller_routed_nothing(self, tmp_path: Path) -> None:
+        """An agent calling the tool directly has a path and nothing else."""
+        result = identify.signing_info(_write(tmp_path, "s.exe", PE_STUB))
+        assert result["format"] == "pe"
+        assert "authenticode" in result

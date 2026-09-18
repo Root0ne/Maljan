@@ -747,6 +747,109 @@ change landed on `main`.
 
 ### Fixed
 
+- **Four documented facts that had drifted from the code.** The delegation
+  section said a lead's 1800 s stage had room for five asks where
+  `_asks_that_fit` computes six and the `ask_<key>` description gives the model
+  six; the events table omitted `via` from the roster row, `ran` from
+  `stage_finished`, `report_truncated` from `agent_message` and the
+  `enrichment_complete` row entirely; the evidence paragraph credited the
+  console with reading `run_summary.evidence.failures`, which it does not; and
+  the roster cache's comment justified itself with a live view that no longer
+  exists. The participants strip's own documentation now says that a
+  specialist reached through `ask_<key>` has its state inferred from its lines,
+  because no stage names it and `agent_progress` is published per stage.
+- **A long agent key inside a published sentence.** A key of 24 characters or
+  more has the shape of a credential, and nothing is exempt from that rule for
+  being lowercase, so such a key reads as `***` inside the prose of an event —
+  never in the identity fields the line is filed under, which travel whole, so
+  attribution and the operator's label are unaffected. The scrubber is a pure
+  function shared by every job on the worker and is deliberately not told which
+  roster is publishing. `docs/configuration.md` now says to keep agent keys
+  short, and a test pins the behaviour so the next reader finds the trade
+  rather than the symptom. No shipped key is close to the floor.
+- **The guard on published failures follows a renamed import and a line
+  handed on twice.** The AST walk that keeps
+  `base_agent.describe_exception_for_log` away from every publish site knew one
+  spelling of the name and one hop from a local. It now resolves an aliased
+  import — which is the shape the mistake most recently took here — walks the
+  taint to a fixed point, and sees a tuple, annotated or augmented target as
+  the binding it is. The floor under both rule engines' timeouts is pinned by
+  calling them with zero and reading what they pass down, rather than by
+  counting a line of their source.
+- **`signing_info` answers about the sample, not about itself.** It reported
+  all three schemes on every file, so a PE carried "apk present=no" and "macho
+  present=no" beside its Authenticode row — statements about what the tool
+  looks for, which the identity table and the report then drew as findings
+  about the sample. It now answers for the routed format alone (Authenticode
+  for a PE, the APK signing block for an APK, `LC_CODE_SIGNATURE` for a
+  Mach-O), and for a format with no such scheme it says that instead of three
+  absences. The tool takes the routing answer from its caller — the triage
+  pack passes it, the `analysis` sidecar takes it as an optional `file_type` —
+  and reads the bytes only when it is called with nothing else, which also
+  stops a `.docx` being asked about Android signing because it is a zip. The
+  console keeps choosing between three blocks as a fallback for reports
+  recorded before this. The identity table shows one signing row, for the
+  routed format, and none at all for a format with no signing scheme —
+  the routed `format` and the `applicable` flag are facts about what the tool
+  looks for, so neither is drawn as a row, in the export or in the console.
+  A JAR or an IPA, which used to reach the APK check because they are zips,
+  now reports no signature rather than an Android one.
+- **A verdict no model produced no longer carries a confidence.** When the
+  judge's body raised, the pipeline wrote a conservative "Suspicious" verdict
+  of its own — correctly, so a run is not lost — and the report then filled the
+  missing confidence from the mean of the analysts' confidence in their *own
+  claims*, printing 0.92 on the front page beside a decision none of them made.
+  The comment at the failure site still said the report node capped it, which
+  it has not done since the cap was removed. Such a verdict now carries
+  `overall_confidence` `null`, the report header reads "not assessed" and says
+  the judge did not answer, and the run summary records the note under
+  `verdict.fallback` with the class of the failure — in the summary the API
+  stores as well as in the report's own copy, so the SUMMARY tab's Run record
+  and an evaluation script reading `analysis_reports.run_summary` both see it.
+  The console's header shows
+  "Confidence: not assessed" rather than 0/100, and
+  `analysis_reports.overall_confidence` is nullable (`20260926000000`) so the
+  distinction survives being stored.
+- **The run-summary golden pins the summary a run is stored with.** It pinned
+  `RunSummary.to_dict()` while its docstring claimed to cover "what the API
+  stores", which is that dict plus four keys written onto it afterwards:
+  `dedupe`, `evidence`, `sections_without_evidence` and `fp_warnings`. `dedupe`
+  was pinned by nothing at all, so a rename of `indicators_merged` or
+  `findings_merged` would have kept every test green. The golden now covers the
+  stored dict, is regenerated by
+  `scripts/goldens/capture_run_summary_golden.py`, and the summary's evidence
+  block is built by one function (`pipeline.nodes.evidence_summary`) rather
+  than by a literal the golden could only agree with by hand.
+- **An empty tool output is no longer explained by a cause that did not
+  happen.** The evidence panel printed "The output was dropped to keep this
+  agent inside its byte budget" for *any* entry whose `output` was empty — a
+  failed call included, directly under the failure row it had just drawn —
+  because the flag that records a budget trim was dropped at persistence.
+  `truncated`, `repeated_of`, `symbol` and `started_at` are now columns
+  (`20260926000000`), the worker writes them, `GET /jobs/{id}/evidence` returns
+  them, and the sentence is shown only for an entry that says it was trimmed.
+  A call that simply answered with nothing now reads as that.
+- **A replayed conversation is the conversation again, not a reconstruction of
+  it.** `agent_messages` kept none of `kind`, `stage` or `display_name`,
+  although the live `agent_message` payload has carried all three and both the
+  model and the response schema are documented as mirroring that payload field
+  for field. A run read back from its rows therefore lost the arrows between a
+  delegated ask and its answer — the kind had to be re-derived, and the
+  derivation can only return `says`, `system` or `verdict` — put every line
+  into one unnamed stage, and named agents by their registry keys where the
+  live view had used the operator's labels. The three are columns
+  (`20260926000000`, all nullable), the recorder writes them, the report
+  endpoint returns them and the console prefers them, falling back to its
+  derivation for a run recorded before they existed.
+- **The two tables a reader meets first say what the code says.**
+  `docs/configuration.md` counted sixteen settings groups and listed sixteen
+  rows where the catalogue holds seventeen: **Live events**, the group
+  `core.events.stream_deltas` and `core.events.retention_days` belong to, was
+  missing from the only place that enumerates them. The README's teams table
+  dropped `triage_pack` from all four seeded teams that open on it, and showed
+  `mobile` and `deep_static` opening on `triage` — the triage *agent*, which is
+  a different stage. Both tables are now checked against `GROUP_ORDER` and
+  `_builtin_profiles()` by a test, so the next drift fails rather than ships.
 - **Semgrep covers the frontend.** The scan ran over `src/ apps/api/ services/
   scripts/` with `.semgrepignore` excluding `apps/web/`, so every file of the
   console was outside it and covered by CodeQL alone. The job and `make

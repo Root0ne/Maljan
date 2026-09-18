@@ -189,6 +189,7 @@ export const MOCK_EVIDENCE = [
     seq: 4,
     args: { min_length: 6 },
     output: "",
+    truncated: true,
     structured: null,
     created_at: "2026-09-01T10:03:00Z",
   },

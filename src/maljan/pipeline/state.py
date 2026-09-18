@@ -213,6 +213,15 @@ class AnalysisState(TypedDict):
     # a quietly successful run.
     report_error: str | None
 
+    # Set by the judge node when its own body raised, so the report node knows
+    # the verdict it is rendering was written by the pipeline rather than
+    # decided by a model. Carries the failure's class (never its message) and
+    # the decision the fallback chose. ``None`` on every run whose judge
+    # answered, which is the only state in which a confidence may be derived.
+    # A declared channel like every other node-to-node key here: an undeclared
+    # one is dropped by ``StateGraph(AnalysisState)`` between nodes.
+    verdict_fallback: dict[str, Any] | None
+
     # Set by the judge node when a run produced no corroborated technique, or
     # when an analyst failed, or when the sandbox was unreachable. It is put to
     # the judge in the verdict prompt so the confidence it sets already

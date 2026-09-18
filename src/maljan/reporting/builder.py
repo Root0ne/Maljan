@@ -89,7 +89,7 @@ class MalwareReportBuilder:
         run_summary: dict[str, Any] | None,
         discussion_history: list[dict[str, Any]] | None,
         final_decision: str,
-        overall_confidence: float = 0.0,
+        overall_confidence: float | None = 0.0,
         judge_assessment: Any | None = None,
         malware_category: str | None = None,
         degraded_mode: bool = False,
@@ -164,8 +164,13 @@ class MalwareReportBuilder:
             "termination_reason": self.run_summary.get("negotiation", {}).get(
                 "termination_reason", "unknown"
             ),
+            # A float wherever this key is declared, so a run whose judge never
+            # answered — and which therefore has no assessed confidence and no
+            # negotiation block to read one from — contributes 0.0 rather than
+            # a ``None`` a reader of the projection has no field for. What was
+            # not assessed is said once, by ``overall_confidence`` itself.
             "final_confidence": self.run_summary.get("negotiation", {}).get(
-                "final_confidence", self.overall_confidence
+                "final_confidence", self.overall_confidence or 0.0
             ),
             "confidence_history": self.run_summary.get("negotiation", {}).get(
                 "confidence_history", []
@@ -338,8 +343,13 @@ class MalwareReportBuilder:
             report.executive_summary = (
                 f"Sample classified as {verdict.lower()}. Best-guess family: {family}. "
                 f"Pipeline reported {len(report.ttp_mappings)} ATT&CK techniques: "
-                f"{ttp_summary}. Confidence {report.overall_confidence:.2f}. "
-                "This is an auto-generated summary (no LLM available); review the "
+                f"{ttp_summary}. "
+                + (
+                    "Confidence not assessed. "
+                    if report.overall_confidence is None
+                    else f"Confidence {report.overall_confidence:.2f}. "
+                )
+                + "This is an auto-generated summary (no LLM available); review the "
                 "detailed sections for evidence."
             )
         report.capabilities_narrative = [

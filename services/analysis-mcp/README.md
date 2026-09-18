@@ -20,7 +20,7 @@ drops the reference really runs without these tools.
 | --- | --- |
 | `identify_file` | `path` |
 | `hashes` | `path` |
-| `signing_info` | `path` |
+| `signing_info` | `path`, `file_type` |
 
 ### Strings
 

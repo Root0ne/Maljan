@@ -213,6 +213,42 @@ def _identity(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
     acc.credit(section, entry)
 
 
+# The three schemes ``signing_info`` can answer under. Read in this order so
+# an older entry — one recorded when the tool answered about all three at once
+# — still puts Authenticode first, which is the order that report was written
+# in.
+_SIGNING_SCHEMES = ("authenticode", "apk", "macho")
+
+
+def _signing(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
+    """The signature row, for the format the sample was routed as.
+
+    One row, and only when there is a scheme to report one under. The payload
+    also carries the routed ``format`` and, for a format with no code-signing
+    scheme at all, ``applicable: False`` — neither is a fact about the sample:
+    the first repeats what ``identify_file`` already says two rows above, and
+    the second is a statement about what this tool looks for, printed under the
+    heading that exists for what was found. A sample whose format has no
+    signing scheme therefore gets no signing row, which is what the table said
+    before the tool reported all three schemes at once.
+
+    A row per scheme rather than a sentence, because the sentence is the
+    console's to build (``identitySection.signingSentence``) and the export
+    keeps the tool's own words.
+    """
+    rows = [
+        [scheme, _text(data[scheme])]
+        for scheme in _SIGNING_SCHEMES
+        if data.get(scheme) not in (None, "", [], {})
+    ]
+    if not rows:
+        return
+    section = acc.get("identity", "Sample identity", "kv", columns=["Field", "Value"])
+    for row in rows:
+        acc.add_row(section, row)
+    acc.credit(section, entry)
+
+
 def _binary_info(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
     """The structural facts of a PE, ELF, Mach-O or APK, one table per shape."""
     prefix = entry.tool.split("_")[0]
@@ -654,7 +690,7 @@ def _functions_examined(acc: _Sections, entry: LedgerEntry, _data: Any) -> None:
 _BUILDERS: dict[str, Any] = {
     "identify_file": _identity,
     "hashes": _identity,
-    "signing_info": _identity,
+    "signing_info": _signing,
     "pe_info": _binary_info,
     "elf_info": _binary_info,
     "macho_info": _binary_info,

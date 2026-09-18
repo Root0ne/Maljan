@@ -231,7 +231,12 @@ export default function AnalysisLayout({
 
   /* Derive header data strictly from real API data — no mock fallback */
   const verdict = verdictBucket(report?.verdict);
-  const confidence = Math.round((report?.overall_confidence ?? 0) * 100);
+  /* "not assessed" rather than 0/100: a run whose judge never answered has no
+   * confidence, and 0 is a confidence — the lowest one there is. */
+  const confidence =
+    report?.overall_confidence == null
+      ? null
+      : Math.round(report.overall_confidence * 100);
   const category = report?.malware_category ?? "";
   // Prefer a readable sample identity (filename, then hash prefix) over
   // the opaque sample_id UUID — available from the job even during the live run,
@@ -337,7 +342,7 @@ export default function AnalysisLayout({
                   {verdictLabel(report?.verdict)}
                 </span>
                 <span className="text-xs text-text-secondary bg-bg-active px-2 py-0.5 rounded">
-                  Confidence: {confidence}/100
+                  {confidence === null ? "Confidence: not assessed" : `Confidence: ${confidence}/100`}
                 </span>
                 {headerSubtitle && (
                   <span className="text-xs text-text-secondary bg-bg-active px-2 py-0.5 rounded">

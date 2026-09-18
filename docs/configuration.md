@@ -69,7 +69,7 @@ API fields (`apps/api/app/services/settings_catalog_api.py`), and each entry
 carries its own title, description, type, bounds, choices and the group it
 belongs to (`src/maljan/core/settings_annotations.py`).
 
-The backend exposes sixteen groups, in this order:
+The backend exposes seventeen groups, in this order:
 
 | Group | Covers |
 | :-- | :-- |
@@ -85,6 +85,7 @@ The backend exposes sixteen groups, in this order:
 | Chunking | How large inputs are split before they reach a model. |
 | Reporting | Report contents and the metadata stamped on it. |
 | Agents | The analysts, the active profile and the ReAct limits. |
+| Live events | The conversation feed the console draws a running analysis from, and how long the record of one is kept. |
 | Tracing | LangSmith tracing of model calls. |
 | Enrichment / threat intelligence | Lookups for the indicators a report names. |
 | API | Request limits and login protection; applied immediately. |
@@ -608,9 +609,11 @@ its own cap does.
 
 That makes the caller's stage timeout the thing that decides how many asks fit
 in one loop: the seeded `lead` has `react_agent_timeout_overrides` of 1800 s
-and `react_agent_max_steps_overrides` of 40, which is room for five asks and
-the turns to weigh them. The `ask_<key>` tool's description tells the model
-the same numbers. See *Delegation* in [architecture.md](architecture.md) for
+and `react_agent_max_steps_overrides` of 40, which is room for six asks and
+the turns to weigh them — 1800 s over the default 300 s per ask, and two steps
+per ask. The `ask_<key>` tool's description gives the model the same number,
+computed by `delegation._asks_that_fit` from the caller's own timeout rather
+than written down twice. See *Delegation* in [architecture.md](architecture.md) for
 what the ledger and the transcript record.
 
 ### A name a later release takes
@@ -667,6 +670,27 @@ single-slot local model changes one setting and the team follows, instead of
 running analysts in parallel forever because it happened to be migrated on a
 day when parallel was on. The console clears the mark on the first stage edit
 — from then the stages are the operator's, and nothing rewrites them.
+
+### Long agent keys in the conversation
+
+An agent key is a slug of at most 32 characters. Keep it well under that, for
+one reason: everything the live feed publishes as prose is scrubbed by the
+publisher, and a run of 24 or more letters, digits, `_` and `-` is the shape a
+credential has. A key that long is redacted to `***` **inside a sentence** —
+`"windows_pe_static_analyst failed"` reaches a reader as `"*** failed"`.
+
+Nothing is lost but the name in that sentence. The identity fields a line is
+filed under — `speaker`, `agent`, `stage`, `label`, `display_name` — are
+exempt by name in the publisher and travel whole, so the console still files
+the line under the right participant and still draws it with the label you
+gave it. No shipped key is anywhere near the floor; the longest is
+`android_static`, at fourteen.
+
+The scrubber is deliberately not told the roster. It is one pure function
+shared by every job on the worker, and a rule that depended on which run was
+publishing would be a rule whose answer changed with the configuration — which
+is the property a redaction rule cannot have. A shorter key costs nothing and
+reads better in the conversation.
 
 ### Conditions
 

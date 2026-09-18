@@ -12,6 +12,7 @@ import {
   argsDetail,
   argsSummary,
   deepLinkView,
+  emptyOutputNote,
   evidenceQuery,
   formatCallDuration,
   mergeOptions,
@@ -305,8 +306,7 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
                                 </>
                               ) : (
                                 <p className="text-[11px] text-text-muted">
-                                  The output was dropped to keep this agent inside its byte
-                                  budget. The call, its arguments and its result stand.
+                                  {emptyOutputNote(entry)}
                                 </p>
                               )}
                             </div>

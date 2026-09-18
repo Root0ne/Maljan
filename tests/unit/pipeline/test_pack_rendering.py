@@ -92,13 +92,12 @@ class TestTheLines:
                 _entry(
                     "signing_info",
                     {
+                        "format": "pe",
                         "authenticode": {
                             "present": True,
                             "subject": "Simon Tatham",
                             "issuer": "Sectigo",
                         },
-                        "apk": {"present": False, "schemes": []},
-                        "macho": {"present": False},
                     },
                     seq=3,
                 ),
@@ -113,12 +112,23 @@ class TestTheLines:
         )
 
     def test_no_signature_is_said_as_none(self) -> None:
+        payload = {"format": "pe", "authenticode": {"present": False}}
+        assert render_pack([_entry("signing_info", payload)], 0) == "[ev_0001] signature: none"
+
+    def test_a_format_with_no_signing_scheme_is_not_said_as_unsigned(self) -> None:
+        """ "None" reads as "this one is not signed", which is a different fact."""
+        payload = {"format": "elf", "applicable": False}
+        assert render_pack([_entry("signing_info", payload)], 0) == (
+            "[ev_0001] signature: no code-signing scheme for this format"
+        )
+
+    def test_a_report_recorded_before_the_tool_answered_once_still_renders(self) -> None:
         payload = {
             "authenticode": {"present": False},
-            "apk": {"present": False, "schemes": []},
+            "apk": {"present": True, "schemes": ["v2"]},
             "macho": {"present": False},
         }
-        assert render_pack([_entry("signing_info", payload)], 0) == "[ev_0001] signature: none"
+        assert render_pack([_entry("signing_info", payload)], 0) == "[ev_0001] signature: apk v2"
 
     def test_capa_carries_its_rule_asserted_technique_ids(self) -> None:
         payload = {

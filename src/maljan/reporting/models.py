@@ -820,7 +820,12 @@ class MalwareReport(BaseModel):
 
     # --- Verdict & severity ---
     verdict: Literal["Malware", "Suspicious", "Benign"] = "Suspicious"
-    overall_confidence: Annotated[float, Field(ge=0.0, le=1.0)] = 0.0
+    # ``None`` when nothing assessed a confidence — a verdict the pipeline
+    # wrote itself because the judge never answered. It is not defaulted to
+    # 0.0 for the same reason ``severity`` is not defaulted to "Informational":
+    # a confidence of zero is an assessment, and printing one for a report that
+    # has none says the run was certain it knew nothing.
+    overall_confidence: Annotated[float | None, Field(ge=0.0, le=1.0)] = 0.0
     malware_category: str | None = None
     # ``None`` when the judge assessed no severity. It is not defaulted to
     # "Informational": an unassessed report and a report assessed as harmless

@@ -315,14 +315,22 @@ def mean_claim_confidence(isrs: Any) -> float | None:
     return sum(values) / len(values) if values else None
 
 
-def _overall_confidence(assessment: Any, isrs: Any) -> float:
+def _overall_confidence(assessment: Any, isrs: Any, *, judged: bool = True) -> float | None:
     """The judge's confidence when it gave one, else the analysts' own mean.
 
     Three answers in order, and the order is the point: the judge decides the
     verdict, so the judge's number is the verdict's number; failing that, the
     analysts that actually produced claims; failing that, zero, which says the
     run reached no confidence rather than naming one.
+
+    ``judged`` is false when the judge never answered and the verdict is the
+    pipeline's own fallback. Then there is no fourth answer to fall to: the
+    analysts' mean is their confidence in their own claims, and attaching it to
+    a verdict none of them reached would put a number on a decision nothing
+    made. ``None`` says the confidence was not assessed, which is the fact.
     """
+    if not judged:
+        return None
     declared = getattr(assessment, "confidence", None)
     if declared is not None:
         try:
@@ -764,6 +772,53 @@ def tool_failures(ledger: Sequence[Any], limit: int = 20) -> list[dict[str, Any]
             }
         )
     return kept
+
+
+def evidence_summary(ledger: Sequence[Any]) -> dict[str, Any]:
+    """What the report is standing on, counted, for ``run_summary.evidence``.
+
+    One place rather than an inline literal, so the golden that pins the
+    stored summary pins the shape this writes rather than a copy of it.
+    """
+    by_tool: dict[str, int] = {}
+    for entry in ledger:
+        by_tool[entry.tool] = by_tool.get(entry.tool, 0) + 1
+    return {
+        "entries": len(ledger),
+        "ok": sum(1 for e in ledger if e.ok),
+        "failed": sum(1 for e in ledger if not e.ok),
+        "trimmed": sum(1 for e in ledger if e.truncated),
+        "by_tool": dict(sorted(by_tool.items())),
+        "failures": tool_failures(ledger),
+    }
+
+
+def with_verdict_fallback(validation: Any, failure: str) -> dict[str, Any]:
+    """``run_summary.validation`` with the note that no judge answered.
+
+    A note rather than a resolved finding, and it goes where the other things
+    a run was told and did not fix already go: under ``verdict.fallback``,
+    the code the judge agent already records when its answer was not the
+    verdict it was asked for. A judge that raised is the same fact one step
+    earlier, so a reader of the summary sees one list and not a special case.
+    The failure's class travels; its message does not.
+    """
+    block = dict(validation or {})
+    by_code = dict(block.get("by_code") or {})
+    by_code[VERDICT_FALLBACK_CODE] = by_code.get(VERDICT_FALLBACK_CODE, 0) + 1
+    rows = [dict(row) for row in block.get("unresolved") or []]
+    rows.append(
+        {
+            "agent": JUDGE_AGENT_KEY,
+            "code": VERDICT_FALLBACK_CODE,
+            "message": f"the judge did not answer ({failure}); the verdict is the pipeline's",
+        }
+    )
+    block["by_code"] = dict(sorted(by_code.items()))
+    block["unresolved"] = rows
+    block.setdefault("retries", int(block.get("retries") or 0))
+    block.setdefault("not_run", list(block.get("not_run") or []))
+    return block
 
 
 def _function_matches_step(container: ServiceContainer, state: AnalysisState) -> Any:
@@ -1268,15 +1323,19 @@ def _with_upstream(chunks: list, block: str) -> list:
     return [replace(head, content=content, char_count=len(content)), *chunks[1:]]
 
 
-def _amended_validation(run_summary: Any, tally: ValidationTally) -> dict[str, Any] | None:
-    """The run summary's ``validation`` block plus what the report round cost.
+def _amended_validation(validation: Any, tally: ValidationTally) -> dict[str, Any] | None:
+    """A ``validation`` block plus what the report round cost.
 
-    ``None`` when there is nothing to amend — no summary (mock mode, where the
-    judge never built one) or no corrections in the report stage.
+    ``validation`` is the block as the report already carries it, which on a
+    run whose judge raised is the judge's block *plus* the ``verdict.fallback``
+    note. Amending that rather than rebuilding from the state is what keeps the
+    note: a report-round correction used to reconstruct the block from the
+    summary the judge wrote, which on such a run is the summary it never wrote.
+
+    ``None`` when there is no block at all — mock mode, where the judge never
+    built a summary and nothing has been told to anybody.
     """
-    if not tally.retries and not tally.by_code and not tally.unresolved:
-        return None
-    block = dict((run_summary or {}).get("validation") or {}) if run_summary else {}
+    block = dict(validation or {})
     if not block:
         return None
     by_code = dict(block.get("by_code") or {})
@@ -3214,6 +3273,12 @@ def make_judge_node(
                     "final_decision": decision,
                     "judge_report": "Analyzed negotiation history and expert reports.",
                     "stix_output": stix_output,
+                    # This judge answered, so there is no pipeline-authored
+                    # verdict to declare. Written rather than left alone: the
+                    # verdict stage runs once today, and a channel that is only
+                    # ever set would suppress a real confidence the first time
+                    # it is not.
+                    "verdict_fallback": None,
                     "run_summary": run_summary_dict,
                     # The judge's own tool calls — threat intel on a disputed
                     # indicator, a knowledge lookup — on the same append-only
@@ -3260,11 +3325,12 @@ def make_judge_node(
                 status="failed",
                 stage=stage_key_of(verdict_stage, "verdict"),
             )
-            # A judge-body failure must ALSO flag the run as degraded so the
-            # report node caps ``overall_confidence`` and the UI shows the
-            # DEGRADED banner. Without these keys the report
-            # node saw ``degraded_mode`` unset and could ship an uncapped
-            # confidence for a verdict the judge never actually produced.
+            # The verdict below is written by this pipeline, not decided by a
+            # model, and it says so: ``verdict_fallback`` tells the report node
+            # that no judge answered, which is what stops a confidence being
+            # derived from the analysts' own claims and attached to a verdict
+            # none of them reached. The run is also flagged degraded, which is
+            # what draws the DEGRADED banner.
             return _closing(
                 {
                     **_verdict_record(
@@ -3276,6 +3342,12 @@ def make_judge_node(
                     "final_decision": "Suspicious",
                     "judge_report": f"[ERROR] Judge failed ({describe_exception(e)}).",
                     "stix_output": {},
+                    "verdict_fallback": {
+                        "decision": "Suspicious",
+                        # The class of the failure and nothing else; the same
+                        # rule the published line above follows.
+                        "failure": describe_exception(e),
+                    },
                     "degraded_mode": True,
                     "degradation_reasons": [f"judge failed ({type(e).__name__})"],
                     "evidence_ledger": _judge_evidence(),
@@ -3365,7 +3437,12 @@ def make_report_node(
         # of no confidence, and the mean of the analysts that did produce
         # claims is the fallback — the judge's own number is the answer when
         # the judge gave one.
-        overall_confidence = _overall_confidence(_bundle_assessment, isr_reports)
+        # A verdict the judge never answered for gets no confidence at all;
+        # see ``_overall_confidence``.
+        _fallback = state.get("verdict_fallback") or None
+        overall_confidence = _overall_confidence(
+            _bundle_assessment, isr_reports, judged=not _fallback
+        )
 
         # A degraded run is not capped here. It is said to the judge in the
         # verdict prompt and printed in the report header, and the confidence
@@ -3516,18 +3593,14 @@ def make_report_node(
         # entry nor the finding it came from is ungrounded, and a run where
         # that number is not zero has a defect worth seeing rather than a
         # report worth reading.
-        _by_tool: dict[str, int] = {}
-        for _entry in _ledger:
-            _by_tool[_entry.tool] = _by_tool.get(_entry.tool, 0) + 1
         _summary = dict(report.run_summary or {})
-        _summary["evidence"] = {
-            "entries": len(_ledger),
-            "ok": sum(1 for e in _ledger if e.ok),
-            "failed": sum(1 for e in _ledger if not e.ok),
-            "trimmed": sum(1 for e in _ledger if e.truncated),
-            "by_tool": dict(sorted(_by_tool.items())),
-            "failures": tool_failures(_ledger),
-        }
+        _summary["evidence"] = evidence_summary(_ledger)
+        if _fallback:
+            # The run summary says the same thing the report header says: this
+            # verdict has no model behind it.
+            _summary["validation"] = with_verdict_fallback(
+                _summary.get("validation"), str(_fallback.get("failure", "") or "unknown")
+            )
         _summary["sections_without_evidence"] = sum(
             1 for section in report.sections if not section_is_grounded(section)
         )
@@ -3680,9 +3753,14 @@ def make_report_node(
             # aggregation may upgrade — STIX consumers should see the
             # FINAL verdict in the user-visible description, not the
             # intermediate ``judge fallback`` text.
+            _confidence = (
+                "not assessed"
+                if report.overall_confidence is None
+                else f"{report.overall_confidence:.2f}"
+            )
             _final_desc = (
                 f"Verdict: {report.verdict} "
-                f"(confidence={report.overall_confidence:.2f}; "
+                f"(confidence={_confidence}; "
                 f"severity={report.severity.rating if report.severity else 'not assessed'})"
             )
             for obj in extended_dump.get("objects", []) or []:
@@ -3756,8 +3834,16 @@ def make_report_node(
         # untouched value keeps the mock-mode contract, where the judge node
         # skipped the RunSummaryBuilder and the column is legitimately null.
         _state_summary: dict[str, Any] = {}
-        _validation_block = _amended_validation(state.get("run_summary"), _report_tally)
-        if _validation_block is not None:
+        # The block the report carries is the base, because it already holds
+        # the ``verdict.fallback`` note when the judge never answered. What is
+        # stored is then compared against what the judge stored: an amendment
+        # that changes nothing is not written, which is what keeps the
+        # mock-mode contract and an untouched column untouched.
+        _stored_validation = (state.get("run_summary") or {}).get("validation")
+        _validation_block = _amended_validation(
+            (report.run_summary or {}).get("validation"), _report_tally
+        )
+        if _validation_block is not None and _validation_block != _stored_validation:
             _state_summary["validation"] = _validation_block
             # A name of its own: ``_summary`` above is still read below this
             # point, and rebinding it here was correct only for as long as

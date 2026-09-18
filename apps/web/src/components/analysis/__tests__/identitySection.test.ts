@@ -101,6 +101,41 @@ describe("the signing rows become the one that applies", () => {
     expect(section?.rows).toEqual([["macho signature", "Carries a signature"]]);
   });
 
+  it("draws no row about what the tool looks for", () => {
+    /* `format` repeats the routing answer two rows above, and `applicable`
+     * says this format has no scheme to look for — which is not a finding
+     * about the sample. The export leaves both out; this is the reader's side
+     * of the same rule, for a report stored while they were being written. */
+    const { section, signing } = readIdentitySection(
+      identity([
+        ["file type", "elf"],
+        ["format", "elf"],
+        ["applicable", "no"],
+      ]),
+      "elf",
+    );
+
+    expect(section?.rows).toEqual([["file type", "elf"]]);
+    expect(signing).toBe(false);
+  });
+
+  it("keeps the signing row for a routed format that has one", () => {
+    const { section, signing } = readIdentitySection(
+      identity([
+        ["file type", "pe"],
+        ["format", "pe"],
+        ["authenticode", "present=yes, subject=Acme Ltd"],
+      ]),
+      "pe",
+    );
+
+    expect(section?.rows).toEqual([
+      ["file type", "pe"],
+      ["Authenticode", "Carries a signature"],
+    ]);
+    expect(signing).toBe(true);
+  });
+
   it("says whether the table states the signing, so the badge can stand down", () => {
     expect(readIdentitySection(identity(PE_ROWS), "pe").signing).toBe(true);
     expect(readIdentitySection(identity([["file type", "pe"]]), "pe").signing).toBe(false);

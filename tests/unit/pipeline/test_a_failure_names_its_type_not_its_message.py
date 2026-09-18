@@ -118,6 +118,72 @@ class TestOnlyTheSafeHelperReachesAPublishSite:
         """Every local this expression reads."""
         return {child.id for child in ast.walk(node) if isinstance(child, ast.Name)}
 
+    def _unsafe_names(self, tree: ast.AST) -> set[str]:
+        """What the log helper is called in this module, including under an alias.
+
+        The shape the code carried before the two helpers were told apart was
+        ``from ... import describe_exception as exception_detail``, so an
+        import that renames the unsafe one is exactly the mistake most
+        recently made here and the one a walk keyed on a single spelling would
+        miss.
+        """
+        names = {self.UNSAFE}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom | ast.Import):
+                for alias in node.names:
+                    if alias.name.rsplit(".", 1)[-1] == self.UNSAFE and alias.asname:
+                        names.add(alias.asname)
+        return names
+
+    @staticmethod
+    def _assigned(node: ast.AST) -> tuple[list[str], ast.AST | None]:
+        """The plain locals an assignment writes, and the expression it writes.
+
+        Tuple and list targets are unpacked, because ``a, b = f(), g()`` taints
+        whatever it binds as surely as a single name does, and an annotated or
+        augmented assignment binds one name each.
+
+        A tuple taints every name it binds, including the sides that came from
+        somewhere safe. Deliberately the wrong way round: a guard that misses a
+        publish site fails open and nothing else in the suite would notice,
+        while one that over-reaches fails loudly on a line a reader can look
+        at. If it ever fires on a mixed tuple, the fix is to split the
+        assignment, not to narrow this.
+        """
+        if isinstance(node, ast.Assign):
+            targets = [t for target in node.targets for t in ast.walk(target)]
+            return [t.id for t in targets if isinstance(t, ast.Name)], node.value
+        if isinstance(node, ast.AnnAssign | ast.AugAssign):
+            target = node.target
+            return ([target.id] if isinstance(target, ast.Name) else []), node.value
+        if isinstance(node, ast.NamedExpr):
+            return [node.target.id], node.value
+        return [], None
+
+    def _tainted(self, tree: ast.AST, unsafe: set[str]) -> set[str]:
+        """Every local that holds, directly or at any remove, what the log said.
+
+        Walked to a fixed point rather than once, so ``a = f"…{unsafe(e)}"``
+        followed by ``b = a`` taints ``b`` as well. One pass caught the first
+        hop only, which is the shape the tree happens to use today and not a
+        property of it.
+        """
+        tainted: set[str] = set()
+        while True:
+            grew = False
+            for node in ast.walk(tree):
+                names, value = self._assigned(node)
+                if value is None or not names:
+                    continue
+                if not (unsafe & self._calls(value) or tainted & self._names(value)):
+                    continue
+                for name in names:
+                    if name not in tainted:
+                        tainted.add(name)
+                        grew = True
+            if not grew:
+                return tainted
+
     def _offenders(self, tree: ast.AST) -> list[int]:
         """The publish sites in ``tree`` whose text describes a failure for the log.
 
@@ -127,13 +193,8 @@ class TestOnlyTheSafeHelperReachesAPublishSite:
         helper are collected first and a publisher reading one of them counts
         the same as a publisher calling it.
         """
-        tainted = {
-            target.id
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Assign) and self.UNSAFE in self._calls(node.value)
-            for target in node.targets
-            if isinstance(target, ast.Name)
-        }
+        unsafe = self._unsafe_names(tree)
+        tainted = self._tainted(tree, unsafe)
         found: list[int] = []
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
@@ -143,7 +204,7 @@ class TestOnlyTheSafeHelperReachesAPublishSite:
             if name not in self.PUBLISHERS:
                 continue
             for argument in [*node.args, *(kw.value for kw in node.keywords)]:
-                if self.UNSAFE in self._calls(argument) or tainted & self._names(argument):
+                if unsafe & self._calls(argument) or tainted & self._names(argument):
                     found.append(node.lineno)
         return found
 
@@ -191,6 +252,66 @@ class TestOnlyTheSafeHelperReachesAPublishSite:
         assert self._offenders(written_inline) == [1]
         assert self._offenders(built_first) == [3]
         assert self._offenders(safe) == []
+
+    def test_the_walk_follows_an_aliased_import(self) -> None:
+        """The shape the code was in before the two helpers were told apart.
+
+        ``from maljan.agents.base_agent import describe_exception as detail``
+        is how the unsafe helper last reached a publish site, and a walk that
+        only knows one spelling would have let that one through.
+        """
+        aliased = ast.parse(
+            "from maljan.agents.base_agent import describe_exception_for_log as detail\n"
+            "def n():\n"
+            "    emit_agent_message(sink, text=f'x {detail(e)}')\n"
+        )
+        unaliased = ast.parse(
+            "from maljan.agents.base_agent import describe_exception_for_log\n"
+            "def n():\n"
+            "    emit_agent_message(sink, text=f'x {describe_exception_for_log(e)}')\n"
+        )
+        other = ast.parse(
+            "from maljan.pipeline.events import describe_exception as detail\n"
+            "def n():\n"
+            "    emit_agent_message(sink, text=f'x {detail(e)}')\n"
+        )
+
+        assert self._offenders(aliased) == [3]
+        assert self._offenders(unaliased) == [3]
+        assert self._offenders(other) == []
+
+    def test_the_walk_follows_a_line_handed_on_twice(self) -> None:
+        two_hops = ast.parse(
+            "def n():\n"
+            "    said = f'x {describe_exception_for_log(e)}'\n"
+            "    passed_on = said\n"
+            "    emit_agent_message(sink, text=passed_on)\n"
+        )
+
+        assert self._offenders(two_hops) == [4]
+
+    def test_the_walk_follows_the_other_ways_a_name_is_bound(self) -> None:
+        """A tuple target, an annotated assignment and an augmented one."""
+        unpacked = ast.parse(
+            "def n():\n"
+            "    said, other = f'x {describe_exception_for_log(e)}', 1\n"
+            "    emit_agent_message(sink, text=said)\n"
+        )
+        annotated = ast.parse(
+            "def n():\n"
+            "    said: str = f'x {describe_exception_for_log(e)}'\n"
+            "    emit_agent_message(sink, text=said)\n"
+        )
+        appended = ast.parse(
+            "def n():\n"
+            "    said = 'x'\n"
+            "    said += describe_exception_for_log(e)\n"
+            "    emit_agent_message(sink, text=said)\n"
+        )
+
+        assert self._offenders(unpacked) == [3]
+        assert self._offenders(annotated) == [3]
+        assert self._offenders(appended) == [4]
 
     def test_the_two_helpers_do_not_share_a_name(self) -> None:
         from maljan.agents import base_agent

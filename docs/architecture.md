@@ -102,16 +102,18 @@ them; a fact a model may or may not ask for is not a fact a run can rely on.
 
 The pack is the same code the `analysis` sidecar serves, called in-process, in
 a fixed order so the ids a sample produces are the same from one run to the
-next: `identify_file` and `hashes`; `signing_info`; the format tool the routed
-type selects (`pe_info`, `elf_info`, `macho_info`, `apk_info`, `document_info`
-or `archive_list`, which carry the section entropies, the packer signature
-hits and the import rows); a `strings` head capped by `triage.strings_head`
-and `iocs_from_file`; `yara_scan`, `capa` under the static provider's budget
-and, when a sandbox report exists, `sigma_match_sandbox`; `api_capability`
-over the import set (the behaviour map is Windows-only, so an ELF or Mach-O
-import table yields no profile and no rule hit) and `lolbin_lookup` over the
-sandbox's command lines; the
-sandbox projections at summary level (processes, network, signatures, dropped
+next: `identify_file` and `hashes`; `signing_info` for the routed format alone
+(Authenticode for a PE, the APK signing block for an APK, `LC_CODE_SIGNATURE`
+for a Mach-O, and for anything else the fact that it has no signing scheme);
+the format tool the routed type selects (`pe_info`, `elf_info`, `macho_info`,
+`apk_info`, `document_info` or `archive_list`, which carry the section
+entropies, the packer signature hits and the import rows); a `strings` head
+capped by `triage.strings_head` and `iocs_from_file`; `yara_scan`, `capa`
+under the static provider's budget and, when a sandbox report exists,
+`sigma_match_sandbox`; `api_capability` over the import set (the behaviour map
+is Windows-only, so an ELF or Mach-O import table yields no profile and no
+rule hit) and `lolbin_lookup` over the sandbox's command lines; the sandbox
+projections at summary level (processes, network, signatures, dropped
 files, channels) and `pcap_summary` when a capture was fetched; one reputation
 lookup on the sha256 (`get_file_report` on `virustotal` when it is enabled,
 else `check_hash` on `threatintel`), made through the tool server exactly as
@@ -626,8 +628,9 @@ A call that failed is an entry with `ok` false whichever way it failed: a
 tool that raised, and a tool that returned an error. The entry keeps the
 message in `error` and, when the tool authored one, the remedy in
 `remediation`; `run_summary.evidence.failures` lists each distinct failure
-once with its count, the report header prints that list, and the console's
-evidence row shows the message and the remedy under the call.
+once with its count and the report header prints that list. The console does
+not read that summary — its evidence row shows the message and the remedy
+under the call itself, from the ledger entry.
 
 The tool loop also meters itself. `budget_tick` events carry an agent's steps
 against its cap and seconds against its limit every five steps and at the end
@@ -647,6 +650,13 @@ its outcome and its timing and drops its output, and the count of what was
 dropped reaches the run summary. The ledger lands in the pipeline state as an
 append-only list and is persisted with the report, in the same transaction.
 
+An entry that lost its output that way says so with `truncated`, and the
+column is the only thing that says it: a call that failed carries an empty
+output too, so a reader inferring the trim from the emptiness explains a
+failure with a cause that did not happen. `truncated` is persisted alongside
+`repeated_of` (the earlier identical call a repeat was answered from), `symbol`
+and `started_at`, and the evidence endpoint returns all four.
+
 ## Events
 
 A run narrates itself. Every node, every tool wrapper and every retry loop
@@ -658,17 +668,18 @@ and the console draws the running analysis from them.
 |---|---|---|
 | `status_change` | the worker | `status` |
 | `pipeline_started` | the worker | `agents`, `sample_filename`, `sha256` |
-| `roster` | the worker, once, before anybody speaks | `agents[{key, label, role, stages}]`, `stages[{key, label, kind, agents}]` |
+| `roster` | the worker, once, before anybody speaks | `agents[{key, label, role, stages, via}]`, `stages[{key, label, kind, agents}]` |
 | `agent_progress` | the worker and the analyst nodes | `agent`, `phase` |
 | `phase_change` | the worker | `phase` |
-| `stage_started` / `stage_skipped` / `stage_finished` | the stage nodes | `stage`, `kind`, and `agents` / `reason` / `duration_ms` |
-| `agent_message` | every speaking node | `speaker`, `role`, `round`, `status`, `text`, `kind`, and optionally `stage`, `addressed_to`, `display_name`, `confidence`, `claims`, `dissent`, `report` |
+| `stage_started` / `stage_skipped` / `stage_finished` | the stage nodes | `stage`, `kind`, and `agents` / `reason` / `ran`, `duration_ms` |
+| `agent_message` | every speaking node | `speaker`, `role`, `round`, `status`, `text`, `kind`, and optionally `stage`, `addressed_to`, `display_name`, `confidence`, `claims`, `dissent`, `report`, `report_truncated` |
 | `agent_message_delta` | the analyst loop, behind `core.events.stream_deltas` | `stage`, `agent`, `text_delta` |
 | `tool_call_started` | the evidence recorder | `stage`, `agent`, `tool`, `server`, `args_summary` |
 | `tool_call_finished` | the evidence recorder, as each entry is written | `stage`, `agent`, `tool`, `server`, `evidence_id`, `ok`, `duration_ms`, `summary` |
 | `validation_feedback` | `pipeline/validation.retry_with_feedback` | `stage`, `agent`, `code`, `message`, `retry_index` |
 | `judge_question` | the judge's ReAct loop | `stage`, `text`, `addressed_to` |
 | `budget_tick` / `stage_ended_at_cap` | the budget meter | see *The evidence ledger* |
+| `enrichment_complete` | the enrichment worker, after the run | `report_id`, `domains_enriched`, `ips_enriched`, `similar_samples` |
 | `completed` / `error` / `cancelled` | the worker | the outcome |
 
 `agent_message.kind` is one of `says`, `tool_call`, `tool_result`,
@@ -684,6 +695,13 @@ does not know which job it is running under, and a second counter would order
 one conversation two ways. `seq` is the ordering key, the dedupe identity and
 the cursor a client resumes from — `?since=<seq>` on `/ws/analysis/{id}` and
 on `GET /api/v1/jobs/{id}/events` return only what is newer, in order.
+
+The stored transcript row carries the payload its event carried: its `kind`,
+the `stage` it was said in, the addressee of a delegated line and the
+`display_name` its speaker was known by. A replay therefore groups by stage and
+keeps the arrow between an ask and its answer, rather than re-deriving a kind
+that cannot distinguish the two. A run recorded before those columns existed
+carries none of them, and the console falls back to deriving what it can.
 
 The stored transcript row is written with the number its event went out under,
 so a live message and its replayed twin are one message. That changed what

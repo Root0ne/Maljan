@@ -23,6 +23,7 @@ import type { StageEvent, StageTimelineRow } from "@/components/analysis/stageTi
 import type { StageRow } from "@/components/analysis/pipelineSteps";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
+import { knownKind } from "@/lib/conversation";
 import type { TranscriptRow } from "@/lib/conversation";
 import type { JobRoster } from "@/types";
 
@@ -518,15 +519,23 @@ async function backfill(entry: RunEntry): Promise<void> {
 const ROOM_SPEAKER = "pipeline";
 
 /**
- * The kind a stored row would have gone out under.
+ * The kind a stored row went out under.
  *
- * Stored rows carry no `kind` — the column postdates them — so it is derived
- * the way the publisher derives it. The judge closes the run; the room's own
- * watchers, the mediator and the sycophancy detector, are notices whatever
- * role they were filed under, and drawing one as a participant would add a
- * speaker to a team nobody composed.
+ * A run recorded after the column existed says so itself, and that answer is
+ * preferred: only the publisher knows that a line was a delegated ask rather
+ * than a report, and the derivation below cannot tell the two apart — it can
+ * return `says`, `system` or `verdict` and nothing else, so a stored ask and
+ * its answer would replay as two plain lines with no arrow between them.
+ *
+ * An older row carries none, and one carrying a kind this view cannot draw is
+ * treated the same way: derived the way the publisher derives it. The judge
+ * closes the run; the room's own watchers, the mediator and the sycophancy
+ * detector, are notices whatever role they were filed under, and drawing one
+ * as a participant would add a speaker to a team nobody composed.
  */
 function kindOfStoredRow(row: TranscriptRow): string {
+  const recorded = knownKind(row.kind);
+  if (recorded) return recorded;
   if (row.speaker === ROOM_SPEAKER) return "system";
   if (row.role === "judge") return "verdict";
   if (row.role === "system" || row.role === "negotiator") return "system";
@@ -563,6 +572,7 @@ function hydrate(entry: RunEntry): void {
         text: row.text,
         kind: kindOfStoredRow(row),
         stage: row.stage ?? undefined,
+        display_name: row.display_name ?? undefined,
         addressed_to: row.addressed_to ?? undefined,
         confidence: row.confidence ?? undefined,
         claims: row.claims,

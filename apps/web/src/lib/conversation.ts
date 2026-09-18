@@ -47,6 +47,12 @@ export interface TranscriptRow {
   ts?: string | null;
   addressed_to?: string | null;
   stage?: string | null;
+  /** What the line was published as, when the run was recorded after the
+   *  column existed. `null` on an older row, whose kind has to be derived. */
+  kind?: string | null;
+  /** The label the operator had given this speaker when the line went out.
+   *  `null` on an older row, and on a line whose producer had no label. */
+  display_name?: string | null;
 }
 
 /** What one line in the conversation is. Mirrors the publisher's message
@@ -189,12 +195,24 @@ const MESSAGE_KINDS: ItemKind[] = [
   "tool_call",
 ];
 
+/**
+ * The kind this value names, or `null` when the view cannot draw it.
+ *
+ * Told apart from `kindOf` so a reader of *stored* rows can tell a kind that
+ * was recorded from one that was not: a row with no kind has to be derived
+ * from, and a kind read as `says` by default would draw a delegated ask as an
+ * ordinary line and lose the arrow between it and its answer.
+ */
+export function knownKind(value: unknown): ItemKind | null {
+  if (value === "tool_result") return "tool_call";
+  return MESSAGE_KINDS.includes(value as ItemKind) ? (value as ItemKind) : null;
+}
+
 /** What an `agent_message` is. `says` is the default and is what every
  *  message published before the field existed was; `tool_result` is drawn as
  *  the tool row its `tool_call` opened. */
 function kindOf(value: unknown): ItemKind {
-  if (value === "tool_result") return "tool_call";
-  return MESSAGE_KINDS.includes(value as ItemKind) ? (value as ItemKind) : "says";
+  return knownKind(value) ?? "says";
 }
 
 export function groupOf(kind: ItemKind): ItemGroup {

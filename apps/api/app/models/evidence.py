@@ -14,7 +14,7 @@ is persisted, long after the call happened.
 import uuid
 from typing import Any
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -59,6 +59,22 @@ class EvidenceEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # the producer already caps it (schemas.evidence).
     output: Mapped[str] = mapped_column(Text, nullable=False, default="")
     structured: Mapped[Any | None] = mapped_column(JSONB, nullable=True)
+
+    # Whether the output was dropped because the agent's byte budget was
+    # spent. It is the only thing that says so: a failed call also has an
+    # empty output, and a reader that infers the trim from the emptiness
+    # states a cause that did not happen.
+    truncated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # The id of the earlier identical call this one was answered from, when
+    # the repeat suppressor served it rather than running the tool again.
+    repeated_of: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # A human label for what the call was aimed at, parsed out of the
+    # arguments by the recorder — a function name, an address, a host.
+    symbol: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Unix timestamp the call started at. With ``duration_ms`` it places the
+    # call on the run's clock, which ``created_at`` cannot: that is written
+    # when the row is persisted, long after the call happened.
+    started_at: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     def __repr__(self) -> str:
         return f"<EvidenceEntry {self.entry_id} {self.agent}/{self.tool} ok={self.ok}>"

@@ -233,6 +233,14 @@ class AgentMessageResponse(BaseModel):
     dissent: list | None = None
     # The agent this line was said to, or ``None`` for a line said to the room.
     addressed_to: str | None = None
+    # What the line is, the stage it was said in and the operator's label for
+    # its speaker. ``None`` on a run recorded before the columns existed, and
+    # the client is required to fall back rather than read the absence as a
+    # value: a missing ``kind`` is a kind that was never written down, not a
+    # ``says``.
+    kind: str | None = None
+    stage: str | None = None
+    display_name: str | None = None
     ts: datetime | None = None
 
     model_config = {"from_attributes": True}
@@ -244,7 +252,9 @@ class ReportDetailResponse(BaseModel):
     id: uuid.UUID
     job_id: uuid.UUID
     verdict: str
-    overall_confidence: float
+    # ``None`` when nothing assessed one. A client shows "not assessed" for it
+    # rather than 0, which is a confidence and a different statement.
+    overall_confidence: float | None
     malware_category: str | None
     stix_bundle: dict | None
     mitre_techniques: list | None

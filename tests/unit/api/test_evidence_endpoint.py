@@ -139,3 +139,67 @@ async def test_the_filters_and_the_offset_reach_the_query():
     count_query = str(session.statements[0].compile(compile_kwargs={"literal_binds": True}))
     assert "count(*)" in count_query
     assert "evidence_entries.agent = 'static'" in count_query
+
+
+@pytest.mark.asyncio
+async def test_a_trimmed_entry_reaches_the_reader_saying_it_was_trimmed():
+    """The flag, not the empty output, is what explains an empty output.
+
+    A failed call has an empty ``output`` too, so a console that reads the
+    emptiness as a budget trim tells a reader a cause that did not happen.
+    """
+    trimmed = _entry(1)
+    trimmed.output = ""
+    trimmed.truncated = True
+    trimmed.symbol = "sub_401000"
+    trimmed.started_at = 1_700_000_000.5
+    trimmed.repeated_of = "ev_0003"
+
+    failed = _entry(2)
+    failed.output = ""
+    failed.ok = False
+    failed.error = "the tool server did not answer"
+
+    page = await get_job_evidence(
+        job_id=uuid.uuid4(),
+        agent=None,
+        tool=None,
+        stage=None,
+        page=1,
+        page_size=50,
+        user=_User(),
+        svc=_Service(object()),
+        db=_Session(2, [trimmed, failed]),
+    )
+
+    assert page.entries[0].truncated is True
+    assert page.entries[0].symbol == "sub_401000"
+    assert page.entries[0].started_at == 1_700_000_000.5
+    assert page.entries[0].repeated_of == "ev_0003"
+    # Same empty output, and the endpoint says the two are different things.
+    assert page.entries[1].output == ""
+    assert page.entries[1].truncated is False
+
+
+@pytest.mark.asyncio
+async def test_a_row_written_before_the_columns_existed_reads_as_untrimmed():
+    old = _entry(1)
+    old.truncated = None
+    old.repeated_of = None
+    old.symbol = None
+    old.started_at = None
+
+    page = await get_job_evidence(
+        job_id=uuid.uuid4(),
+        agent=None,
+        tool=None,
+        stage=None,
+        page=1,
+        page_size=50,
+        user=_User(),
+        svc=_Service(object()),
+        db=_Session(1, [old]),
+    )
+
+    assert page.entries[0].truncated is False
+    assert page.entries[0].started_at is None

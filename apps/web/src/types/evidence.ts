@@ -4,8 +4,10 @@
  * `entry_id` is the citation string ("ev_0007") the report's sections and the
  * agents' findings refer to, so a reader can resolve a claim back to the call
  * that produced it. `structured` is the tool's own JSON when it returned JSON,
- * and `output` the trimmed text either way — empty when the entry lost its
- * output to the per-agent byte budget.
+ * and `output` the trimmed text either way. An empty `output` is not one
+ * thing: a call that lost its result to the per-agent byte budget says so
+ * with `truncated`, and a call that failed carries `error`. Only the flag
+ * names the budget.
  */
 
 export interface EvidenceEntry {
@@ -30,6 +32,16 @@ export interface EvidenceEntry {
   args_raw?: string | null;
   output: string;
   structured: unknown | null;
+  /** True when the output was dropped to keep the agent inside its byte
+   *  budget. Absent on rows written before the column existed, where the
+   *  reason an output is empty is simply not recorded. */
+  truncated?: boolean;
+  /** The earlier identical call this one was answered from, the label the
+   *  recorder parsed out of the arguments, and the run-clock time the call
+   *  started at. Absent on rows written before the columns existed. */
+  repeated_of?: string | null;
+  symbol?: string | null;
+  started_at?: number | null;
   created_at: string | null;
 }
 

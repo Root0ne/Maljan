@@ -100,7 +100,11 @@ gives its reason there rather than leaving an unexplained gap.
 **Following.** While a run is live the view follows the newest message as long
 as the reader is at the bottom of the stream, and stops the moment they scroll
 up; a "Jump to latest" button brings them back. The strip at the foot of the
-stream says who is working right now.
+stream says who is working right now. For an agent a stage names, that comes
+from the `agent_progress` events the worker publishes; for a specialist a lead
+reaches through `ask_<key>`, which no stage names and which therefore gets
+none, it is inferred from the agent's own lines — so such a specialist is
+`waiting` until it first speaks.
 
 **Leaving and coming back.** The events, the roster and the socket live in a
 run store keyed by job id (`apps/web/src/lib/runStore.ts`), not in the page.
@@ -136,7 +140,11 @@ identity and the resume cursor. A run recorded before the numbering existed
 keeps the order its events arrived in. A run whose feed has passed the
 retention window replays from the conversation stored on its report instead —
 only then, so stored rows can never be laid over a feed that still has
-something to say.
+something to say. A stored row carries what its event carried, its kind and
+its stage included, so a replay groups by stage and keeps the arrow between a
+delegated ask and its answer. A run recorded before those were columns carries
+neither, and the view derives what it can: such a replay is one unnamed stage
+of plain lines.
 
 ## Reputation
 
@@ -159,10 +167,11 @@ another shape. A table row is left alone, because its cells are positional.
 
 IDENTITY applies it twice over. The `identity` section is the one that
 overlaps the tab's own blocks, so it is split: its hashes go to the File
-hashes block, which draws only the fingerprints a tool produced, and its three
-signing rows — one per format `signing_info` knows about, of which all but one
-are the tool's untouched defaults — become the one for the format the run
-routed on, stated as a sentence.
+hashes block, which draws only the fingerprints a tool produced, and its
+signing row is stated as a sentence rather than as `present=no`. A report
+written before `signing_info` answered for one format carries three such rows,
+of which all but one are the tool's untouched defaults; the tab keeps the one
+for the format the run routed on and drops the rest.
 
 ## Settings
 

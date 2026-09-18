@@ -75,7 +75,9 @@ export interface ReportSummaryDTO {
   job_id: string;
   sample_filename: string;
   verdict: string;
-  overall_confidence: number;
+  /** `null` when nothing assessed one: a verdict the pipeline wrote
+   *  because the judge never answered has no confidence. */
+  overall_confidence: number | null;
   malware_category: string | null;
   created_at: string;
   techniques_count: number;
@@ -100,7 +102,9 @@ export interface ReportDetailDTO {
   id: string;
   job_id: string;
   verdict: string;
-  overall_confidence: number;
+  /** `null` when nothing assessed one: a verdict the pipeline wrote
+   *  because the judge never answered has no confidence. */
+  overall_confidence: number | null;
   malware_category: string | null;
   stix_bundle: Record<string, unknown> | null;
   mitre_techniques: unknown[] | null;
