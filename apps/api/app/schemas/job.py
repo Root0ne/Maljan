@@ -233,6 +233,14 @@ class AgentMessageResponse(BaseModel):
     dissent: list | None = None
     # The agent this line was said to, or ``None`` for a line said to the room.
     addressed_to: str | None = None
+    # What the line is, the stage it was said in and the operator's label for
+    # its speaker. ``None`` on a run recorded before the columns existed, and
+    # the client is required to fall back rather than read the absence as a
+    # value: a missing ``kind`` is a kind that was never written down, not a
+    # ``says``.
+    kind: str | None = None
+    stage: str | None = None
+    display_name: str | None = None
     ts: datetime | None = None
 
     model_config = {"from_attributes": True}

@@ -19,10 +19,16 @@ replay stops being the recording and nothing else would notice.
 from __future__ import annotations
 
 import asyncio
+import uuid
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
-from app.worker.analysis_worker import _make_event_sink, _parse_event_ts
+from app.worker.analysis_worker import (
+    _evidence_row,
+    _make_event_sink,
+    _parse_event_ts,
+    _transcript_row,
+)
 from maljan.pipeline.events import AGENT_MESSAGE, emit_agent_message
 from tests.credential_shapes import prefixed_key
 
@@ -209,3 +215,141 @@ def test_recording_is_synchronous_relative_to_emission() -> None:
         assert [m["text"] for m in recorded] == ["first", "second"]
 
     asyncio.run(main())
+
+
+class TestTheRowKeepsEveryFieldTheRecordingCarried:
+    """From the payload to the row, without losing a field on the way.
+
+    The recorder above proves the *copy* is faithful; this proves the row
+    built from that copy is. The three fields checked here are the ones the
+    table had no column for until ``20260926000000``: a replay that has to
+    re-derive the kind of a line draws a delegated ask and its answer as two
+    plain lines, and a replay with no stage puts the whole conversation in one
+    unnamed stage.
+    """
+
+    def _row(self, **kwargs: Any) -> Any:
+        sink, recorded = _sink_with_recorder()
+        emit_agent_message(sink, **kwargs)
+        return _transcript_row(recorded[0], report_id=uuid.uuid4(), seq=7)
+
+    def test_the_kind_the_stage_and_the_label_are_stored(self) -> None:
+        row = self._row(
+            speaker="static",
+            role="analyst",
+            text="asking the reverser",
+            stage="analysis",
+            kind="delegation_ask",
+            addressed_to="reverser",
+            display_name="Ahmet",
+        )
+
+        assert row.kind == "delegation_ask"
+        assert row.stage == "analysis"
+        assert row.display_name == "Ahmet"
+        assert row.addressed_to == "reverser"
+
+    def test_a_line_with_no_stage_and_no_label_stores_neither(self) -> None:
+        """Absent is NULL, not a default the publisher never sent."""
+        row = self._row(speaker="static", role="analyst", text="plain")
+
+        assert row.stage is None
+        assert row.display_name is None
+        # ``kind`` is the one the publisher always sends, so it is always
+        # stored; what must not happen is a *missing* kind becoming "says".
+        assert row.kind == "says"
+        assert _transcript_row({}, report_id=uuid.uuid4(), seq=1).kind is None
+
+    def test_every_field_of_the_payload_has_somewhere_to_go(self) -> None:
+        """The property ``AgentMessage`` is documented on, held by the code.
+
+        ``seq`` and ``ts`` are stamped by the sink rather than by
+        ``emit_agent_message``, and ``report_truncated`` is a flag the payload
+        only carries when it applies; all three are columns.
+        """
+        sink, recorded = _sink_with_recorder()
+        emit_agent_message(
+            sink,
+            speaker="static",
+            role="analyst",
+            text="headline",
+            round_index=1,
+            status="complete",
+            confidence=0.5,
+            claims=[{"claim": "c", "evidence_ref": "ev_0001", "confidence": 0.5}],
+            dissent=["d"],
+            report="prose",
+            stage="analysis",
+            addressed_to="judge",
+            kind="says",
+            display_name="Ahmet",
+        )
+        row = _transcript_row(recorded[0], report_id=uuid.uuid4(), seq=7)
+
+        missing = [field for field in recorded[0] if not hasattr(row, field)]
+        assert not missing, (
+            f"the payload carries {missing} and the row has no column for it. "
+            "AgentMessage is documented as mirroring the payload field for "
+            "field; add the column or correct the docstring."
+        )
+
+
+class TestTheLedgerRowKeepsWhatTheEntryCarried:
+    """The four fields the ledger row was dropping, and why one of them matters.
+
+    ``truncated`` is the only thing that says an output was dropped to keep an
+    agent inside its byte budget. A failed call also has an empty output, so a
+    reader that infers the trim from the emptiness explains a failure with a
+    cause that did not happen.
+    """
+
+    def test_a_trimmed_entry_says_so_in_the_row(self) -> None:
+        row = _evidence_row(
+            {
+                "id": "ev_0007",
+                "agent": "static",
+                "tool": "decompile",
+                "ok": True,
+                "output": "",
+                "truncated": True,
+                "symbol": "sub_401000",
+                "started_at": 1_700_000_000.5,
+                "repeated_of": "ev_0003",
+            },
+            job_id=uuid.uuid4(),
+        )
+
+        assert row.truncated is True
+        assert row.symbol == "sub_401000"
+        assert row.started_at == 1_700_000_000.5
+        assert row.repeated_of == "ev_0003"
+
+    def test_a_failed_call_is_not_recorded_as_a_trimmed_one(self) -> None:
+        row = _evidence_row(
+            {
+                "id": "ev_0008",
+                "agent": "static",
+                "tool": "pe_info",
+                "ok": False,
+                "error": "the tool server did not answer",
+                "output": "",
+            },
+            job_id=uuid.uuid4(),
+        )
+
+        assert row.output == ""
+        assert row.truncated is False
+        assert row.repeated_of is None
+
+    def test_every_field_of_a_ledger_entry_has_somewhere_to_go(self) -> None:
+        from maljan.schemas.evidence import LedgerEntry
+
+        row = _evidence_row(LedgerEntry(id="ev_0001").model_dump(), job_id=uuid.uuid4())
+        # ``id`` is the citation string, which the row calls ``entry_id``: the
+        # row's own ``id`` is its primary key.
+        missing = [
+            field
+            for field in LedgerEntry(id="ev_0001").model_dump()
+            if field != "id" and not hasattr(row, field)
+        ]
+        assert not missing, f"LedgerEntry carries {missing} and the row drops it."

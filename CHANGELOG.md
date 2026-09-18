@@ -747,6 +747,18 @@ change landed on `main`.
 
 ### Fixed
 
+- **A replayed conversation is the conversation again, not a reconstruction of
+  it.** `agent_messages` kept none of `kind`, `stage` or `display_name`,
+  although the live `agent_message` payload has carried all three and both the
+  model and the response schema are documented as mirroring that payload field
+  for field. A run read back from its rows therefore lost the arrows between a
+  delegated ask and its answer — the kind had to be re-derived, and the
+  derivation can only return `says`, `system` or `verdict` — put every line
+  into one unnamed stage, and named agents by their registry keys where the
+  live view had used the operator's labels. The three are columns
+  (`20260926000000`, all nullable), the recorder writes them, the report
+  endpoint returns them and the console prefers them, falling back to its
+  derivation for a run recorded before they existed.
 - **The two tables a reader meets first say what the code says.**
   `docs/configuration.md` counted sixteen settings groups and listed sixteen
   rows where the catalogue holds seventeen: **Live events**, the group

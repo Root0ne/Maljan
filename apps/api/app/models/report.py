@@ -162,6 +162,23 @@ class AgentMessage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     speaker: Mapped[str] = mapped_column(String(100), nullable=False)
     # analyst | reviser | negotiator | judge | system
     role: Mapped[str] = mapped_column(String(20), nullable=False)
+    # What the line *is*, from ``maljan.pipeline.events.MESSAGE_KINDS``: a
+    # report, a delegated ask, the answer to one, a verdict, a system notice.
+    # NULL on a row written before the column existed, and NULL is the only
+    # honest value there: such a row was recorded without its kind, so a
+    # reader falls back to deriving one rather than claiming it was a
+    # ``says``. Without it a stored ask and its answer replay as two plain
+    # lines and lose the arrow between them, although ``addressed_to`` — the
+    # other half of that pair — is stored.
+    kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # The team stage the speaker was working in, when the producer knew it.
+    # The console groups a replayed conversation by it; without it every
+    # replayed line falls into one unnamed stage.
+    stage: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # The label the operator gave this agent, so a replay names it the way the
+    # live view did. Never a substitute for ``speaker``, which stays the
+    # identity everything joins on.
+    display_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     # Negotiation round; 0 for the initial pass.
     round: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     # complete | no_data | no_claims | failed | timeout — the AgentFinding vocabulary.

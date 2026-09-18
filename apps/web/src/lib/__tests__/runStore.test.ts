@@ -13,6 +13,8 @@ import {
   type RunSocketHandlers,
   type RunTransport,
 } from "@/lib/runStore";
+import { buildConversation, resetConversationCache } from "@/lib/conversation";
+import type { JobRoster } from "@/types";
 
 /**
  * The run store, driven through a transport the test owns.
@@ -245,6 +247,96 @@ describe("the recorded conversation", () => {
     await vi.advanceTimersByTimeAsync(0);
 
     expect(getRun(JOB).events[0].data.kind).toBe("system");
+  });
+
+  it("prefers the kind, the stage and the label the run recorded", async () => {
+    /* A run recorded after those three became columns says what each line
+     * was, where it was said and what its speaker was called. Deriving any of
+     * them from a row that states them is how a delegated ask came back as a
+     * plain line. */
+    const { transport } = fakeTransport();
+    configureRunTransport(transport);
+    hydrateRunTranscript(JOB, [
+      {
+        speaker: "lead",
+        role: "analyst",
+        round: 0,
+        status: "complete",
+        text: "check the imports",
+        kind: "delegation_ask",
+        stage: "analysis",
+        addressed_to: "ahmet",
+        display_name: "Lead analyst",
+      },
+    ]);
+    subscribeRun(JOB, () => {});
+    await vi.advanceTimersByTimeAsync(0);
+
+    const data = getRun(JOB).events[0].data;
+    expect(data.kind).toBe("delegation_ask");
+    expect(data.stage).toBe("analysis");
+    expect(data.display_name).toBe("Lead analyst");
+    expect(data.addressed_to).toBe("ahmet");
+  });
+
+  it("derives the kind for a row that never recorded one", async () => {
+    /* The fallback the older rows still need, kept exactly as it was. */
+    const { transport } = fakeTransport();
+    configureRunTransport(transport);
+    hydrateRunTranscript(JOB, ROWS);
+    subscribeRun(JOB, () => {});
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(getRun(JOB).events.map((e) => e.data.kind)).toEqual(["says", "verdict"]);
+  });
+
+  it("derives the kind when the row records one this view cannot draw", async () => {
+    const { transport } = fakeTransport();
+    configureRunTransport(transport);
+    hydrateRunTranscript(JOB, [
+      { speaker: "judge", role: "judge", round: 1, status: "complete", text: "Malware", kind: "semaphore" },
+    ]);
+    subscribeRun(JOB, () => {});
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(getRun(JOB).events[0].data.kind).toBe("verdict");
+  });
+
+  it("replays a recorded run into stages with its delegation arrows intact", async () => {
+    /* The whole point of storing the three fields: a replayed conversation
+     * and a live one are the same conversation. Grouped by the stage each
+     * line was said in, and with the ask and its answer still pointing at
+     * each other by name. */
+    const roster: JobRoster = {
+      agents: [
+        { key: "lead", label: "Lead analyst", role: "analyst", stages: ["analysis"] },
+        { key: "ahmet", label: "Ahmet", role: "analyst", stages: [], via: ["lead"] },
+        { key: "judge", label: "Judge", role: "judge", stages: ["verdict"] },
+      ],
+      stages: [
+        { key: "analysis", label: "Analysis", kind: "analysis", agents: ["lead"] },
+        { key: "verdict", label: "Verdict", kind: "verdict", agents: ["judge"] },
+      ],
+    };
+    const { transport } = fakeTransport();
+    configureRunTransport(transport);
+    resetConversationCache();
+    setRunRoster(JOB, roster);
+    hydrateRunTranscript(JOB, [
+      { speaker: "lead", role: "analyst", round: 0, status: "complete", text: "check the imports", kind: "delegation_ask", stage: "analysis", addressed_to: "ahmet", display_name: "Lead analyst" },
+      { speaker: "ahmet", role: "analyst", round: 0, status: "complete", text: "two suspicious imports", kind: "delegation_answer", stage: "analysis", addressed_to: "lead", display_name: "Ahmet" },
+      { speaker: "judge", role: "judge", round: 1, status: "complete", text: "Malware", kind: "verdict", stage: "verdict", display_name: "Judge" },
+    ]);
+    subscribeRun(JOB, () => {});
+    await vi.advanceTimersByTimeAsync(0);
+
+    const run = getRun(JOB);
+    const conversation = buildConversation(run.events, run.roster);
+    expect(conversation.stages.map((s) => s.key)).toEqual(["analysis", "verdict"]);
+    const analysis = conversation.stages[0].rounds.flatMap((r) => r.items);
+    expect(analysis.map((i) => i.kind)).toEqual(["delegation_ask", "delegation_answer"]);
+    expect(analysis[0].addressedToName).toBe("Ahmet");
+    expect(analysis[1].addressedToName).toBe("Lead analyst");
   });
 
   it("waits for the feed to answer before standing in for it", () => {

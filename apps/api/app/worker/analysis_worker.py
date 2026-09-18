@@ -602,6 +602,77 @@ def _parse_event_ts(value: Any) -> datetime | None:
         return None
 
 
+def _evidence_row(entry: dict[str, Any], *, job_id: uuid.UUID) -> Any:
+    """One ledger entry as the row that keeps it.
+
+    Every field ``maljan.schemas.evidence.LedgerEntry`` carries has a column
+    here, which is what lets a reader of the stored ledger say why an output
+    is empty instead of guessing. An absent value stays absent rather than
+    becoming a default, for the same reason.
+    """
+    from app.models.evidence import EvidenceEntry
+
+    return EvidenceEntry(
+        job_id=job_id,
+        entry_id=str(entry.get("id", ""))[:32],
+        stage=str(entry.get("stage", "analysis"))[:32],
+        agent=str(entry.get("agent", ""))[:100],
+        server=(str(entry["server"])[:100] if entry.get("server") else None),
+        tool=str(entry.get("tool", ""))[:200],
+        ok=bool(entry.get("ok", True)),
+        error=(str(entry["error"]) if entry.get("error") else None),
+        remediation=(str(entry["remediation"]) if entry.get("remediation") else None),
+        duration_ms=int(entry.get("duration_ms", 0) or 0),
+        seq=int(entry.get("seq", 0) or 0),
+        args=entry.get("args") or {},
+        args_repaired=bool(entry.get("args_repaired", False)),
+        args_raw=(str(entry["args_raw"]) if entry.get("args_raw") else None),
+        output=str(entry.get("output", "") or ""),
+        structured=entry.get("structured"),
+        # Why the output is empty, what the call was answered from, what it
+        # was aimed at, and when it ran.
+        truncated=bool(entry.get("truncated", False)),
+        repeated_of=(str(entry["repeated_of"])[:32] if entry.get("repeated_of") else None),
+        symbol=(str(entry["symbol"])[:200] if entry.get("symbol") else None),
+        started_at=(float(entry["started_at"]) if entry.get("started_at") else None),
+    )
+
+
+def _transcript_row(message: dict[str, Any], *, report_id: uuid.UUID, seq: int) -> Any:
+    """One broadcast line as the row that keeps it.
+
+    Field for field from the payload ``maljan.pipeline.events.emit_agent_message``
+    built, which is the property ``AgentMessage`` is documented on: a replay
+    that has to re-derive a field the publisher already sent is a replay that
+    can get it wrong. A field the payload did not carry is stored as NULL, so
+    a reader can tell "not recorded" from a recorded value.
+    """
+    from app.models.report import AgentMessage
+
+    return AgentMessage(
+        report_id=report_id,
+        # The number the publisher gave this message when it went out, so the
+        # stored row and the live event a console still holds are one message
+        # rather than two.
+        seq=seq,
+        speaker=str(message.get("speaker", "unknown"))[:100],
+        role=str(message.get("role", "system"))[:20],
+        round=int(message.get("round", 0) or 0),
+        status=str(message.get("status", "complete"))[:20],
+        text=str(message.get("text", "") or ""),
+        report=message.get("report"),
+        report_truncated=bool(message.get("report_truncated", False)),
+        confidence=message.get("confidence"),
+        claims=message.get("claims") or [],
+        dissent=message.get("dissent") or [],
+        addressed_to=(str(message["addressed_to"])[:100] if message.get("addressed_to") else None),
+        kind=(str(message["kind"])[:32] if message.get("kind") else None),
+        stage=(str(message["stage"])[:64] if message.get("stage") else None),
+        display_name=(str(message["display_name"])[:200] if message.get("display_name") else None),
+        ts=_parse_event_ts(message.get("ts")),
+    )
+
+
 def _make_event_sink(
     redis_conn: aioredis.Redis,
     job_id: str,
@@ -1214,7 +1285,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             await _publish_event(redis_conn, job_id, "phase_change", {"phase": "reporting"})
 
             # ── 4. Save report ───────────────────────────────────
-            from app.models.report import AgentFinding, AgentMessage, AnalysisReport
+            from app.models.report import AgentFinding, AnalysisReport
 
             # Prefer the rich extended bundle produced by ``report_node``
             # (54+ objects with Identity/Indicator/ObservedData/Note/Report
@@ -1449,34 +1520,11 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # The report's sections cite these ids, so the two are written in
             # one transaction: a report whose citations resolve to nothing is
             # worse than one that was never saved.
-            from app.models.evidence import EvidenceEntry
-
             _ledger = pipeline_result.get("evidence_ledger") or []
             for _entry in _ledger:
                 if not isinstance(_entry, dict):
                     continue
-                db.add(
-                    EvidenceEntry(
-                        job_id=job.id,
-                        entry_id=str(_entry.get("id", ""))[:32],
-                        stage=str(_entry.get("stage", "analysis"))[:32],
-                        agent=str(_entry.get("agent", ""))[:100],
-                        server=(str(_entry["server"])[:100] if _entry.get("server") else None),
-                        tool=str(_entry.get("tool", ""))[:200],
-                        ok=bool(_entry.get("ok", True)),
-                        error=(str(_entry["error"]) if _entry.get("error") else None),
-                        remediation=(
-                            str(_entry["remediation"]) if _entry.get("remediation") else None
-                        ),
-                        duration_ms=int(_entry.get("duration_ms", 0) or 0),
-                        seq=int(_entry.get("seq", 0) or 0),
-                        args=_entry.get("args") or {},
-                        args_repaired=bool(_entry.get("args_repaired", False)),
-                        args_raw=(str(_entry["args_raw"]) if _entry.get("args_raw") else None),
-                        output=str(_entry.get("output", "") or ""),
-                        structured=_entry.get("structured"),
-                    )
-                )
+                db.add(_evidence_row(_entry, job_id=job.id))
 
             logger.info(
                 f"Saved {len(_ledger)} evidence entries for job={job.id}",
@@ -1504,28 +1552,10 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             for index, message in enumerate(transcript):
                 _stamped = int(message.get("seq") or 0)
                 db.add(
-                    AgentMessage(
+                    _transcript_row(
+                        message,
                         report_id=report.id,
-                        # The number the publisher gave this message when it
-                        # went out, so the stored row and the live event a
-                        # console still holds are one message rather than two.
                         seq=_stamped or (0 if _numbered else index),
-                        speaker=str(message.get("speaker", "unknown"))[:100],
-                        role=str(message.get("role", "system"))[:20],
-                        round=int(message.get("round", 0) or 0),
-                        status=str(message.get("status", "complete"))[:20],
-                        text=str(message.get("text", "") or ""),
-                        report=message.get("report"),
-                        report_truncated=bool(message.get("report_truncated", False)),
-                        confidence=message.get("confidence"),
-                        claims=message.get("claims") or [],
-                        dissent=message.get("dissent") or [],
-                        addressed_to=(
-                            str(message["addressed_to"])[:100]
-                            if message.get("addressed_to")
-                            else None
-                        ),
-                        ts=_parse_event_ts(message.get("ts")),
                     )
                 )
 
