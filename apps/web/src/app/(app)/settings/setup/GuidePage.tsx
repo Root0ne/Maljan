@@ -260,7 +260,7 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
   const stagedCount = lines.length + alsoStaged.length;
   // Counted as rows of the two lists above, not as raw error entries: one
   // composite leaf can carry several field-level errors and still be one row.
-  const errorCount = [...lines, ...alsoStaged].filter((item) => item.error).length;
+  const errorCount = [...lines, ...alsoStaged].reduce((total, item) => total + item.errors.length, 0);
   const probeId = step.probe;
   const result = probeId ? probeResult(probeId) : undefined;
 

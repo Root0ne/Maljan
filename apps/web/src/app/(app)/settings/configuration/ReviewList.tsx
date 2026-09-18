@@ -12,19 +12,20 @@ export interface ReviewItem extends ChangeLine {
   href: string;
   sectionTitle: string;
   groupTitle: string;
-  error?: string;
+  /** Empty when the server accepted this key. */
+  errors: string[];
 }
 
 /** All validation errors that belong to a staged key: an exact match for a
  *  scalar leaf, or `${key}.<field>` for a composite one (the server map, the
  *  agent definitions, ...) — the same prefix rule the composite editors use
- *  to place a card error. Joined so one review row can show every field the
- *  server rejected. */
-function errorFor(key: string, errors: Record<string, string>): string | undefined {
-  const matches = Object.entries(errors)
+ *  to place a card error. A list rather than one joined sentence: a composite
+ *  leaf can be refused on five fields at once, and semicolons between them
+ *  made a screen reader recite one run-on paragraph. */
+function errorsFor(key: string, errors: Record<string, string>): string[] {
+  return Object.entries(errors)
     .filter(([k]) => k === key || k.startsWith(`${key}.`))
     .map(([, v]) => v);
-  return matches.length > 0 ? matches.join("; ") : undefined;
 }
 
 /** The slice of `SettingsContextValue` `buildReviewItems` reads — named
@@ -70,7 +71,7 @@ export function buildReviewItems(ctx: ReviewSource): ReviewItem[] {
       href,
       sectionTitle: titles.sectionTitle,
       groupTitle: titles.groupTitle,
-      error: errorFor(key, errors),
+      errors: errorsFor(key, errors),
     });
   }
   return items;
@@ -133,10 +134,12 @@ export function ReviewList({ lines }: { lines: ReviewItem[] }) {
                 <div className="text-xs text-text-muted">
                   <em>{APPLIES_SENTENCE[item.applies]}</em>
                 </div>
-                {item.error && (
-                  <div className="text-xs text-status-red" role="alert">
-                    {item.error}
-                  </div>
+                {item.errors.length > 0 && (
+                  <ul className="text-xs text-status-red">
+                    {item.errors.map((message, i) => (
+                      <li key={i}>{message}</li>
+                    ))}
+                  </ul>
                 )}
               </li>
             ))}

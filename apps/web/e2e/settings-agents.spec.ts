@@ -81,7 +81,7 @@ test.describe("agent definitions and profiles", () => {
       changes: Record<string, unknown> & {
         "core.agents.definitions": Record<
           string,
-          { role: string; static_provider: string | null; prompt: string | null }
+          { role: string; enabled?: boolean; static_provider?: string | null }
         >;
         "core.llm.agents": Record<string, { provider: string; model: string }>;
       };
@@ -89,9 +89,10 @@ test.describe("agent definitions and profiles", () => {
     const sent = body.changes["core.agents.definitions"];
     expect(sent.static_r2.role).toBe("static");
     expect(sent.static_r2.static_provider).toBe("r2");
-    // The source is sent back untouched: a clone must not edit what it copied.
-    expect(sent.static.static_provider).toBeNull();
-    expect(sent.static.prompt).toBeNull();
+    // A built-in goes out as the only thing that may be changed about it —
+    // its role and its switch — and the API fills the rest in from the seed.
+    // Sending it whole is what let a stale stored row refuse every save.
+    expect(sent.static).toEqual({ role: "static", enabled: true });
     // The typed model lands in the `core.llm.agents` map under the clone's
     // own key, not folded into the definitions map. A model-only edit fills
     // in the effective global provider (the fixture's `core.llm.provider`,

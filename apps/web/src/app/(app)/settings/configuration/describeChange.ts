@@ -5,6 +5,7 @@
  * masking rules below are the single place that decides what a viewer sees
  * for a token or a `secret`-typed leaf.
  */
+import { countLabel } from "@/lib/report-utils";
 import type {
   AgentDefinitionEntry,
   CatalogEntry,
@@ -216,7 +217,7 @@ function describeServerMap(before: unknown, after: unknown): {
   }
 
   return {
-    summary: `${changedCount} server(s) changed`,
+    summary: `${countLabel(changedCount, "server")} changed`,
     detail: detail.length ? detail : undefined,
   };
 }
@@ -291,7 +292,7 @@ function describeDefinitionsMap(before: unknown, after: unknown): {
   }
 
   return {
-    summary: `${changedCount} agent(s) changed`,
+    summary: `${countLabel(changedCount, "agent")} changed`,
     detail: detail.length ? detail : undefined,
   };
 }
@@ -405,7 +406,7 @@ function describeProfilesMap(before: unknown, after: unknown): {
   }
 
   return {
-    summary: `${changedCount} team(s) changed`,
+    summary: `${countLabel(changedCount, "team")} changed`,
     detail: detail.length ? detail : undefined,
   };
 }
@@ -452,7 +453,7 @@ function describeLlmAgentsMap(before: unknown, after: unknown): {
   }
 
   return {
-    summary: `${changedCount} override(s) changed`,
+    summary: `${countLabel(changedCount, "override")} changed`,
     detail: detail.length ? detail : undefined,
   };
 }

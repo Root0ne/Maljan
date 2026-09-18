@@ -134,8 +134,23 @@ describe("buildReviewItems", () => {
     const items = buildReviewItems(baseSource());
     const byKey = new Map(items.map((i) => [i.key, i]));
 
-    expect(byKey.get(maxTokens.key)?.error).toBe("must be a positive integer");
-    expect(byKey.get(apiKey.key)?.error).toBeUndefined();
+    expect(byKey.get(maxTokens.key)?.errors).toEqual(["must be a positive integer"]);
+    expect(byKey.get(apiKey.key)?.errors).toEqual([]);
+  });
+
+  /* One composite leaf can be refused on several of its fields at once. The
+   * review panel counted rows and joined the messages with semicolons, so it
+   * announced "1 field needs attention" over five sentences read out as one.
+   * A row keeps them apart. */
+  it("keeps a composite leaf's field errors apart", () => {
+    const source = baseSource();
+    source.errors = {
+      [`${maxTokens.key}.alpha`]: "alpha is wrong",
+      [`${maxTokens.key}.beta`]: "beta is wrong",
+    };
+    const byKey = new Map(buildReviewItems(source).map((i) => [i.key, i]));
+
+    expect(byKey.get(maxTokens.key)?.errors).toEqual(["alpha is wrong", "beta is wrong"]);
   });
 
   it("never renders a secret's value, only that a new one was staged", () => {

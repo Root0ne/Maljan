@@ -253,13 +253,8 @@ export function ServerDetail({
     onChange(putEntry(value, key, next));
   };
 
-  const remove = (key: string) => {
-    if (BUILTIN.has(key)) {
-      put(key, { enabled: false });
-      return;
-    }
-    onChange(removeEntry(value, key));
-  };
+  /** Only a custom server has a Remove; a built-in is turned off instead. */
+  const remove = (key: string) => onChange(removeEntry(value, key));
 
   if (!server) return null;
 
@@ -354,13 +349,17 @@ export function ServerDetail({
               >
                 Test
               </button>
-              <button
-                type="button"
-                className="text-xs text-text-secondary"
-                onClick={() => remove(serverKey)}
-              >
-                {BUILTIN.has(serverKey) ? "Disable" : "Remove"}
-              </button>
+              {/* A built-in server has no Remove, and the switch two
+                  controls to the left is already how it is turned off. */}
+              {!BUILTIN.has(serverKey) && (
+                <button
+                  type="button"
+                  className="text-xs text-text-secondary"
+                  onClick={() => remove(serverKey)}
+                >
+                  Remove
+                </button>
+              )}
             </div>
           </div>
 

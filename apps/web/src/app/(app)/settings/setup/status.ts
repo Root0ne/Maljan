@@ -1,3 +1,4 @@
+import { BUILTIN_AGENT_KEYS } from "../configuration/agentStaging";
 import type { GuideId } from "./guides";
 
 /** Reads the value a key currently has — staged if it is staged, else stored.
@@ -50,10 +51,8 @@ function countEnabled(value: unknown, skip: (key: string) => boolean = () => fal
 }
 
 /** Agent keys the backend ships; anything else in the definitions map is a
- *  custom analyst. Duplicated from `AgentDefinitionsEditor.BUILTIN_AGENT_KEYS`
- *  rather than imported so this module stays free of React imports (it is
- *  unit-tested on its own). */
-const BUILTIN_AGENTS = new Set(["static", "dynamic", "network", "judge", "reporter"]);
+ *  custom analyst. */
+const BUILTIN_AGENTS = BUILTIN_AGENT_KEYS;
 
 /**
  * Whether the language-model settings could plausibly run an analysis: a

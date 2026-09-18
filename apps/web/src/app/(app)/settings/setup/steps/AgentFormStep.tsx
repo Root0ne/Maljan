@@ -4,11 +4,11 @@ import { useEffect, useState } from "react";
 import type { AgentDefinitionEntry } from "@/types/settings";
 import {
   AgentDetail,
-  BUILTIN_AGENT_KEYS,
   cloneDefinition,
   useAgentResolve,
   type AgentLLMOverride,
 } from "../../configuration/AgentDefinitionsEditor";
+import { BUILTIN_AGENT_KEYS } from "../../configuration/agentStaging";
 import { buildFieldRowProps } from "../../configuration/fieldRowProps";
 import { copyKey, mapKeyError } from "../../configuration/mapEditorHelpers";
 import { useSettingsContext } from "../../configuration/SettingsContext";
