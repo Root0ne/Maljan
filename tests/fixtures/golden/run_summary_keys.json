@@ -16,13 +16,43 @@
   ],
   "budget": "<data-keyed map>",
   "corroboration": "<data-keyed map>",
+  "dedupe": {
+    "findings_merged": null,
+    "indicators_merged": null
+  },
   "degradation_reasons": [],
   "degraded_mode": null,
   "elapsed_seconds": null,
+  "evidence": {
+    "by_tool": "<data-keyed map>",
+    "entries": null,
+    "failed": null,
+    "failures": [
+      {
+        "count": null,
+        "entry_id": null,
+        "error": null,
+        "remediation": null,
+        "server": null,
+        "tool": null
+      }
+    ],
+    "ok": null,
+    "trimmed": null
+  },
   "failed_analysts": [],
   "file_hash": null,
   "file_name": null,
   "final_decision": null,
+  "fp_warnings": [
+    {
+      "explanation": null,
+      "field": null,
+      "message": null,
+      "rule": null,
+      "severity": null
+    }
+  ],
   "negotiation": {
     "confidence_history": [
       null
@@ -44,6 +74,8 @@
     "custom": [],
     "name": null
   },
+  "sections_without_evidence": null,
+  "settings_snapshot": "<data-keyed map>",
   "stages": [
     {
       "agents": [

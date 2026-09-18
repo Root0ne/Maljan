@@ -766,6 +766,25 @@ def tool_failures(ledger: Sequence[Any], limit: int = 20) -> list[dict[str, Any]
     return kept
 
 
+def evidence_summary(ledger: Sequence[Any]) -> dict[str, Any]:
+    """What the report is standing on, counted, for ``run_summary.evidence``.
+
+    One place rather than an inline literal, so the golden that pins the
+    stored summary pins the shape this writes rather than a copy of it.
+    """
+    by_tool: dict[str, int] = {}
+    for entry in ledger:
+        by_tool[entry.tool] = by_tool.get(entry.tool, 0) + 1
+    return {
+        "entries": len(ledger),
+        "ok": sum(1 for e in ledger if e.ok),
+        "failed": sum(1 for e in ledger if not e.ok),
+        "trimmed": sum(1 for e in ledger if e.truncated),
+        "by_tool": dict(sorted(by_tool.items())),
+        "failures": tool_failures(ledger),
+    }
+
+
 def _function_matches_step(container: ServiceContainer, state: AnalysisState) -> Any:
     """The pack's exact-match attribution step, or ``None`` when it cannot run.
 
@@ -3516,18 +3535,8 @@ def make_report_node(
         # entry nor the finding it came from is ungrounded, and a run where
         # that number is not zero has a defect worth seeing rather than a
         # report worth reading.
-        _by_tool: dict[str, int] = {}
-        for _entry in _ledger:
-            _by_tool[_entry.tool] = _by_tool.get(_entry.tool, 0) + 1
         _summary = dict(report.run_summary or {})
-        _summary["evidence"] = {
-            "entries": len(_ledger),
-            "ok": sum(1 for e in _ledger if e.ok),
-            "failed": sum(1 for e in _ledger if not e.ok),
-            "trimmed": sum(1 for e in _ledger if e.truncated),
-            "by_tool": dict(sorted(_by_tool.items())),
-            "failures": tool_failures(_ledger),
-        }
+        _summary["evidence"] = evidence_summary(_ledger)
         _summary["sections_without_evidence"] = sum(
             1 for section in report.sections if not section_is_grounded(section)
         )
