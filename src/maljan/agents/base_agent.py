@@ -35,6 +35,7 @@ from maljan.core.exceptions import AgentLoopCancelled, AnalystError
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger, record_response_usage
 from maljan.pipeline.validation import (
+    ALIGNMENT_MARGIN,
     VALIDITY_CODE,
     ValidationTally,
     Violation,
@@ -3583,8 +3584,17 @@ class BaseAnalyst(BudgetMeter, ABC):
         cfg_validation = getattr(get_settings(), "validation", None)
         gate = alignment_gate(knowledge, cfg_validation, self.logger, self.name)
         threshold = float(getattr(cfg_validation, "alignment_threshold", 0.05) or 0.05)
+        margin = float(getattr(cfg_validation, "alignment_margin", ALIGNMENT_MARGIN))
+        challenges = bool(getattr(cfg_validation, "weak_alignment", False))
+        # One weak-alignment batch per turn. The ranking is recorded on every
+        # claim every time; what is bounded is the asking, because a second
+        # batch would spend another full model turn on a check whose first
+        # batch the analyst has already answered.
+        asked: list[bool] = []
 
         def _validator(candidate: AgentISR) -> list[Violation]:
+            first = not asked
+            asked.append(True)
             return validate_isr(
                 candidate,
                 attck=knowledge,
@@ -3592,6 +3602,8 @@ class BaseAnalyst(BudgetMeter, ABC):
                 sample=sample,
                 alignment=gate,
                 alignment_threshold=threshold,
+                alignment_margin=margin,
+                weak_alignment_challenges=challenges and first,
             )
 
         try:

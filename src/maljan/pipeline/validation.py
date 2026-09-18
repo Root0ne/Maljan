@@ -43,6 +43,13 @@ from maljan.schemas.judgement import SEVERITY_RATINGS
 # middle of it.
 MAX_SUGGESTIONS = 3
 
+# How far a candidate has to beat the claimed id's own score before the gate
+# says anything. The index scores a *correct* id near zero often enough that a
+# bare threshold questioned almost every claim: 81 of the 92 feedback rows in
+# one audited run, 33 of 33 in another. The default is the measured one — see
+# ``tests/fixtures/attck_alignment_recorded.json`` and docs/architecture.md.
+ALIGNMENT_MARGIN = 0.20
+
 # How many schema complaints one feedback turn carries. A model that answered
 # with the wrong shape produces one error per field, and a wall of them reads
 # as noise rather than as a correction.
@@ -200,6 +207,8 @@ def validate_isr(
     sample: Mapping[str, Any] | None = None,
     alignment: Any = None,
     alignment_threshold: float = 0.05,
+    alignment_margin: float = ALIGNMENT_MARGIN,
+    weak_alignment_challenges: bool = False,
 ) -> list[Violation]:
     """What is wrong with one analyst's structured answer.
 
@@ -220,11 +229,13 @@ def validate_isr(
     technique whose catalogue domain or platforms cannot apply to them is
     ``attck.platform_mismatch``. ``alignment`` is the gate — a callable of
     ``(claim_text, technique_id)`` answering the index's gate score and
-    candidates, or ``None`` when the index is cold or the gate is off. A
-    claimed id the index neither ranked nor scored above
-    ``alignment_threshold`` is ``attck.weak_alignment``, with the candidates
-    named; the ranking is written on the claim either way, and no id is ever
-    replaced by a candidate.
+    candidates, or ``None`` when the index is cold or the gate is off. The
+    ranking is narrowed to the sample's own domain and platforms and written on
+    the claim whatever it says; it becomes ``attck.weak_alignment`` only with
+    ``weak_alignment_challenges`` on, and then only for a claimed id that scores
+    under ``alignment_threshold`` while an in-scope candidate from another
+    tactic beats it by ``alignment_margin``. No id is ever replaced by a
+    candidate.
     """
     citable = [str(i) for i in (ledger_ids or []) if str(i).strip()]
     known = {i.strip().lower() for i in citable}
@@ -309,7 +320,16 @@ def validate_isr(
         mismatch = platform_mismatch_message(tid, attck, scope)
         if mismatch:
             violations.append(Violation(code=PLATFORM_MISMATCH_CODE, message=mismatch, path=path))
-        weak = _weak_alignment(claim, tid, alignment, alignment_threshold)
+        weak = _weak_alignment(
+            claim,
+            tid,
+            alignment,
+            alignment_threshold,
+            attck=attck,
+            scope=scope,
+            margin=alignment_margin,
+            challenge=weak_alignment_challenges,
+        )
         if weak:
             violations.append(Violation(code=WEAK_ALIGNMENT_CODE, message=weak, path=path))
 
@@ -432,16 +452,97 @@ WEAK_ALIGNMENT_CODE = "attck.weak_alignment"
 ALIGNMENT_CANDIDATES = 5
 
 
-def _weak_alignment(claim: Any, tid: str, alignment: Any, threshold: float) -> str:
+def _base_id(technique_id: str) -> str:
+    """The parent technique of an id: ``T1055.001`` -> ``T1055``."""
+    return str(technique_id or "").split(".")[0]
+
+
+def _catalogue_answer(technique_id: str, attck: Any, question: str) -> dict[str, Any]:
+    """One catalogue answer about an id, or ``{}`` when it cannot be had."""
+    lookup = getattr(attck, question, None)
+    if lookup is None:
+        return {}
+    try:
+        answer = lookup(technique_id)
+    except Exception as exc:  # noqa: BLE001 — an unanswered lookup narrows nothing
+        logger.debug("validation: the %s lookup for %s failed (%s).", question, technique_id, exc)
+        return {}
+    return answer if isinstance(answer, dict) else {}
+
+
+def _within_scope(technique_id: str, attck: Any, scope: tuple[str | None, tuple[str, ...]]) -> bool:
+    """Whether a technique could apply to a sample in ``scope``.
+
+    The same question ``platform_mismatch_message`` answers about a claimed id,
+    asked about a *candidate* before it is proposed. Without it the index
+    offered Mobile and ICS techniques as better fits for a Windows PE — the
+    ranking is domain-blind, so ``T1406`` and ``T0885`` came back for a claim
+    about a PE's imports and the analyst was asked to consider them.
+    """
+    expected_domain, expected_platforms = scope
+    if expected_domain is None:
+        return True
+    answer = _catalogue_answer(technique_id, attck, "attck_scope") or _catalogue_answer(
+        technique_id, attck, "attck_lookup"
+    )
+    if not answer:
+        return True
+    domain = str(answer.get("domain") or "").strip().lower()
+    if domain and domain != expected_domain:
+        return False
+    platforms = [str(p) for p in (answer.get("platforms") or []) if str(p).strip()]
+    if not platforms or _pre_only(platforms):
+        return True
+    wanted = {p.lower() for p in expected_platforms}
+    return not wanted or any(p.lower() in wanted for p in platforms)
+
+
+def _tactics(technique_id: str, attck: Any) -> set[str]:
+    """The tactics the catalogue gives a technique, lowercased."""
+    answer = _catalogue_answer(technique_id, attck, "attck_lookup")
+    return {str(t).strip().lower() for t in (answer.get("tactics") or []) if str(t).strip()}
+
+
+def _disagrees_with(candidate_id: str, tid: str, attck: Any) -> bool:
+    """Whether proposing ``candidate_id`` contradicts the claim's own id.
+
+    A candidate from the same technique family (``T1055`` beside ``T1055.001``)
+    or from the same tactic is the index naming another rung of the behaviour
+    the analyst already named, which is a ranking preference and not a reason
+    to spend a model turn. A candidate from another tactic is the index saying
+    the claim describes something else.
+    """
+    if _base_id(candidate_id) == _base_id(tid):
+        return False
+    claimed = _tactics(tid, attck)
+    return not (claimed and claimed & _tactics(candidate_id, attck))
+
+
+def _weak_alignment(
+    claim: Any,
+    tid: str,
+    alignment: Any,
+    threshold: float,
+    *,
+    attck: Any = None,
+    scope: tuple[str | None, tuple[str, ...]] = (None, ()),
+    margin: float = ALIGNMENT_MARGIN,
+    challenge: bool = False,
+) -> str:
     """Record the index's ranking on the claim; the feedback when it disagrees.
 
     ``alignment(text, tid)`` answers ``{gate_score, candidates: [{technique_id,
     score_gate}, ...]}`` or ``None`` when the index has nothing to say. The
-    ranking is written to ``claim.alignment`` whatever it says, so the judge
-    and the report see it beside the analyst's choice. The violation is raised
-    only when the index both left the id out of its candidates and scored it
-    under the threshold; either alone is a ranking the model may disagree
-    with. The id is never replaced.
+    ranking is written to ``claim.alignment`` whatever it says — narrowed to
+    the sample's own ATT&CK domain and platforms, so nothing out of scope is
+    ever proposed — and the judge and the report see it beside the analyst's
+    choice.
+
+    The feedback is the narrow case: the gate challenges only when it is turned
+    on, the claimed id scores under the threshold, no in-scope candidate names
+    the same family or tactic, and the best of the ones that do disagree beats
+    the claimed id by ``margin``. Everything else is a ranking the model may
+    disagree with, and the id is never replaced either way.
     """
     if alignment is None:
         return ""
@@ -457,7 +558,7 @@ def _weak_alignment(claim: Any, tid: str, alignment: Any, threshold: float) -> s
         return ""
     if not isinstance(answer, dict):
         return ""
-    candidates = [
+    candidates: list[dict[str, Any]] = [
         {
             "technique_id": str(c.get("technique_id") or "").strip().upper(),
             "score_gate": float(c.get("score_gate") or 0.0),
@@ -465,6 +566,7 @@ def _weak_alignment(claim: Any, tid: str, alignment: Any, threshold: float) -> s
         for c in answer.get("candidates") or []
         if isinstance(c, dict) and c.get("technique_id")
     ]
+    candidates = [c for c in candidates if _within_scope(str(c["technique_id"]), attck, scope)]
     try:
         gate_score = float(answer.get("gate_score") or 0.0)
     except (TypeError, ValueError):
@@ -472,13 +574,25 @@ def _weak_alignment(claim: Any, tid: str, alignment: Any, threshold: float) -> s
     record = {"gate_score": round(gate_score, 4), "candidates": candidates}
     if hasattr(claim, "alignment"):
         claim.alignment = record
-    if any(c["technique_id"] == tid for c in candidates) or gate_score >= threshold:
+    if not challenge or gate_score >= threshold:
         return ""
-    ranked = ", ".join(f"{c['technique_id']} ({c['score_gate']:.2f})" for c in candidates)
+    if scope[0] is None:
+        # A sample whose domain the router could not settle has no scope to
+        # score inside, and a comparison that cannot be made is not one to
+        # challenge on.
+        return ""
+    disagreeing = [c for c in candidates if _disagrees_with(str(c["technique_id"]), tid, attck)]
+    if not disagreeing:
+        return ""
+    best = max(disagreeing, key=lambda c: float(c["score_gate"]))
+    if float(best["score_gate"]) - gate_score < margin:
+        return ""
+    ranked = ", ".join(f"{c['technique_id']} ({c['score_gate']:.2f})" for c in disagreeing)
     return (
         f"TECHNIQUE {tid} aligns weakly with the claim's own text (gate score "
-        f"{gate_score:.2f}, threshold {threshold:.2f}), and the ATT&CK index ranks other "
-        f"techniques for it: {ranked or 'none'}. Keep {tid} if the evidence says so and say "
+        f"{gate_score:.2f}, threshold {threshold:.2f}), and the ATT&CK index ranks "
+        f"{best['technique_id']} ({best['score_gate']:.2f}) and other techniques from this "
+        f"sample's own domain above it: {ranked}. Keep {tid} if the evidence says so and say "
         "why in the claim, choose one of the ranked techniques, or drop the technique id."
     )
 

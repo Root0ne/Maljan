@@ -514,12 +514,17 @@ pack runs the real tools in mock mode too, so a local observation run with a
 reputation server enabled makes that one outbound call; a team that withholds
 the server, or `triage.reputation = off`, keeps such a run offline.
 
-The technique check's one heuristic part has three settings in the same
+The technique check's one heuristic part has five settings in the same
 group: `validation.alignment_gate` (`auto` runs the alignment gate only on a
 worker whose ATT&CK index is already built; `off` never),
 `validation.alignment_gate_build` (false; true lets the first run that wants
-the gate build the index once, on a thread, and go without it) and
-`validation.alignment_threshold` (0.05, the paper's gate). See *The technique
+the gate build the index once, on a thread, and go without it),
+`validation.weak_alignment` (false — the ranking is recorded on the claim and
+shown to the judge, and nothing is asked again; true lets it question a claim,
+at one correction turn per batch), `validation.alignment_threshold` (0.05, the
+paper's gate) and `validation.alignment_margin` (0.20, how far a candidate from
+the sample's own domain and another tactic must beat the claimed id before it
+is questioned). The measurement behind the default off is in *The technique
 check* in [architecture.md](architecture.md).
 
 `mobile` and `deep_static` are built from three seeded generic agent

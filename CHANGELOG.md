@@ -747,6 +747,24 @@ change landed on `main`.
 
 ### Fixed
 
+- **The ATT&CK alignment gate scores inside the sample's own scope, and asks
+  nothing unless it is turned on.** The index that ranks a claim's text is
+  domain-blind, so a technique claim about a Windows PE was answered with
+  Mobile and ICS candidates, and it scores a correct id near zero often enough
+  that the check questioned 81 of 92 technique claims in one audited run and 33
+  of 33 in another — each batch a full extra model turn. The candidates are now
+  narrowed to the routed sample's ATT&CK domain and platforms before anything
+  is recorded or proposed; a claim is questioned only when its id scores under
+  `validation.alignment_threshold` and an in-scope candidate from neither its
+  own technique family nor any of its tactics beats it by the new
+  `validation.alignment_margin` (0.20); and at most one weak-alignment batch is
+  sent per agent turn. The question itself is behind the new
+  `validation.weak_alignment`, which is off: the ranking is still recorded on
+  every claim and shown to the judge. Over the audit's own 105 distinct
+  rankings, replayed as a fixture, the narrowed rule questions none of the 36
+  claims whose id the audit read as right for its sample and 5 of the other 69;
+  docs/architecture.md carries the measurement.
+
 - **A judge that never answered no longer produces the verdict "Malware".** The
   bundle the pipeline builds when the judge's answer was not a bundle carried a
   `malware` object whatever verdict it was carrying, and the pipeline read the

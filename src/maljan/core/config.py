@@ -2536,13 +2536,23 @@ class ValidationConfig(BaseModel):
     index costs seconds and hundreds of megabytes to build. ``auto`` runs the
     gate only when this worker already built the index; ``alignment_gate_build``
     lets the first run that needs it build it once, in a thread, for the runs
-    after. ``alignment_threshold`` is the paper's gate: a claimed id below it
-    that the index also did not rank among its candidates is questioned.
+    after. The ranking it produces is recorded on the claim and shown to the
+    judge whenever the gate runs.
+
+    Whether that ranking may also *question* a claim is ``weak_alignment``, and
+    it is off. The index scores a correct id near zero often enough that the
+    check questioned 81 of 92 claims in one audited run, each one costing a
+    full model turn; it stays off until it clears the bar the recorded fixture
+    sets. With it on, a claim is questioned when its id scores under
+    ``alignment_threshold`` — the paper's gate — and an in-scope candidate from
+    another tactic beats that score by ``alignment_margin``.
     """
 
     alignment_gate: Literal["auto", "off"] = "auto"
     alignment_gate_build: bool = False
     alignment_threshold: Annotated[float, Field(ge=0.0, le=1.0)] = 0.05
+    alignment_margin: Annotated[float, Field(ge=0.0, le=1.0)] = 0.20
+    weak_alignment: bool = False
 
 
 # ---------------------------------------------------------------------------

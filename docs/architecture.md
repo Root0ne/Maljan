@@ -255,20 +255,42 @@ decides.
    the feedback names the technique, its domain and platforms and the
    sample's. `CapabilityCell` carries `domain` and `platforms` from the
    catalogue and the FP linter's C1 reads them.
-3. **Alignment** (`attck.weak_alignment`, the paper's gate, heuristic). For
-   every technique an analyst keeps, the claim text is ranked against the
-   hybrid ATT&CK index; the claimed id's own TF-IDF gate score and the index's
-   top candidates are written on the claim (`ClaimEvidence.alignment`). The
-   violation is raised only when the index neither ranked the id among its
-   candidates nor scored it at or above `validation.alignment_threshold`
-   (0.05); the feedback lists the candidates and says the analyst may keep
-   the id and say why. The ranking lives on the ISR record
-   (`ClaimEvidence.alignment`) and in the judge's `TECHNIQUE CHECK` block; the
-   report shows it only for a technique the gate questioned and the analyst
-   kept. It runs only when the index is warm in this worker
-   (`validation.alignment_gate = auto`); `validation.alignment_gate_build`
-   lets the first run that wants it start the build on a thread and go
-   without. The index never substitutes an id.
+3. **Alignment** (`attck.weak_alignment`, the paper's gate, heuristic, and the
+   only part that is off by default). For every technique an analyst keeps, the
+   claim text is ranked against the hybrid ATT&CK index; the claimed id's own
+   TF-IDF gate score and the index's candidates — narrowed to the sample's own
+   ATT&CK domain and platforms, so nothing out of scope is ever proposed — are
+   written on the claim (`ClaimEvidence.alignment`). The ranking lives on the
+   ISR record and in the judge's `TECHNIQUE CHECK` block; the report shows it
+   only for a technique the gate questioned and the analyst kept. It runs only
+   when the index is warm in this worker (`validation.alignment_gate = auto`);
+   `validation.alignment_gate_build` lets the first run that wants it start the
+   build on a thread and go without. The index never substitutes an id.
+
+   Whether that ranking may also *question* a claim is
+   `validation.weak_alignment`, and it is false. The end-to-end audit measured
+   the cost of the check as it stood: the index is domain-blind, so a claim
+   about a Windows PE was answered with Mobile and ICS candidates (`T1406`,
+   `T1471` for `T1027`; `T0885`, `T0874`, `T1639` for `T1071.001`), and it
+   scores a *correct* id near zero often enough that 81 of 92 corrections in
+   one run, 16 of 19 in another and 33 of 33 in a third were of this kind —
+   each batch a full extra model turn. With the setting on, a claim is
+   questioned only when the claimed id scores under
+   `validation.alignment_threshold` (0.05) and an in-scope candidate that
+   disagrees with it — neither from its own technique family nor from any of
+   its tactics — beats its score by `validation.alignment_margin` (0.20). At
+   most one weak-alignment batch is sent per agent turn.
+
+   Measured on the audit's own recordings (188 corrections, 105 distinct
+   rankings, replayed in `tests/fixtures/attck_alignment_recorded.json`): of
+   the 36 rankings whose claimed id the audit read as right for its sample —
+   `T1027`, `T1071.001`, `T1055`, `T1547.001`, `T1497.001` and the ids the ELF
+   and APK runs published — the narrowed rule questions none, where the shipped
+   check questioned all of them. Of the other 69 it questions 5, each naming a
+   candidate from the sample's own domain and another tactic that beats the
+   claim by the margin. That is the bar the setting is held to, and it is the
+   reason the default stays off: 5 questions over 105 rankings is a small
+   enough yield that a run pays the turn only when an operator asks for it.
 4. **Corroboration** (exact). Per technique in the run, `asserted_by` — the
    deterministic sources carrying their own ATT&CK ids: capa's `attck`
    field, a Sigma rule's technique tags, a YARA TTP rule's

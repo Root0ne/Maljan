@@ -959,8 +959,30 @@ ANNOTATIONS: dict[str, Annotation] = {
     "validation.alignment_threshold": {
         "title": "Alignment gate threshold",
         "description": (
-            "The TF-IDF gate score below which a claimed technique the index did not "
-            "rank among its candidates is questioned. The paper's gate."
+            "The TF-IDF gate score below which a claimed technique may be questioned. "
+            "The paper's gate. It questions nothing on its own: the ranking also has to "
+            "disagree with the claim by the alignment margin."
+        ),
+        "subgroup": "Technique check",
+    },
+    "validation.alignment_margin": {
+        "title": "Alignment gate margin",
+        "description": (
+            "How far a candidate technique from the sample's own ATT&CK domain, and from "
+            "another tactic than the claimed id, must beat the claimed id's gate score "
+            "before the claim is questioned. The index scores correct ids near zero, so "
+            "without a margin nearly every claim is questioned and every batch costs a "
+            "model turn."
+        ),
+        "subgroup": "Technique check",
+    },
+    "validation.weak_alignment": {
+        "title": "Question weakly aligned techniques",
+        "description": (
+            "Whether the alignment ranking may question an analyst's technique id, at the "
+            "cost of one correction turn per batch. Off: the ranking is recorded on the "
+            "claim and shown to the judge, and nothing is asked again. No id is ever "
+            "replaced either way."
         ),
         "subgroup": "Technique check",
     },
