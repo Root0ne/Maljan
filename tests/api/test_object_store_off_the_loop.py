@@ -129,11 +129,13 @@ def test_nothing_on_the_loop_calls_the_store_directly() -> None:
 
     blocking = {"fput_object", "put_object", "get_object", "remove_object", "fget_object"}
     offenders: list[str] = []
+    inspected: list[str] = []
     for module in (samples, sandbox_reports, analysis_worker):
         tree = ast.parse(inspect.getsource(module))
         for node in ast.walk(tree):
             if not isinstance(node, ast.AsyncFunctionDef):
                 continue
+            inspected.append(f"{module.__name__}.{node.name}")
             for call in ast.walk(node):
                 if not isinstance(call, ast.Call) or not isinstance(call.func, ast.Attribute):
                     continue
@@ -142,4 +144,8 @@ def test_nothing_on_the_loop_calls_the_store_directly() -> None:
                 # ``asyncio.to_thread(client.put_object, …)`` passes the method
                 # rather than calling it, so what is left here is a direct call.
                 offenders.append(f"{module.__name__}.{node.name}: {call.func.attr}")
+    # A guard that walked no handler at all would pass for the wrong reason.
+    assert len(inspected) > 10, inspected
+    assert any("upload_sample" in name for name in inspected), "the upload path is in scope"
+    assert any("run_analysis" in name for name in inspected), "so is the worker's download"
     assert offenders == [], offenders

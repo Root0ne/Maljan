@@ -26,6 +26,7 @@ one — duplicate work is impossible.
 
 from __future__ import annotations
 
+import os
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -42,6 +43,32 @@ if TYPE_CHECKING:
     from maljan.memory.long_term_memory import MemoryStore
 
 logger = get_logger("worker.enrich")
+
+# How many enrichments this worker runs at once. A deployment knob rather than
+# a setting: it sizes a process, like the analysis worker's RSS ceiling and
+# teardown budget, and it is read once when the process starts.
+ENRICHMENT_MAX_JOBS = max(1, int(os.environ.get("ENRICHMENT_MAX_JOBS", "2")))
+
+
+def enrichment_health_key() -> str:
+    """Where the enrichment worker writes that it is alive.
+
+    arq gives each queue its own health key and refreshes it every
+    ``health_check_interval`` with a TTL one second longer, so its absence one
+    interval after a boot means no worker is reading this queue.
+    """
+    from arq.constants import health_check_key_suffix
+
+    return f"{ENRICHMENT_QUEUE}{health_check_key_suffix}"
+
+
+async def enrichment_worker_is_alive(redis_conn: Any) -> bool | None:
+    """Whether a worker is reading the enrichment queue. ``None`` when unknown."""
+    try:
+        return bool(await redis_conn.exists(enrichment_health_key()))
+    except Exception as exc:  # noqa: BLE001 — an unreadable queue is not a verdict
+        logger.debug("enrich: could not read the worker's health key (%s).", type(exc).__name__)
+        return None
 
 
 async def enqueue_enrichment(pool: Any, report_id: Any) -> str | None:
@@ -65,10 +92,15 @@ async def enqueue_enrichment(pool: Any, report_id: Any) -> str | None:
         )
         dedicated = True
     queue = ENRICHMENT_QUEUE if dedicated else ANALYSIS_QUEUE
+    # The queue is part of the identity, not only of the destination. arq
+    # refuses a job id it has seen for 24 hours, which is what coalesces two
+    # triggers for one report — and which would also refuse to re-queue a
+    # report after the setting flipped, leaving it waiting on the queue it was
+    # first put in. One id per queue keeps the coalescing and drops that.
     job = await pool.enqueue_job(
         "enrich_threat_intel",
         str(report_id),
-        _job_id=f"enrich:{report_id}",
+        _job_id=f"enrich:{queue}:{report_id}",
         _queue_name=queue,
     )
     return str(job.job_id) if job is not None else None
@@ -232,8 +264,15 @@ async def enrich_threat_intel(ctx: dict, report_id: str) -> dict[str, Any]:
             _publish_event,
             _start_event_feed,
             _stop_event_feed,
+            seed_seq_from_the_table,
         )
 
+        # The counter this event takes its number from lives 24 hours, and the
+        # rows it numbers do not: enriching an older report would start again
+        # at 1, collide with that job's first event and be dropped by a feed
+        # that never fails a run. Continue from the table when Redis has
+        # forgotten, before the feed hands out a number.
+        await seed_seq_from_the_table(redis_conn, db_session_factory, parent_job_id)
         _start_event_feed(parent_job_id, db_session_factory)
         try:
             await _publish_event(
@@ -374,10 +413,11 @@ class EnrichmentWorkerSettings:
     """The second process: ``arq app.worker.enrich_worker.EnrichmentWorkerSettings``.
 
     Reads its own queue, so the analysis worker's single slot is never spent on
-    a reputation lookup. Several at a time, because each one is waiting on
-    somebody else's HTTP rather than on this host's model or its memory, and
-    with its own timeout: the longest measured enrichment took 452 s, which the
-    analysis worker's eight-hour ceiling would have hidden.
+    a reputation lookup. ``ENRICHMENT_MAX_JOBS`` at a time (two by default),
+    because each one is waiting on somebody else's HTTP rather than on this
+    host's model or its memory, and with its own timeout: the longest measured
+    enrichment took 452 s, which the analysis worker's eight-hour ceiling would
+    have hidden.
 
     The nightly ``job_events`` purge stays on the analysis worker. One owner for
     a scheduled task is the whole point of scheduling it.
@@ -390,7 +430,14 @@ class EnrichmentWorkerSettings:
 
     redis_settings = build_redis_settings(settings.redis_url)
 
-    max_jobs = 4
+    # Two at a time, and tunable like the analysis worker's own sizing knobs
+    # (``WORKER_RSS_RESTART_MB``, ``WORKER_TEARDOWN_TIMEOUT``). More than one
+    # because each job is waiting on somebody else's HTTP; not many more
+    # because they share one VirusTotal key and one AbuseIPDB key, and a
+    # provider's rate limit is per key, not per job. ``enrichment_max_lookups``
+    # still caps each report; what this multiplies is how many reports are in
+    # flight against that shared limit.
+    max_jobs = ENRICHMENT_MAX_JOBS
     job_timeout = 3600
     max_tries = 1
     health_check_interval = 30

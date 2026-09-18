@@ -753,12 +753,18 @@ change landed on `main`.
   model — applied to them as well: a measured enrichment spent 451.98 s at
   VirusTotal while the next analysis sat `pending` for 4 minutes 33 seconds.
   Enrichment now has a queue and a worker of its own
-  (`arq app.worker.enrich_worker.EnrichmentWorkerSettings`, four at a time,
-  in `docker-compose.yml` as `enrichment-worker`), and the analysis worker
+  (`arq app.worker.enrich_worker.EnrichmentWorkerSettings`, in
+  `docker-compose.yml` as `enrichment-worker`), and the analysis worker
   reads only its own queue. A deployment that would rather run one process
-  turns `api.enrichment_dedicated_worker` off and gets the old behaviour
-  deliberately: enrichment queued beside the analyses, waiting until none is
-  running.
+  reads only its own queue. The setting ships **off**, so a release taken and
+  run unchanged keeps one process and its old behaviour rather than queueing
+  for a worker nobody started; the compose stack runs the second worker and
+  turns it on beside it, and an operator's saved value wins over both. With it
+  on and nothing reading the queue, the worker logs one warning naming the
+  command that reads it and `GET /api/v1/system/status` reports
+  `enrichment_worker: "down"` — the queued enrichments are kept and run when a
+  worker starts. Concurrency is `ENRICHMENT_MAX_JOBS` (default 2), sized
+  against the reputation providers' per-key rate limits rather than per job.
 - **The enrichment's own event is kept with the rest of the run's.** Every
   event takes a sequence number from the job's counter, so the rows stored for
   a job have to equal the last number issued — the invariant the events
@@ -766,7 +772,11 @@ change landed on `main`.
   ended and the feed has been closed, so it took a number and stored nothing:
   one measured run published 71 events and kept 70, and the missing one was
   gone for good once the Redis stream expired. The enrichment task now opens
-  the job's feed for that one line and closes it again.
+  the job's feed for that one line and closes it again, and seeds the job's
+  sequence counter from the table first: the counter is a Redis key with the
+  stream's 24-hour life, so enriching an older report used to start again at 1,
+  collide with the row that already held that number and lose the event the
+  same way.
 - **A reasoning model on Ollama can be selected again.** The probe gives a
   model eight tokens and reads its answer; a reasoning model spends them in its
   thinking channel and answers with an empty `response`, so every one of them
@@ -996,7 +1006,11 @@ change landed on `main`.
   from constants, not exception text from a driver or the filesystem. They are
   now raised as `StatedFailure` — the class `AbsentAnalysisError` already
   belonged to — and only that class keeps its message on `job.error_message`;
-  everything else still arrives as its class name plus the error id.
+  everything else still arrives as its class name plus the error id. A
+  `StatedFailure` whose message the event scrubber would change is marked
+  unpublishable rather than refused: the job says the class name, the sentence
+  goes to the log under the same error id, and a test walks every site that
+  raises one so a bad sentence fails a build rather than a job.
 - **Four documented facts that had drifted from the code.** The delegation
   section said a lead's 1800 s stage had room for five asks where
   `_asks_that_fit` computes six and the `ask_<key>` description gives the model

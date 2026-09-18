@@ -412,11 +412,13 @@ async def test_the_operators_cancellation_writes_the_cancelled_row(
         _mock_mode(),
         patch("maljan.app.MaljanApp.arun", new=AsyncMock(side_effect=_wait_to_be_cancelled)),
         patch.object(worker_module, "CANCEL_POLL_SECONDS", 0.01),
+        # The cancellation carries on once the row is written: a task that
+        # returned normally here would leave whatever cancelled it waiting.
+        pytest.raises(asyncio.CancelledError),
     ):
-        result = await run_analysis({"redis": redis_stub, "db_session": factory}, str(job.id))
+        await run_analysis({"redis": redis_stub, "db_session": factory}, str(job.id))
     api_config._settings = None
 
-    assert result["status"] == "cancelled"
     cancelled = [u for u in updates_to(factory, "analysis_jobs") if u.get("status") == "cancelled"]
     assert len(cancelled) == 1
     assert isinstance(cancelled[0]["completed_at"], datetime)
@@ -597,11 +599,12 @@ async def test_a_cancel_request_writes_its_row_even_between_two_polls(
     with (
         _mock_mode(),
         patch("maljan.app.MaljanApp.arun", new=AsyncMock(side_effect=_cancelled)),
+        # The row is written and the cancellation carries on.
+        pytest.raises(asyncio.CancelledError),
     ):
-        result = await run_analysis({"redis": redis_stub, "db_session": factory}, str(job.id))
+        await run_analysis({"redis": redis_stub, "db_session": factory}, str(job.id))
     api_config._settings = None
 
-    assert result["status"] == "cancelled"
     cancelled = [u for u in updates_to(factory, "analysis_jobs") if u.get("status") == "cancelled"]
     assert len(cancelled) == 1
     assert isinstance(cancelled[0]["completed_at"], datetime)

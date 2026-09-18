@@ -16,7 +16,7 @@ operator can reconfigure.
 | Console (`apps/web`) | Next.js interface: dashboard, analyses, samples, settings. Talks HTTP to the API and subscribes to the job WebSocket. |
 | API (`apps/api/app`) | FastAPI application. Authentication, samples, jobs, reports, the audit trail, the settings store and the probes. |
 | Worker (`apps/api/app/worker`) | arq process. Takes an analysis job, runs the pipeline, writes the report and publishes progress events. One job at a time. |
-| Enrichment worker (`apps/api/app/worker/enrich_worker.py`) | A second arq process on a queue of its own, for the post-verdict reputation lookups. Several at a time; optional (see below). |
+| Enrichment worker (`apps/api/app/worker/enrich_worker.py`) | A second arq process on a queue of its own, for the post-verdict reputation lookups. Two at a time by default, and off unless the deployment turns it on (see below). |
 | Core (`src/maljan`) | The analysis package: agents, the LangGraph pipeline, the deterministic evidence layers, the provider layer, memory and reporting. |
 | Postgres | Users, samples, jobs, reports, audit rows and the settings store. |
 | Redis | The arq queue, the per-job event stream, and rate-limit counters. |
@@ -59,19 +59,36 @@ operator can reconfigure.
 
 The analysis worker reads arq's default queue and runs **one job at a time**:
 two analyses on one host would share a model, a sandbox and a memory budget
-sized for one. The enrichment worker reads `arq:queue:enrichment` and runs
-several, because a reputation lookup waits on somebody else's HTTP.
+sized for one. The enrichment worker reads `arq:queue:enrichment` and runs two
+at a time (`ENRICHMENT_MAX_JOBS`), because a reputation lookup waits on
+somebody else's HTTP.
 
 They were one process, and the single slot was the cost: a measured enrichment
 spent 451.98 s at VirusTotal while the next analysis sat `pending` for 4 m
 33 s. Nothing about that lookup needed the rule it was subject to.
 
-A deployment that does not want a second process turns
-`api.enrichment_dedicated_worker` off. The enrichment is then queued beside the
-analyses, as it used to be, and waits until none is running — the old behaviour
-with the old delay, chosen rather than inherited. The task is registered on
-both workers so the fallback has something to run it, and the nightly
-`job_events` purge stays on the analysis worker: one owner per scheduled task.
+**Which one a deployment gets.** `api.enrichment_dedicated_worker` decides, and
+it ships **off**: a release that is taken and run unchanged keeps one process,
+with the enrichment queued beside the analyses and deferred until none is
+running — the old behaviour and the old delay, but nothing stops working
+because a process nobody started is missing. The compose stack runs the second
+worker and sets `ENRICHMENT_DEDICATED_WORKER=true` beside it, which is the
+default the setting falls back to; an operator's saved value wins over both.
+Turn it on wherever the second process actually runs.
+
+When it is on and nothing is reading the enrichment queue — arq's own
+per-queue health key is absent one health interval after the analysis worker
+boots — the worker logs one warning naming the queue and the command that
+reads it, and `GET /api/v1/system/status` reports `enrichment_worker` as
+`down`. Queued enrichments are kept, not dropped: they run when a worker
+starts.
+
+The task is registered on both workers so the single-process default has
+something to run it, and the nightly `job_events` purge stays on the analysis
+worker: one owner per scheduled task. The enrichment worker runs
+`ENRICHMENT_MAX_JOBS` (default 2) at a time — more than one because each job
+waits on somebody else's HTTP, not many more because they share one VirusTotal
+key and one AbuseIPDB key and a provider's rate limit is per key.
 
 ### What the worker holds while a run is in flight
 
@@ -863,6 +880,13 @@ by the other worker, so the enrichment task opens the job's feed for that one
 line and closes it again; otherwise the number would be issued and the row
 never written, which is what one measured run's 71 published and 70 stored
 was. The console already tolerates an event that arrives after the run.
+
+The counter itself is a Redis key with the stream's 24-hour life, and the rows
+outlive it by `core.events.retention_days`. So before that late event is
+numbered, the counter is seeded from the table — the highest `seq` the job
+holds, set only when Redis has none — and the number continues where the run
+left off instead of starting again at 1 and colliding with the row that has it
+(`uq_job_events_job_seq`). Enriching a month-old report is exactly that case.
 
 **What never travels.** Tool arguments and results go out as short summaries,
 and every string of every event — a message's text and its report, a

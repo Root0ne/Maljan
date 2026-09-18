@@ -24,16 +24,36 @@ from pydantic import SecretStr
 
 from app.config import APISettings
 
+
 # Every application-shaped setting used to live on APISettings and be
 # configurable through the process environment. The env-free
 # configuration work moved them out: the environment no longer configures
 # application behaviour, only deployment/bootstrap facts (see API_READONLY
 # below). Each entry's runtime value now comes from the settings store, or
 # from this table when no override is stored.
+def dedicated_enrichment_worker_default() -> bool:
+    """Whether this deployment runs the enrichment worker, unless told otherwise.
+
+    The one default here that is a fact about the deployment rather than a
+    preference: a second process either exists or it does not, and queueing for
+    a worker nobody started would leave enrichments sitting where nothing reads
+    them. So the shipped default is **off** — one process, the enrichment
+    deferred until no analysis is running — and a stack that starts the second
+    worker says so through ``ENRICHMENT_DEDICATED_WORKER`` beside the service
+    that provides it (``docker/docker-compose.yml``).
+
+    An operator's saved value still wins over both: this only decides what
+    ``runtime_config`` falls back to when the store holds nothing.
+    """
+    import os
+
+    return os.environ.get("ENRICHMENT_DEDICATED_WORKER", "false").strip().lower() == "true"
+
+
 API_DEFAULTS: dict[str, Any] = {
     "mock_mode_allowed": False,
     "enrichment_enabled": True,
-    "enrichment_dedicated_worker": True,
+    "enrichment_dedicated_worker": dedicated_enrichment_worker_default(),
     "enrichment_max_lookups": 25,
     "virustotal_api_key": "",
     "abuseipdb_api_key": "",
@@ -196,9 +216,10 @@ API_EDITABLE: dict[str, dict[str, Any]] = {
         "description": (
             "Queue the post-verdict enrichment for the enrichment worker "
             "process, so a long reputation lookup never occupies the analysis "
-            "worker's single slot. Turn this off only where that second "
-            "process is not running: the enrichment is then queued beside the "
-            "analyses and waits until none is running."
+            "worker's single slot. Turn it on only where that second process "
+            "is actually running (the compose stack starts one and turns this "
+            "on for you); off, the enrichment is queued beside the analyses "
+            "and waits until none is running."
         ),
     },
     "enrichment_max_lookups": {

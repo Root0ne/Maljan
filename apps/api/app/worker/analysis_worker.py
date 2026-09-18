@@ -42,6 +42,23 @@ logger = get_logger("worker")
 _SECRET_PATHS = [e.path for e in core_catalog() if e.secret]
 
 
+def is_publishable(message: str) -> bool:
+    """Whether this sentence can go out as it stands.
+
+    The test is the event publisher's own scrubber: if it would change the
+    text, the text holds something that must not travel — a host path, a URL,
+    a digest, a credential shape — and what this module undertook to publish is
+    sentences it wrote itself, not data it was handed.
+    """
+    if not message:
+        return True
+    # Deferred like every other ``maljan`` import here: the API process must
+    # not pay for the core package at import time.
+    from maljan.pipeline.events import scrub
+
+    return scrub(message) == message
+
+
 class StatedFailure(Exception):
     """A failure whose message this module wrote for an operator to read.
 
@@ -56,27 +73,26 @@ class StatedFailure(Exception):
     reaches the console as ``ValueError (error id …)`` and the sentence stays
     in the log.
 
-    The promise is checked where it is made. A message that the event
-    publisher's own scrubber would change is not an authored sentence — it
-    carries a path, a URL, a digest or something shaped like a credential — and
-    building one raises ``ValueError`` rather than creating an exception whose
-    text this module has undertaken to publish. ``StatedFailure(str(exc))``,
-    the one way this class could have leaked a driver's words, is refused at
-    the point somebody writes it.
+    The promise is checked where it is made, and checking it never costs a run.
+    A message the event publisher's own scrubber would change is not an
+    authored sentence — it carries a path, a URL, a digest or something shaped
+    like a credential — so the instance is marked ``publishable = False`` and
+    ``failure_reason`` falls back to the class name and the error id for it,
+    with the sentence going to the log under that id. Raising here instead
+    would replace the failure being reported with a failure about reporting it,
+    inside whatever ``except`` built it.
+
+    ``StatedFailure(str(exc))`` — the one way this class could leak a driver's
+    words — is therefore harmless at runtime and caught in CI:
+    ``test_absent_analysis.py`` walks every site in this module that raises one
+    and asserts its authored sentence is publishable, so a bad sentence fails a
+    build rather than a job.
     """
 
     def __init__(self, message: str = "") -> None:
         text = str(message)
-        # Deferred like every other ``maljan`` import here: the API process
-        # must not pay for the core package at import time.
-        from maljan.pipeline.events import scrub
-
-        if text and scrub(text) != text:
-            raise ValueError(
-                "a stated failure carries an authored sentence, and this one "
-                "holds something the event scrubber would redact"
-            )
         super().__init__(text)
+        self.publishable = is_publishable(text)
 
 
 class AbsentAnalysisError(StatedFailure):
@@ -427,6 +443,52 @@ _LAST_SEQ: dict[str, int] = {}
 
 def _seq_key(job_id: str) -> str:
     return f"analysis:{job_id}:seq"
+
+
+async def seed_seq_from_the_table(
+    redis_conn: aioredis.Redis, db_session: async_sessionmaker, job_id: str
+) -> int | None:
+    """Continue this job's numbering from what is stored. Never raises.
+
+    The counter is a Redis key with a 24-hour life, because the stream it
+    numbers has one too. The table does not: an event published for a job whose
+    counter has expired — an operator pressing Enrich on last week's report —
+    would take the number 1, collide with the row that job's first event
+    already has (``uq_job_events_job_seq``), and be dropped by a feed that
+    never fails a run. The same "published but not stored" the enrichment event
+    was fixed for.
+
+    So before such an event is published, the counter is set to the highest
+    number the table holds for that job, and only when Redis holds none: ``NX``
+    rather than a plain ``SET``, so a live run's counter is never overwritten
+    by a straggler. Returns the number it seeded with, or ``None`` when there
+    was nothing to do.
+    """
+    key = _seq_key(job_id)
+    try:
+        if await redis_conn.exists(key):
+            return None
+        from app.models.job_event import JobEvent
+
+        async with db_session() as db:
+            highest = (
+                await db.execute(
+                    select(func.max(JobEvent.seq)).where(JobEvent.job_id == uuid.UUID(job_id))
+                )
+            ).scalar()
+            await db.commit()
+        if not highest:
+            return None
+        await redis_conn.set(key, int(highest), nx=True, ex=86_400)
+    except Exception as exc:  # noqa: BLE001 — numbering never costs an event
+        logger.debug(
+            "Could not continue the event numbering for job %s (%s).",
+            job_id,
+            type(exc).__name__,
+            extra={"job_id": job_id},
+        )
+        return None
+    return int(highest)
 
 
 async def _next_seq(redis_conn: aioredis.Redis, job_id: str) -> int:
@@ -988,10 +1050,21 @@ def failure_reason(exc: BaseException, error_id: str) -> str:
     ``StatedFailure`` is the exception this module raises with a sentence it
     wrote itself — the absent analysis, an attached report that belongs to
     another sample, a sandbox provider that cannot take one — so that sentence
-    is what the job says, and it is the reason the class exists.
+    is what the job says, and it is the reason the class exists. One that was
+    built from something else after all is marked unpublishable when it is
+    made: its sentence goes to the log under this error id and the job says the
+    class name, which is what every other exception says.
     """
     if isinstance(exc, StatedFailure):
-        return f"{exc} (error id {error_id})"
+        if getattr(exc, "publishable", False):
+            return f"{exc} (error id {error_id})"
+        logger.error(
+            "A stated failure carried something unpublishable; the job says its "
+            "class instead. error_id=%s message=%s",
+            error_id,
+            exc,
+            extra={"error_id": error_id},
+        )
     return f"{type(exc).__name__} (error id {error_id})"
 
 
@@ -1013,8 +1086,12 @@ async def cancel_was_requested(redis_conn: Any, job_id: str) -> bool:
     the sweep repairs a row nobody claimed rather than this guessing at one.
     """
     try:
-        return bool(await redis_conn.get(cancel_flag_key(job_id)))
-    except Exception as exc:  # noqa: BLE001 — a cancelled run is going down anyway
+        return bool(
+            await asyncio.wait_for(
+                redis_conn.get(cancel_flag_key(job_id)), timeout=JOB_OWNER_RELEASE_TIMEOUT
+            )
+        )
+    except (Exception, TimeoutError) as exc:  # noqa: BLE001 — a cancelled run is going down
         logger.debug(
             "Could not read the cancel flag for job %s (%s); treating this as a shutdown.",
             job_id,
@@ -1688,7 +1765,12 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # cancellation came with.
             if job_uuid is not None:
                 await mark_job_cancelled(db_session, job_uuid)
-            return {"status": "cancelled", "job_id": job_id}
+            # And then the cancellation carries on. Returning here swallowed
+            # it: the task looked like it had finished normally, while the
+            # thing that cancelled it — a shutdown, a timeout — was still
+            # waiting for it to end. The ``finally`` below still runs, so the
+            # feed is flushed and the claim released on the way out.
+            raise
         finally:
             heartbeat_stop_event.set()
             try:
@@ -2499,6 +2581,43 @@ async def sweep_orphans_forever(
         await asyncio.sleep(wait_between)
 
 
+async def warn_if_enrichment_is_unmanned(ctx: dict, delay: float | None = None) -> None:
+    """Say so, once, when enrichments are queued for a worker nobody started.
+
+    The setting says where an enrichment goes; only the queue can say whether
+    anything is reading it. arq refreshes a per-queue health key every
+    ``health_check_interval`` with a TTL one second longer, so its absence one
+    interval after this process booted means no enrichment worker is up —
+    every enrichment then sits in its queue, kept but not run, and nothing
+    would otherwise say why reputation data stopped appearing.
+
+    Waits that interval first, because at boot the other process may be coming
+    up beside this one. Never raises, and says it once: a worker that shouts
+    every ten minutes teaches its reader to skip the line.
+    """
+    from app.worker.enrich_worker import ENRICHMENT_QUEUE, enrichment_worker_is_alive
+
+    wait = EnrichmentWorkerSettings.health_check_interval + 1 if delay is None else delay
+    await asyncio.sleep(wait)
+    try:
+        if not await runtime_config.get("enrichment_dedicated_worker"):
+            return
+        alive = await enrichment_worker_is_alive(ctx.get("redis"))
+    except Exception as exc:  # noqa: BLE001 — a warning never costs the worker
+        logger.debug("Could not check the enrichment worker (%s).", type(exc).__name__)
+        return
+    if alive is False:
+        logger.warning(
+            "Enrichment is queued for its own worker (api.enrichment_dedicated_worker "
+            "is on) and nothing is reading %s. Enrichments are kept in the queue and "
+            "will run when a worker starts: run "
+            "'arq app.worker.enrich_worker.EnrichmentWorkerSettings', or turn the "
+            "setting off to have this worker run them between analyses.",
+            ENRICHMENT_QUEUE,
+            extra={"component": "worker.lifecycle"},
+        )
+
+
 async def startup(ctx: dict) -> None:
     """Called when the ARQ worker starts up."""
     # Initialize logging for the worker process first: the CRITICAL bootstrap
@@ -2556,6 +2675,9 @@ async def startup(ctx: dict) -> None:
     # passes after it run every ten minutes, which is what reaches a job a
     # still-running worker gave up on.
     ctx["sweep_task"] = asyncio.create_task(sweep_orphans_forever(ctx))
+    # And one look at the other queue, once the process that reads it has had
+    # a health interval to come up beside this one.
+    ctx["enrichment_watch_task"] = asyncio.create_task(warn_if_enrichment_is_unmanned(ctx))
 
     logger.info(
         "Worker started: connected to DB and Redis",
@@ -2565,12 +2687,13 @@ async def startup(ctx: dict) -> None:
 
 async def shutdown(ctx: dict) -> None:
     """Called when the ARQ worker shuts down."""
-    # Before the connections it uses are closed under it.
-    sweep_task: asyncio.Task | None = ctx.get("sweep_task")
-    if sweep_task is not None:
-        sweep_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await sweep_task
+    # Before the connections they use are closed under them.
+    for name in ("sweep_task", "enrichment_watch_task"):
+        task: asyncio.Task | None = ctx.get(name)
+        if task is not None:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
 
     redis_conn: aioredis.Redis | None = ctx.get("redis")
     if redis_conn:
@@ -2592,7 +2715,11 @@ async def shutdown(ctx: dict) -> None:
 # The enrichment task lives in a sibling module. Importing it at module
 # scope is fine — ``enrich_worker`` only re-enters this module lazily from
 # inside its function, so there is no real circular dependency.
-from app.worker.enrich_worker import enrich_threat_intel, purge_old_job_events  # noqa: E402
+from app.worker.enrich_worker import (  # noqa: E402
+    EnrichmentWorkerSettings,
+    enrich_threat_intel,
+    purge_old_job_events,
+)
 
 # Resident-memory ceiling for the worker process, in MiB. Above this, the
 # worker finishes reporting the job it just completed and then exits so Docker

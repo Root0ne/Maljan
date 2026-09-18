@@ -283,12 +283,11 @@ class TestTheWorkerFailsSuchAJob:
 
         tree = ast.parse(inspect.getsource(analysis_worker))
         # An exception class's own body is about how it is built, not about how
-        # a job ended: the check ``StatedFailure`` performs on its message
-        # raises a sentence of its own, at a programmer rather than at an
-        # operator.
+        # a job ended.
         for node in list(ast.walk(tree)):
             if isinstance(node, ast.ClassDef):
                 node.body = []
+        inspected: list[str] = []
         worded: list[str] = []
         for node in ast.walk(tree):
             if not isinstance(node, ast.Raise) or not isinstance(node.exc, ast.Call):
@@ -312,8 +311,11 @@ class TestTheWorkerFailsSuchAJob:
                 # A word or two is a diagnosis for the log, not a sentence for
                 # an operator; those travel as their class name and the id.
                 continue
+            inspected.append(f"{raised}: {said[:40]}")
             if not keeps_its_message(raised):
                 worded.append(f"{raised}: {said[:60]}")
+        # A guard that inspected nothing passes for the wrong reason.
+        assert inspected, "no worded raise was found in the module at all"
         assert worded == [], worded
 
     def test_the_guard_sees_a_subclass_and_a_sentence_without_a_full_stop(self) -> None:
@@ -342,41 +344,116 @@ class TestTheWorkerFailsSuchAJob:
 
 
 class TestWhatAStatedFailureMaySay:
-    """The class publishes its message, so it refuses one it cannot vouch for."""
+    """The class publishes its message, so it marks one it cannot vouch for.
+
+    Marked rather than refused: raising here would replace the failure being
+    reported with a failure about reporting it, inside whatever ``except``
+    built it. The job says the class name in that case, exactly as it does for
+    every other exception, and the sentence goes to the log under the error id.
+    """
 
     def test_a_path_is_not_an_authored_sentence(self) -> None:
-        from app.worker.analysis_worker import StatedFailure
+        from app.worker.analysis_worker import StatedFailure, failure_reason
 
-        with pytest.raises(ValueError, match="authored sentence"):
-            StatedFailure("the sample at /srv/maljan/data/samples/aa/sample.exe was refused")
+        stated = StatedFailure("the sample at /srv/maljan/data/samples/aa/sample.exe was refused")
+        assert stated.publishable is False
+        assert failure_reason(stated, "abc") == "StatedFailure (error id abc)"
 
     def test_a_secret_shaped_value_is_not_either(self) -> None:
-        from app.worker.analysis_worker import StatedFailure
+        from app.worker.analysis_worker import StatedFailure, failure_reason
         from tests.credential_shapes import prefixed_key
 
-        with pytest.raises(ValueError, match="authored sentence"):
-            StatedFailure(f"the provider refused the call: api_key={prefixed_key('sk-')}")
+        secret = prefixed_key("sk-")
+        stated = StatedFailure(f"the provider refused the call: api_key={secret}")
+        assert stated.publishable is False
+        assert secret not in failure_reason(stated, "abc")
 
-    def test_a_drivers_own_words_cannot_be_promoted_into_one(self) -> None:
+    def test_a_drivers_own_words_are_not_promoted_into_one(self) -> None:
         """``StatedFailure(str(exc))`` is the shape the contract exists against."""
-        from app.worker.analysis_worker import StatedFailure
+        from app.worker.analysis_worker import StatedFailure, failure_reason
 
         driver_error = OSError("could not open /etc/maljan/credentials.toml")
-        with pytest.raises(ValueError, match="authored sentence"):
-            StatedFailure(str(driver_error))
+        stated = StatedFailure(str(driver_error))
+        assert stated.publishable is False
+        assert "/etc/maljan" not in failure_reason(stated, "abc")
+
+    def test_the_sentence_still_reaches_the_log_under_the_error_id(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+
+        from app.worker.analysis_worker import StatedFailure, failure_reason
+
+        stated = StatedFailure("the sample at /srv/maljan/data/samples/aa/sample.exe was refused")
+        with caplog.at_level(logging.ERROR):
+            failure_reason(stated, "abc123")
+
+        said = " ".join(record.getMessage() for record in caplog.records)
+        assert "abc123" in said
+        assert "/srv/maljan" in said, "the operator's own log keeps what the API may not"
 
     def test_the_sentences_this_module_raises_are_accepted(self) -> None:
         from app.worker.analysis_worker import AbsentAnalysisError, StatedFailure
 
-        StatedFailure("The attached sandbox report does not belong to this sample.")
-        StatedFailure(
+        assert StatedFailure(
+            "The attached sandbox report does not belong to this sample."
+        ).publishable
+        assert StatedFailure(
             "A sandbox report is attached to this job, but the configured "
             "sandbox provider ('mock') cannot accept an uploaded report."
-        )
-        AbsentAnalysisError(
+        ).publishable
+        assert AbsentAnalysisError(
             "no analysis was produced: every analyst failed and the judge did "
             "not answer (APIStatusError 402)"
-        )
+        ).publishable
+
+    def test_every_sentence_this_module_raises_is_publishable(self) -> None:
+        """The check CI performs so a job never has to.
+
+        Walks each ``raise`` of a ``StatedFailure`` in the module, rebuilds the
+        sentence as it is written — an f-string's placeholders stand in for the
+        values they interpolate — and asserts the publisher's scrubber would
+        leave it alone. A worded refusal added later with a path in it fails
+        here rather than in somebody's run.
+        """
+        import ast
+        import inspect
+
+        from app.worker import analysis_worker
+        from app.worker.analysis_worker import StatedFailure, is_publishable
+
+        def written(node: ast.expr) -> str:
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                return node.value
+            if isinstance(node, ast.JoinedStr):
+                # ``{provider!r}`` stands for whatever it interpolates; what is
+                # under test is the sentence around it.
+                return "".join(
+                    part.value if isinstance(part, ast.Constant) else "'placeholder'"
+                    for part in node.values
+                )
+            return ""
+
+        source = inspect.getsource(analysis_worker)
+        checked: list[str] = []
+        for node in ast.walk(ast.parse(source)):
+            if not isinstance(node, ast.Raise) or not isinstance(node.exc, ast.Call):
+                continue
+            name = getattr(node.exc.func, "id", "")
+            raised = getattr(analysis_worker, name, None)
+            if not (isinstance(raised, type) and issubclass(raised, StatedFailure)):
+                continue
+            if not node.exc.args:
+                continue
+            sentence = written(node.exc.args[0])
+            if not sentence:
+                # Not written at the raise — ``AbsentAnalysisError(absent)``
+                # carries a sentence ``pipeline.outcome`` composed, which its
+                # own tests cover.
+                continue
+            checked.append(sentence)
+            assert is_publishable(sentence), sentence
+        assert checked, "no worded StatedFailure was found to check"
 
 
 class TestWhatTheReaderIsTold:

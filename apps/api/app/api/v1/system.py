@@ -7,6 +7,7 @@ can purge low-signal LTM entries that pre-date the write-time quality gate).
 
 from __future__ import annotations
 
+import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException, status
 from maljan.core.settings_overrides import redact_url
 from pydantic import BaseModel, Field
@@ -45,6 +46,16 @@ class SystemStatusResponse(BaseModel):
     enrichment_enabled: bool = Field(
         description="Whether post-pipeline threat-intel enrichment runs.",
     )
+    enrichment_worker: str = Field(
+        default="not_required",
+        description=(
+            "Where enrichment runs and whether anything is there to run it: "
+            "'not_required' when it is queued beside the analyses, 'up' when "
+            "its own worker is reading its queue, 'down' when that worker is "
+            "expected and absent (enrichments stay queued), 'unknown' when the "
+            "queue could not be read."
+        ),
+    )
     has_virustotal_key: bool
     has_abuseipdb_key: bool
     throttle: dict[str, object] | None = Field(
@@ -61,6 +72,33 @@ class SystemStatusResponse(BaseModel):
             "callers only — omitted for anonymous requests."
         ),
     )
+
+
+async def _enrichment_worker_state() -> str:
+    """Whether the process the enrichment is queued for is there.
+
+    A dashboard that says enrichment is enabled while every enrichment sits in
+    a queue nobody reads is telling half the truth. Cheap: one Redis key,
+    written by arq itself, and never an error — a status endpoint that fails
+    because it could not reach Redis tells an operator less than one that says
+    it does not know.
+    """
+    from app.worker.enrich_worker import enrichment_worker_is_alive
+
+    try:
+        if not await runtime_config.get("enrichment_dedicated_worker"):
+            return "not_required"
+        redis_conn = aioredis.from_url(settings.redis_url)
+        try:
+            alive = await enrichment_worker_is_alive(redis_conn)
+        finally:
+            await redis_conn.aclose()
+    except Exception as exc:  # noqa: BLE001 — a status line never fails a request
+        logger.debug("system status: enrichment worker unknown (%s).", type(exc).__name__)
+        return "unknown"
+    if alive is None:
+        return "unknown"
+    return "up" if alive else "down"
 
 
 @router.get("/status", response_model=SystemStatusResponse, response_model_exclude_none=True)
@@ -86,6 +124,7 @@ async def system_status(
         app_version=settings.app_version,
         mock_mode_allowed=bool(await runtime_config.get("mock_mode_allowed")),
         enrichment_enabled=bool(await runtime_config.get("enrichment_enabled")),
+        enrichment_worker=await _enrichment_worker_state(),
         has_virustotal_key=bool(vt_key),
         has_abuseipdb_key=bool(abuse_key),
         throttle=throttle_state() if is_admin else None,

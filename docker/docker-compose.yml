@@ -194,6 +194,14 @@ services:
       UPLOAD_TEMP_DIR: data/uploads/.tmp
       # Must match the right-hand side of the ghidra-mcp samples bind mount.
       GHIDRA_CONTAINER_SAMPLES_PATH: /data/samples
+      # This stack runs the enrichment-worker service below, so an enrichment
+      # is queued for it rather than for the analysis worker's single slot.
+      # It is the setting's *default*, not an override: an operator who saves
+      # api.enrichment_dedicated_worker in the console still wins. A
+      # deployment that drops that service drops this line with it, or its
+      # enrichments sit in a queue nobody reads — the status endpoint and the
+      # worker's own startup warning both say so when that happens.
+      ENRICHMENT_DEDICATED_WORKER: "true"
       RUN_MIGRATIONS_ON_STARTUP: ${RUN_MIGRATIONS_ON_STARTUP:-false}
       CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:3000","http://127.0.0.1:3000"]}
       # APISettings.cookie_secure is bool | None; an empty string fails
@@ -262,6 +270,14 @@ services:
       UPLOAD_TEMP_DIR: data/uploads/.tmp
       # Must match the right-hand side of the ghidra-mcp samples bind mount.
       GHIDRA_CONTAINER_SAMPLES_PATH: /data/samples
+      # This stack runs the enrichment-worker service below, so an enrichment
+      # is queued for it rather than for the analysis worker's single slot.
+      # It is the setting's *default*, not an override: an operator who saves
+      # api.enrichment_dedicated_worker in the console still wins. A
+      # deployment that drops that service drops this line with it, or its
+      # enrichments sit in a queue nobody reads — the status endpoint and the
+      # worker's own startup warning both say so when that happens.
+      ENRICHMENT_DEDICATED_WORKER: "true"
       # glibc allocator (2026-07-26 memory audit). The image is python:3.13-slim
       # (glibc) and the host has 32 cores, so the default arena cap is 8 x ncores
       # = 256 arenas of 64 MB each. This process is genuinely multi-threaded —
@@ -335,9 +351,15 @@ services:
   # and needs none of that, and while it shared the queue it spent 452 s of a
   # measured run holding the slot the next analysis was waiting for.
   #
-  # Cheap to run: no pipeline, no sample download, no model. Drop this service
-  # and set ``api.enrichment_dedicated_worker`` to false to go back to one
-  # process, where enrichment waits until no analysis is running.
+  # Cheap to run: no pipeline, no sample download, no model. Two jobs at a time
+  # (``ENRICHMENT_MAX_JOBS``), because they share one VirusTotal key and one
+  # AbuseIPDB key and those providers rate-limit per key.
+  #
+  # Dropping this service means dropping ``ENRICHMENT_DEDICATED_WORKER`` from
+  # backend-api and backend-worker above with it: without the service, that
+  # line queues enrichments where nothing reads them. The setting ships off, so
+  # a deployment that never adds either keeps one process and runs the
+  # enrichment between analyses.
   enrichment-worker:
     <<: *backend-image
     container_name: maljan-enrichment-worker

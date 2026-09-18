@@ -365,7 +365,8 @@ class TestEnqueueEnrichment:
         pool.enqueue_job.assert_awaited_once()
         call = pool.enqueue_job.await_args
         # ``_job_id`` keeps the enqueue idempotent.
-        assert call.kwargs["_job_id"] == f"enrich:{fake_report.id}"
+        assert call.kwargs["_job_id"].endswith(f":{fake_report.id}")
+        assert call.kwargs["_job_id"].startswith("enrich:")
 
     @pytest.mark.asyncio
     async def test_missing_report_returns_none(self) -> None:
@@ -454,3 +455,163 @@ class TestTheMemoryStoreReadsOneSetOfSettings:
         built = self._store("http://qdrant:6333", "maljan_cases_v2", None)
 
         assert built["api_key"] is None
+
+
+class TestTheNumberingContinuesFromTheTable:
+    """A counter that lived a day, and rows that live thirty.
+
+    The sequence a job's events are numbered by is a Redis key with a 24-hour
+    life. An operator pressing Enrich on an older report found it gone, took
+    the number 1, collided with that job's first stored event and lost the row
+    to a feed that never fails a run — the same "published but not stored" the
+    enrichment event was fixed for.
+    """
+
+    @staticmethod
+    def _redis(counter: dict[str, int]) -> Any:
+        redis = AsyncMock()
+
+        async def _exists(key: str) -> int:
+            return 1 if key in counter else 0
+
+        async def _set(key: str, value: Any, nx: bool = False, ex: int | None = None) -> bool:
+            if nx and key in counter:
+                return False
+            counter[key] = int(value)
+            return True
+
+        async def _incr(key: str) -> int:
+            counter[key] = counter.get(key, 0) + 1
+            return counter[key]
+
+        redis.exists = AsyncMock(side_effect=_exists)
+        redis.set = AsyncMock(side_effect=_set)
+        redis.incr = AsyncMock(side_effect=_incr)
+        return redis
+
+    @staticmethod
+    def _sessions(stored_max: int | None, added: list[Any]) -> Any:
+        class _Session:
+            def __init__(self) -> None:
+                self.commit = AsyncMock()
+
+            async def get(self, *args: Any, **kwargs: Any) -> Any:
+                report = MagicMock()
+                report.id = uuid.uuid4()
+                report.job_id = uuid.uuid4()
+                report.malware_report = _malware_report_dict()
+                return report
+
+            async def execute(self, statement: Any) -> Any:
+                result = MagicMock()
+                result.scalar.return_value = stored_max
+                return result
+
+            def add_all(self, rows: Any) -> None:
+                added.extend(rows)
+
+            async def __aenter__(self) -> Any:
+                return self
+
+            async def __aexit__(self, *exc: Any) -> bool:
+                return False
+
+        return _Session
+
+    @pytest.mark.asyncio
+    async def test_an_enrichment_on_an_older_report_continues_the_numbering(self) -> None:
+        from app.worker.analysis_worker import _seq_key
+
+        job_id = uuid.uuid4()
+        added: list[Any] = []
+        counter: dict[str, int] = {}
+        redis = self._redis(counter)
+
+        session_cls = self._sessions(70, added)
+
+        class _Fixed(session_cls):  # type: ignore[valid-type, misc]
+            async def get(self, *args: Any, **kwargs: Any) -> Any:
+                report = MagicMock()
+                report.id = uuid.uuid4()
+                report.job_id = job_id
+                report.malware_report = _malware_report_dict()
+                return report
+
+        ctx = {"redis": redis, "db_session": _Fixed}
+        get_patch, get_secret_patch = _enabled_patch()
+        with (
+            patch(
+                "maljan.enrichment.enrich_malware_report",
+                new=AsyncMock(return_value=_malware_report_dict()),
+            ),
+            get_patch,
+            get_secret_patch,
+        ):
+            result = await enrich_threat_intel(ctx, str(uuid.uuid4()))
+
+        assert result["status"] == "ok"
+        assert counter[_seq_key(str(job_id))] == 71, "the counter continued the table"
+        assert len(added) == 1
+        assert added[0].seq == 71
+        assert added[0].payload["seq"] == 71
+
+    @pytest.mark.asyncio
+    async def test_two_enrichments_in_a_row_take_the_next_two_numbers(self) -> None:
+        from app.worker.analysis_worker import _seq_key
+
+        job_id = uuid.uuid4()
+        added: list[Any] = []
+        counter: dict[str, int] = {}
+        redis = self._redis(counter)
+        session_cls = self._sessions(70, added)
+
+        class _Fixed(session_cls):  # type: ignore[valid-type, misc]
+            async def get(self, *args: Any, **kwargs: Any) -> Any:
+                report = MagicMock()
+                report.id = uuid.uuid4()
+                report.job_id = job_id
+                report.malware_report = _malware_report_dict()
+                return report
+
+        ctx = {"redis": redis, "db_session": _Fixed}
+        get_patch, get_secret_patch = _enabled_patch()
+        with (
+            patch(
+                "maljan.enrichment.enrich_malware_report",
+                new=AsyncMock(return_value=_malware_report_dict()),
+            ),
+            get_patch,
+            get_secret_patch,
+        ):
+            await enrich_threat_intel(ctx, str(uuid.uuid4()))
+            await enrich_threat_intel(ctx, str(uuid.uuid4()))
+
+        assert [row.seq for row in added] == [71, 72]
+        assert counter[_seq_key(str(job_id))] == 72
+
+    @pytest.mark.asyncio
+    async def test_a_live_run_keeps_its_own_counter(self) -> None:
+        """The seeding is ``NX`` and only when Redis holds nothing at all."""
+        from app.worker.analysis_worker import _seq_key, seed_seq_from_the_table
+
+        job_id = str(uuid.uuid4())
+        counter = {_seq_key(job_id): 12}
+        redis = self._redis(counter)
+        added: list[Any] = []
+
+        seeded = await seed_seq_from_the_table(redis, self._sessions(70, added), job_id)
+
+        assert seeded is None, "a run in flight is not renumbered"
+        assert counter[_seq_key(job_id)] == 12
+        redis.set.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_job_with_no_stored_events_is_left_at_the_start(self) -> None:
+        from app.worker.analysis_worker import seed_seq_from_the_table
+
+        job_id = str(uuid.uuid4())
+        redis = self._redis({})
+        added: list[Any] = []
+
+        assert await seed_seq_from_the_table(redis, self._sessions(None, added), job_id) is None
+        redis.set.assert_not_awaited()
