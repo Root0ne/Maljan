@@ -823,5 +823,9 @@ Each domain in the network block records where it came from — `sandbox` for a
 name the sample resolved or requested, `analyst` for one an agent put in an
 artefact, `strings` for a run of bytes in the file that has the shape of a
 hostname. The last is the weakest claim there is, so a `strings` domain is
-printed in the report and left out of the STIX indicator set and out of the
-reputation lookups until a second source knows the same name.
+printed in the report — in its own Source column in the Markdown table and as
+a badge on the console's domain card — and left out of the STIX indicator set
+and out of the reputation lookups until a second source knows the same name.
+One predicate decides that, and both paths that mint a domain indicator ask
+it: the network block's own, and the string rows that reach the bundle
+through `static.interesting_strings`.

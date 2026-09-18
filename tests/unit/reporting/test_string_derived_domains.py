@@ -155,3 +155,29 @@ class TestNoStringDerivedDomainReachesTheBundle:
         report = self._report()
         assert report.network is not None
         assert {d.fqdn for d in report.network.domains} >= {"rosoft.com", "jector.sa"}
+
+
+class TestTheReportSaysWhereEachNameCameFrom:
+    """ "Labelled" has to be true where somebody reads it.
+
+    The field was recorded and the bundle was gated on it, and the Markdown
+    table still printed a byte-image fragment and a name the sandbox resolved
+    in the same five columns. A reader comparing the table with the exported
+    bundle had nothing to explain the difference.
+    """
+
+    def _markdown(self) -> str:
+        from maljan.reporting.renderers.markdown import MarkdownRenderer
+
+        report = TestNoStringDerivedDomainReachesTheBundle()._report()
+        return MarkdownRenderer().render(report)
+
+    def test_the_domains_table_carries_a_source_column(self) -> None:
+        markdown = self._markdown()
+        assert "| FQDN | Source | Suspicious |" in markdown
+
+    def test_each_row_names_its_own_source(self) -> None:
+        rows = [line for line in self._markdown().splitlines() if line.startswith("| `")]
+        by_fqdn = {line.split("`")[1]: line for line in rows}
+        assert "| strings |" in by_fqdn["rosoft.com"]
+        assert "| sandbox |" in by_fqdn["c2.evil.tld"]

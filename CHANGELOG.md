@@ -776,7 +776,10 @@ change landed on `main`.
   predicate decides that, and both paths that mint a domain indicator ask it:
   the network block's own, and the string rows, which reach the bundle as
   `interesting_strings` and were still being published after the first gate
-  went in. The name is still in the report, labelled with where it came from.
+  went in. The name is still in the report, labelled with where it came from:
+  the Markdown network table has a Source column, and the console's domain
+  card a badge that says whether the sandbox resolved the name or the byte
+  image merely contained it.
   Which of two names is a fragment is decided by where the matches sit rather
   than by how they are spelled, so a longer look-alike no longer deletes the
   real name — `microsoft.com` beside `xmicrosoft.com`, and
