@@ -137,7 +137,10 @@ export function cloneDefinition(
           ...source,
           label: source.label ? `${source.label} (copy)` : key,
           prompt: source.prompt ?? resolvedDetails?.prompt ?? null,
-          tools: source.tools.map((t) => ({ ...t })),
+          // `?? []` rather than a bare `.map`: the source is meant to be the
+          // full definition the schema serves, and a caller that hands over a
+          // narrowed one should get a tool-less clone rather than a crash.
+          tools: (source.tools ?? []).map((t) => ({ ...t })),
         }
       : { ...EMPTY_DEFINITION },
   };
