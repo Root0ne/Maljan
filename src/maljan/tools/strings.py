@@ -230,7 +230,17 @@ def _domains_in(text: str) -> list[str]:
 
 
 def _inside_a_longer_host(start: int, end: int, found: list[tuple[int, int, str]]) -> bool:
-    """Whether this span sits within a longer one, cut inside a label."""
+    """Whether this span sits within a longer one, cut inside a label.
+
+    A guard rather than a filter that fires today: ``re.finditer`` yields
+    non-overlapping matches, so two matches of ``_DOMAIN_RE`` are never nested
+    and this returns ``False`` for every input the scan can hand it. It is
+    kept and tested because it is the rule that says which of two names is the
+    fragment, and a matcher that ever yields overlapping candidates — a
+    second pattern for a longer form, a sliding retry inside a run — would
+    need exactly it. The rule it replaced asked the question by spelling and
+    deleted the real name whenever a longer look-alike existed.
+    """
     for other_start, other_end, other in found:
         if (other_start, other_end) == (start, end):
             continue

@@ -258,3 +258,16 @@ class TestATorAddressCorroboratesItself:
         from maljan.enrichment.orchestrator import _is_public_fqdn
 
         assert _is_public_fqdn(_a_v3_onion()) is False
+
+
+class TestTheMachineReadableSurfacesSayItToo:
+    """The same reader is served by the IOC feed and the consolidated table."""
+
+    def test_the_consolidated_table_carries_the_source(self) -> None:
+        report = TestNoStringDerivedDomainReachesTheBundle()._report()
+        # The table defangs what it prints, so the rows are keyed on that.
+        described = {
+            row.value: row.description for row in report.consolidated_iocs if row.type == "Domain"
+        }
+        assert "strings" in described["rosoft[.]com"]
+        assert "sandbox" in described["c2[.]evil[.]tld"]

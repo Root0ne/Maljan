@@ -194,3 +194,18 @@ class TestOnlyTheRoutedFormatsOwnToolCounts:
         archive = _write(tmp_path, "bundle.zip", b"PK\x03\x04")
         opened = self._ledger("archive_list", {"members": [{"name": "payload.elf"}]})
         assert unparsed_container_reason(archive, ledger=opened) is None
+
+
+def test_the_container_reason_and_the_pack_route_to_the_same_tool() -> None:
+    """Two tables, one routing decision.
+
+    `sample_identity._FORMAT_TOOL_FOR` says which tool's answer silences the
+    container reason and `triage_pack._FORMAT_TOOLS` says which tool the pack
+    actually calls. A format added to one and forgotten in the other makes the
+    report state something about the run that did not happen.
+    """
+    from maljan.extractors.sample_identity import _FORMAT_TOOL_FOR
+    from maljan.pipeline.triage_pack import _FORMAT_TOOLS
+
+    routed = {file_type: tool for file_type, (tool, _call) in _FORMAT_TOOLS.items()}
+    assert _FORMAT_TOOL_FOR == routed

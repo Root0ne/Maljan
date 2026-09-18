@@ -503,7 +503,11 @@ def macho_info(path: str) -> dict[str, Any]:
 
 
 def _degraded(
-    facts: dict[str, Any], why: str, *, still: str = "the zip-level facts"
+    facts: dict[str, Any],
+    why: str,
+    *,
+    still: str = "the zip-level facts",
+    remediation: str | None = None,
 ) -> dict[str, Any]:
     """Facts a tool did produce, with what it could not add said beside them.
 
@@ -512,14 +516,22 @@ def _degraded(
     call as failed and the pack printed none of the facts in the same dict.
     An Android run therefore had no container channel at all, although the
     archive had been read and the dex files counted. What is missing is a
-    ``degraded`` note and a remediation, which is the shape a reader can act
-    on.
+    ``degraded`` note and, when there is one, a remediation.
+
+    The remedy is the caller's to name, because it is about the reason: a
+    library that is not installed can be installed, and a file the installed
+    library refused to parse cannot be fixed by installing it again.
     """
+    facts["degraded"] = f"{why}; answered {still}"
+    if remediation:
+        facts["remediation"] = remediation
+    return facts
+
+
+def _missing_library_remedy() -> str:
     from maljan.tools.errors import MISSING_DEPENDENCY, REMEDIATIONS
 
-    facts["degraded"] = f"{why}; answered {still}"
-    facts["remediation"] = REMEDIATIONS[MISSING_DEPENDENCY]
-    return facts
+    return REMEDIATIONS[MISSING_DEPENDENCY]
 
 
 def apk_info(
@@ -551,11 +563,14 @@ def apk_info(
     try:
         from androguard.core.apk import APK  # type: ignore[import-not-found]
     except ImportError:
-        return _degraded(out, "androguard is not installed")
+        return _degraded(out, "androguard is not installed", remediation=_missing_library_remedy())
 
     try:
         apk = APK(str(target))
     except Exception as exc:  # noqa: BLE001
+        # The library is installed and refused the file, so installing it
+        # again is not the remedy and saying so would send the operator after
+        # the wrong thing.
         return _degraded(out, f"androguard parse failed: {type(exc).__name__}: {exc}")
 
     if manifest:
@@ -848,6 +863,7 @@ def _ole_info(target: Path) -> dict[str, Any]:
             },
             "olefile is not installed",
             still="the macro storage name read out of the raw bytes",
+            remediation=_missing_library_remedy(),
         )
     try:
         with olefile.OleFileIO(str(target)) as ole:

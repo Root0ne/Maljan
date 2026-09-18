@@ -294,6 +294,33 @@ class TestApkInfo:
         else:
             pytest.skip("androguard is installed; the degraded path is not the one taken")
 
+    def test_a_parse_failure_does_not_tell_the_operator_to_install_what_is_installed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The remedy belongs to the reason: a library that refused a file is
+        not fixed by installing it again."""
+        import sys
+        import types
+
+        module = types.ModuleType("androguard.core.apk")
+
+        class _Refuses:
+            def __init__(self, _path: str) -> None:
+                raise ValueError("not a manifest")
+
+        module.APK = _Refuses  # type: ignore[attr-defined]
+        package = types.ModuleType("androguard")
+        core = types.ModuleType("androguard.core")
+        monkeypatch.setitem(sys.modules, "androguard", package)
+        monkeypatch.setitem(sys.modules, "androguard.core", core)
+        monkeypatch.setitem(sys.modules, "androguard.core.apk", module)
+
+        result = tool.apk_info(str(self._apk(tmp_path)))
+
+        assert "androguard parse failed" in result["degraded"]
+        assert "remediation" not in result
+        assert result["manifest_present"] is True
+
     def test_a_file_that_is_not_a_zip_is_refused(self, tmp_path: Path) -> None:
         target = tmp_path / "s.bin"
         target.write_bytes(_elf())
