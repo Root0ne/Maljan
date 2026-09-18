@@ -914,7 +914,10 @@ take away: `MALJAN_SAMPLE_ROOTS` and `MALJAN_STAGING_DIR` on `analysis` and
 sidecar cannot work out for itself — which directories it may read, where a
 delivered sample lands and how long it is kept — so they are put back on load,
 on save, in the Configuration tab's own view and in the connection test. The
-registry is stored as one row holding every server, written whole whenever
+tab draws them above the box as names that are always passed, so a deletion is
+never accepted and then quietly undone; what stays editable there is the rest
+of the list. The registry is stored as one row holding every server, written
+whole whenever
 anything in it is saved, so without that floor a deployment that had configured
 its servers
 before a sidecar gained a variable would keep starting that sidecar without

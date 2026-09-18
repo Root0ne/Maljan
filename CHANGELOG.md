@@ -762,7 +762,10 @@ change landed on `main`.
   retention — on load, on save, in the editor's own view and in the connection
   test, which launches the server a run launches, so a name a sidecar gains
   reaches a deployment that has been configured rather than a fresh install
-  alone. Every other shipped name stays the operator's: a
+  alone. The Configuration tab draws those names above the box as always
+  passed, so an admin can no longer delete one, be told the map was saved, and
+  go on believing a sidecar was narrowed. Every other shipped name stays the
+  operator's: a
   `threatintel` whose `VIRUSTOTAL_API_KEY` and `ABUSEIPDB_API_KEY` an admin has
   cleared keeps them out of the child, and the sidecar answers from its mock as
   it does on a host that never held a key. A server an operator added is

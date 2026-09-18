@@ -7,6 +7,7 @@ import { getErrorMessage } from "@/lib/errors";
 import type { CatalogEntry, McpServerEntry, ProbeResult, SettingValue } from "@/types/settings";
 import { unavailableTools } from "@/types/settings";
 import Dot from "./Dot";
+import { addedEnvNames, requiredEnvNames, withRequiredEnvNames } from "./envAllow";
 import { deepEqual, mapKeyError, putEntry, removeEntry } from "./mapEditorHelpers";
 import SecretField, { type SecretStatus } from "./SecretField";
 
@@ -134,6 +135,59 @@ function EnvMapField({
           Invalid environment map: {bad}
         </div>
       )}
+    </label>
+  );
+}
+
+/**
+ * The names a stdio child inherits from the worker's own environment.
+ *
+ * A built-in's required names are drawn above the box rather than in it. The
+ * API passes them whatever the stored registry says (`envAllow.ts`), so a line
+ * an admin deleted here used to be accepted, put back on save, and reported as
+ * saved — a server that looked narrowed and was not. What stays editable is
+ * the rest of the list, which is theirs.
+ *
+ * The typed text is local state for the reason the environment map's is: a
+ * half-typed name is not reformatted under the cursor, and what is staged is
+ * always the fixed names plus the typed ones.
+ */
+function EnvAllowField({
+  serverKey,
+  envAllow,
+  onChange,
+}: {
+  serverKey: string;
+  envAllow: string[];
+  onChange: (envAllow: string[]) => void;
+}) {
+  const required = requiredEnvNames(serverKey);
+  const [text, setText] = useState(() => addedEnvNames(serverKey, envAllow).join("\n"));
+
+  const stage = (next: string) => {
+    setText(next);
+    onChange(withRequiredEnvNames(serverKey, next.split("\n").filter((name) => name !== "")));
+  };
+
+  return (
+    <label className="block">
+      <span className="text-text-muted">
+        {required.length > 0
+          ? "Other environment names passed through (one per line)"
+          : "Environment names passed through (one per line)"}
+      </span>
+      {required.length > 0 && (
+        <p className="text-[11px] text-text-secondary" data-required-env={serverKey}>
+          Always passed: <span className="font-mono text-text-primary">{required.join(", ")}</span>
+        </p>
+      )}
+      <textarea
+        className={input}
+        rows={2}
+        aria-label={`${serverKey} env allow`}
+        value={text}
+        onChange={(e) => stage(e.target.value)}
+      />
     </label>
   );
 }
@@ -432,22 +486,11 @@ export function ServerDetail({
                   env={server.env ?? {}}
                   onChange={(env) => put(serverKey, { env })}
                 />
-                <label className="block">
-                  <span className="text-text-muted">
-                    Environment names passed through (one per line)
-                  </span>
-                  <textarea
-                    className={input}
-                    rows={2}
-                    aria-label={`${serverKey} env allow`}
-                    value={server.env_allow.join("\n")}
-                    onChange={(e) =>
-                      put(serverKey, {
-                        env_allow: e.target.value.split("\n").filter((a) => a !== ""),
-                      })
-                    }
-                  />
-                </label>
+                <EnvAllowField
+                  serverKey={serverKey}
+                  envAllow={server.env_allow}
+                  onChange={(env_allow) => put(serverKey, { env_allow })}
+                />
               </>
             ) : (
               <>
