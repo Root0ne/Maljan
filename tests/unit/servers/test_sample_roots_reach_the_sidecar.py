@@ -73,6 +73,18 @@ def _stale_server_map(settings_servers: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _no_roots_yet(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Start from no roots, and leave this process's environment as it was.
+
+    An empty value rather than a deletion: a root exported during the test
+    then belongs to the value ``monkeypatch`` puts back, instead of outliving
+    the test in the environment every later one reads.
+    """
+    from maljan.tools.roots import SAMPLE_ROOTS_ENV
+
+    monkeypatch.setenv(SAMPLE_ROOTS_ENV, "")
+
+
 def _sample(target: Path) -> str:
     target.write_bytes(b"MZ" + b"\x00" * 128 + b"a readable string" * 4)
     return str(target)
@@ -276,9 +288,9 @@ class TestTheLiveSidecarReadsTheSampleAndNothingElse:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from maljan.core.settings_overrides import build_settings
-        from maljan.tools.roots import SAMPLE_ROOTS_ENV, add_sample_root
+        from maljan.tools.roots import add_sample_root
 
-        monkeypatch.delenv(SAMPLE_ROOTS_ENV, raising=False)
+        _no_roots_yet(monkeypatch)
         add_sample_root(tmp_path)
         config = build_settings({}).mcp.servers["analysis"]
 
@@ -298,9 +310,9 @@ class TestTheLiveSidecarReadsTheSampleAndNothingElse:
     ) -> None:
         from maljan.core.config import Settings
         from maljan.core.settings_overrides import build_settings
-        from maljan.tools.roots import SAMPLE_ROOTS_ENV, add_sample_root
+        from maljan.tools.roots import add_sample_root
 
-        monkeypatch.delenv(SAMPLE_ROOTS_ENV, raising=False)
+        _no_roots_yet(monkeypatch)
         add_sample_root(tmp_path)
         stale = _stale_server_map(Settings(_env_file=None).mcp.servers)
         config = build_settings({"mcp.servers": stale}).mcp.servers["analysis"]
@@ -322,13 +334,13 @@ class TestTheLiveSidecarReadsTheSampleAndNothingElse:
         """
         from maljan.core.settings_overrides import build_settings
         from maljan.providers.servers import ServerHandle
-        from maljan.tools.roots import SAMPLE_ROOTS_ENV, add_sample_root
+        from maljan.tools.roots import add_sample_root
 
         first = tmp_path / "first"
         second = tmp_path / "second"
         first.mkdir()
         second.mkdir()
-        monkeypatch.delenv(SAMPLE_ROOTS_ENV, raising=False)
+        _no_roots_yet(monkeypatch)
         add_sample_root(first)
         config = build_settings({}).mcp.servers["analysis"]
 
@@ -357,7 +369,7 @@ class TestTheWorkerNamesItsOwnDirectoriesBeforeAnySidecarStarts:
         from maljan.core.settings_overrides import build_settings
         from maljan.tools.roots import ROOT_SEPARATOR, SAMPLE_ROOTS_ENV
 
-        monkeypatch.delenv(SAMPLE_ROOTS_ENV, raising=False)
+        _no_roots_yet(monkeypatch)
         monkeypatch.setattr(sample_files.settings, "samples_dir", str(tmp_path / "samples"))
         monkeypatch.setattr(sample_files.settings, "upload_temp_dir", str(tmp_path / "uploads"))
 
