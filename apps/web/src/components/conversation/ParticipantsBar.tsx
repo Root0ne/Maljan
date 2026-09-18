@@ -60,6 +60,14 @@ export default function ParticipantsBar({
   const initials = agentInitials(
     Object.fromEntries(participants.map((p) => [p.key, p.name])),
   );
+  /* Two participants can carry the same name — a run drew `Jd Judge` beside
+   * `Ju Judge`, telling them apart by two letters of an avatar. Where a name
+   * is not unique its key comes with it, and where it is nothing changes. */
+  const shares = new Set(
+    participants
+      .map((p) => p.name)
+      .filter((name, i, all) => all.indexOf(name) !== i),
+  );
 
   return (
     <div className="flex flex-wrap gap-1.5">
@@ -92,6 +100,11 @@ export default function ParticipantsBar({
             <span className="min-w-0">
               <span className="flex items-center gap-1.5">
                 <span className="truncate text-xs text-text-primary">{participant.name}</span>
+                {shares.has(participant.name) && (
+                  <span className="shrink-0 font-mono text-[11px] text-text-muted">
+                    {participant.key}
+                  </span>
+                )}
                 <span
                   aria-hidden="true"
                   className={`h-1.5 w-1.5 shrink-0 rounded-full ${STATE_DOT[participant.state]}`}

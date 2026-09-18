@@ -19,6 +19,7 @@ export default function NoticeRow({ item }: { item: ConversationItem }) {
   return (
     <div className="flex justify-center">
       <div
+        title={correction ? item.code : undefined}
         className={`flex max-w-[46rem] items-baseline gap-2 rounded border px-2.5 py-1 text-[11px] ${
           correction
             ? "border-status-orange/30 bg-status-orange/10 text-status-orange"
@@ -26,12 +27,12 @@ export default function NoticeRow({ item }: { item: ConversationItem }) {
         }`}
       >
         <Icon size={12} aria-hidden="true" className="self-center" />
-        {correction && (
-          <>
-            <span className="font-mono">{item.code}</span>
-            {item.retryIndex ? <span>retry {item.retryIndex}</span> : null}
-          </>
-        )}
+        {/* The rule key is what a log line is grepped for, not what a reader
+            needs beside the sentence the rule already writes out — it rode
+            along as `isr.empty_evidence` in front of its own explanation. It
+            stays on the row as its title, which is where the other machine
+            identifiers on this page live. */}
+        {correction && item.retryIndex ? <span>retry {item.retryIndex}</span> : null}
         {/* A notice still comes from somewhere, and which validator or which
           * watcher raised it is the first thing a reader wants. */}
         {item.displayName && <span className="text-text-primary">{item.displayName}</span>}

@@ -45,11 +45,16 @@ export default function PipelineStrip({
             className={`flex items-baseline gap-2 rounded border px-2 py-1 text-[11px] ${
               STATUS_STYLE[stage.status] ?? STATUS_STYLE.pending
             }`}
-            title={stage.reason || `${stage.kind} stage`}
+            title={stage.reason || undefined}
           >
             {/* A name rather than a key, so not monospaced: the roster's
                 label where the run published one, the key where it did not. */}
             <span className="font-medium">{names.stage(stage.key)}</span>
+            {/* What kind of stage this is used to live in a `title` on a
+                `<span>` nothing can focus, so it reached a pointer and nobody
+                else. A reason keeps its tooltip, because a reason is a
+                sentence rather than a word. */}
+            <span className="sr-only">{stage.kind} stage</span>
             <span className="uppercase tracking-wider">{stage.status}</span>
             {members.length > 0 && (
               <span className="text-text-muted">{members.join(", ")}</span>

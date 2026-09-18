@@ -215,17 +215,19 @@ test.describe("tool servers and the REST sandbox", () => {
     await expect(detail.getByText("3 tools: open_file, analyze, list_imports")).toHaveCount(0);
   });
 
-  test("a built-in offers disable rather than remove, and one PATCH disables it while its key and other fields survive", async ({
+  test("a built-in is turned off by its own switch and never removed, and one PATCH disables it while its key and other fields survive", async ({
     authenticatedPage: page,
   }) => {
     await page.goto(MCP_PATH);
 
     await page.locator('[data-server="threatintel"]').click();
     const detail = page.locator('[data-server-detail="threatintel"]');
-    await expect(detail.getByRole("button", { name: "Disable" })).toBeVisible();
+    // Neither Remove nor the "Disable" that used to sit beside the switch:
+    // two controls for one state, worded in opposite directions.
     await expect(detail.getByRole("button", { name: "Remove" })).toHaveCount(0);
+    await expect(detail.getByRole("button", { name: "Disable" })).toHaveCount(0);
 
-    await detail.getByRole("button", { name: "Disable" }).click();
+    await detail.getByLabel("threatintel enabled").uncheck();
     await expect(detail.getByLabel("threatintel enabled")).not.toBeChecked();
     await expect(page.getByTestId("changes-count")).toHaveText("1 change");
 

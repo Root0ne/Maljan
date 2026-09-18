@@ -8,10 +8,31 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <AuthProvider>
       <div className="flex h-screen overflow-hidden">
+        {/* The first thing the keyboard reaches, and visible once it has it:
+            without this every page begins with five rail links, the search box
+            and the account menu before any content. */}
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:fixed focus:left-2 focus:top-2 focus:z-50 focus:rounded focus:border focus:border-accent focus:bg-bg-surface focus:px-3 focus:py-1.5 focus:text-xs focus:text-text-primary"
+        >
+          Skip to content
+        </a>
         <Sidebar />
-        <div className="flex flex-col flex-1" style={{ marginLeft: "var(--sidebar-width)" }}>
+        {/* `min-w-0` on both flex children, and it is not cosmetic. A flex item
+            defaults to `min-width: auto`, so it grows to its content's
+            min-content width instead of constraining it: one wide `<pre>` on
+            the Detection tab took `main` to 2542 px inside a 1440 px window and
+            the shell's `overflow:hidden` cut the rest off with no scrollbar
+            anywhere to reach it. With the minimum at zero the column stays the
+            width of the viewport and the scrollers inside it — every
+            `overflow-x-auto` table and code block — engage as they were meant
+            to. */}
+        <div
+          className="flex flex-col flex-1 min-w-0"
+          style={{ marginLeft: "var(--sidebar-width)" }}
+        >
           <Header />
-          <main className="flex-1 overflow-y-auto p-6">
+          <main id="main-content" tabIndex={-1} className="flex-1 min-w-0 overflow-y-auto p-6">
             {children}
           </main>
         </div>

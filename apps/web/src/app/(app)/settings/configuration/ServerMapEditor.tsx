@@ -1,5 +1,6 @@
 "use client";
 
+import { probeDetail } from "@/lib/probeDetail";
 import { useState } from "react";
 import { Server } from "lucide-react";
 import { api } from "@/lib/api";
@@ -307,13 +308,8 @@ export function ServerDetail({
     onChange(putEntry(value, key, next));
   };
 
-  const remove = (key: string) => {
-    if (BUILTIN.has(key)) {
-      put(key, { enabled: false });
-      return;
-    }
-    onChange(removeEntry(value, key));
-  };
+  /** Only a custom server has a Remove; a built-in is turned off instead. */
+  const remove = (key: string) => onChange(removeEntry(value, key));
 
   if (!server) return null;
 
@@ -351,7 +347,7 @@ export function ServerDetail({
           className={`text-[11px] ${result.ok ? "text-status-green" : "text-status-red"}`}
           role="status"
         >
-          {result.ok ? "ok" : "failed"} · {result.latency_ms} ms · {result.detail}
+          {result.ok ? "ok" : "failed"} · {result.latency_ms} ms · {probeDetail(result.detail)}
         </p>
       )}
       {/* What the server cannot do on its host, said before any run: each
@@ -408,13 +404,17 @@ export function ServerDetail({
               >
                 Test
               </button>
-              <button
-                type="button"
-                className="text-xs text-text-secondary"
-                onClick={() => remove(serverKey)}
-              >
-                {BUILTIN.has(serverKey) ? "Disable" : "Remove"}
-              </button>
+              {/* A built-in server has no Remove, and the switch two
+                  controls to the left is already how it is turned off. */}
+              {!BUILTIN.has(serverKey) && (
+                <button
+                  type="button"
+                  className="text-xs text-text-secondary"
+                  onClick={() => remove(serverKey)}
+                >
+                  Remove
+                </button>
+              )}
             </div>
           </div>
 
@@ -747,11 +747,19 @@ export default function ServerMapEditor({
                     label={item.enabled ? "enabled" : "disabled"}
                     className={item.enabled ? "bg-status-green" : "bg-border"}
                   />
-                  <span className="text-sm font-mono text-text-primary truncate">{key}</span>
+                  {/* Label first, key after it, which is how the sibling
+                      agents list reads. This one showed the key alone while
+                      its own detail pane held "Network MCP". */}
+                  <span className="text-sm text-text-primary truncate">
+                    {item.label?.trim() || key}
+                  </span>
                   {changed && <Dot label="changed" className="bg-accent-strong" />}
                   {errorFor(key) && <Dot label="invalid" className="bg-status-red" />}
                 </div>
                 <div className="flex items-center gap-2 text-[11px] text-text-muted pl-3.5">
+                  {item.label?.trim() && item.label.trim() !== key && (
+                    <span className="font-mono">{key}</span>
+                  )}
                   <span>{item.transport}</span>
                   {verdict && (
                     <span

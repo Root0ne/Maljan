@@ -2,8 +2,9 @@ import type { NextConfig } from "next";
 
 /* The routes that moved, and where they moved to.
  *
- * Twelve analysis tabs became five, and `/reports` became a filter on the one
- * list of runs. Each retired route used to be a client component that mounted,
+ * Nine analysis routes were retired onto two destinations, and `/reports`
+ * became a filter on the one list of runs. Each retired route used to be a
+ * client component that mounted,
  * read its params and called `router.replace` — nine files whose only job was
  * to draw "Redirecting…" for one frame. The server answers now, before the
  * bundle is fetched, so a bookmark or a link in an already-issued report lands

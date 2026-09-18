@@ -75,6 +75,25 @@ describe("the style rules", () => {
     });
   }
 
+  /* The console had no responsive layout at all: twenty-one unconditional
+   * multi-column grids, so the dashboard kept four stat columns at 375 px and
+   * clipped every one of their labels. The rule that replaced them is that the
+   * base layout is the phone layout — at most two columns before a breakpoint
+   * variant widens it — and this is what keeps a copied `grid-cols-4` from
+   * bringing the old behaviour back. */
+  it("gives every multi-column grid a phone layout", () => {
+    const offenders: string[] = [];
+    for (const file of files) {
+      const body = readFileSync(file, "utf8");
+      for (const match of body.matchAll(/(^|[^:\w-])grid-cols-(\d+)/g)) {
+        if (Number(match[2]) <= 2) continue;
+        const line = body.slice(0, match.index ?? 0).split("\n").length;
+        offenders.push(`${path.relative(SRC, file)}:${line} — grid-cols-${match[2]}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
   /* The transitions that stay: width, transform and opacity move something,
    * and a rail that widens or a chevron that turns is showing what changed
    * rather than colouring it. */

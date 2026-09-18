@@ -137,9 +137,9 @@ export function RestMappingTable({
       <table className="w-full text-xs mt-2">
         <thead className="sticky top-0 bg-bg-deep">
           <tr className="border-b border-border text-text-muted">
-            <th className="text-left font-normal py-1">Channel</th>
-            <th className="text-left font-normal py-1">JSONPath</th>
-            <th className="text-left font-normal py-1 w-40">
+            <th scope="col" className="text-left font-normal py-1">Channel</th>
+            <th scope="col" className="text-left font-normal py-1">JSONPath</th>
+            <th scope="col" className="text-left font-normal py-1 w-40">
               Matched / kept / dropped
               <span className="text-text-muted">*</span>
             </th>

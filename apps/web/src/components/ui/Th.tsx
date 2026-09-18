@@ -6,7 +6,10 @@
  */
 export default function Th({ children }: { children: React.ReactNode }) {
   return (
-    <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider">
+    <th
+      scope="col"
+      className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider"
+    >
       {children}
     </th>
   );
