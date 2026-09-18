@@ -398,13 +398,26 @@ word this pipeline does not, or it wrote nothing. Only the third is a question
 the object set may answer.
 
 `normalise_verdict` is what "knows" means, and it is the one reading in the
-tree — the report builder's own prefix rule, which the statement is now read
-with too. Case, surrounding whitespace and a qualifier after the word do not
-matter, so "Benign (legitimate utility)" is Benign. Anything the three prefixes
-do not reach is *unrecognised*, which is a fault of its own and never a
-fall-through: a judge that wrote "Not malware" beside a container object would
-have been published as Malware, and one that wrote "Malicious" over a
-reputation-only bundle as Benign.
+tree, shared with the report builder that renders a decision. The whole value
+has to *be* one of the three words once whitespace, case and the decoration a
+model wraps a word in are taken off — `Malware.`, `**Benign**`, `"Suspicious"`.
+Nothing else is interpreted. A question mark is not decoration and is not
+stripped: `Malware?` is doubt, and reading doubt as the confident word is the
+fault this rule exists to close.
+
+It was a prefix match, which is the right rule for the builder — whose input
+the pipeline has already reduced to one of three words — and a dangerous one
+for free model text, because a prefix cannot see what follows the stem:
+`malware-free`, `Malware (false positive)` and `malwarebytes detected nothing`
+all read as Malware, and `Benignware is unlikely; malware` as Benign. The
+published verdict was the inverse of what the judge wrote, with no code, no
+feedback turn and the judge's own confidence printed beside it.
+
+The field's annotation is `Any` for the same reason its vocabulary is not a
+`Literal`: a judge answering `["Malware"]` or `1` to a field with three allowed
+values used to fail `Bundle.model_validate` and cost the run every object it
+had. A value that is not text is stated and unrecognised like any other, shown
+back as its own compact JSON.
 
 Four rules follow from the statement:
 
@@ -414,10 +427,13 @@ Four rules follow from the statement:
   bundle this pipeline built out of text states its own verdict and is not
   asked for a second one.
 * **Unrecognised is asked about, and the objects stay out of it.** The run
-  publishes `INCONCLUSIVE_VERDICT`, the judge's own word is quoted verbatim in
-  a degradation reason the header prints directly under the verdict, no
+  publishes `INCONCLUSIVE_VERDICT`, the judge's own answer is quoted in a
+  degradation reason the header prints directly under the verdict, no
   confidence is published, and `verdict.unrecognised` asks once for one of the
-  three words, quoting what the judge wrote.
+  three words, quoting what the judge wrote. The severity and category
+  conflict rows are silent for that turn, and correctly: there is no stated
+  verdict for them to disagree with, and they return the moment the retry
+  states one.
 * **The conflict check compares the statement with the rest.** The severity
   rating (Malware over Informational, Benign over High or Critical), the
   category (a Malware verdict whose category says the sample is legitimate),
@@ -431,7 +447,21 @@ Four rules follow from the statement:
   neither the judge's nor one the renderer would mint — and the decline is
   recorded as `stix.malware_object_under_benign`. The relationships that would
   dangle go through the integrity pass that already prunes them. Nothing is
-  rewritten: the judge's own bundle is stored with the object in it. A summary
+  rewritten: the judge's own bundle is stored with the object in it. The
+  indicator carrying the sample's own hash says what the published verdict
+  says, through `schemas/judgement.indicator_type_for` and STIX 2.1's
+  `indicator-type-ov`: Malware is `malicious-activity`, Suspicious
+  `anomalous-activity`, Benign `benign`, and a verdict that mapping does not
+  name is `unknown`. It used to claim `malicious-activity` whatever the run
+  concluded, which told every blocklist the opposite of the verdict — a
+  stronger contradiction than the malware object the same export declines,
+  because a consumer blocks on the indicator and reads the objects afterwards.
+  An indicator for anything else — a domain, an address, a URL the analysts
+  observed — keeps the type it already had (`malicious-activity` when the row
+  is marked suspicious, `anomalous-activity` otherwise, and
+  `anomalous-activity` for a `file:name` out of the string scan); a Benign run
+  can carry them, because a benign sample still talks to hosts, and they are
+  exported as they are. A summary
   note then has no malware object to be about, so it refers to the indicator
   carrying the sample's own hash, which the cap keeps in a band of its own; a
   bundle holding nothing the note could truthfully refer to emits no note, and
@@ -1225,10 +1255,13 @@ bundle, a MITRE view, the extracted indicators, the detection signatures that
 fired and a timeline. Post-hoc enrichment fills VirusTotal, AbuseIPDB, WHOIS and
 GeoIP reputation into the indicator set after the verdict has shipped.
 
-Each domain in the network block records where it came from — `sandbox` for a
-name the sample resolved or requested, `analyst` for one an agent put in an
-artefact, `strings` for a run of bytes in the file that has the shape of a
-hostname. The last is the weakest claim there is, so a `strings` domain is
+Every row in the network block — a domain, an address and a URL alike —
+records where it came from: `sandbox` for something the sample resolved,
+reached or requested, `analyst` for something an agent put in an artefact,
+`strings` for a run of bytes in the file that has the shape of one. A row that
+records nothing is read as `strings`, because that is the weakest claim and
+reading "unrecorded" two ways is how one reading publishes what the other ranks
+as noise. The last is the weakest claim there is, so a `strings` domain is
 printed in the report — in its own Source column in the Markdown table and as
 a badge on the console's domain card — and left out of the STIX indicator set
 and out of the reputation lookups until a second source knows the same name.
@@ -1237,6 +1270,19 @@ it: the network block's own, and the string rows that reach the bundle
 through `static.interesting_strings`. A Tor address is corroborated by its own
 syntax, because `.onion` never resolves and no sandbox can confirm one; the
 indicator it mints carries the reason it was admitted.
+
+Addresses go through the same predicate (`ip_corroboration_reason`), and until
+this they were the one network kind with no gate at all: every run of digits
+the string sweep read as an address was published, charged to a reputation
+provider and — once the export's cap began ordering by how strong an origin
+was — ranked as though a sandbox had watched it, because an address carried no
+origin to read. One live bundle published `6.0.0.0`, a version number out of
+the strings table. `address_is_publishable` answers the question no source can
+answer for: loopback, unspecified, link-local, multicast, the broadcast
+address, anything the registries reserve and the ranges a document is written
+with are never indicators, and a *private* address is published only when
+somebody watched the sample reach it, because that is lateral movement rather
+than a version number typed with dots in it.
 
 URLs record their source the same way and go through the same predicate, asked
 of the URL's host (`url_corroboration_reason`), plus one question no source can
@@ -1251,7 +1297,12 @@ ever be its second source, and a name merely ending in `.onion` is not a host
 either. An address literal passes unless it is loopback, unspecified or
 link-local. A name passes when it is not a reserved name or suffix, every label
 is a label, and its last label is a suffix rather than a word — two or more
-letters, or a punycode label. It is not membership in a list of TLDs somebody
+letters, or a punycode label. The reserved suffixes include `.internal`, `.alt`
+and `.home.arpa`, which name a private network's own machines: publishing one
+is a low-value indicator in a shared bundle and a small disclosure of how the
+analysis network is named. The same list gates the domains, because
+`_is_emittable_domain` is what both ask. The last label's rule is not
+membership in a list of TLDs somebody
 wrote down: the list this replaced omitted `gov`, `edu`, `mobi`, every punycode
 TLD and most of two continents' ccTLDs, so a sandbox-observed request to a
 university host was dropped from the export with nothing said about it. Four of
@@ -1259,14 +1310,20 @@ the five above fail this question; `fs01n5.sends` passes it and is held back by
 the corroboration rule instead, which is the true reason and the one recorded.
 
 Whether an endpoint that *could* exist is published stays
-`corroboration_reason`'s decision. Nothing anybody observed is dropped in
-silence: a sandbox or analyst URL the host question refuses, and a judge's own
-indicator object that it refuses, are both recorded as
-`stix.unpublishable_url` with the judge's or the report's own copy unchanged. A
-string-derived URL held back for want of a second source is the rule working
-and is not a finding. The value in such a row goes through
-`pipeline.events.scrub` and a length bound first, so a URL's userinfo never
-reaches the stored report.
+`corroboration_reason`'s decision. A URL the host question refuses is recorded
+as `stix.unpublishable_url` whoever wrote the row down — the report's own
+network block or the judge's indicator object, both left unchanged — because
+the reason is true of all of them and a reader is owed it. A URL held back only
+for want of a second source is the rule working and is not a finding.
+
+Every model-written value on this path — a URL echoed into a decline, the
+judge's own verdict word, the category it invented, the type of an object the
+bundle cannot hold — goes through `pipeline.events.safe_finding_value`, which
+is `scrub` and a length bound. A validation row, a degradation reason and an
+export decline all land in `run_summary`, in the stored report and on the
+analysis page, and none of them is an event, so none of them was covered by the
+scrubbing the publisher does: a model echoing a credentialled URL into the
+verdict field put the credential in the stored report and drew it on the page.
 
 `MAX_TOTAL_INDICATORS` is applied where the indicators are rendered into the
 bundle, over every indicator that would be in it rather than over the ones the

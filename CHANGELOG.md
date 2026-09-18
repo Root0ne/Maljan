@@ -2020,12 +2020,18 @@ change landed on `main`.
   malware, and `pipeline.outcome.decide_from_bundle` reads that statement
   first. The statement has three answers and only one of them lets the object
   set speak. A word the pipeline knows is the verdict, read through one
-  normaliser the report builder shares, so case, surrounding whitespace and a
-  qualifier after the word do not matter and "Benign (legitimate utility)" is
-  Benign. A word it does not know — "Clean", "Not malware", "Malicious" — is
+  normaliser the report builder shares: the whole value has to *be* one of the
+  three words once whitespace, case and the decoration a model wraps a word in
+  are taken off, so `Malware.`, `**Benign**` and `"Suspicious"` are the words
+  they are wrapped in and nothing else is interpreted — not a qualifier, not a
+  parenthesis, not a question mark, which is doubt rather than decoration. The
+  field accepts any type, because a judge answering `["Malware"]` to a field
+  with three allowed values would otherwise fail the whole bundle exactly as a
+  misplaced block did; a value that is not one of the three words — `Clean`,
+  `Not malware`, `malware-free`, `Malware (false positive)`, `["Malware"]` — is
   `verdict.unrecognised`: asked about once, quoting what the judge wrote, and
   if it survives the run publishes the inconclusive verdict with the judge's
-  own word printed beside it and no confidence, because a judge that wrote
+  own answer printed beside it and no confidence, because a judge that wrote
   something has already kept the objects out of it. The object set is read only
   for a bundle whose field is *absent*, which is every stored run and a model
   that omitted it, and that reading is fed back once as `verdict.unstated` and
@@ -2052,6 +2058,33 @@ change landed on `main`.
   which the indicator cap keeps in a band of its own; a bundle holding nothing
   the note could truthfully refer to emits no note and keeps the summary in the
   report, and a bundle with nothing to report on emits no report object.
+- **The sample's own indicator says what the verdict says.** It was typed
+  `malicious-activity` whatever the run concluded, so a Benign export told
+  every blocklist that the sample's hash is malicious activity, with the run's
+  own note saying Benign attached to it — a stronger contradiction than the
+  malware object the same export declines, because a consumer blocks on the
+  indicator and reads the objects afterwards. The type now follows the
+  published verdict through STIX 2.1's own `indicator-type-ov`: Malware is
+  `malicious-activity`, Suspicious `anomalous-activity`, Benign `benign`, and a
+  verdict the mapping does not name is `unknown`. An indicator for anything
+  else — a domain, an address or a URL the analysts observed — keeps the type
+  it already had.
+- **An address in the sample's bytes is not an address it reached for.** The
+  domains got this rule and then the URLs; the addresses were the one network
+  kind with nothing asked of them at all, so every run of digits the string
+  sweep read as an address was published as an indicator, charged to a
+  reputation provider, and ranked at the export's cap as though a sandbox had
+  watched it. One live bundle carried `6.0.0.0`, a version number out of the
+  strings table; on a report shaped like the ones the live runs produced,
+  fourteen such values displaced every observed C2 endpoint. `NetworkIP` now
+  records its source the way a domain and a URL do — labelled where the ledger
+  projection adds it, shown in the report and on the console's card — and goes
+  through the same publish predicate. Loopback, unspecified, link-local,
+  multicast, broadcast, reserved and the ranges a document is written with are
+  never indicators; a private address is published only when somebody watched
+  the sample reach it, which is lateral movement rather than a version number
+  typed with dots in it. A string-derived address costs no reputation lookup
+  either, as a string-derived domain already did not.
 - **One misplaced extension object no longer costs the judge its whole
   bundle.** The prompt asks for `x_maljan_assessment` beside `objects`; a model
   that wrote it inside the list failed `Bundle.model_validate` with twenty-one
@@ -2100,10 +2133,16 @@ change landed on `main`.
   scan alone is held back for want of a second source, which is the reason the
   report gives for it. Every minting path asks both, including the judge's own
   indicator objects — one that fails is not exported and the decline is
-  recorded as `stix.unpublishable_url`, never rewritten — and nothing a
-  sandbox, an analyst or the judge recorded is dropped with only a log line.
-  The value in such a row goes through the scrubber the events use and a length
-  bound, so a URL's userinfo never reaches the stored report.
+  recorded as `stix.unpublishable_url` whoever wrote the row down, never
+  rewritten, because the reason is true of all of them. A row held back only
+  for want of a second source is the rule working and is not a finding, and a
+  row that records no source at all is read as string-derived, which is what
+  the export's cap ranks it as. Every model-written value the verdict path puts
+  into a validation row, a degradation reason or an export decline goes through
+  the scrubber the events use and a length bound — a validation row is not an
+  event, so none of them was covered by the scrubbing the publisher does, and a
+  model echoing a credentialled URL into the verdict field put the credential
+  in the stored report and drew it on the analysis page.
   `MAX_TOTAL_INDICATORS` is applied over every indicator that would be in the
   bundle rather than over the ones the renderer minted, in the linter's stated
   priority order, so the two read one constant and agree: a run whose bundle
