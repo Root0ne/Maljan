@@ -86,9 +86,13 @@ def client(monkeypatch, tmp_path):
     db.execute = AsyncMock(return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: [])))
     monkeypatch.setattr(module, "_load_sample", MagicMock(return_value=sample))
     stored: dict[str, bytes] = {}
-    monkeypatch.setattr(
-        module, "_put_object", lambda path, blob, **kw: stored.setdefault(path, blob)
-    )
+
+    async def _store(path: str, blob: bytes, **kw: object) -> None:
+        # The route writes to the object store off the event loop now, so the
+        # stand-in is awaitable like the call it replaces.
+        stored.setdefault(path, blob)
+
+    monkeypatch.setattr(module, "put_object", _store)
     monkeypatch.setattr(module, "_persist", MagicMock(side_effect=lambda db, row: row))
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[get_current_user] = lambda: user

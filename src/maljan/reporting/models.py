@@ -76,6 +76,10 @@ class SignatureInfo(BaseModel):
     is_signed: bool = False
     signer_subject: str | None = None
     signer_issuer: str | None = None
+    # SHA-1 over the signer certificate, which is how Windows, VirusTotal and
+    # every signing-certificate feed name one. The identifier the subject and
+    # issuer above were read from.
+    signer_thumbprint: str | None = None
     signature_valid: bool | None = None
     # The pack's ``signing_info`` entry these facts were read from.
     evidence_id: str | None = None
@@ -307,6 +311,12 @@ class NetworkDomain(BaseModel):
     # IDN/punycode homograph signals.
     is_punycode: bool = False
     homograph_target: str | None = None
+    # Where the name came from. ``sandbox`` is a resolution or a request the
+    # sample actually made, ``analyst`` an agent's own artefact, ``strings`` a
+    # run of bytes in the file that has the shape of a hostname — which is a
+    # far weaker claim and was being published as though it were the same one.
+    # ``None`` for a producer that does not record it.
+    source: Literal["sandbox", "analyst", "strings"] | None = None
     # Filled asynchronously by the threat-intel enrichment worker.
     reputation: dict[str, Any] | None = None
 

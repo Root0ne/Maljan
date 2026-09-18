@@ -831,12 +831,36 @@ class ServerHandle:
         what a newly registered custom server carries until the operator ticks
         tools off its probe result — a server is connected and inert until
         somebody says which of its tools may run.
+
+        A tool this host cannot run is dropped either way. The manifest the
+        server computed at start-up says which those are, and offering one is
+        offering the model a step that can only fail; the manifest still names
+        it, so the reason and the remedy reach the operator and the degraded
+        block. A server that answered no manifest is offered whole, as before.
         """
         allowed = self.config.tools
-        if allowed is None:
-            return list(self._all_tools)
-        keep = set(allowed)
-        return [t for t in self._all_tools if str(getattr(t, "name", "")) in keep]
+        withheld = self.capabilities.unusable() if self.capabilities else frozenset()
+        keep = None if allowed is None else set(allowed)
+        return [
+            tool
+            for tool in self._all_tools
+            for name in (str(getattr(tool, "name", "")),)
+            if name not in withheld and (keep is None or name in keep)
+        ]
+
+    def withheld_reasons(self) -> list[str]:
+        """The degradation reasons for the tools this host cannot run.
+
+        Said where the tool is withheld rather than where it would have been
+        bound, so dropping it from the model's list does not also drop the
+        sentence that explains the gap.
+        """
+        if self.capabilities is None:
+            return []
+        withheld = self.capabilities.unusable()
+        if not withheld:
+            return []
+        return [u.degradation_reason for u in self.capabilities.unavailable(sorted(withheld))]
 
     def _teardown(self, toolkit: Any) -> None:
         """Best-effort close of ``toolkit``, attached or abandoned mid-open. Never raises.
@@ -1083,6 +1107,11 @@ class ServerRegistry:
         return renamed
 
     def _merge(self, handle: ServerHandle, tools: list[BaseTool], seen: dict[str, str]) -> int:
+        # A tool the host cannot run is no longer put in front of the model, so
+        # the stage that binds it can no longer be the thing that reports it.
+        # It is reported here instead, where it is withheld, and reaches the
+        # degraded block exactly as it did before.
+        self._record(handle.withheld_reasons())
         return self.merge_tools(handle.name, handle.tools(), tools, seen)
 
     def tools_for(
@@ -1192,7 +1221,7 @@ class ServerRegistry:
         """
         available = handle.tools()
         if ref.name is None:
-            return list(available), []
+            return list(available), handle.withheld_reasons()
         wanted = str(ref.name)
         picked = [tool for tool in available if str(getattr(tool, "name", "")) == wanted]
         if not picked:

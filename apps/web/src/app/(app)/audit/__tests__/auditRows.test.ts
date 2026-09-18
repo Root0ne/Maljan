@@ -6,6 +6,7 @@ function log(overrides: Partial<AuditLogDTO>): AuditLogDTO {
   return {
     id: "1",
     user_id: "6f1d9a2e-0000-4000-8000-000000000000",
+    actor: "Ada Lovelace",
     action: "settings.update",
     resource_type: "settings",
     resource_id: null,
@@ -22,9 +23,34 @@ describe("an audit row", () => {
     expect(actionLabel("api_key.revoke")).toBe("API key revoke");
   });
 
-  it("names the actor, and names the platform where there is none", () => {
-    expect(actorLabel("6f1d9a2e-0000-4000-8000-000000000000")).toBe("6f1d9a2e");
-    expect(actorLabel(null)).toBe("the platform");
+  it("names the actor the endpoint names", () => {
+    expect(actorLabel("Ada Lovelace", "6f1d9a2e-0000-4000-8000-000000000000")).toBe(
+      "Ada Lovelace"
+    );
+  });
+
+  it("falls back to the id when the endpoint has no name for it", () => {
+    expect(actorLabel(null, "6f1d9a2e-0000-4000-8000-000000000000")).toBe("6f1d9a2e");
+    expect(actorLabel("   ", "6f1d9a2e-0000-4000-8000-000000000000")).toBe("6f1d9a2e");
+  });
+
+  it("names the platform where there is no principal at all", () => {
+    expect(actorLabel(null, null)).toBe("the platform");
+    expect(actorLabel("", "  ")).toBe("the platform");
+  });
+
+  it("keeps the id beside a name, and does not repeat an id it already shows", () => {
+    const [named] = auditRows([log({})]);
+    expect(named.actor).toBe("Ada Lovelace");
+    expect(named.actorId).toBe("6f1d9a2e-0000-4000-8000-000000000000");
+
+    const [unnamed] = auditRows([log({ actor: null })]);
+    expect(unnamed.actor).toBe("6f1d9a2e");
+    expect(unnamed.actorId).toBe("");
+
+    const [platform] = auditRows([log({ actor: null, user_id: null })]);
+    expect(platform.actor).toBe("the platform");
+    expect(platform.actorId).toBe("");
   });
 
   it("drops a resource that only restates the action's own prefix", () => {

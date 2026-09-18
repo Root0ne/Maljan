@@ -59,6 +59,7 @@ __all__ = [
     "PackResult",
     "ReputationLookup",
     "degrades_run",
+    "degradation_reason_for",
     "failure_reason",
     "is_pack_reason",
     "malicious_count",
@@ -103,13 +104,27 @@ def failure_reason(tool: str) -> str:
     return f"triage.{tool}_failed"
 
 
+def degradation_reason_for(tool: str, value: Any) -> str | None:
+    """The reason a tool that answered less than it wanted to contributes.
+
+    A degraded answer is a success — the facts it did produce are in the
+    ledger and in the pack — so it cannot be a ``_failed``. It is still an
+    absence the reader is owed, because "no permissions listed" and "the
+    library that lists permissions is not installed" look identical from the
+    outside.
+    """
+    if not isinstance(value, dict) or not value.get("degraded"):
+        return None
+    return f"triage.{tool}_degraded"
+
+
 # The two tools whose failure leaves the run without its identity. Every other
 # tool in the pack is an optional source: a capa that ran out of budget or a
 # reputation server that did not answer is an absence the judge is told about,
 # not a reason to call the whole run degraded.
 ESSENTIAL_TOOLS: frozenset[str] = frozenset({"identify_file", "hashes", "pack"})
 
-_REASON_RE = re.compile(r"^triage\.(?P<tool>.+)_failed$")
+_REASON_RE = re.compile(r"^triage\.(?P<tool>.+)_(?:failed|degraded)$")
 _UNAVAILABLE_RE = re.compile(r"^server\.[^.]+\.[^.(]+_unavailable\(")
 
 
@@ -118,8 +133,18 @@ def is_pack_reason(reason: str) -> bool:
     return bool(_REASON_RE.match(str(reason or "")))
 
 
+_DEGRADED_RE = re.compile(r"^triage\.(?P<tool>.+)_degraded$")
+
+
 def degrades_run(reason: str) -> bool:
-    """Whether one of the pack's reasons makes the run degraded on its own."""
+    """Whether one of the pack's reasons makes the run degraded on its own.
+
+    A tool that answered a smaller set than it wanted to never does: the
+    facts it produced are in the pack, and what is missing from them is said
+    beside them.
+    """
+    if _DEGRADED_RE.match(str(reason or "")):
+        return False
     match = _REASON_RE.match(str(reason or ""))
     return bool(match and match.group("tool") in ESSENTIAL_TOOLS)
 
@@ -165,10 +190,20 @@ def reason_sentence(reason: str) -> str:
     The tokens stay in the run summary, where a consumer keys on them; the
     judge reads prose.
     """
-    match = _REASON_RE.match(str(reason or ""))
+    text = str(reason or "")
+    match = _REASON_RE.match(text)
     if not match:
-        return str(reason)
+        return text
     tool = match.group("tool")
+    if _DEGRADED_RE.match(text):
+        # This sentence reaches the judge's prompt beside the facts the tool
+        # did produce, so it must not say the tool could not run: the same
+        # prompt carries an APK's dex count and its ABIs under a reason that
+        # used to read "could not run apk_info".
+        return (
+            f"the triage pack's {tool} answered a smaller set than it wanted to; "
+            "what it did answer is in the pack, and the entry says which library was missing"
+        )
     if tool == "pack":
         return "the triage pack itself failed before it finished"
     if tool in _REPUTATION_TOOLS:
@@ -227,10 +262,12 @@ class PackResult:
     # The steps the pack's own budget stopped before they started, in order.
     # A skipped lookup is not one of these; it was never going to run.
     stopped_by_budget: list[str] = field(default_factory=list)
+    # The reasons of tools that answered a smaller set than they wanted to.
+    degraded: list[str] = field(default_factory=list)
 
     @property
     def degradation_reasons(self) -> list[str]:
-        return [failure_reason(tool) for tool in self.failed]
+        return [failure_reason(tool) for tool in self.failed] + list(self.degraded)
 
     def to_state(self) -> dict[str, Any]:
         """The channel value the node writes: the facts, the counts, the reasons."""
@@ -382,6 +419,10 @@ class _Pack:
         if error:
             self._failed(tool, entry)
             return None
+        reason = degradation_reason_for(tool, value)
+        if reason and reason not in self.result.degraded:
+            self.result.degraded.append(reason)
+            logger.info("triage pack: %s answered less than it wanted to (%s).", tool, reason)
         return value if isinstance(value, dict) else None
 
     def _record_not_run(self, tool: str, args: dict[str, Any], spent: float) -> None:

@@ -53,6 +53,39 @@ MEDIUM = "medium"
 INFO = "informational"
 
 
+# What a category needs beside it to mean something. A category that is
+# informational on its own says nothing about a sample, and saying only that
+# leaves the reader to guess what would change the answer; these names travel
+# in the manifest as ``corroborated_by`` and ``api_capability`` puts them on
+# the row. Only categories that need it are listed.
+WINDOWS_CORROBORATORS: dict[str, list[str]] = {
+    "screen_capture": [
+        "AttachThreadInput",
+        "GetAsyncKeyState",
+        "GetClipboardData",
+        "GetKeyboardState",
+        "GetRawInputData",
+        "GetRawInputDeviceList",
+        "RegisterRawInputDevices",
+        "SetWinEventHook",
+        "SetWindowsHookExA",
+        "SetWindowsHookExW",
+    ],
+    "message_loop": [
+        "AttachThreadInput",
+        "GetAsyncKeyState",
+        "GetClipboardData",
+        "GetKeyboardState",
+        "GetRawInputData",
+        "GetRawInputDeviceList",
+        "RegisterRawInputDevices",
+        "SetWinEventHook",
+        "SetWindowsHookExA",
+        "SetWindowsHookExW",
+    ],
+}
+
+
 # ---------------------------------------------------------------------------
 # Windows behaviour categories
 # ---------------------------------------------------------------------------
@@ -821,11 +854,6 @@ WINDOWS_CATEGORIES: dict[str, tuple[str, list[str]]] = {
             "keybd_event",
             "mouse_event",
             "SendInput",
-            "GetMessageA",
-            "GetMessageW",
-            "PeekMessageA",
-            "TranslateMessage",
-            "DispatchMessageA",
             "SetWinEventHook",
             "RegisterHotKey",
             "GetClipboardData",
@@ -835,6 +863,19 @@ WINDOWS_CATEGORIES: dict[str, tuple[str, list[str]]] = {
             "EmptyClipboard",
             "IsClipboardFormatAvailable",
             "AddClipboardFormatListener",
+            "waveInOpen",
+            "waveInStart",
+            "capCreateCaptureWindowA",
+        ],
+    ),
+    # The GDI calls that copy pixels out of a device context. They are what a
+    # screenshot is made of, and they are also what every program that draws
+    # its own window calls: filed under keylogging at tier high, they made a
+    # signed SSH client read as a keylogger to the one analyst that spoke.
+    # Informational, with the company they would need to mean something.
+    "screen_capture": (
+        INFO,
+        [
             "BitBlt",
             "StretchBlt",
             "CreateCompatibleBitmap",
@@ -844,9 +885,18 @@ WINDOWS_CATEGORIES: dict[str, tuple[str, list[str]]] = {
             "GetDIBits",
             "SelectObject",
             "PrintWindow",
-            "waveInOpen",
-            "waveInStart",
-            "capCreateCaptureWindowA",
+        ],
+    ),
+    # The Win32 message pump. Every windowed program has one; a keylogger is
+    # told apart by the hook or the raw-input registration beside it.
+    "message_loop": (
+        INFO,
+        [
+            "GetMessageA",
+            "GetMessageW",
+            "PeekMessageA",
+            "TranslateMessage",
+            "DispatchMessageA",
         ],
     ),
     "evasion": (
@@ -1798,6 +1848,17 @@ def _validate() -> list[str]:
     return problems
 
 
+def _block(category: str) -> dict[str, object]:
+    """One category as the catalog carries it, corroborators included."""
+    tier, apis = WINDOWS_CATEGORIES[category]
+    block: dict[str, object] = {"tier": tier}
+    corroborators = WINDOWS_CORROBORATORS.get(category)
+    if corroborators:
+        block["corroborated_by"] = sorted(set(corroborators))
+    block["apis"] = sorted(set(apis))
+    return block
+
+
 def main() -> int:
     problems = _validate()
     if problems:
@@ -1808,12 +1869,7 @@ def main() -> int:
     behaviour = {
         "schema": "maljan-api-behaviour/v1",
         "version": "1.0",
-        "platforms": {
-            "windows": {
-                cat: {"tier": tier, "apis": sorted(set(apis))}
-                for cat, (tier, apis) in WINDOWS_CATEGORIES.items()
-            }
-        },
+        "platforms": {"windows": {cat: _block(cat) for cat in WINDOWS_CATEGORIES}},
     }
     attck = {
         "schema": "maljan-api-attck/v1",

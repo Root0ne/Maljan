@@ -144,6 +144,15 @@ def setup_logging() -> None:
     handler.setFormatter(formatter)
     root_logger.addHandler(handler)
 
+    # The pipeline package installs a handler of its own for callers who have
+    # none — a CLI run, a script. Beside the root handler above it is a second
+    # writer for the same record, and every pipeline line went to stdout
+    # twice: once plain, once through the formatter chosen here. Now that
+    # there is a root handler, that one steps aside.
+    from maljan.core.logger import hand_over_to_root
+
+    hand_over_to_root()
+
     # Reduce noise from third-party libraries
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
     logging.getLogger("uvicorn.error").setLevel(logging.INFO)

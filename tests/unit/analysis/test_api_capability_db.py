@@ -234,4 +234,33 @@ class TestEveryApiHasExactlyOneOwner:
         windows = raw["platforms"]["windows"]
         total = sum(len(block["apis"]) for block in windows.values())
         assert total > 700, f"catalog shrank unexpectedly to {total}"
-        assert len(windows) == 13
+        assert len(windows) == 15
+
+
+class TestACategoryThatMeansNothingAloneSaysWhatWouldChangeThat:
+    """The GDI blit calls were `keylogging` at tier high, so a program that
+    drew a window read as suspicious. They are their own category now, and the
+    catalogue names the company they would need."""
+
+    def setup_method(self) -> None:
+        reset_cache()
+
+    def _windows(self) -> dict:
+        return json.loads(Path(_BEHAVIOUR).read_text(encoding="utf-8"))["platforms"]["windows"]
+
+    def test_the_informational_groups_carry_their_corroborators(self) -> None:
+        windows = self._windows()
+        for name in ("screen_capture", "message_loop"):
+            assert windows[name]["tier"] == "informational"
+            assert windows[name]["corroborated_by"]
+
+    def test_a_group_that_stands_on_its_own_names_none(self) -> None:
+        assert "corroborated_by" not in self._windows()["process_injection"]
+
+    def test_the_corroborators_are_apis_the_catalogue_knows(self) -> None:
+        """A name with a typo in it is advice nobody can act on."""
+        windows = self._windows()
+        known = {api.lower() for block in windows.values() for api in block["apis"]}
+        for name in ("screen_capture", "message_loop"):
+            named = {api.lower() for api in windows[name]["corroborated_by"]}
+            assert named <= known, sorted(named - known)

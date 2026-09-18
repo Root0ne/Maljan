@@ -747,6 +747,82 @@ change landed on `main`.
 
 ### Fixed
 
+- **Enrichment stopped taking the slot an analysis was waiting for.** The
+  post-verdict reputation lookups were queued beside the analyses, where the
+  worker's one-job-at-a-time rule — which exists so two analyses never share a
+  model — applied to them as well: a measured enrichment spent 451.98 s at
+  VirusTotal while the next analysis sat `pending` for 4 minutes 33 seconds.
+  Enrichment now has a queue and a worker of its own
+  (`arq app.worker.enrich_worker.EnrichmentWorkerSettings`, in
+  `docker-compose.yml` as `enrichment-worker`), and the analysis worker
+  reads only its own queue. A deployment that would rather run one process
+  reads only its own queue. The setting ships **off**, so a release taken and
+  run unchanged keeps one process rather than queueing for a worker nobody
+  started — and on that shared queue the enrichment now yields: it re-enqueues
+  itself a minute later while an analysis is waiting, up to half an hour, after
+  which it runs anyway, so the analysis no longer waits out an enrichment that
+  was queued a second before it; the compose stack runs the second worker and
+  turns it on beside it, and an operator's saved value wins over both. With it
+  on and nothing reading the queue, the worker logs one warning naming the
+  command that reads it and `GET /api/v1/system/status` reports
+  `enrichment_worker: "down"` — the queued enrichments are kept and run when a
+  worker starts. Concurrency is `ENRICHMENT_MAX_JOBS` (default 2), sized
+  against the reputation providers' per-key rate limits rather than per job.
+- **The enrichment's own event is kept with the rest of the run's.** Every
+  event takes a sequence number from the job's counter, so the rows stored for
+  a job have to equal the last number issued — the invariant the events
+  endpoint pages by. `enrichment_complete` is published after the run has
+  ended and the feed has been closed, so it took a number and stored nothing:
+  one measured run published 71 events and kept 70, and the missing one was
+  gone for good once the Redis stream expired. The enrichment task now opens
+  the job's feed for that one line and closes it again, and seeds the job's
+  sequence counter from the table first: the counter is a Redis key with the
+  stream's 24-hour life, so enriching an older report used to start again at 1,
+  collide with the row that already held that number and lose the event the
+  same way.
+- **A reasoning model on Ollama can be selected again.** The probe gives a
+  model eight tokens and reads its answer; a reasoning model spends them in its
+  thinking channel and answers with an empty `response`, so every one of them
+  failed — and with `core.llm.require_probe` on, the API then refused to create
+  any job at all. The probe reads Ollama's `thinking` as an answer now, the way
+  it already read an OpenAI-compatible `reasoning_content`, and
+  `core.llm.ollama.disable_thinking` sends `think: false` so the budget is
+  spent on the answer instead. It is off by default, because Ollama refuses the
+  field for a model with no thinking mode, and the same value is sent by the
+  agents' calls and by the probe.
+- **The evidence ledger can be read as a timeline.** Every row carried the
+  flush time as its `created_at`, because the ledger is written in one batch
+  when the run ends: one measured run's thirty entries had a single distinct
+  value between them. A row is now stamped with the moment its call returned
+  (`started_at + duration_ms`, both already on the entry), and a call the
+  recorder never stamped keeps the write time rather than an invented one.
+- **An upload no longer stops the process while it travels.** The MinIO client
+  is synchronous and was called straight from the request handlers, so a sample
+  of a hundred megabytes — or a slow store — held the event loop for the whole
+  transfer: no other request, no WebSocket frame, not even `/health`. The
+  sample upload, the sandbox-report upload and read, the deletes and the
+  worker's own sample download all go through a worker thread now, and a
+  source guard fails the build if a new one is added on the loop.
+- **A cancel between two heartbeat polls still writes its row.** The worker
+  polls the cancel flag every fifteen seconds; a cancellation that arrived
+  between two polls reached the task as a bare `CancelledError` and was
+  re-raised with nothing recorded. The task now reads the same flag where the
+  cancellation lands: the operator's cancel writes `cancelled` through a
+  session of its own, and a cancellation with no flag — arq's job timeout, a
+  worker shutting down — is left to the periodic sweep, which is what repairs
+  a row whose worker is gone.
+- **An audit row says who did it.** `AuditLogResponse` carries the actor's
+  display name, or the local part of their e-mail when the account has no
+  name — what the admin users list already shows an admin — so the log's actor
+  column no longer reads as eight characters of a UUID. One query names a whole
+  page; an event with no authenticated principal, and a user who has since been
+  deleted, both leave it empty. The console draws that name and keeps the id as
+  the cell's title, so two people under one display name stay apart, and it
+  falls back to the short id where the endpoint has no name to give.
+- **A probe that could not read a catalogue says where it tried.** "model list:
+  connection refused" was the same sentence whichever endpoint was configured.
+  It now names the endpoint as scheme and host through `endpoint_label`, which
+  drops the path and any credential in front of it.
 - **The console stopped clipping itself.** `main` is a flex item, so its
   `min-width: auto` let it grow to its content's min-content width instead of
   constraining it: the Detection tab's Suricata block took it to 2542 px
@@ -935,7 +1011,11 @@ change landed on `main`.
   from constants, not exception text from a driver or the filesystem. They are
   now raised as `StatedFailure` — the class `AbsentAnalysisError` already
   belonged to — and only that class keeps its message on `job.error_message`;
-  everything else still arrives as its class name plus the error id.
+  everything else still arrives as its class name plus the error id. A
+  `StatedFailure` whose message the event scrubber would change is marked
+  unpublishable rather than refused: the job says the class name, the sentence
+  goes to the log under the same error id, and a test walks every site that
+  raises one so a bad sentence fails a build rather than a job.
 - **The sample roots reach a configured deployment's sidecars, not only a
   fresh one.** The `analysis` and `network` sidecars read a path argument only
   inside the directories `MALJAN_SAMPLE_ROOTS` names, and they learn them from
@@ -1073,6 +1153,179 @@ change landed on `main`.
   reads "not assessed", and the run summary carries the code once rather than
   twice — asked off the bundle's own mark rather than off the violation codes,
   so a fallback built from JSON that was not a bundle is one too.
+- **Every modern APK was reported unsigned.** The APK Signing Block opens with
+  its own size, and the walk over the id-value pairs began on that size field
+  rather than eight bytes later on the first pair. One field out of step is
+  enough that no scheme id is ever recognised, so an APK signed only with
+  schemes v2 and v3 — which is how Android has signed packages for years —
+  came back with `present: false, schemes: []`, and an analyst reading the pack
+  wrote that the application was unsigned and therefore probably repacked. The
+  walk now starts on the first pair, stays inside the block rather than inside
+  the file, and refuses to read a block whose two size fields disagree, because
+  a footer that does not agree with itself was not a block footer.
+- **A run of bytes shaped like a hostname was published as infrastructure.**
+  The string sweep over one PE returned twenty-five domains, fifteen of them
+  fragments of longer names (`rosoft.com` out of a resource that had been cut
+  short before `microsoft.com`), rows of a detection-name table (`jector.SA`,
+  `Bifrose.IE`) or identifiers. Each was exported as a STIX indicator and each
+  cost a reputation lookup — 452 s of the enrichment slot for one report. The
+  domain pattern now takes an underscore as a token boundary; a name that is
+  the tail of a longer one found in the same sample is dropped unless it ends
+  at a label boundary, so `sectigo.com` under `crl.sectigo.com` is kept and
+  `rosoft.com` is not; a candidate that is nothing but a public suffix
+  (`co.uk`, `ne.jp`) is not a name; and a lowercase label wearing a shouted
+  country code is read as a table row rather than a host. Every row the scan
+  produces now carries `source: "strings"`, `NetworkDomain` records where the
+  name came from, and a name only the byte image knows is neither exported as
+  an indicator nor sent to a paid provider until a second source — the
+  sandbox, an analyst artefact or a reputation record — knows it too. A Tor
+  address is the exception and has to be: `.onion` does not resolve, so no
+  sandbox can ever confirm one, and the rule made the strongest string-derived
+  indicator there is unpublishable by any path. Its own syntax is the second
+  source — a v3 address is admitted only when the checksum and version byte in
+  its last three bytes check out against the first thirty-two, a v2 one on its
+  length and alphabet — it stays labelled `strings`, it is still never sent to
+  a paid provider, and the indicator's description says why it was let
+  through. One
+  predicate decides that, and both paths that mint a domain indicator ask it:
+  the network block's own, and the string rows, which reach the bundle as
+  `interesting_strings` and were still being published after the first gate
+  went in. The name is still in the report, labelled with where it came from:
+  the Markdown network table has a Source column, and the console's domain
+  card a badge that says whether the sandbox resolved the name or the byte
+  image merely contained it.
+  Which of two names is a fragment is decided by where the matches sit rather
+  than by how they are spelled, so a longer look-alike no longer deletes the
+  real name — `microsoft.com` beside `xmicrosoft.com`, and
+  `000webhostapp.com` beside `M000webhostapp.com`, are two names each. An
+  address no longer yields a bare host beside itself — `admin@example.com` was
+  one string and two indicators — and the case rule asks for the shouted
+  two-letter country code it was written for, so `Evil.COM` is a hostname
+  again.
+- **The catalogue called drawing a window keylogging.** `BitBlt`,
+  `CreateCompatibleBitmap`, `CreateCompatibleDC`, `GetDC` and `GetDIBits` were
+  filed under `keylogging` at tier `high`, so every program that puts pixels
+  on a screen came back with `catalog_flags: ["suspicious"]` — on a signed SSH
+  client that was one of the two entries the only analyst that spoke cited
+  behind a Malware verdict. The GDI blit calls are now `screen_capture` and
+  the message pump `message_loop`, both `informational`, and both name the
+  APIs that would give them weight — hooks, raw input, the clipboard beside a
+  capture — in a new `corroborated_by` field that `api_capability` puts on the
+  row. The T1113 association is untouched: it is shown as a catalogue
+  association, which is what it always was.
+- **Thirteen rules asserted a technique about a benign GUI network client;
+  none asserts one now.** The corpus was swept rule by rule against two
+  fixtures built from names and words rather than from any sample. Four shapes
+  were doing the damage: a pattern that is a substring of a benign API name
+  (`RegSetValue`, `CreateService`, `ExecuteA`), a pattern that is an English
+  word (`encrypt`, `macro`, `shortcut`), a pattern too short to be evidence
+  (`#24`, the highest authored confidence in the file, and `.scr`, which
+  matches `.scrollbar`), and a pattern the MSVC CRT links into most benign PEs
+  (`IsDebuggerPresent`). Eight rules now want the artefact — a ransom note's own wording, a
+  `rundll32` command line, `comsvcs.dll MiniDump`, a policy key path, a VBA
+  project stream. Five could not be made specific statically and have left the
+  technique-asserting set: `web_client_apis`, `file_enumeration_apis`,
+  `user_activity_apis`, `service_control_apis` and `scripted_runtime_markers`
+  say what is in the file and carry no technique and no confidence, because
+  importing an HTTP client or enumerating files is what ordinary software
+  does. A rule file entry may now omit `technique_id`, and one that does may
+  not carry a confidence either; it may also carry an `all_of` group, which
+  fires only when every string in it is present, for a technique that is a
+  pair rather than a string; one matcher answers which of a rule's strings
+  count, so the layer and the tool that `yara_scan` falls back to cannot
+  disagree about a group, and neither engine lists half a pair among the
+  strings that fired a rule. Two more rules followed: `lsass_dump` asserts
+  T1003.001 on the mimikatz string or a `comsvcs.dll MiniDump` invocation, and
+  on `MiniDumpWriteDump` **together with** `lsass.exe` — either of those two
+  alone is now a `process_dump_apis` note, because a crash reporter imports
+  the one and every process lister carries the other. `ransomware_indicators`
+  loses the bare `.locked` and `.encrypted`, which made `notes.encrypted` read
+  as T1486 at 0.88, and `ransomware_extensions` becomes the
+  `encrypted_file_extensions` note: what makes an extension evidence is the
+  renaming, and this file cannot say "together with" across two groups. Its
+  `.onion` pattern is gone with it — it had been tagging every Tor address in
+  every sample as ransomware.
+- **Three shipped YARA rules fired on words rather than on facts.**
+  `registry_run_keys` (T1547.001 at 0.88) listed `RegSetValueEx` beside the Run
+  key paths, so it matched any program that writes a registry value — on a
+  signed SSH client the hit was in the pack every agent read. It now wants a
+  Run, RunOnce, RunServices or Startup path. `obfuscation_indicators` (T1027 at
+  0.82) and `software_packing` (T1027.002) listed `UPX`, `AES`, `RC4`, `XOR`,
+  `Base64`, `packed` and `compress`, which fire on every implementation of a
+  transport: the same client matched on fourteen occurrences of `aes` and on
+  `uPX` inside a longer word. Both now want a packer section name or a packer's
+  own banner. The section entropies that are the other half of the packing
+  signal are reported by the format tool beside these hits, as before.
+- **A tool that answered less than it wanted to was recorded as having failed.**
+  `apk_info` without androguard returns the zip-level facts — the manifest
+  member, the dex count, the ABIs, the certificate members — and returned them
+  beside an `error` key. Every consumer reads `error` as "this call produced
+  nothing", so the ledger recorded the call as failed and the pack printed none
+  of them: an Android run had no container channel at all although the archive
+  had been read. A degraded answer is now a success carrying `degraded` (the
+  library that is missing, and what was answered without it) and the
+  remediation, the same for `document_info` without olefile, and the pack
+  contributes `triage.<tool>_degraded` rather than `triage.<tool>_failed`. That
+  reason never makes a whole run degraded, because the facts are there and what
+  is missing from them is said beside them. The sentence the judge reads says
+  the tool answered a smaller set than it wanted to, not that the pack could
+  not run it — the same prompt carries the facts it did produce.
+- **A container that had been opened was reported as never opened.** The
+  degradation reason "container was not parsed — no format-aware extraction
+  exists for it; findings come from a raw-byte string sweep only" was decided
+  from the file type alone, so a ZIP whose members `archive_list` had listed —
+  with sizes and CRCs, printed in the report, cited by the analyst — carried it
+  anyway, and the run capped its confidence on the strength of it.
+  `unparsed_container_reason` now asks the evidence ledger whether the routed
+  format's own tool produced a result, and speaks only when it did not, which
+  is still the true answer for a package whose `apk_info` could not load its
+  library. The routed type's tool is the one that counts: an APK, a JAR and a
+  macro document are all zips, and an analyst listing an Android package's zip
+  members has not read its manifest, its permissions or its components.
+- **The timestamp authority was named as the publisher.** A timestamped PE
+  carries the timestamp service's chain in the same PKCS#7 certificate set as
+  its own, so the set has two leaves and "the certificate that issued none of
+  the others" picked whichever the producer wrote first: over the local corpus
+  that named a time-stamping certificate as the publisher on four signed
+  binaries out of seventeen. The publisher is now the certificate the
+  `SignerInfo` names, by issuer and serial number, read with a small
+  definite-length DER walk; failing that, the leaf whose extended key usage
+  carries code signing and not time stamping; and failing that, no publisher
+  at all, because a name that might be the timestamp service's is worse than
+  none. The file is still reported as signed either way.
+- **A signed binary reached the pack anonymous.** `signing_info` reported
+  `authenticode present` and left the subject and issuer for "an enrichment
+  step", and no such step exists — so the strongest benign fact a run could
+  hold named nobody, and on a signed, 0/74-clean binary the only analyst that
+  spoke never had a publisher to weigh. The signer's subject, issuer and SHA-1
+  thumbprint are now read out of the PKCS#7 blob in the certificate table, the
+  signer being the certificate in the bundle that issued none of the others.
+  No chain verdict is claimed: `signature_valid` stays unset, because deciding
+  whether a certificate is trusted needs a root store this process does not
+  have. `SignatureInfo` gains `signer_thumbprint`.
+- **A tool the host cannot run is no longer offered to the model.** One run
+  reported `22/22 tools exposed` while `apk_info`, `archive_list`,
+  `document_info` and `macho_info` were unavailable on that host: the
+  degradation was logged and recorded, and the model was handed the tool
+  anyway, spent a step on it and got a failure back. The registry now drops a
+  tool the server's own manifest marks unavailable from the list the model is
+  given, unless the manifest says what the tool still answers without its
+  library — `archive_list` without py7zr still lists a zip, and withholding it
+  would cost an archive analysis to save a 7z failure. The manifest is
+  unchanged and still names every tool with its reason and remedy, and the
+  degradation reason is now said where the tool is withheld rather than where
+  it would have been bound, so the degraded block reads as it did before.
+- **Every pipeline line was written to stdout twice.** The `maljan` logger
+  installs a handler of its own so a CLI caller with no logging set up still
+  sees something, and it also propagates to the root handler the API and the
+  worker install — so once either had started, each line went out once plain
+  and once through the root formatter. A live worker log held 3 306 coloured
+  lines with every unique message appearing exactly twice. `setup_logging`
+  now calls `hand_over_to_root`, which takes away the package's own handler
+  and leaves the root's; propagation stays on, because that handler is the
+  structured one in production and is also where a test's capture is attached.
+  A caller who configured nothing keeps the handler and sees no change.
+
 - **Four documented facts that had drifted from the code.** The delegation
   section said a lead's 1800 s stage had room for five asks where
   `_asks_that_fit` computes six and the `ask_<key>` description gives the model

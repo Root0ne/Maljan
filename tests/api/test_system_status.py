@@ -49,6 +49,9 @@ class TestSystemStatus:
                     side_effect=lambda n: {
                         "enrichment_enabled": True,
                         "mock_mode_allowed": True,
+                        # One process: the enrichment is queued beside the
+                        # analyses, so there is no second worker to report on.
+                        "enrichment_dedicated_worker": False,
                     }[n]
                 ),
             ),
@@ -71,6 +74,7 @@ class TestSystemStatus:
             "app_version": "0.1.0",
             "mock_mode_allowed": True,
             "enrichment_enabled": True,
+            "enrichment_worker": "not_required",
             "has_virustotal_key": True,
             "has_abuseipdb_key": False,
         }

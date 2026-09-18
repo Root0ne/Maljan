@@ -148,6 +148,7 @@ export const MALWARE_REPORT: MalwareReport = {
         reason: "Newly registered domain",
         dga_score: 0.12,
         is_punycode: false,
+        source: "sandbox",
         homograph_target: null,
         reputation: null,
       },

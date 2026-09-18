@@ -169,8 +169,17 @@ const CREDENTIAL_KEYS: Record<string, { keys: string[]; advanced: string[] }> = 
   anthropic: { keys: ["core.llm.anthropic.api_key"], advanced: [] },
   gemini: { keys: ["core.llm.gemini.api_key"], advanced: [] },
   ollama: {
-    keys: ["core.llm.ollama.base_url", "core.llm.ollama.num_ctx", "core.llm.ollama.keep_alive"],
-    advanced: ["core.llm.ollama.num_ctx", "core.llm.ollama.keep_alive"],
+    keys: [
+      "core.llm.ollama.base_url",
+      "core.llm.ollama.num_ctx",
+      "core.llm.ollama.keep_alive",
+      "core.llm.ollama.disable_thinking",
+    ],
+    advanced: [
+      "core.llm.ollama.num_ctx",
+      "core.llm.ollama.keep_alive",
+      "core.llm.ollama.disable_thinking",
+    ],
   },
 };
 

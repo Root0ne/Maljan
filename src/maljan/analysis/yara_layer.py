@@ -83,16 +83,31 @@ class YaraTTPRule:
 
     id: str
     technique_id: str
-    confidence: float
+    confidence: float | None
     description: str
     patterns: tuple[str, ...]
     platform: tuple[str, ...] = ("any",)
+    # Strings that mean something only together. ``patterns`` is "any of
+    # these on its own"; ``all_of`` is one more way to fire, and every string
+    # in it must be present. `MiniDumpWriteDump` is in a crash reporter and
+    # `lsass.exe` is in every process lister; the pair is the technique.
+    all_of: tuple[str, ...] = ()
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> YaraTTPRule:
         """Construct a YaraTTPRule from a YAML rule dict."""
-        confidence = max(float(data.get("confidence", 0.75)), _CONFIDENCE_FLOOR)
+        technique_id = str(data.get("technique_id") or "")
+        # A rule whose patterns cannot establish a technique statically is a
+        # string note: it says what it found and asserts nothing, so it
+        # carries no id and no authored confidence to be read as one. A rule
+        # that does assert keeps the old default when its author wrote none.
+        confidence = (
+            None
+            if not technique_id
+            else max(float(data.get("confidence", 0.75)), _CONFIDENCE_FLOOR)
+        )
         patterns = tuple(str(p) for p in data.get("patterns", []))
+        all_of = tuple(str(p) for p in data.get("all_of", []))
         raw_platforms = data.get("platform") or ["any"]
         if isinstance(raw_platforms, str):
             raw_platforms = [raw_platforms]
@@ -101,11 +116,12 @@ class YaraTTPRule:
             platform = ("any",)
         return cls(
             id=str(data["id"]),
-            technique_id=str(data["technique_id"]),
+            technique_id=technique_id,
             confidence=confidence,
             description=str(data.get("description", "")),
             patterns=patterns,
             platform=platform,
+            all_of=all_of,
         )
 
 
@@ -160,7 +176,7 @@ class YaraMatch:
 
     rule_id: str
     technique_id: str
-    confidence: float
+    confidence: float | None
     description: str
     matched_patterns: list[str] = field(default_factory=list)
     rule_platforms: tuple[str, ...] = ()
@@ -209,6 +225,7 @@ class YaraLayer:
         self._yara_rules: Any = None
         self._yara_id_map: dict[str, str] = {}
         self._compiled: dict[str, list[re.Pattern[str]]] = {}
+        self._compiled_all_of: dict[str, list[re.Pattern[str]]] = {}
         # Platform-filter telemetry (parallel to SigmaLayer).
         self._filtered_count: int = 0
 
@@ -225,6 +242,10 @@ class YaraLayer:
             # No yara-python: build the regex fallback so scanning still works.
             self._compiled = {
                 rule.id: [re.compile(re.escape(p), re.IGNORECASE) for p in rule.patterns]
+                for rule in rules
+            }
+            self._compiled_all_of = {
+                rule.id: [re.compile(re.escape(p), re.IGNORECASE) for p in rule.all_of]
                 for rule in rules
             }
             if rules:
@@ -338,18 +359,41 @@ class YaraLayer:
                 f'        ${i} = "{_escape_yara_string(p)}" nocase'
                 for i, p in enumerate(rule.patterns)
             )
-            # YARA meta values: string, integer, boolean only (no float)
+            if rule.all_of:
+                together = "\n".join(
+                    f'        $a{i} = "{_escape_yara_string(p)}" nocase'
+                    for i, p in enumerate(rule.all_of)
+                )
+                strings_block = f"{strings_block}\n{together}" if strings_block else together
+            # "any of these on its own, or every one of those together". The
+            # numbered set is listed rather than wildcarded so it can never
+            # reach into the ``$a`` group.
+            clauses = []
+            if rule.patterns:
+                clauses.append(
+                    "any of (" + ", ".join(f"${i}" for i in range(len(rule.patterns))) + ")"
+                )
+            if rule.all_of:
+                clauses.append("all of ($a*)")
+            condition = " or ".join(clauses) or "false"
+            # YARA meta values: string, integer, boolean only (no float). A
+            # note rule writes neither id nor confidence, so nothing reading
+            # the match can mistake it for an assertion.
+            claims = ""
+            if rule.technique_id:
+                claims += f'        technique_id = "{rule.technique_id}"\n'
+            if rule.confidence is not None:
+                claims += f'        confidence = "{rule.confidence}"\n'
             src = (
                 f"rule {yara_id} {{\n"
                 f"    meta:\n"
                 f'        original_id = "{rule.id}"\n'
-                f'        technique_id = "{rule.technique_id}"\n'
-                f'        confidence = "{rule.confidence}"\n'
+                f"{claims}"
                 f'        description = "{_escape_yara_string(rule.description)}"\n'
                 f"    strings:\n"
                 f"{strings_block}\n"
                 f"    condition:\n"
-                f"        any of them\n"
+                f"        {condition}\n"
                 f"}}\n"
             )
             rule_sources.append(src)
@@ -364,6 +408,45 @@ class YaraLayer:
                 exc,
             )
             return None, {}
+
+    def literal_matches(self, rule: YaraTTPRule, text: str) -> list[str]:
+        """Which of ``rule``'s strings are in ``text``, under the rule's own condition.
+
+        The one answer for the rule file without yara-python. Two callers used
+        to carry a copy of this — this class's own fallback and the one
+        ``tools.rules.yara_scan`` uses, which is the path the triage pack
+        calls — and the copies disagreed about ``all_of``: the second iterated
+        the ordinary patterns only, so the pair form of a rule could not fire
+        at all on a host with no yara-python.
+
+        A together-group contributes its strings only when every one of them
+        is present. Half a pair is not evidence and must not be listed as
+        though it were.
+        """
+        found = [
+            pattern
+            for pattern, compiled in zip(rule.patterns, self._literals(rule), strict=True)
+            if compiled.search(text)
+        ]
+        together = self._literals(rule, group=True)
+        if together and all(compiled.search(text) for compiled in together):
+            found.extend(rule.all_of)
+        return found
+
+    def _literals(self, rule: YaraTTPRule, *, group: bool = False) -> list[re.Pattern[str]]:
+        """This rule's compiled literals, built on demand.
+
+        The index is dropped when yara-python compiles the corpus, because the
+        engine is then the one that scans; a caller that asks for the fallback
+        anyway gets it compiled here and kept.
+        """
+        index = self._compiled_all_of if group else self._compiled
+        compiled = index.get(rule.id)
+        if compiled is None:
+            strings = rule.all_of if group else rule.patterns
+            compiled = [re.compile(re.escape(p), re.IGNORECASE) for p in strings]
+            index[rule.id] = compiled
+        return compiled
 
     def _yara_scan(self, data: bytes) -> list[YaraMatch]:
         """Scan raw bytes using the compiled yara-python engine."""
@@ -382,8 +465,9 @@ class YaraLayer:
             meta = match.meta
             yara_id = match.rule
             rule_id = id_map.get(yara_id, yara_id)
-            technique_id = meta.get("technique_id", "")
-            confidence = float(meta.get("confidence", "0.75"))
+            technique_id = str(meta.get("technique_id", "") or "")
+            raw_confidence = meta.get("confidence")
+            confidence = None if raw_confidence is None else float(raw_confidence)
             description = meta.get("description", "")
 
             # Collect matched strings from yara result.
@@ -418,6 +502,16 @@ class YaraLayer:
                         if decoded not in seen:
                             matched_patterns.append(decoded)
                             seen.add(decoded)
+
+            # The engine reports every string it matched, including one from
+            # a together-group that did not complete. The rule may have fired
+            # on something else entirely, and listing half a pair among the
+            # strings that fired it says the group counted when it did not.
+            rule = next((r for r in self._rules if r.id == rule_id), None)
+            if rule is not None and rule.all_of:
+                group = {p.lower() for p in rule.all_of}
+                if not group <= {p.lower() for p in matched_patterns}:
+                    matched_patterns = [p for p in matched_patterns if p.lower() not in group]
 
             results.append(
                 YaraMatch(
@@ -506,12 +600,7 @@ class YaraLayer:
         regex_matches: list[YaraMatch] = []
 
         for rule in active_rules:
-            triggered_patterns: list[str] = []
-            compiled_patterns = self._compiled[rule.id]
-
-            for pattern_re, pattern_str in zip(compiled_patterns, rule.patterns, strict=False):
-                if pattern_re.search(text):
-                    triggered_patterns.append(pattern_str)
+            triggered_patterns = self.literal_matches(rule, text)
 
             if triggered_patterns:
                 regex_matches.append(

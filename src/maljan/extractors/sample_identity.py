@@ -15,6 +15,7 @@ never an exception.
 from __future__ import annotations
 
 import io
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -392,7 +393,52 @@ _UNPARSED_CONTAINER_TYPES: dict[str, str] = {
 }
 
 
-def unparsed_container_reason(sample_path: str | Path | None) -> str | None:
+# The one tool that opens each routed format, by the name it is recorded
+# under. An APK, a JAR and a macro document are all zips, so more than one of
+# these can be called on the same file — but only the routed type's own tool
+# answers the question this module asks. Listing an Android package's zip
+# members is not reading its manifest, its permissions or its components.
+_FORMAT_TOOL_FOR: dict[str, str] = {
+    "pe": "pe_info",
+    "elf": "elf_info",
+    "mach-o": "macho_info",
+    "apk": "apk_info",
+    "dex": "apk_info",
+    **{name: "document_info" for name in DOCUMENT_FILE_TYPES},
+    **{name: "archive_list" for name in ARCHIVE_FILE_TYPES},
+    "jar": "archive_list",
+}
+
+
+def _the_format_tool_answered(ledger: Iterable[Any] | None, routed: str) -> bool:
+    """Whether the routed format's own tool returned a result about the sample.
+
+    A failed call, and a call whose payload is an error, are both "no result":
+    the Android run whose ``apk_info`` could not load its library really did
+    have nothing but a byte sweep, and saying so was right. A degraded answer
+    is a result — the facts it did produce are in the ledger — and what is
+    missing from it is said in its own reason.
+    """
+    wanted = _FORMAT_TOOL_FOR.get(routed)
+    if wanted is None:
+        return False
+    for entry in ledger or ():
+        if isinstance(entry, dict):
+            tool, ok, data = entry.get("tool"), entry.get("ok"), entry.get("structured")
+        else:
+            tool = getattr(entry, "tool", None)
+            ok = getattr(entry, "ok", None)
+            data = getattr(entry, "structured", None)
+        if tool != wanted or not ok:
+            continue
+        if isinstance(data, dict) and not data.get("error"):
+            return True
+    return False
+
+
+def unparsed_container_reason(
+    sample_path: str | Path | None, ledger: Iterable[Any] | None = None
+) -> str | None:
     """Say so when the sample's container was never opened.
 
     A ``.docm`` is accepted by the upload allow-list — correctly, since macro
@@ -405,6 +451,16 @@ def unparsed_container_reason(sample_path: str | Path | None) -> str | None:
     That is the gap this closes. Not by refusing the sample, which would be
     worse, but by returning a degradation reason so the report caps its own
     confidence and states plainly what it did not look at.
+
+    The question is about the run, not about the file type. A ZIP whose members
+    ``archive_list`` had listed — with sizes and CRCs, in the report, cited by
+    the analyst — was still described as never opened, and the run capped its
+    confidence for it. So ``ledger`` is asked whether the format tool for this
+    sample produced a result, and the reason is emitted only when it did not.
+    The routed type's own tool is the one that counts: an analyst listing an
+    Android package's zip members has not read its manifest. A caller with no
+    ledger has nothing to go on and gets the answer the file type alone
+    supports.
     """
     if not sample_path:
         return None
@@ -420,6 +476,8 @@ def unparsed_container_reason(sample_path: str | Path | None) -> str | None:
     # A real PE, ELF or Mach-O was parsed properly; nothing to declare.
     detected = _detect_file_type(path, header).lower()
     if detected in {"pe", "elf", "mach-o"}:
+        return None
+    if _the_format_tool_answered(ledger, detected):
         return None
 
     label = _UNPARSED_CONTAINER_TYPES.get(detected) or _UNPARSED_CONTAINER_EXTENSIONS.get(
@@ -649,11 +707,67 @@ def _extract_signing(blob: bytes | None) -> SignatureInfo:
         ]
         if security_dir.Size and security_dir.VirtualAddress:
             info.is_signed = True
-            # Subject / issuer extraction needs ASN.1 parsing; surface the
-            # presence flag here and let an enrichment step fill the names.
+            _name_the_signer(info, blob, security_dir.VirtualAddress, security_dir.Size)
     except Exception:  # noqa: BLE001
         pass
     return info
+
+
+def _name_the_signer(info: SignatureInfo, blob: bytes, at: int, size: int) -> None:
+    """Fill subject, issuer and thumbprint from the certificate table.
+
+    A signed binary used to reach the report as bare "authenticode present" —
+    the subject and issuer were left to "an enrichment step", and no such step
+    exists — so the strongest benign fact a run could hold arrived anonymous
+    and the one analyst that spoke never had a publisher to weigh.
+
+    Reading the names is not verifying the chain. ``signature_valid`` stays
+    ``None``, because deciding whether this certificate is trusted needs a
+    root store this process does not have, and a tool that reported "signed"
+    when it means "carries a signature blob" would be stating a verdict it
+    never checked.
+    """
+    # WIN_CERTIFICATE: dwLength, wRevision, wCertificateType, then the DER
+    # PKCS#7 SignedData. ``VirtualAddress`` is a file offset for this one
+    # directory, not an RVA.
+    header = blob[at : at + 8]
+    if len(header) < 8:
+        return
+    declared = int.from_bytes(header[:4], "little")
+    length = min(declared, size) - 8
+    if length <= 0:
+        return
+    der = blob[at + 8 : at + 8 + length]
+    try:
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.serialization import pkcs7
+
+        from maljan.extractors.authenticode import publisher_certificate
+
+        certificates = pkcs7.load_der_pkcs7_certificates(der)
+    except Exception:  # noqa: BLE001 — an unreadable blob leaves the names unset
+        return
+    # The publisher is the certificate the SignerInfo names. A timestamped
+    # file carries the timestamp authority's chain in the same bundle, so
+    # "the certificate that issued none of the others" names the authority
+    # about as often as it names the publisher. When nothing settles it the
+    # answer is no name at all: the file is still reported as signed, and a
+    # reader is not handed a publisher that might be a timestamp service.
+    signer = publisher_certificate(der, list(certificates))
+    if signer is None:
+        return
+    try:
+        info.signer_subject = signer.subject.rfc4514_string()
+        info.signer_issuer = signer.issuer.rfc4514_string()
+        # A certificate's thumbprint is its SHA-1 by convention: the value
+        # Windows shows and threat-intelligence sources index. It names the
+        # certificate and verifies nothing.
+        # nosemgrep: insecure-hash-algorithm-sha1
+        info.signer_thumbprint = signer.fingerprint(hashes.SHA1()).hex()
+    except Exception:  # noqa: BLE001 — a malformed name is no name, not a crash
+        info.signer_subject = None
+        info.signer_issuer = None
+        info.signer_thumbprint = None
 
 
 def _safe_imphash(blob: bytes) -> str | None:

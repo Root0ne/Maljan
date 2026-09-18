@@ -488,8 +488,8 @@ class MarkdownRenderer:
         if net.domains:
             lines.append("### Domains")
             lines.append("")
-            lines.append("| FQDN | Suspicious | Reason | Resolved IPs | Queried by |")
-            lines.append("|---|---|---|---|---|")
+            lines.append("| FQDN | Source | Suspicious | Reason | Resolved IPs | Queried by |")
+            lines.append("|---|---|---|---|---|---|")
             for d in net.domains[:40]:
                 lines.append(_domain_row(d))
             lines.append("")
@@ -1107,7 +1107,13 @@ def _domain_row(d: NetworkDomain) -> str:
     # "-" here — but when a dropped child resolves the C2 rather than the
     # parent, this column is the whole story and it was not being printed.
     pids = ", ".join(str(p) for p in d.queried_pids[:6]) or "-"
-    return f"| `{d.fqdn}` | {flag} | {reason} | {ips} | {pids} |"
+    # Where the name came from. `strings` is a run of bytes in the file that
+    # has the shape of a hostname — a far weaker claim than a name the
+    # sandbox watched the sample resolve, and the two were printed
+    # identically. Such a name is also kept out of the exported bundle, so a
+    # reader comparing the table with the bundle needs the column to see why.
+    source = d.source or "-"
+    return f"| `{d.fqdn}` | {source} | {flag} | {reason} | {ips} | {pids} |"
 
 
 def _ip_row(ip: NetworkIP) -> str:

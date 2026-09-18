@@ -15,7 +15,8 @@ operator can reconfigure.
 | :-- | :-- |
 | Console (`apps/web`) | Next.js interface: dashboard, analyses, samples, settings. Talks HTTP to the API and subscribes to the job WebSocket. |
 | API (`apps/api/app`) | FastAPI application. Authentication, samples, jobs, reports, the audit trail, the settings store and the probes. |
-| Worker (`apps/api/app/worker`) | arq process. Takes an analysis job, runs the pipeline, writes the report and publishes progress events. |
+| Worker (`apps/api/app/worker`) | arq process. Takes an analysis job, runs the pipeline, writes the report and publishes progress events. One job at a time. |
+| Enrichment worker (`apps/api/app/worker/enrich_worker.py`) | A second arq process on a queue of its own, for the post-verdict reputation lookups. Two at a time by default, and off unless the deployment turns it on (see below). |
 | Core (`src/maljan`) | The analysis package: agents, the LangGraph pipeline, the deterministic evidence layers, the provider layer, memory and reporting. |
 | Postgres | Users, samples, jobs, reports, audit rows and the settings store. |
 | Redis | The arq queue, the per-job event stream, and rate-limit counters. |
@@ -27,7 +28,11 @@ operator can reconfigure.
 
 1. The console authenticates and uploads a sample. The API streams it through
    `UPLOAD_TEMP_DIR`, hashes it, stores the bytes in MinIO and the metadata in
-   Postgres, and writes an audit row.
+   Postgres, and writes an audit row. The object store's client is synchronous,
+   so every call into it — the sample, an uploaded sandbox report, a delete —
+   is made from a worker thread: a hundred megabytes sent from the event loop
+   is a hundred megabytes during which the process answers nothing else, its
+   own health check included.
 2. `POST /api/v1/jobs` creates the job row and enqueues `run_analysis` on arq
    under the same identifier, so the queue job and the database row cannot
    drift apart. An optional `config` object may override a handful of pipeline
@@ -43,8 +48,57 @@ operator can reconfigure.
    record.
 5. The report is written to Postgres and becomes available under
    `/api/v1/reports/...` in every rendering the report service supports.
-6. Threat-intelligence enrichment runs afterwards as its own job, so it never
-   delays the verdict.
+6. Threat-intelligence enrichment runs afterwards as its own job, on the
+   enrichment worker's queue, so it delays neither the verdict nor the next
+   analysis.
+
+### The two worker processes
+
+    uv run arq app.worker.analysis_worker.WorkerSettings
+    uv run arq app.worker.enrich_worker.EnrichmentWorkerSettings
+
+The analysis worker reads arq's default queue and runs **one job at a time**:
+two analyses on one host would share a model, a sandbox and a memory budget
+sized for one. The enrichment worker reads `arq:queue:enrichment` and runs two
+at a time (`ENRICHMENT_MAX_JOBS`), because a reputation lookup waits on
+somebody else's HTTP.
+
+They were one process, and the single slot was the cost: a measured enrichment
+spent 451.98 s at VirusTotal while the next analysis sat `pending` for 4 m
+33 s. Nothing about that lookup needed the rule it was subject to.
+
+**Which one a deployment gets.** `api.enrichment_dedicated_worker` decides, and
+it ships **off**: a release that is taken and run unchanged keeps one process,
+and nothing stops working because a process nobody started is missing.
+
+On that one queue the enrichment gets out of the way rather than merely waiting
+its turn. arq pops by score, so an enrichment queued a second before an
+analysis would otherwise run first and the analysis would wait for all of it —
+452 s in the run this was filed for. When the task starts there it reads the
+analysis queue first, and if anything but another enrichment is waiting it
+re-enqueues itself 60 seconds later and returns having done nothing. The total
+deferral travels in the job's own arguments and is capped at 30 minutes, after
+which it runs whatever is queued: an analysis waits for at most one enrichment
+per cap window, and a steady stream of analyses can never starve the
+enrichment. An enrichment already running is never interrupted — that is what
+the second worker is for. The compose stack runs the second
+worker and sets `ENRICHMENT_DEDICATED_WORKER=true` beside it, which is the
+default the setting falls back to; an operator's saved value wins over both.
+Turn it on wherever the second process actually runs.
+
+When it is on and nothing is reading the enrichment queue — arq's own
+per-queue health key is absent one health interval after the analysis worker
+boots — the worker logs one warning naming the queue and the command that
+reads it, and `GET /api/v1/system/status` reports `enrichment_worker` as
+`down`. Queued enrichments are kept, not dropped: they run when a worker
+starts.
+
+The task is registered on both workers so the single-process default has
+something to run it, and the nightly `job_events` purge stays on the analysis
+worker: one owner per scheduled task. The enrichment worker runs
+`ENRICHMENT_MAX_JOBS` (default 2) at a time — more than one because each job
+waits on somebody else's HTTP, not many more because they share one VirusTotal
+key and one AbuseIPDB key and a provider's rate limit is per key.
 
 ### What the worker holds while a run is in flight
 
@@ -107,9 +161,14 @@ is running is never swept whatever Redis says. If Redis cannot be read, nothing
 is touched and the reason is logged once, because ownership cannot be
 established without it and guessing costs somebody else's run.
 
-A run that ends in `CancelledError` — arq's `job_timeout`, or SIGTERM — still
-writes no row of its own; its heartbeat goes with the process, so the next
-sweep pass marks it failed within ten minutes.
+A run that ends in `CancelledError` is told apart by the cancel flag the API
+writes when somebody presses stop (`analysis:{job_id}:cancel`, which the
+heartbeat also polls). The flag is there: the operator asked, so the task
+writes `cancelled` on the row through a session of its own, whether the
+heartbeat noticed or the cancel landed between two of its polls. No flag: arq's
+`job_timeout` or a worker shutting down, where the process is going away and
+writing a row races its own teardown — the heartbeat goes with it, so the next
+sweep pass marks the job failed within ten minutes.
 
 ### What a request holds while it waits on somebody else
 
@@ -189,8 +248,10 @@ them; a fact a model may or may not ask for is not a fact a run can rely on.
 The pack is the same code the `analysis` sidecar serves, called in-process, in
 a fixed order so the ids a sample produces are the same from one run to the
 next: `identify_file` and `hashes`; `signing_info` for the routed format alone
-(Authenticode for a PE, the APK signing block for an APK, `LC_CODE_SIGNATURE`
-for a Mach-O, and for anything else the fact that it has no signing scheme);
+(Authenticode for a PE, with the signer's subject, issuer and thumbprint read
+out of the certificate table and no chain verdict claimed; the APK signing
+block for an APK; `LC_CODE_SIGNATURE` for a Mach-O; and for anything else the
+fact that it has no signing scheme);
 the format tool the routed type selects (`pe_info`, `elf_info`, `macho_info`,
 `apk_info`, `document_info` or `archive_list`, which carry the section
 entropies, the packer signature hits and the import rows); a `strings` head
@@ -402,7 +463,10 @@ decides.
    technique with an import set (BitBlt and CreateCompatibleDC read as screen
    capture on any GUI program), so its associations travel under
    `associated_by`, shown in a Catalogue column for reference and counted for
-   nothing. An asserted id the catalogue has retired
+   nothing. The catalogue's own `screen_capture` and `message_loop` groups are
+   `informational` for the same reason and name, in `corroborated_by`, the
+   APIs whose presence beside them would mean something. An asserted id the
+   catalogue has retired
    (upstream Sigma rules and the case corpus still name a few) is marked
    `retired in ATT&CK 19.2` in the table. Two flat lists in
    `run_summary.corroboration`, rendered as a table in the report and shown
@@ -720,10 +784,14 @@ Each sidecar also answers `capabilities`: which of its tools need an optional
 library, a binary or a setting, and which of those are present on its host,
 probed when the server starts. The registry keeps the manifest on the server's
 entry when it attaches, the settings probe returns it so the console's server
-card names the unavailable tools before a run, and an analysis stage records
-each bound tool the manifest marks unavailable as
-`server.<key>.<tool>_unavailable(<reason>); <remedy>` when it starts. A tool
-that cannot answer returns an error with a code and an authored remediation
+card names the unavailable tools before a run, and each tool the manifest
+marks unavailable is recorded as
+`server.<key>.<tool>_unavailable(<reason>); <remedy>`. A tool marked
+unavailable is also kept out of the list the model is given, because offering
+one is offering a step that can only fail — unless the manifest says what the
+tool still answers without its library, in which case it is offered and the
+reason says what is missing from its answer. A tool that cannot answer
+returns an error with a code and an authored remediation
 (`maljan.tools.errors`) rather than raising, and the sidecars' guards rewrite
 an implementation's flat error into that shape. See *Writing a tool server* in
 [configuration.md](configuration.md).
@@ -823,6 +891,13 @@ failure with a cause that did not happen. `truncated` is persisted alongside
 `repeated_of` (the earlier identical call a repeat was answered from), `symbol`
 and `started_at`, and the evidence endpoint returns all four.
 
+The rows are written in one batch when the run ends, so `created_at` used to be
+the flush for every one of them — thirty entries of one run had one distinct
+value between them, and a ledger sorted by it said nothing about when anything
+happened. It is now the moment the call returned, `started_at + duration_ms`,
+computed as the row is built. A call the recorder never stamped keeps the write
+time, which is honest about being the batch's.
+
 ## Events
 
 A run narrates itself. Every node, every tool wrapper and every retry loop
@@ -903,6 +978,22 @@ stream has expired, and when the cursor is older than the capped stream
 reaches. `core.events.retention_days` (default 30) bounds the table; the
 worker sweeps it nightly. The transcript, the agent findings and the evidence
 ledger are kept by the report and the job and are not touched by the sweep.
+
+**The count is the last number.** Every event takes a sequence number from the
+run's counter, so the rows stored for a job equal the last number issued for
+it — that is what the events endpoint pages by and what the console checks its
+history against. `enrichment_complete` is published after the run has ended,
+by the other worker, so the enrichment task opens the job's feed for that one
+line and closes it again; otherwise the number would be issued and the row
+never written, which is what one measured run's 71 published and 70 stored
+was. The console already tolerates an event that arrives after the run.
+
+The counter itself is a Redis key with the stream's 24-hour life, and the rows
+outlive it by `core.events.retention_days`. So before that late event is
+numbered, the counter is seeded from the table — the highest `seq` the job
+holds, set only when Redis has none — and the number continues where the run
+left off instead of starting again at 1 and colliding with the row that has it
+(`uq_job_events_job_seq`). Enriching a month-old report is exactly that case.
 
 **What never travels.** Tool arguments and results go out as short summaries,
 and every string of every event — a message's text and its report, a
@@ -1024,3 +1115,16 @@ The API renders the report as Markdown, HTML and PDF, and exposes the STIX 2.1
 bundle, a MITRE view, the extracted indicators, the detection signatures that
 fired and a timeline. Post-hoc enrichment fills VirusTotal, AbuseIPDB, WHOIS and
 GeoIP reputation into the indicator set after the verdict has shipped.
+
+Each domain in the network block records where it came from — `sandbox` for a
+name the sample resolved or requested, `analyst` for one an agent put in an
+artefact, `strings` for a run of bytes in the file that has the shape of a
+hostname. The last is the weakest claim there is, so a `strings` domain is
+printed in the report — in its own Source column in the Markdown table and as
+a badge on the console's domain card — and left out of the STIX indicator set
+and out of the reputation lookups until a second source knows the same name.
+One predicate decides that, and both paths that mint a domain indicator ask
+it: the network block's own, and the string rows that reach the bundle
+through `static.interesting_strings`. A Tor address is corroborated by its own
+syntax, because `.onion` never resolves and no sandbox can confirm one; the
+indicator it mints carries the reason it was admitted.

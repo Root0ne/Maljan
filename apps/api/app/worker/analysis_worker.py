@@ -21,11 +21,9 @@ from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 import redis.asyncio as aioredis
 from arq import cron
-from arq.connections import RedisSettings
 from maljan.core.config import Settings as _CoreSettings
 from maljan.core.settings_catalog import core_catalog
 from maljan.core.settings_overrides import build_settings, public_snapshot
@@ -37,10 +35,28 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.config import get_settings, settings
 from app.logging_config import get_logger, setup_logging
 from app.runtime_config import runtime_config
+from app.worker.queues import ANALYSIS_QUEUE, build_redis_settings
 
 logger = get_logger("worker")
 
 _SECRET_PATHS = [e.path for e in core_catalog() if e.secret]
+
+
+def is_publishable(message: str) -> bool:
+    """Whether this sentence can go out as it stands.
+
+    The test is the event publisher's own scrubber: if it would change the
+    text, the text holds something that must not travel — a host path, a URL,
+    a digest, a credential shape — and what this module undertook to publish is
+    sentences it wrote itself, not data it was handed.
+    """
+    if not message:
+        return True
+    # Deferred like every other ``maljan`` import here: the API process must
+    # not pay for the core package at import time.
+    from maljan.pipeline.events import scrub
+
+    return scrub(message) == message
 
 
 class StatedFailure(Exception):
@@ -56,7 +72,27 @@ class StatedFailure(Exception):
     what the operator should do next; a bare ``ValueError`` in the same place
     reaches the console as ``ValueError (error id …)`` and the sentence stays
     in the log.
+
+    The promise is checked where it is made, and checking it never costs a run.
+    A message the event publisher's own scrubber would change is not an
+    authored sentence — it carries a path, a URL, a digest or something shaped
+    like a credential — so the instance is marked ``publishable = False`` and
+    ``failure_reason`` falls back to the class name and the error id for it,
+    with the sentence going to the log under that id. Raising here instead
+    would replace the failure being reported with a failure about reporting it,
+    inside whatever ``except`` built it.
+
+    ``StatedFailure(str(exc))`` — the one way this class could leak a driver's
+    words — is therefore harmless at runtime and caught in CI:
+    ``test_absent_analysis.py`` walks every site in this module that raises one
+    and asserts its authored sentence is publishable, so a bad sentence fails a
+    build rather than a job.
     """
+
+    def __init__(self, message: str = "") -> None:
+        text = str(message)
+        super().__init__(text)
+        self.publishable = is_publishable(text)
 
 
 class AbsentAnalysisError(StatedFailure):
@@ -409,6 +445,52 @@ def _seq_key(job_id: str) -> str:
     return f"analysis:{job_id}:seq"
 
 
+async def seed_seq_from_the_table(
+    redis_conn: aioredis.Redis, db_session: async_sessionmaker, job_id: str
+) -> int | None:
+    """Continue this job's numbering from what is stored. Never raises.
+
+    The counter is a Redis key with a 24-hour life, because the stream it
+    numbers has one too. The table does not: an event published for a job whose
+    counter has expired — an operator pressing Enrich on last week's report —
+    would take the number 1, collide with the row that job's first event
+    already has (``uq_job_events_job_seq``), and be dropped by a feed that
+    never fails a run. The same "published but not stored" the enrichment event
+    was fixed for.
+
+    So before such an event is published, the counter is set to the highest
+    number the table holds for that job, and only when Redis holds none: ``NX``
+    rather than a plain ``SET``, so a live run's counter is never overwritten
+    by a straggler. Returns the number it seeded with, or ``None`` when there
+    was nothing to do.
+    """
+    key = _seq_key(job_id)
+    try:
+        if await redis_conn.exists(key):
+            return None
+        from app.models.job_event import JobEvent
+
+        async with db_session() as db:
+            highest = (
+                await db.execute(
+                    select(func.max(JobEvent.seq)).where(JobEvent.job_id == uuid.UUID(job_id))
+                )
+            ).scalar()
+            await db.commit()
+        if not highest:
+            return None
+        await redis_conn.set(key, int(highest), nx=True, ex=86_400)
+    except Exception as exc:  # noqa: BLE001 — numbering never costs an event
+        logger.debug(
+            "Could not continue the event numbering for job %s (%s).",
+            job_id,
+            type(exc).__name__,
+            extra={"job_id": job_id},
+        )
+        return None
+    return int(highest)
+
+
 async def _next_seq(redis_conn: aioredis.Redis, job_id: str) -> int:
     """The next sequence number for this job's feed. Never raises."""
     try:
@@ -623,6 +705,29 @@ def _parse_event_ts(value: Any) -> datetime | None:
         return None
 
 
+def _returned_at(entry: dict[str, Any]) -> datetime | None:
+    """The moment this tool call came back, or ``None`` when it is not known.
+
+    ``started_at`` is a Unix timestamp the recorder stamped when the call went
+    out, and ``duration_ms`` is what it measured; their sum is the only moment
+    in the entry a reader can sort a ledger by. Absent, zero or nonsensical
+    values give ``None``, because a 1970 timestamp on a tool call is not a fact
+    about anything and the column's own default at least says "written then".
+    """
+    started = entry.get("started_at")
+    try:
+        seconds = float(started)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if seconds <= 0:
+        return None
+    try:
+        duration = max(0.0, float(entry.get("duration_ms", 0) or 0) / 1000.0)
+        return datetime.fromtimestamp(seconds + duration, tz=UTC)
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
 def _evidence_row(entry: dict[str, Any], *, job_id: uuid.UUID) -> Any:
     """One ledger entry as the row that keeps it.
 
@@ -634,6 +739,15 @@ def _evidence_row(entry: dict[str, Any], *, job_id: uuid.UUID) -> Any:
     from app.models.evidence import EvidenceEntry
 
     return EvidenceEntry(
+        # When the call returned, which is what a reader of a ledger wants and
+        # what the column could not say: the rows are written in one batch at
+        # the end of the run, so every one of them carried the flush time — one
+        # measured run's thirty entries had one distinct ``created_at`` between
+        # them. The entry knows: ``started_at`` is the call's own clock and
+        # ``duration_ms`` is how long it took. A row whose entry was never
+        # stamped leaves the column to its server default rather than inventing
+        # a moment.
+        created_at=_returned_at(entry),
         job_id=job_id,
         entry_id=str(entry.get("id", ""))[:32],
         stage=str(entry.get("stage", "analysis"))[:32],
@@ -788,6 +902,11 @@ CANCEL_POLL_SECONDS = 15.0
 JOB_OWNER_KEY_PREFIX = "maljan:job-owner:"
 JOB_OWNER_TTL_SECONDS = 90
 JOB_OWNER_REFRESH_SECONDS = 30
+# How long the release in the job's ``finally`` may wait on Redis. The worker
+# takes no new job until that block returns, so an unbounded delete against a
+# Redis that has stopped answering would hold the whole queue for a finished
+# job. The key expires by itself either way.
+JOB_OWNER_RELEASE_TIMEOUT = 5.0
 
 # This process, as the heartbeat names it.
 WORKER_ID = f"{platform.node()}:{os.getpid()}"
@@ -840,12 +959,22 @@ async def claim_job(redis_conn: Any, job_id: str) -> bool:
 
 
 async def release_job(redis_conn: Any, job_id: str) -> None:
-    """Stop claiming this job, on every way out of it. Never raises."""
+    """Stop claiming this job, on every way out of it. Never raises.
+
+    Bounded, because this runs in the task's ``finally`` and the worker takes
+    no new job until that returns: a Redis that has stopped answering would
+    otherwise hold a finished job open, and the queue behind it. The key
+    expires on its own within the TTL, so the worst a skipped delete costs is
+    that long before the sweep would consider the job unowned — and the sweep
+    skips the jobs this process is running anyway.
+    """
     canonical = canonical_job_id(job_id)
     _OWNED_JOBS.discard(canonical)
     try:
-        await redis_conn.delete(job_owner_key(canonical))
-    except Exception as exc:  # noqa: BLE001 — the key expires on its own
+        await asyncio.wait_for(
+            redis_conn.delete(job_owner_key(canonical)), timeout=JOB_OWNER_RELEASE_TIMEOUT
+        )
+    except (Exception, TimeoutError) as exc:  # noqa: BLE001 — the key expires on its own
         logger.debug(
             "Could not drop the owner heartbeat for job %s (%s); it expires in %ds.",
             canonical,
@@ -921,11 +1050,85 @@ def failure_reason(exc: BaseException, error_id: str) -> str:
     ``StatedFailure`` is the exception this module raises with a sentence it
     wrote itself — the absent analysis, an attached report that belongs to
     another sample, a sandbox provider that cannot take one — so that sentence
-    is what the job says, and it is the reason the class exists.
+    is what the job says, and it is the reason the class exists. One that was
+    built from something else after all is marked unpublishable when it is
+    made: its sentence goes to the log under this error id and the job says the
+    class name, which is what every other exception says.
     """
     if isinstance(exc, StatedFailure):
-        return f"{exc} (error id {error_id})"
+        if getattr(exc, "publishable", False):
+            return f"{exc} (error id {error_id})"
+        logger.error(
+            "A stated failure carried something unpublishable; the job says its "
+            "class instead. error_id=%s message=%s",
+            error_id,
+            exc,
+            extra={"error_id": error_id},
+        )
     return f"{type(exc).__name__} (error id {error_id})"
+
+
+def cancel_flag_key(job_id: str) -> str:
+    """Where a cancel request for this job is written.
+
+    ``AnalysisService.cancel_job`` sets it and the heartbeat polls it. It is
+    also how a ``CancelledError`` is told apart: an operator's cancel leaves
+    this key behind, a worker shutting down or arq's own job timeout does not.
+    """
+    return f"analysis:{canonical_job_id(job_id)}:cancel"
+
+
+async def cancel_was_requested(redis_conn: Any, job_id: str) -> bool:
+    """Whether somebody asked for this job to stop. Never raises.
+
+    Read when the task is already being cancelled, so a Redis that cannot
+    answer means "not a cancel request": the run is going down either way, and
+    the sweep repairs a row nobody claimed rather than this guessing at one.
+    """
+    try:
+        return bool(
+            await asyncio.wait_for(
+                redis_conn.get(cancel_flag_key(job_id)), timeout=JOB_OWNER_RELEASE_TIMEOUT
+            )
+        )
+    except (Exception, TimeoutError) as exc:  # noqa: BLE001 — a cancelled run is going down
+        logger.debug(
+            "Could not read the cancel flag for job %s (%s); treating this as a shutdown.",
+            job_id,
+            type(exc).__name__,
+            extra={"job_id": job_id},
+        )
+        return False
+
+
+async def mark_job_cancelled(db_session: async_sessionmaker, job_uuid: uuid.UUID) -> bool:
+    """Record the operator's cancellation on a session of its own. Never raises.
+
+    The same rule the failure marker follows, for the same reason: the session
+    the run was writing through is the one a lost connection leaves unusable,
+    and a cancelled job whose row still says ``running`` is the phantom this
+    work exists to remove. Only a job that was still running is touched — a run
+    that finished while the cancel was in flight keeps its result.
+    """
+    from app.models.job import AnalysisJob
+
+    try:
+        async with db_session() as db:
+            await db.execute(
+                update(AnalysisJob)
+                .where(AnalysisJob.id == job_uuid, AnalysisJob.status.in_(("pending", "running")))
+                .values(status="cancelled", completed_at=datetime.now(UTC))
+            )
+            await db.commit()
+        return True
+    except Exception as exc:  # noqa: BLE001 — the run is already stopping
+        logger.error(
+            "Could not mark job %s cancelled (%s); the orphan sweep repairs the row.",
+            job_uuid,
+            type(exc).__name__,
+            extra={"job_id": str(job_uuid)},
+        )
+        return False
 
 
 async def mark_job_failed(
@@ -1412,7 +1615,12 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
 
             _worker_tmp = sample_files.temp_dir()
             temp_path = str(_worker_tmp / f"{sample_sha256}{_orig_ext}")
-            minio_client.fget_object(
+            # In a thread: the client is synchronous, and this loop is also
+            # carrying the job's heartbeat, its cancellation poller and every
+            # event the pipeline publishes. A slow store would stop all three
+            # for the length of the download.
+            await asyncio.to_thread(
+                minio_client.fget_object,
                 settings.minio_bucket,
                 derived_path,
                 temp_path,
@@ -1491,7 +1699,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     await asyncio.wait_for(heartbeat_stop_event.wait(), timeout=CANCEL_POLL_SECONDS)
                 except TimeoutError:
                     try:
-                        if await redis_conn.get(f"analysis:{job_id}:cancel"):
+                        if await cancel_was_requested(redis_conn, job_id):
                             cancelled_by_user = True
                             logger.info(
                                 "Cancellation requested for job=%s — stopping pipeline.",
@@ -1533,6 +1741,17 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             )
             pipeline_result = await pipeline_task
         except asyncio.CancelledError:
+            # Two things cancel this task and they end differently. An
+            # operator's cancel leaves its flag in Redis — the heartbeat may
+            # have read it already, or the cancel may have arrived between two
+            # of its polls — and that run owes the operator a row saying
+            # ``cancelled``. A worker shutting down and arq's own job timeout
+            # leave no flag: the process is going away, writing a row on the
+            # way out is a race with its own teardown, and the periodic sweep
+            # repairs the row within ten minutes because the heartbeat dies
+            # with the process.
+            if not cancelled_by_user:
+                cancelled_by_user = await cancel_was_requested(redis_conn, job_id)
             if not cancelled_by_user:
                 raise
             logger.info(
@@ -1541,13 +1760,27 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 extra={"job_id": job_id},
             )
             await _publish_event(redis_conn, job_id, "cancelled", {})
-            async with db_session() as cleanup_db:
-                await cleanup_db.execute(
-                    update(AnalysisJob)
-                    .where(AnalysisJob.id == job_uuid)
-                    .values(status="cancelled", completed_at=datetime.now(UTC))
-                )
-                await cleanup_db.commit()
+            # On a session of its own, like every other outcome this task
+            # records: the one it was working through may be the one the
+            # cancellation came with.
+            if job_uuid is not None:
+                await mark_job_cancelled(db_session, job_uuid)
+            # How this job ends depends on who cancelled what. The operator's
+            # cancel reaches the pipeline task, not this one: nothing outside
+            # is waiting for a ``CancelledError`` here, and raising one puts
+            # arq on its retry branch — the job goes back in the queue, is
+            # popped again and ends with "max retries exceeded", which reads
+            # like a failure for something somebody asked for. A finished job
+            # is what this is, so it returns like one.
+            #
+            # A worker shutting down cancels *this* task and waits for it, and
+            # ``cancelling()`` is how a task knows that has happened. Then the
+            # cancellation must carry on, or the shutdown waits for a task that
+            # decided not to end. The ``finally`` below runs on both paths, so
+            # the feed is flushed and the claim released either way.
+            current = asyncio.current_task()
+            if current is not None and current.cancelling():
+                raise
             return {"status": "cancelled", "job_id": job_id}
         finally:
             heartbeat_stop_event.set()
@@ -1940,11 +2173,9 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     from arq.connections import ArqRedis
 
                     arq_pool = ArqRedis(connection_pool=redis_conn.connection_pool)
-                await arq_pool.enqueue_job(
-                    "enrich_threat_intel",
-                    str(report_uuid),
-                    _job_id=f"enrich:{report_uuid}",
-                )
+                from app.worker.enrich_worker import enqueue_enrichment
+
+                await enqueue_enrichment(arq_pool, report_uuid)
                 logger.info(
                     "enrich: queued report=%s",
                     report_uuid,
@@ -2371,6 +2602,43 @@ async def sweep_orphans_forever(
         await asyncio.sleep(wait_between)
 
 
+async def warn_if_enrichment_is_unmanned(ctx: dict, delay: float | None = None) -> None:
+    """Say so, once, when enrichments are queued for a worker nobody started.
+
+    The setting says where an enrichment goes; only the queue can say whether
+    anything is reading it. arq refreshes a per-queue health key every
+    ``health_check_interval`` with a TTL one second longer, so its absence one
+    interval after this process booted means no enrichment worker is up —
+    every enrichment then sits in its queue, kept but not run, and nothing
+    would otherwise say why reputation data stopped appearing.
+
+    Waits that interval first, because at boot the other process may be coming
+    up beside this one. Never raises, and says it once: a worker that shouts
+    every ten minutes teaches its reader to skip the line.
+    """
+    from app.worker.enrich_worker import ENRICHMENT_QUEUE, enrichment_worker_is_alive
+
+    wait = EnrichmentWorkerSettings.health_check_interval + 1 if delay is None else delay
+    await asyncio.sleep(wait)
+    try:
+        if not await runtime_config.get("enrichment_dedicated_worker"):
+            return
+        alive = await enrichment_worker_is_alive(ctx.get("redis"))
+    except Exception as exc:  # noqa: BLE001 — a warning never costs the worker
+        logger.debug("Could not check the enrichment worker (%s).", type(exc).__name__)
+        return
+    if alive is False:
+        logger.warning(
+            "Enrichment is queued for its own worker (api.enrichment_dedicated_worker "
+            "is on) and nothing is reading %s. Enrichments are kept in the queue and "
+            "will run when a worker starts: run "
+            "'arq app.worker.enrich_worker.EnrichmentWorkerSettings', or turn the "
+            "setting off to have this worker run them between analyses.",
+            ENRICHMENT_QUEUE,
+            extra={"component": "worker.lifecycle"},
+        )
+
+
 async def startup(ctx: dict) -> None:
     """Called when the ARQ worker starts up."""
     # Initialize logging for the worker process first: the CRITICAL bootstrap
@@ -2421,6 +2689,10 @@ async def startup(ctx: dict) -> None:
 
     # Store a Redis connection for PubSub
     ctx["redis"] = aioredis.from_url(settings.redis_url)
+    # Which queue this process reads. The enrichment task asks, because on this
+    # queue it shares the worker's one slot with the analyses and gets out of
+    # their way; on its own it never does.
+    ctx["queue"] = ANALYSIS_QUEUE
 
     # Repair the phantom 'running' rows a killed worker leaves behind, and
     # keep repairing them: the first pass waits one owner TTL so a crashed
@@ -2428,6 +2700,9 @@ async def startup(ctx: dict) -> None:
     # passes after it run every ten minutes, which is what reaches a job a
     # still-running worker gave up on.
     ctx["sweep_task"] = asyncio.create_task(sweep_orphans_forever(ctx))
+    # And one look at the other queue, once the process that reads it has had
+    # a health interval to come up beside this one.
+    ctx["enrichment_watch_task"] = asyncio.create_task(warn_if_enrichment_is_unmanned(ctx))
 
     logger.info(
         "Worker started: connected to DB and Redis",
@@ -2437,12 +2712,13 @@ async def startup(ctx: dict) -> None:
 
 async def shutdown(ctx: dict) -> None:
     """Called when the ARQ worker shuts down."""
-    # Before the connections it uses are closed under it.
-    sweep_task: asyncio.Task | None = ctx.get("sweep_task")
-    if sweep_task is not None:
-        sweep_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await sweep_task
+    # Before the connections they use are closed under them.
+    for name in ("sweep_task", "enrichment_watch_task"):
+        task: asyncio.Task | None = ctx.get(name)
+        if task is not None:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
 
     redis_conn: aioredis.Redis | None = ctx.get("redis")
     if redis_conn:
@@ -2464,7 +2740,11 @@ async def shutdown(ctx: dict) -> None:
 # The enrichment task lives in a sibling module. Importing it at module
 # scope is fine — ``enrich_worker`` only re-enters this module lazily from
 # inside its function, so there is no real circular dependency.
-from app.worker.enrich_worker import enrich_threat_intel, purge_old_job_events  # noqa: E402
+from app.worker.enrich_worker import (  # noqa: E402
+    EnrichmentWorkerSettings,
+    enrich_threat_intel,
+    purge_old_job_events,
+)
 
 # Resident-memory ceiling for the worker process, in MiB. Above this, the
 # worker finishes reporting the job it just completed and then exits so Docker
@@ -2519,26 +2799,6 @@ async def _recycle_if_bloated(ctx: dict, *args: Any, **kwargs: Any) -> None:
         os.kill(os.getpid(), signal.SIGTERM)
 
 
-def build_redis_settings(redis_url: str) -> RedisSettings:
-    """Build arq's RedisSettings from a redis:// URL, credentials included.
-
-    ``redis://:${REDIS_PASSWORD}@redis:6379/0`` (the compose default once Redis
-    runs with --requirepass) carries a password. arq's own ``RedisSettings.
-    from_dsn`` parses that password correctly; the bug this function fixed
-    was in ``WorkerSettings``'s previous hand-rolled URL parsing, which
-    dropped it — every queue command the worker issued then came back NOAUTH
-    against a password-protected Redis.
-    """
-    parsed = urlparse(redis_url)
-    return RedisSettings(
-        host=parsed.hostname or "localhost",
-        port=parsed.port or 6379,
-        database=int((parsed.path or "/0").strip("/") or 0),
-        username=parsed.username or None,
-        password=parsed.password or None,
-    )
-
-
 class WorkerSettings:
     """ARQ worker settings — configure connection and task functions."""
 
@@ -2552,6 +2812,13 @@ class WorkerSettings:
     after_job_end = _recycle_if_bloated
 
     redis_settings = build_redis_settings(settings.redis_url)
+    # The analyses' queue, named rather than defaulted: the enrichment reads
+    # one of its own (``enrich_worker.EnrichmentWorkerSettings``) so a 452 s
+    # reputation lookup can never be what this worker's single slot is busy
+    # with. A deployment that runs one process only turns
+    # ``api.enrichment_dedicated_worker`` off, and enrichment is queued here
+    # again.
+    queue_name = ANALYSIS_QUEUE
 
     # Worker tuning
     # Phase A fix: max_jobs=1 prevents zombie threads from starving other jobs.

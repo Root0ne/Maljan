@@ -69,6 +69,73 @@ class TestApiCapability:
         assert row["techniques"] == []
 
 
+# The GDI and message-pump calls a Win32 program makes to put a window on the
+# screen and read its events. Nothing here is evidence of anything; a signed
+# SSH client imports every one of them.
+_A_GUI_PROGRAM_IMPORTS = [
+    "BitBlt",
+    "CreateCompatibleBitmap",
+    "CreateCompatibleDC",
+    "GetDC",
+    "GetDIBits",
+    "SelectObject",
+    "GetMessageA",
+    "PeekMessageA",
+    "DispatchMessageA",
+    "TranslateMessage",
+]
+
+
+class TestDrawingAWindowIsNotKeylogging:
+    """The catalogue called the GDI blit calls keylogging and tiered them high.
+
+    On a signed SSH client that made sixteen imports read as suspicious, and
+    the one analyst that spoke cited the entry behind a Malware verdict. The
+    calls stay in the catalogue and keep their ATT&CK association — screen
+    capture really is what a screenshot is made of — but the association is
+    not a finding, and the catalogue now says what would turn it into one.
+    """
+
+    def test_the_gdi_capture_calls_are_catalogued_as_screen_capture(self) -> None:
+        rows = knowledge.api_capability(
+            ["BitBlt", "CreateCompatibleBitmap", "CreateCompatibleDC", "GetDC", "GetDIBits"]
+        )["capabilities"]
+        assert {row["category"] for row in rows} == {"screen_capture"}
+
+    def test_the_screen_capture_group_flags_nothing_on_its_own(self) -> None:
+        rows = knowledge.api_capability(["BitBlt", "GetDC", "GetDIBits"])["capabilities"]
+        assert all(row["catalog_flags"] == [] for row in rows)
+
+    def test_the_group_names_what_would_corroborate_it(self) -> None:
+        row = knowledge.api_capability(["BitBlt"])["capabilities"][0]
+        assert row["corroborated_by"]
+        assert "SetWindowsHookExA" in row["corroborated_by"]
+        assert "GetRawInputData" in row["corroborated_by"]
+        assert "GetClipboardData" in row["corroborated_by"]
+
+    def test_a_named_corroborator_is_still_catalogued_as_keylogging(self) -> None:
+        row = knowledge.api_capability(["GetAsyncKeyState"])["capabilities"][0]
+        assert row["category"] == "keylogging"
+        assert row["catalog_flags"] == ["suspicious"]
+
+    def test_the_association_survives_the_relabelling(self) -> None:
+        """T1113 is what these calls are for; it is shown, never asserted."""
+        rows = knowledge.api_capability(["BitBlt", "CreateCompatibleDC", "GetDC", "GetDIBits"])[
+            "capabilities"
+        ]
+        cited = {t["technique_id"] for row in rows for t in row["techniques"]}
+        assert "T1113" in cited
+
+    def test_a_benign_gui_import_set_raises_no_flag_from_these_groups(self) -> None:
+        rows = knowledge.api_capability(_A_GUI_PROGRAM_IMPORTS)["capabilities"]
+        flagged = {row["api"]: row["category"] for row in rows if row["catalog_flags"]}
+        assert flagged == {}
+
+    def test_an_api_with_no_corroboration_list_does_not_carry_the_key(self) -> None:
+        row = knowledge.api_capability(["WriteProcessMemory"])["capabilities"][0]
+        assert "corroborated_by" not in row
+
+
 class TestLolbinLookup:
     def test_a_scriptlet_rundll32_invocation_maps_to_its_technique(self) -> None:
         result = knowledge.lolbin_lookup(
