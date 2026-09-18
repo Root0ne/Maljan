@@ -747,6 +747,25 @@ change landed on `main`.
 
 ### Fixed
 
+- **A judge that never answered no longer produces the verdict "Malware".** The
+  bundle the pipeline builds when the judge's answer was not a bundle carried a
+  `malware` object whatever verdict it was carrying, and the pipeline read the
+  verdict back off the objects — so the "Suspicious" the extraction had read
+  out of the judge's own text was overridden by the bundle's shape, and a
+  signed sample with a clean reputation entry in its own pack, no analyst claim
+  and no technique was reported as Malware because the verdict round timed out.
+  The fallback bundle now states its verdict in `x_maljan_fallback_verdict`
+  (`extracted` from the judge's own text, or `pipeline` when there was nothing
+  to read, which is what a timeout leaves), its object set follows that verdict
+  — no `malware` object for a verdict that is not Malware, and a `note`
+  carrying the degraded-path record instead — and `decide_from_bundle` reads
+  the statement rather than counting objects. `verdict.unsupported_benign` and
+  `verdict.unsupported_malware` run over that bundle on the timeout path too,
+  where the loop used to return before they could be asked; they annotate and
+  change nothing. Such a verdict also takes the path a judge that raised
+  already took: `overall_confidence` is `null`, the header reads "not
+  assessed", and the run summary carries the code once rather than twice.
+
 - **Four documented facts that had drifted from the code.** The delegation
   section said a lead's 1800 s stage had room for five asks where
   `_asks_that_fit` computes six and the `ask_<key>` description gives the model

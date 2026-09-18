@@ -2999,10 +2999,11 @@ def make_judge_node(
             # answer this pipeline can produce — no severity, no reasoning the
             # model stands behind — and before this it reached the reader as an
             # ordinary verdict with a slightly emptier STIX object.
-            if any(v.code == VERDICT_FALLBACK_CODE for v in verdict.violations):
+            _verdict_codes = {v.code for v in verdict.violations}
+            if VERDICT_FALLBACK_CODE in _verdict_codes:
                 _degradation_reasons.append(VERDICT_FALLBACK_REASON)
                 _degraded_mode = True
-            if any(v.code == VERDICT_TIMEOUT_CODE for v in verdict.violations):
+            if VERDICT_TIMEOUT_CODE in _verdict_codes:
                 _degradation_reasons.append(VERDICT_TIMEOUT_REASON)
                 _degraded_mode = True
 
@@ -3020,6 +3021,23 @@ def make_judge_node(
             if _inconclusive:
                 _degradation_reasons.append(_inconclusive)
                 _degraded_mode = True
+
+            # A verdict the judge expressed as text, or never expressed at all,
+            # is not a verdict a model put a confidence on. It travels on the
+            # same channel a judge that raised uses, so the report node has one
+            # question to ask; ``recorded`` says the violation is already among
+            # the leftovers below, so the summary is not told twice.
+            _verdict_fallback: dict[str, Any] | None = None
+            if _verdict_codes & {VERDICT_FALLBACK_CODE, VERDICT_TIMEOUT_CODE}:
+                _verdict_fallback = {
+                    "decision": decision,
+                    "failure": (
+                        VERDICT_TIMEOUT_CODE
+                        if VERDICT_TIMEOUT_CODE in _verdict_codes
+                        else VERDICT_FALLBACK_CODE
+                    ),
+                    "recorded": True,
+                }
 
             # What the analysts and the judge were told and did not fix. Both
             # are recorded rather than resolved, and both are what
@@ -3273,12 +3291,12 @@ def make_judge_node(
                     "final_decision": decision,
                     "judge_report": "Analyzed negotiation history and expert reports.",
                     "stix_output": stix_output,
-                    # This judge answered, so there is no pipeline-authored
-                    # verdict to declare. Written rather than left alone: the
-                    # verdict stage runs once today, and a channel that is only
-                    # ever set would suppress a real confidence the first time
-                    # it is not.
-                    "verdict_fallback": None,
+                    # Set when the judge's answer was not the verdict it was
+                    # asked for — text, or nothing at all. Written rather than
+                    # left alone: the verdict stage runs once today, and a
+                    # channel that is only ever set would suppress a real
+                    # confidence the first time it is not.
+                    "verdict_fallback": _verdict_fallback,
                     "run_summary": run_summary_dict,
                     # The judge's own tool calls — threat intel on a disputed
                     # indicator, a knowledge lookup — on the same append-only
@@ -3595,9 +3613,11 @@ def make_report_node(
         # report worth reading.
         _summary = dict(report.run_summary or {})
         _summary["evidence"] = evidence_summary(_ledger)
-        if _fallback:
+        if _fallback and not _fallback.get("recorded"):
             # The run summary says the same thing the report header says: this
-            # verdict has no model behind it.
+            # verdict has no model behind it. A judge that answered with
+            # something other than a bundle has already recorded its own
+            # unresolved finding, so that one is not written a second time.
             _summary["validation"] = with_verdict_fallback(
                 _summary.get("validation"), str(_fallback.get("failure", "") or "unknown")
             )

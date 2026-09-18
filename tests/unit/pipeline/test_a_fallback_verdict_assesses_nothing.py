@@ -266,3 +266,86 @@ class TestTheReportSaysTheJudgeDidNotAnswer:
         assert "**Overall Confidence**: 0.92" in markdown
         assert "The judge did not answer" not in markdown
         assert "verdict.fallback" not in str(report["run_summary"].get("validation") or {})
+
+
+class TestAJudgeThatAnsweredWithNoVerdict:
+    """The same rule for a judge that answered with text, or not at all.
+
+    Its body did not raise, so nothing wrote the fallback channel — and the
+    verdict the pipeline then reported carried the analysts' confidence in
+    their own claims, exactly as a judge that raised used to.
+    """
+
+    @staticmethod
+    def _timed_out_verdict(claims: bool) -> dict[str, Any]:
+        from unittest.mock import AsyncMock
+
+        from maljan.agents.judge_agent import (
+            VERDICT_TIMEOUT_CODE,
+            VERDICT_TIMEOUT_REASON,
+            JudgeVerdict,
+        )
+        from maljan.pipeline.validation import Violation
+        from maljan.schemas.stix_models import Bundle
+
+        container = _Container(EvidenceCounter())
+        judge = container.get_judge_agent(role="judge")
+        bundle = Bundle.model_validate(
+            {
+                "objects": [],
+                "x_maljan_fallback_verdict": {"decision": "Suspicious", "source": "pipeline"},
+            }
+        )
+        judge.give_verdict = AsyncMock(
+            return_value=JudgeVerdict(
+                bundle=bundle,
+                violations=[Violation(code=VERDICT_TIMEOUT_CODE, message=VERDICT_TIMEOUT_REASON)],
+                retries=0,
+                fed_back={},
+            )
+        )
+        state = _state()
+        if not claims:
+            state["isr_reports"] = {
+                "static": AgentISR(agent_id="static", domain="static", claims=[])
+            }
+            state["reports"] = {"static": "Nothing was established."}
+        return asyncio.run(make_judge_node(container)(state))
+
+    def test_a_silent_run_whose_judge_timed_out_is_not_malware(self) -> None:
+        """The audit's case: signed, reputation-clean, no claim, no technique."""
+        update = self._timed_out_verdict(claims=False)
+
+        assert update["final_decision"] != "Malware"
+        assert update["final_decision"] == "Suspicious"
+
+    def test_the_fallback_channel_is_written(self) -> None:
+        update = self._timed_out_verdict(claims=True)
+
+        fallback = update["verdict_fallback"]
+        assert fallback["decision"] == "Suspicious"
+        assert fallback["failure"] == "verdict.timeout"
+        assert fallback["recorded"] is True
+
+    def test_the_summary_carries_the_timeout_once(self) -> None:
+        update = self._timed_out_verdict(claims=True)
+
+        validation = update["run_summary"]["validation"]
+        codes = [row["code"] for row in validation["unresolved"]]
+        assert codes.count("verdict.timeout") == 1
+        assert "verdict.fallback" not in codes
+
+    def test_the_report_carries_no_confidence_for_it(self) -> None:
+        report, markdown = _reported(
+            {"decision": "Suspicious", "failure": "verdict.timeout", "recorded": True}
+        )
+
+        assert report["overall_confidence"] is None
+        assert "The judge did not answer" in markdown
+
+    def test_the_note_the_judge_already_recorded_is_not_written_again(self) -> None:
+        update = _run_report(
+            {"decision": "Suspicious", "failure": "verdict.timeout", "recorded": True}
+        )
+
+        assert "validation" not in (update.get("run_summary") or {})

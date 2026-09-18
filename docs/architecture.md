@@ -202,7 +202,25 @@ Two producers use it:
   signature is the usual one) and `verdict.unsupported_malware` for the entries
   that establish Malware (a reputation entry, a rule hit); either way the
   alternative offered is Suspicious with an inconclusive rationale, the judge
-  is asked once, and the second answer is kept as given.
+  is asked once, and the second answer is kept as given. Both rules also run
+  over the fallback bundle on the timeout path, where nothing is asked again —
+  a second full judge timeout buys nothing — and what they find is recorded in
+  `run_summary.validation` beside the verdict it describes.
+
+* **A judge that did not answer with a bundle** — the pipeline builds one from
+  whatever text there was, and that bundle states its verdict in
+  `x_maljan_fallback_verdict` rather than implying it through its objects. The
+  verdict is `extracted` when it was read out of the judge's own text and
+  `pipeline` when there was nothing to read, which is what a timeout leaves; a
+  verdict that is not Malware carries no `malware` object, and the record of
+  the degraded path travels on a note instead. `pipeline.outcome
+  .decide_from_bundle` reads the statement and counts nothing. Before this the
+  fallback bundle carried a `malware` object unconditionally, so the bundle's
+  shape decided the verdict: a signed sample with a clean reputation entry, no
+  analyst claim and no technique was reported as Malware because the judge
+  timed out, while the extraction in the same run had read "Suspicious" out of
+  the text. Such a verdict also carries no confidence — see
+  `verdict_fallback` below.
 
 ### The technique check
 
@@ -276,6 +294,16 @@ What the judge decides is the judge's: `severity` (with its rationale),
 assessed prints as "not assessed" rather than defaulting to Informational; a
 family the judge could not cite evidence for is kept and flagged unverified
 rather than silently zeroed.
+
+A verdict no judge decided carries no confidence. The judge node writes
+`verdict_fallback` on the state whenever its own body raised, its answer was
+not a bundle, or it never answered; the report node reads that one channel and
+sets `overall_confidence` to `None` rather than deriving a number from the
+analysts' confidence in their own claims, and the header prints "not assessed".
+The reason is recorded once: a judge that raised is filed under
+`verdict.fallback` by the report node, and a judge that answered with something
+other than a bundle has already filed `verdict.fallback` or `verdict.timeout`
+itself, so the summary carries one row and not two.
 
 Two metrics record the outcome:
 

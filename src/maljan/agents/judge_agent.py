@@ -1016,7 +1016,9 @@ class JudgeAgent(BudgetMeter):
             attempts += 1
             if timed_out:
                 not_json = False
-                return self._fallback_bundle_from_text("[TIMEOUT]", reports, isr_reports)
+                return self._fallback_bundle_from_text(
+                    "[TIMEOUT]", reports, isr_reports, extracted=False
+                )
             not_json = _is_not_json(answer)
             if not_json:
                 self.logger.warning(
@@ -1042,19 +1044,16 @@ class JudgeAgent(BudgetMeter):
             len(getattr(isr, "claims", None) or []) for isr in (isr_reports or {}).values()
         )
 
-        def _validate(bundle: Bundle) -> list[Violation]:
-            # A timeout produced no answer, so there is nothing to give
-            # feedback about. Reporting no violations ends the loop: a retry
-            # would cost a second full judge timeout and could only produce the
-            # same fallback bundle.
-            if timed_out:
-                return []
-            if not_json:
-                return [Violation(code="verdict.not_json", message=_NOT_JSON_FEEDBACK)]
+        def _verdict_checks(bundle: Bundle) -> list[Violation]:
+            """What a Benign or a Malware verdict over a silent run cites.
+
+            Its own function because it runs on the timeout path too, where it
+            is recorded rather than fed back: those two checks are the ones
+            that ask whether the verdict in front of them has anything behind
+            it, and the path that most needed asking was the one path that
+            skipped them.
+            """
             return [
-                *validate_verdict_bundle(bundle, evidence_corpus, attck=_knowledge, sample=sample),
-                *assessment_violations(bundle),
-                *assessment_conflict_violations(bundle),
                 *unsupported_benign_violations(
                     bundle,
                     analyst_claims=_analyst_claims,
@@ -1065,6 +1064,23 @@ class JudgeAgent(BudgetMeter):
                     analyst_claims=_analyst_claims,
                     ledger_ids=ledger_ids,
                 ),
+            ]
+
+        def _validate(bundle: Bundle) -> list[Violation]:
+            # A timeout produced no answer, so there is nothing to give
+            # feedback about. Reporting no violations ends the loop: a retry
+            # would cost a second full judge timeout and could only produce the
+            # same fallback bundle. What the checks below have to say about the
+            # fallback bundle is recorded after the loop instead.
+            if timed_out:
+                return []
+            if not_json:
+                return [Violation(code="verdict.not_json", message=_NOT_JSON_FEEDBACK)]
+            return [
+                *validate_verdict_bundle(bundle, evidence_corpus, attck=_knowledge, sample=sample),
+                *assessment_violations(bundle),
+                *assessment_conflict_violations(bundle),
+                *_verdict_checks(bundle),
             ]
 
         tally = ValidationTally()
@@ -1081,11 +1097,15 @@ class JudgeAgent(BudgetMeter):
         )
         if timed_out:
             # No answer at all, so there is nothing to feed back and nothing
-            # was: the bundle is whatever the text extraction could make of the
-            # analysts' reports. Cheap to record and invisible without it.
+            # was: the bundle is this pipeline's own conservative verdict.
+            # Cheap to record and invisible without it. The two verdict checks
+            # run here rather than in the loop: they annotate what the fallback
+            # carries, they do not change it, and a retry is not what they ask
+            # for on a path where nobody is listening.
             violations = [
                 *violations,
                 Violation(code=VERDICT_TIMEOUT_CODE, message=VERDICT_TIMEOUT_REASON),
+                *_verdict_checks(bundle),
             ]
         if not_json:
             # The retry answered with prose or a tool call as well, so the
@@ -1239,22 +1259,39 @@ class JudgeAgent(BudgetMeter):
         text: str,
         reports: dict[str, str],
         isr_reports: dict[str, AgentISR] | None = None,
+        *,
+        extracted: bool = True,
     ) -> Bundle:
         """Build a minimal STIX Bundle when the LLM fails to produce valid JSON.
 
-        Extracts the verdict from the text response and creates a minimal Bundle
-        with an Identity, Malware, and Report object so the pipeline never
-        returns an empty Bundle.
+        The verdict is read out of the judge's own text and the bundle's object
+        set follows it: a ``malware`` object only when the verdict is Malware.
+        It used to be emitted unconditionally, and since the pipeline read the
+        verdict off the objects, the bundle's shape overrode the verdict the
+        judge had actually expressed — a judge that timed out reported Malware
+        over a signed sample with no claim behind it.
+
+        ``extracted`` is false when there was no answer to read at all, which is
+        what a timeout leaves. Then the verdict is this pipeline's own
+        conservative one rather than anything a model said, and the bundle says
+        so in ``x_maljan_fallback_verdict``.
         """
+        from maljan.pipeline.outcome import INCONCLUSIVE_VERDICT
         from maljan.schemas.stix_models import Bundle
 
-        decision = self._verdict_from_text(text)
+        decision = self._verdict_from_text(text) if extracted else INCONCLUSIVE_VERDICT
 
-        self.logger.info(
-            "Fallback Bundle: extracted verdict='%s' from text response (%d chars).",
-            decision,
-            len(text),
-        )
+        if extracted:
+            self.logger.info(
+                "Fallback Bundle: extracted verdict='%s' from text response (%d chars).",
+                decision,
+                len(text),
+            )
+        else:
+            self.logger.info(
+                "Fallback Bundle: no answer to read; the verdict is the pipeline's own '%s'.",
+                decision,
+            )
 
         # Fail closed. This used to union two sets and emit them as one: the
         # technique identifiers the analysts had claimed against cited evidence,
@@ -1283,7 +1320,6 @@ class JudgeAgent(BudgetMeter):
                 ", ".join(model_only),
             )
 
-        malware_id = f"malware--{uuid.uuid4()}"
         # Don't bake the raw fallback text (which may contain ``[TIMEOUT]``
         # or other internal markers) into the malware SDO description —
         # downstream cross-layer aggregation can upgrade the verdict in
@@ -1294,8 +1330,11 @@ class JudgeAgent(BudgetMeter):
         text_snippet = (text[:2000] if text else "No structured output available.").replace(
             "\n", " "
         )
-        objects: list[dict[str, Any]] = [
-            {
+        objects: list[dict[str, Any]] = []
+        malware_id = ""
+        if decision == "Malware":
+            malware_id = f"malware--{uuid.uuid4()}"
+            malware: dict[str, Any] = {
                 "type": "malware",
                 "id": malware_id,
                 "name": "analyzed-sample",
@@ -1306,13 +1345,28 @@ class JudgeAgent(BudgetMeter):
                 ),
                 "x_maljan_fallback_reasoning": text_snippet,
                 "x_maljan_degraded_path": True,
-            },
-        ]
-        # Only when non-empty: the STIX validator refuses a property serialised
-        # as null or as an empty array, which is one of the two conformance
-        # defects an external validator found in this emitter.
-        if model_only:
-            objects[0]["x_maljan_model_only_technique_ids"] = model_only
+            }
+            # Only when non-empty: the STIX validator refuses a property
+            # serialised as null or as an empty array, which is one of the two
+            # conformance defects an external validator found in this emitter.
+            if model_only:
+                malware["x_maljan_model_only_technique_ids"] = model_only
+            objects.append(malware)
+        else:
+            # A verdict that is not Malware gets no malware object, so the
+            # rationale and the record of what was dropped need somewhere else
+            # to live: a Note, which is where STIX puts an analyst's own words
+            # about a set of objects.
+            note: dict[str, Any] = {
+                "type": "note",
+                "id": f"note--{uuid.uuid4()}",
+                "abstract": f"Verdict: {decision} (judge fallback)",
+                "content": text_snippet,
+                "x_maljan_degraded_path": True,
+            }
+            if model_only:
+                note["x_maljan_model_only_technique_ids"] = model_only
+            objects.append(note)
 
         for tid in sorted(tids):
             attack_id = f"attack-pattern--{uuid.uuid4()}"
@@ -1330,6 +1384,10 @@ class JudgeAgent(BudgetMeter):
                     ],
                 }
             )
+            if not malware_id:
+                # Nothing to relate the technique to, and a relationship with a
+                # dangling source is a defect the integrity pass would prune.
+                continue
             objects.append(
                 {
                     "type": "relationship",
@@ -1344,7 +1402,15 @@ class JudgeAgent(BudgetMeter):
                 }
             )
 
-        return Bundle.model_validate({"objects": objects})
+        return Bundle.model_validate(
+            {
+                "objects": objects,
+                "x_maljan_fallback_verdict": {
+                    "decision": decision,
+                    "source": "extracted" if extracted else "pipeline",
+                },
+            }
+        )
 
     # ------------------------------------------------------------------
     # Private helpers

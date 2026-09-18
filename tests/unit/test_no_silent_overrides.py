@@ -328,3 +328,69 @@ def test_every_exempt_path_and_whitelist_entry_still_exists():
         assert (SRC / prefix).exists(), f"{prefix} no longer exists; drop the exemption"
     for entry in WHITELIST:
         assert (SRC / entry).exists(), f"{entry} no longer exists; drop the whitelist entry"
+
+
+class TestABundleShapeDoesNotOverrideAVerdict:
+    """The third way a decision was rewritten: not by an assignment, but by
+    being re-derived from something else.
+
+    The fallback bundle carried a ``malware`` object whatever verdict the judge
+    had expressed, and the pipeline read the verdict back off the objects — so
+    "Suspicious", extracted from the judge's own text, was reported as Malware.
+    A fallback bundle now states the verdict it carries and the reader takes it
+    as stated.
+    """
+
+    @staticmethod
+    def _fallback(decision: str, source: str, objects: list[dict[str, Any]]) -> Any:
+        from maljan.schemas.stix_models import Bundle
+
+        return Bundle.model_validate(
+            {
+                "objects": objects,
+                "x_maljan_fallback_verdict": {"decision": decision, "source": source},
+            }
+        )
+
+    def test_an_extracted_verdict_is_read_as_extracted(self) -> None:
+        from maljan.pipeline.outcome import decide_from_bundle
+
+        bundle = self._fallback(
+            "Suspicious",
+            "extracted",
+            [
+                {
+                    "type": "attack-pattern",
+                    "id": "attack-pattern--0f1e2d3c-4b5a-4968-8776-655443332211",
+                    "name": "T1055",
+                }
+            ],
+        )
+
+        assert decide_from_bundle(bundle) == "Suspicious"
+
+    def test_a_pipeline_authored_verdict_is_never_malware(self) -> None:
+        from maljan.pipeline.outcome import INCONCLUSIVE_VERDICT, decide_from_bundle
+
+        bundle = self._fallback(INCONCLUSIVE_VERDICT, "pipeline", [])
+
+        assert decide_from_bundle(bundle) == INCONCLUSIVE_VERDICT
+
+    def test_a_bundle_the_judge_produced_is_still_read_by_its_objects(self) -> None:
+        from maljan.pipeline.outcome import decide_from_bundle
+        from maljan.schemas.stix_models import Bundle
+
+        bundle = Bundle.model_validate(
+            {
+                "objects": [
+                    {
+                        "type": "malware",
+                        "id": "malware--0f1e2d3c-4b5a-4968-8776-655443332211",
+                        "name": "sample",
+                        "is_family": False,
+                    }
+                ]
+            }
+        )
+
+        assert decide_from_bundle(bundle) == "Malware"
