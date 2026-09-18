@@ -569,3 +569,103 @@ async def test_a_redis_that_refuses_the_claim_never_costs_the_run(
 
     assert result["status"] == "completed"
     assert str(job.id) not in _OWNED_JOBS
+
+
+@pytest.mark.asyncio
+async def test_a_cancel_request_writes_its_row_even_between_two_polls(
+    redis_stub: MagicMock,
+) -> None:
+    """The operator asked, so the row says so — whoever noticed first.
+
+    The heartbeat reads the cancel flag every fifteen seconds; a cancel that
+    arrives between two polls reaches the task as a bare ``CancelledError``,
+    which used to be re-raised with nothing written. The flag is still in
+    Redis, so the task reads it where it lands and the row is written through
+    a session of its own.
+    """
+    job = fake_job()
+    sample = fake_sample(job.sample_id)
+    factory = SessionFactory(rows_for(job, sample))
+    redis_stub.get = AsyncMock(return_value=b"1")
+
+    async def _cancelled(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise asyncio.CancelledError
+
+    from app import config as api_config
+
+    api_config._settings = None
+    with (
+        _mock_mode(),
+        patch("maljan.app.MaljanApp.arun", new=AsyncMock(side_effect=_cancelled)),
+    ):
+        result = await run_analysis({"redis": redis_stub, "db_session": factory}, str(job.id))
+    api_config._settings = None
+
+    assert result["status"] == "cancelled"
+    cancelled = [u for u in updates_to(factory, "analysis_jobs") if u.get("status") == "cancelled"]
+    assert len(cancelled) == 1
+    assert isinstance(cancelled[0]["completed_at"], datetime)
+    # Written by a session opened after the reads, not by the run's own.
+    assert len(factory.sessions) >= 2
+    assert_every_session_has_ended(factory)
+
+
+@pytest.mark.asyncio
+async def test_a_shutdown_cancellation_writes_no_row(redis_stub: MagicMock) -> None:
+    """Nobody asked, so nothing is claimed.
+
+    arq cancels the task on its own job timeout and on SIGTERM. The process is
+    going away, writing a row on the way out races its own teardown, and the
+    heartbeat dies with it — so the periodic sweep repairs the row within ten
+    minutes, and the ``CancelledError`` travels on untouched.
+    """
+    job = fake_job()
+    sample = fake_sample(job.sample_id)
+    factory = SessionFactory(rows_for(job, sample))
+    redis_stub.get = AsyncMock(return_value=None)
+
+    async def _cancelled(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise asyncio.CancelledError
+
+    from app import config as api_config
+
+    api_config._settings = None
+    with (
+        _mock_mode(),
+        patch("maljan.app.MaljanApp.arun", new=AsyncMock(side_effect=_cancelled)),
+        pytest.raises(asyncio.CancelledError),
+    ):
+        await run_analysis({"redis": redis_stub, "db_session": factory}, str(job.id))
+    api_config._settings = None
+
+    assert [u for u in updates_to(factory, "analysis_jobs") if u.get("status") == "cancelled"] == []
+    assert [u for u in updates_to(factory, "analysis_jobs") if u.get("status") == "failed"] == []
+
+
+@pytest.mark.asyncio
+async def test_a_redis_that_cannot_answer_is_read_as_a_shutdown(
+    redis_stub: MagicMock,
+) -> None:
+    """The run is going down either way; the sweep repairs what nobody claimed."""
+    job = fake_job()
+    sample = fake_sample(job.sample_id)
+    factory = SessionFactory(rows_for(job, sample))
+    redis_stub.get = AsyncMock(side_effect=ConnectionError("queue unreachable"))
+
+    async def _cancelled(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise asyncio.CancelledError
+
+    from app import config as api_config
+
+    api_config._settings = None
+    with (
+        _mock_mode(),
+        patch("maljan.app.MaljanApp.arun", new=AsyncMock(side_effect=_cancelled)),
+        pytest.raises(asyncio.CancelledError),
+    ):
+        await run_analysis({"redis": redis_stub, "db_session": factory}, str(job.id))
+    api_config._settings = None
+
+    assert updates_to(factory, "analysis_jobs") == [
+        u for u in updates_to(factory, "analysis_jobs") if u.get("status") == "running"
+    ]

@@ -11,6 +11,7 @@ exactly when a restarted worker looks at it.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -291,3 +292,117 @@ async def test_a_failing_pass_does_not_end_the_loop() -> None:
             await task
     finally:
         worker_module._sweep_orphan_jobs = original  # type: ignore[assignment]
+
+
+class TestTheWorkerLifecycleWiring:
+    """The sweep loop is started at boot and cancelled before its tools close.
+
+    Both were true by reading only. A shutdown that closed Redis and the
+    database engine under a running sweep would leave it raising into a
+    process that is on its way out, and a boot that never started it would
+    leave every orphan for the next restart.
+    """
+
+    @pytest.mark.asyncio
+    async def test_startup_leaves_the_sweep_running_in_the_context(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app.worker import analysis_worker as worker_module
+
+        started: list[dict[str, Any]] = []
+
+        async def _forever(ctx: dict, **kwargs: Any) -> None:
+            started.append(ctx)
+            await asyncio.sleep(3600)
+
+        monkeypatch.setattr(worker_module, "sweep_orphans_forever", _forever)
+        monkeypatch.setattr(worker_module, "setup_logging", lambda: None)
+        monkeypatch.setattr(worker_module, "create_async_engine", lambda *a, **k: MagicMock())
+        monkeypatch.setattr(
+            worker_module.aioredis, "from_url", lambda *a, **k: MagicMock(), raising=False
+        )
+        monkeypatch.setattr("app.bootstrap.require_bootstrap", lambda settings: None, raising=False)
+        sample_files = MagicMock()
+        monkeypatch.setitem(__import__("sys").modules, "app.worker.sample_files", sample_files)
+
+        ctx: dict[str, Any] = {}
+        await worker_module.startup(ctx)
+        task = ctx.get("sweep_task")
+        try:
+            assert isinstance(task, asyncio.Task), "the sweep is not started at boot"
+            assert not task.done()
+            await asyncio.sleep(0)
+            assert started, "the loop was never entered"
+        finally:
+            if isinstance(task, asyncio.Task):
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+
+    @pytest.mark.asyncio
+    async def test_shutdown_stops_the_sweep_before_it_closes_redis(self) -> None:
+        from app.worker import analysis_worker as worker_module
+
+        order: list[str] = []
+        running = asyncio.Event()
+
+        async def _forever() -> None:
+            running.set()
+            try:
+                await asyncio.sleep(3600)
+            except asyncio.CancelledError:
+                order.append("sweep cancelled")
+                raise
+
+        task = asyncio.create_task(_forever())
+        await running.wait()
+
+        redis = MagicMock()
+
+        async def _aclose() -> None:
+            order.append("redis closed")
+
+        redis.aclose = _aclose
+
+        engine = MagicMock()
+
+        async def _dispose() -> None:
+            order.append("engine disposed")
+
+        engine.dispose = _dispose
+        db_session = MagicMock()
+        db_session.kw = {"bind": engine}
+
+        await worker_module.shutdown({"sweep_task": task, "redis": redis, "db_session": db_session})
+
+        assert task.done()
+        assert order == ["sweep cancelled", "redis closed", "engine disposed"]
+
+
+class TestTheClaimIsReleasedPromptly:
+    @pytest.mark.asyncio
+    async def test_a_redis_that_never_answers_does_not_hold_the_job_open(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The release runs in the task's ``finally``, and the queue waits on it.
+
+        With one job at a time, an unbounded delete against a Redis that has
+        stopped answering would hold every queued analysis behind a finished
+        one. The key expires by itself, so the bound costs nothing.
+        """
+        from app.worker import analysis_worker as worker_module
+
+        monkeypatch.setattr(worker_module, "JOB_OWNER_RELEASE_TIMEOUT", 0.05)
+
+        class _Silent:
+            async def delete(self, key: str) -> None:
+                await asyncio.sleep(3600)
+
+        job_id = str(uuid.uuid4())
+        _OWNED_JOBS.add(job_id)
+        started = asyncio.get_running_loop().time()
+        await worker_module.release_job(_Silent(), job_id)
+        waited = asyncio.get_running_loop().time() - started
+
+        assert waited < 1.0, "the release waited on Redis"
+        assert job_id not in _OWNED_JOBS, "the job is no longer this process's"

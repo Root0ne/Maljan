@@ -134,9 +134,14 @@ is running is never swept whatever Redis says. If Redis cannot be read, nothing
 is touched and the reason is logged once, because ownership cannot be
 established without it and guessing costs somebody else's run.
 
-A run that ends in `CancelledError` — arq's `job_timeout`, or SIGTERM — still
-writes no row of its own; its heartbeat goes with the process, so the next
-sweep pass marks it failed within ten minutes.
+A run that ends in `CancelledError` is told apart by the cancel flag the API
+writes when somebody presses stop (`analysis:{job_id}:cancel`, which the
+heartbeat also polls). The flag is there: the operator asked, so the task
+writes `cancelled` on the row through a session of its own, whether the
+heartbeat noticed or the cancel landed between two of its polls. No flag: arq's
+`job_timeout` or a worker shutting down, where the process is going away and
+writing a row races its own teardown — the heartbeat goes with it, so the next
+sweep pass marks the job failed within ten minutes.
 
 ### What a request holds while it waits on somebody else
 

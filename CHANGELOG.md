@@ -790,6 +790,24 @@ change landed on `main`.
   sample upload, the sandbox-report upload and read, the deletes and the
   worker's own sample download all go through a worker thread now, and a
   source guard fails the build if a new one is added on the loop.
+- **A cancel between two heartbeat polls still writes its row.** The worker
+  polls the cancel flag every fifteen seconds; a cancellation that arrived
+  between two polls reached the task as a bare `CancelledError` and was
+  re-raised with nothing recorded. The task now reads the same flag where the
+  cancellation lands: the operator's cancel writes `cancelled` through a
+  session of its own, and a cancellation with no flag — arq's job timeout, a
+  worker shutting down — is left to the periodic sweep, which is what repairs
+  a row whose worker is gone.
+- **An audit row says who did it.** `AuditLogResponse` carries the actor's
+  display name, or the local part of their e-mail when the account has no
+  name — what the admin users list already shows an admin — so the log's actor
+  column no longer reads as eight characters of a UUID. One query names a whole
+  page; an event with no authenticated principal, and a user who has since been
+  deleted, both leave it empty.
+- **A probe that could not read a catalogue says where it tried.** "model list:
+  connection refused" was the same sentence whichever endpoint was configured.
+  It now names the endpoint as scheme and host through `endpoint_label`, which
+  drops the path and any credential in front of it.
 - **The console stopped clipping itself.** `main` is a flex item, so its
   `min-width: auto` let it grow to its content's min-content width instead of
   constraining it: the Detection tab's Suricata block took it to 2542 px

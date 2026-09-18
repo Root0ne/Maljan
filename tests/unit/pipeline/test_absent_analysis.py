@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from maljan.pipeline.outcome import (
     INCONCLUSIVE_REASON,
     absent_analysis_message,
@@ -262,29 +264,119 @@ class TestTheWorkerFailsSuchAJob:
     def test_every_worded_refusal_in_the_module_is_a_stated_failure(self) -> None:
         """A sentence raised as a bare exception would be swallowed by its class.
 
-        Read off the source: a ``raise`` whose argument is a sentence — it ends
-        in a full stop — belongs to the class that keeps sentences.
+        Read off the source: a ``raise`` whose argument is a sentence — more
+        than three words of prose — belongs to the class that keeps sentences,
+        or to one of its subclasses. Neither edge of the older form is left:
+        it matched the name ``StatedFailure`` literally, so a correct raise of
+        ``AbsentAnalysisError`` would have failed it, and it keyed on a
+        trailing full stop, so a sentence without one walked past.
         """
         import ast
         import inspect
 
         from app.worker import analysis_worker
+        from app.worker.analysis_worker import StatedFailure
+
+        def keeps_its_message(name: str) -> bool:
+            raised = getattr(analysis_worker, name, None)
+            return isinstance(raised, type) and issubclass(raised, StatedFailure)
 
         tree = ast.parse(inspect.getsource(analysis_worker))
+        # An exception class's own body is about how it is built, not about how
+        # a job ended: the check ``StatedFailure`` performs on its message
+        # raises a sentence of its own, at a programmer rather than at an
+        # operator.
+        for node in list(ast.walk(tree)):
+            if isinstance(node, ast.ClassDef):
+                node.body = []
         worded: list[str] = []
         for node in ast.walk(tree):
             if not isinstance(node, ast.Raise) or not isinstance(node.exc, ast.Call):
                 continue
-            raised = getattr(node.exc.func, "id", "")
-            said = "".join(
+            if not node.exc.args:
+                continue
+            first = node.exc.args[0]
+            # Only a message written at the raise: a message computed elsewhere
+            # — ``RuntimeError(report_error or "…")`` carries a pipeline
+            # exception's own words — is exactly what must *not* be promoted
+            # into a class that publishes it.
+            if not isinstance(first, ast.Constant | ast.JoinedStr):
+                continue
+            raised = getattr(node.exc.func, "id", "") or getattr(node.exc.func, "attr", "")
+            said = " ".join(
                 part.value
-                for part in ast.walk(node.exc)
+                for part in ast.walk(first)
                 if isinstance(part, ast.Constant) and isinstance(part.value, str)
-            )
-            if said.strip().endswith(".") and " " in said.strip():
-                worded.append(f"{raised}: {said}")
-        assert worded, "the module raises at least one worded refusal"
-        assert all(entry.startswith("StatedFailure:") for entry in worded), worded
+            ).strip()
+            if len(said.split()) <= 3:
+                # A word or two is a diagnosis for the log, not a sentence for
+                # an operator; those travel as their class name and the id.
+                continue
+            if not keeps_its_message(raised):
+                worded.append(f"{raised}: {said[:60]}")
+        assert worded == [], worded
+
+    def test_the_guard_sees_a_subclass_and_a_sentence_without_a_full_stop(self) -> None:
+        """The two edges the older form of the guard had, pinned.
+
+        Checked against a sample of source rather than by reading the guard
+        twice: ``AbsentAnalysisError`` is a correct worded raise and must pass,
+        and a bare ``RuntimeError`` with an unpunctuated sentence must not.
+        """
+        import ast
+
+        from app.worker.analysis_worker import AbsentAnalysisError, StatedFailure
+
+        sample = ast.parse(
+            'raise AbsentAnalysisError("no analysis was produced by this run")\n'
+            'raise RuntimeError("the configured provider refused every request")\n'
+        )
+        by_name = {"AbsentAnalysisError": AbsentAnalysisError, "RuntimeError": RuntimeError}
+        verdicts = {}
+        for node in ast.walk(sample):
+            if isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call):
+                name = getattr(node.exc.func, "id", "")
+                raised = by_name[name]
+                verdicts[name] = issubclass(raised, StatedFailure)
+        assert verdicts == {"AbsentAnalysisError": True, "RuntimeError": False}
+
+
+class TestWhatAStatedFailureMaySay:
+    """The class publishes its message, so it refuses one it cannot vouch for."""
+
+    def test_a_path_is_not_an_authored_sentence(self) -> None:
+        from app.worker.analysis_worker import StatedFailure
+
+        with pytest.raises(ValueError, match="authored sentence"):
+            StatedFailure("the sample at /srv/maljan/data/samples/aa/sample.exe was refused")
+
+    def test_a_secret_shaped_value_is_not_either(self) -> None:
+        from app.worker.analysis_worker import StatedFailure
+        from tests.credential_shapes import prefixed_key
+
+        with pytest.raises(ValueError, match="authored sentence"):
+            StatedFailure(f"the provider refused the call: api_key={prefixed_key('sk-')}")
+
+    def test_a_drivers_own_words_cannot_be_promoted_into_one(self) -> None:
+        """``StatedFailure(str(exc))`` is the shape the contract exists against."""
+        from app.worker.analysis_worker import StatedFailure
+
+        driver_error = OSError("could not open /etc/maljan/credentials.toml")
+        with pytest.raises(ValueError, match="authored sentence"):
+            StatedFailure(str(driver_error))
+
+    def test_the_sentences_this_module_raises_are_accepted(self) -> None:
+        from app.worker.analysis_worker import AbsentAnalysisError, StatedFailure
+
+        StatedFailure("The attached sandbox report does not belong to this sample.")
+        StatedFailure(
+            "A sandbox report is attached to this job, but the configured "
+            "sandbox provider ('mock') cannot accept an uploaded report."
+        )
+        AbsentAnalysisError(
+            "no analysis was produced: every analyst failed and the judge did "
+            "not answer (APIStatusError 402)"
+        )
 
 
 class TestWhatTheReaderIsTold:

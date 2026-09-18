@@ -143,6 +143,8 @@ export interface SystemStatusDTO {
 export interface AuditLogDTO {
   id: string;
   user_id: string;
+  /** Who that id belongs to, as the admin users list shows them. */
+  actor: string | null;
   action: string;
   resource_type: string | null;
   resource_id: string | null;

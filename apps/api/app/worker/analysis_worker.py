@@ -55,7 +55,28 @@ class StatedFailure(Exception):
     what the operator should do next; a bare ``ValueError`` in the same place
     reaches the console as ``ValueError (error id …)`` and the sentence stays
     in the log.
+
+    The promise is checked where it is made. A message that the event
+    publisher's own scrubber would change is not an authored sentence — it
+    carries a path, a URL, a digest or something shaped like a credential — and
+    building one raises ``ValueError`` rather than creating an exception whose
+    text this module has undertaken to publish. ``StatedFailure(str(exc))``,
+    the one way this class could have leaked a driver's words, is refused at
+    the point somebody writes it.
     """
+
+    def __init__(self, message: str = "") -> None:
+        text = str(message)
+        # Deferred like every other ``maljan`` import here: the API process
+        # must not pay for the core package at import time.
+        from maljan.pipeline.events import scrub
+
+        if text and scrub(text) != text:
+            raise ValueError(
+                "a stated failure carries an authored sentence, and this one "
+                "holds something the event scrubber would redact"
+            )
+        super().__init__(text)
 
 
 class AbsentAnalysisError(StatedFailure):
@@ -819,6 +840,11 @@ CANCEL_POLL_SECONDS = 15.0
 JOB_OWNER_KEY_PREFIX = "maljan:job-owner:"
 JOB_OWNER_TTL_SECONDS = 90
 JOB_OWNER_REFRESH_SECONDS = 30
+# How long the release in the job's ``finally`` may wait on Redis. The worker
+# takes no new job until that block returns, so an unbounded delete against a
+# Redis that has stopped answering would hold the whole queue for a finished
+# job. The key expires by itself either way.
+JOB_OWNER_RELEASE_TIMEOUT = 5.0
 
 # This process, as the heartbeat names it.
 WORKER_ID = f"{platform.node()}:{os.getpid()}"
@@ -871,12 +897,22 @@ async def claim_job(redis_conn: Any, job_id: str) -> bool:
 
 
 async def release_job(redis_conn: Any, job_id: str) -> None:
-    """Stop claiming this job, on every way out of it. Never raises."""
+    """Stop claiming this job, on every way out of it. Never raises.
+
+    Bounded, because this runs in the task's ``finally`` and the worker takes
+    no new job until that returns: a Redis that has stopped answering would
+    otherwise hold a finished job open, and the queue behind it. The key
+    expires on its own within the TTL, so the worst a skipped delete costs is
+    that long before the sweep would consider the job unowned — and the sweep
+    skips the jobs this process is running anyway.
+    """
     canonical = canonical_job_id(job_id)
     _OWNED_JOBS.discard(canonical)
     try:
-        await redis_conn.delete(job_owner_key(canonical))
-    except Exception as exc:  # noqa: BLE001 — the key expires on its own
+        await asyncio.wait_for(
+            redis_conn.delete(job_owner_key(canonical)), timeout=JOB_OWNER_RELEASE_TIMEOUT
+        )
+    except (Exception, TimeoutError) as exc:  # noqa: BLE001 — the key expires on its own
         logger.debug(
             "Could not drop the owner heartbeat for job %s (%s); it expires in %ds.",
             canonical,
@@ -957,6 +993,65 @@ def failure_reason(exc: BaseException, error_id: str) -> str:
     if isinstance(exc, StatedFailure):
         return f"{exc} (error id {error_id})"
     return f"{type(exc).__name__} (error id {error_id})"
+
+
+def cancel_flag_key(job_id: str) -> str:
+    """Where a cancel request for this job is written.
+
+    ``AnalysisService.cancel_job`` sets it and the heartbeat polls it. It is
+    also how a ``CancelledError`` is told apart: an operator's cancel leaves
+    this key behind, a worker shutting down or arq's own job timeout does not.
+    """
+    return f"analysis:{canonical_job_id(job_id)}:cancel"
+
+
+async def cancel_was_requested(redis_conn: Any, job_id: str) -> bool:
+    """Whether somebody asked for this job to stop. Never raises.
+
+    Read when the task is already being cancelled, so a Redis that cannot
+    answer means "not a cancel request": the run is going down either way, and
+    the sweep repairs a row nobody claimed rather than this guessing at one.
+    """
+    try:
+        return bool(await redis_conn.get(cancel_flag_key(job_id)))
+    except Exception as exc:  # noqa: BLE001 — a cancelled run is going down anyway
+        logger.debug(
+            "Could not read the cancel flag for job %s (%s); treating this as a shutdown.",
+            job_id,
+            type(exc).__name__,
+            extra={"job_id": job_id},
+        )
+        return False
+
+
+async def mark_job_cancelled(db_session: async_sessionmaker, job_uuid: uuid.UUID) -> bool:
+    """Record the operator's cancellation on a session of its own. Never raises.
+
+    The same rule the failure marker follows, for the same reason: the session
+    the run was writing through is the one a lost connection leaves unusable,
+    and a cancelled job whose row still says ``running`` is the phantom this
+    work exists to remove. Only a job that was still running is touched — a run
+    that finished while the cancel was in flight keeps its result.
+    """
+    from app.models.job import AnalysisJob
+
+    try:
+        async with db_session() as db:
+            await db.execute(
+                update(AnalysisJob)
+                .where(AnalysisJob.id == job_uuid, AnalysisJob.status.in_(("pending", "running")))
+                .values(status="cancelled", completed_at=datetime.now(UTC))
+            )
+            await db.commit()
+        return True
+    except Exception as exc:  # noqa: BLE001 — the run is already stopping
+        logger.error(
+            "Could not mark job %s cancelled (%s); the orphan sweep repairs the row.",
+            job_uuid,
+            type(exc).__name__,
+            extra={"job_id": str(job_uuid)},
+        )
+        return False
 
 
 async def mark_job_failed(
@@ -1527,7 +1622,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     await asyncio.wait_for(heartbeat_stop_event.wait(), timeout=CANCEL_POLL_SECONDS)
                 except TimeoutError:
                     try:
-                        if await redis_conn.get(f"analysis:{job_id}:cancel"):
+                        if await cancel_was_requested(redis_conn, job_id):
                             cancelled_by_user = True
                             logger.info(
                                 "Cancellation requested for job=%s — stopping pipeline.",
@@ -1569,6 +1664,17 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             )
             pipeline_result = await pipeline_task
         except asyncio.CancelledError:
+            # Two things cancel this task and they end differently. An
+            # operator's cancel leaves its flag in Redis — the heartbeat may
+            # have read it already, or the cancel may have arrived between two
+            # of its polls — and that run owes the operator a row saying
+            # ``cancelled``. A worker shutting down and arq's own job timeout
+            # leave no flag: the process is going away, writing a row on the
+            # way out is a race with its own teardown, and the periodic sweep
+            # repairs the row within ten minutes because the heartbeat dies
+            # with the process.
+            if not cancelled_by_user:
+                cancelled_by_user = await cancel_was_requested(redis_conn, job_id)
             if not cancelled_by_user:
                 raise
             logger.info(
@@ -1577,13 +1683,11 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 extra={"job_id": job_id},
             )
             await _publish_event(redis_conn, job_id, "cancelled", {})
-            async with db_session() as cleanup_db:
-                await cleanup_db.execute(
-                    update(AnalysisJob)
-                    .where(AnalysisJob.id == job_uuid)
-                    .values(status="cancelled", completed_at=datetime.now(UTC))
-                )
-                await cleanup_db.commit()
+            # On a session of its own, like every other outcome this task
+            # records: the one it was working through may be the one the
+            # cancellation came with.
+            if job_uuid is not None:
+                await mark_job_cancelled(db_session, job_uuid)
             return {"status": "cancelled", "job_id": job_id}
         finally:
             heartbeat_stop_event.set()
