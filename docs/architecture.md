@@ -1302,10 +1302,22 @@ ever be its second source, and a name merely ending in `.onion` is not a host
 either. An address literal passes unless it is loopback, unspecified or
 link-local. A name passes when it is not a reserved name or suffix, every label
 is a label, and its last label is a suffix rather than a word — two or more
-letters, or a punycode label. It also refuses `.internal`, `.alt` and
-`.home.arpa`, which name a private network's own machines: publishing one is a
-low-value indicator in a shared bundle and a small disclosure of how the
-analysis network is named.
+letters, or a punycode label. It also refuses the suffixes that name a private
+network's own machines — `.internal`, `.alt` and `.home.arpa`, which are
+reserved for it, and `.lan`, `.home`, `.corp` and `.intranet`, which are not
+reserved by anybody, have never been delegated and are used for it anyway.
+Publishing one is a low-value indicator in a shared bundle and a small
+disclosure of how the analysis network is named.
+
+One list answers that, `host_is_private_use`, and the enrichment's lookup gate
+reads the same one. The two kept their own lists and answered differently,
+which stopped being a tidiness problem the moment the projection stopped
+dropping observed rows: a sandbox that resolved `x.alt` or
+`localhost.localdomain` was held out of the bundle and posted to a public
+reputation provider in the same run, which is the disclosure the lookup gate
+exists to prevent. The one name the two still answer differently is a Tor
+address, and deliberately: the export carries it on its own checksum, and no
+provider can resolve a hidden service.
 
 That is an **export** decision, and it is made where an indicator is minted.
 Made at the projection instead, it erased the observation: a sandbox-observed
@@ -1329,9 +1341,9 @@ the corroboration rule instead, which is the true reason and the one recorded.
 One function writes a STIX pattern for a network endpoint —
 `stix_renderer.network_pattern` — and one answers whether this run may publish
 one: `network_publish_reason`, which dispatches to the domain, address or URL
-rule. Every minting path asks it: the network block's own rows, the string rows
-that reach the bundle through `static.interesting_strings`, and the judge's own
-indicator objects. It was three rules on four paths, and the fourth — a
+rule. Every minting path asks it: the network block's own rows and the string
+rows that reach the bundle through `static.interesting_strings`. It was three
+rules on four paths, and the fourth — a
 `StringIOC` of kind `ip`, which the deterministic IOC extractor produces on
 every sample — asked none of them, so `6.0.0.0` was refused by the network block
 and exported by the string scan two sections later, typed `malicious-activity`.
@@ -1339,11 +1351,33 @@ and exported by the string scan two sections later, typed `malicious-activity`.
 literal that *builds* one of the four patterns and fails if a second place
 starts doing it.
 
+The judge does not mint patterns, it writes them, and its own indicator
+objects are asked the host question and not the corroboration one. The judge's
+assertion *is* the source, so the corroboration half would answer trivially,
+and letting "the judge said so" count as a second source is a claim this code
+should not make on the judge's behalf. The host question is the half that does
+not depend on who wrote the row down, so all three kinds are asked it:
+`host_is_public` for a name and for a URL's host, `address_is_publishable`
+with the judge as an observing source for an address — which is why a private
+address the judge cites out of the sandbox's evidence stays and loopback never
+does. Asking it of URLs alone exported `[domain-name:value = 'localhost']` and
+`[ipv4-addr:value = '127.0.0.1']` from a judge bundle while every other path
+in the tree refused the same two values. A pattern is not one comparison, so
+every value in it is asked — `[a] OR [b]`, an `AND` of two object paths, an
+`IN` list — and an indicator with one unpublishable endpoint in it is declined
+whole. A syntactically routable address the judge invented passes this
+question by design; whether any evidence holds it up is
+`stix.ungrounded_indicator`'s question, and that check is asked of every
+indicator the judge writes.
+
 Whether an endpoint that *could* exist is published stays
 `corroboration_reason`'s decision. A URL or a name the host question refuses is
 recorded as `stix.unpublishable_url` or `stix.unpublishable_domain` when a
 sandbox, an analyst or the judge is the one that recorded it — the report's own
-network block and the judge's own bundle both left unchanged. A row held back
+network block and the judge's own bundle both left unchanged. An address the
+export holds back is recorded under the domain code, which is the code for an
+endpoint that is not a host anything outside the analysed network could answer
+for; the sentence beside it names the kind. A row held back
 only for want of a second source is the rule working and is not a finding, and
 neither is a string sweep's own cut-off: a report carries up to forty of them,
 and forty unresolved findings nobody can act on bury the ones somebody can.

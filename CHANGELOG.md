@@ -2051,7 +2051,9 @@ change landed on `main`.
   `unstated` or `fallback`, the report endpoint carries it, and the console
   draws the matching one-line note beside the verdict and says in its degraded
   banner whose confidence — the judge's own or none at all — the number above it
-  is. Replaying the PuTTY run's recorded answer — which has no
+  is. A judge that states a verdict and puts no number on it gets the sentence
+  for a run with no confidence, because the header reads "not assessed" there
+  and a banner describing the confidence shown above would describe nothing. Replaying the PuTTY run's recorded answer — which has no
   `verdict` field, because there was none to write — now publishes Malware from
   the objects with `verdict.unstated` recorded and **no confidence**, where it
   used to print the judge's `1.00`.
@@ -2138,8 +2140,8 @@ change landed on `main`.
   silently dropped. Whether an endpoint that *could* exist is published stays
   the corroboration rule's decision, so `https://fs01n5.sends` from the string
   scan alone is held back for want of a second source, which is the reason the
-  report gives for it. Every minting path asks both, including the judge's own
-  indicator objects, and there is now one place that asks and one that writes:
+  report gives for it. Every minting path asks both, and there is now one place
+  that asks and one that writes:
   `network_publish_reason` answers for a domain, an address or a URL alike, and
   `network_pattern` is the only function that builds a `domain-name`, `url`,
   `ipv4-addr` or `ipv6-addr` pattern string. That was three rules over four
@@ -2147,13 +2149,36 @@ change landed on `main`.
   extractor produces on every sample — asked none of them, so an address the
   network block refused was exported by the string scan two sections later,
   typed `malicious-activity`; a test walks the tree for a second place building
-  one of those four patterns and fails when one appears. A row that fails is
+  one of those four patterns and fails when one appears. The judge writes
+  patterns rather than minting them, and its own indicator objects are asked
+  the host question for all three kinds — a name, a URL's host and an address,
+  the last with the judge counted as having observed it, so one it cites out of
+  the sandbox's evidence stays and loopback never does. Asked of URLs alone, a
+  judge bundle exported `[domain-name:value = 'localhost']` and
+  `[ipv4-addr:value = '127.0.0.1']` unrecorded while every other path refused
+  the same two values. A pattern is not one comparison, so every value in one
+  is asked and an indicator with a single unpublishable endpoint in it is
+  declined whole. The corroboration half is still not asked of the judge,
+  because the judge's own assertion is the source and "the judge said so" is
+  not a second source this code will assert on its behalf; whether any evidence
+  holds an endpoint up stays `stix.ungrounded_indicator`'s question. A row that fails is
   not exported, and the decline is recorded as `stix.unpublishable_url` or
   `stix.unpublishable_domain` when a sandbox, an analyst or the judge is the one
   that recorded the row, because those are the rows a reader is owed a reason
   for; the string sweep's own cut-offs are not findings — a report carries up to
   forty of them and forty unresolved rows nobody can act on bury the ones
-  somebody can. A row held back only for want of a second source is the rule
+  somebody can. The console draws both codes as the export's decision rather
+  than as something the judge left unfixed, which only the URL one did.
+  The suffixes that name a private network's own machines are one list now,
+  read by the export and by the enrichment's lookup gate alike. They kept their
+  own, and the two answering differently stopped being a tidiness problem the
+  moment the projection stopped dropping observed rows: a sandbox that resolved
+  `x.alt` or `localhost.localdomain` was held out of the bundle and sent to a
+  public reputation provider in the same run. `.lan`, `.home`, `.corp` and
+  `.intranet` join the reserved ones, because none of the four has ever been
+  delegated. The one name the two still answer differently is a Tor address:
+  the export carries it on its own checksum and no provider can resolve a
+  hidden service. A row held back only for want of a second source is the rule
   working and is not a finding either, and a row that records no source at all
   is read as string-derived, which is what the export's cap ranks it as. The
   host question is an export decision and is made where the indicator is
