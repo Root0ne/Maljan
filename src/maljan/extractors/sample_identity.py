@@ -759,6 +759,10 @@ def _name_the_signer(info: SignatureInfo, blob: bytes, at: int, size: int) -> No
     try:
         info.signer_subject = signer.subject.rfc4514_string()
         info.signer_issuer = signer.issuer.rfc4514_string()
+        # A certificate's thumbprint is its SHA-1 by convention: the value
+        # Windows shows and threat-intelligence sources index. It names the
+        # certificate and verifies nothing.
+        # nosemgrep: insecure-hash-algorithm-sha1
         info.signer_thumbprint = signer.fingerprint(hashes.SHA1()).hex()
     except Exception:  # noqa: BLE001 — a malformed name is no name, not a crash
         info.signer_subject = None
