@@ -196,7 +196,7 @@ test.describe("Audit log", () => {
     await expectNoAlerts(page);
   });
 
-  /* C-I17: the log had no way to narrow 1766 entries but Previous and Next. */
+  /* The log had no way to narrow 1766 entries but Previous and Next. */
   test("narrows the log by action, through the endpoint", async ({
     authenticatedPage: page,
   }) => {

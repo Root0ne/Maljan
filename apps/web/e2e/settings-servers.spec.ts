@@ -180,7 +180,7 @@ test.describe("tool servers and the REST sandbox", () => {
     await page.locator('[data-server="threatintel"]').click();
     const detail = page.locator('[data-server-detail="threatintel"]');
     // Neither Remove nor the "Disable" that used to sit beside the switch:
-    // two controls for one state, worded in opposite directions (C-I11).
+    // two controls for one state, worded in opposite directions.
     await expect(detail.getByRole("button", { name: "Remove" })).toHaveCount(0);
     await expect(detail.getByRole("button", { name: "Disable" })).toHaveCount(0);
 

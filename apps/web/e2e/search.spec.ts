@@ -84,8 +84,8 @@ test.describe("Search palette", () => {
     await expect(palette.getByRole("alert")).toHaveCount(0);
   });
 
-  /* C-I19: the arrow keys moved `aria-selected` between options that had no
-   * ids, under a combobox with no `aria-activedescendant` — so the highlighted
+  /* The arrow keys moved `aria-selected` between options that had no ids,
+   * under a combobox with no `aria-activedescendant` — so the highlighted
    * result was carried by a background colour and by nothing else. */
   test("announces the row the arrow keys are on", async ({ authenticatedPage: page }) => {
     const box = await openPalette(page);
