@@ -102,6 +102,31 @@ class TestTheJudgeNodeRecordsThatItFellBack:
         assert any("judge failed" in reason for reason in update["degradation_reasons"])
 
 
+class TestAJudgeThatAnsweredClearsTheChannel:
+    def test_the_judged_path_writes_the_channel_empty(self) -> None:
+        """A channel only ever set would suppress the next run's confidence.
+
+        The verdict stage runs once today, so nothing reads a stale value —
+        which is exactly why it is worth writing now rather than after a
+        retry is added.
+        """
+        from unittest.mock import AsyncMock
+
+        from maljan.agents.judge_agent import JudgeVerdict
+        from maljan.schemas.stix_models import Bundle
+
+        container = _Container(EvidenceCounter())
+        judge = container.get_judge_agent(role="judge")
+        judge.give_verdict = AsyncMock(
+            return_value=JudgeVerdict(
+                bundle=Bundle(objects=[]), violations=[], retries=0, fed_back={}
+            )
+        )
+        update = asyncio.run(make_judge_node(container)(_state()))
+
+        assert update["verdict_fallback"] is None
+
+
 class TestNothingDerivesAConfidenceForIt:
     def test_an_unjudged_verdict_has_none(self) -> None:
         assert _overall_confidence(None, _confident_analysts(), judged=False) is None

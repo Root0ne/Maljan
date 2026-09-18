@@ -630,7 +630,11 @@ def _evidence_row(entry: dict[str, Any], *, job_id: uuid.UUID) -> Any:
         output=str(entry.get("output", "") or ""),
         structured=entry.get("structured"),
         # Why the output is empty, what the call was answered from, what it
-        # was aimed at, and when it ran.
+        # was aimed at, and when it ran. ``LedgerEntry.started_at`` defaults to
+        # 0.0 rather than to None, so an entry the recorder never stamped and
+        # one that started at the epoch are one value; it is stored as NULL,
+        # because 0.0 there means "not recorded" and a 1970 timestamp on a tool
+        # call is not a fact about anything.
         truncated=bool(entry.get("truncated", False)),
         repeated_of=(str(entry["repeated_of"])[:32] if entry.get("repeated_of") else None),
         symbol=(str(entry["symbol"])[:200] if entry.get("symbol") else None),

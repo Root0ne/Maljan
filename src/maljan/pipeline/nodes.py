@@ -3273,6 +3273,12 @@ def make_judge_node(
                     "final_decision": decision,
                     "judge_report": "Analyzed negotiation history and expert reports.",
                     "stix_output": stix_output,
+                    # This judge answered, so there is no pipeline-authored
+                    # verdict to declare. Written rather than left alone: the
+                    # verdict stage runs once today, and a channel that is only
+                    # ever set would suppress a real confidence the first time
+                    # it is not.
+                    "verdict_fallback": None,
                     "run_summary": run_summary_dict,
                     # The judge's own tool calls — threat intel on a disputed
                     # indicator, a knowledge lookup — on the same append-only

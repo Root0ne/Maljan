@@ -142,6 +142,13 @@ class TestOnlyTheSafeHelperReachesAPublishSite:
         Tuple and list targets are unpacked, because ``a, b = f(), g()`` taints
         whatever it binds as surely as a single name does, and an annotated or
         augmented assignment binds one name each.
+
+        A tuple taints every name it binds, including the sides that came from
+        somewhere safe. Deliberately the wrong way round: a guard that misses a
+        publish site fails open and nothing else in the suite would notice,
+        while one that over-reaches fails loudly on a line a reader can look
+        at. If it ever fires on a mixed tuple, the fix is to split the
+        assignment, not to narrow this.
         """
         if isinstance(node, ast.Assign):
             targets = [t for target in node.targets for t in ast.walk(target)]

@@ -164,8 +164,13 @@ class MalwareReportBuilder:
             "termination_reason": self.run_summary.get("negotiation", {}).get(
                 "termination_reason", "unknown"
             ),
+            # A float wherever this key is declared, so a run whose judge never
+            # answered — and which therefore has no assessed confidence and no
+            # negotiation block to read one from — contributes 0.0 rather than
+            # a ``None`` a reader of the projection has no field for. What was
+            # not assessed is said once, by ``overall_confidence`` itself.
             "final_confidence": self.run_summary.get("negotiation", {}).get(
-                "final_confidence", self.overall_confidence
+                "final_confidence", self.overall_confidence or 0.0
             ),
             "confidence_history": self.run_summary.get("negotiation", {}).get(
                 "confidence_history", []
