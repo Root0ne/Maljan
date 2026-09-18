@@ -811,6 +811,30 @@ function intoRounds(items: ConversationItem[]): ConversationRound[] {
   return rounds;
 }
 
+/**
+ * What a participant that has not spoken is doing, read off its own stages.
+ *
+ * Some agents never emit a line. The reporter is one: it writes the report and
+ * says nothing, so on every finished run its chip read "waiting" under a Report
+ * stage marked DONE with its duration beside it. Silence is not a state; the
+ * stage the agent belongs to is, and it is the only thing that knows.
+ *
+ * A stage still running means the agent is working. A stage that finished means
+ * it is done, whether it said so or not. Anything else — a stage that was
+ * skipped, or an agent no stage names, which is a specialist a lead reaches —
+ * leaves the state the feed gave it.
+ */
+export function participantState(
+  said: number,
+  own: ParticipantState,
+  stages: readonly StageState[],
+): ParticipantState {
+  if (said > 0 || stages.length === 0) return own;
+  if (stages.includes("running")) return "working";
+  if (stages.includes("done")) return "done";
+  return own;
+}
+
 function snapshot(state: BuilderState): Conversation {
   const stages = state.order.map((key) => {
     const stage = state.stages.get(key) as StageDraft;
@@ -841,8 +865,16 @@ function snapshot(state: BuilderState): Conversation {
       rounds: [{ round: state.closing.round, items: [state.closing] }],
     });
   }
+  const stageState = new Map(stages.map((stage) => [stage.key, stage.state]));
   return {
-    participants: [...state.participants.values()].map((p) => ({ ...p })),
+    participants: [...state.participants.values()].map((p) => ({
+      ...p,
+      state: participantState(
+        p.messages,
+        p.state,
+        p.stages.map((key) => stageState.get(key)).filter((s) => s !== undefined),
+      ),
+    })),
     textLength: state.textLength,
     stages,
   };

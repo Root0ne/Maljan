@@ -551,6 +551,71 @@ describe("participants", () => {
   });
 });
 
+/**
+ * An agent that never speaks still has a state.
+ *
+ * The reporter writes the report and emits no line, so on every finished run
+ * its chip read "waiting" under a Report stage marked DONE with its duration
+ * printed beside it. Silence is not a state; the stage is, and it is the only
+ * thing that knows.
+ */
+describe("a participant that has said nothing", () => {
+  const REPORTER: JobRoster = {
+    agents: [{ key: "reporter", label: "Reporter", role: "reporter", stages: ["report"] }],
+    stages: [{ key: "report", label: "Report", kind: "report", agents: ["reporter"] }],
+  };
+
+  function stateOf(...events: RunEvent[]): string | undefined {
+    return buildConversation(events, REPORTER).participants[0]?.state;
+  }
+
+  it("is done when its stage is done", () => {
+    expect(
+      stateOf(
+        event("stage_started", { stage: "report", kind: "report" }),
+        event("stage_finished", { stage: "report", duration_ms: 75040 }),
+      ),
+    ).toBe("done");
+  });
+
+  it("is working while its stage runs", () => {
+    expect(stateOf(event("stage_started", { stage: "report", kind: "report" }))).toBe("working");
+  });
+
+  it("is waiting before its stage starts", () => {
+    expect(stateOf(event("stage_started", { stage: "analysis", kind: "analysis" }))).toBe(
+      "waiting",
+    );
+  });
+
+  it("is waiting when its stage was skipped", () => {
+    expect(
+      stateOf(event("stage_skipped", { stage: "report", reason: "reporting is off" })),
+    ).toBe("waiting");
+  });
+
+  it("keeps what it said about itself once it has spoken", () => {
+    expect(
+      stateOf(
+        event("stage_started", { stage: "report", kind: "report" }),
+        event("agent_message", { stage: "report", speaker: "reporter", kind: "delegation_ask", text: "?" }),
+      ),
+    ).toBe("working");
+  });
+
+  it("leaves a specialist no stage names where the feed put it", () => {
+    const { participants } = buildConversation(
+      [
+        event("stage_started", { stage: "analysis", kind: "analysis" }),
+        event("stage_finished", { stage: "analysis", duration_ms: 10 }),
+      ],
+      ROSTER,
+    );
+
+    expect(participants.find((p) => p.key === "ahmet")?.state).toBe("waiting");
+  });
+});
+
 describe("filters", () => {
   const conversation = buildConversation(
     [
