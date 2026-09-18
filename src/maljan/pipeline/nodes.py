@@ -3758,6 +3758,12 @@ def make_report_node(
                     "report_node: ReportComposer.compose raised (%s); spine skipped.", exc
                 )
             _report_tally.merge(getattr(composer, "validation_tally", ValidationTally()))
+            # What the spine lost, said where the report says what it is
+            # missing. A section dropped after its retries used to leave the
+            # report with no conclusion and no sentence about it anywhere.
+            for _reason in getattr(composer, "degradations", None) or []:
+                if _reason not in report.degradation_reasons:
+                    report.degradation_reasons.append(str(_reason))
 
         # Deterministic figures (inline SVG + Ghidra
         # code listings) generated from the report's own data — real charts, no

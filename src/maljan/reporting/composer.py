@@ -32,6 +32,7 @@ from maljan.pipeline.validation import (
     CapabilityGrounding,
     ValidationTally,
     Violation,
+    keep_known_keys,
     retry_with_feedback,
     schema_violations,
     section_capability_violations,
@@ -181,6 +182,12 @@ class ReportComposer:
         # ``compose`` call.
         self._facts_block = ""
         self._run_state = ""
+        # What this report lost or had trimmed, in the words the report's own
+        # degradation reasons are written in. A section dropped after its
+        # retries used to leave the report with no conclusion and nothing
+        # saying so; the keys an answer invented used to take the whole
+        # section with them.
+        self.degradations: list[str] = []
 
     async def compose(
         self,
@@ -307,12 +314,19 @@ class ReportComposer:
             )
         except TimeoutError:
             logger.warning("ReportComposer: section '%s' timed out; skipping.", section)
+            self._note_degradation(
+                f"report section '{section}' is missing: it did not answer within "
+                f"{int(self.per_section_timeout)}s"
+            )
             return None
         except Exception as exc:  # noqa: BLE001
             # ``error``, not ``warning``: a dropped section is missing content
             # in a delivered report, and at warning level in a noisy worker log
             # nobody ever noticed one had gone.
             logger.error("ReportComposer: section '%s' failed (%s); SKIPPED.", section, exc)
+            self._note_degradation(
+                f"report section '{section}' is missing: the round failed ({type(exc).__name__})"
+            )
             return None
 
     async def _invoke(
@@ -368,7 +382,23 @@ class ReportComposer:
             declined = bool(payload) and _section_declined(payload, schema)
             if not payload or declined:
                 return None
-            return _unwrap_section_envelope(payload, schema)
+            kept, dropped = keep_known_keys(schema, _unwrap_section_envelope(payload, schema))
+            if dropped:
+                # Kept, not refused: the fields the schema declares were
+                # answered and the section is publishable. What was dropped is
+                # named where a reader of the report will find it.
+                logger.warning(
+                    "ReportComposer: section '%s' carried %d key(s) the schema does not "
+                    "declare (%s); the known fields are kept.",
+                    section or schema.__name__,
+                    len(dropped),
+                    ", ".join(dropped),
+                )
+                self._note_degradation(
+                    f"report section '{section or schema.__name__}' dropped the keys "
+                    f"{', '.join(dropped)}, which its schema does not declare"
+                )
+            return kept
 
         def _validate(payload: Any) -> list[Violation]:
             # A declined section is an empty one, not a broken one: the model
@@ -413,9 +443,19 @@ class ReportComposer:
                 "y" if retries == 1 else "ies",
                 "; ".join(f"{v.path}: {v.message}" for v in broken),
             )
+            self._note_degradation(
+                f"report section '{section or schema.__name__}' is missing: its answer did "
+                f"not fit the schema after {retries} retr{'y' if retries == 1 else 'ies'} "
+                f"({', '.join(sorted({v.code for v in broken}))})"
+            )
             return None
         self._record_ungrounded(section or schema.__name__, ungrounded)
         return schema.model_validate(payload)
+
+    def _note_degradation(self, reason: str) -> None:
+        """One sentence about what this report lost, once."""
+        if reason not in self.degradations:
+            self.degradations.append(reason)
 
     def _record_ungrounded(self, section: str, violations: list[Violation]) -> None:
         """Keep a section's over-claims on the record, without editing its prose.

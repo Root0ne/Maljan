@@ -139,6 +139,11 @@ class MarkdownRenderer:
                 "verdict, confidence and severity below should be treated as tentative "
                 f"and corroborated manually.  \n> Reasons: {reasons}"
             )
+        elif report.degradation_reasons:
+            # A run that is not degraded can still be missing something a
+            # reader would look for — a section the composer could not get past
+            # its schema is simply absent from the report otherwise.
+            header += "\n\n**Notes**: " + "; ".join(report.degradation_reasons) + "."
         # What the report is standing on, said in the header rather than left
         # in a JSON field: a reader who is told nothing was trimmed reads the
         # evidence sections as complete, and a reader who is told twelve

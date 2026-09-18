@@ -885,6 +885,12 @@ is assembled from what the run gathered rather than recomputed beside it:
 * `run_summary.evidence` counts the calls and `run_summary.sections_without_
   evidence` counts the sections that can name neither an entry nor a finding —
   the number that says whether the report is standing on anything.
+* The section-wise composer keeps the fields a section's schema declares and
+  drops the ones it does not, rather than refusing the whole section over an
+  invented key — which is how two runs shipped with no conclusion. What it
+  dropped, and any section it lost outright (still off-schema after its retry,
+  timed out, or failed), is added to the report's degradation reasons, which
+  the header prints under **Notes** on a run that is not otherwise degraded.
 * `qa/fp_linter.py` runs last and reports; it changes nothing. Its findings land
   in `run_summary.fp_warnings`, including C6 (a section or TTP row with nothing
   citable behind it) and C7 (a technique id the validation loop could not get

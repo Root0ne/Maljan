@@ -24,7 +24,7 @@ import json
 import re
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, get_args
 
 from pydantic import ValidationError
 
@@ -819,6 +819,51 @@ def _claim_index(path: str) -> int | None:
 # ---------------------------------------------------------------------------
 # Anything with a pydantic schema
 # ---------------------------------------------------------------------------
+
+
+def keep_known_keys(model: Any, payload: Any) -> tuple[Any, list[str]]:
+    """``payload`` narrowed to the fields ``model`` declares, and what was dropped.
+
+    The report sections forbid unknown keys, deliberately: a model that invents
+    a field has invented its content too. But refusing the whole object over
+    one extra key cost two reports their conclusion and their technical
+    analysis — ``sophistication_rating`` and ``text`` beside fields that were
+    all correct — and the report then simply had no conclusion, with nothing
+    saying why. The known subset is kept, the extra keys are named, and the
+    caller records them as a degradation reason.
+
+    Recursive through the declared sub-models, because the keys the models
+    invented were nested inside the section objects rather than beside them.
+    Paths come back dotted, as a reader of the reason reads them.
+    """
+    dropped: list[str] = []
+
+    def _walk(target: Any, value: Any, path: str) -> Any:
+        fields = getattr(target, "model_fields", None)
+        if not isinstance(value, dict) or not isinstance(fields, dict):
+            return value
+        kept: dict[str, Any] = {}
+        for key, item in value.items():
+            if key not in fields:
+                dropped.append(f"{path}{key}")
+                continue
+            kept[key] = _walk_field(fields[key], item, f"{path}{key}.")
+        return kept
+
+    def _walk_field(field: Any, value: Any, path: str) -> Any:
+        annotation = getattr(field, "annotation", None)
+        nested = [
+            arg
+            for arg in ([annotation, *get_args(annotation)])
+            if isinstance(arg, type) and hasattr(arg, "model_fields")
+        ]
+        if not nested:
+            return value
+        if isinstance(value, list):
+            return [_walk(nested[0], item, f"{path}{index}.") for index, item in enumerate(value)]
+        return _walk(nested[0], value, path)
+
+    return _walk(model, payload, ""), dropped
 
 
 def schema_violations(model: Any, payload: Any, *, code: str) -> list[Violation]:
