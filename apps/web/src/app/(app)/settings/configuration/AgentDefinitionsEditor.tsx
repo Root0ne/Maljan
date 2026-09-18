@@ -8,6 +8,7 @@ import { getErrorMessage } from "@/lib/errors";
 import { agentDisplayName, agentKeySuffix } from "./agentNames";
 import {
   BUILTIN_AGENT_KEYS,
+  cloneDefinition,
   displayedDefinitions,
   stagedDefinitions,
   type StagedDefinitionMap,
@@ -51,15 +52,6 @@ const ROLE_CHOICES: AgentDefinitionEntry["role"][] = [
  *  reporter are not analysts and the settings model refuses a reference to
  *  either. */
 const ASKABLE_ROLES = new Set(["static", "dynamic", "network", "generic", "lead"]);
-
-export const EMPTY_DEFINITION: AgentDefinitionEntry = {
-  role: "generic",
-  label: "",
-  prompt: "",
-  tools: [],
-  static_provider: null,
-  enabled: true,
-};
 
 /**
  * One entry of `llm.agents`, mirroring `maljan.core.config.AgentLLMConfig`.
@@ -105,46 +97,6 @@ export interface LlmGlobalFallback {
 const RESOLVE_INPUTS = new Set<keyof AgentDefinitionEntry>([
   "role", "prompt", "tools", "static_provider",
 ]);
-
-/**
- * The definition map with a new entry at `key`: a copy of `from` when one is
- * named, else a blank generic agent.
- *
- * A clone starts from what its source *resolves to*, so an operator can see
- * and edit the built-in prompt rather than guessing it: the source's own
- * `prompt` when it has one, else the resolved text of a probe already made
- * against the source, else `null` — still "the built-in prompt" — with the
- * editor's usual hint to press Resolve first.
- *
- * Shared with the setup guide's "Start from" step so a clone means exactly
- * the same thing wherever it is made.
- */
-export function cloneDefinition(
-  definitions: Record<string, AgentDefinitionEntry>,
-  key: string,
-  from?: string,
-  sourceProbe?: ProbeResult | "running"
-): Record<string, AgentDefinitionEntry> {
-  const source = from ? definitions[from] : undefined;
-  const resolvedDetails =
-    sourceProbe && sourceProbe !== "running" && sourceProbe.ok
-      ? (sourceProbe.details as AgentProbeDetails | null)
-      : null;
-  return {
-    ...definitions,
-    [key]: source
-      ? {
-          ...source,
-          label: source.label ? `${source.label} (copy)` : key,
-          prompt: source.prompt ?? resolvedDetails?.prompt ?? null,
-          // `?? []` rather than a bare `.map`: the source is meant to be the
-          // full definition the schema serves, and a caller that hands over a
-          // narrowed one should get a tool-less clone rather than a crash.
-          tools: (source.tools ?? []).map((t) => ({ ...t })),
-        }
-      : { ...EMPTY_DEFINITION },
-  };
-}
 
 /** One field's validation message, under the field the API named. */
 function FieldError({ message }: { message?: string }) {

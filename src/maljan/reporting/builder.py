@@ -332,12 +332,9 @@ class MalwareReportBuilder:
         # of them reads as a contradiction rather than as a sample.
         named = [f"{m.technique_id} ({m.technique_name})" for m in report.ttp_mappings[:5]]
         rest = len(report.ttp_mappings) - len(named)
-        if not named:
-            ttp_summary = ""
-        elif rest > 0:
-            ttp_summary = f"including {', '.join(named)}, and {rest} more"
-        else:
-            ttp_summary = ", ".join(named)
+        ttp_summary = (
+            f"including {', '.join(named)}, and {rest} more" if rest > 0 else ", ".join(named)
+        )
         if any(reason in INCONCLUSIVE_REASONS for reason in report.degradation_reasons or []):
             # A run that examined nothing has no classification to report, and
             # "classified as suspicious" would read as a finding drawn from
@@ -354,9 +351,9 @@ class MalwareReportBuilder:
             # the console's header chip, the exported report's own header --
             # and the two used to disagree about notation on one screen.
             techniques = (
-                "The pipeline mapped no MITRE ATT&CK technique. "
+                "The pipeline mapped no ATT&CK technique. "
                 if not named
-                else f"Pipeline reported {len(report.ttp_mappings)} ATT&CK techniques, "
+                else f"The pipeline mapped {len(report.ttp_mappings)} ATT&CK techniques, "
                 f"{ttp_summary}. "
             )
             report.executive_summary = (

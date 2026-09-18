@@ -1,11 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  BUILTIN_AGENT_KEYS,
+  cloneDefinition,
   comparableSaved,
   displayedDefinitions,
   stagedDefinitions,
 } from "../agentStaging";
-import { cloneDefinition } from "../AgentDefinitionsEditor";
 import type { AgentDefinitionEntry } from "@/types/settings";
 
 /** A built-in as the store holds it after a seed gained a tool the row predates. */
@@ -103,12 +102,6 @@ describe("cloning a built-in from what the guide holds", () => {
     saved,
   );
 
-  it("names every built-in, so the guide's chooser offers them all", () => {
-    for (const key of BUILTIN_AGENT_KEYS) {
-      expect(key in saved).toBe(true);
-    }
-  });
-
   for (const source of ["static", "dynamic", "network", "judge", "reporter"]) {
     it(`clones ${source} from the map the guide draws`, () => {
       const drawn = displayedDefinitions(stagedAfterAnEdit, saved);
@@ -124,10 +117,18 @@ describe("cloning a built-in from what the guide holds", () => {
     });
   }
 
-  it("gives a tool-less clone rather than throwing on a narrowed source", () => {
-    const narrowed = stagedAfterAnEdit as Record<string, AgentDefinitionEntry>;
-    expect(() => cloneDefinition(narrowed, "judge_copy", "judge")).not.toThrow();
-    expect(cloneDefinition(narrowed, "judge_copy", "judge").judge_copy.tools).toEqual([]);
+  it("starts a blank agent from the empty definition", () => {
+    // The other half of `cloneDefinition`: no source means a new generic
+    // agent, which is what the Add button and the guide's blank option make.
+    const made = cloneDefinition(saved, "ahmet");
+    expect(made.ahmet).toEqual({
+      role: "generic",
+      label: "",
+      prompt: "",
+      tools: [],
+      static_provider: null,
+      enabled: true,
+    });
   });
 });
 

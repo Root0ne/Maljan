@@ -4,13 +4,13 @@ import { useEffect, useState } from "react";
 import type { AgentDefinitionEntry } from "@/types/settings";
 import {
   AgentDetail,
-  cloneDefinition,
   useAgentResolve,
   type AgentLLMOverride,
 } from "../../configuration/AgentDefinitionsEditor";
 import {
   AGENT_DEFINITIONS_KEY as DEFINITIONS_KEY,
   BUILTIN_AGENT_KEYS,
+  cloneDefinition,
   displayedDefinitions,
   stagedDefinitions,
   type StagedDefinitionMap,

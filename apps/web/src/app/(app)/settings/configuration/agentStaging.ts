@@ -25,7 +25,11 @@
  */
 
 import { deepEqual } from "./deepEqual";
-import type { AgentDefinitionEntry } from "@/types/settings";
+import type {
+  AgentDefinitionEntry,
+  AgentProbeDetails,
+  ProbeResult,
+} from "@/types/settings";
 
 /** Re-seeded by the settings model, so they lock rather than delete. */
 export const BUILTIN_AGENT_KEYS: ReadonlySet<string> = new Set([
@@ -106,4 +110,56 @@ export function displayedDefinitions(
     out[key] = entry as AgentDefinitionEntry;
   }
   return out;
+}
+
+/** A generic agent with nothing filled in, which is what Add starts from. */
+export const EMPTY_DEFINITION: AgentDefinitionEntry = {
+  role: "generic",
+  label: "",
+  prompt: "",
+  tools: [],
+  static_provider: null,
+  enabled: true,
+};
+
+/**
+ * The definition map with a new entry at `key`: a copy of `from` when one is
+ * named, else a blank generic agent.
+ *
+ * A clone starts from what its source *resolves to*, so an operator can see
+ * and edit the built-in prompt rather than guessing it: the source's own
+ * `prompt` when it has one, else the resolved text of a probe already made
+ * against the source, else `null` — still "the built-in prompt" — with the
+ * editor's usual hint to press Resolve first.
+ *
+ * Shared with the setup guide's "Start from" step so a clone means exactly
+ * the same thing wherever it is made.
+ *
+ * `definitions` is a `DefinitionMap`, which is what keeps a narrowed map from
+ * reaching here: `StagedDefinitionMap` does not assign to it, so the mistake
+ * H4 was about is a compile error at the call site rather than a clone that
+ * quietly loses its tools. Read the map through `displayedDefinitions` first.
+ */
+export function cloneDefinition(
+  definitions: DefinitionMap,
+  key: string,
+  from?: string,
+  sourceProbe?: ProbeResult | "running"
+): DefinitionMap {
+  const source = from ? definitions[from] : undefined;
+  const resolvedDetails =
+    sourceProbe && sourceProbe !== "running" && sourceProbe.ok
+      ? (sourceProbe.details as AgentProbeDetails | null)
+      : null;
+  return {
+    ...definitions,
+    [key]: source
+      ? {
+          ...source,
+          label: source.label ? `${source.label} (copy)` : key,
+          prompt: source.prompt ?? resolvedDetails?.prompt ?? null,
+          tools: source.tools.map((t) => ({ ...t })),
+        }
+      : { ...EMPTY_DEFINITION },
+  };
 }
