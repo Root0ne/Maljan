@@ -21,11 +21,9 @@ from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 import redis.asyncio as aioredis
 from arq import cron
-from arq.connections import RedisSettings
 from maljan.core.config import Settings as _CoreSettings
 from maljan.core.settings_catalog import core_catalog
 from maljan.core.settings_overrides import build_settings, public_snapshot
@@ -37,6 +35,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.config import get_settings, settings
 from app.logging_config import get_logger, setup_logging
 from app.runtime_config import runtime_config
+from app.worker.queues import ANALYSIS_QUEUE, build_redis_settings
 
 logger = get_logger("worker")
 
@@ -1940,11 +1939,9 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     from arq.connections import ArqRedis
 
                     arq_pool = ArqRedis(connection_pool=redis_conn.connection_pool)
-                await arq_pool.enqueue_job(
-                    "enrich_threat_intel",
-                    str(report_uuid),
-                    _job_id=f"enrich:{report_uuid}",
-                )
+                from app.worker.enrich_worker import enqueue_enrichment
+
+                await enqueue_enrichment(arq_pool, report_uuid)
                 logger.info(
                     "enrich: queued report=%s",
                     report_uuid,
@@ -2509,26 +2506,6 @@ async def _recycle_if_bloated(ctx: dict, *args: Any, **kwargs: Any) -> None:
         os.kill(os.getpid(), signal.SIGTERM)
 
 
-def build_redis_settings(redis_url: str) -> RedisSettings:
-    """Build arq's RedisSettings from a redis:// URL, credentials included.
-
-    ``redis://:${REDIS_PASSWORD}@redis:6379/0`` (the compose default once Redis
-    runs with --requirepass) carries a password. arq's own ``RedisSettings.
-    from_dsn`` parses that password correctly; the bug this function fixed
-    was in ``WorkerSettings``'s previous hand-rolled URL parsing, which
-    dropped it — every queue command the worker issued then came back NOAUTH
-    against a password-protected Redis.
-    """
-    parsed = urlparse(redis_url)
-    return RedisSettings(
-        host=parsed.hostname or "localhost",
-        port=parsed.port or 6379,
-        database=int((parsed.path or "/0").strip("/") or 0),
-        username=parsed.username or None,
-        password=parsed.password or None,
-    )
-
-
 class WorkerSettings:
     """ARQ worker settings — configure connection and task functions."""
 
@@ -2542,6 +2519,13 @@ class WorkerSettings:
     after_job_end = _recycle_if_bloated
 
     redis_settings = build_redis_settings(settings.redis_url)
+    # The analyses' queue, named rather than defaulted: the enrichment reads
+    # one of its own (``enrich_worker.EnrichmentWorkerSettings``) so a 452 s
+    # reputation lookup can never be what this worker's single slot is busy
+    # with. A deployment that runs one process only turns
+    # ``api.enrichment_dedicated_worker`` off, and enrichment is queued here
+    # again.
+    queue_name = ANALYSIS_QUEUE
 
     # Worker tuning
     # Phase A fix: max_jobs=1 prevents zombie threads from starving other jobs.

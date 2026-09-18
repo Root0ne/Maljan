@@ -15,7 +15,8 @@ operator can reconfigure.
 | :-- | :-- |
 | Console (`apps/web`) | Next.js interface: dashboard, analyses, samples, settings. Talks HTTP to the API and subscribes to the job WebSocket. |
 | API (`apps/api/app`) | FastAPI application. Authentication, samples, jobs, reports, the audit trail, the settings store and the probes. |
-| Worker (`apps/api/app/worker`) | arq process. Takes an analysis job, runs the pipeline, writes the report and publishes progress events. |
+| Worker (`apps/api/app/worker`) | arq process. Takes an analysis job, runs the pipeline, writes the report and publishes progress events. One job at a time. |
+| Enrichment worker (`apps/api/app/worker/enrich_worker.py`) | A second arq process on a queue of its own, for the post-verdict reputation lookups. Several at a time; optional (see below). |
 | Core (`src/maljan`) | The analysis package: agents, the LangGraph pipeline, the deterministic evidence layers, the provider layer, memory and reporting. |
 | Postgres | Users, samples, jobs, reports, audit rows and the settings store. |
 | Redis | The arq queue, the per-job event stream, and rate-limit counters. |
@@ -43,8 +44,30 @@ operator can reconfigure.
    record.
 5. The report is written to Postgres and becomes available under
    `/api/v1/reports/...` in every rendering the report service supports.
-6. Threat-intelligence enrichment runs afterwards as its own job, so it never
-   delays the verdict.
+6. Threat-intelligence enrichment runs afterwards as its own job, on the
+   enrichment worker's queue, so it delays neither the verdict nor the next
+   analysis.
+
+### The two worker processes
+
+    uv run arq app.worker.analysis_worker.WorkerSettings
+    uv run arq app.worker.enrich_worker.EnrichmentWorkerSettings
+
+The analysis worker reads arq's default queue and runs **one job at a time**:
+two analyses on one host would share a model, a sandbox and a memory budget
+sized for one. The enrichment worker reads `arq:queue:enrichment` and runs
+several, because a reputation lookup waits on somebody else's HTTP.
+
+They were one process, and the single slot was the cost: a measured enrichment
+spent 451.98 s at VirusTotal while the next analysis sat `pending` for 4 m
+33 s. Nothing about that lookup needed the rule it was subject to.
+
+A deployment that does not want a second process turns
+`api.enrichment_dedicated_worker` off. The enrichment is then queued beside the
+analyses, as it used to be, and waits until none is running — the old behaviour
+with the old delay, chosen rather than inherited. The task is registered on
+both workers so the fallback has something to run it, and the nightly
+`job_events` purge stays on the analysis worker: one owner per scheduled task.
 
 ### What the worker holds while a run is in flight
 

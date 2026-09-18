@@ -33,6 +33,7 @@ from app.config import APISettings
 API_DEFAULTS: dict[str, Any] = {
     "mock_mode_allowed": False,
     "enrichment_enabled": True,
+    "enrichment_dedicated_worker": True,
     "enrichment_max_lookups": 25,
     "virustotal_api_key": "",
     "abuseipdb_api_key": "",
@@ -186,6 +187,18 @@ API_EDITABLE: dict[str, dict[str, Any]] = {
         "description": (
             "Look up the report's domains and IPs at VirusTotal and AbuseIPDB "
             "after every analysis. Providers without a key are skipped."
+        ),
+    },
+    "enrichment_dedicated_worker": {
+        "type": "bool",
+        "group": "enrichment",
+        "title": "Enrichment runs on its own worker",
+        "description": (
+            "Queue the post-verdict enrichment for the enrichment worker "
+            "process, so a long reputation lookup never occupies the analysis "
+            "worker's single slot. Turn this off only where that second "
+            "process is not running: the enrichment is then queued beside the "
+            "analyses and waits until none is running."
         ),
     },
     "enrichment_max_lookups": {

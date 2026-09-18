@@ -747,6 +747,18 @@ change landed on `main`.
 
 ### Fixed
 
+- **Enrichment stopped taking the slot an analysis was waiting for.** The
+  post-verdict reputation lookups were queued beside the analyses, where the
+  worker's one-job-at-a-time rule — which exists so two analyses never share a
+  model — applied to them as well: a measured enrichment spent 451.98 s at
+  VirusTotal while the next analysis sat `pending` for 4 minutes 33 seconds.
+  Enrichment now has a queue and a worker of its own
+  (`arq app.worker.enrich_worker.EnrichmentWorkerSettings`, four at a time,
+  in `docker-compose.yml` as `enrichment-worker`), and the analysis worker
+  reads only its own queue. A deployment that would rather run one process
+  turns `api.enrichment_dedicated_worker` off and gets the old behaviour
+  deliberately: enrichment queued beside the analyses, waiting until none is
+  running.
 - **The console stopped clipping itself.** `main` is a flex item, so its
   `min-width: auto` let it grow to its content's min-content width instead of
   constraining it: the Detection tab's Suricata block took it to 2542 px

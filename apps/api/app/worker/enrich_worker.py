@@ -1,16 +1,27 @@
 """ARQ task: post-hoc threat-intel enrichment for an ``AnalysisReport``.
 
-Picked up by the same worker process as :mod:`analysis_worker` — added to
-``WorkerSettings.functions`` so the existing startup / shutdown / Redis /
-DB session factory is reused.
+Runs on a queue and a worker of its own (``EnrichmentWorkerSettings``, started
+as a second process). It used to share the analysis worker's queue, where the
+one-job-at-a-time rule that keeps two analyses off one model applied to it as
+well: a measured run spent 451.98 s looking up domains at VirusTotal while the
+next analysis sat ``pending`` for 4 m 33 s. Nothing about a reputation lookup
+needs that rule — it waits on somebody else's HTTP — so it now waits in its own
+queue, several at a time, and the analysis worker never sees it.
+
+A deployment that would rather run one process turns
+``api.enrichment_dedicated_worker`` off: the enrichment is queued beside the
+analyses again and waits its turn there, which is the old behaviour and the old
+cost. The task stays registered on both workers so the fallback has something
+to run it.
 
 Trigger paths:
   - automatic: ``analysis_worker.run_analysis`` enqueues this task right
     after the report row is committed.
   - manual: ``POST /api/v1/reports/{id}/enrich`` enqueues it explicitly.
 
-Both paths share the unique ``_job_id="enrich:{report_id}"`` so a second
-attempt simply replaces the queued one — duplicate work is impossible.
+Both go through :func:`enqueue_enrichment`, and both share the unique
+``_job_id="enrich:{report_id}"`` so a second attempt simply replaces the queued
+one — duplicate work is impossible.
 """
 
 from __future__ import annotations
@@ -21,14 +32,47 @@ from typing import TYPE_CHECKING, Any
 import redis.asyncio as aioredis
 from maljan.core.settings_overrides import redact_url
 
+from app.config import settings
 from app.logging_config import get_logger
 from app.models.report import AnalysisReport
 from app.runtime_config import runtime_config
+from app.worker.queues import ANALYSIS_QUEUE, ENRICHMENT_QUEUE, build_redis_settings
 
 if TYPE_CHECKING:
     from maljan.memory.long_term_memory import MemoryStore
 
 logger = get_logger("worker.enrich")
+
+
+async def enqueue_enrichment(pool: Any, report_id: Any) -> str | None:
+    """Queue one report's enrichment, on the queue the deployment asked for.
+
+    The one place that knows the task's name and where it goes, so the
+    automatic path and the operator's button cannot drift apart. Returns the
+    arq job id, or ``None`` when arq refused it because the same id is already
+    queued — which is how a duplicate trigger is coalesced.
+
+    A settings store that cannot be read does not stop the work: the enrichment
+    is queued on its own queue, which is the configured default.
+    """
+    try:
+        dedicated = bool(await runtime_config.get("enrichment_dedicated_worker"))
+    except Exception as exc:  # noqa: BLE001 — the queue is not worth a failed enqueue
+        logger.warning(
+            "enrich: could not read which queue to use (%s); using %s.",
+            type(exc).__name__,
+            ENRICHMENT_QUEUE,
+        )
+        dedicated = True
+    queue = ENRICHMENT_QUEUE if dedicated else ANALYSIS_QUEUE
+    job = await pool.enqueue_job(
+        "enrich_threat_intel",
+        str(report_id),
+        _job_id=f"enrich:{report_id}",
+        _queue_name=queue,
+    )
+    return str(job.job_id) if job is not None else None
+
 
 # Process-wide singleton cache for the Qdrant LTM store. Two flags so we
 # can distinguish "never attempted" (build it now) from "built but unavailable"
@@ -250,3 +294,82 @@ async def purge_old_job_events(ctx: dict) -> dict[str, Any]:
 
     logger.info("events sweep: removed %d row(s) older than %d day(s).", removed, days)
     return {"status": "ok", "removed": removed, "retention_days": days}
+
+
+# ── The enrichment worker ───────────────────────────────────────
+
+
+async def enrich_startup(ctx: dict) -> None:
+    """Called when the enrichment worker starts up.
+
+    Deliberately lighter than the analysis worker's: this process runs no
+    pipeline, downloads no sample and owns no job row, so it needs a database
+    session factory and a Redis connection and nothing else. The orphan sweep
+    and the private-sample sweep belong to the process that runs the jobs they
+    are about.
+    """
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.bootstrap import BootstrapProblem, require_bootstrap
+    from app.config import get_settings
+    from app.logging_config import setup_logging
+
+    setup_logging()
+    try:
+        require_bootstrap(get_settings())
+    except BootstrapProblem as exc:
+        logger.critical(str(exc))
+        raise
+
+    engine = create_async_engine(settings.database_url, pool_size=5, max_overflow=10)
+    ctx["db_session"] = async_sessionmaker(engine, expire_on_commit=False)
+    ctx["redis"] = aioredis.from_url(settings.redis_url)
+    logger.info(
+        "Enrichment worker started: reading %s",
+        ENRICHMENT_QUEUE,
+        extra={"component": "worker.lifecycle"},
+    )
+
+
+async def enrich_shutdown(ctx: dict) -> None:
+    """Called when the enrichment worker shuts down."""
+    redis_conn: aioredis.Redis | None = ctx.get("redis")
+    if redis_conn:
+        await redis_conn.aclose()
+
+    db_session = ctx.get("db_session")
+    if db_session:
+        engine = db_session.kw.get("bind")
+        if engine:
+            await engine.dispose()
+
+    logger.info(
+        "Enrichment worker shutdown complete",
+        extra={"component": "worker.lifecycle"},
+    )
+
+
+class EnrichmentWorkerSettings:
+    """The second process: ``arq app.worker.enrich_worker.EnrichmentWorkerSettings``.
+
+    Reads its own queue, so the analysis worker's single slot is never spent on
+    a reputation lookup. Several at a time, because each one is waiting on
+    somebody else's HTTP rather than on this host's model or its memory, and
+    with its own timeout: the longest measured enrichment took 452 s, which the
+    analysis worker's eight-hour ceiling would have hidden.
+
+    The nightly ``job_events`` purge stays on the analysis worker. One owner for
+    a scheduled task is the whole point of scheduling it.
+    """
+
+    functions = [enrich_threat_intel]
+    queue_name = ENRICHMENT_QUEUE
+    on_startup = enrich_startup
+    on_shutdown = enrich_shutdown
+
+    redis_settings = build_redis_settings(settings.redis_url)
+
+    max_jobs = 4
+    job_timeout = 3600
+    max_tries = 1
+    health_check_interval = 30
