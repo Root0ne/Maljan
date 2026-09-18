@@ -4,13 +4,23 @@ Two properties of ``run_analysis``, both learned from one live run: a session
 left open for the length of an analysis blocked a migration and every read
 behind it, and a job whose session was killed under it published an ``error``
 event and left its row saying ``running`` for ever.
+
+Nothing here reaches a service. The database is the tracking factory from
+``_session_probe``, Redis is a stub, and the object store is stubbed per test —
+because whether the sample download succeeds changes how many short sessions a
+run opens before the pipeline, and a test that counted them was a test of the
+environment. What these assert is the invariant instead: when the pipeline
+starts, every session the run has opened is closed and settled, whichever way
+the download went.
 """
 
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -45,6 +55,59 @@ def _isolated_runtime_settings(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(rc.runtime_config, "_overrides", _mock_mode_allowed_override)
     yield
     reset_settings_cache()
+
+
+class _FakeMinioClient:
+    """Writes the bytes the download step is there to fetch."""
+
+    def fget_object(self, bucket: str, object_name: str, file_path: str) -> None:
+        Path(file_path).write_bytes(b"MZfakebinary")
+
+
+@pytest.fixture(autouse=True)
+def _object_store(tmp_path: Path):
+    """A reachable object store, and private directories under this test's own.
+
+    Every path below runs the download for real, so it is stubbed here rather
+    than left to whatever is listening on the host: on this machine MinIO is
+    up and the download succeeds, in CI it is not and the run takes its
+    "Sandbox submission skipped" path, and the two differ by a session. A test
+    that depends on which one it got is a test of the deployment it ran on.
+    """
+    from app import config as api_config
+
+    api_config._settings = None
+    with (
+        patch("minio.Minio", return_value=_FakeMinioClient()),
+        patch.dict(
+            "os.environ",
+            {
+                "UPLOAD_TEMP_DIR": str(tmp_path / "tmp"),
+                "SAMPLES_DIR": str(tmp_path / "samples"),
+            },
+            clear=False,
+        ),
+    ):
+        yield
+    api_config._settings = None
+
+
+def _unreachable_object_store():
+    """The CI shape: nothing is listening, and the run says so and carries on."""
+    return patch("minio.Minio", side_effect=ConnectionError("no object store here"))
+
+
+def assert_every_session_has_ended(factory: SessionFactory) -> None:
+    """No session of this run is open, and each one committed or rolled back.
+
+    The invariant the count used to stand in for. How many short sessions a
+    run opens before the models start depends on what it had to do — read the
+    settings, flush a batch of events — and none of that matters as long as
+    each one ended.
+    """
+    assert [s.index for s in factory.sessions if s.open] == []
+    assert [s.index for s in factory.sessions if s.in_transaction] == []
+    assert [s.index for s in factory.sessions if s.commits + s.rollbacks == 0] == []
 
 
 @pytest_asyncio.fixture
@@ -115,20 +178,14 @@ async def test_no_transaction_is_open_while_the_pipeline_runs(redis_stub: MagicM
 
     assert result["status"] == "completed"
     assert open_during_the_run and max(open_during_the_run) == 0
-    # And every session this run opened was closed again.
-    assert [s for s in factory.sessions if s.open] == []
+    # And every session this run opened was closed and settled.
+    assert_every_session_has_ended(factory)
 
 
-@pytest.mark.asyncio
-async def test_the_settings_read_is_committed_before_the_pipeline(
+async def _run_and_watch_the_boundary(
     redis_stub: MagicMock,
-) -> None:
-    """The session that read the settings ends before the models start.
-
-    The first session does the reads and the status change and then closes;
-    the report is written through a different one, opened when the pipeline
-    has already returned.
-    """
+) -> tuple[dict[str, Any], SessionFactory, list[int]]:
+    """Run a job whose pipeline inspects the sessions at the moment it starts."""
     job = fake_job()
     sample = fake_sample(job.sample_id)
     factory = SessionFactory(rows_for(job, sample))
@@ -136,7 +193,7 @@ async def test_the_settings_read_is_committed_before_the_pipeline(
 
     async def _pipeline(*args: Any, **kwargs: Any) -> dict[str, Any]:
         sessions_at_pipeline_time.append(len(factory.sessions))
-        assert [s for s in factory.sessions if s.open] == []
+        assert_every_session_has_ended(factory)
         return _pipeline_result()
 
     from app import config as api_config
@@ -148,14 +205,50 @@ async def test_the_settings_read_is_committed_before_the_pipeline(
     ):
         result = await run_analysis({"redis": redis_stub, "db_session": factory}, str(job.id))
     api_config._settings = None
+    return result, factory, sessions_at_pipeline_time
+
+
+@pytest.mark.asyncio
+async def test_the_reads_are_settled_before_the_pipeline(redis_stub: MagicMock) -> None:
+    """Whatever the run did first, it had finished doing it.
+
+    The reads and the status change go through sessions that end before the
+    models start, and the report is written through one opened after they
+    stop. How many the run opened on the way is not the invariant — a batch of
+    events flushed on its own session is one more, and so is a download that
+    had to be retried — so this asserts that each of them ended and that the
+    writes came later.
+    """
+    result, factory, at_pipeline_time = await _run_and_watch_the_boundary(redis_stub)
 
     assert result["status"] == "completed"
-    # One session for the reads and the status change, and at least one more
-    # for the writes at the end.
-    assert sessions_at_pipeline_time == [1]
-    assert len(factory.sessions) > 1
+    assert at_pipeline_time and at_pipeline_time[0] >= 1, "the reads happen before the models"
+    assert len(factory.sessions) > at_pipeline_time[0], "and the writes after them"
     first = factory.sessions[0]
     assert first.commits >= 1 and not first.open
+    assert_every_session_has_ended(factory)
+
+
+@pytest.mark.asyncio
+async def test_the_reads_are_settled_when_the_object_store_is_unreachable(
+    redis_stub: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The path CI takes: no object store, so the run skips the download.
+
+    It opens a session more or fewer than the reachable case — which is what
+    made a count fail there and pass here — and the invariant is the same.
+    """
+    with _unreachable_object_store(), caplog.at_level(logging.WARNING):
+        result, factory, at_pipeline_time = await _run_and_watch_the_boundary(redis_stub)
+
+    # The run really did take the other path, rather than quietly finding an
+    # object store somewhere.
+    assert any("Sandbox submission skipped" in record.message for record in caplog.records)
+    assert result["status"] == "completed"
+    assert at_pipeline_time and at_pipeline_time[0] >= 1
+    assert len(factory.sessions) > at_pipeline_time[0]
+    assert_every_session_has_ended(factory)
 
 
 @pytest.mark.asyncio

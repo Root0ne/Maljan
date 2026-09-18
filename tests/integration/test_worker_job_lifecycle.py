@@ -54,6 +54,22 @@ def _isolated_runtime_settings(monkeypatch: pytest.MonkeyPatch):
     reset_settings_cache()
 
 
+@pytest.fixture(autouse=True)
+def _no_object_store(monkeypatch: pytest.MonkeyPatch):
+    """The object store is out of reach here unless a test brings its own.
+
+    These tests are about the job's lifecycle, not its bytes. Left to the
+    host, the download succeeds on a developer machine and fails in CI, which
+    makes every run take a different path through the worker and writes sample
+    copies into whatever ``UPLOAD_TEMP_DIR`` points at. Refusing the
+    connection is the shape CI exercises, and the two tests that need the
+    bytes patch ``minio.Minio`` themselves, which wins while their block is
+    open.
+    """
+    with patch("minio.Minio", side_effect=ConnectionError("no object store here")):
+        yield
+
+
 @pytest_asyncio.fixture
 async def mock_db_session() -> AsyncMock:
     """A mocked async DB session that supports async context manager.
