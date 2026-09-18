@@ -37,12 +37,20 @@ _CATALOG: dict[str, Any] | None = None
 
 
 def reset_indices() -> None:
-    """Drop the warm index and catalog. For tests and for a refresh."""
-    global _HYBRID_INDEX, _HYBRID_FAILED, _CATALOG
+    """Drop the warm index and catalog. For tests and for a refresh.
+
+    The attempt is dropped with them. ``_WARM_STARTED`` is the memory of a
+    build having been started, and it is sticky precisely so a failed one is
+    not retried; a caller that has just thrown the index away is asking for
+    the cold state, and leaving the flag set would disarm the background
+    warmer for the rest of the process with nothing able to arm it again.
+    """
+    global _HYBRID_INDEX, _HYBRID_FAILED, _CATALOG, _WARM_STARTED
     with _INDEX_LOCK:
         _HYBRID_INDEX = None
         _HYBRID_FAILED = ""
         _CATALOG = None
+        _WARM_STARTED = False
 
 
 def _catalog() -> dict[str, Any]:
