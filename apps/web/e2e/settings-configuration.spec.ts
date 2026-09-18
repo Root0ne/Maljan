@@ -70,7 +70,7 @@ test.describe("Settings → Configuration (admin)", () => {
     // The visible badge is aria-hidden; the accessible name carries the
     // sr-only count text instead, so a screen reader hears "1 unsaved
     // changes" rather than a bare digit.
-    await expect(link).toHaveAccessibleName(/1 unsaved changes/);
+    await expect(link).toHaveAccessibleName(/1 unsaved change/);
   });
 
   test("stages a change, shows the pending bar, and Review → Confirm sends one PATCH with the applies summary", async ({

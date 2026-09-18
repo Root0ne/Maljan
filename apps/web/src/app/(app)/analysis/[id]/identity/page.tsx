@@ -15,8 +15,9 @@ import {
   saysSomething,
   sectionsForTab,
 } from "@/components/analysis/reportSections";
+import { humaniseRow } from "@/lib/humanise";
 import { fileTypeLabel, platformLabel } from "@/types/malware-report";
-import type { SampleIdentity } from "@/types/malware-report";
+import type { EvidenceSection, SampleIdentity } from "@/types/malware-report";
 
 export default function IdentityTab() {
   const { report, loading } = useReport();
@@ -48,7 +49,11 @@ export default function IdentityTab() {
     report?.malware_report?.identity?.file_type,
   );
   const evidenceSections = tabSections.flatMap((section) =>
-    section.key === "identity" ? (splitIdentity ? [splitIdentity] : []) : [section],
+    section.key === "identity"
+      ? splitIdentity
+        ? [splitIdentity]
+        : []
+      : [readableHeader(section)],
   );
   const showsTypedIdentity = !isCoveredBySection(reportSections, binarySectionKeys("header"));
 
@@ -194,6 +199,19 @@ export default function IdentityTab() {
       )}
     </div>
   );
+}
+
+/**
+ * A binary-info tool's header table, read back into the words it means.
+ *
+ * `machine 34404`, `subsystem 2`, `timestamp 1566949827` and `size 4486656`
+ * are what the file format stores; none of them is a fact about the sample
+ * until it is named. Scoped to the header tables rather than done in
+ * `ArtifactTable`, which is deliberately ignorant of what a tool's fields are.
+ */
+function readableHeader(section: EvidenceSection): EvidenceSection {
+  if (section.kind !== "kv" || !/_header$/.test(section.key)) return section;
+  return { ...section, rows: (section.rows ?? []).map(humaniseRow) };
 }
 
 /** The hashes a reader knows by name, in the order they are usually quoted. */
