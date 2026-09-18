@@ -447,6 +447,28 @@ describe("the back-fill", () => {
     expect(getRun(JOB).feedError).toContain("only part of this run");
   });
 
+  it("reaches an enrichment published after the run itself ended", async () => {
+    /* Enrichment runs after the verdict, on its own queue, and its event is
+     * numbered from where the run's own numbering stopped. A run whose last
+     * page is exactly full therefore has one more page behind it, holding a
+     * line the reader is waiting for — the reputation the report is about to
+     * gain. */
+    const run = recorded(BACKFILL_LIMIT);
+    const late = event("enrichment_complete", { seq: BACKFILL_LIMIT + 500, domains_enriched: 3 });
+    const { transport, reads } = pagingTransport([...run, late]);
+    configureRunTransport(transport);
+
+    subscribeRun(JOB, () => {});
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(reads).toEqual([undefined, BACKFILL_LIMIT]);
+    const events = getRun(JOB).events;
+    expect(events).toHaveLength(BACKFILL_LIMIT + 1);
+    expect(events[events.length - 1].type).toBe("enrichment_complete");
+    expect(getRun(JOB).lastSeq).toBe(BACKFILL_LIMIT + 500);
+    expect(getRun(JOB).feedError).toBeNull();
+  });
+
   it("drops a page that comes back for a run the store was told to forget", async () => {
     /* A reader who leaves is why a long run is evicted at all: the pages keep
      * arriving, and folding one by job id would put the whole run back in the

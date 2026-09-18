@@ -49,3 +49,22 @@ export function runFailure(
     .trim();
   return { sentence, errorId: found[1] };
 }
+
+/**
+ * The failure a job row states, and nothing for a job that did not fail.
+ *
+ * A cancelled run is not a failed one. The operator stopped it, the worker
+ * writes `cancelled` on a session of its own and records no message, and
+ * `mark_job_failed` leaves a cancelled row alone — so a cancel outranks
+ * whatever the run was raising on its way down, and there is no failure here
+ * to report. A run still going has not failed either, and one that completed
+ * least of all.
+ */
+export function jobFailure(
+  status: string | null | undefined,
+  message: string | null | undefined,
+): RunFailure | null {
+  if (status !== "failed") return null;
+  const failure = runFailure(message);
+  return failure.sentence || failure.errorId ? failure : null;
+}

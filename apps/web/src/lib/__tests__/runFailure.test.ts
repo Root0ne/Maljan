@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { runFailure } from "@/lib/runFailure";
+import { jobFailure, runFailure } from "@/lib/runFailure";
 
 const ID = "5f3a9c1d4e2b48f7a0c6d8e1b3f5a7c9";
 const OTHER = "0011223344556677889900aabbccddee";
@@ -59,5 +59,33 @@ describe("a failure's error id", () => {
   it("survives a run that recorded no failure text", () => {
     expect(runFailure(null)).toEqual({ sentence: "", errorId: null });
     expect(runFailure(undefined)).toEqual({ sentence: "", errorId: null });
+  });
+});
+
+describe("what a job row says about its ending", () => {
+  it("is the failure, for a run that failed", () => {
+    expect(jobFailure("failed", `ValueError (error id ${ID})`)).toEqual({
+      sentence: "ValueError",
+      errorId: ID,
+    });
+  });
+
+  it("is nothing for a run an operator cancelled", () => {
+    /* The cancel is the operator's decision, recorded with no message and
+     * outranking whatever the run was raising as it went down. Drawing a
+     * failure over it would report the stop as a fault. */
+    expect(jobFailure("cancelled", null)).toBeNull();
+    expect(jobFailure("cancelled", `ValueError (error id ${ID})`)).toBeNull();
+  });
+
+  it("is nothing for a run that is still going or has finished", () => {
+    for (const status of ["pending", "running", "completed"]) {
+      expect(jobFailure(status, null)).toBeNull();
+    }
+  });
+
+  it("is nothing for a failed row that recorded no message at all", () => {
+    expect(jobFailure("failed", null)).toBeNull();
+    expect(jobFailure("failed", "   ")).toBeNull();
   });
 });

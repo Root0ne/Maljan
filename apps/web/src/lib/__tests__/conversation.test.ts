@@ -4,6 +4,7 @@ import {
   buildConversation,
   filterConversation,
   groupOf,
+  runStatus,
   toolCallsFromFeed,
   type ConversationItem,
   type ConversationStage,
@@ -281,6 +282,23 @@ describe("a run that failed", () => {
 
     expect(notices.map((s) => s.id)).toEqual(["closing"]);
     expect(notices[0].id).toBe(all[all.length - 1].id);
+  });
+
+  it("draws nothing for a run an operator stopped", () => {
+    /* A cancel publishes its own event and no failure: the worker records a
+     * cancelled row with no message, and leaves a cancelled row alone when
+     * something else tries to mark it failed. A closing failure line here
+     * would report the operator's own decision as a fault. */
+    const { stages } = buildConversation(
+      [
+        event("agent_message", { stage: "analysis", speaker: "lead", text: "reading imports" }),
+        event("cancelled", {}),
+      ],
+      ROSTER,
+    );
+
+    expect(itemsOf(stages)).toEqual(["analysis/0/says"]);
+    expect(runStatus([event("cancelled", {})])).toBe("cancelled");
   });
 
   it("says the run failed when the event carried no words of its own", () => {
