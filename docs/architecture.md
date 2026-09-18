@@ -481,7 +481,15 @@ carry a budget of their own (`core.agents.delegation_steps`,
 spent by its specialists' work, only its wall clock is, and an ask is cut to
 the time the caller has left and refused when that is below what a first model
 turn needs. A callee that reaches its step cap writes up what it gathered, the
-way an analyst at its own cap does. Two `agent_message`
+way an analyst at its own cap does — and so, now, does a caller. A lead's
+report is the only channel its stage has, so a lead whose own loop ended
+without one used to take every answered ask down with it: one audited chunk
+spent 1,830 s, collected six answers and 52 ledger entries, and merged zero
+claims. The lead is given one bounded turn to write its report from the answers
+it already holds, and when that turn produces nothing either the specialists'
+own ISRs are promoted into the stage's merge under their own agent keys, with
+their own claims and confidences untouched. Nothing is promoted beside a report
+that exists. Two `agent_message`
 events carry the exchange, each with `stage`, `round` and `addressed_to`: the
 caller's ask, addressed to the callee, and the callee's answer with its claims,
 addressed to the caller. The console draws the arrow live, and in the replay

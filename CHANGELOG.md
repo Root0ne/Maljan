@@ -747,6 +747,18 @@ change landed on `main`.
 
 ### Fixed
 
+- **A lead that never wrote its report no longer takes its specialists'
+  answers with it.** A lead's report is the only channel its chunk has out of a
+  stage, so a loop that ended without one lost every completed ask: one audited
+  chunk spent 1,830 s, had six specialist asks answered and 52 evidence entries
+  recorded, and merged zero claims. The answers are kept on the caller as the
+  specialists' own ISRs; a lead that produced no claims is given one bounded
+  turn to write its report from them — the forced synthesis the analysts
+  already use — and when that turn produces nothing either, the specialists'
+  ISRs are promoted into the stage's merge under their own agent keys, with
+  their claims and confidences exactly as they made them. Nothing is promoted
+  beside a report that exists.
+
 - **Every violation a run recorded reaches the conversation, with what became
   of it.** Only the batch that triggered a correction turn was published, so a
   reader watching a run saw neither the violations that survived the retry nor

@@ -111,6 +111,38 @@ def _empty_isr(agent_name: str, revision_round: int = 0) -> AgentISR:
     )
 
 
+def promoted_asks(agent: Any, own: AgentISR | None = None) -> dict[str, AgentISR]:
+    """The answered asks a stage takes when the caller's own report is empty.
+
+    A lead's report is the only channel its stage has, so a lead that produced
+    nothing — its loop hit the wall-clock cap, or it failed outright — used to
+    take every answer it had already received down with it: one audited chunk
+    spent 1,830 s, collected six answered asks and 52 ledger entries, and
+    merged zero claims. The specialists' own ISRs are model output of this
+    team, they carry the agent that produced them, and here they stand in for
+    the report the lead never wrote. Empty when the lead did answer: nothing is
+    promoted beside a report that exists.
+    """
+    if own is not None and getattr(own, "claims", None):
+        return {}
+    answers = getattr(agent, "answered_asks", None)
+    if not callable(answers):
+        return {}
+    out: dict[str, AgentISR] = {}
+    for isr in answers() or []:
+        key = str(getattr(isr, "agent_id", "") or "").strip()
+        if not key or not getattr(isr, "claims", None) or key in out:
+            continue
+        out[key] = isr
+    if out:
+        logger.warning(
+            "The lead produced no claims; promoting %d answered ask(s) into the stage: %s.",
+            len(out),
+            ", ".join(sorted(out)),
+        )
+    return out
+
+
 # The file-loader placeholder for a missing per-sample fixture
 # ("No static data available for sample <sha>."). Local copy of the
 # placeholder pattern from static_analyst to avoid a nodes->agents import edge.
@@ -1857,9 +1889,16 @@ def make_stage_agent_node(
             technique_ids = tuple(
                 dict.fromkeys(str(c.technique_id) for c in isr.claims if c.technique_id is not None)
             )
+            # A lead that answered with no claims still has whatever its
+            # specialists answered, and their ISRs are the only place those
+            # answers survive.
+            _promoted = promoted_asks(agent, isr)
             node_out: dict[str, Any] = {
-                "reports": {agent_name: report},
-                "isr_reports": {agent_name: isr},
+                "reports": {
+                    agent_name: report,
+                    **{key: answer.to_text_summary() for key, answer in _promoted.items()},
+                },
+                "isr_reports": {agent_name: isr, **_promoted},
                 **stage_record(
                     stage,
                     ran=True,
@@ -1903,10 +1942,14 @@ def make_stage_agent_node(
                 stage=stage_key_of(stage, "analysis"),
                 display_name=label_of(container, agent_name),
             )
+            _promoted = promoted_asks(agent)
             return _closing(
                 {
-                    "reports": {agent_name: failed_text},
-                    "isr_reports": {agent_name: _empty_isr(agent_name)},
+                    "reports": {
+                        agent_name: failed_text,
+                        **{key: answer.to_text_summary() for key, answer in _promoted.items()},
+                    },
+                    "isr_reports": {agent_name: _empty_isr(agent_name), **_promoted},
                     **_evidence_update(),
                     **stage_record(
                         stage,
