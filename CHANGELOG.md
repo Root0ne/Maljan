@@ -747,6 +747,16 @@ change landed on `main`.
 
 ### Fixed
 
+- **Every modern APK was reported unsigned.** The APK Signing Block opens with
+  its own size, and the walk over the id-value pairs began on that size field
+  rather than eight bytes later on the first pair. One field out of step is
+  enough that no scheme id is ever recognised, so an APK signed only with
+  schemes v2 and v3 — which is how Android has signed packages for years —
+  came back with `present: false, schemes: []`, and an analyst reading the pack
+  wrote that the application was unsigned and therefore probably repacked. The
+  walk now starts on the first pair, stays inside the block rather than inside
+  the file, and refuses to read a block whose two size fields disagree, because
+  a footer that does not agree with itself was not a block footer.
 - **Four documented facts that had drifted from the code.** The delegation
   section said a lead's 1800 s stage had room for five asks where
   `_asks_that_fit` computes six and the `ask_<key>` description gives the model

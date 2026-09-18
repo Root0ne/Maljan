@@ -33,6 +33,50 @@ def _write(tmp_path: Path, name: str, blob: bytes) -> str:
     return str(target)
 
 
+APK_SIG_BLOCK_MAGIC = b"APK Sig Block 42"
+APK_SCHEME_V2 = 0x7109871A
+APK_SCHEME_V3 = 0xF05368C0
+# The padding pair apksigner writes to align the block; not a scheme.
+APK_PADDING_ID = 0x42726577
+
+
+def _signing_block(pair_ids: list[int]) -> bytes:
+    """An APK Signing Block holding one value per id, laid out as the spec has it.
+
+    Leading uint64 size, the id-value pairs, the same size again, the magic.
+    The size counts everything after the leading field, so the first pair
+    begins eight bytes past the block's start.
+    """
+    pairs = b""
+    for pair_id in pair_ids:
+        value = b"\x30\x82" + b"\x00" * 46
+        pairs += struct.pack("<QI", 4 + len(value), pair_id) + value
+    block_size = len(pairs) + 8 + len(APK_SIG_BLOCK_MAGIC)
+    size_field = struct.pack("<Q", block_size)
+    return size_field + pairs + size_field + APK_SIG_BLOCK_MAGIC
+
+
+def _apk_with_block(tmp_path: Path, name: str, block: bytes, *, cert: bool = False) -> str:
+    """A real zip with a signing block spliced in where apksigner puts it.
+
+    Between the last local entry and the central directory, with the end
+    record's directory offset moved on by the block's length, so the file is
+    still a readable archive.
+    """
+    raw = tmp_path / f"{name}.staging"
+    with zipfile.ZipFile(raw, "w") as archive:
+        archive.writestr("AndroidManifest.xml", b"\x03\x00\x08\x00binary manifest")
+        archive.writestr("classes.dex", b"dex\n035\x00")
+        if cert:
+            archive.writestr("META-INF/CERT.RSA", b"\x30\x82 not a real pkcs7")
+    blob = bytearray(raw.read_bytes())
+    end = blob.rfind(b"PK\x05\x06")
+    directory_at = struct.unpack_from("<I", blob, end + 16)[0]
+    struct.pack_into("<I", blob, end + 16, directory_at + len(block))
+    spliced = bytes(blob[:directory_at]) + block + bytes(blob[directory_at:])
+    return _write(tmp_path, name, spliced)
+
+
 class TestIdentifyFile:
     def test_an_elf_is_an_elf_on_linux(self, tmp_path: Path) -> None:
         result = identify.identify_file(_write(tmp_path, "s.bin", ELF_HEADER + b"\x00" * 512))
@@ -106,6 +150,57 @@ class TestSigningInfo:
         assert result["apk"]["schemes"] == ["v1"]
         assert result["apk"]["cert_files"] == ["META-INF/CERT.RSA"]
         assert "authenticode" not in result
+
+    def test_an_apk_signed_only_with_scheme_v2_is_not_reported_unsigned(
+        self, tmp_path: Path
+    ) -> None:
+        """Every modern APK is v2/v3 only; reading the block wrong calls them all unsigned."""
+        apk = _apk_with_block(tmp_path, "v2.apk", _signing_block([APK_SCHEME_V2]))
+        result = identify.signing_info(apk, file_type="apk")
+        assert result["apk"]["present"] is True
+        assert result["apk"]["schemes"] == ["v2"]
+        assert result["apk"]["cert_files"] == []
+
+    def test_an_apk_signed_only_with_scheme_v3_names_that_scheme(self, tmp_path: Path) -> None:
+        apk = _apk_with_block(tmp_path, "v3.apk", _signing_block([APK_SCHEME_V3]))
+        result = identify.signing_info(apk, file_type="apk")
+        assert result["apk"]["present"] is True
+        assert result["apk"]["schemes"] == ["v3"]
+
+    def test_an_apk_signed_with_v2_and_v3_names_both_and_skips_the_padding_pair(
+        self, tmp_path: Path
+    ) -> None:
+        """The shape of a production APK: both schemes, no META-INF certificate."""
+        block = _signing_block([APK_SCHEME_V2, APK_SCHEME_V3, APK_PADDING_ID])
+        result = identify.signing_info(_apk_with_block(tmp_path, "both.apk", block), "apk")
+        assert result["apk"]["present"] is True
+        assert result["apk"]["schemes"] == ["v2", "v3"]
+
+    def test_an_apk_carrying_both_a_certificate_and_a_block_names_all_three(
+        self, tmp_path: Path
+    ) -> None:
+        block = _signing_block([APK_SCHEME_V2, APK_SCHEME_V3])
+        apk = _apk_with_block(tmp_path, "all.apk", block, cert=True)
+        result = identify.signing_info(apk, file_type="apk")
+        assert result["apk"]["schemes"] == ["v1", "v2", "v3"]
+        assert result["apk"]["cert_files"] == ["META-INF/CERT.RSA"]
+
+    def test_an_apk_with_no_signature_at_all_is_the_only_unsigned_answer(
+        self, tmp_path: Path
+    ) -> None:
+        apk = tmp_path / "bare.apk"
+        with zipfile.ZipFile(apk, "w") as archive:
+            archive.writestr("AndroidManifest.xml", b"\x03\x00\x08\x00binary manifest")
+            archive.writestr("classes.dex", b"dex\n035\x00")
+        result = identify.signing_info(str(apk), file_type="apk")
+        assert result["apk"] == {"present": False, "schemes": [], "cert_files": []}
+
+    def test_a_block_whose_two_size_fields_disagree_yields_no_schemes(self, tmp_path: Path) -> None:
+        """Without a coherent footer the block was not located, so nothing is claimed."""
+        block = bytearray(_signing_block([APK_SCHEME_V2]))
+        struct.pack_into("<Q", block, 0, len(block) + 64)
+        apk = _apk_with_block(tmp_path, "torn.apk", bytes(block))
+        assert identify.signing_info(apk, file_type="apk")["apk"]["schemes"] == []
 
     def test_a_zip_that_is_not_an_apk_is_not_asked_about_apk_signing(self, tmp_path: Path) -> None:
         """A .docx is a zip. Nothing about it is an Android signing scheme."""
