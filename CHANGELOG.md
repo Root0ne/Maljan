@@ -774,6 +774,17 @@ change landed on `main`.
   `error_message` is a field of `JobResponse` and an exception's message names
   host paths and connection strings. A `cancelled` row is left alone.
 
+- **The startup sweep reads ownership from the queue instead of assuming it.**
+  It marked every `running` row older than five minutes as failed, on the
+  reasoning that this process is the worker and has just booted — true of a
+  single-worker deployment and false of any other, where it would fail a run
+  another worker was performing. A job is now left alone while arq holds a
+  claim on it (`arq:in-progress:<job id>`, written under our own job id) and a
+  worker is alive to be holding it (the queue's health key, which expires
+  seconds after a worker stops writing it). A job running longer than
+  `job_timeout` is swept whatever the queue says, and when the queue cannot be
+  read, only those are. The row's reason now names which of the two it was.
+
 - **Four documented facts that had drifted from the code.** The delegation
   section said a lead's 1800 s stage had room for five asks where
   `_asks_that_fit` computes six and the `ask_<key>` description gives the model

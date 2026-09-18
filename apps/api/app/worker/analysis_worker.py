@@ -2024,83 +2024,161 @@ def _extract_mitre(result: dict) -> list | None:
 _ORPHAN_GRACE_SECONDS = int(os.environ.get("ORPHAN_JOB_GRACE_SECONDS", "300"))
 
 
-async def _sweep_orphan_jobs(db_session: async_sessionmaker) -> None:
-    """Mark abandoned ``running`` rows as ``failed`` at worker startup.
+def health_check_key() -> str:
+    """The key an arq worker writes its health line to.
 
-    When the worker process is killed
-    mid-flight (e.g. operator ``Stop-Process`` during development, OOM
-    kill, deploy rollover) the ``run_analysis`` task has no chance to
-    flip the row from ``running`` → ``failed`` in its ``except`` block.
-    The DB then carries phantom ``running`` rows forever — the
-    dashboard reports them as in-flight even though no worker holds
-    them. Auditors looking at the legacy data assume the pipeline is
-    still busy.
+    Present means a worker was alive within the last
+    ``health_check_interval + 1`` seconds — arq sets it with that expiry — so
+    its absence at boot is a statement about the queue, not about this
+    process, which has not recorded its own health yet when ``on_startup``
+    runs.
+    """
+    from arq.constants import default_queue_name, health_check_key_suffix
 
-    Cleanup rule: at boot, any ``running`` row older than
-    ``_ORPHAN_GRACE_SECONDS`` cannot be held by a live worker — this
-    process is the worker, ``max_jobs = 1``, and it has just started.
-    Flip it to ``failed`` with a clear ``error_message`` so the UI shows
-    the right state and the FP-rate stats become real.
+    return f"{default_queue_name}{health_check_key_suffix}"
 
-    This runs once per worker boot and cannot race with an active job:
-    the only rows in the window are ones written before this process
-    existed.
+
+async def claimed_job_ids(redis_conn: Any, job_ids: list[str]) -> set[str] | None:
+    """Which of these jobs the queue says a live worker is holding.
+
+    ``None`` when the queue cannot answer at all, which is a different thing
+    from "nobody holds them" and is treated as such by the caller: a sweep
+    that guessed here would fail a run another worker is performing.
+
+    arq claims a job by setting ``arq:in-progress:<id>`` for the length of the
+    job timeout and enqueues under our own job id, so the key names the job
+    row directly. A claim outlives the process that made it — the key is set
+    once, not refreshed — so a claim only counts while some worker is alive.
+    """
+    if redis_conn is None or not job_ids:
+        return None
+    from arq.constants import in_progress_key_prefix
+
+    try:
+        if not await redis_conn.exists(health_check_key()):
+            return set()
+        held = await redis_conn.mget([f"{in_progress_key_prefix}{job_id}" for job_id in job_ids])
+    except Exception as exc:  # noqa: BLE001 — an unreadable queue is not a verdict
+        logger.warning(
+            "Startup orphan sweep: the queue could not be read (%s); "
+            "only jobs past the job timeout will be swept.",
+            type(exc).__name__,
+            extra={"component": "worker.lifecycle"},
+        )
+        return None
+    return {job_id for job_id, value in zip(job_ids, held, strict=False) if value is not None}
+
+
+# What a swept row says about itself. Two reasons, because the two cases are
+# different facts about the queue and an operator reading the row acts on them
+# differently.
+_SWEPT_ABANDONED = (
+    "No worker holds this job: the queue has no claim on it and no worker is "
+    "alive. Marked failed by the startup sweep — re-submit the sample if needed."
+)
+_SWEPT_OVER_TIMEOUT = (
+    "This job has been running for longer than the worker's job timeout, which "
+    "no run outlives. Marked failed by the startup sweep — re-submit the sample "
+    "if needed."
+)
+
+
+async def _sweep_orphan_jobs(db_session: async_sessionmaker, redis_conn: Any = None) -> None:
+    """Mark ``running`` rows with no live owner as ``failed`` at worker startup.
+
+    When the worker process is killed mid-flight (e.g. operator
+    ``Stop-Process`` during development, OOM kill, deploy rollover, the RSS
+    recycler) the ``run_analysis`` task has no chance to flip the row from
+    ``running`` → ``failed`` in its ``except`` block. The DB then carries
+    phantom ``running`` rows forever — the dashboard reports them as in-flight
+    even though no worker holds them, and the false-positive statistics count
+    analyses that never ended.
+
+    Ownership is read from the queue rather than assumed from this process.
+    The sweep used to mark every ``running`` row older than the grace period,
+    on the reasoning that this process is the worker and has just started;
+    that is true of a single-worker deployment and false of any other, where
+    it would fail a run another worker is performing. A job is left alone when
+    arq holds a claim on it (``arq:in-progress:<id>``, written under our own
+    job id) *and* a worker is alive to be holding it (the queue's health key,
+    which expires seconds after a worker stops writing it). A job that has
+    been running longer than ``job_timeout`` is swept whatever the queue says,
+    because no run outlives that ceiling; and when the queue cannot be read at
+    all, only those are swept.
+
+    The grace period bounds the other direction: a row is only a candidate
+    once it has been ``running`` for ``_ORPHAN_GRACE_SECONDS``, which covers
+    the seconds between the API writing the row and a worker claiming it.
     """
     from datetime import UTC as _UTC
     from datetime import datetime as _datetime
     from datetime import timedelta as _timedelta
 
-    # 2026-07-27: the cutoff used to be ``job_timeout`` — eight hours — which
-    # made this sweep useless for the case it names first in its own docstring.
-    # A worker killed mid-flight comes back within seconds, and its abandoned
-    # row then sat in ``running`` for the rest of the day: no worker held it,
-    # ``max_tries=1`` meant nothing retried it, and the UI showed an analysis
-    # that was permanently five minutes from finishing. Observed exactly that
-    # on a verification run, and adding a container memory limit makes a
-    # mid-flight kill *more* likely, not less.
-    #
-    # The grace period only has to exceed the window in which a job can be
-    # legitimately ``running`` while no worker is up. Since ``max_jobs = 1``
-    # and this process has just booted, that window is the time between the
-    # API writing the row and the worker picking it up — seconds. Five minutes
-    # is generous and still bounded.
-    cutoff_seconds = min(WorkerSettings.job_timeout, _ORPHAN_GRACE_SECONDS)
-    cutoff_ts = _datetime.now(_UTC) - _timedelta(seconds=cutoff_seconds)
+    from app.models.job import AnalysisJob
+
+    now = _datetime.now(_UTC)
+    grace_seconds = min(WorkerSettings.job_timeout, _ORPHAN_GRACE_SECONDS)
+    grace_ts = now - _timedelta(seconds=grace_seconds)
+    timeout_ts = now - _timedelta(seconds=WorkerSettings.job_timeout)
 
     async with db_session() as db:
-        from app.models.job import AnalysisJob
-
-        stmt = (
-            update(AnalysisJob)
-            .where(
-                AnalysisJob.status == "running",
-                AnalysisJob.started_at < cutoff_ts,
+        candidates = (
+            await db.execute(
+                select(AnalysisJob.id, AnalysisJob.started_at, AnalysisJob.created_at).where(
+                    AnalysisJob.status == "running"
+                )
             )
-            .values(
-                status="failed",
-                completed_at=func.now(),
-                error_message=(
-                    "Worker process was killed mid-flight (no shutdown hook ran). "
-                    "Marked failed by startup sweep — re-submit the sample if needed."
-                ),
-            )
-            .returning(AnalysisJob.id)
-        )
-        result = await db.execute(stmt)
-        affected = [str(row[0]) for row in result.all()]
+        ).all()
         await db.commit()
-        if affected:
-            logger.warning(
-                "Startup orphan sweep: marked %d phantom 'running' job(s) as 'failed': %s",
-                len(affected),
-                ", ".join(affected[:8]) + (" ..." if len(affected) > 8 else ""),
-                extra={"component": "worker.lifecycle", "job_count": len(affected)},
+
+    def _since(row: Any) -> Any:
+        # ``started_at`` is written with the status change; ``created_at`` is
+        # the fallback for a row that somehow carries none, so a job cannot
+        # stay ``running`` for ever by having no clock.
+        return row[1] or row[2]
+
+    aged = [row for row in candidates if _since(row) is not None and _since(row) < grace_ts]
+    over_timeout = {str(row[0]) for row in aged if _since(row) < timeout_ts}
+    still_within = [str(row[0]) for row in aged if str(row[0]) not in over_timeout]
+
+    claimed = await claimed_job_ids(redis_conn, still_within)
+    if claimed is None:
+        abandoned = set()
+    else:
+        abandoned = {job_id for job_id in still_within if job_id not in claimed}
+
+    groups = [(over_timeout, _SWEPT_OVER_TIMEOUT), (abandoned, _SWEPT_ABANDONED)]
+    affected: list[str] = []
+    async with db_session() as db:
+        for ids, reason in groups:
+            if not ids:
+                continue
+            result = await db.execute(
+                update(AnalysisJob)
+                .where(
+                    AnalysisJob.id.in_([uuid.UUID(job_id) for job_id in ids]),
+                    # Re-checked in the statement: a worker may have finished
+                    # one of these between the read above and this write.
+                    AnalysisJob.status == "running",
+                )
+                .values(status="failed", completed_at=func.now(), error_message=reason)
+                .returning(AnalysisJob.id)
             )
-        else:
-            logger.info(
-                "Startup orphan sweep: no phantom 'running' jobs found.",
-                extra={"component": "worker.lifecycle"},
-            )
+            affected.extend(str(row[0]) for row in result.all())
+        await db.commit()
+
+    if affected:
+        logger.warning(
+            "Startup orphan sweep: marked %d unowned 'running' job(s) as 'failed': %s",
+            len(affected),
+            ", ".join(affected[:8]) + (" ..." if len(affected) > 8 else ""),
+            extra={"component": "worker.lifecycle", "job_count": len(affected)},
+        )
+    else:
+        logger.info(
+            "Startup orphan sweep: no unowned 'running' jobs found.",
+            extra={"component": "worker.lifecycle"},
+        )
 
 
 async def startup(ctx: dict) -> None:
@@ -2159,7 +2237,7 @@ async def startup(ctx: dict) -> None:
     # fired). Without this, the dashboard accumulates fake in-flight
     # jobs every time the operator restarts the worker.
     try:
-        await _sweep_orphan_jobs(ctx["db_session"])
+        await _sweep_orphan_jobs(ctx["db_session"], ctx.get("redis"))
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "Startup orphan sweep failed (non-fatal): %s",
