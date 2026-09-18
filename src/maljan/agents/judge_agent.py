@@ -1114,11 +1114,13 @@ class JudgeAgent(BudgetMeter):
             # verdict no judge expressed reached the report with a confidence
             # derived from the analysts' own claims. Asked off the bundle's own
             # mark rather than off the path, so neither way can be forgotten.
-            # It is a fact about this run, not a schema problem the model can
-            # fix: the feedback violation is replaced by one that says the
-            # verdict is a fallback, and it stays unresolved so the run summary
-            # and the report's degradation reasons both carry it.
-            violations = [v for v in violations if v.code != "verdict.not_json"]
+            # It is a fact about this run as well as a schema problem the
+            # model was shown: the answer that was not a bundle is kept among
+            # the leftovers, because the conversation published it as one and a
+            # summary that dropped it would disagree with the feed, and the
+            # fallback code is added beside it so the run summary and the
+            # report's degradation reasons carry what the pipeline did about
+            # it.
             if not any(v.code == VERDICT_FALLBACK_CODE for v in violations):
                 violations.append(
                     Violation(code=VERDICT_FALLBACK_CODE, message=VERDICT_FALLBACK_REASON)

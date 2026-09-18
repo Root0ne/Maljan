@@ -3256,6 +3256,11 @@ class BaseAnalyst(BudgetMeter, ABC):
             return self._analyze_isr_guarded(data)
 
     def _analyze_isr_guarded(self, data: str) -> AgentISR:
+        # Whatever the loop is given, kept where the handlers below can reach
+        # it: the salvage needs the same text the analysis had, and asking for
+        # it again inside a handler is how a failing truncate would raise out
+        # of the branch that is reporting a different failure.
+        truncated = data
         try:
             truncated = self._truncate_input(data)
             isr = self.analyze_isr(truncated)
@@ -3269,31 +3274,43 @@ class BaseAnalyst(BudgetMeter, ABC):
                     isr = salvaged
             return self._validate_isr(self._apply_consistency_gate(isr, truncated), truncated)
         except AnalystError:
-            salvaged = self._salvaged_isr(data)
+            salvaged = self._salvaged_isr(truncated)
             if salvaged is not None:
                 return salvaged
             raise
         except Exception as e:
             self.logger.error("ISR analysis failed: %s", describe_exception_for_log(e))
-            salvaged = self._salvaged_isr(data)
+            salvaged = self._salvaged_isr(truncated)
             if salvaged is not None:
                 return salvaged
             raise AnalystError(
                 f"{self.name} ISR analysis failed: {describe_exception_for_log(e)}"
             ) from e
 
-    def _salvaged_isr(self, data: str) -> AgentISR | None:
+    def _salvaged_isr(self, evidence: str) -> AgentISR | None:
         """A report written from the answered asks, checked like any other.
 
         Through the same gate and the same validation the ordinary path takes:
         a salvaged report that cites what it cannot see is the failure mode
         the gate exists for, and it is the report most likely to.
+
+        ``evidence`` is the text the analysis was given, already truncated by
+        the caller. Nothing here may raise: this runs inside the handler that
+        is reporting the original failure, and a salvage that threw would
+        replace that failure with its own.
         """
-        salvaged = self._synthesise_from_answered_asks()
-        if salvaged is None:
+        try:
+            salvaged = self._synthesise_from_answered_asks()
+            if salvaged is None:
+                return None
+            return self._validate_isr(self._apply_consistency_gate(salvaged, evidence), evidence)
+        except Exception as exc:  # noqa: BLE001 — the original failure is the one to report
+            self.logger.error(
+                "%s: the salvaged report could not be checked: %s",
+                self.name,
+                describe_exception_for_log(exc),
+            )
             return None
-        truncated = self._truncate_input(data)
-        return self._validate_isr(self._apply_consistency_gate(salvaged, truncated), truncated)
 
     def answered_asks(self) -> list[AgentISR]:
         """The specialists' own ISRs, for the asks this agent got answers to.

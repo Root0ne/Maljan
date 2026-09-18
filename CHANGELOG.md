@@ -816,10 +816,10 @@ change landed on `main`.
   `stix.unlinked_technique`, so it is counted once, as the technique's loss,
   and not again as a defect of the judge's bundle. An
   attack-pattern with a name and no id is asked for one (`attck.missing_id`)
-  instead of skipping every ATT&CK check — which is why the Mobile-domain check never ran on an Android
-  sample's techniques — and one that survives is reported as a behaviour, in
-  the new `MalwareReport.unmapped_behaviours` and under its own heading in the
-  markdown.
+  instead of skipping every ATT&CK check — which is why the Mobile-domain
+  check never ran on an Android sample's techniques — and one that survives is
+  reported as a behaviour, in the new `MalwareReport.unmapped_behaviours` and
+  under its own heading in the markdown.
 
 - **The ATT&CK alignment gate scores inside the sample's own scope, and asks
   nothing unless it is turned on.** The index that ranks a claim's text is

@@ -764,6 +764,11 @@ and the console draws the running analysis from them.
 
 `agent_message.kind` is one of `says`, `tool_call`, `tool_result`,
 `validation_feedback`, `judge_question`, `verdict`, `system`,
+`delegation_ask`, `delegation_answer`. An ask and its answer are the last two,
+with `addressed_to` naming the other side, which is what draws a delegated
+exchange as an arrow between two participants rather than as two lines to the
+room.
+
 A violation is published as `retried` where the producer is shown it and again
 as `resolved` or `survived` once the loop knows which; one the retry introduced
 is published once. `(agent, code, path)` is the key those two lines share, so a
@@ -771,11 +776,6 @@ reader that draws one line per violation folds on it, and two violations of one
 code on different claims stay apart. A finding the producer was never shown —
 the judge appends its timeout, its fallback and its two verdict checks after
 the loop — is published once, as `survived`.
-
-`delegation_ask`, `delegation_answer`. An ask and its answer are the last two,
-with `addressed_to` naming the other side, which is what draws a delegated
-exchange as an arrow between two participants rather than as two lines to the
-room.
 
 **Sequence.** The publisher stamps every event with `seq`, a per-job counter
 taken from a Redis `INCR`. Nothing in `src/maljan` numbers anything: the core

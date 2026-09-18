@@ -362,8 +362,12 @@ class TestAnAnswerThatIsNotABundle:
 
         assert verdict.retries == 1
         assert len(llm.calls) == 2
-        assert [v.code for v in verdict.violations] == [VERDICT_FALLBACK_CODE]
-        assert verdict.violations[0].message == VERDICT_FALLBACK_REASON
+        # Both: the answer that was not a bundle, which the model was shown and
+        # did not fix, and what this pipeline did about it. The conversation
+        # published the first as survived, so a summary without it would
+        # disagree with the feed.
+        assert [v.code for v in verdict.violations] == ["verdict.not_json", VERDICT_FALLBACK_CODE]
+        assert verdict.violations[-1].message == VERDICT_FALLBACK_REASON
         assert verdict.bundle.objects, "the fallback bundle is still built"
 
     @pytest.mark.asyncio
@@ -397,7 +401,10 @@ class TestAnAnswerThatIsNotABundle:
         metrics = validation_metrics(verdict.retries, [("judge", v) for v in verdict.violations])
 
         assert metrics["retries"] == 1
-        assert [row["code"] for row in metrics["unresolved"]] == [VERDICT_FALLBACK_CODE]
+        assert [row["code"] for row in metrics["unresolved"]] == [
+            "verdict.not_json",
+            VERDICT_FALLBACK_CODE,
+        ]
 
 
 class TestAJudgeThatNeverAnswered:

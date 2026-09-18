@@ -192,6 +192,30 @@ class TestWhatTheConversationIsTold:
         assert any(row["code"] == VERDICT_FALLBACK_CODE for row in rows)
 
 
+class TestTheFeedAndTheSummaryAgree:
+    """Every state the conversation published is a row the summary records."""
+
+    @pytest.mark.asyncio
+    async def test_no_state_is_published_for_a_code_the_summary_drops(self) -> None:
+        published: list[tuple[str, dict[str, Any]]] = []
+        judge = JudgeAgent(llm=_Llm("not a bundle", "still not a bundle"))  # type: ignore[arg-type]
+        judge._container = SimpleNamespace(
+            event_sink=lambda kind, data: published.append((kind, data))
+        )
+
+        verdict = await judge.give_verdict(
+            reports=REPORTS, history=[], isr_reports=SILENT, ledger_ids=LEDGER
+        )
+
+        feed = {
+            data["code"]
+            for kind, data in published
+            if kind == "validation_feedback" and data["state"] != "retried"
+        }
+        assert feed <= set(_codes(verdict)), "a state was published for a code nothing records"
+        assert "verdict.not_json" in feed
+
+
 class TestARunWithClaimsBehindItIsAskedNothing:
     """The checks have an opinion only about a run in which nothing was said."""
 
@@ -220,4 +244,4 @@ class TestARunWithClaimsBehindItIsAskedNothing:
             ledger_ids=LEDGER,
         )
 
-        assert _codes(verdict) == [VERDICT_FALLBACK_CODE]
+        assert _codes(verdict) == ["verdict.not_json", VERDICT_FALLBACK_CODE]

@@ -3131,10 +3131,8 @@ def make_judge_node(
             # the leftovers below, so the summary is not told twice.
             _verdict_fallback: dict[str, Any] | None = None
             _stated = bundle.x_maljan_fallback_verdict if isinstance(bundle, Bundle) else None
-            if _stated is not None or _verdict_codes & {
-                VERDICT_FALLBACK_CODE,
-                VERDICT_TIMEOUT_CODE,
-            }:
+            _recorded = bool(_verdict_codes & {VERDICT_FALLBACK_CODE, VERDICT_TIMEOUT_CODE})
+            if _stated is not None or _recorded:
                 _verdict_fallback = {
                     "decision": decision,
                     "failure": (
@@ -3142,7 +3140,11 @@ def make_judge_node(
                         if VERDICT_TIMEOUT_CODE in _verdict_codes
                         else VERDICT_FALLBACK_CODE
                     ),
-                    "recorded": True,
+                    # Whether the judge's own row is already among the
+                    # leftovers, asked of them rather than assumed: a bundle
+                    # that carries the mark and no code would otherwise leave
+                    # the summary with nothing at all to say about it.
+                    "recorded": _recorded,
                 }
 
             # What the analysts and the judge were told and did not fix. Both

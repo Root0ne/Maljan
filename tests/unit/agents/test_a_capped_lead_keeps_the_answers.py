@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
 from langchain_core.messages import AIMessage
 
 from maljan.agents.delegation import tool_name
@@ -241,6 +242,57 @@ class TestTheShapeTheAuditSaw:
         shown = self._answered().answered_asks()
 
         assert [isr.agent_id for isr in shown] == list(AUDITED)
+
+
+class TestTheSalvageCannotChangeHowAFailureIsReported:
+    """It runs inside the handler that is reporting the original failure."""
+
+    def test_a_truncate_that_raises_is_not_asked_a_second_time(self) -> None:
+        from maljan.core.exceptions import AnalystError
+
+        container = _team(lead_answers=[], asks=("helper",))
+        boss = _lead(container)
+        boss.remember_answered_ask(
+            AgentISR(
+                agent_id="helper",
+                domain="helper",
+                claims=[
+                    ClaimEvidence(
+                        claim="helper answered ask 0",
+                        evidence_ref="[ev_0001] the entry it read",
+                        confidence=0.7,
+                        technique_id="T1095",
+                    )
+                ],
+            )
+        )
+        calls: list[str] = []
+
+        def _explode(data: str) -> str:
+            calls.append(data)
+            raise RuntimeError("the input could not be trimmed")
+
+        boss._truncate_input = _explode  # type: ignore[method-assign]
+
+        with pytest.raises(AnalystError):
+            boss.safe_analyze_isr("Lead this analysis.")
+
+        assert len(calls) == 1, "the handler does not run it again"
+
+    def test_a_salvage_that_cannot_be_checked_leaves_the_failure(self) -> None:
+        from maljan.core.exceptions import AnalystError
+
+        container = _team(lead_answers=[], asks=("helper",))
+        boss = _lead(container)
+        boss._synthesise_from_answered_asks = lambda: (_ for _ in ()).throw(  # type: ignore[method-assign]
+            RuntimeError("the salvage turn broke")
+        )
+        boss.analyze_isr = lambda data: (_ for _ in ()).throw(  # type: ignore[method-assign]
+            AnalystError("the loop failed")
+        )
+
+        with pytest.raises(AnalystError, match="the loop failed"):
+            boss.safe_analyze_isr("Lead this analysis.")
 
 
 class TestNothingIsPromotedBesideAReportThatExists:

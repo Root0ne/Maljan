@@ -318,6 +318,24 @@ class TestAJudgeThatAnsweredWithNoVerdict:
         assert fallback["decision"] == "Suspicious"
         assert fallback["failure"] == "verdict.fallback"
 
+    def test_whether_the_judge_recorded_it_is_read_from_what_it_recorded(self) -> None:
+        """This judge recorded nothing, so the report node writes the note.
+
+        Hard-coded, the flag said the row was already there and the summary
+        ended up with nothing to say about a verdict no judge expressed.
+        """
+        update = self._extracted_verdict()
+
+        assert update["verdict_fallback"]["recorded"] is False
+
+    def test_and_then_the_summary_carries_it(self) -> None:
+        update = _run_report(
+            {"decision": "Suspicious", "failure": "verdict.fallback", "recorded": False}
+        )
+
+        validation = update["run_summary"]["validation"]
+        assert validation["by_code"]["verdict.fallback"] == 1
+
     def test_the_report_gives_it_no_confidence(self) -> None:
         report, markdown = _reported(
             {"decision": "Suspicious", "failure": "verdict.fallback", "recorded": True}
