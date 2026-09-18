@@ -11,6 +11,7 @@ about is offered to the world as an indicator.
 from __future__ import annotations
 
 import json
+from typing import Any
 
 from maljan.reporting.ledger_projection import network_from_ledger
 from maljan.reporting.models import NetworkDomain, NetworkIOCs
@@ -94,3 +95,63 @@ class TestWhichDomainsBecomeIndicators:
     def test_a_domain_with_no_recorded_source_is_published_as_before(self) -> None:
         """Every other producer of this block is unchanged by the rule."""
         assert _indicator_for_domain(NetworkDomain(fqdn="evil.com")) is not None
+
+
+class TestNoStringDerivedDomainReachesTheBundle:
+    """The gate has to be on every path that mints a domain indicator.
+
+    Gating `_indicator_for_domain` alone left the other one open: the same
+    rows also reach `static.interesting_strings`, and the renderer turns those
+    into `[domain-name:value = …]` indicators of their own. A bundle rendered
+    from run 2's shapes still shipped the fragments.
+    """
+
+    def _report(self) -> Any:
+        from maljan.reporting.builder import MalwareReportBuilder
+
+        rows = [
+            {"kind": "domain", "value": "rosoft.com", "notes": None, "source": "strings"},
+            {"kind": "domain", "value": "jector.sa", "notes": None, "source": "strings"},
+            {"kind": "domain", "value": "c2.evil.tld", "notes": None, "source": "strings"},
+        ]
+        ledger = [
+            _entry(1, "iocs_from_file", {"iocs": rows}),
+            _entry(2, "sandbox_network", {"dns": [{"request": "c2.evil.tld"}]}),
+        ]
+        return MalwareReportBuilder(
+            file_hash="c" * 64,
+            file_name="sample.exe",
+            sample_path=None,
+            sandbox_report={},
+            reports={},
+            isr_reports={},
+            stix_output={"objects": []},
+            run_summary={},
+            discussion_history=[],
+            final_decision="Malware",
+            overall_confidence=0.8,
+            judge_assessment=None,
+            malware_category="rat",
+            evidence_ledger=ledger,
+        ).build_deterministic()
+
+    def _patterns(self) -> list[str]:
+        from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
+        from maljan.schemas.stix_models import Indicator
+
+        bundle = ExtendedSTIXRenderer().render(self._report(), base_bundle=None)
+        return [o.pattern for o in bundle.objects if isinstance(o, Indicator)]
+
+    def test_the_fragments_are_in_no_stix_object(self) -> None:
+        rendered = " ".join(self._patterns())
+        assert "rosoft.com" not in rendered
+        assert "jector.sa" not in rendered
+
+    def test_a_corroborated_domain_is_published(self) -> None:
+        assert "[domain-name:value = 'c2.evil.tld']" in self._patterns()
+
+    def test_the_report_still_carries_every_name_it_read(self) -> None:
+        """Withheld from the bundle is not deleted from the report."""
+        report = self._report()
+        assert report.network is not None
+        assert {d.fqdn for d in report.network.domains} >= {"rosoft.com", "jector.sa"}

@@ -137,6 +137,12 @@ class ExtendedSTIXRenderer:
 
         # 5) StringIOC → Indicator.
         #
+        # Which names this run may publish at all. One rule, read once, and
+        # every path that mints a domain indicator asks it: the network block
+        # below, and the string rows here, which are the same names arriving
+        # by a second road.
+        publishable_domains = _publishable_domains(report)
+
         # Apply the same acceptance-based filter
         # used by the judge bundle postprocess so deterministic
         # interesting_strings can't smuggle noise (NDK build paths, bundled
@@ -149,7 +155,7 @@ class ExtendedSTIXRenderer:
                 pattern = _stix_pattern_for_string_ioc(ioc)
                 if pattern is None:
                     continue
-                if not _accept_string_ioc(ioc, pattern, file_name_kept):
+                if not _accept_string_ioc(ioc, pattern, file_name_kept, publishable_domains):
                     continue
                 is_file_name = pattern.lstrip().startswith("[file:name")
                 if is_file_name:
@@ -342,7 +348,32 @@ def _stix_pattern_for_string_ioc(ioc: StringIOC) -> str | None:
     return None
 
 
-def _accept_string_ioc(ioc: StringIOC, pattern: str, file_name_kept: int) -> bool:
+def _publishable_domains(report: Any) -> frozenset[str]:
+    """The domains this report may publish, by the one corroboration rule.
+
+    A name the sample's byte image knows and nothing else is not an
+    observation of infrastructure, so it is not offered to a consumer that
+    would block on it. The network block is where each name's source is
+    recorded, so it is the answer for both minting paths — a `domain` string
+    row is by construction string-derived, and is published only when the
+    network block says a second source names it too.
+    """
+    network = getattr(report, "network", None)
+    if network is None:
+        return frozenset()
+    return frozenset(
+        domain.fqdn.strip().lower().rstrip(".")
+        for domain in network.domains
+        if domain.fqdn and domain_is_corroborated(domain.source, domain.reputation)
+    )
+
+
+def _accept_string_ioc(
+    ioc: StringIOC,
+    pattern: str,
+    file_name_kept: int,
+    publishable_domains: frozenset[str] = frozenset(),
+) -> bool:
     """Gate StringIOC → Indicator emission.
 
     Applies the same rules as :func:`maljan.pipeline.validation._indicator_problem`
@@ -354,6 +385,12 @@ def _accept_string_ioc(ioc: StringIOC, pattern: str, file_name_kept: int) -> boo
     """
     stripped = pattern.lstrip()
     value = (ioc.value or "").strip()
+
+    # Domains: the corroboration rule, the same one the network block is
+    # gated by. Every `domain` row here came out of the string scan, so an
+    # uncorroborated one is a run of bytes shaped like a hostname.
+    if stripped.startswith("[domain-name:value"):
+        return value.lower().rstrip(".") in publishable_domains
 
     # URLs: denylist developer/build hosts.
     if stripped.startswith("[url:value"):

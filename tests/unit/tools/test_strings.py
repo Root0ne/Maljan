@@ -197,12 +197,30 @@ class TestDomainsReadOutOfStrings:
             row["value"] for row in tool.iocs_from_text(text)["iocs"] if row["kind"] == "domain"
         ]
 
-    def test_a_fragment_of_a_longer_host_is_dropped_for_the_whole_one(self) -> None:
-        """A run beginning mid-word yielded `rosoft.com` beside `microsoft.com`."""
-        text = "rosoft.com/win/2004/08/events/event\nproxy bypass list: microsoft.com"
-        found = self._domains(text)
-        assert "microsoft.com" in found
-        assert "rosoft.com" not in found
+    def test_a_longer_look_alike_does_not_delete_the_real_name(self) -> None:
+        """Which of two names is the fragment is about where they sit, not how
+        they are spelled. Asking by spelling deleted the real one."""
+        assert self._domains("visit microsoft.com and xmicrosoft.com") == [
+            "microsoft.com",
+            "xmicrosoft.com",
+        ]
+
+    def test_a_leading_byte_does_not_delete_the_host_it_was_stuck_to(self) -> None:
+        assert self._domains("M000webhostapp.com and 000webhostapp.com") == [
+            "M000webhostapp.com",
+            "000webhostapp.com",
+        ]
+
+    def test_a_name_inside_a_longer_one_is_the_fragment(self) -> None:
+        """The rule keys on spans: a match that lies within a longer host's
+        span, cut inside a label, is the fragment."""
+        found = [(0, 13, "microsoft.com"), (2, 13, "crosoft.com")]
+        assert tool._inside_a_longer_host(2, 13, found) is True
+        assert tool._inside_a_longer_host(0, 13, found) is False
+
+    def test_a_cut_on_a_label_boundary_is_a_name_of_its_own(self) -> None:
+        found = [(0, 15, "crl.example.com"), (4, 15, "example.com")]
+        assert tool._inside_a_longer_host(4, 15, found) is False
 
     def test_a_parent_domain_at_a_label_boundary_is_kept(self) -> None:
         """`sectigo.com` under `crl.sectigo.com` is a registrable name, not a fragment."""

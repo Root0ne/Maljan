@@ -187,10 +187,8 @@ def iter_string_iocs(blob: bytes) -> list[dict[str, Any]]:
             _add("email", match.decode("ascii", errors="ignore"))
         for match in _MUTEX_RE.findall(text.encode("ascii", errors="ignore")):
             _add("mutex", match.decode("ascii", errors="ignore"))
-        for match in _DOMAIN_RE.findall(text.encode("ascii", errors="ignore")):
-            candidate = match.decode("ascii", errors="ignore")
-            if _looks_like_domain(candidate):
-                _add("domain", candidate)
+        for candidate in _domains_in(text):
+            _add("domain", candidate)
         for label, pattern in _SECRET_PATTERNS:
             for hit in pattern.findall(text):
                 _add("secret", hit, notes=label)
@@ -200,30 +198,47 @@ def iter_string_iocs(blob: bytes) -> list[dict[str, Any]]:
         for hit in _ONION_RE.findall(text):
             _add("domain", hit, notes="tor_hidden_service")
 
-    return _without_fragment_domains(iocs)[:_MAX_IOC_STRINGS]
+    return iocs[:_MAX_IOC_STRINGS]
 
 
-def _without_fragment_domains(iocs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Drop a domain that is the tail of a longer name found in the same sample.
+def _domains_in(text: str) -> list[str]:
+    """The hostnames in one printable run, fragments of each other removed.
 
-    A printable run does not have to begin where the string does: a compressed
-    or truncated resource left `rosoft.com` in the scan of a binary that also
-    carried `microsoft.com`, and the fragment was published as a domain
-    indicator and looked up at a paid reputation provider. A parent at a label
-    boundary is a different thing — `sectigo.com` under `crl.sectigo.com` is a
-    registrable name in its own right — so only a tail that cuts into a label
-    is dropped.
+    Which of two names is the fragment is a question about where they sit, not
+    about how they are spelled. Asking it by spelling — dropping any name that
+    another name ends with — deletes the real one whenever a longer look-alike
+    is present: `microsoft.com` beside `xmicrosoft.com`, `000webhostapp.com`
+    beside `M000webhostapp.com`. Both of those are two names, and both stay.
+
+    A fragment is a match that lies *inside* a longer hostname's span in this
+    same run, cut somewhere other than a label boundary — `rosoft.com` inside
+    `microsoft.com`. A parent at a label boundary is a name in its own right,
+    so `sectigo.com` under `crl.sectigo.com` stays.
     """
-    names = [row["value"].lower() for row in iocs if row["kind"] == "domain"]
-    fragments = {
-        name
-        for name in names
-        for other in names
-        if other != name and other.endswith(name) and not other[: -len(name)].endswith(".")
-    }
-    if not fragments:
-        return iocs
-    return [row for row in iocs if row["kind"] != "domain" or row["value"].lower() not in fragments]
+    found: list[tuple[int, int, str]] = []
+    for match in _DOMAIN_RE.finditer(text.encode("ascii", errors="ignore")):
+        candidate = match.group().decode("ascii", errors="ignore")
+        if _looks_like_domain(candidate):
+            found.append((match.start(), match.end(), candidate))
+    return [value for start, end, value in found if not _inside_a_longer_host(start, end, found)]
+
+
+def _inside_a_longer_host(start: int, end: int, found: list[tuple[int, int, str]]) -> bool:
+    """Whether this span sits within a longer one, cut inside a label."""
+    for other_start, other_end, other in found:
+        if (other_start, other_end) == (start, end):
+            continue
+        if not (other_start <= start and end <= other_end):
+            continue
+        if other_end - other_start <= end - start:
+            continue
+        cut = start - other_start
+        if cut > 0 and other[cut - 1] == ".":
+            # `sectigo.com` inside `crl.sectigo.com` — a registrable name, not
+            # the tail of one.
+            continue
+        return True
+    return False
 
 
 def _is_meaningful_ip(ip: str) -> bool:

@@ -772,8 +772,15 @@ change landed on `main`.
   produces now carries `source: "strings"`, `NetworkDomain` records where the
   name came from, and a name only the byte image knows is neither exported as
   an indicator nor sent to a paid provider until a second source — the
-  sandbox, an analyst artefact or a reputation record — knows it too. It is
-  still in the report's network block, labelled.
+  sandbox, an analyst artefact or a reputation record — knows it too. One
+  predicate decides that, and both paths that mint a domain indicator ask it:
+  the network block's own, and the string rows, which reach the bundle as
+  `interesting_strings` and were still being published after the first gate
+  went in. The name is still in the report, labelled with where it came from.
+  Which of two names is a fragment is decided by where the matches sit rather
+  than by how they are spelled, so a longer look-alike no longer deletes the
+  real name — `microsoft.com` beside `xmicrosoft.com`, and
+  `000webhostapp.com` beside `M000webhostapp.com`, are two names each.
 - **The catalogue called drawing a window keylogging.** `BitBlt`,
   `CreateCompatibleBitmap`, `CreateCompatibleDC`, `GetDC` and `GetDIBits` were
   filed under `keylogging` at tier `high`, so every program that puts pixels
