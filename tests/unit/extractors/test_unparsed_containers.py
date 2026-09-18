@@ -152,3 +152,45 @@ class TestAContainerThatWasOpenedIsNotCalledUnparsed:
 
     def test_a_caller_with_no_ledger_answers_from_the_type_as_before(self, tmp_path: Path) -> None:
         assert "ZIP archive" in (unparsed_container_reason(_write(tmp_path, "a.zip")) or "")
+
+
+class TestOnlyTheRoutedFormatsOwnToolCounts:
+    """An APK, a .jar and a .docm are all zips, and an analyst may call
+    `archive_list` on any of them. Listing the zip members is not opening the
+    Android package: the manifest, the permissions and the components are what
+    `apk_info` reads, and when it could not load there is still no permissions
+    channel. Accepting any format tool let an analyst's call lift the cap on a
+    payload nobody had read."""
+
+    def _ledger(self, tool: str, payload: dict[str, object]) -> list[dict]:
+        return [{"tool": tool, "ok": True, "structured": payload}]
+
+    def _apk(self, tmp_path: Path) -> Path:
+        import zipfile
+
+        package = tmp_path / "app.apk"
+        with zipfile.ZipFile(package, "w") as archive:
+            archive.writestr("AndroidManifest.xml", b"\x03\x00\x08\x00binary manifest")
+            archive.writestr("classes.dex", b"dex\n035\x00")
+        return package
+
+    def test_listing_an_android_packages_zip_members_does_not_open_it(self, tmp_path: Path) -> None:
+        listed = self._ledger("archive_list", {"members": [{"name": "classes.dex"}]})
+        reason = unparsed_container_reason(self._apk(tmp_path), ledger=listed)
+        assert "Android package" in (reason or "")
+
+    def test_the_packages_own_tool_does_open_it(self, tmp_path: Path) -> None:
+        opened = self._ledger("apk_info", {"package": "com.example.app", "permissions": []})
+        assert unparsed_container_reason(self._apk(tmp_path), ledger=opened) is None
+
+    def test_a_documents_own_tool_is_document_info(self, tmp_path: Path) -> None:
+        document = _write(tmp_path, "invoice.docm", b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1")
+        listed = self._ledger("archive_list", {"members": []})
+        assert "OLE2 document" in (unparsed_container_reason(document, ledger=listed) or "")
+        opened = self._ledger("document_info", {"format": "ole2", "macros_present": True})
+        assert unparsed_container_reason(document, ledger=opened) is None
+
+    def test_an_archives_own_tool_is_archive_list(self, tmp_path: Path) -> None:
+        archive = _write(tmp_path, "bundle.zip", b"PK\x03\x04")
+        opened = self._ledger("archive_list", {"members": [{"name": "payload.elf"}]})
+        assert unparsed_container_reason(archive, ledger=opened) is None

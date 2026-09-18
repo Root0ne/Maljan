@@ -803,16 +803,30 @@ change landed on `main`.
   `uPX` inside a longer word. Both now want a packer section name or a packer's
   own banner. The section entropies that are the other half of the packing
   signal are reported by the format tool beside these hits, as before.
+- **A tool that answered less than it wanted to was recorded as having failed.**
+  `apk_info` without androguard returns the zip-level facts — the manifest
+  member, the dex count, the ABIs, the certificate members — and returned them
+  beside an `error` key. Every consumer reads `error` as "this call produced
+  nothing", so the ledger recorded the call as failed and the pack printed none
+  of them: an Android run had no container channel at all although the archive
+  had been read. A degraded answer is now a success carrying `degraded` (the
+  library that is missing, and what was answered without it) and the
+  remediation, the same for `document_info` without olefile, and the pack
+  contributes `triage.<tool>_degraded` rather than `triage.<tool>_failed`. That
+  reason never makes a whole run degraded, because the facts are there and what
+  is missing from them is said beside them.
 - **A container that had been opened was reported as never opened.** The
   degradation reason "container was not parsed — no format-aware extraction
   exists for it; findings come from a raw-byte string sweep only" was decided
   from the file type alone, so a ZIP whose members `archive_list` had listed —
   with sizes and CRCs, printed in the report, cited by the analyst — carried it
   anyway, and the run capped its confidence on the strength of it.
-  `unparsed_container_reason` now asks the evidence ledger whether the format
-  tool for this sample produced a result, and speaks only when none did, which
+  `unparsed_container_reason` now asks the evidence ledger whether the routed
+  format's own tool produced a result, and speaks only when it did not, which
   is still the true answer for a package whose `apk_info` could not load its
-  library.
+  library. The routed type's tool is the one that counts: an APK, a JAR and a
+  macro document are all zips, and an analyst listing an Android package's zip
+  members has not read its manifest, its permissions or its components.
 - **The timestamp authority was named as the publisher.** A timestamped PE
   carries the timestamp service's chain in the same PKCS#7 certificate set as
   its own, so the set has two leaves and "the certificate that issued none of

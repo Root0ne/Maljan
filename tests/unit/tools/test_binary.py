@@ -275,13 +275,22 @@ class TestApkInfo:
         assert result["abis"] == ["arm64-v8a"]
         assert result["cert_files"] == ["META-INF/CERT.RSA"]
 
-    def test_without_androguard_the_missing_library_is_named(self, tmp_path: Path) -> None:
+    def test_without_androguard_the_answer_is_a_success_that_says_what_is_missing(
+        self, tmp_path: Path
+    ) -> None:
+        """The zip facts were returned beside an `error` key, so the ledger
+        recorded the call as failed and the pack showed none of them. The
+        degraded subset is an answer; what it could not add is said in
+        `degraded`, with the remedy."""
         try:
             import androguard  # noqa: F401
         except ImportError:
             result = tool.apk_info(str(self._apk(tmp_path)))
-            assert result["error"] == "androguard is not installed"
-            assert result["degraded"] == "zip-level facts only"
+            assert "error" not in result
+            assert result["manifest_present"] is True
+            assert result["dex_count"] == 2
+            assert "androguard is not installed" in result["degraded"]
+            assert "uv sync --extra tools" in result["remediation"]
         else:
             pytest.skip("androguard is installed; the degraded path is not the one taken")
 

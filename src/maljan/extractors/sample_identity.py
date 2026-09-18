@@ -393,21 +393,35 @@ _UNPARSED_CONTAINER_TYPES: dict[str, str] = {
 }
 
 
-# The format tools, by the name they are recorded under. These are the entry
-# points of ``tools.binary`` that the pack routes a sample to; one of them
-# answering is what "the container was opened" means.
-_FORMAT_TOOL_NAMES = frozenset(
-    {"pe_info", "elf_info", "macho_info", "apk_info", "document_info", "archive_list"}
-)
+# The one tool that opens each routed format, by the name it is recorded
+# under. An APK, a JAR and a macro document are all zips, so more than one of
+# these can be called on the same file — but only the routed type's own tool
+# answers the question this module asks. Listing an Android package's zip
+# members is not reading its manifest, its permissions or its components.
+_FORMAT_TOOL_FOR: dict[str, str] = {
+    "pe": "pe_info",
+    "elf": "elf_info",
+    "mach-o": "macho_info",
+    "apk": "apk_info",
+    "dex": "apk_info",
+    **{name: "document_info" for name in DOCUMENT_FILE_TYPES},
+    **{name: "archive_list" for name in ARCHIVE_FILE_TYPES},
+    "jar": "archive_list",
+}
 
 
-def _a_format_tool_answered(ledger: Iterable[Any] | None) -> bool:
-    """Whether a format tool in ``ledger`` returned a result about the sample.
+def _the_format_tool_answered(ledger: Iterable[Any] | None, routed: str) -> bool:
+    """Whether the routed format's own tool returned a result about the sample.
 
     A failed call, and a call whose payload is an error, are both "no result":
     the Android run whose ``apk_info`` could not load its library really did
-    have nothing but a byte sweep, and saying so was right.
+    have nothing but a byte sweep, and saying so was right. A degraded answer
+    is a result — the facts it did produce are in the ledger — and what is
+    missing from it is said in its own reason.
     """
+    wanted = _FORMAT_TOOL_FOR.get(routed)
+    if wanted is None:
+        return False
     for entry in ledger or ():
         if isinstance(entry, dict):
             tool, ok, data = entry.get("tool"), entry.get("ok"), entry.get("structured")
@@ -415,7 +429,7 @@ def _a_format_tool_answered(ledger: Iterable[Any] | None) -> bool:
             tool = getattr(entry, "tool", None)
             ok = getattr(entry, "ok", None)
             data = getattr(entry, "structured", None)
-        if tool not in _FORMAT_TOOL_NAMES or not ok:
+        if tool != wanted or not ok:
             continue
         if isinstance(data, dict) and not data.get("error"):
             return True
@@ -442,13 +456,13 @@ def unparsed_container_reason(
     ``archive_list`` had listed — with sizes and CRCs, in the report, cited by
     the analyst — was still described as never opened, and the run capped its
     confidence for it. So ``ledger`` is asked whether the format tool for this
-    sample produced a result, and the reason is emitted only when none did. A
-    caller with no ledger has nothing to go on and gets the answer the file
-    type alone supports.
+    sample produced a result, and the reason is emitted only when it did not.
+    The routed type's own tool is the one that counts: an analyst listing an
+    Android package's zip members has not read its manifest. A caller with no
+    ledger has nothing to go on and gets the answer the file type alone
+    supports.
     """
     if not sample_path:
-        return None
-    if _a_format_tool_answered(ledger):
         return None
     path = Path(sample_path)
     try:
@@ -462,6 +476,8 @@ def unparsed_container_reason(
     # A real PE, ELF or Mach-O was parsed properly; nothing to declare.
     detected = _detect_file_type(path, header).lower()
     if detected in {"pe", "elf", "mach-o"}:
+        return None
+    if _the_format_tool_answered(ledger, detected):
         return None
 
     label = _UNPARSED_CONTAINER_TYPES.get(detected) or _UNPARSED_CONTAINER_EXTENSIONS.get(
