@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildReviewItems } from "../ReviewList";
+import { attentionLine, buildReviewItems, reviewErrors } from "../ReviewList";
 import { stagedDefinitions } from "../agentStaging";
 import type { ReviewSource } from "../ReviewList";
 import type { AgentDefinitionEntry, CatalogEntry, SettingsSchema } from "@/types/settings";
@@ -246,5 +246,30 @@ describe("an agent-map edit, as the review panel describes it", () => {
     const [line] = buildReviewItems(source);
 
     expect(line.detail).toEqual(["ahmet: removed"]);
+  });
+});
+
+describe("what the review panel announces", () => {
+  it("counts fields across the rows, not rows", () => {
+    const source = baseSource();
+    source.errors = {
+      [`${maxTokens.key}.alpha`]: "alpha is wrong",
+      [`${maxTokens.key}.beta`]: "beta is wrong",
+      [apiKey.key]: "and this one too",
+    };
+    const messages = reviewErrors(buildReviewItems(source));
+
+    expect(messages).toEqual(["alpha is wrong", "beta is wrong", "and this one too"]);
+    expect(attentionLine(messages.length)).toBe("3 fields need attention");
+  });
+
+  it("says it in the singular for one", () => {
+    expect(attentionLine(1)).toBe("1 field needs attention");
+  });
+
+  it("has nothing to announce when the server refused nothing", () => {
+    const source = baseSource();
+    source.errors = {};
+    expect(reviewErrors(buildReviewItems(source))).toEqual([]);
   });
 });

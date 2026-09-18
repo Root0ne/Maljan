@@ -5,6 +5,7 @@ import type { ChangeLine } from "./describeChange";
 import { comparableSaved } from "./agentStaging";
 import { describeChange } from "./describeChange";
 import { groupsBySection, pathForKey } from "./sections";
+import { countLabel } from "@/lib/report-utils";
 import { APPLIES_SENTENCE } from "./vocabulary";
 import type { CatalogEntry, SettingValue, SettingsSchema } from "@/types/settings";
 
@@ -83,6 +84,40 @@ export function buildReviewItems(ctx: ReviewSource): ReviewItem[] {
     });
   }
   return items;
+}
+
+/** Every field the server refused, across the rows on screen. */
+export function reviewErrors(lines: ReviewItem[]): string[] {
+  return lines.flatMap((line) => line.errors);
+}
+
+/** "3 fields need attention", and the one exception English makes. */
+export function attentionLine(count: number): string {
+  return `${countLabel(count, "field")} ${count === 1 ? "needs" : "need"} attention`;
+}
+
+/**
+ * What the server refused, said once and announced once.
+ *
+ * The messages used to be joined with semicolons into a single `role="alert"`,
+ * which a screen reader read as one run-on sentence; splitting them into a
+ * list fixed the sentence and lost the announcement, so a reader was told
+ * "2 fields need attention" and never which two. The list stays visible and
+ * unannounced, and a status node beside it carries the count and the messages
+ * politely — one region rather than one per message, which is what produced
+ * the run-on in the first place.
+ */
+export function ReviewErrorSummary({ lines }: { lines: ReviewItem[] }) {
+  const messages = reviewErrors(lines);
+  if (messages.length === 0) return null;
+  return (
+    <>
+      <p className="text-xs text-status-red mb-2">{attentionLine(messages.length)}</p>
+      <p role="status" className="sr-only">
+        {[attentionLine(messages.length), ...messages].join(". ")}
+      </p>
+    </>
+  );
 }
 
 interface GroupBucket {

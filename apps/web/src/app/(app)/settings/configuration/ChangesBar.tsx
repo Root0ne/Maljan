@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { buildReviewItems, ReviewList } from "./ReviewList";
+import { buildReviewItems, ReviewErrorSummary, ReviewList } from "./ReviewList";
 import { useSettingsContext } from "./SettingsContext";
 import { appliesSummary } from "./vocabulary";
 import { countLabel } from "@/lib/report-utils";
@@ -36,10 +36,6 @@ export default function ChangesBar() {
   if (count === 0 && !(statusVisible && lastResult)) return null;
 
   const lines = buildReviewItems(ctx);
-  // What the list below actually shows: every field the server refused. The
-  // count used to be of rows, so one agent map rejected on five fields
-  // announced "1 field needs attention" above five messages.
-  const errorCount = lines.reduce((total, line) => total + line.errors.length, 0);
 
   const discardAll = () => {
     keys.forEach((k) => ctx.unstage(k));
@@ -77,11 +73,7 @@ export default function ChangesBar() {
           className="fixed inset-x-0 bottom-16 z-40 mx-auto max-w-3xl px-4"
         >
           <div className="border border-border rounded bg-bg-surface shadow-lg px-4 py-3 max-h-[60vh] overflow-auto">
-            {errorCount > 0 && (
-              <p className="text-xs text-status-red mb-2" role="alert">
-                {errorCount} field{errorCount === 1 ? " needs" : "s need"} attention
-              </p>
-            )}
+            <ReviewErrorSummary lines={lines} />
             <ReviewList lines={lines} />
             <div className="flex items-center gap-4 mt-4 pt-3 border-t border-border">
               <button

@@ -149,8 +149,11 @@ test.describe("a custom agent", () => {
     await page.getByRole("button", { name: "Confirm and apply" }).click();
 
     // Two messages, counted as two — not "1 field needs attention" over a
-    // semicolon-joined run-on sentence.
-    await expect(page.getByText("2 fields need attention")).toBeVisible();
+    // semicolon-joined run-on sentence — and announced with the fields they
+    // name rather than with the count alone.
+    await expect(page.getByText("2 fields need attention").first()).toBeVisible();
+    await expect(page.getByRole("status")).toContainText("a generic agent needs a prompt");
+    await expect(page.getByRole("status")).toContainText("a generic agent needs a label");
 
     const detail = page.locator('[data-agent-detail="ahmet"]');
     await expect(detail.getByText("a generic agent needs a prompt")).toBeVisible();

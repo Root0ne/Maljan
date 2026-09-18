@@ -8,7 +8,11 @@ import type { CatalogEntry, PatchResult, ProbeResult } from "@/types/settings";
 import FieldRow from "../configuration/FieldRow";
 import { buildFieldRowProps } from "../configuration/fieldRowProps";
 import { probeLabel } from "../configuration/GroupHeader";
-import { buildReviewItems, ReviewList } from "../configuration/ReviewList";
+import {
+  buildReviewItems,
+  ReviewErrorSummary,
+  ReviewList,
+} from "../configuration/ReviewList";
 import { useSettingsContext, type SettingsContextValue } from "../configuration/SettingsContext";
 import { appliesSummary } from "../configuration/vocabulary";
 import { isProbeStale, probeFingerprint } from "./probeStale";
@@ -261,7 +265,6 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
   const stagedCount = lines.length + alsoStaged.length;
   // Counted as rows of the two lists above, not as raw error entries: one
   // composite leaf can carry several field-level errors and still be one row.
-  const errorCount = [...lines, ...alsoStaged].reduce((total, item) => total + item.errors.length, 0);
   const probeId = step.probe;
   const result = probeId ? probeResult(probeId) : undefined;
 
@@ -388,11 +391,7 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
             <p className="text-sm text-text-secondary">Nothing to apply.</p>
           ) : (
             <>
-              {errorCount > 0 && (
-                <p className="text-xs text-status-red mb-2" role="alert">
-                  {errorCount} field{errorCount === 1 ? " needs" : "s need"} attention
-                </p>
-              )}
+              <ReviewErrorSummary lines={[...lines, ...alsoStaged]} />
               <ReviewList lines={lines} />
               {alsoStaged.length > 0 && (
                 <div className="mt-4 pt-3 border-t border-border">
