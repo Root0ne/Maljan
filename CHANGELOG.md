@@ -798,7 +798,10 @@ change landed on `main`.
   it has not done since the cap was removed. Such a verdict now carries
   `overall_confidence` `null`, the report header reads "not assessed" and says
   the judge did not answer, and the run summary records the note under
-  `verdict.fallback` with the class of the failure. The console's header shows
+  `verdict.fallback` with the class of the failure — in the summary the API
+  stores as well as in the report's own copy, so the SUMMARY tab's Run record
+  and an evaluation script reading `analysis_reports.run_summary` both see it.
+  The console's header shows
   "Confidence: not assessed" rather than 0/100, and
   `analysis_reports.overall_confidence` is nullable (`20260926000000`) so the
   distinction survives being stored.

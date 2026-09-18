@@ -1323,15 +1323,19 @@ def _with_upstream(chunks: list, block: str) -> list:
     return [replace(head, content=content, char_count=len(content)), *chunks[1:]]
 
 
-def _amended_validation(run_summary: Any, tally: ValidationTally) -> dict[str, Any] | None:
-    """The run summary's ``validation`` block plus what the report round cost.
+def _amended_validation(validation: Any, tally: ValidationTally) -> dict[str, Any] | None:
+    """A ``validation`` block plus what the report round cost.
 
-    ``None`` when there is nothing to amend — no summary (mock mode, where the
-    judge never built one) or no corrections in the report stage.
+    ``validation`` is the block as the report already carries it, which on a
+    run whose judge raised is the judge's block *plus* the ``verdict.fallback``
+    note. Amending that rather than rebuilding from the state is what keeps the
+    note: a report-round correction used to reconstruct the block from the
+    summary the judge wrote, which on such a run is the summary it never wrote.
+
+    ``None`` when there is no block at all — mock mode, where the judge never
+    built a summary and nothing has been told to anybody.
     """
-    if not tally.retries and not tally.by_code and not tally.unresolved:
-        return None
-    block = dict((run_summary or {}).get("validation") or {}) if run_summary else {}
+    block = dict(validation or {})
     if not block:
         return None
     by_code = dict(block.get("by_code") or {})
@@ -3824,8 +3828,16 @@ def make_report_node(
         # untouched value keeps the mock-mode contract, where the judge node
         # skipped the RunSummaryBuilder and the column is legitimately null.
         _state_summary: dict[str, Any] = {}
-        _validation_block = _amended_validation(state.get("run_summary"), _report_tally)
-        if _validation_block is not None:
+        # The block the report carries is the base, because it already holds
+        # the ``verdict.fallback`` note when the judge never answered. What is
+        # stored is then compared against what the judge stored: an amendment
+        # that changes nothing is not written, which is what keeps the
+        # mock-mode contract and an untouched column untouched.
+        _stored_validation = (state.get("run_summary") or {}).get("validation")
+        _validation_block = _amended_validation(
+            (report.run_summary or {}).get("validation"), _report_tally
+        )
+        if _validation_block is not None and _validation_block != _stored_validation:
             _state_summary["validation"] = _validation_block
             # A name of its own: ``_summary`` above is still read below this
             # point, and rebinding it here was correct only for as long as

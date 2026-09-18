@@ -144,7 +144,14 @@ class TestTheSummaryCarriesTheNote:
 def _report_container() -> Any:
     from unittest.mock import MagicMock
 
+    from maljan.pipeline.validation import ValidationTally
+
     container = MagicMock()
+    # The report round's own tally is merged into the summary's validation
+    # block, so it has to be a real one: a mock's ``retries`` would turn the
+    # count this asserts on into a mock and hide whatever it is worth.
+    container.get_narrative_agent.return_value.validation_tally = ValidationTally()
+    container.get_report_composer.return_value.validation_tally = ValidationTally()
     container.is_mock = True
     container.config.reporting.enabled = True
     container.config.llm.parallel_analysts = True
@@ -175,11 +182,16 @@ def _report_state(fallback: dict[str, Any] | None) -> dict[str, Any]:
     return state
 
 
-def _reported(fallback: dict[str, Any] | None) -> tuple[dict[str, Any], str]:
+def _run_report(fallback: dict[str, Any] | None) -> dict[str, Any]:
     from maljan.pipeline.nodes import make_report_node
 
     update = asyncio.run(make_report_node(_report_container())(_report_state(fallback)))
     assert update.get("report_error") is None
+    return update
+
+
+def _reported(fallback: dict[str, Any] | None) -> tuple[dict[str, Any], str]:
+    update = _run_report(fallback)
     return update["malware_report"], update["malware_report_markdown"]
 
 
@@ -195,11 +207,32 @@ class TestTheReportSaysTheJudgeDidNotAnswer:
         assert "0.92" not in markdown.split("## ")[0]
 
     def test_the_stored_summary_carries_the_note(self) -> None:
-        report, _ = _reported({"decision": "Suspicious", "failure": "TimeoutError"})
+        """The state channel, which is the summary the API stores and serves.
 
-        validation = report["run_summary"]["validation"]
-        assert validation["by_code"]["verdict.fallback"] == 1
-        assert validation["unresolved"][0]["agent"] == "judge"
+        The report's own copy travels inside ``malware_report``; the column the
+        SUMMARY tab's Run record reads is ``analysis_reports.run_summary``, and
+        the worker fills that from ``result["run_summary"]``. Asserting on the
+        report's copy alone left the stored one silent: an operator whose judge
+        raised read "No producer needed a correction turn."
+        """
+        update = _run_report({"decision": "Suspicious", "failure": "TimeoutError"})
+
+        for where, summary in (
+            ("the stored summary", update["run_summary"]),
+            ("the report's own copy", update["malware_report"]["run_summary"]),
+        ):
+            validation = summary["validation"]
+            assert validation["by_code"]["verdict.fallback"] == 1, where
+            assert validation["retries"] == 0, where
+            row = validation["unresolved"][0]
+            assert row["agent"] == "judge", where
+            assert "TimeoutError" in row["message"], where
+
+    def test_a_judged_run_stores_no_note_and_no_empty_block(self) -> None:
+        """The amendment writes only what it changed, so the column is untouched."""
+        update = _run_report(None)
+
+        assert "validation" not in (update.get("run_summary") or {})
 
     def test_a_run_whose_judge_answered_is_untouched(self) -> None:
         report, markdown = _reported(None)

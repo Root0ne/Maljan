@@ -153,7 +153,7 @@ class TestTheReportRoundIsFoldedIn:
         tally = ValidationTally(retries=2)
         tally.count([_violation("composer.schema"), _violation("narrative.schema")])
         block = _amended_validation(
-            {"validation": {"retries": 1, "by_code": {"verdict.not_json": 1}, "unresolved": []}},
+            {"retries": 1, "by_code": {"verdict.not_json": 1}, "unresolved": []},
             tally,
         )
 
@@ -168,18 +168,38 @@ class TestTheReportRoundIsFoldedIn:
             "not_run": [],
         }
 
-    def test_a_clean_report_round_amends_nothing(self) -> None:
+    def test_a_clean_report_round_gives_the_block_back_as_it_was(self) -> None:
+        """The caller decides whether that is worth storing, by comparing."""
         from maljan.pipeline.nodes import _amended_validation
 
-        summary = {"validation": {"retries": 1, "by_code": {}, "unresolved": []}}
-        assert _amended_validation(summary, ValidationTally()) is None
+        block = {"retries": 1, "by_code": {}, "unresolved": [], "not_run": []}
+        assert _amended_validation(block, ValidationTally()) == block
 
-    def test_there_is_nothing_to_amend_without_a_summary(self) -> None:
+    def test_there_is_nothing_to_amend_without_a_block(self) -> None:
         from maljan.pipeline.nodes import _amended_validation
 
         tally = ValidationTally(retries=1)
         tally.count([_violation("composer.schema")])
         assert _amended_validation(None, tally) is None
+        assert _amended_validation({}, tally) is None
+
+    def test_the_fallback_note_survives_a_report_round_correction(self) -> None:
+        """The amendment builds on the block the report carries, note included.
+
+        Rebuilding it from the summary the judge wrote dropped the note on the
+        one kind of run that has one: the judge raised, so there is no summary
+        of its to rebuild from.
+        """
+        from maljan.pipeline.nodes import _amended_validation, with_verdict_fallback
+
+        tally = ValidationTally(retries=1)
+        tally.count([_violation("composer.schema")])
+        block = _amended_validation(with_verdict_fallback(None, "TimeoutError"), tally)
+
+        assert block is not None
+        assert block["by_code"] == {"composer.schema": 1, "verdict.fallback": 1}
+        assert [row["code"] for row in block["unresolved"]] == ["verdict.fallback"]
+        assert block["retries"] == 1
 
 
 class TestTheProducersHandItOver:
