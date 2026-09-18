@@ -828,4 +828,6 @@ a badge on the console's domain card — and left out of the STIX indicator set
 and out of the reputation lookups until a second source knows the same name.
 One predicate decides that, and both paths that mint a domain indicator ask
 it: the network block's own, and the string rows that reach the bundle
-through `static.interesting_strings`.
+through `static.interesting_strings`. A Tor address is corroborated by its own
+syntax, because `.onion` never resolves and no sandbox can confirm one; the
+indicator it mints carries the reason it was admitted.

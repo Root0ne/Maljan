@@ -103,7 +103,8 @@ class TestNoStringDerivedDomainReachesTheBundle:
     Gating `_indicator_for_domain` alone left the other one open: the same
     rows also reach `static.interesting_strings`, and the renderer turns those
     into `[domain-name:value = …]` indicators of their own. A bundle rendered
-    from run 2's shapes still shipped the fragments.
+    from a string sweep beside one sandbox resolution still shipped the
+    fragments.
     """
 
     def _report(self) -> Any:
@@ -181,3 +182,79 @@ class TestTheReportSaysWhereEachNameCameFrom:
         by_fqdn = {line.split("`")[1]: line for line in rows}
         assert "| strings |" in by_fqdn["rosoft.com"]
         assert "| sandbox |" in by_fqdn["c2.evil.tld"]
+
+
+def _a_v3_onion() -> str:
+    """A syntactically valid v3 address, built here rather than taken from a sample."""
+    import base64
+    import hashlib
+
+    public_key = hashlib.sha256(b"maljan test onion service key").digest()
+    version = b"\x03"
+    checksum = hashlib.sha3_256(b".onion checksum" + public_key + version).digest()[:2]
+    return base64.b32encode(public_key + checksum + version).decode().lower() + ".onion"
+
+
+class TestATorAddressCorroboratesItself:
+    """No sandbox can ever confirm one, because `.onion` does not resolve.
+
+    A hard-coded onion C2 is among the strongest string-derived indicators
+    there is, and it is not a coincidence of bytes the way a truncated
+    hostname is: fifty-six base32 characters whose last three bytes check out
+    against the first thirty-two do not occur by accident. Holding it to the
+    same corroboration rule as `rosoft.com` made it unpublishable by any path.
+    """
+
+    def _patterns(self, value: str) -> list[str]:
+        from maljan.reporting.builder import MalwareReportBuilder
+        from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
+        from maljan.schemas.stix_models import Indicator
+
+        rows = [{"kind": "domain", "value": value, "notes": "tor_hidden_service"}]
+        report = MalwareReportBuilder(
+            file_hash="d" * 64,
+            file_name="sample.exe",
+            sample_path=None,
+            sandbox_report={},
+            reports={},
+            isr_reports={},
+            stix_output={"objects": []},
+            run_summary={},
+            discussion_history=[],
+            final_decision="Malware",
+            overall_confidence=0.8,
+            judge_assessment=None,
+            malware_category="rat",
+            evidence_ledger=[_entry(1, "iocs_from_file", {"iocs": rows})],
+        ).build_deterministic()
+        bundle = ExtendedSTIXRenderer().render(report, base_bundle=None)
+        return [o.pattern for o in bundle.objects if isinstance(o, Indicator)]
+
+    def test_a_valid_v3_address_is_published(self) -> None:
+        onion = _a_v3_onion()
+        assert f"[domain-name:value = '{onion}']" in self._patterns(onion)
+
+    def test_a_v2_address_is_published(self) -> None:
+        onion = "expyuzz4wqqyqhjn.onion"
+        assert f"[domain-name:value = '{onion}']" in self._patterns(onion)
+
+    def test_fifty_six_characters_that_fail_the_checksum_are_not(self) -> None:
+        """Length and alphabet alone are a shape anything can wear."""
+        broken = "a" * 56 + ".onion"
+        assert not any("onion" in pattern for pattern in self._patterns(broken))
+
+    def test_an_ordinary_string_derived_name_is_still_withheld(self) -> None:
+        assert not any("rosoft" in pattern for pattern in self._patterns("rosoft.com"))
+
+    def test_the_indicator_says_why_it_was_let_through(self) -> None:
+        from maljan.reporting.models import NetworkDomain
+        from maljan.reporting.renderers.stix_renderer import _indicator_for_domain
+
+        indicator = _indicator_for_domain(NetworkDomain(fqdn=_a_v3_onion(), source="strings"))
+        assert indicator is not None
+        assert "hidden service" in (indicator.description or "").lower()
+
+    def test_it_is_still_labelled_a_string_and_never_looked_up(self) -> None:
+        from maljan.enrichment.orchestrator import _is_public_fqdn
+
+        assert _is_public_fqdn(_a_v3_onion()) is False

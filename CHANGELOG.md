@@ -772,7 +772,15 @@ change landed on `main`.
   produces now carries `source: "strings"`, `NetworkDomain` records where the
   name came from, and a name only the byte image knows is neither exported as
   an indicator nor sent to a paid provider until a second source — the
-  sandbox, an analyst artefact or a reputation record — knows it too. One
+  sandbox, an analyst artefact or a reputation record — knows it too. A Tor
+  address is the exception and has to be: `.onion` does not resolve, so no
+  sandbox can ever confirm one, and the rule made the strongest string-derived
+  indicator there is unpublishable by any path. Its own syntax is the second
+  source — a v3 address is admitted only when the checksum and version byte in
+  its last three bytes check out against the first thirty-two, a v2 one on its
+  length and alphabet — it stays labelled `strings`, it is still never sent to
+  a paid provider, and the indicator's description says why it was let
+  through. One
   predicate decides that, and both paths that mint a domain indicator ask it:
   the network block's own, and the string rows, which reach the bundle as
   `interesting_strings` and were still being published after the first gate
@@ -799,7 +807,7 @@ change landed on `main`.
   capture — in a new `corroborated_by` field that `api_capability` puts on the
   row. The T1113 association is untouched: it is shown as a catalogue
   association, which is what it always was.
-- **Thirteen rules fired on a benign GUI network client; none does now.** The
+- **Thirteen rules asserted a technique about a benign GUI network client; none asserts one now.** The
   corpus was swept rule by rule against two fixtures built from names and
   words rather than from any sample. Four shapes were doing the damage: a
   pattern that is a substring of a benign API name (`RegSetValue`,
@@ -838,7 +846,9 @@ change landed on `main`.
   remediation, the same for `document_info` without olefile, and the pack
   contributes `triage.<tool>_degraded` rather than `triage.<tool>_failed`. That
   reason never makes a whole run degraded, because the facts are there and what
-  is missing from them is said beside them.
+  is missing from them is said beside them. The sentence the judge reads says
+  the tool answered a smaller set than it wanted to, not that the pack could
+  not run it — the same prompt carries the facts it did produce.
 - **A container that had been opened was reported as never opened.** The
   degradation reason "container was not parsed — no format-aware extraction
   exists for it; findings come from a raw-byte string sweep only" was decided

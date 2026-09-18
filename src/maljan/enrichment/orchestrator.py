@@ -213,7 +213,7 @@ async def _enrich_domains(
         if not _is_public_fqdn(fqdn):
             skipped += 1
             continue
-        if not domain_is_corroborated(dom.get("source"), dom.get("reputation")):
+        if not domain_is_corroborated(dom.get("source"), dom.get("reputation"), fqdn):
             # A name only the sample's byte image knows. One PE's twenty-five
             # string-derived "domains" held the single enrichment slot for
             # 452 s, and fifteen of them were fragments of longer names.

@@ -190,10 +190,20 @@ def reason_sentence(reason: str) -> str:
     The tokens stay in the run summary, where a consumer keys on them; the
     judge reads prose.
     """
-    match = _REASON_RE.match(str(reason or ""))
+    text = str(reason or "")
+    match = _REASON_RE.match(text)
     if not match:
-        return str(reason)
+        return text
     tool = match.group("tool")
+    if _DEGRADED_RE.match(text):
+        # This sentence reaches the judge's prompt beside the facts the tool
+        # did produce, so it must not say the tool could not run: the same
+        # prompt carries an APK's dex count and its ABIs under a reason that
+        # used to read "could not run apk_info".
+        return (
+            f"the triage pack's {tool} answered a smaller set than it wanted to; "
+            "what it did answer is in the pack, and the entry says which library was missing"
+        )
     if tool == "pack":
         return "the triage pack itself failed before it finished"
     if tool in _REPUTATION_TOOLS:

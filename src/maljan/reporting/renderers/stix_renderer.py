@@ -31,7 +31,7 @@ from maljan.agents._indicator_denylists import (
     URL_DENY_HOSTS,
 )
 from maljan.core.logger import logger
-from maljan.extractors.network_extractor import domain_is_corroborated
+from maljan.extractors.network_extractor import corroboration_reason, domain_is_corroborated
 from maljan.reporting.models import (
     MalwareReport,
     NetworkDomain,
@@ -364,7 +364,7 @@ def _publishable_domains(report: Any) -> frozenset[str]:
     return frozenset(
         domain.fqdn.strip().lower().rstrip(".")
         for domain in network.domains
-        if domain.fqdn and domain_is_corroborated(domain.source, domain.reputation)
+        if domain.fqdn and domain_is_corroborated(domain.source, domain.reputation, domain.fqdn)
     )
 
 
@@ -452,7 +452,8 @@ def _indicator_for_domain(domain: NetworkDomain) -> Indicator | None:
     fqdn = domain.fqdn.strip()
     if not fqdn:
         return None
-    if not domain_is_corroborated(domain.source, domain.reputation):
+    admitted = corroboration_reason(domain.source, domain.reputation, fqdn)
+    if admitted is None:
         # A run of bytes that has the shape of a hostname is not an
         # observation of infrastructure. One PE's string sweep put fifteen
         # such fragments into a published bundle, each as an indicator a
@@ -467,7 +468,11 @@ def _indicator_for_domain(domain: NetworkDomain) -> Indicator | None:
         pattern=pattern,
         pattern_type="stix",
         indicator_types=["malicious-activity"] if domain.is_suspicious else ["anomalous-activity"],
-        description=domain.reason,
+        # Why this name may be published at all, beside whatever the scorer
+        # said about it. A Tor address reaches a bundle on the strength of its
+        # own syntax and of nothing anybody watched, and a reader finding it
+        # there beside no sandbox observation is owed that sentence.
+        description="; ".join(part for part in (domain.reason, admitted) if part),
     )
 
 
