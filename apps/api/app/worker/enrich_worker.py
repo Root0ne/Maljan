@@ -49,6 +49,22 @@ logger = get_logger("worker.enrich")
 # teardown budget, and it is read once when the process starts.
 ENRICHMENT_MAX_JOBS = max(1, int(os.environ.get("ENRICHMENT_MAX_JOBS", "2")))
 
+# How an enrichment gets out of an analysis's way when the two share a queue.
+#
+# With one process — the shipped default — arq pops by score, so an enrichment
+# queued a second before an analysis runs first and the analysis waits for all
+# of it: 452 s in the run this was filed for. One job at a time keeps them from
+# running together; it does not keep the enrichment from going first.
+#
+# So on that queue the task looks, before it does anything, for an analysis
+# waiting behind it, and puts itself back with a short deferral if it finds
+# one. The deferral is capped, and the total carried in the job's own
+# arguments: past the cap it runs whatever is waiting, so a steady stream of
+# analyses can never starve it, and an analysis waits for at most one
+# enrichment per cap window.
+ENRICHMENT_DEFER_SECONDS = 60
+ENRICHMENT_DEFER_CAP_SECONDS = 1800
+
 
 def enrichment_health_key() -> str:
     """Where the enrichment worker writes that it is alive.
@@ -69,6 +85,77 @@ async def enrichment_worker_is_alive(redis_conn: Any) -> bool | None:
     except Exception as exc:  # noqa: BLE001 — an unreadable queue is not a verdict
         logger.debug("enrich: could not read the worker's health key (%s).", type(exc).__name__)
         return None
+
+
+async def analyses_are_waiting(redis_conn: Any) -> bool:
+    """Whether the analysis queue holds an analysis this enrichment is ahead of.
+
+    Read from the queue rather than from the database: a job row is inserted
+    and the arq job enqueued inside one request, and Redis has the entry before
+    Postgres commits it, so the queue is the store that cannot miss an analysis
+    submitted a moment ago.
+
+    An entry is an analysis unless it is one of ours: an enrichment is enqueued
+    under ``enrich:…`` and an analysis under its own job id. Never raises — a
+    queue that cannot be read is not a reason to defer, because the enrichment
+    would then defer for ever.
+    """
+    try:
+        members = await redis_conn.zrange(ANALYSIS_QUEUE, 0, 100)
+    except Exception as exc:  # noqa: BLE001 — an unreadable queue is not a queue full of work
+        logger.debug("enrich: could not read the analysis queue (%s).", type(exc).__name__)
+        return False
+    for member in members or []:
+        name = member.decode() if isinstance(member, bytes | bytearray) else str(member)
+        if not name.startswith("enrich:"):
+            return True
+    return False
+
+
+async def defer_behind_the_analyses(ctx: dict, report_id: str, deferred_for: float) -> float | None:
+    """Put this enrichment back behind the analyses, or ``None`` to run it now.
+
+    Returns the total deferral the re-enqueued job carries, so the caller can
+    say how long this report has been waiting. Nothing is deferred on the
+    enrichment worker's own queue — that process exists so these two never
+    compete — and nothing is deferred past the cap.
+    """
+    if ctx.get("queue") == ENRICHMENT_QUEUE:
+        return None
+    if deferred_for >= ENRICHMENT_DEFER_CAP_SECONDS:
+        logger.info(
+            "enrich: report %s waited %.0fs for the analyses; running it now.",
+            report_id,
+            deferred_for,
+        )
+        return None
+    redis_conn = ctx.get("redis")
+    if redis_conn is None or not await analyses_are_waiting(redis_conn):
+        return None
+
+    total = deferred_for + ENRICHMENT_DEFER_SECONDS
+    try:
+        from arq.connections import ArqRedis
+
+        pool = ctx.get("arq_pool") or ArqRedis(connection_pool=redis_conn.connection_pool)
+        await pool.enqueue_job(
+            "enrich_threat_intel",
+            str(report_id),
+            total,
+            # A new id per attempt: arq refuses one it is already running, and
+            # this job is the one being re-queued.
+            _job_id=f"enrich:{ANALYSIS_QUEUE}:{report_id}:d{int(total)}",
+            _queue_name=ANALYSIS_QUEUE,
+            _defer_by=ENRICHMENT_DEFER_SECONDS,
+        )
+    except Exception as exc:  # noqa: BLE001 — rather run it late than lose it
+        logger.warning(
+            "enrich: could not defer report %s (%s); running it now.",
+            report_id,
+            type(exc).__name__,
+        )
+        return None
+    return total
 
 
 async def enqueue_enrichment(pool: Any, report_id: Any) -> str | None:
@@ -156,7 +243,9 @@ async def _get_memory_store() -> MemoryStore | None:
     return _memory_store
 
 
-async def enrich_threat_intel(ctx: dict, report_id: str) -> dict[str, Any]:
+async def enrich_threat_intel(
+    ctx: dict, report_id: str, deferred_for: float = 0.0
+) -> dict[str, Any]:
     """Enrich a single report's NetworkDomain / NetworkIP reputation fields.
 
     The task is **fail-safe**: any unexpected exception is logged but does
@@ -168,6 +257,19 @@ async def enrich_threat_intel(ctx: dict, report_id: str) -> dict[str, Any]:
 
     redis_conn: aioredis.Redis = ctx["redis"]
     db_session_factory = ctx["db_session"]
+
+    # Before anything else, and only where the two share a queue: an analysis
+    # waiting behind this job goes first. An enrichment already running is
+    # never interrupted — that is what the dedicated worker is for.
+    waited = await defer_behind_the_analyses(ctx, report_id, deferred_for)
+    if waited is not None:
+        logger.info(
+            "enrich: an analysis is waiting; report %s deferred %ds (%.0fs so far).",
+            report_id,
+            ENRICHMENT_DEFER_SECONDS,
+            waited,
+        )
+        return {"status": "deferred", "deferred_for": waited}
 
     try:
         report_uuid = uuid.UUID(report_id)
@@ -384,6 +486,9 @@ async def enrich_startup(ctx: dict) -> None:
     engine = create_async_engine(settings.database_url, pool_size=5, max_overflow=10)
     ctx["db_session"] = async_sessionmaker(engine, expire_on_commit=False)
     ctx["redis"] = aioredis.from_url(settings.redis_url)
+    # Which queue this process reads. The task asks, because the same task runs
+    # on both workers and only one of them shares its queue with the analyses.
+    ctx["queue"] = ENRICHMENT_QUEUE
     logger.info(
         "Enrichment worker started: reading %s",
         ENRICHMENT_QUEUE,

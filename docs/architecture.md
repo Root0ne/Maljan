@@ -69,9 +69,19 @@ spent 451.98 s at VirusTotal while the next analysis sat `pending` for 4 m
 
 **Which one a deployment gets.** `api.enrichment_dedicated_worker` decides, and
 it ships **off**: a release that is taken and run unchanged keeps one process,
-with the enrichment queued beside the analyses and deferred until none is
-running — the old behaviour and the old delay, but nothing stops working
-because a process nobody started is missing. The compose stack runs the second
+and nothing stops working because a process nobody started is missing.
+
+On that one queue the enrichment gets out of the way rather than merely waiting
+its turn. arq pops by score, so an enrichment queued a second before an
+analysis would otherwise run first and the analysis would wait for all of it —
+452 s in the run this was filed for. When the task starts there it reads the
+analysis queue first, and if anything but another enrichment is waiting it
+re-enqueues itself 60 seconds later and returns having done nothing. The total
+deferral travels in the job's own arguments and is capped at 30 minutes, after
+which it runs whatever is queued: an analysis waits for at most one enrichment
+per cap window, and a steady stream of analyses can never starve the
+enrichment. An enrichment already running is never interrupted — that is what
+the second worker is for. The compose stack runs the second
 worker and sets `ENRICHMENT_DEDICATED_WORKER=true` beside it, which is the
 default the setting falls back to; an operator's saved value wins over both.
 Turn it on wherever the second process actually runs.

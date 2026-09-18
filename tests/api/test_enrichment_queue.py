@@ -354,3 +354,136 @@ class TestNothingStopsSilently:
             AsyncMock(side_effect=ConnectionError("no settings store")),
         ):
             assert await system._enrichment_worker_state() == "unknown"
+
+
+class TestAnEnrichmentGetsOutOfTheWay:
+    """One process, one slot: the analysis behind the enrichment goes first.
+
+    arq pops by score, so an enrichment queued a second before an analysis runs
+    first and the analysis waits for all of it — 452 s measured. One job at a
+    time keeps the two from running together; it does not decide which one
+    goes. So on the shared queue the task looks for an analysis waiting behind
+    it and puts itself back, up to a cap, after which it runs whatever is
+    queued: an analysis waits for at most one enrichment per cap window, and a
+    stream of analyses can never starve the enrichment.
+    """
+
+    @staticmethod
+    def _redis(queued: list[str]) -> Any:
+        redis = MagicMock()
+        redis.zrange = AsyncMock(return_value=[m.encode() for m in queued])
+        redis.connection_pool = MagicMock()
+        return redis
+
+    @staticmethod
+    def _ctx(redis: Any, queue: str, pool: Any) -> dict[str, Any]:
+        return {"redis": redis, "queue": queue, "arq_pool": pool, "db_session": MagicMock()}
+
+    @pytest.mark.asyncio
+    async def test_it_yields_to_an_analysis_that_is_waiting(self) -> None:
+        from app.worker.enrich_worker import ENRICHMENT_DEFER_SECONDS
+
+        pool = _pool()
+        redis = self._redis([str(uuid.uuid4())])
+        ctx = self._ctx(redis, _analysis_queue(), pool)
+        report_id = uuid.uuid4()
+
+        result = await enrich_threat_intel(ctx, str(report_id))
+
+        assert result["status"] == "deferred"
+        assert result["deferred_for"] == ENRICHMENT_DEFER_SECONDS
+        queued = pool.enqueue_job.await_args
+        assert queued.kwargs["_defer_by"] == ENRICHMENT_DEFER_SECONDS
+        assert queued.kwargs["_queue_name"] == _analysis_queue()
+        assert queued.args[0] == "enrich_threat_intel"
+        # The total it has waited travels with it.
+        assert queued.args[2] == ENRICHMENT_DEFER_SECONDS
+        # And it did no work: no report was read.
+        assert ctx["db_session"].call_count == 0
+
+    @pytest.mark.asyncio
+    async def test_an_empty_analysis_queue_means_it_runs_now(self) -> None:
+        from app.worker import enrich_worker
+
+        pool = _pool()
+        redis = self._redis([])
+        ctx = self._ctx(redis, _analysis_queue(), pool)
+
+        assert await enrich_worker.defer_behind_the_analyses(ctx, str(uuid.uuid4()), 0.0) is None
+        pool.enqueue_job.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_another_deferred_enrichment_is_not_an_analysis(self) -> None:
+        """Only the analyses count; our own deferred jobs sit in the same set."""
+        from app.worker import enrich_worker
+
+        pool = _pool()
+        redis = self._redis([f"enrich:{_analysis_queue()}:{uuid.uuid4()}:d60"])
+        ctx = self._ctx(redis, _analysis_queue(), pool)
+
+        assert await enrich_worker.defer_behind_the_analyses(ctx, str(uuid.uuid4()), 0.0) is None
+
+    @pytest.mark.asyncio
+    async def test_the_deferrals_stop_at_the_cap(self) -> None:
+        from app.worker.enrich_worker import (
+            ENRICHMENT_DEFER_CAP_SECONDS,
+            ENRICHMENT_DEFER_SECONDS,
+            defer_behind_the_analyses,
+        )
+
+        pool = _pool()
+        redis = self._redis([str(uuid.uuid4())])
+        ctx = self._ctx(redis, _analysis_queue(), pool)
+
+        waited = 0.0
+        rounds = 0
+        while True:
+            total = await defer_behind_the_analyses(ctx, "r", waited)
+            if total is None:
+                break
+            waited = total
+            rounds += 1
+            assert rounds < 100, "the deferral never stopped"
+
+        assert waited == ENRICHMENT_DEFER_CAP_SECONDS
+        assert rounds == ENRICHMENT_DEFER_CAP_SECONDS // ENRICHMENT_DEFER_SECONDS
+        # Past the cap it runs even with the analysis still queued.
+        assert await defer_behind_the_analyses(ctx, "r", waited) is None
+
+    @pytest.mark.asyncio
+    async def test_the_dedicated_worker_never_defers(self) -> None:
+        """Its queue holds nothing but enrichments; the two never compete."""
+        from app.worker import enrich_worker
+
+        pool = _pool()
+        redis = self._redis([str(uuid.uuid4())])
+        ctx = self._ctx(redis, ENRICHMENT_QUEUE, pool)
+
+        assert await enrich_worker.defer_behind_the_analyses(ctx, "r", 0.0) is None
+        pool.enqueue_job.assert_not_awaited()
+        redis.zrange.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_queue_it_cannot_read_is_not_a_reason_to_wait(self) -> None:
+        """Deferring on an error would defer for ever."""
+        from app.worker import enrich_worker
+
+        pool = _pool()
+        redis = MagicMock()
+        redis.zrange = AsyncMock(side_effect=ConnectionError("queue unreachable"))
+        ctx = self._ctx(redis, _analysis_queue(), pool)
+
+        assert await enrich_worker.defer_behind_the_analyses(ctx, "r", 0.0) is None
+
+    @pytest.mark.asyncio
+    async def test_an_enqueue_that_fails_runs_the_enrichment_rather_than_losing_it(
+        self,
+    ) -> None:
+        from app.worker import enrich_worker
+
+        pool = MagicMock()
+        pool.enqueue_job = AsyncMock(side_effect=ConnectionError("queue unreachable"))
+        redis = self._redis([str(uuid.uuid4())])
+        ctx = self._ctx(redis, _analysis_queue(), pool)
+
+        assert await enrich_worker.defer_behind_the_analyses(ctx, "r", 0.0) is None

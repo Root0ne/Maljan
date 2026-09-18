@@ -412,12 +412,14 @@ async def test_the_operators_cancellation_writes_the_cancelled_row(
         _mock_mode(),
         patch("maljan.app.MaljanApp.arun", new=AsyncMock(side_effect=_wait_to_be_cancelled)),
         patch.object(worker_module, "CANCEL_POLL_SECONDS", 0.01),
-        # The cancellation carries on once the row is written: a task that
-        # returned normally here would leave whatever cancelled it waiting.
-        pytest.raises(asyncio.CancelledError),
     ):
-        await run_analysis({"redis": redis_stub, "db_session": factory}, str(job.id))
+        # A job the operator cancelled is a finished job, and it ends like one:
+        # raising here would put arq on its retry branch and the run would end
+        # as "max retries exceeded" for something somebody asked for.
+        result = await run_analysis({"redis": redis_stub, "db_session": factory}, str(job.id))
     api_config._settings = None
+
+    assert result["status"] == "cancelled"
 
     cancelled = [u for u in updates_to(factory, "analysis_jobs") if u.get("status") == "cancelled"]
     assert len(cancelled) == 1
@@ -599,11 +601,11 @@ async def test_a_cancel_request_writes_its_row_even_between_two_polls(
     with (
         _mock_mode(),
         patch("maljan.app.MaljanApp.arun", new=AsyncMock(side_effect=_cancelled)),
-        # The row is written and the cancellation carries on.
-        pytest.raises(asyncio.CancelledError),
     ):
-        await run_analysis({"redis": redis_stub, "db_session": factory}, str(job.id))
+        result = await run_analysis({"redis": redis_stub, "db_session": factory}, str(job.id))
     api_config._settings = None
+
+    assert result["status"] == "cancelled"
 
     cancelled = [u for u in updates_to(factory, "analysis_jobs") if u.get("status") == "cancelled"]
     assert len(cancelled) == 1
@@ -672,3 +674,50 @@ async def test_a_redis_that_cannot_answer_is_read_as_a_shutdown(
     assert updates_to(factory, "analysis_jobs") == [
         u for u in updates_to(factory, "analysis_jobs") if u.get("status") == "running"
     ]
+
+
+@pytest.mark.asyncio
+async def test_a_shutdown_that_cancels_the_task_is_not_swallowed(
+    redis_stub: MagicMock,
+) -> None:
+    """The other half of the rule: a task somebody is waiting on must end.
+
+    A worker shutting down cancels this task and waits for it. Returning
+    normally there would leave the shutdown waiting for a task that decided not
+    to end, so the cancellation carries on — told apart by
+    ``Task.cancelling()``, which counts the cancellations aimed at this task
+    rather than at the pipeline inside it. The cancel flag is set here too, so
+    what is under test is the direction of the cancellation, not the flag.
+    """
+    job = fake_job()
+    sample = fake_sample(job.sample_id)
+    factory = SessionFactory(rows_for(job, sample))
+    redis_stub.get = AsyncMock(return_value=b"1")
+    running = asyncio.Event()
+
+    async def _long_pipeline(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        running.set()
+        await asyncio.sleep(3600)
+        return _pipeline_result()
+
+    from app import config as api_config
+
+    api_config._settings = None
+    with (
+        _mock_mode(),
+        patch("maljan.app.MaljanApp.arun", new=AsyncMock(side_effect=_long_pipeline)),
+    ):
+        task = asyncio.create_task(
+            run_analysis({"redis": redis_stub, "db_session": factory}, str(job.id))
+        )
+        await running.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    api_config._settings = None
+
+    assert task.cancelled(), "the task ended as cancelled, as the shutdown asked"
+    # And the row was still written on the way out.
+    cancelled = [u for u in updates_to(factory, "analysis_jobs") if u.get("status") == "cancelled"]
+    assert len(cancelled) == 1
+    assert_every_session_has_ended(factory)

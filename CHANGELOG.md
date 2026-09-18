@@ -757,8 +757,11 @@ change landed on `main`.
   `docker-compose.yml` as `enrichment-worker`), and the analysis worker
   reads only its own queue. A deployment that would rather run one process
   reads only its own queue. The setting ships **off**, so a release taken and
-  run unchanged keeps one process and its old behaviour rather than queueing
-  for a worker nobody started; the compose stack runs the second worker and
+  run unchanged keeps one process rather than queueing for a worker nobody
+  started — and on that shared queue the enrichment now yields: it re-enqueues
+  itself a minute later while an analysis is waiting, up to half an hour, after
+  which it runs anyway, so the analysis no longer waits out an enrichment that
+  was queued a second before it; the compose stack runs the second worker and
   turns it on beside it, and an operator's saved value wins over both. With it
   on and nothing reading the queue, the worker logs one warning naming the
   command that reads it and `GET /api/v1/system/status` reports

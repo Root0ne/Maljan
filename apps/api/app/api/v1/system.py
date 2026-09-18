@@ -7,6 +7,8 @@ can purge low-signal LTM entries that pre-date the write-time quality gate).
 
 from __future__ import annotations
 
+from typing import Any
+
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException, status
 from maljan.core.settings_overrides import redact_url
@@ -74,6 +76,21 @@ class SystemStatusResponse(BaseModel):
     )
 
 
+# One client for this module, reused by every status call. The console polls
+# this endpoint, and a connect-and-close per poll is a connection the pool was
+# there to avoid; the worker's own check reuses its context's client the same
+# way.
+_redis_client: Any = None
+
+
+async def _redis() -> Any:
+    """The shared Redis client for the status read, built once."""
+    global _redis_client
+    if _redis_client is None:
+        _redis_client = aioredis.from_url(settings.redis_url)
+    return _redis_client
+
+
 async def _enrichment_worker_state() -> str:
     """Whether the process the enrichment is queued for is there.
 
@@ -88,11 +105,7 @@ async def _enrichment_worker_state() -> str:
     try:
         if not await runtime_config.get("enrichment_dedicated_worker"):
             return "not_required"
-        redis_conn = aioredis.from_url(settings.redis_url)
-        try:
-            alive = await enrichment_worker_is_alive(redis_conn)
-        finally:
-            await redis_conn.aclose()
+        alive = await enrichment_worker_is_alive(await _redis())
     except Exception as exc:  # noqa: BLE001 — a status line never fails a request
         logger.debug("system status: enrichment worker unknown (%s).", type(exc).__name__)
         return "unknown"

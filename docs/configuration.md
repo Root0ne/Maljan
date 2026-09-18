@@ -181,8 +181,11 @@ admin-only, as they have always been; what was missing was the record.
 
 `api.enrichment_dedicated_worker` decides whether a report's reputation lookups
 are queued for the enrichment worker or beside the analyses, and it ships off:
-a deployment that runs one process keeps working, with the enrichment deferred
-until no analysis is running. Turn it on where the second process actually runs
+a deployment that runs one process keeps working. On the shared queue the
+enrichment yields — it re-enqueues itself a minute later whenever an analysis
+is waiting, up to a total of 30 minutes, after which it runs anyway — so an
+analysis submitted after an enrichment does not wait for the whole of it, and
+the enrichment is never starved. Turn it on where the second process actually runs
 — the compose stack starts one and sets the default beside it. With it on and
 nothing reading that queue, the analysis worker logs one warning at startup and
 `GET /api/v1/system/status` reports `enrichment_worker` as `down`; the
@@ -194,6 +197,14 @@ again for the other worker straight away, and two triggers for one report on
 one queue still coalesce into one job. What does not move is an enrichment
 already sitting in the queue it was put in — it runs when that queue's worker
 runs, which for the analysis queue is between analyses.
+
+One consequence of that, if a flip happens while an enrichment is still queued:
+the report can be enriched twice, once from each queue. Both runs read the
+report and write the same fields, and both completion events take their own
+sequence numbers, so the feed's count still matches its last number; what it
+costs is a second set of provider lookups against a rate-limited key and two
+completion events for one report. Flipping the setting when nothing is queued
+avoids it.
 
 That worker runs `ENRICHMENT_MAX_JOBS` (default 2) at a time. More than one
 because each job waits on somebody else's HTTP; not many more because they

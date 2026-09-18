@@ -1765,12 +1765,23 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # cancellation came with.
             if job_uuid is not None:
                 await mark_job_cancelled(db_session, job_uuid)
-            # And then the cancellation carries on. Returning here swallowed
-            # it: the task looked like it had finished normally, while the
-            # thing that cancelled it — a shutdown, a timeout — was still
-            # waiting for it to end. The ``finally`` below still runs, so the
-            # feed is flushed and the claim released on the way out.
-            raise
+            # How this job ends depends on who cancelled what. The operator's
+            # cancel reaches the pipeline task, not this one: nothing outside
+            # is waiting for a ``CancelledError`` here, and raising one puts
+            # arq on its retry branch — the job goes back in the queue, is
+            # popped again and ends with "max retries exceeded", which reads
+            # like a failure for something somebody asked for. A finished job
+            # is what this is, so it returns like one.
+            #
+            # A worker shutting down cancels *this* task and waits for it, and
+            # ``cancelling()`` is how a task knows that has happened. Then the
+            # cancellation must carry on, or the shutdown waits for a task that
+            # decided not to end. The ``finally`` below runs on both paths, so
+            # the feed is flushed and the claim released either way.
+            current = asyncio.current_task()
+            if current is not None and current.cancelling():
+                raise
+            return {"status": "cancelled", "job_id": job_id}
         finally:
             heartbeat_stop_event.set()
             try:
@@ -2668,6 +2679,10 @@ async def startup(ctx: dict) -> None:
 
     # Store a Redis connection for PubSub
     ctx["redis"] = aioredis.from_url(settings.redis_url)
+    # Which queue this process reads. The enrichment task asks, because on this
+    # queue it shares the worker's one slot with the analyses and gets out of
+    # their way; on its own it never does.
+    ctx["queue"] = ANALYSIS_QUEUE
 
     # Repair the phantom 'running' rows a killed worker leaves behind, and
     # keep repairing them: the first pass waits one owner TTL so a crashed
