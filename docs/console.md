@@ -140,7 +140,11 @@ identity and the resume cursor. A run recorded before the numbering existed
 keeps the order its events arrived in. A run whose feed has passed the
 retention window replays from the conversation stored on its report instead —
 only then, so stored rows can never be laid over a feed that still has
-something to say.
+something to say. A stored row carries what its event carried, its kind and
+its stage included, so a replay groups by stage and keeps the arrow between a
+delegated ask and its answer. A run recorded before those were columns carries
+neither, and the view derives what it can: such a replay is one unnamed stage
+of plain lines.
 
 ## Reputation
 
