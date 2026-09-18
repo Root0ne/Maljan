@@ -104,7 +104,7 @@ test.describe("a custom agent", () => {
     // The status the apply leaves behind, which is the console saying the
     // PATCH was accepted. Waiting on this rather than on the bar disappearing
     // keeps the test off the six-second window the status line lingers for.
-    await expect(page.getByRole("status")).toBeVisible();
+    await expect(page.getByRole("status").first()).toBeVisible();
     const sent = patches[0][DEFINITIONS] as DefinitionMap;
     expect(sent.ahmet).toMatchObject({ role: "generic", label: "Ahmet" });
     expect(sent.judge).toEqual({ role: "judge", enabled: true });
@@ -118,7 +118,7 @@ test.describe("a custom agent", () => {
     await page.locator('[data-agent-detail="ahmet"]').getByRole("button", { name: "Remove" }).click();
     await page.getByRole("button", { name: "Review" }).click();
     await page.getByRole("button", { name: "Confirm and apply" }).click();
-    await expect(page.getByRole("status")).toBeVisible();
+    await expect(page.getByRole("status").first()).toBeVisible();
 
     await page.goto(AGENTS_PATH);
     await expect(page.locator('[data-agent="ahmet"]')).toHaveCount(0);
@@ -152,8 +152,9 @@ test.describe("a custom agent", () => {
     // semicolon-joined run-on sentence — and announced with the fields they
     // name rather than with the count alone.
     await expect(page.getByText("2 fields need attention").first()).toBeVisible();
-    await expect(page.getByRole("status")).toContainText("a generic agent needs a prompt");
-    await expect(page.getByRole("status")).toContainText("a generic agent needs a label");
+    const announced = page.getByRole("status").first();
+    await expect(announced).toContainText("a generic agent needs a prompt");
+    await expect(announced).toContainText("a generic agent needs a label");
 
     const detail = page.locator('[data-agent-detail="ahmet"]');
     await expect(detail.getByText("a generic agent needs a prompt")).toBeVisible();
