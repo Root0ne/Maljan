@@ -343,7 +343,11 @@ Two producers use it:
   attack-pattern with an unresolvable id, a severity outside the enum, and a
   family named with no evidence ids. An ungrounded indicator that survives the
   retry is dropped, because a STIX consumer has no way to read a caveat — and
-  recorded, because the false positive is a fact about the run. Two symmetric
+  recorded, because the false positive is a fact about the run.
+  `verdict.unstated` asks for the verdict when the bundle states none, and
+  `verdict.assessment_conflict` asks which of two answers was meant when the
+  stated verdict and the rest of the assessment disagree — see *The verdict is
+  what the judge states* below. Two symmetric
   rules ask what a verdict over zero analyst claims rests on:
   `verdict.unsupported_benign` asks for the entry that establishes Benign (a
   signature is the usual one) and `verdict.unsupported_malware` for the entries
@@ -371,6 +375,63 @@ Two producers use it:
   timed out, while the extraction in the same run had read "Suspicious" out of
   the text. Such a verdict also carries no confidence — see
   `verdict_fallback` below.
+
+### The verdict is what the judge states
+
+`x_maljan_assessment.verdict` is the judge's answer to the question the report
+leads with, in the vocabulary `schemas/judgement.VERDICT_VALUES` fixes:
+Malware, Suspicious or Benign. `pipeline.outcome.decide_from_bundle` reads it,
+after `x_maljan_fallback_verdict` and before anything else. The object set of a
+bundle illustrates the decision; it does not make it.
+
+It used to. A signed, 0/74-clean PuTTY was published as `Malware, confidence
+1.0` because the bundle carried a `malware` object, while the judge's own
+severity was `Informational`, its category `legitimate-utility` and its
+rationale read *"the 'malware' classification is used here strictly as a
+container for the object type in STIX, but the assessment confirms it is
+benign"*. The contradiction was detected, fed back once, survived — and the
+shape-derived verdict was published over the judge's own words.
+
+Three rules follow from the statement:
+
+* **Unstated is recorded, not guessed at.** A bundle with no readable verdict
+  is still read by its objects, for stored runs and for a model that omitted
+  the field, and `verdict.unstated` is fed back once and recorded when it
+  survives. A bundle this pipeline built out of text states its own verdict
+  and is not asked for a second one.
+* **The conflict check compares the statement with the rest.** The severity
+  rating (Malware over Informational, Benign over High or Critical), the
+  category (a Malware verdict whose category says the sample is legitimate),
+  and the presence of a `malware` object under a Benign verdict — one
+  `verdict.assessment_conflict` row per disagreeing fact, each with its own
+  path. It is asked once. When it survives, the **stated verdict is
+  published**, the conflict is in `run_summary.validation.unresolved`, and the
+  console's header draws both facts on one line.
+* **The export declines what contradicts the published verdict.** A `malware`
+  object under a Benign verdict is not written into the exported bundle —
+  neither the judge's nor one the renderer would mint — and the decline is
+  recorded as `stix.malware_object_under_benign`. The relationships that would
+  dangle go through the integrity pass that already prunes them. Nothing is
+  rewritten: the judge's own bundle is stored with the object in it.
+
+The published confidence is `x_maljan_assessment.confidence`, the judge's own
+number for its own verdict, and nothing else. A verdict the judge put no number
+on is published with `overall_confidence` `None` and the header says "not
+assessed"; the analysts' mean is their confidence in their own claims and is
+not borrowed for a decision they did not reach.
+
+### A misplaced extension does not cost the bundle
+
+The prompt asks for `x_maljan_assessment` beside `objects`. A model that writes
+it *inside* the list used to fail `Bundle.model_validate` outright, and one live
+run lost all twenty-five of its objects to a text-extracted verdict twice over.
+`agents/judge_postprocess.lift_misplaced_extensions` runs before validation: the
+block is moved to the property it belongs to, unchanged, and recorded as
+`verdict.assessment_relocated` with the state `resolved` and no retry spent —
+there is nothing left for the judge to fix. A top-level block already present
+wins, and the inner copy is set aside. Any other item whose `type` is not one
+of `schemas/stix_models.BUNDLE_OBJECT_TYPES` is set aside under
+`stix.unknown_object` and fed back once. What is left is validated.
 
 ### The technique check
 
@@ -1084,8 +1145,18 @@ is assembled from what the run gathered rather than recomputed beside it:
   the judge already used. A relationship to a technique the checks rejected is
   removed with that technique and recorded in `run_summary.validation` as
   `stix.unlinked_technique` — counted once, as the technique's loss, and not
-  again by the integrity pass as a dangling ref. An id the
-  catalogue check rejected is in the matrix and in none of those. The three
+  again by the integrity pass as a dangling ref. Two checks keep a technique
+  out of the published list, and both write their reason into
+  `CapabilityCell.not_published`, which the markdown prints under *Claims that
+  were not published as techniques*: an id the catalogue has no entry for, and
+  one whose ATT&CK domain or platforms the routed sample cannot host
+  (`attck.platform_mismatch`, asked with the same
+  `platform_mismatch_message` the analyst and the judge were shown, and
+  falling open for a sample whose platform is unknown or cross-domain). An APK
+  run published enterprise-only `T1027` and `T1005` on all three surfaces with
+  both mismatches unresolved; they are in the matrix, with the reason, and on
+  none of the three now. An `isr.ungrounded_technique` alone is not one of the
+  two: it is advisory, and the technique is published and flagged. The three
   surfaces used to be built from three sources and disagreed inside single
   runs: ten techniques in one report against zero attack-patterns in its
   bundle; three attack-patterns with no ATT&CK reference and ids copied out of
@@ -1128,3 +1199,21 @@ it: the network block's own, and the string rows that reach the bundle
 through `static.interesting_strings`. A Tor address is corroborated by its own
 syntax, because `.onion` never resolves and no sandbox can confirm one; the
 indicator it mints carries the reason it was admitted.
+
+URLs record their source the same way and go through the same predicate, asked
+of the URL's host (`url_corroboration_reason`), plus one question no source can
+answer for: whether the host could exist at all. A host that is reserved, has a
+single label, or ends in something that is not a real TLD is never an
+indicator, and neither is a loopback or unspecified address. One bundle
+published `http://localho`, `http://schq`, `https://q`, `http://3271` and
+`https://fs01n5.sends` — string-sweep cut-offs — as `url:value` indicators. The
+judge's own indicator objects ask the same question; one that fails it is not
+exported and the decline is recorded as `stix.unpublishable_url`, with the
+judge's bundle unchanged.
+
+`MAX_TOTAL_INDICATORS` is applied where the indicators are rendered into the
+bundle, over every indicator that would be in it rather than over the ones the
+renderer happened to mint, in the priority order the linter's C4 rule names:
+hashes, then network indicators, then file names. Counting only the minted ones
+shipped sixteen indicators against a ceiling of fifteen, which C4 reported on
+the same run. The renderer and the linter read the one constant.

@@ -2006,6 +2006,84 @@ change landed on `main`.
   comes back short of the cap, and a page that does not advance the sequence
   ends the read and says on the conversation that what is drawn is only part
   of the run.
+- **The verdict a run publishes is the one the judge stated.** A signed,
+  0/74-clean PuTTY was published as `Malware, confidence 1.00` over a judge
+  whose severity was `Informational`, whose category was `legitimate-utility`
+  and whose own rationale read *"the 'malware' classification is used here
+  strictly as a container for the object type in STIX, but the assessment
+  confirms it is benign"*: `decide_from_bundle` read the verdict off the
+  *presence* of a `malware` object, the pipeline detected the contradiction,
+  fed it back once, and published the shape's answer when it survived. The
+  judge now states the verdict in `x_maljan_assessment.verdict` — Malware,
+  Suspicious or Benign, with its own confidence beside it — the prompt asks for
+  it and says a `malware` object is written only for a sample it concludes is
+  malware, and `pipeline.outcome.decide_from_bundle` reads that statement
+  first. The object set is read only for a bundle that states nothing, which is
+  a stored run or a model that omitted the field, and the reading is fed back
+  once as `verdict.unstated` and recorded when it survives. The conflict check
+  now compares the stated verdict with the severity rating, the category and
+  the presence of a `malware` object, one row per disagreeing fact; when it
+  survives the stated verdict is published, the conflict is in
+  `run_summary.validation.unresolved` — and a `malware` object under a stated
+  Benign verdict is not written into the exported STIX bundle, recorded as
+  `stix.malware_object_under_benign`, with the relationships that would dangle
+  pruned by the integrity pass and the judge's own bundle unchanged. The
+  published confidence is the judge's own number for its own verdict and
+  nothing else: a verdict it put no number on is published with none, rather
+  than borrowing the analysts' confidence in their own claims.
+- **One misplaced extension object no longer costs the judge its whole
+  bundle.** The prompt asks for `x_maljan_assessment` beside `objects`; a model
+  that wrote it inside the list failed `Bundle.model_validate` with twenty-one
+  errors, and a live run lost all twenty-five of its objects to a
+  text-extracted verdict, twice. The block is now moved to the property it
+  belongs to before validation, unchanged, and recorded as
+  `verdict.assessment_relocated` with the state `resolved` and no retry spent;
+  a top-level block already present wins and the inner copy is set aside. Any
+  other item whose `type` is not a STIX type the bundle can hold is set aside
+  under `stix.unknown_object` and fed back once, and the rest of the bundle is
+  read.
+- **A technique from an ATT&CK domain the sample cannot host is not published
+  as one of its techniques.** An APK run's `ttp_mappings`, `/mitre` and STIX
+  bundle all carried enterprise-only `T1027` and `T1005` with
+  `attck.platform_mismatch` unresolved on both after the feedback turn. Such a
+  technique now joins the rule an unresolvable id already follows: it stays in
+  the capability matrix, spelled as the producer wrote it, with the check's own
+  sentence in the new `CapabilityCell.not_published`; it is absent from the one
+  validated list all three surfaces and the attack-pattern rebuild are built
+  from; and the report lists it under *Claims that were not published as
+  techniques* with the reason in words. The question is asked with the same
+  `platform_mismatch_message` the analyst and the judge were shown and falls
+  open for a sample whose platform is unknown or cross-domain. An
+  `isr.ungrounded_technique` alone stays advisory.
+- **A truncated URL is not an indicator, and the indicator cap holds.** One
+  bundle published `http://localho`, `http://schq`, `https://q`,
+  `http://3271` and `https://fs01n5.sends` — string-sweep cut-offs — as
+  `url:value` indicator objects. URLs now record where they came from, the way
+  domains already did, and go through the one publish predicate:
+  string-derived only when a second source knows the endpoint, and, whatever
+  the source, never when the host is reserved, single-label, not ending in a
+  real TLD, or a loopback or unspecified address. Every minting path asks it,
+  including the judge's own indicator objects — one that fails is not exported
+  and the decline is recorded as `stix.unpublishable_url`, never rewritten.
+  `MAX_TOTAL_INDICATORS` is applied over every indicator that would be in the
+  bundle rather than over the ones the renderer minted, in the linter's stated
+  priority order, so the two read one constant and agree: a run whose bundle
+  carried two of the judge's indicators and fourteen of the renderer's shipped
+  sixteen against a ceiling of fifteen, and the report's own C4 rule said so.
+- **Every `arq` line is written once.** The worker's entry point is arq's own
+  CLI, which configures a handler on the `arq` logger before the application
+  configures the root one, and that logger still propagates: a measured worker
+  log carried 19 lines with the `[arq.worker]` prefix against 21 bare
+  `HH:MM:SS: ` ones. `setup_logging` now hands arq's logger over to the root
+  the same way it already did the application's, so one handler writes each
+  line in the application's format. A handler an operator added is left alone.
+- **A participant whose stage has finished does not read "waiting".** The
+  reporter writes the report and emits no `agent_message`, so its chip in the
+  conversation's participant strip read `Reporter — waiting` on every finished
+  run, under a Report stage marked DONE with its duration beside it. A
+  participant that has said nothing now takes its state from its own stages:
+  running is working, finished is done, and anything else leaves it where the
+  feed put it.
 
 ### Removed
 
