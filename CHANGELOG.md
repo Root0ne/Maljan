@@ -828,6 +828,16 @@ change landed on `main`.
   unchanged and still names every tool with its reason and remedy, and the
   degradation reason is now said where the tool is withheld rather than where
   it would have been bound, so the degraded block reads as it did before.
+- **Every pipeline line was written to stdout twice.** The `maljan` logger
+  installs a handler of its own so a CLI caller with no logging set up still
+  sees something, and it also propagates to the root handler the API and the
+  worker install — so once either had started, each line went out once plain
+  and once through the root formatter. A live worker log held 3 306 coloured
+  lines with every unique message appearing exactly twice. `setup_logging`
+  now calls `hand_over_to_root`, which takes away the package's own handler
+  and leaves the root's; propagation stays on, because that handler is the
+  structured one in production and is also where a test's capture is attached.
+  A caller who configured nothing keeps the handler and sees no change.
 - **Four documented facts that had drifted from the code.** The delegation
   section said a lead's 1800 s stage had room for five asks where
   `_asks_that_fit` computes six and the `ask_<key>` description gives the model
