@@ -159,10 +159,11 @@ another shape. A table row is left alone, because its cells are positional.
 
 IDENTITY applies it twice over. The `identity` section is the one that
 overlaps the tab's own blocks, so it is split: its hashes go to the File
-hashes block, which draws only the fingerprints a tool produced, and its three
-signing rows — one per format `signing_info` knows about, of which all but one
-are the tool's untouched defaults — become the one for the format the run
-routed on, stated as a sentence.
+hashes block, which draws only the fingerprints a tool produced, and its
+signing row is stated as a sentence rather than as `present=no`. A report
+written before `signing_info` answered for one format carries three such rows,
+of which all but one are the tool's untouched defaults; the tab keeps the one
+for the format the run routed on and drops the rest.
 
 ## Settings
 

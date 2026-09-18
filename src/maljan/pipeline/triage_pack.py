@@ -407,10 +407,18 @@ class _Pack:
             "identify_file", {"path": path}, lambda: identify.identify_file(path)
         )
         self.record("hashes", {"path": path}, lambda: identify.hashes(path))
-        signing = self.record("signing_info", {"path": path}, lambda: identify.signing_info(path))
+        # The routed format decides which signing scheme is about this sample.
+        # Resolved before the call rather than sniffed inside it, so the pack
+        # and the format tool below answer for the same format.
+        routed = self._routed_format(identity)
+        signing = self.record(
+            "signing_info",
+            {"path": path, "file_type": routed},
+            lambda: identify.signing_info(path, file_type=routed),
+        )
         self.has_signature = _carries_signature(signing)
 
-        format_facts = self._format_facts(identity)
+        format_facts = self._format_facts(routed)
         self._strings_and_iocs()
         self._rules()
         self._catalogue_lookups(format_facts)
@@ -430,11 +438,15 @@ class _Pack:
         )
         return self.result
 
-    def _format_facts(self, identity: dict[str, Any] | None) -> dict[str, Any] | None:
-        """The header facts for the routed format, falling back to what identity saw."""
+    def _routed_format(self, identity: dict[str, Any] | None) -> str:
+        """What this run routed the sample as, falling back to what identity saw."""
         routed = (self.inputs.file_type or "").strip().lower()
         if routed in ("", "unknown") and identity:
             routed = str(identity.get("file_type") or "").strip().lower()
+        return routed
+
+    def _format_facts(self, routed: str) -> dict[str, Any] | None:
+        """The header facts for the routed format."""
         selected = _FORMAT_TOOLS.get(routed)
         if selected is None:
             return None
@@ -616,7 +628,12 @@ def run_pack(
 
 
 def _carries_signature(signing: dict[str, Any] | None) -> bool:
-    """Whether any of the three signature blocks reports a signature present."""
+    """Whether the signature block for the routed format reports one present.
+
+    Still written as a sweep over the three names: ``signing_info`` answers
+    under one of them, and a report recorded before it did answers under all
+    three.
+    """
     if not signing:
         return False
     for key in ("authenticode", "apk", "macho"):
@@ -849,6 +866,8 @@ def _hashes(data: dict[str, Any]) -> str:
 
 
 def _signature(data: dict[str, Any]) -> str:
+    if data.get("applicable") is False:
+        return "no code-signing scheme for this format"
     present = []
     auth = data.get("authenticode") or {}
     if isinstance(auth, dict) and auth.get("present"):

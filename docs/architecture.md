@@ -102,16 +102,18 @@ them; a fact a model may or may not ask for is not a fact a run can rely on.
 
 The pack is the same code the `analysis` sidecar serves, called in-process, in
 a fixed order so the ids a sample produces are the same from one run to the
-next: `identify_file` and `hashes`; `signing_info`; the format tool the routed
-type selects (`pe_info`, `elf_info`, `macho_info`, `apk_info`, `document_info`
-or `archive_list`, which carry the section entropies, the packer signature
-hits and the import rows); a `strings` head capped by `triage.strings_head`
-and `iocs_from_file`; `yara_scan`, `capa` under the static provider's budget
-and, when a sandbox report exists, `sigma_match_sandbox`; `api_capability`
-over the import set (the behaviour map is Windows-only, so an ELF or Mach-O
-import table yields no profile and no rule hit) and `lolbin_lookup` over the
-sandbox's command lines; the
-sandbox projections at summary level (processes, network, signatures, dropped
+next: `identify_file` and `hashes`; `signing_info` for the routed format alone
+(Authenticode for a PE, the APK signing block for an APK, `LC_CODE_SIGNATURE`
+for a Mach-O, and for anything else the fact that it has no signing scheme);
+the format tool the routed type selects (`pe_info`, `elf_info`, `macho_info`,
+`apk_info`, `document_info` or `archive_list`, which carry the section
+entropies, the packer signature hits and the import rows); a `strings` head
+capped by `triage.strings_head` and `iocs_from_file`; `yara_scan`, `capa`
+under the static provider's budget and, when a sandbox report exists,
+`sigma_match_sandbox`; `api_capability` over the import set (the behaviour map
+is Windows-only, so an ELF or Mach-O import table yields no profile and no
+rule hit) and `lolbin_lookup` over the sandbox's command lines; the sandbox
+projections at summary level (processes, network, signatures, dropped
 files, channels) and `pcap_summary` when a capture was fetched; one reputation
 lookup on the sha256 (`get_file_report` on `virustotal` when it is enabled,
 else `check_hash` on `threatintel`), made through the tool server exactly as

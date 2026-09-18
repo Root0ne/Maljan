@@ -8,16 +8,18 @@
  *
  * * the hashes, which belong in the File hashes block with the copy buttons a
  *   reader actually uses, and were otherwise printed twice on one screen;
- * * the signing answer, which arrives as one row per format the tool knows
- *   about — `authenticode`, `apk`, `macho` — of which all but one are the
- *   tool's untouched defaults. A PE sample read "apk present=no" and "macho
- *   present=no", which are facts about the tool rather than about the sample,
- *   and even the one that applied read as `present=no` rather than as a
+ * * the signing answer, which reads as `present=no` rather than as a
  *   sentence.
  *
  * So the section is split here: the hashes come out and go to the block that
- * holds them, the three signing rows become the one that applies, and every
- * row left whose value says nothing is dropped.
+ * holds them, the signing row becomes a sentence, and every row left whose
+ * value says nothing is dropped.
+ *
+ * `signing_info` now answers for the routed format alone, so a report carries
+ * one signing row. Choosing between three of them is kept for the reports
+ * written before it did, where a PE also carried "apk present=no" and "macho
+ * present=no" — facts about what the tool looks for, which this drops rather
+ * than draw as findings about the sample.
  */
 
 import { saysSomething } from "./reportSections";
@@ -44,6 +46,8 @@ const HASH_FIELD_SET: ReadonlySet<string> = new Set<string>(HASH_FIELDS);
  * Matched loosely on purpose: `file_type` is the lowercase routing label
  * (`pe`, `apk`, `mach-o`) on a report the extractor wrote, and whatever
  * `identify_file` called the format (`PE32 executable`) on one it did not.
+ * The heading is what a current report's single row is titled with; the
+ * matching itself only ever has to choose on an older one.
  */
 const SIGNING_BLOCKS: { matches: RegExp; field: string; label: string }[] = [
   { matches: /^pe\b|^pe32/, field: "authenticode", label: "Authenticode" },
@@ -102,10 +106,12 @@ export interface IdentityView {
 /**
  * Split the identity section into the table and the hashes.
  *
- * `fileType` is the format the run routed on, which decides which of the three
- * signing blocks is about this sample. A format nothing here knows keeps any
- * block that reports a signature and drops the ones that report none — a
- * "no" about a format the sample is not is not a finding.
+ * `fileType` is the format the run routed on. A current report carries one
+ * signing block, the one the pack asked about; on a report written before
+ * that, `fileType` is what decides which of the three is about this sample,
+ * and a format nothing here knows keeps any block that reports a signature
+ * and drops the ones that report none — a "no" about a format the sample is
+ * not is not a finding.
  */
 export function readIdentitySection(
   section: EvidenceSection | null | undefined,

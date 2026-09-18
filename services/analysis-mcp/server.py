@@ -273,9 +273,16 @@ def hashes(path: str) -> dict[str, Any]:
 
 
 @mcp.tool()
-def signing_info(path: str) -> dict[str, Any]:
-    """Report whether the file carries an Authenticode, APK or Mach-O signature."""
-    return _guard("signing_info", identify_tools.signing_info, path=path)
+def signing_info(path: str, file_type: str = "") -> dict[str, Any]:
+    """Report whether the file carries a code signature, for one format.
+
+    ``file_type`` is the format the sample was routed as ("pe", "apk",
+    "mach-o"); with none, the format is read from the bytes. The answer covers
+    that format alone — a PE is asked about Authenticode and nothing else.
+    """
+    return _guard(
+        "signing_info", identify_tools.signing_info, path=path, file_type=file_type or None
+    )
 
 
 # ---------------------------------------------------------------------------

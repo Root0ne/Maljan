@@ -162,6 +162,28 @@ class TestTheOrderAndTheIds:
         }
         assert by_tool["pe_info"].structured["imports"][0]["function"] == "CreateFileA"
 
+    def test_the_pack_asks_about_one_signing_scheme(self, tmp_path: Path) -> None:
+        """The routed format decides which one, and the entry carries no other.
+
+        A PE used to be recorded with "apk present=no" and "macho present=no"
+        beside its Authenticode row — two absences about schemes the sample was
+        never a candidate for, which the identity table then drew as findings.
+        """
+        signing = {
+            entry.tool: entry for entry in _pack(_write(tmp_path, "s.exe", _pe()), "pe").entries
+        }["signing_info"]
+
+        assert signing.args["file_type"] == "pe"
+        assert signing.structured["format"] == "pe"
+        assert set(signing.structured) == {"format", "authenticode"}
+
+    def test_a_format_with_no_signing_scheme_records_that_it_has_none(self, tmp_path: Path) -> None:
+        signing = {
+            entry.tool: entry for entry in _pack(_write(tmp_path, "s.bin", _elf()), "elf").entries
+        }["signing_info"]
+
+        assert signing.structured == {"format": "elf", "applicable": False}
+
     def test_the_import_set_reaches_api_capability(self, tmp_path: Path) -> None:
         result = _pack(_write(tmp_path, "s.exe", _pe()), "pe")
         (lookup,) = [entry for entry in result.entries if entry.tool == "api_capability"]

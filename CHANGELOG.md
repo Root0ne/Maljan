@@ -747,6 +747,19 @@ change landed on `main`.
 
 ### Fixed
 
+- **`signing_info` answers about the sample, not about itself.** It reported
+  all three schemes on every file, so a PE carried "apk present=no" and "macho
+  present=no" beside its Authenticode row — statements about what the tool
+  looks for, which the identity table and the report then drew as findings
+  about the sample. It now answers for the routed format alone (Authenticode
+  for a PE, the APK signing block for an APK, `LC_CODE_SIGNATURE` for a
+  Mach-O), and for a format with no such scheme it says that instead of three
+  absences. The tool takes the routing answer from its caller — the triage
+  pack passes it, the `analysis` sidecar takes it as an optional `file_type` —
+  and reads the bytes only when it is called with nothing else, which also
+  stops a `.docx` being asked about Android signing because it is a zip. The
+  console keeps choosing between three blocks as a fallback for reports
+  recorded before this.
 - **A verdict no model produced no longer carries a confidence.** When the
   judge's body raised, the pipeline wrote a conservative "Suspicious" verdict
   of its own — correctly, so a run is not lost — and the report then filled the
