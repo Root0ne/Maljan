@@ -31,6 +31,7 @@ from maljan.pipeline.validation import (
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 from maljan.schemas.stix_models import Bundle
 from tests.credential_shapes import prefixed_key
+from tests.unit.pipeline.test_validation import _Attck
 
 VALIDATION = pathlib.Path(__file__).resolve().parents[3] / "src/maljan/pipeline/validation.py"
 
@@ -125,15 +126,20 @@ class TestTheRowsThatQuoteAnAnalyst:
         return AgentISR(agent_id="static", domain="static", claims=[ClaimEvidence(**fields)])
 
     def test_a_technique_id_the_catalogue_rejects_is_bounded_and_scrubbed(self) -> None:
-        """The schema refuses this shape, so it is set the way a stored row carries it."""
-        from maljan.tools import knowledge
+        """The schema refuses this shape, so it is set the way a stored row carries it.
 
+        The catalogue is the package's stand-in. What is being checked is the
+        sentence the row is written with, which is the same one for any
+        catalogue that answers "not a technique" — and the real module answers
+        it by downloading three STIX bundles and an embedding model, which is
+        the thing this package has a named test forbidding.
+        """
         secret, url = credentialled_url()
         claim = ClaimEvidence(claim="it hides", evidence_ref="ev_0001", confidence=0.5)
         object.__setattr__(claim, "technique_id", f"T{url}{'E' * 3000}")
         isr = AgentISR(agent_id="static", domain="static", claims=[claim])
 
-        violations = validate_isr(isr, attck=knowledge)
+        violations = validate_isr(isr, attck=_Attck())
 
         assert secret not in _messages(violations)
         for row in violations:

@@ -35,6 +35,7 @@ from maljan.agents._indicator_denylists import (
 )
 from maljan.core.logger import logger
 from maljan.extractors.network_extractor import (
+    address_is_publishable,
     corroboration_reason,
     host_is_public,
     ip_corroboration_reason,
@@ -124,6 +125,13 @@ _NETWORK_PATTERN_PREFIXES = (
 # URL.
 _PATTERN_LITERALS_RE = re.compile(r"'([^']*)'")
 
+# An object path in a pattern comparison: the type, then the property.
+_OBJECT_PATH_RE = re.compile(r"([a-z0-9-]+):[a-z_.]+")
+
+# The object types whose value is an endpoint a consumer would act on, which is
+# what the host question is asked about.
+_NETWORK_OBJECT_TYPES = ("url", "domain-name", "ipv4-addr", "ipv6-addr")
+
 
 def _indicator_band(pattern: str) -> int:
     """Which cap band one indicator pattern belongs to, the sample's own aside."""
@@ -180,6 +188,15 @@ def impossible_host_sentence(value: str, whose: str) -> str:
     )
 
 
+def unpublishable_endpoint_sentence(value: str, kind_words: str, whose: str) -> str:
+    """The recorded sentence for an endpoint no export may carry, left where it is."""
+    return (
+        f"the {kind_words} indicator for {safe_finding_value(value)!r} is not in the exported "
+        f"bundle: it is not a name or address that could exist outside the analysed network. It "
+        f"is unchanged in {whose}."
+    )
+
+
 def unpublishable_domain_sentence(fqdn: str) -> str:
     """The recorded sentence for a name somebody watched that no export may carry."""
     return (
@@ -194,26 +211,81 @@ def _observed(source: Any) -> bool:
     return str(source or "").strip().lower() in _OBSERVED_SOURCES
 
 
+def _pattern_endpoints(pattern: str) -> list[tuple[str, str]]:
+    """Every ``(object type, literal)`` a network comparison in this pattern names.
+
+    A STIX pattern is not one comparison. ``[a] OR [b]``, an ``AND`` of two
+    object paths and an ``IN`` list of several values are all one pattern with
+    several endpoints in it, and an indicator is exported or not as a whole. So
+    every quoted value is credited to the object path most recently written
+    before it, and the caller answers for all of them.
+
+    The split is on the quotes rather than on the object paths, because a
+    pattern's literals are where a URL lives and a URL can carry anything that
+    looks like an object path inside it. Only what is written *outside* the
+    quotes says what is being compared.
+    """
+    found: list[tuple[str, str]] = []
+    kind = ""
+    for index, chunk in enumerate(pattern.split("'")):
+        if index % 2 == 0:
+            paths = _OBJECT_PATH_RE.findall(chunk)
+            # No path in this chunk means the list of values goes on: ``IN
+            # ('a', 'b')`` writes the path once and quotes twice.
+            kind = paths[-1] if paths else kind
+        elif kind in _NETWORK_OBJECT_TYPES:
+            found.append((kind, chunk))
+    return found
+
+
+def _endpoint_is_publishable(kind: str, literal: str) -> bool:
+    """Whether an export could carry this endpoint at all, whoever wrote it down.
+
+    The host question only — could anything outside the analysed network ever
+    answer for this. Who recorded the row is the corroboration question's
+    business and is not asked here.
+    """
+    if kind == "url":
+        return host_is_public(url_host(literal))
+    if kind == "domain-name":
+        return host_is_public(literal)
+    # The judge asserting an address is somebody observing it, so a private one
+    # it cites out of the sandbox's own evidence is lateral movement and stays.
+    # Loopback, unspecified, documentation, multicast and broadcast never are.
+    return address_is_publishable(literal, "judge")
+
+
 def _judge_indicator_problem(indicator: Indicator) -> tuple[str, str] | None:
     """Why this judge indicator is not exported, as ``(code, sentence)``, or ``None``.
 
-    The judge's objects go through the same publish rule the deterministic
-    rows do, and the answer for one that fails it is the one this pipeline
-    gives everywhere else: not published, recorded, never rewritten. A URL is
-    the only kind asked so far — it is the one the string sweep feeds and the
-    one a cut-off host reaches a consumer through. The judge's own assertion is
-    the URL's source, so the only way one of its objects fails is the host
-    question, and the sentence says exactly that.
+    The judge's objects go through the host question the deterministic rows do,
+    and the answer for one that fails it is the one this pipeline gives
+    everywhere else: not published, recorded, never rewritten. All three
+    network kinds are asked, because the question is about the endpoint rather
+    than about who wrote it down — a judge-written ``localhost`` or
+    ``127.0.0.1`` is the same thing a consumer's blocklist cannot use as the
+    one the network block already refuses.
+
+    What is deliberately *not* asked is the corroboration half. The judge's own
+    assertion is the source, so that half would answer trivially, and letting
+    "the judge said so" count as a second source is a claim this code should
+    not make on the judge's behalf. Whether any evidence holds a judge-written
+    endpoint up is ``stix.ungrounded_indicator``'s question, and it is asked of
+    every indicator the judge writes.
     """
-    pattern = (indicator.pattern or "").lstrip()
-    if not pattern.startswith("[url:value"):
-        return None
-    for literal in _PATTERN_LITERALS_RE.findall(pattern):
-        if not host_is_public(url_host(literal)):
+    for kind, literal in _pattern_endpoints(indicator.pattern or ""):
+        if _endpoint_is_publishable(kind, literal):
+            continue
+        if kind == "url":
             return (
                 UNPUBLISHABLE_URL_CODE,
                 impossible_host_sentence(literal, "the judge's own bundle"),
             )
+        words = "domain" if kind == "domain-name" else "address"
+        return (
+            UNPUBLISHABLE_DOMAIN_CODE,
+            unpublishable_endpoint_sentence(literal, words, "the judge's own bundle"),
+        )
     return None
 
 

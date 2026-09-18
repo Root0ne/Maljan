@@ -34,6 +34,21 @@ describe("what an unresolved row says", () => {
     ).toMatch(/^the export did not publish stix\.unpublishable_url:/);
   });
 
+  it("says the same for a name or address the export held back", () => {
+    // Both codes are one decision in two words, and only one of them was on
+    // the list: a domain decline read "judge left stix.unpublishable_domain
+    // unfixed", blaming the judge for a call the export made about a row a
+    // sandbox had written down.
+    expect(isExportDecision("stix.unpublishable_domain")).toBe(true);
+    expect(
+      validationRowText({
+        agent: "judge",
+        code: "stix.unpublishable_domain",
+        message: "it is not a name or address that could exist.",
+      }),
+    ).toMatch(/^the export did not publish stix\.unpublishable_domain:/);
+  });
+
   it("says the same for an annotation that went with a rejected technique", () => {
     expect(isExportDecision("stix.unlinked_technique")).toBe(true);
   });

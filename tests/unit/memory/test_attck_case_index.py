@@ -1,7 +1,11 @@
 """Unit tests for the ATT&CK case-prior semantic index (§4 U2).
 
-Uses the deterministic BoW fallback embedding (fastembed not required), so cosine
-ranking and technique aggregation are assertable with well-separated case vocabularies.
+Uses the deterministic BoW fallback embedding, so cosine ranking and technique
+aggregation are assertable with well-separated case vocabularies. The fallback
+is what the unit tree gives every test rather than something this file assumed:
+on a machine where fastembed imports, these were quietly ranking with a 190 MB
+downloaded model instead — deterministic on this box, a network dependency on a
+runner, and not the thing the file says it measures.
 """
 
 from __future__ import annotations

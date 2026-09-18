@@ -75,6 +75,16 @@ describe("the degraded banner", () => {
     }
   });
 
+  it("describes no confidence when the judge stated a verdict and put no number on it", () => {
+    // The judge is allowed to answer `Benign` and assess no confidence, and
+    // the header then reads "not assessed". A banner describing the
+    // confidence shown above would be describing nothing.
+    const text = degradedBannerText("stated", null);
+
+    expect(text).not.toContain("the judge's own");
+    expect(text).toContain("No confidence was assessed");
+  });
+
   it("reads a report with no recorded reading off its confidence", () => {
     expect(degradedBannerText(null, 0.9)).toContain("the judge's own");
     expect(degradedBannerText(null, null)).toContain("No confidence was assessed");

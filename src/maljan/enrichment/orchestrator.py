@@ -22,7 +22,11 @@ from maljan.enrichment.abuseipdb_client import AbuseIPDBClient
 from maljan.enrichment.virustotal_client import VirusTotalClient
 from maljan.enrichment.whois_client import WhoisClient
 from maljan.extractors.attribution import populate_similar_samples
-from maljan.extractors.network_extractor import domain_is_corroborated, ip_corroboration_reason
+from maljan.extractors.network_extractor import (
+    domain_is_corroborated,
+    host_is_private_use,
+    ip_corroboration_reason,
+)
 
 if TYPE_CHECKING:
     from maljan.memory.long_term_memory import MemoryStore
@@ -94,20 +98,11 @@ def _is_public_ip(address: str) -> bool:
     )
 
 
-_PRIVATE_SUFFIXES = (
-    ".local",
-    ".localhost",
-    ".internal",
-    ".lan",
-    ".home",
-    ".corp",
-    ".intranet",
-    ".test",
-    ".example",
-    ".invalid",
-    ".onion",
-    ".arpa",
-)
+# A hidden service is the one name this refuses that the export does not. The
+# export publishes a valid Tor address because its own checksum stands in for
+# the second source no sandbox can ever give it; no reputation provider can
+# resolve one, so asking about it spends quota on a certain "unknown".
+_TOR_SUFFIX = ".onion"
 
 
 def _is_public_fqdn(name: str) -> bool:
@@ -115,7 +110,9 @@ def _is_public_fqdn(name: str) -> bool:
 
     IP literals, single-label names and the special-use suffixes are internal
     infrastructure: sending them to VirusTotal leaks the operator's naming and
-    costs quota for an answer that is always "unknown".
+    costs quota for an answer that is always "unknown". The suffixes are the
+    ones the export holds back, read from the one list, so a name this pipeline
+    will not publish is not one it posts to somebody else either.
     """
     host = name.strip().rstrip(".").lower().strip("[]")
     if not host or ".." in host or "." not in host:
@@ -125,7 +122,7 @@ def _is_public_fqdn(name: str) -> bool:
         return False
     except ValueError:
         pass
-    return not any(host.endswith(suffix) for suffix in _PRIVATE_SUFFIXES)
+    return not host.endswith(_TOR_SUFFIX) and not host_is_private_use(host)
 
 
 async def enrich_malware_report(

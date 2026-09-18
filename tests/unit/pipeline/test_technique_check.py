@@ -823,6 +823,16 @@ class TestARetiredId:
     A stored report or a prompt that still names it must read as retired,
     not as invented."""
 
+    @pytest.fixture(autouse=True)
+    def _no_suggestions(self, monkeypatch: pytest.MonkeyPatch):
+        """The retired note comes from the vendored id universe; the suggestions
+        beside it come from the ranked index, which is a corpus download and a
+        model this suite does not take. These tests are about the note."""
+        from maljan.tools import knowledge
+
+        monkeypatch.setattr(knowledge, "resolve_technique", lambda *a, **k: {"candidates": []})
+        yield
+
     def test_the_analyst_is_told_the_id_was_retired_and_in_which_release(self) -> None:
         from maljan.tools import knowledge
 

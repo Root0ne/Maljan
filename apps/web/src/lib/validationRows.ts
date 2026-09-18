@@ -23,6 +23,7 @@
 const EXPORT_DECIDED: ReadonlySet<string> = new Set([
   "stix.malware_object_under_benign",
   "stix.unpublishable_url",
+  "stix.unpublishable_domain",
   "stix.unlinked_technique",
 ]);
 

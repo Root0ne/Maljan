@@ -10,6 +10,11 @@
  *
  * Four readings, four sentences, and one for a report stored before the
  * reading existed, which can only be read off whether a confidence is there.
+ *
+ * A stated verdict with no number beside it takes the same sentence as a
+ * report with no reading at all. The judge is allowed to state `Benign` and
+ * put no confidence on it, and the header then reads "not assessed"; a banner
+ * describing the confidence shown above is describing nothing.
  */
 
 import type { VerdictReading } from "@/lib/api";
@@ -42,9 +47,8 @@ export function degradedBannerText(
   reading: VerdictReading | null | undefined,
   confidence: number | null | undefined,
 ): string {
-  if (reading) return `${OPENING} ${ABOUT_THE_CONFIDENCE[reading]}`;
-  if (confidence === null || confidence === undefined) {
-    return `${OPENING} No confidence was assessed for this verdict.`;
-  }
+  const hasConfidence = confidence !== null && confidence !== undefined;
+  if (reading && reading !== "stated") return `${OPENING} ${ABOUT_THE_CONFIDENCE[reading]}`;
+  if (!hasConfidence) return `${OPENING} No confidence was assessed for this verdict.`;
   return `${OPENING} ${ABOUT_THE_CONFIDENCE.stated}`;
 }

@@ -273,6 +273,17 @@ def _attack_pattern(external_id: str, source_name: str = "mitre-attack") -> dict
 
 
 class TestUnknownTechniqueIds:
+    @pytest.fixture(autouse=True)
+    def _real_catalogue(self, real_attck_index: None) -> None:
+        """This asks the real ATT&CK catalogue for names and descriptions.
+
+        The unit tree holds the corpus download shut, and these are the tests
+        that want what is behind it. They read the loader's own disk cache when
+        one is there and fetch when it is not, which is what they did before
+        the door existed; the opt-out is here so the list of tests that pay
+        that cost is a list somebody can read.
+        """
+
     """The case the violation exists for: well-formed, and imaginary.
 
     It was unreachable while ``_filter_invalid_technique_ids`` dropped the

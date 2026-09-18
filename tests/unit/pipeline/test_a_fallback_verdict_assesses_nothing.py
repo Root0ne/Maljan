@@ -26,6 +26,8 @@ import asyncio
 from typing import Any
 from unittest.mock import AsyncMock
 
+import pytest
+
 from maljan.core.token_ledger import TokenLedger
 from maljan.core.truncation_ledger import TruncationLedger
 from maljan.pipeline.nodes import _overall_confidence, make_judge_node, with_verdict_fallback
@@ -228,6 +230,17 @@ def _reported(fallback: dict[str, Any] | None) -> tuple[dict[str, Any], str]:
 
 
 class TestTheReportSaysTheJudgeDidNotAnswer:
+    @pytest.fixture(autouse=True)
+    def _real_catalogue(self, real_attck_index: None) -> None:
+        """This asks the real ATT&CK catalogue for names and descriptions.
+
+        The unit tree holds the corpus download shut, and these are the tests
+        that want what is behind it. They read the loader's own disk cache when
+        one is there and fetch when it is not, which is what they did before
+        the door existed; the opt-out is here so the list of tests that pay
+        that cost is a list somebody can read.
+        """
+
     def test_the_confidence_is_none_and_the_header_says_so(self) -> None:
         report, markdown = _reported({"decision": "Suspicious", "failure": "TimeoutError"})
 
@@ -282,6 +295,17 @@ class TestTheReportSaysTheJudgeDidNotAnswer:
 
 
 class TestAJudgeThatAnsweredWithNoVerdict:
+    @pytest.fixture(autouse=True)
+    def _real_catalogue(self, real_attck_index: None) -> None:
+        """This asks the real ATT&CK catalogue for names and descriptions.
+
+        The unit tree holds the corpus download shut, and these are the tests
+        that want what is behind it. They read the loader's own disk cache when
+        one is there and fetch when it is not, which is what they did before
+        the door existed; the opt-out is here so the list of tests that pay
+        that cost is a list somebody can read.
+        """
+
     """The same rule for a judge that answered with text, or not at all.
 
     Its body did not raise, so nothing wrote the fallback channel — and the

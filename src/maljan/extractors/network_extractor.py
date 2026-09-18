@@ -68,10 +68,44 @@ _RESERVED_DOMAIN_SUFFIXES: tuple[str, ...] = (
 # decision and not a projection one. A sandbox that resolved
 # ``fileserver.corp.internal`` watched the sample resolve it, which is the
 # thing an analyst reading a lateral-movement case most needs to see, and the
-# report's network block keeps the row with its source. Only ``host_is_public``
-# consults these, which is asked where an indicator is minted.
-_PRIVATE_USE_SUFFIXES: tuple[str, ...] = (".internal", ".alt", ".home.arpa")
+# report's network block keeps the row with its source. ``host_is_private_use``
+# is the one reader of these, and it is asked where an indicator is minted and
+# where a name is about to be sent to a reputation provider.
+#
+# ``.internal``, ``.alt`` and ``.home.arpa`` are reserved for the purpose. The
+# rest are not reserved by anybody and are used for it anyway, and none of the
+# four has ever been delegated, so a name under one cannot be looked up from
+# outside the network that invented it.
+_PRIVATE_USE_SUFFIXES: tuple[str, ...] = (
+    ".internal",
+    ".alt",
+    ".home.arpa",
+    ".lan",
+    ".home",
+    ".corp",
+    ".intranet",
+)
 _RESERVED_DOMAIN_NAMES: frozenset[str] = frozenset({"localhost", "localhost.localdomain"})
+
+
+def host_is_private_use(host: Any) -> bool:
+    """Whether this name belongs to a private network rather than to the internet.
+
+    One list, two readers. The export asks it before minting an indicator and
+    the enrichment asks it before sending a name to a reputation provider, and
+    the two answering differently is how ``x.alt`` and
+    ``localhost.localdomain`` were held out of one bundle and posted to a
+    public provider in the same run.
+    """
+    name = str(host or "").strip().rstrip(".").lower()
+    if not name:
+        return True
+    if name in _RESERVED_DOMAIN_NAMES:
+        return True
+    return any(
+        name.endswith(suffix) for suffix in _RESERVED_DOMAIN_SUFFIXES + _PRIVATE_USE_SUFFIXES
+    )
+
 
 # Substrings that strongly suggest C2 / commodity-malware infra.
 _SUSPICIOUS_DOMAIN_TOKENS: tuple[str, ...] = (
@@ -655,9 +689,7 @@ def host_is_public(host: Any) -> bool:
         pass
     else:
         return not (address.is_loopback or address.is_unspecified or address.is_link_local)
-    if not _is_emittable_domain(name):
-        return False
-    if any(name.endswith(suffix) for suffix in _PRIVATE_USE_SUFFIXES):
+    if not _is_emittable_domain(name) or host_is_private_use(name):
         return False
     labels = name.split(".")
     if not all(_LABEL_RE.match(label) for label in labels):
