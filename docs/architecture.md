@@ -28,7 +28,11 @@ operator can reconfigure.
 
 1. The console authenticates and uploads a sample. The API streams it through
    `UPLOAD_TEMP_DIR`, hashes it, stores the bytes in MinIO and the metadata in
-   Postgres, and writes an audit row.
+   Postgres, and writes an audit row. The object store's client is synchronous,
+   so every call into it — the sample, an uploaded sandbox report, a delete —
+   is made from a worker thread: a hundred megabytes sent from the event loop
+   is a hundred megabytes during which the process answers nothing else, its
+   own health check included.
 2. `POST /api/v1/jobs` creates the job row and enqueues `run_analysis` on arq
    under the same identifier, so the queue job and the database row cannot
    drift apart. An optional `config` object may override a handful of pipeline

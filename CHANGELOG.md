@@ -783,6 +783,13 @@ change landed on `main`.
   value between them. A row is now stamped with the moment its call returned
   (`started_at + duration_ms`, both already on the entry), and a call the
   recorder never stamped keeps the write time rather than an invented one.
+- **An upload no longer stops the process while it travels.** The MinIO client
+  is synchronous and was called straight from the request handlers, so a sample
+  of a hundred megabytes — or a slow store — held the event loop for the whole
+  transfer: no other request, no WebSocket frame, not even `/health`. The
+  sample upload, the sandbox-report upload and read, the deletes and the
+  worker's own sample download all go through a worker thread now, and a
+  source guard fails the build if a new one is added on the loop.
 - **The console stopped clipping itself.** `main` is a flex item, so its
   `min-width: auto` let it grow to its content's min-content width instead of
   constraining it: the Detection tab's Suricata block took it to 2542 px

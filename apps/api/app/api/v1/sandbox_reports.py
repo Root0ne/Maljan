@@ -14,6 +14,7 @@ re-parsing the blob to ask the same question twice.
 
 from __future__ import annotations
 
+import asyncio
 import gzip
 import hashlib
 import inspect
@@ -89,7 +90,7 @@ def _minio_client() -> Any:
     )
 
 
-def _put_object(path: str, blob: bytes, *, content_type: str = "application/json") -> None:
+def _put_object_blocking(path: str, blob: bytes, *, content_type: str = "application/json") -> None:
     import io as _io
 
     client = _minio_client()
@@ -100,14 +101,35 @@ def _put_object(path: str, blob: bytes, *, content_type: str = "application/json
     )
 
 
+async def put_object(path: str, blob: bytes, *, content_type: str = "application/json") -> None:
+    """Write an uploaded report to the object store, off the event loop.
+
+    The MinIO client is synchronous, and a handler that called it directly held
+    the loop for the whole transfer: every other request, every WebSocket frame
+    and the health check itself waited on somebody else's upload. A thread
+    costs one context switch and gives the loop back.
+    """
+    await asyncio.to_thread(_put_object_blocking, path, blob, content_type=content_type)
+
+
 def get_object(path: str) -> bytes:
-    """Read an uploaded report back. The worker calls this, hence the public name."""
+    """Read an uploaded report back, blocking.
+
+    The worker calls this from its own ``asyncio.to_thread`` — it has the path
+    and needs the bytes before the sandbox provider is built — hence the public
+    name and the synchronous shape. Inside the API, call ``get_object_async``.
+    """
     response = _minio_client().get_object(settings.minio_bucket, path)
     try:
         return bytes(response.read())
     finally:
         response.close()
         response.release_conn()
+
+
+async def get_object_async(path: str) -> bytes:
+    """``get_object`` from a worker thread, for anything on the event loop."""
+    return await asyncio.to_thread(get_object, path)
 
 
 async def _read_payload(file: UploadFile, db: AsyncSession) -> tuple[bytes, dict[str, Any]]:
@@ -278,7 +300,7 @@ async def upload_sandbox_report(
             ),
         )
     )
-    _put_object(storage_path, body)
+    await put_object(storage_path, body)
     warning = _match_warning(matches=matches, sample_sha256=sample.sha256)
     if warning is not None:
         logger.warning(
@@ -362,7 +384,9 @@ async def delete_sandbox_report(
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Sandbox report not found")
     try:
-        _minio_client().remove_object(settings.minio_bucket, row.storage_path)
+        await asyncio.to_thread(
+            _minio_client().remove_object, settings.minio_bucket, row.storage_path
+        )
     except Exception as exc:  # noqa: BLE001 — an orphaned object is not a failed delete
         logger.warning("Could not remove %s from storage: %s", row.storage_path, exc)
     await db.execute(delete(SandboxReportRow).where(SandboxReportRow.id == row.id))

@@ -1443,7 +1443,12 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
 
             _worker_tmp = sample_files.temp_dir()
             temp_path = str(_worker_tmp / f"{sample_sha256}{_orig_ext}")
-            minio_client.fget_object(
+            # In a thread: the client is synchronous, and this loop is also
+            # carrying the job's heartbeat, its cancellation poller and every
+            # event the pipeline publishes. A slow store would stop all three
+            # for the length of the download.
+            await asyncio.to_thread(
+                minio_client.fget_object,
                 settings.minio_bucket,
                 derived_path,
                 temp_path,
