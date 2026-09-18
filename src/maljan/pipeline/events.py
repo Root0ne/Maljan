@@ -54,6 +54,19 @@ JUDGE_QUESTION = "judge_question"
 AGENT_MESSAGE_DELTA = "agent_message_delta"
 ROSTER = "roster"
 
+# What became of one violation. ``retried`` is the correction turn as it
+# happens; the other two are what the run knows once the producer has answered
+# again — and a violation the retry itself introduced is announced once, as
+# ``survived``, because nobody was ever shown it.
+VALIDATION_RETRIED = "retried"
+VALIDATION_RESOLVED = "resolved"
+VALIDATION_SURVIVED = "survived"
+VALIDATION_STATES: tuple[str, ...] = (
+    VALIDATION_RETRIED,
+    VALIDATION_RESOLVED,
+    VALIDATION_SURVIVED,
+)
+
 # What an ``agent_message`` is. ``says`` is the default and is what every
 # message emitted before this field existed was; the rest name the ones a
 # console draws differently. ``tool_call`` and ``tool_result`` are here for a
@@ -882,13 +895,21 @@ def emit_validation_feedback(
     code: str,
     message: str,
     retry_index: int,
+    state: str = VALIDATION_RETRIED,
 ) -> None:
-    """One correction a producer is shown before it answers again.
+    """One violation, and what became of it.
 
     Emitted where the correction turn is written rather than where the run
     summary counts it: a violation the retry fixes leaves no other trace, and
     the conversation is the one place a reader can see that the answer they
     are reading is the second one.
+
+    ``state`` is ``retried`` when the producer is being shown the violation,
+    then ``resolved`` or ``survived`` once the run knows which. Only the
+    correction turn used to be published, so a reader saw the violations that
+    triggered a retry and never the ones that survived it or the ones the retry
+    introduced — two events in the feed of a run whose summary recorded ten
+    unresolved findings.
     """
     emit(
         sink,
@@ -899,6 +920,7 @@ def emit_validation_feedback(
             "code": str(code),
             "message": str(message),
             "retry_index": max(0, int(retry_index)),
+            "state": str(state),
         },
     )
 

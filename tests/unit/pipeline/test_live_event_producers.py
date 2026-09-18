@@ -139,11 +139,15 @@ class TestValidationFeedbackReachesTheConversation:
             agent="static",
             stage="analysis",
         )
-        (event,) = sink.of("validation_feedback")
-        assert event["code"] == "technique_unknown"
-        assert event["agent"] == "static"
-        assert event["stage"] == "analysis"
-        assert event["retry_index"] == 1
+        shown, outcome = sink.of("validation_feedback")
+        assert shown["code"] == "technique_unknown"
+        assert shown["agent"] == "static"
+        assert shown["stage"] == "analysis"
+        assert shown["retry_index"] == 1
+        assert shown["state"] == "retried"
+        # And what became of it, which nothing used to publish.
+        assert outcome["code"] == "technique_unknown"
+        assert outcome["state"] == "resolved"
 
     def test_a_loop_with_nobody_to_tell_publishes_nothing(self) -> None:
         answers = iter(["first", "second"])
@@ -183,6 +187,69 @@ class TestValidationFeedbackReachesTheConversation:
             )
         )
         assert sink.of("validation_feedback")[0]["agent"] == "judge"
+
+
+class TestEveryViolationSaysWhatBecameOfIt:
+    """A reader of the conversation sees every violation the run recorded.
+
+    Only the batch that triggered a retry used to be published: the ones that
+    survived it and the ones the retry introduced were in the run summary and
+    nowhere a reader could watch. One run showed two corrections in the feed
+    beside a summary recording ten unresolved findings.
+    """
+
+    @staticmethod
+    def _rows(sink: _Sink) -> list[tuple[str, str]]:
+        return [(row["code"], row["state"]) for row in sink.of("validation_feedback")]
+
+    @staticmethod
+    def _loop(sink: _Sink, rounds: list[list[Violation]]) -> None:
+        answers = iter(["first", "second", "third"])
+        remaining = list(rounds)
+
+        def validator(_parsed: Any) -> list[Violation]:
+            return remaining.pop(0) if remaining else []
+
+        retry_with_feedback_sync(
+            lambda _turns: next(answers),
+            ["turn"],
+            [validator],
+            parse=lambda a: a,
+            sink=sink,  # type: ignore[arg-type]
+            agent="static",
+            stage="analysis",
+        )
+
+    def test_a_violation_that_survived_its_retry_is_published(self) -> None:
+        sink = _Sink()
+        kept = Violation(code="attck.unknown_id", message="T9999 is not in the catalogue")
+
+        self._loop(sink, [[kept], [kept]])
+
+        assert self._rows(sink) == [
+            ("attck.unknown_id", "retried"),
+            ("attck.unknown_id", "survived"),
+        ]
+
+    def test_a_violation_the_retry_introduced_is_published_once(self) -> None:
+        sink = _Sink()
+        first = Violation(code="isr.empty_evidence", message="cite the artifact")
+        introduced = Violation(code="attck.unknown_id", message="T9999 is not in the catalogue")
+
+        self._loop(sink, [[first], [introduced]])
+
+        assert self._rows(sink) == [
+            ("isr.empty_evidence", "retried"),
+            ("isr.empty_evidence", "resolved"),
+            ("attck.unknown_id", "survived"),
+        ]
+
+    def test_an_answer_that_needed_no_correction_publishes_nothing(self) -> None:
+        sink = _Sink()
+
+        self._loop(sink, [[]])
+
+        assert self._rows(sink) == []
 
 
 class TestTheJudgeAsks:

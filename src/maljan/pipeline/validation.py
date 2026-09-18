@@ -34,7 +34,13 @@ from maljan.analysis.corroboration import corroboration_row as corroboration_row
 from maljan.analysis.corroboration import corroboration_sources as corroboration_sources
 from maljan.analysis.technique_ids import TECHNIQUE_ID_EXACT_RE
 from maljan.core.logger import logger
-from maljan.pipeline.events import EventSink, emit_validation_feedback
+from maljan.pipeline.events import (
+    VALIDATION_RESOLVED,
+    VALIDATION_RETRIED,
+    VALIDATION_SURVIVED,
+    EventSink,
+    emit_validation_feedback,
+)
 from maljan.schemas.evidence import entry_ids_in
 from maljan.schemas.judgement import SEVERITY_RATINGS
 
@@ -1779,14 +1785,42 @@ class _FeedbackFeed:
 
     def announce(self, violations: Sequence[Violation], retry_index: int) -> None:
         for violation in violations:
-            emit_validation_feedback(
-                self.sink,
-                stage=self.stage,
-                agent=self.agent,
-                code=str(violation.code),
-                message=str(violation.message),
-                retry_index=retry_index,
-            )
+            self._emit(violation, retry_index, VALIDATION_RETRIED)
+
+    def outcome(
+        self,
+        shown: Sequence[Violation],
+        remaining: Sequence[Violation],
+        retry_index: int,
+    ) -> None:
+        """What became of every violation this loop saw.
+
+        One line per violation, and the ones that were never fed back are here
+        too: a retry introduces violations of its own, and a reader of the
+        conversation used to see only the batch that triggered the retry —
+        two lines beside a run whose summary recorded ten unresolved findings.
+        """
+        left = {(v.code, v.path) for v in remaining}
+        seen: set[tuple[str, str]] = set()
+        for violation in shown:
+            key = (violation.code, violation.path)
+            if key in left or key in seen:
+                continue
+            seen.add(key)
+            self._emit(violation, retry_index, VALIDATION_RESOLVED)
+        for violation in remaining:
+            self._emit(violation, retry_index, VALIDATION_SURVIVED)
+
+    def _emit(self, violation: Violation, retry_index: int, state: str) -> None:
+        emit_validation_feedback(
+            self.sink,
+            stage=self.stage,
+            agent=self.agent,
+            code=str(violation.code),
+            message=str(violation.message),
+            retry_index=retry_index,
+            state=state,
+        )
 
 
 def _feed(sink: EventSink | None, agent: str, stage: str) -> _FeedbackFeed | None:
@@ -1824,10 +1858,11 @@ async def retry_with_feedback[T](
     — :class:`ValidationTally` is what the callers pass.
 
     ``sink``, ``agent`` and ``stage`` put the same correction into the live
-    conversation, as one ``validation_feedback`` per violation, so a reader
-    watching the run sees why an agent is answering a second time. A caller
-    with nobody to tell — the CLI, a test, the report composer — passes no
-    sink and nothing is emitted.
+    conversation, as one ``validation_feedback`` per violation — ``retried``
+    where the producer is shown it, then ``resolved`` or ``survived`` once this
+    loop knows which, including for the violations the retry itself introduced.
+    A caller with nobody to tell — the CLI, a test, the report composer —
+    passes no sink and nothing is emitted.
     """
     feed = _feed(sink, agent, stage)
     turns = list(messages)
@@ -1835,13 +1870,17 @@ async def retry_with_feedback[T](
     parsed = parse(answer)
     violations = _collect(parsed, validators)
     retries = 0
+    shown: list[Violation] = []
     while violations and retries < max_retries:
         _announce_feedback(violations, on_feedback, feed, retries + 1)
+        shown.extend(violations)
         turns = _with_feedback(turns, answer, violations)
         retries += 1
         answer = await run(turns)
         parsed = parse(answer)
         violations = _collect(parsed, validators)
+    if feed is not None:
+        feed.outcome(shown, violations, retries)
     return parsed, violations, retries
 
 
@@ -1870,13 +1909,17 @@ def retry_with_feedback_sync[T](
     parsed = parse(answer)
     violations = _collect(parsed, validators)
     retries = 0
+    shown: list[Violation] = []
     while violations and retries < max_retries:
         _announce_feedback(violations, on_feedback, feed, retries + 1)
+        shown.extend(violations)
         turns = _with_feedback(turns, answer, violations)
         retries += 1
         answer = run(turns)
         parsed = parse(answer)
         violations = _collect(parsed, validators)
+    if feed is not None:
+        feed.outcome(shown, violations, retries)
     return parsed, violations, retries
 
 

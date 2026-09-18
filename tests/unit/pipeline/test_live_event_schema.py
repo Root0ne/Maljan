@@ -722,8 +722,23 @@ class TestValidationFeedback:
         )
         (event_type, data) = recorded[0]
         assert event_type == "validation_feedback"
-        assert set(data) == {"stage", "agent", "code", "message", "retry_index"}
+        assert set(data) == {"stage", "agent", "code", "message", "retry_index", "state"}
         assert data["retry_index"] == 1
+        assert data["state"] == "retried"
+
+    def test_what_became_of_a_violation_travels_with_it(self) -> None:
+        recorded, sink = _sink()
+        for state in ("resolved", "survived"):
+            ev.emit_validation_feedback(
+                sink,
+                stage="analysis",
+                agent="static",
+                code="technique_unknown",
+                message="T9999 is not in the catalogue",
+                retry_index=1,
+                state=state,
+            )
+        assert [data["state"] for _type, data in recorded] == ["resolved", "survived"]
 
 
 class TestJudgeQuestion:

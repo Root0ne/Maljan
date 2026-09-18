@@ -747,6 +747,16 @@ change landed on `main`.
 
 ### Fixed
 
+- **Every violation a run recorded reaches the conversation, with what became
+  of it.** Only the batch that triggered a correction turn was published, so a
+  reader watching a run saw neither the violations that survived the retry nor
+  the ones the retry introduced — two `validation_feedback` events in one run's
+  feed beside a summary recording ten unresolved findings. Each violation now
+  carries a `state`: `retried` where the producer is shown it, then `resolved`
+  or `survived` once the loop knows which, and a violation the retry introduced
+  is published once, as `survived`. The fields the console keys on — `code`,
+  `agent`, `stage`, `retry_index` — are unchanged.
+
 - **One source for the techniques a report publishes.** A report's three
   technique surfaces were built from three sources and disagreed inside single
   runs: one run exported ten techniques and a STIX bundle with no

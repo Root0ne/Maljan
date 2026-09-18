@@ -726,7 +726,7 @@ and the console draws the running analysis from them.
 | `agent_message_delta` | the analyst loop, behind `core.events.stream_deltas` | `stage`, `agent`, `text_delta` |
 | `tool_call_started` | the evidence recorder | `stage`, `agent`, `tool`, `server`, `args_summary` |
 | `tool_call_finished` | the evidence recorder, as each entry is written | `stage`, `agent`, `tool`, `server`, `evidence_id`, `ok`, `duration_ms`, `summary` |
-| `validation_feedback` | `pipeline/validation.retry_with_feedback` | `stage`, `agent`, `code`, `message`, `retry_index` |
+| `validation_feedback` | `pipeline/validation.retry_with_feedback` | `stage`, `agent`, `code`, `message`, `retry_index`, `state` |
 | `judge_question` | the judge's ReAct loop | `stage`, `text`, `addressed_to` |
 | `budget_tick` / `stage_ended_at_cap` | the budget meter | see *The evidence ledger* |
 | `enrichment_complete` | the enrichment worker, after the run | `report_id`, `domains_enriched`, `ips_enriched`, `similar_samples` |
