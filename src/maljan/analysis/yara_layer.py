@@ -409,6 +409,45 @@ class YaraLayer:
             )
             return None, {}
 
+    def literal_matches(self, rule: YaraTTPRule, text: str) -> list[str]:
+        """Which of ``rule``'s strings are in ``text``, under the rule's own condition.
+
+        The one answer for the rule file without yara-python. Two callers used
+        to carry a copy of this — this class's own fallback and the one
+        ``tools.rules.yara_scan`` uses, which is the path the triage pack
+        calls — and the copies disagreed about ``all_of``: the second iterated
+        the ordinary patterns only, so the pair form of a rule could not fire
+        at all on a host with no yara-python.
+
+        A together-group contributes its strings only when every one of them
+        is present. Half a pair is not evidence and must not be listed as
+        though it were.
+        """
+        found = [
+            pattern
+            for pattern, compiled in zip(rule.patterns, self._literals(rule), strict=True)
+            if compiled.search(text)
+        ]
+        together = self._literals(rule, group=True)
+        if together and all(compiled.search(text) for compiled in together):
+            found.extend(rule.all_of)
+        return found
+
+    def _literals(self, rule: YaraTTPRule, *, group: bool = False) -> list[re.Pattern[str]]:
+        """This rule's compiled literals, built on demand.
+
+        The index is dropped when yara-python compiles the corpus, because the
+        engine is then the one that scans; a caller that asks for the fallback
+        anyway gets it compiled here and kept.
+        """
+        index = self._compiled_all_of if group else self._compiled
+        compiled = index.get(rule.id)
+        if compiled is None:
+            strings = rule.all_of if group else rule.patterns
+            compiled = [re.compile(re.escape(p), re.IGNORECASE) for p in strings]
+            index[rule.id] = compiled
+        return compiled
+
     def _yara_scan(self, data: bytes) -> list[YaraMatch]:
         """Scan raw bytes using the compiled yara-python engine."""
         if self._yara_rules is None or yara is None:
@@ -463,6 +502,16 @@ class YaraLayer:
                         if decoded not in seen:
                             matched_patterns.append(decoded)
                             seen.add(decoded)
+
+            # The engine reports every string it matched, including one from
+            # a together-group that did not complete. The rule may have fired
+            # on something else entirely, and listing half a pair among the
+            # strings that fired it says the group counted when it did not.
+            rule = next((r for r in self._rules if r.id == rule_id), None)
+            if rule is not None and rule.all_of:
+                group = {p.lower() for p in rule.all_of}
+                if not group <= {p.lower() for p in matched_patterns}:
+                    matched_patterns = [p for p in matched_patterns if p.lower() not in group]
 
             results.append(
                 YaraMatch(
@@ -551,19 +600,7 @@ class YaraLayer:
         regex_matches: list[YaraMatch] = []
 
         for rule in active_rules:
-            triggered_patterns: list[str] = []
-            compiled_patterns = self._compiled[rule.id]
-
-            for pattern_re, pattern_str in zip(compiled_patterns, rule.patterns, strict=False):
-                if pattern_re.search(text):
-                    triggered_patterns.append(pattern_str)
-
-            # The together-group fires only whole, and contributes its strings
-            # only then — half a pair is not evidence and must not be reported
-            # as though it were.
-            together = self._compiled_all_of.get(rule.id) or []
-            if together and all(pattern_re.search(text) for pattern_re in together):
-                triggered_patterns.extend(rule.all_of)
+            triggered_patterns = self.literal_matches(rule, text)
 
             if triggered_patterns:
                 regex_matches.append(

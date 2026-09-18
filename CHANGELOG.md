@@ -807,15 +807,15 @@ change landed on `main`.
   capture — in a new `corroborated_by` field that `api_capability` puts on the
   row. The T1113 association is untouched: it is shown as a catalogue
   association, which is what it always was.
-- **Thirteen rules asserted a technique about a benign GUI network client; none asserts one now.** The
-  corpus was swept rule by rule against two fixtures built from names and
-  words rather than from any sample. Four shapes were doing the damage: a
-  pattern that is a substring of a benign API name (`RegSetValue`,
-  `CreateService`, `ExecuteA`), a pattern that is an English word (`encrypt`,
-  `macro`, `shortcut`), a pattern too short to be evidence (`#24`, the highest
-  authored confidence in the file, and `.scr`, which matches `.scrollbar`),
-  and a pattern the MSVC CRT links into most benign PEs (`IsDebuggerPresent`).
-  Eight rules now want the artefact — a ransom note's own wording, a
+- **Thirteen rules asserted a technique about a benign GUI network client;
+  none asserts one now.** The corpus was swept rule by rule against two
+  fixtures built from names and words rather than from any sample. Four shapes
+  were doing the damage: a pattern that is a substring of a benign API name
+  (`RegSetValue`, `CreateService`, `ExecuteA`), a pattern that is an English
+  word (`encrypt`, `macro`, `shortcut`), a pattern too short to be evidence
+  (`#24`, the highest authored confidence in the file, and `.scr`, which
+  matches `.scrollbar`), and a pattern the MSVC CRT links into most benign PEs
+  (`IsDebuggerPresent`). Eight rules now want the artefact — a ransom note's own wording, a
   `rundll32` command line, `comsvcs.dll MiniDump`, a policy key path, a VBA
   project stream. Five could not be made specific statically and have left the
   technique-asserting set: `web_client_apis`, `file_enumeration_apis`,
@@ -825,7 +825,10 @@ change landed on `main`.
   does. A rule file entry may now omit `technique_id`, and one that does may
   not carry a confidence either; it may also carry an `all_of` group, which
   fires only when every string in it is present, for a technique that is a
-  pair rather than a string. Two more rules followed: `lsass_dump` asserts
+  pair rather than a string; one matcher answers which of a rule's strings
+  count, so the layer and the tool that `yara_scan` falls back to cannot
+  disagree about a group, and neither engine lists half a pair among the
+  strings that fired a rule. Two more rules followed: `lsass_dump` asserts
   T1003.001 on the mimikatz string or a `comsvcs.dll MiniDump` invocation, and
   on `MiniDumpWriteDump` **together with** `lsass.exe` — either of those two
   alone is now a `process_dump_apis` note, because a crash reporter imports

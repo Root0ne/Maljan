@@ -271,3 +271,25 @@ class TestTheMachineReadableSurfacesSayItToo:
         }
         assert "strings" in described["rosoft[.]com"]
         assert "sandbox" in described["c2[.]evil[.]tld"]
+
+
+class TestAnIndicatorWithNothingToSaySaysNothing:
+    def test_a_domain_with_no_reason_carries_no_description_key(self) -> None:
+        """An empty description is noise in a published bundle, and the key
+        was absent before there was anything to put in it."""
+        from maljan.reporting.models import NetworkDomain
+        from maljan.reporting.renderers.stix_renderer import _indicator_for_domain
+
+        indicator = _indicator_for_domain(NetworkDomain(fqdn="c2.evil.tld", source="sandbox"))
+        assert indicator is not None
+        assert indicator.description is None
+        assert "description" not in indicator.model_dump(exclude_none=True)
+
+    def test_a_domain_with_a_reason_still_carries_it(self) -> None:
+        from maljan.reporting.models import NetworkDomain
+        from maljan.reporting.renderers.stix_renderer import _indicator_for_domain
+
+        domain = NetworkDomain(fqdn="c2.evil.tld", source="sandbox", reason="Newly registered")
+        indicator = _indicator_for_domain(domain)
+        assert indicator is not None
+        assert indicator.description == "Newly registered"

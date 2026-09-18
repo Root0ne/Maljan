@@ -473,11 +473,15 @@ def _indicator_for_domain(domain: NetworkDomain) -> Indicator | None:
         # description of every domain in every bundle; a Tor address reaches a
         # bundle on the strength of its own syntax and of nothing anybody
         # watched, and a reader finding it there is owed that sentence.
+        # ``None`` rather than an empty string: an absent key is what a
+        # consumer saw before there was anything to say, and an empty
+        # description is noise in a published bundle.
         description="; ".join(
             part
             for part in (domain.reason, admitted if domain.source == "strings" else None)
             if part
-        ),
+        )
+        or None,
     )
 
 

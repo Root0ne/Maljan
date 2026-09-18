@@ -581,3 +581,137 @@ class TestTheTogetherGroupInTheRuleFile:
             "first",
             "second",
         }
+
+
+class TestOneFallbackMatcherForTheRuleFile:
+    """Two code paths read the same rule file without yara-python.
+
+    The layer's own fallback and the one `yara_scan` uses — which is the path
+    the triage pack calls — disagreed about `all_of`: the tool's copy iterated
+    the ordinary patterns only, so on a host without yara-python the pair form
+    of a rule could not fire at all while the layer fired it.
+    """
+
+    def _yaraless(self, rules: list[YaraTTPRule]) -> YaraLayer:
+        from unittest.mock import patch
+
+        with (
+            patch("maljan.analysis.yara_layer._YARA_AVAILABLE", False),
+            patch("maljan.analysis.yara_layer.yara", None),
+        ):
+            return YaraLayer(rules)
+
+    def _both(self, layer: YaraLayer, blob: bytes) -> tuple[set[str], set[str]]:
+        from maljan.tools.rules import _yara_regex_matches
+
+        theirs = {row["rule"] for row in _yara_regex_matches(layer, blob)}
+        mine = {match.rule_id for match in layer.scan(blob)}
+        return theirs, mine
+
+    SHAPES = [
+        ("neither half", b"nothing of interest here"),
+        ("one half", b"ALPHA on its own"),
+        ("the other half", b"BETA on its own"),
+        ("both halves", b"ALPHA and BETA together"),
+        ("the specific form", b"SPECIFIC_FORM on its own"),
+        ("specific and one half", b"SPECIFIC_FORM with ALPHA"),
+        ("the plain rule", b"PLAIN string"),
+        ("the pair in another case", b"alpha and beta"),
+    ]
+
+    def _mixed_rules(self) -> list[YaraTTPRule]:
+        return [
+            YaraTTPRule.from_dict(
+                {
+                    "id": "pair_only",
+                    "technique_id": "T1003.001",
+                    "confidence": 0.9,
+                    "description": "a pair",
+                    "patterns": [],
+                    "all_of": ["ALPHA", "BETA"],
+                }
+            ),
+            YaraTTPRule.from_dict(
+                {
+                    "id": "mixed",
+                    "technique_id": "T1055",
+                    "confidence": 0.9,
+                    "description": "one on its own, or a pair",
+                    "patterns": ["SPECIFIC_FORM"],
+                    "all_of": ["ALPHA", "BETA"],
+                }
+            ),
+            YaraTTPRule.from_dict(
+                {
+                    "id": "plain",
+                    "technique_id": "T1059",
+                    "confidence": 0.9,
+                    "description": "one string",
+                    "patterns": ["PLAIN"],
+                }
+            ),
+        ]
+
+    @pytest.mark.parametrize(("label", "blob"), SHAPES)
+    def test_the_two_fallbacks_agree_on_the_mixed_shapes(self, label: str, blob: bytes) -> None:
+        layer = self._yaraless(self._mixed_rules())
+        theirs, mine = self._both(layer, blob)
+        assert theirs == mine, label
+
+    def test_the_two_fallbacks_agree_over_every_rule_in_the_shipped_file(self) -> None:
+        from maljan.analysis.yara_layer import _DEFAULT_RULES_PATH
+
+        if not _DEFAULT_RULES_PATH.exists():
+            pytest.skip("Default rules file not found.")
+        shipped = YaraLayer.from_yaml(_DEFAULT_RULES_PATH)
+        layer = self._yaraless(list(shipped._rules))
+        for blob in (
+            b"MiniDumpWriteDump\x00lsass.exe\x00",
+            b"MiniDumpWriteDump\x00",
+            b"lsass.exe\x00",
+            b"sekurlsa::logonpasswords\x00",
+            b"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run\x00",
+            b"UPX0\x00UPX1\x00",
+            b"nothing at all\x00",
+        ):
+            theirs, mine = self._both(layer, blob)
+            assert theirs == mine, blob
+
+    def test_the_pair_fires_for_the_tool_too(self) -> None:
+        from maljan.analysis.yara_layer import _DEFAULT_RULES_PATH
+
+        if not _DEFAULT_RULES_PATH.exists():
+            pytest.skip("Default rules file not found.")
+        layer = self._yaraless(list(YaraLayer.from_yaml(_DEFAULT_RULES_PATH)._rules))
+        theirs, _mine = self._both(layer, b"MiniDumpWriteDump\x00lsass.exe\x00")
+        assert "lsass_dump" in theirs
+
+
+class TestNeitherEngineCallsHalfAPairEvidence:
+    def test_the_matched_strings_agree_on_the_shipped_mixed_rule(self) -> None:
+        """A half-matched group must not be listed as one of the strings that
+        fired the rule, whichever engine answered."""
+        from unittest.mock import patch
+
+        from maljan.analysis.yara_layer import _DEFAULT_RULES_PATH
+
+        if not _DEFAULT_RULES_PATH.exists():
+            pytest.skip("Default rules file not found.")
+        rules = list(YaraLayer.from_yaml(_DEFAULT_RULES_PATH)._rules)
+        compiled = YaraLayer(rules)
+        if compiled._yara_rules is None:
+            pytest.skip("yara-python is not installed; there is only one engine here.")
+        with (
+            patch("maljan.analysis.yara_layer._YARA_AVAILABLE", False),
+            patch("maljan.analysis.yara_layer.yara", None),
+        ):
+            fallback = YaraLayer(rules)
+
+        blob = b"sekurlsa::logonpasswords\x00lsass.exe\x00"
+        by_engine = []
+        for layer in (compiled, fallback):
+            fired = [m for m in layer.scan(blob, sample_platform="windows")]
+            hit = next(m for m in fired if m.rule_id == "lsass_dump")
+            by_engine.append({p.lower() for p in hit.matched_patterns})
+        assert "lsass.exe" not in by_engine[0]
+        assert by_engine[0] == by_engine[1]
