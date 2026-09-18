@@ -468,11 +468,16 @@ def _indicator_for_domain(domain: NetworkDomain) -> Indicator | None:
         pattern=pattern,
         pattern_type="stix",
         indicator_types=["malicious-activity"] if domain.is_suspicious else ["anomalous-activity"],
-        # Why this name may be published at all, beside whatever the scorer
-        # said about it. A Tor address reaches a bundle on the strength of its
-        # own syntax and of nothing anybody watched, and a reader finding it
-        # there beside no sandbox observation is owed that sentence.
-        description="; ".join(part for part in (domain.reason, admitted) if part),
+        # Only the surprising admission is spelled out. A name the sandbox
+        # resolved needs no explanation, and adding one would rewrite the
+        # description of every domain in every bundle; a Tor address reaches a
+        # bundle on the strength of its own syntax and of nothing anybody
+        # watched, and a reader finding it there is owed that sentence.
+        description="; ".join(
+            part
+            for part in (domain.reason, admitted if domain.source == "strings" else None)
+            if part
+        ),
     )
 
 
