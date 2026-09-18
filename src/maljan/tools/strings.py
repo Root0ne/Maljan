@@ -32,6 +32,12 @@ _MIN_STRING_LENGTH = 6
 _MAX_STRINGS_SCANNED = 200_000
 _MAX_IOC_STRINGS = 120
 
+# What every row this module produces was read out of. One value today, and a
+# field rather than an assumption: downstream a name seen on the wire and a
+# name found in the byte image carry different weight, and the consumers had
+# no way to tell them apart.
+_IOC_SOURCE = "strings"
+
 
 _URL_RE = re.compile(rb"https?://[A-Za-z0-9._\-/?=&%:#~+]+")
 _IP_RE = re.compile(rb"\b(?:\d{1,3}\.){3}\d{1,3}\b")
@@ -45,8 +51,18 @@ _REG_RE = re.compile(rb"HK(?:LM|CU|CR|U|CC)[\\\\][A-Za-z0-9_\-\\\\ ./]+")
 # every report unless the sample happened to embed escaped text.
 _PATH_RE = re.compile(rb"(?:[A-Za-z]:[\\/]|/)[A-Za-z0-9_\-./\\ ]+")
 _EMAIL_RE = re.compile(rb"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+# The lookarounds are the token boundary. An underscore cannot appear in a
+# hostname label, so a match that begins or ends against one is the tail or the
+# head of an identifier — `evil_payload.com` is a symbol name, and the
+# `payload.com` inside it was being published as a domain. An `@` before the
+# match means the run is an address, which the e-mail pattern above has
+# already typed: `admin@example.com` was also yielding a bare `example.com`
+# row, so one string became two indicators. A hyphen is excluded for the same
+# reason as the underscore, and it has to be: with `@` refused, the scan would
+# otherwise retry inside the address and pull `c2-host.top` out of the middle
+# of `evil-c2-host.top`.
 _DOMAIN_RE = re.compile(
-    rb"(?<![A-Za-z0-9.])(?:[A-Za-z0-9-]{1,63}\.){1,3}[A-Za-z]{2,24}(?![A-Za-z0-9.])"
+    rb"(?<![A-Za-z0-9._@-])(?:[A-Za-z0-9-]{1,63}\.){1,3}[A-Za-z]{2,24}(?![A-Za-z0-9._])"
 )
 _MUTEX_RE = re.compile(rb"\\BaseNamedObjects\\[A-Za-z0-9_\-]+")
 _PRINTABLE_RE = re.compile(rb"[\x20-\x7e]{%d,}" % _MIN_STRING_LENGTH)
@@ -129,8 +145,12 @@ def _iter_strings(blob: bytes) -> Iterator[str]:
 def iter_string_iocs(blob: bytes) -> list[dict[str, Any]]:
     """Scan binary strings for typed indicators of compromise.
 
-    Rows are ``{"kind": ..., "value": ..., "notes": ...}``; ``notes`` is the
-    sub-label a secret or wallet pattern carries and ``None`` otherwise.
+    Rows are ``{"kind": ..., "value": ..., "notes": ..., "source": ...}``;
+    ``notes`` is the sub-label a secret or wallet pattern carries and ``None``
+    otherwise. ``source`` is always ``"strings"`` and is there so a consumer
+    can tell a name a sandbox watched the sample resolve from a name that was
+    lying in its byte image, which are not the same claim and were being
+    published as though they were.
     """
     iocs: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
@@ -147,7 +167,7 @@ def iter_string_iocs(blob: bytes) -> list[dict[str, Any]]:
             return
         seen.add(key)
         per_kind[kind] += 1
-        iocs.append({"kind": kind, "value": decoded, "notes": notes})
+        iocs.append({"kind": kind, "value": decoded, "notes": notes, "source": _IOC_SOURCE})
 
     def _all_quotas_full() -> bool:
         return all(per_kind[kind] >= quota for kind, quota in _IOC_QUOTAS.items())
@@ -173,10 +193,8 @@ def iter_string_iocs(blob: bytes) -> list[dict[str, Any]]:
             _add("email", match.decode("ascii", errors="ignore"))
         for match in _MUTEX_RE.findall(text.encode("ascii", errors="ignore")):
             _add("mutex", match.decode("ascii", errors="ignore"))
-        for match in _DOMAIN_RE.findall(text.encode("ascii", errors="ignore")):
-            candidate = match.decode("ascii", errors="ignore")
-            if _looks_like_domain(candidate):
-                _add("domain", candidate)
+        for candidate in _domains_in(text):
+            _add("domain", candidate)
         for label, pattern in _SECRET_PATTERNS:
             for hit in pattern.findall(text):
                 _add("secret", hit, notes=label)
@@ -187,6 +205,56 @@ def iter_string_iocs(blob: bytes) -> list[dict[str, Any]]:
             _add("domain", hit, notes="tor_hidden_service")
 
     return iocs[:_MAX_IOC_STRINGS]
+
+
+def _domains_in(text: str) -> list[str]:
+    """The hostnames in one printable run, fragments of each other removed.
+
+    Which of two names is the fragment is a question about where they sit, not
+    about how they are spelled. Asking it by spelling — dropping any name that
+    another name ends with — deletes the real one whenever a longer look-alike
+    is present: `microsoft.com` beside `xmicrosoft.com`, `000webhostapp.com`
+    beside `M000webhostapp.com`. Both of those are two names, and both stay.
+
+    A fragment is a match that lies *inside* a longer hostname's span in this
+    same run, cut somewhere other than a label boundary — `rosoft.com` inside
+    `microsoft.com`. A parent at a label boundary is a name in its own right,
+    so `sectigo.com` under `crl.sectigo.com` stays.
+    """
+    found: list[tuple[int, int, str]] = []
+    for match in _DOMAIN_RE.finditer(text.encode("ascii", errors="ignore")):
+        candidate = match.group().decode("ascii", errors="ignore")
+        if _looks_like_domain(candidate):
+            found.append((match.start(), match.end(), candidate))
+    return [value for start, end, value in found if not _inside_a_longer_host(start, end, found)]
+
+
+def _inside_a_longer_host(start: int, end: int, found: list[tuple[int, int, str]]) -> bool:
+    """Whether this span sits within a longer one, cut inside a label.
+
+    A guard rather than a filter that fires today: ``re.finditer`` yields
+    non-overlapping matches, so two matches of ``_DOMAIN_RE`` are never nested
+    and this returns ``False`` for every input the scan can hand it. It is
+    kept and tested because it is the rule that says which of two names is the
+    fragment, and a matcher that ever yields overlapping candidates — a
+    second pattern for a longer form, a sliding retry inside a run — would
+    need exactly it. The rule it replaced asked the question by spelling and
+    deleted the real name whenever a longer look-alike existed.
+    """
+    for other_start, other_end, other in found:
+        if (other_start, other_end) == (start, end):
+            continue
+        if not (other_start <= start and end <= other_end):
+            continue
+        if other_end - other_start <= end - start:
+            continue
+        cut = start - other_start
+        if cut > 0 and other[cut - 1] == ".":
+            # `sectigo.com` inside `crl.sectigo.com` — a registrable name, not
+            # the tail of one.
+            continue
+        return True
+    return False
 
 
 def _is_meaningful_ip(ip: str) -> bool:
@@ -346,6 +414,77 @@ _NAMESPACE_TOKENS = frozenset(
 # check below has to know about them.
 _MULTIPART_TLD_SECOND_LEVELS = frozenset(
     {"co", "com", "net", "org", "ac", "gov", "edu", "mil", "or", "ne", "in", "web"}
+)
+
+# Two-part public suffixes: the registry's own level, under which names are
+# registered and which is therefore not itself a name. A binary that embeds a
+# public-suffix table — every browser engine and every TLS stack does — was
+# handing back dozens of these as domains.
+#
+# Written out rather than derived from the set above, because that set answers
+# a different question and combining it with a country code would reject
+# `web.de` and `in.ua`, which are ordinary registrable names.
+_TWO_PART_PUBLIC_SUFFIXES = frozenset(
+    {
+        "ac.jp",
+        "ac.uk",
+        "co.id",
+        "co.il",
+        "co.in",
+        "co.jp",
+        "co.kr",
+        "co.nz",
+        "co.th",
+        "co.uk",
+        "co.za",
+        "com.ar",
+        "com.au",
+        "com.br",
+        "com.cn",
+        "com.eg",
+        "com.hk",
+        "com.mx",
+        "com.my",
+        "com.ng",
+        "com.ph",
+        "com.pl",
+        "com.ru",
+        "com.sa",
+        "com.sg",
+        "com.tr",
+        "com.tw",
+        "com.ua",
+        "com.vn",
+        "edu.au",
+        "edu.tr",
+        "go.jp",
+        "gov.au",
+        "gov.tr",
+        "gov.uk",
+        "me.uk",
+        "ne.jp",
+        "net.au",
+        "net.br",
+        "net.cn",
+        "net.in",
+        "net.nz",
+        "net.ru",
+        "net.sa",
+        "net.tr",
+        "net.uk",
+        "or.jp",
+        "or.kr",
+        "org.au",
+        "org.br",
+        "org.cn",
+        "org.in",
+        "org.nz",
+        "org.ru",
+        "org.sa",
+        "org.tr",
+        "org.uk",
+        "org.za",
+    }
 )
 
 # A positive TLD check, complementing the negative suffix list. Without one,
@@ -614,6 +753,23 @@ def _looks_like_domain(text: str) -> bool:
     # Positive TLD check. A hostname ends in a real TLD; `Collections.Generic`
     # does not.
     if labels[-1] not in _KNOWN_TLDS:
+        return False
+
+    # Nothing registrable in it. `co.uk` and `ne.jp` are the registry's own
+    # level, not names, and a sample carrying a public-suffix table was
+    # handing back a page of them.
+    if lower in _TWO_PART_PUBLIC_SUFFIXES:
+        return False
+
+    # A lowercase name wearing a shouted two-letter country code —
+    # `jector.SA`, `Bifrose.IE`, `workbench.nL`, `mucod.FR`, `Deftool.CZ` — is
+    # a row out of a detection-name table, and five such labels reached a live
+    # report as C2 domains. Only that shape: a name spelled wholly in capitals
+    # is a spelling of the name, and `Evil.COM` is a hostname somebody
+    # capitalised, so the rule asks for the two-letter code it was written
+    # for rather than for an upper-case letter in any suffix at all.
+    tld = text.rsplit(".", 1)[1]
+    if len(tld) == 2 and any(ch.isupper() for ch in tld) and not text.isupper():
         return False
 
     # Namespace shape. Most .NET identifiers die on the TLD check already

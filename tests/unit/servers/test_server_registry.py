@@ -560,3 +560,140 @@ def test_an_attached_handle_outlives_the_registry_that_opened_it(patched):
     del survivor
     gc.collect()
     assert ref() is None, "a closed handle is not held by the process any more"
+
+
+class TestAToolTheHostCannotRunIsNotOffered:
+    """A model was handed four tools that could not answer.
+
+    The sidecar exposed its whole tool set and reported separately that
+    `apk_info`, `archive_list`, `document_info` and `macho_info` were
+    unavailable on that host. The degradation was logged and recorded, and the
+    model was still offered the tool, spent a step on it and got a failure
+    back. The manifest is the answer: a tool it marks unavailable with nothing
+    to give without its library is not put in front of the model, and the
+    manifest still names it, with the reason and the remedy, for the operator
+    and for the degraded block.
+    """
+
+    def _manifest(self, *cells: dict) -> dict:
+        return {"server": "analysis", "version": "1.0", "tools": list(cells)}
+
+    def _handle(self, patched, names: list[str], manifest: dict) -> ServerHandle:
+        from maljan.tools.capabilities import ServerCapabilities
+
+        factory, _made = patched
+        factory.names = names
+        handle = ServerHandle("analysis", MCPServerConfig(enabled=True, command="mcp"))
+        handle.open("job-1")
+        handle.capabilities = ServerCapabilities.from_payload("analysis", manifest)
+        return handle
+
+    def test_an_unavailable_tool_with_nothing_to_give_is_withheld(self, patched) -> None:
+        handle = self._handle(
+            patched,
+            ["alpha", "macho_info"],
+            self._manifest(
+                {"name": "alpha", "available": True, "reason": None},
+                {
+                    "name": "macho_info",
+                    "available": False,
+                    "reason": "macholib is not installed",
+                    "remediation": "uv sync --extra tools",
+                },
+            ),
+        )
+        assert [t.name for t in handle.tools()] == ["alpha"]
+
+    def test_the_manifest_still_names_it_with_the_remedy(self, patched) -> None:
+        handle = self._handle(
+            patched,
+            ["macho_info"],
+            self._manifest(
+                {
+                    "name": "macho_info",
+                    "available": False,
+                    "reason": "macholib is not installed",
+                    "remediation": "uv sync --extra tools",
+                }
+            ),
+        )
+        assert handle.tools() == []
+        assert handle.all_tool_names() == ["macho_info"]
+        (missing,) = handle.capabilities.unavailable()
+        assert missing.reason == "macholib is not installed"
+        assert "uv sync" in (missing.remediation or "")
+
+    def test_a_tool_that_still_answers_a_subset_is_kept(self, patched) -> None:
+        """`archive_list` without py7zr still lists a zip, and withholding it
+        would cost a whole archive analysis to save a 7z failure."""
+        handle = self._handle(
+            patched,
+            ["archive_list"],
+            self._manifest(
+                {
+                    "name": "archive_list",
+                    "available": False,
+                    "reason": "py7zr is not installed",
+                    "without": "zip and tar members; 7z needs py7zr",
+                    "remediation": "uv sync --extra tools",
+                }
+            ),
+        )
+        assert [t.name for t in handle.tools()] == ["archive_list"]
+
+    def test_a_server_with_no_manifest_offers_what_it_always_did(self, patched) -> None:
+        factory, _made = patched
+        factory.names = ["alpha", "beta"]
+        handle = ServerHandle("custom", MCPServerConfig(enabled=True, command="mcp"))
+        handle.open("job-1")
+        assert [t.name for t in handle.tools()] == ["alpha", "beta"]
+
+    def test_an_allow_list_and_the_manifest_both_apply(self, patched) -> None:
+        from maljan.tools.capabilities import ServerCapabilities
+
+        factory, _made = patched
+        factory.names = ["alpha", "beta", "macho_info"]
+        handle = ServerHandle(
+            "analysis", MCPServerConfig(enabled=True, command="mcp", tools=["beta", "macho_info"])
+        )
+        handle.open("job-1")
+        handle.capabilities = ServerCapabilities.from_payload(
+            "analysis",
+            self._manifest(
+                {"name": "beta", "available": True, "reason": None},
+                {"name": "macho_info", "available": False, "reason": "macholib is not installed"},
+            ),
+        )
+        assert [t.name for t in handle.tools()] == ["beta"]
+
+    def test_withholding_it_does_not_withhold_the_reason(self, patched) -> None:
+        handle = self._handle(
+            patched,
+            ["macho_info"],
+            self._manifest(
+                {
+                    "name": "macho_info",
+                    "available": False,
+                    "reason": "macholib is not installed",
+                    "remediation": "uv sync --extra tools",
+                }
+            ),
+        )
+        (reason,) = handle.withheld_reasons()
+        assert reason.startswith("server.analysis.macho_info_unavailable(macholib is not installed")
+        assert "uv sync --extra tools" in reason
+
+    def test_a_tool_that_still_answers_a_subset_reports_nothing_here(self, patched) -> None:
+        handle = self._handle(
+            patched,
+            ["archive_list"],
+            self._manifest(
+                {
+                    "name": "archive_list",
+                    "available": False,
+                    "reason": "py7zr is not installed",
+                    "without": "zip and tar members; 7z needs py7zr",
+                }
+            ),
+        )
+        assert handle.withheld_reasons() == []

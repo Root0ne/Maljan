@@ -32,6 +32,11 @@ dependencies = [
     "arq>=0.26.1",
     "minio>=7.2.0",
     "pyjwt[crypto]>=2.10.0",
+    # Named in its own right rather than left to arrive through pyjwt:
+    # the Authenticode signer's name in the pack is read with it, and a
+    # transitive extra that stopped being pulled would make that fact
+    # silently absent rather than loudly missing.
+    "cryptography>=42.0.0",
     "python-multipart>=0.0.6",
     "alembic>=1.14.0",
     "filetype>=1.2.0",

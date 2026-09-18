@@ -189,8 +189,10 @@ them; a fact a model may or may not ask for is not a fact a run can rely on.
 The pack is the same code the `analysis` sidecar serves, called in-process, in
 a fixed order so the ids a sample produces are the same from one run to the
 next: `identify_file` and `hashes`; `signing_info` for the routed format alone
-(Authenticode for a PE, the APK signing block for an APK, `LC_CODE_SIGNATURE`
-for a Mach-O, and for anything else the fact that it has no signing scheme);
+(Authenticode for a PE, with the signer's subject, issuer and thumbprint read
+out of the certificate table and no chain verdict claimed; the APK signing
+block for an APK; `LC_CODE_SIGNATURE` for a Mach-O; and for anything else the
+fact that it has no signing scheme);
 the format tool the routed type selects (`pe_info`, `elf_info`, `macho_info`,
 `apk_info`, `document_info` or `archive_list`, which carry the section
 entropies, the packer signature hits and the import rows); a `strings` head
@@ -402,7 +404,10 @@ decides.
    technique with an import set (BitBlt and CreateCompatibleDC read as screen
    capture on any GUI program), so its associations travel under
    `associated_by`, shown in a Catalogue column for reference and counted for
-   nothing. An asserted id the catalogue has retired
+   nothing. The catalogue's own `screen_capture` and `message_loop` groups are
+   `informational` for the same reason and name, in `corroborated_by`, the
+   APIs whose presence beside them would mean something. An asserted id the
+   catalogue has retired
    (upstream Sigma rules and the case corpus still name a few) is marked
    `retired in ATT&CK 19.2` in the table. Two flat lists in
    `run_summary.corroboration`, rendered as a table in the report and shown
@@ -720,10 +725,14 @@ Each sidecar also answers `capabilities`: which of its tools need an optional
 library, a binary or a setting, and which of those are present on its host,
 probed when the server starts. The registry keeps the manifest on the server's
 entry when it attaches, the settings probe returns it so the console's server
-card names the unavailable tools before a run, and an analysis stage records
-each bound tool the manifest marks unavailable as
-`server.<key>.<tool>_unavailable(<reason>); <remedy>` when it starts. A tool
-that cannot answer returns an error with a code and an authored remediation
+card names the unavailable tools before a run, and each tool the manifest
+marks unavailable is recorded as
+`server.<key>.<tool>_unavailable(<reason>); <remedy>`. A tool marked
+unavailable is also kept out of the list the model is given, because offering
+one is offering a step that can only fail — unless the manifest says what the
+tool still answers without its library, in which case it is offered and the
+reason says what is missing from its answer. A tool that cannot answer
+returns an error with a code and an authored remediation
 (`maljan.tools.errors`) rather than raising, and the sidecars' guards rewrite
 an implementation's flat error into that shape. See *Writing a tool server* in
 [configuration.md](configuration.md).
@@ -1024,3 +1033,16 @@ The API renders the report as Markdown, HTML and PDF, and exposes the STIX 2.1
 bundle, a MITRE view, the extracted indicators, the detection signatures that
 fired and a timeline. Post-hoc enrichment fills VirusTotal, AbuseIPDB, WHOIS and
 GeoIP reputation into the indicator set after the verdict has shipped.
+
+Each domain in the network block records where it came from — `sandbox` for a
+name the sample resolved or requested, `analyst` for one an agent put in an
+artefact, `strings` for a run of bytes in the file that has the shape of a
+hostname. The last is the weakest claim there is, so a `strings` domain is
+printed in the report — in its own Source column in the Markdown table and as
+a badge on the console's domain card — and left out of the STIX indicator set
+and out of the reputation lookups until a second source knows the same name.
+One predicate decides that, and both paths that mint a domain indicator ask
+it: the network block's own, and the string rows that reach the bundle
+through `static.interesting_strings`. A Tor address is corroborated by its own
+syntax, because `.onion` never resolves and no sandbox can confirm one; the
+indicator it mints carries the reason it was admitted.

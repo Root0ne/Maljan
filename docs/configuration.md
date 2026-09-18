@@ -324,6 +324,27 @@ means an empty corpus and no matches, not a failure. `analysis.sigma_rules_dir`
 was the previous name for the first of these — a stored override moves into the
 server's `env` automatically on upgrade.
 
+A rule in the YARA corpus fires when any of its patterns is in the sample's
+bytes, and its confidence travels with the hit into every agent's pack. A
+pattern must therefore be a fact about a sample rather than a word that
+describes one: the persistence rules name key paths and not the API that writes
+a value, and the packing rules name section names and packer banners and not
+the words `AES`, `packed` or `compress`, which any program that speaks a
+protocol carries.
+
+A rule may also carry an `all_of` group beside its `patterns`: the patterns
+fire one at a time, the group fires only whole. That is for a technique that
+is a pair rather than a string — `MiniDumpWriteDump` is in a crash reporter
+and `lsass.exe` is in every process lister, and only the two together are
+credential dumping.
+
+A rule that cannot be made that specific is written as a note: it omits
+`technique_id`, and a rule with no technique may not carry a `confidence`
+either. It fires, it says in its description what is in the file, and it
+asserts nothing — which is what `web_client_apis` and `file_enumeration_apis`
+are for. Importing an HTTP client is a fact; calling it a command-and-control
+channel is a claim no substring can support.
+
 ### The evidence budget
 
 `reporting.evidence_budget_bytes` (512 KiB by default) is how many bytes of

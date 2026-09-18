@@ -3009,7 +3009,9 @@ def make_judge_node(
             try:
                 from maljan.extractors.sample_identity import unparsed_container_reason
 
-                _container_reason = unparsed_container_reason(state.get("sample_path"))
+                _container_reason = unparsed_container_reason(
+                    state.get("sample_path"), state.get("evidence_ledger")
+                )
                 if _container_reason:
                     _degradation_reasons.append(_container_reason)
             except Exception as _e:  # noqa: BLE001

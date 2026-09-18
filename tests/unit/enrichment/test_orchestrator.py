@@ -247,6 +247,34 @@ class TestSignalQualityFeedback:
         assert mr["network"]["domains"][0].get("reputation") is None
 
     @pytest.mark.asyncio
+    async def test_a_name_found_only_in_the_byte_image_is_not_looked_up(self) -> None:
+        """One PE's string sweep spent 452 s of reputation budget on fragments."""
+        mr = _mr(domains=[{"fqdn": "rosoft.com", "source": "strings"}])
+        vt = _vt_mock(domain_rep={"source": "virustotal", "malicious": 5})
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={}))
+        ) as http:
+            with patch("maljan.enrichment.orchestrator.VirusTotalClient", return_value=vt):
+                await enrich_malware_report(
+                    mr, vt_api_key="k", abuseipdb_api_key=None, http_client=http
+                )
+        vt.domain_reputation.assert_not_awaited()
+        assert mr["network"]["domains"][0].get("reputation") is None
+
+    @pytest.mark.asyncio
+    async def test_a_name_the_sandbox_resolved_is_looked_up(self) -> None:
+        mr = _mr(domains=[{"fqdn": "evil.com", "source": "sandbox"}])
+        vt = _vt_mock(domain_rep={"source": "virustotal", "malicious": 5})
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={}))
+        ) as http:
+            with patch("maljan.enrichment.orchestrator.VirusTotalClient", return_value=vt):
+                await enrich_malware_report(
+                    mr, vt_api_key="k", abuseipdb_api_key=None, http_client=http
+                )
+        vt.domain_reputation.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_malicious_reputation_sets_is_suspicious(self) -> None:
         mr = _mr(domains=[{"fqdn": "evil.com", "is_suspicious": False}])
         vt = _vt_mock(domain_rep={"source": "virustotal", "malicious": 8})

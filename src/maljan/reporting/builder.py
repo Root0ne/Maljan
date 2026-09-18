@@ -633,7 +633,10 @@ def build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
     net = report.network
     if net:
         for d in net.domains:
-            _add("Domain", d.fqdn, d.reason or "", is_network=True)
+            # Where the name came from belongs beside it: the consolidated
+            # table is read by somebody deciding what to block.
+            note = "; ".join(part for part in (d.reason, d.source) if part)
+            _add("Domain", d.fqdn, note, is_network=True)
         for ip in net.ips:
             _add("IPv4", ip.address, f"port {ip.port}" if ip.port else "", is_network=True)
         for u in net.urls:

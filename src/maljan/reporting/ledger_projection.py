@@ -25,7 +25,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from maljan.analysis.technique_ids import api_capability_hits, sigma_technique_ids
 from maljan.core.logger import logger
@@ -198,6 +198,7 @@ def _signing_from_ledger(ledger: list[LedgerEntry]) -> SignatureInfo:
             is_signed=bool(auth.get("present") or apk.get("present") or macho.get("present")),
             signer_subject=_opt(auth.get("subject")) or _opt(apk.get("subject")),
             signer_issuer=_opt(auth.get("issuer")) or _opt(apk.get("issuer")),
+            signer_thumbprint=_opt(auth.get("thumbprint")) or _opt(apk.get("thumbprint")),
             signature_valid=valid if isinstance(valid, bool) else None,
             evidence_id=entry.id,
         )
@@ -560,6 +561,12 @@ def _as_tree(nodes: list[ProcessNode]) -> list[ProcessNode]:
 # ---------------------------------------------------------------------------
 
 
+_DomainSource = Literal["sandbox", "analyst", "strings"]
+# What one source is worth against another. A name the sample resolved outranks
+# a name an analyst wrote down, which outranks a run of bytes in the file.
+_DOMAIN_SOURCE_RANK: dict[str, int] = {"strings": 0, "analyst": 1, "sandbox": 2}
+
+
 def network_from_ledger(
     ledger: list[LedgerEntry], isrs: dict[str, AgentISR] | None = None
 ) -> NetworkIOCs | None:
@@ -577,32 +584,37 @@ def network_from_ledger(
     )
 
     network = NetworkIOCs()
-    domains: set[str] = set()
+    domains: dict[str, NetworkDomain] = {}
     ips: set[str] = set()
     urls: set[str] = set()
 
-    def _add(kind: str, value: str) -> None:
+    def _add(kind: str, value: str, source: _DomainSource = "strings") -> None:
         value = (value or "").strip()
         if not value:
             return
-        if kind == "domain" and value not in domains:
+        if kind == "domain":
             if not _is_emittable_domain(value):
                 return
             value = value.lower().strip().rstrip(".")
-            if value in domains:
+            known = domains.get(value)
+            if known is not None:
+                # The same name from a second source is the corroboration the
+                # indicator rule asks for, so the stronger origin wins.
+                if _DOMAIN_SOURCE_RANK[source] > _DOMAIN_SOURCE_RANK[known.source or "strings"]:
+                    known.source = source
                 return
-            domains.add(value)
             verdict = _assess_domain(value)
-            network.domains.append(
-                NetworkDomain(
-                    fqdn=value,
-                    is_suspicious=verdict.suspicious,
-                    reason=verdict.reason,
-                    dga_score=verdict.dga_score,
-                    is_punycode=verdict.is_punycode,
-                    homograph_target=verdict.homograph_target,
-                )
+            domain = NetworkDomain(
+                fqdn=value,
+                is_suspicious=verdict.suspicious,
+                reason=verdict.reason,
+                dga_score=verdict.dga_score,
+                is_punycode=verdict.is_punycode,
+                homograph_target=verdict.homograph_target,
+                source=source,
             )
+            domains[value] = domain
+            network.domains.append(domain)
         elif kind == "ip" and value not in ips:
             if not _is_emittable_ip(value):
                 return
@@ -620,7 +632,7 @@ def network_from_ledger(
     for _entry, data in _payloads(ledger, "sandbox_network"):
         for key in ("dns", "domains"):
             for row in data.get(key) or []:
-                _add("domain", _first_str(row, "request", "hostname", "domain", "name"))
+                _add("domain", _first_str(row, "request", "hostname", "domain", "name"), "sandbox")
         for row in data.get("hosts") or []:
             _add("ip", _first_str(row, "ip", "address", "host"))
         for key in ("tcp", "udp"):
@@ -628,18 +640,18 @@ def network_from_ledger(
                 _add("ip", _first_str(row, "dst", "ip", "address"))
         for row in data.get("http") or []:
             host = _first_str(row, "host", "hostname")
-            _add("domain", host)
+            _add("domain", host, "sandbox")
             _add("url", _http_url(row, host))
 
     for _entry, data in _payloads(ledger, "iocs_from_file", "iocs_from_text"):
         for row in data.get("iocs") or []:
             if isinstance(row, dict):
-                _add(str(row.get("kind") or ""), str(row.get("value") or ""))
+                _add(str(row.get("kind") or ""), str(row.get("value") or ""), "strings")
 
     for artifact in _artifacts(isrs, "endpoints", "network", "iocs"):
         for row in _rows_of(artifact):
             if len(row) >= 2:
-                _add(row[0].strip().lower(), row[1])
+                _add(row[0].strip().lower(), row[1], "analyst")
 
     return network if (network.domains or network.ips or network.urls) else None
 

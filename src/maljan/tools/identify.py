@@ -195,6 +195,7 @@ def signing_info(path: str, file_type: str | None = None) -> dict[str, Any]:
             "present": bool(info.is_signed),
             "subject": info.signer_subject,
             "issuer": info.signer_issuer,
+            "thumbprint": info.signer_thumbprint,
         }
     elif scheme == "apk":
         out["apk"] = _apk_signing(target, blob)
@@ -227,9 +228,16 @@ def _apk_signing(target: Path, blob: bytes) -> dict[str, Any]:
 def _apk_block_schemes(blob: bytes) -> list[str]:
     """Scheme ids inside the APK Signing Block, if there is one.
 
-    The block ends with its own size and the 16-byte magic, immediately before
-    the zip central directory. Finding the magic from the tail is enough to
-    locate it without parsing the whole archive.
+    The block opens with its own size, then the id-value pairs, then that same
+    size again and the 16-byte magic, immediately before the zip central
+    directory. Finding the magic from the tail is enough to locate it without
+    parsing the whole archive.
+
+    The size counts everything after the leading size field, so the first pair
+    begins eight bytes past the block's start. Reading it at the start instead
+    means the leading size field is taken for a pair length, the walk falls out
+    of step and no scheme id is ever recognised — which reports every APK
+    signed only with v2/v3, that is to say every modern APK, as unsigned.
     """
     marker = blob.rfind(_APK_SIG_BLOCK_MAGIC)
     if marker < 24:
@@ -241,14 +249,24 @@ def _apk_block_schemes(blob: bytes) -> list[str]:
     start = marker + len(_APK_SIG_BLOCK_MAGIC) - 8 - int(block_size)
     if start < 8 or start >= marker:
         return []
+    try:
+        declared = struct.unpack_from("<Q", blob, start)[0]
+    except struct.error:
+        return []
+    if declared != block_size:
+        # The two size fields are one number written twice. When they
+        # disagree, the magic was not a block footer and there is nothing
+        # here to read.
+        return []
+    pairs_end = marker - 8
     found: list[str] = []
-    cursor = start
-    while cursor + 12 <= marker - 8:
+    cursor = start + 8
+    while cursor + 12 <= pairs_end:
         try:
             pair_len, pair_id = struct.unpack_from("<QI", blob, cursor)
         except struct.error:
             break
-        if pair_len < 4 or cursor + 8 + pair_len > len(blob):
+        if pair_len < 4 or cursor + 8 + pair_len > pairs_end:
             break
         name = _APK_SCHEME_IDS.get(int(pair_id))
         if name and name not in found:
