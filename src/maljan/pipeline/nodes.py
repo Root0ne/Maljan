@@ -100,6 +100,12 @@ if TYPE_CHECKING:
 _NARRATIVE_TIMEOUT_SECONDS = 600
 
 
+# What the run summary calls a judge annotation whose technique did not
+# survive validation. Its own code: the technique's own rejection is recorded
+# under its own, and this row says what that rejection cost the export.
+UNLINKED_TECHNIQUE_CODE = "stix.unlinked_technique"
+
+
 def _empty_isr(agent_name: str, revision_round: int = 0) -> AgentISR:
     """Build an empty placeholder ISR (e.g. for mock or error paths)."""
     return AgentISR(
@@ -109,6 +115,39 @@ def _empty_isr(agent_name: str, revision_round: int = 0) -> AgentISR:
         dissent_items=[],
         revision_round=revision_round,
     )
+
+
+def _note_unlinked_techniques(report: Any, unlinked: Sequence[tuple[str, int]]) -> None:
+    """Record the judge annotations that went with a rejected technique.
+
+    One row per technique, under the code the STIX check already uses for an
+    id it could not resolve, so a reader of ``run_summary.validation`` finds
+    the annotation's fate beside the reason the technique was dropped.
+    """
+    if not unlinked:
+        return
+    summary = dict(getattr(report, "run_summary", None) or {})
+    validation = dict(summary.get("validation") or {})
+    rows = [dict(row) for row in validation.get("unresolved") or []]
+    by_code = dict(validation.get("by_code") or {})
+    for technique, count in unlinked:
+        rows.append(
+            {
+                "agent": JUDGE_AGENT_KEY,
+                "code": UNLINKED_TECHNIQUE_CODE,
+                "message": (
+                    f"{count} judge relationship(s) about {technique} were not published: "
+                    "the technique is not in the report's validated list."
+                ),
+            }
+        )
+        by_code[UNLINKED_TECHNIQUE_CODE] = by_code.get(UNLINKED_TECHNIQUE_CODE, 0) + 1
+    validation["unresolved"] = rows
+    validation["by_code"] = dict(sorted(by_code.items()))
+    validation.setdefault("retries", int(validation.get("retries") or 0))
+    validation.setdefault("not_run", list(validation.get("not_run") or []))
+    summary["validation"] = validation
+    report.run_summary = summary
 
 
 def promoted_asks(agent: Any, own: AgentISR | None = None) -> dict[str, AgentISR]:
@@ -3820,10 +3859,16 @@ def make_report_node(
                 )
                 base = None
             try:
-                extended_bundle = ExtendedSTIXRenderer().render(
+                _renderer = ExtendedSTIXRenderer()
+                extended_bundle = _renderer.render(
                     report, base, ledger=container.get_truncation_ledger()
                 )
                 extended_dump = extended_bundle.model_dump(mode="json")
+                # What the judge said about a technique the checks rejected
+                # went with that technique. Recorded where the run's other
+                # unresolved findings are, not counted as a bundle defect: the
+                # annotation was sound, the technique it was about was not.
+                _note_unlinked_techniques(report, _renderer.unlinked)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("report_node: extended STIX render failed (%s).", exc)
                 extended_dump = None

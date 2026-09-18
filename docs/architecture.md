@@ -874,7 +874,15 @@ is assembled from what the run gathered rather than recomputed beside it:
   surface is built from it: the report's ATT&CK section, its References, the
   `attack-pattern` objects of the STIX bundle — minted with ids derived from
   the technique id, so the same technique is the same object across exports —
-  and the `mitre_techniques` column behind `/reports/{id}/mitre`. An id the
+  and the `mitre_techniques` column behind `/reports/{id}/mitre`. What the
+  judge said *about* a technique travels with it: its `uses` relationship,
+  with the confidence, the evidence basis and the contributing agents it
+  annotated, is re-linked to the rebuilt object of the same technique and
+  carried unedited, and the rebuild mints no second link for a technique the
+  judge already related. A relationship to a technique the checks rejected goes
+  with that technique and is recorded in `run_summary.validation` as
+  `stix.unlinked_technique`, which is a fact about the run rather than a defect
+  of the bundle. An id the
   catalogue check rejected is in the matrix and in none of those. The three
   surfaces used to be built from three sources and disagreed inside single
   runs: ten techniques in one report against zero attack-patterns in its

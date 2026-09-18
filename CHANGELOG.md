@@ -800,9 +800,15 @@ change landed on `main`.
   attack-patterns are minted from that list with ids derived from the technique
   id and an ATT&CK external reference each, the References section and the
   `mitre_techniques` column are built from the same list, and no entry without
-  a technique id is stored as a technique. An attack-pattern with a name and no
-  id is asked for one (`attck.missing_id`) instead of skipping every ATT&CK
-  check — which is why the Mobile-domain check never ran on an Android
+  a technique id is stored as a technique. The judge's own `uses` relationships
+  travel with their techniques: each is re-linked to the rebuilt attack-pattern
+  of the same id with its confidence, evidence basis and contributing agents
+  unedited, so the uncertainty annotation that makes these bundles worth
+  exporting is not pruned as dangling, and a relationship whose technique the
+  checks rejected is recorded in `run_summary.validation` as
+  `stix.unlinked_technique` rather than counted as an integrity defect. An
+  attack-pattern with a name and no id is asked for one (`attck.missing_id`)
+  instead of skipping every ATT&CK check — which is why the Mobile-domain check never ran on an Android
   sample's techniques — and one that survives is reported as a behaviour, in
   the new `MalwareReport.unmapped_behaviours` and under its own heading in the
   markdown.

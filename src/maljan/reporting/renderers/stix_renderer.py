@@ -65,6 +65,14 @@ class ExtendedSTIXRenderer:
     input bundle is treated as immutable.
     """
 
+    def __init__(self) -> None:
+        # Per render: the techniques whose judge relationships went with them,
+        # as ``(technique, relationships dropped)``. The report node writes
+        # them into ``run_summary.validation`` — an annotation the judge made
+        # about a technique the checks rejected is not a defect of the bundle,
+        # it is part of what the run has to say about that technique.
+        self.unlinked: list[tuple[str, int]] = []
+
     def render(
         self,
         report: MalwareReport,
@@ -82,6 +90,7 @@ class ExtendedSTIXRenderer:
         undercounts.
         """
         objects: list[Any] = []
+        self.unlinked = []
 
         # 1) Preserve everything the judge already emitted, except its
         #    attack-patterns: those are rebuilt from the report's published
@@ -89,11 +98,26 @@ class ExtendedSTIXRenderer:
         #    about what this run found. One audited run exported ten techniques
         #    in the report and zero attack-patterns in the bundle; another
         #    exported three attack-patterns with no ATT&CK reference at all.
+        #
+        #    What the judge said *about* those techniques stays. Its `uses`
+        #    relationships carry the confidence, the evidence basis and the
+        #    contributing agents it put on each one, and they point at objects
+        #    that are about to be replaced — so the refs move to the rebuilt
+        #    object of the same technique before the originals go, and the
+        #    annotations travel unedited. A relationship to a technique the
+        #    checks rejected has nothing to move to and goes with it.
+        linked: set[str] = set()
         if base_bundle is not None:
             self._normalize_judge_timestamps(base_bundle.objects)
-            objects.extend(
-                obj for obj in base_bundle.objects if getattr(obj, "type", "") != "attack-pattern"
-            )
+            remap = _technique_remap(report, base_bundle)
+            for obj in base_bundle.objects:
+                if getattr(obj, "type", "") == "attack-pattern":
+                    continue
+                moved, technique = _with_remapped_target(obj, remap)
+                if technique:
+                    linked.add(technique)
+                objects.append(moved)
+            self.unlinked = _unlinked_techniques(base_bundle, remap)
 
         # 2) Identity SDO for Maljan itself.
         identity = Identity(
@@ -122,9 +146,10 @@ class ExtendedSTIXRenderer:
         #      placeholder UUIDs out of the STIX documentation — and a
         #      technique the report published reached the bundle only if the
         #      judge had happened to emit an object for it.
-        for technique, uses in _attack_patterns_for(report, malware_id):
-            objects.append(technique)
-            objects.append(uses)
+        for pattern_sdo, uses in _attack_patterns_for(report, malware_id, linked):
+            objects.append(pattern_sdo)
+            if uses is not None:
+                objects.append(uses)
 
         # Collect indicators per-kind, then apply
         # MAX_TOTAL_INDICATORS as a hard cap with priority order
@@ -334,17 +359,94 @@ class ExtendedSTIXRenderer:
 _ATTACK_PATTERN_NAMESPACE = uuid.UUID("2f0b4c10-6f7e-5b6a-9d3b-1f6a5c7e8d90")
 
 
+def _pattern_id_for(technique_id: str) -> str:
+    """The published object id of one technique. Same id every time."""
+    return f"attack-pattern--{uuid.uuid5(_ATTACK_PATTERN_NAMESPACE, technique_id)}"
+
+
+def _published_ids(report: MalwareReport) -> dict[str, str]:
+    """``technique id -> published object id`` for the validated mappings."""
+    out: dict[str, str] = {}
+    for mapping in report.ttp_mappings:
+        tid = str(mapping.technique_id or "").strip().upper()
+        if tid and tid not in out:
+            out[tid] = _pattern_id_for(tid)
+    return out
+
+
+def _declared_technique(obj: Any) -> str:
+    """The ATT&CK id an attack-pattern declares, from its reference or its name."""
+    for ref in getattr(obj, "external_references", None) or []:
+        if isinstance(ref, dict) and str(ref.get("external_id") or "").strip():
+            return str(ref["external_id"]).strip().upper()
+    name = str(getattr(obj, "name", "") or "").strip().upper()
+    first = name.split()[0].rstrip(":") if name else ""
+    return first if first.startswith("T") else ""
+
+
+def _technique_remap(report: MalwareReport, base_bundle: Bundle) -> dict[str, str]:
+    """``judge object id -> published object id``, per surviving technique."""
+    published = _published_ids(report)
+    remap: dict[str, str] = {}
+    for obj in base_bundle.objects:
+        if getattr(obj, "type", "") != "attack-pattern":
+            continue
+        published_id = published.get(_declared_technique(obj))
+        if published_id:
+            remap[str(getattr(obj, "id", ""))] = published_id
+    return remap
+
+
+def _with_remapped_target(obj: Any, remap: dict[str, str]) -> tuple[Any, str]:
+    """``obj`` pointing at the rebuilt technique, and that technique's id.
+
+    A copy rather than a write: the judge's bundle is stored as the run's own
+    record and a renderer that edited it would change what the run says it
+    answered. ``("", …)`` for anything that is not a relationship to a
+    rebuilt technique.
+    """
+    if getattr(obj, "type", "") != "relationship":
+        return obj, ""
+    target = str(getattr(obj, "target_ref", "") or "")
+    published_id = remap.get(target)
+    if not published_id:
+        return obj, ""
+    technique = str(getattr(obj, "x_maljan_technique_id", "") or "").strip().upper()
+    return obj.model_copy(update={"target_ref": published_id}), technique or published_id
+
+
+def _unlinked_techniques(base_bundle: Bundle, remap: dict[str, str]) -> list[tuple[str, int]]:
+    """Per technique the checks rejected, how many judge relationships went with it."""
+    dropped: dict[str, str] = {}
+    for obj in base_bundle.objects:
+        object_id = str(getattr(obj, "id", "") or "")
+        if getattr(obj, "type", "") != "attack-pattern" or object_id in remap:
+            continue
+        dropped[object_id] = _declared_technique(obj) or str(getattr(obj, "name", "") or "")
+    counts: dict[str, int] = {}
+    for obj in base_bundle.objects:
+        if getattr(obj, "type", "") != "relationship":
+            continue
+        label = dropped.get(str(getattr(obj, "target_ref", "") or ""))
+        if label:
+            counts[label] = counts.get(label, 0) + 1
+    return sorted(counts.items())
+
+
 def _attack_patterns_for(
-    report: MalwareReport, malware_id: str
-) -> list[tuple[AttackPattern, Relationship]]:
-    """One attack-pattern and one relationship per published technique.
+    report: MalwareReport, malware_id: str, linked: set[str] | None = None
+) -> list[tuple[AttackPattern, Relationship | None]]:
+    """One attack-pattern per published technique, and the link it still needs.
 
     The report's ``ttp_mappings`` is the source, so the bundle names exactly
     the techniques the report names: the same list the ATT&CK section, the
     References and ``/reports/{id}/mitre`` are built from, with the ids the
-    catalogue check rejected already out of it.
+    catalogue check rejected already out of it. A technique the judge already
+    related to the sample gets no second relationship — the judge's own carries
+    its confidence and this one would carry none.
     """
-    out: list[tuple[AttackPattern, Relationship]] = []
+    already = linked or set()
+    out: list[tuple[AttackPattern, Relationship | None]] = []
     seen: set[str] = set()
     for mapping in report.ttp_mappings:
         tid = str(mapping.technique_id or "").strip().upper()
@@ -352,7 +454,7 @@ def _attack_patterns_for(
             continue
         seen.add(tid)
         pattern = AttackPattern(
-            id=f"attack-pattern--{uuid.uuid5(_ATTACK_PATTERN_NAMESPACE, tid)}",
+            id=_pattern_id_for(tid),
             name=mapping.technique_name or tid,
             external_references=[
                 {
@@ -362,6 +464,9 @@ def _attack_patterns_for(
                 }
             ],
         )
+        if tid in already or pattern.id in already:
+            out.append((pattern, None))
+            continue
         out.append(
             (
                 pattern,
