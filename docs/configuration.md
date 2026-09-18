@@ -669,6 +669,27 @@ running analysts in parallel forever because it happened to be migrated on a
 day when parallel was on. The console clears the mark on the first stage edit
 — from then the stages are the operator's, and nothing rewrites them.
 
+### Long agent keys in the conversation
+
+An agent key is a slug of at most 32 characters. Keep it well under that, for
+one reason: everything the live feed publishes as prose is scrubbed by the
+publisher, and a run of 24 or more letters, digits, `_` and `-` is the shape a
+credential has. A key that long is redacted to `***` **inside a sentence** —
+`"windows_pe_static_analyst failed"` reaches a reader as `"*** failed"`.
+
+Nothing is lost but the name in that sentence. The identity fields a line is
+filed under — `speaker`, `agent`, `stage`, `label`, `display_name` — are
+exempt by name in the publisher and travel whole, so the console still files
+the line under the right participant and still draws it with the label you
+gave it. No shipped key is anywhere near the floor; the longest is
+`android_static`, at fourteen.
+
+The scrubber is deliberately not told the roster. It is one pure function
+shared by every job on the worker, and a rule that depended on which run was
+publishing would be a rule whose answer changed with the configuration — which
+is the property a redaction rule cannot have. A shorter key costs nothing and
+reads better in the conversation.
+
 ### Conditions
 
 `when` is an expression in a small language evaluated on the worker. It is

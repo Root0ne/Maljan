@@ -595,6 +595,16 @@ def _looks_like_a_credential(token: str) -> bool:
     *this* system issues let every one of them through. The names an event
     carries are exempted where their names are known, by key, in the
     publisher (``analysis_worker.scrubbed``); they are not guessed at here.
+
+    What that costs, stated rather than discovered: an agent key of 24 to 32
+    characters — the pattern allows up to 32 — has the shape of a key, so it
+    reads as ``***`` inside a *sentence*. The identity fields the line is
+    filed under are exempt by name and travel whole, so attribution is
+    unaffected and only the name inside the prose goes. The roster is not
+    consulted here on purpose: this is one pure function shared by every job
+    on the worker, and a redaction rule whose answer depended on which run was
+    publishing would not be a redaction rule. ``docs/configuration.md`` tells
+    an operator to keep keys short; no shipped key is close to the floor.
     """
     if _DIGEST.match(token) or _IDENTIFIER.match(token):
         return False

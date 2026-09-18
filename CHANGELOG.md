@@ -747,6 +747,24 @@ change landed on `main`.
 
 ### Fixed
 
+- **A long agent key inside a published sentence.** A key of 24 characters or
+  more has the shape of a credential, and nothing is exempt from that rule for
+  being lowercase, so such a key reads as `***` inside the prose of an event —
+  never in the identity fields the line is filed under, which travel whole, so
+  attribution and the operator's label are unaffected. The scrubber is a pure
+  function shared by every job on the worker and is deliberately not told which
+  roster is publishing. `docs/configuration.md` now says to keep agent keys
+  short, and a test pins the behaviour so the next reader finds the trade
+  rather than the symptom. No shipped key is close to the floor.
+- **The guard on published failures follows a renamed import and a line
+  handed on twice.** The AST walk that keeps
+  `base_agent.describe_exception_for_log` away from every publish site knew one
+  spelling of the name and one hop from a local. It now resolves an aliased
+  import — which is the shape the mistake most recently took here — walks the
+  taint to a fixed point, and sees a tuple, annotated or augmented target as
+  the binding it is. The floor under both rule engines' timeouts is pinned by
+  calling them with zero and reading what they pass down, rather than by
+  counting a line of their source.
 - **`signing_info` answers about the sample, not about itself.** It reported
   all three schemes on every file, so a PE carried "apk present=no" and "macho
   present=no" beside its Authenticode row — statements about what the tool

@@ -674,6 +674,47 @@ class TestWhatTheScrubMustNotTouchAndWhatItMust:
         assert data["addressed_to"] == self.AGENT_KEY
         assert data["display_name"] == self.LABEL
 
+    def test_a_long_key_inside_a_sentence_is_the_price_of_the_rule(self) -> None:
+        """Recorded rather than fixed, and here is why it is a fair trade.
+
+        A key of 24 characters or more is the shape a credential has, and
+        nothing is exempt for being lowercase — four real key formats are
+        nothing but lowercase letters, digits and a separator. The scrubber is
+        one pure function shared by every job on this worker and is not told
+        which roster is publishing, because a redaction rule whose answer
+        changes with the configuration is not one.
+
+        What it costs is the name inside a *sentence*. What it does not cost
+        is attribution: the identity fields travel whole, so the line is still
+        filed under the right participant and still drawn with the operator's
+        label. No shipped key is close to the floor — the longest is
+        ``android_static``, at fourteen — and ``docs/configuration.md`` tells
+        an operator to keep keys short for exactly this reason.
+        """
+        data = self._publish(
+            "agent_message",
+            {
+                "speaker": self.AGENT_KEY,
+                "display_name": self.LABEL,
+                "role": "analyst",
+                "text": f"{self.AGENT_KEY} failed",
+            },
+        )
+
+        assert len(self.AGENT_KEY) >= 24
+        assert data["text"] == "*** failed"
+        assert data["speaker"] == self.AGENT_KEY
+        assert data["display_name"] == self.LABEL
+
+    def test_a_key_of_a_shipped_length_reads_as_itself(self) -> None:
+        """Every built-in key, and anything an operator keeps short."""
+        for key in ("static", "android_static", "reverser", "team_lead_analyst"):
+            data = self._publish(
+                "agent_message",
+                {"speaker": key, "role": "analyst", "text": f"{key} failed"},
+            )
+            assert data["text"] == f"{key} failed", key
+
     def test_a_report_id_survives_and_so_does_a_digest(self) -> None:
         import hashlib
 

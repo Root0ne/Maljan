@@ -403,14 +403,56 @@ class TestAnArgumentIsBoundedBeforeItIsRead:
 
         assert asked == [analysis.YARA_TIMEOUT_S, 5, 1, 1]
 
-    def test_a_floor_of_one_second_is_what_the_engines_already_did(self) -> None:
-        """Zero was never "the tool's own default": both engines floor it."""
-        import inspect
+    def test_a_floor_of_one_second_is_what_the_engines_already_did(
+        self, staging: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Zero was never "the tool's own default": both engines floor it.
 
+        Asserted by calling them and reading what they pass down, rather than
+        by counting a line in their source: the floor is what has to survive,
+        and a helper extracted or a parameter renamed would break a source
+        count while leaving the behaviour exactly as it is.
+        """
+        from maljan.providers.static import capa_yara
         from maljan.tools import rules
 
-        source = inspect.getsource(rules)
-        assert source.count("max(1, int(timeout_s))") == 2
+        yara_timeouts: list[int] = []
+        capa_timeouts: list[int] = []
+
+        class _Compiled:
+            @staticmethod
+            def match(**kwargs: Any) -> list[Any]:
+                yara_timeouts.append(int(kwargs["timeout"]))
+                return []
+
+        class _Layer:
+            _rules: list[Any] = []
+            _yara_rules = _Compiled()
+
+        monkeypatch.setattr(rules, "_yara_layer", lambda ruleset: _Layer())
+
+        def _document(**kwargs: Any) -> dict[str, Any]:
+            capa_timeouts.append(int(kwargs["timeout_seconds"]))
+            return {"rules": {}, "meta": {}}
+
+        monkeypatch.setattr(capa_yara, "run_capa_document", _document)
+
+        rules.yara_scan(text="x", timeout_s=0)
+        rules.yara_scan(text="x", timeout_s=-5)
+        rules.yara_scan(text="x", timeout_s=30)
+        assert yara_timeouts == [1, 1, 30]
+
+        # capa refuses before it starts when its corpus is missing, and the
+        # vendored corpus is not part of a checkout; one rule file is enough
+        # for the guard, because the run itself is the stub above.
+        corpus = staging / "capa-rules"
+        corpus.mkdir()
+        (corpus / "rule.yml").write_text("rule:\n", encoding="utf-8")
+
+        sample = _pe(staging / "floor.bin")
+        for asked in (0, -5, 30):
+            rules.capa(sample, timeout_s=asked, rules_dir=str(corpus), signatures_dir=str(corpus))
+        assert capa_timeouts == [1, 1, 30]
 
     def test_a_capa_timeout_cannot_exceed_the_declared_one(
         self, analysis: Any, staging: Path, monkeypatch: pytest.MonkeyPatch
