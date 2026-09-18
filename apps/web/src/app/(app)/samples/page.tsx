@@ -92,9 +92,12 @@ function SamplesPageContent() {
     setSubmitError(null);
   }, []);
 
+  /** `trigger` is the control that opened the dialog, so closing it can put
+   *  the focus back where it was taken from rather than on `<body>`. */
   const openSubmitDialog = useCallback(
-    (sample: SampleRow) => {
+    (sample: SampleRow, trigger: HTMLElement | null) => {
       activeSubmitSampleIdRef.current = sample.id;
+      submitTriggerRef.current = trigger;
       resetSubmitDialogFields();
       setSubmitFor(sample);
     },
@@ -402,9 +405,9 @@ function SamplesPageContent() {
                           Details
                         </button>
                         <button
-                          onClick={() => {
+                          onClick={(e) => {
                             setActionError(null);
-                            openSubmitDialog(s);
+                            openSubmitDialog(s, e.currentTarget);
                           }}
                           className="px-2.5 py-1 text-xs bg-accent-fill text-white rounded hover:bg-accent-fill-hover"
                         >
