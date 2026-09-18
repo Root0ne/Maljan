@@ -263,7 +263,8 @@ decides.
    `associated_by`, shown in a Catalogue column for reference and counted for
    nothing. The catalogue's own `screen_capture` and `message_loop` groups are
    `informational` for the same reason and name, in `corroborated_by`, the
-   APIs whose presence beside them would mean something. An asserted id the catalogue has retired
+   APIs whose presence beside them would mean something. An asserted id the
+   catalogue has retired
    (upstream Sigma rules and the case corpus still name a few) is marked
    `retired in ATT&CK 19.2` in the table. Two flat lists in
    `run_summary.corroboration`, rendered as a table in the report and shown
@@ -564,8 +565,8 @@ marks unavailable is recorded as
 unavailable is also kept out of the list the model is given, because offering
 one is offering a step that can only fail — unless the manifest says what the
 tool still answers without its library, in which case it is offered and the
-reason says what is missing from its answer. A tool
-that cannot answer returns an error with a code and an authored remediation
+reason says what is missing from its answer. A tool that cannot answer
+returns an error with a code and an authored remediation
 (`maljan.tools.errors`) rather than raising, and the sidecars' guards rewrite
 an implementation's flat error into that shape. See *Writing a tool server* in
 [configuration.md](configuration.md).
