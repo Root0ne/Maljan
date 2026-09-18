@@ -259,11 +259,23 @@ rules:
     description: "LSASS memory credential dumping"
     platform: ["windows"]
     patterns:
-      - "lsass.exe"
-      - "MiniDumpWriteDump"
       - "sekurlsa::logonpasswords"
       - "comsvcs.dll, MiniDump"
       - "comsvcs.dll MiniDump"
+    # Neither half is credential dumping: a crash reporter imports the one and
+    # every process lister carries the other. Naming LSASS *and* carrying the
+    # call that writes a process dump is the technique.
+    all_of:
+      - "MiniDumpWriteDump"
+      - "lsass.exe"
+
+  # A string note for either half on its own.
+  - id: process_dump_apis
+    description: "Process-dump APIs or the LSASS image name are present"
+    platform: ["windows"]
+    patterns:
+      - "MiniDumpWriteDump"
+      - "lsass.exe"
 
   # T1105 - Ingress Tool Transfer
   - id: tool_transfer
@@ -326,20 +338,21 @@ rules:
       - "DECRYPT_INSTRUCTION"
       - "_readme.txt"
       - "RECOVERY_KEY"
-      - ".locked"
-      - ".encrypted"
 
-  # T1486 - Additional ransomware file extensions
-  - id: ransomware_extensions
-    technique_id: "T1486"
-    confidence: 0.85
-    description: "Ransomware file extension modification"
+  # A string note. What makes an extension evidence is the renaming — the
+  # extension beside a ransom note's wording, or beside file enumeration and
+  # the crypto APIs — and this file's condition cannot say "together with"
+  # across two groups. `notes.encrypted` and `backup.locked` are ordinary
+  # file names, and `.onion` here tagged every Tor address as ransomware.
+  - id: encrypted_file_extensions
+    description: "File extensions associated with ransomware are present"
     platform: ["any"]
     patterns:
       - ".crypto"
       - ".vault"
-      - ".onion"
       - ".crypt"
+      - ".locked"
+      - ".encrypted"
       - "YOUR_FILES"
       - "restore_files"
 

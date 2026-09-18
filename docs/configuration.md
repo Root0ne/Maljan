@@ -332,6 +332,12 @@ a value, and the packing rules name section names and packer banners and not
 the words `AES`, `packed` or `compress`, which any program that speaks a
 protocol carries.
 
+A rule may also carry an `all_of` group beside its `patterns`: the patterns
+fire one at a time, the group fires only whole. That is for a technique that
+is a pair rather than a string — `MiniDumpWriteDump` is in a crash reporter
+and `lsass.exe` is in every process lister, and only the two together are
+credential dumping.
+
 A rule that cannot be made that specific is written as a note: it omits
 `technique_id`, and a rule with no technique may not carry a `confidence`
 either. It fires, it says in its description what is in the file, and it
