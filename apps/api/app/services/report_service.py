@@ -362,6 +362,10 @@ class ReportService:
                         "value": dom.get("fqdn", ""),
                         "is_suspicious": bool(dom.get("is_suspicious")),
                         "notes": dom.get("reason"),
+                        # A name the sandbox resolved and a run of bytes shaped
+                        # like a hostname are not the same claim, and this feed
+                        # presented them identically.
+                        "source": dom.get("source"),
                     }
                 )
         if not kind or kind == "ip":

@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Any
 
 from maljan.core import settings_secrets as box
-from maljan.core.config import Settings
+from maljan.core.config import BUILTIN_SERVER_KEYS, Settings, builtin_env_allow
 from maljan.core.settings_overrides import (
     build_settings,
     effective_source,
@@ -241,10 +241,22 @@ class SettingsService:
         type a new token needs to know which one they are looking at. The
         editor sends the mask straight back for an unchanged field, and
         ``split_server_secrets`` reads that as "leave the row alone".
+
+        A built-in's ``env_allow`` is shown with the names its sidecar cannot
+        run without in it (``builtin_env_allow``), which is what its child is
+        really started with, rather than whatever a row saved before one of
+        them existed still holds. A shipped default an admin has taken out
+        stays out, and is shown as taken out.
+
+        The map shown is the stored one: a built-in key a row predates is
+        re-seeded for the run and written back by the next save
+        (``validate_server_map``), but it is not conjured into this view.
         """
         out: dict[str, Any] = {}
         for name, entry in stored_map.items():
             shown = dict(entry)
+            if name in BUILTIN_SERVER_KEYS:
+                shown["env_allow"] = builtin_env_allow(name, shown.get("env_allow") or [])
             if server_token_key(name) in rows:
                 shown["auth_token"], shown["auth_token_source"] = TOKEN_MASK, "ui"
             else:

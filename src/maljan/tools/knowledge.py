@@ -344,6 +344,13 @@ def api_capability(
     API it tiers high or medium — named for where they come from rather than
     presented as this tool's finding. A bare ``suspicious: true`` would be a
     verdict, and the tools state facts.
+
+    ``corroborated_by`` appears on a row whose category means nothing on its
+    own — drawing to a device context, pumping a message queue — and lists the
+    APIs whose presence beside it would give it weight. The catalogue used to
+    file the GDI blit calls under keylogging and tier them high, so a signed
+    SSH client read as a keylogger; the category now says what it is and what
+    it is not.
     """
     from maljan.analysis.api_capability_db import (
         canonical_name,
@@ -372,15 +379,17 @@ def api_capability(
                     "min_apis": rule.min_apis,
                 }
             )
-        rows.append(
-            {
-                "api": name,
-                "category": category,
-                "behaviours": [category] if category else [],
-                "techniques": cited,
-                "catalog_flags": ["suspicious"] if suspicious else [],
-            }
-        )
+        row: dict[str, Any] = {
+            "api": name,
+            "category": category,
+            "behaviours": [category] if category else [],
+            "techniques": cited,
+            "catalog_flags": ["suspicious"] if suspicious else [],
+        }
+        corroborators = behaviours.corroborated_by(category) if behaviours else ()
+        if corroborators:
+            row["corroborated_by"] = list(corroborators)
+        rows.append(row)
     out: dict[str, Any] = {"capabilities": rows}
     if behaviours is None:
         out["reason"] = f"the API behaviour catalog is not readable at {behaviour_map}"

@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 
 from maljan.core.logger import logger
 from maljan.extractors.attribution import build_family_attribution
-from maljan.extractors.capability_matrix import build_capability_matrix
+from maljan.extractors.capability_matrix import build_capability_matrix, unmapped_behaviours
 from maljan.pipeline.outcome import INCONCLUSIVE_REASONS
 from maljan.reporting.dedupe import MergeTally
 from maljan.reporting.ledger_projection import (
@@ -196,6 +196,7 @@ class MalwareReportBuilder:
             persistence=persistence,
             capability_matrix=cells,
             ttp_mappings=mappings,
+            unmapped_behaviours=unmapped_behaviours(self.stix_output),
             attribution=attribution,
             executive_summary="",  # filled by NarrativeAgent
             capabilities_narrative=[],  # filled by NarrativeAgent
@@ -632,7 +633,10 @@ def build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
     net = report.network
     if net:
         for d in net.domains:
-            _add("Domain", d.fqdn, d.reason or "", is_network=True)
+            # Where the name came from belongs beside it: the consolidated
+            # table is read by somebody deciding what to block.
+            note = "; ".join(part for part in (d.reason, d.source) if part)
+            _add("Domain", d.fqdn, note, is_network=True)
         for ip in net.ips:
             _add("IPv4", ip.address, f"port {ip.port}" if ip.port else "", is_network=True)
         for u in net.urls:

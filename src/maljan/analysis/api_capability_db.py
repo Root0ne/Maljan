@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import json
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -98,6 +98,15 @@ class ApiBehaviourDB:
     by_name: dict[str, tuple[str, bool]]
     by_name_lower: dict[str, tuple[str, bool]]
     tiers: dict[str, str]
+    # Per category, the APIs whose presence beside it would make the group
+    # mean something. A category that is informational on its own — drawing a
+    # window, pumping its message queue — is not evidence, and saying so
+    # without saying what would be leaves the reader to guess.
+    corroborators: dict[str, tuple[str, ...]] = field(default_factory=dict)
+
+    def corroborated_by(self, category: str | None) -> tuple[str, ...]:
+        """The APIs the catalogue names as corroboration for ``category``."""
+        return self.corroborators.get(category or "", ())
 
     def classify(self, function: str) -> tuple[str | None, bool]:
         hit = self.by_name.get(function)
@@ -268,6 +277,7 @@ def _load_behaviour_uncached(catalog_path: str) -> ApiBehaviourDB | None:
     by_name: dict[str, tuple[str, bool]] = {}
     by_name_lower: dict[str, tuple[str, bool]] = {}
     tiers: dict[str, str] = {}
+    corroborators: dict[str, tuple[str, ...]] = {}
 
     for category, spec in windows.items():
         if not isinstance(category, str) or not isinstance(spec, dict):
@@ -282,6 +292,9 @@ def _load_behaviour_uncached(catalog_path: str) -> ApiBehaviourDB | None:
         if not isinstance(apis, list):
             continue
         tiers[category] = tier
+        named = spec.get("corroborated_by")
+        if isinstance(named, list):
+            corroborators[category] = tuple(a for a in named if isinstance(a, str) and a)
         suspicious = tier in _SUSPICIOUS_TIERS
         for api in apis:
             if not isinstance(api, str) or not api:
@@ -303,7 +316,12 @@ def _load_behaviour_uncached(catalog_path: str) -> ApiBehaviourDB | None:
         len(tiers),
         catalog_path,
     )
-    return ApiBehaviourDB(by_name=by_name, by_name_lower=by_name_lower, tiers=tiers)
+    return ApiBehaviourDB(
+        by_name=by_name,
+        by_name_lower=by_name_lower,
+        tiers=tiers,
+        corroborators=corroborators,
+    )
 
 
 def _load_attck_uncached(catalog_path: str) -> ApiAttckMap | None:

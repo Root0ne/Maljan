@@ -532,6 +532,14 @@ def _hand_over_the_structured_channel(caller: Any, callee: Any, isr: AgentISR) -
         caller._artifacts_buffer.append(artifact)
     for finding in list(isr.findings or []):
         caller._findings_buffer.append(finding)
+    # And the answer itself, whole, under the callee's own agent id. The text
+    # of it goes back to the model as a tool result and lives only in the
+    # caller's conversation, so a caller whose loop died — the wall-clock cap
+    # on a lead's chunk, with six asks already answered — took every answer
+    # down with it. Kept here, the stage can promote them.
+    remember = getattr(caller, "remember_answered_ask", None)
+    if callable(remember):
+        remember(isr)
 
 
 def _task_turn(caller_name: str, task: str, context: str, callee: Any) -> str:

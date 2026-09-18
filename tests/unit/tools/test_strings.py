@@ -8,6 +8,7 @@ with real offsets, and the typed extraction over free text rather than bytes.
 
 from __future__ import annotations
 
+import string
 from pathlib import Path
 
 from maljan.tools import strings as tool
@@ -162,10 +163,13 @@ class TestIocsFromText:
         assert [row for row in result["iocs"] if row["kind"] == "domain"] == []
 
     def test_a_secret_carries_the_pattern_that_matched_it(self) -> None:
-        result = tool.iocs_from_text("key AKIAIOSFODNN7EXAMPLE in the config")
+        # Built rather than written down: a line carrying the shape whole is a
+        # secret as far as a scanner is concerned, however invented it is.
+        key = "AKIA" + "".join(string.ascii_uppercase[(i * 7 + 3) % 26] for i in range(16))
+        result = tool.iocs_from_text(f"key {key} in the config")
         secrets = [row for row in result["iocs"] if row["kind"] == "secret"]
         assert secrets == [
-            {"kind": "secret", "value": "AKIAIOSFODNN7EXAMPLE", "notes": "aws_access_key"}
+            {"kind": "secret", "value": key, "notes": "aws_access_key", "source": "strings"}
         ]
 
     def test_kinds_narrows_the_answer_without_changing_the_scan(self) -> None:
@@ -176,6 +180,87 @@ class TestIocsFromText:
         assert set(everything["kinds"]) >= {"url", "ip", "domain"}
         assert just_urls["kinds"] == ["url"]
         assert [row["value"] for row in just_urls["iocs"]] == ["http://evil-c2-host.top/a"]
+
+
+class TestDomainsReadOutOfStrings:
+    """A printable run cut mid-word still ends in a real TLD.
+
+    Every case here was produced by a real sample in a live run: the scan
+    returned twenty-five "domains" for one PE, of which fifteen were fragments
+    of longer names, identifier tables or detection labels. Each was published
+    as a STIX indicator and each cost a reputation lookup.
+    """
+
+    def _domains(self, text: str) -> list[str]:
+        return [
+            row["value"] for row in tool.iocs_from_text(text)["iocs"] if row["kind"] == "domain"
+        ]
+
+    def test_a_longer_look_alike_does_not_delete_the_real_name(self) -> None:
+        """Which of two names is the fragment is about where they sit, not how
+        they are spelled. Asking by spelling deleted the real one."""
+        assert self._domains("visit microsoft.com and xmicrosoft.com") == [
+            "microsoft.com",
+            "xmicrosoft.com",
+        ]
+
+    def test_a_leading_byte_does_not_delete_the_host_it_was_stuck_to(self) -> None:
+        assert self._domains("M000webhostapp.com and 000webhostapp.com") == [
+            "M000webhostapp.com",
+            "000webhostapp.com",
+        ]
+
+    def test_a_name_inside_a_longer_one_is_the_fragment(self) -> None:
+        """The rule keys on spans: a match that lies within a longer host's
+        span, cut inside a label, is the fragment."""
+        found = [(0, 13, "microsoft.com"), (2, 13, "crosoft.com")]
+        assert tool._inside_a_longer_host(2, 13, found) is True
+        assert tool._inside_a_longer_host(0, 13, found) is False
+
+    def test_a_cut_on_a_label_boundary_is_a_name_of_its_own(self) -> None:
+        found = [(0, 15, "crl.example.com"), (4, 15, "example.com")]
+        assert tool._inside_a_longer_host(4, 15, found) is False
+
+    def test_a_parent_domain_at_a_label_boundary_is_kept(self) -> None:
+        """`sectigo.com` under `crl.sectigo.com` is a registrable name, not a fragment."""
+        found = self._domains("http://crl.sectigo.com/a.crl and https://sectigo.com/CPS")
+        assert "crl.sectigo.com" in found
+        assert "sectigo.com" in found
+
+    def test_a_detection_label_wearing_a_country_code_is_not_a_host(self) -> None:
+        """`Bifrose.IE`, `jector.SA`, `workbench.nL` — a host is written in one case."""
+        found = self._domains("Trojan:Bifrose.IE jector.SA =[workbench.nL mucod.FR")
+        assert found == []
+
+    def test_a_host_written_wholly_in_capitals_survives_the_case_check(self) -> None:
+        """One case throughout is a spelling; a lowercase name with a shouted
+        country code is a label out of a table."""
+        assert self._domains("connect to WWW.EXAMPLE-C2.TOP now") == ["WWW.EXAMPLE-C2.TOP"]
+
+    def test_a_capitalised_host_is_a_host(self) -> None:
+        """The case rule is about a shouted country code on a detection label,
+        not about any capital letter anywhere."""
+        assert self._domains("connect to Evil.COM and Example.Com") == [
+            "Evil.COM",
+            "Example.Com",
+        ]
+
+    def test_an_email_address_does_not_also_become_a_domain(self) -> None:
+        """One string was two indicators: the address and a bare host."""
+        rows = tool.iocs_from_text("mail admin@example.com now")["iocs"]
+        assert [r["kind"] for r in rows] == ["email"]
+
+    def test_a_bare_public_suffix_has_nothing_registrable_in_it(self) -> None:
+        assert self._domains("suffixes are co.uk and com.br and ne.jp") == []
+
+    def test_a_match_that_begins_after_an_underscore_is_an_identifier(self) -> None:
+        """An underscore cannot appear in a hostname label, so the run is code."""
+        assert self._domains("field_name evil_payload.com beside real-c2.top") == ["real-c2.top"]
+
+    def test_every_row_says_where_it_came_from(self) -> None:
+        rows = tool.iocs_from_text("http://evil-c2-host.top/gate.php from 45.77.12.34")["iocs"]
+        assert rows
+        assert {row["source"] for row in rows} == {"strings"}
 
 
 class TestIocsFromFile:

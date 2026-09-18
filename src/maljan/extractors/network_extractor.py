@@ -18,6 +18,7 @@ import ipaddress
 import math
 import unicodedata
 from dataclasses import dataclass
+from typing import Any
 
 # Domains we never want to flag as suspicious — common SaaS / OS update
 # infrastructure. Extend rather than replace.
@@ -516,6 +517,98 @@ def _is_emittable_ip(ip: str) -> bool:
     ):
         return False
     return str(addr) != "255.255.255.255"
+
+
+# A v3 onion address is the base32 of a 32-byte key, a 2-byte checksum over
+# it and a version byte; v2 is sixteen base32 characters and carries no
+# checksum, so length and alphabet are all there is to check.
+_TOR_SUFFIX = ".onion"
+_TOR_V3_LENGTH = 56
+_TOR_V2_LENGTH = 16
+_TOR_ALPHABET = frozenset("abcdefghijklmnopqrstuvwxyz234567")
+_TOR_V3_VERSION = 3
+_TOR_CHECKSUM_SALT = b".onion checksum"
+
+
+def tor_hidden_service(fqdn: Any) -> bool:
+    """Whether ``fqdn`` is a syntactically valid Tor onion address.
+
+    Checked rather than assumed: a v3 address carries its own checksum, so
+    fifty-six characters of the right alphabet are not enough — the last three
+    bytes have to check out against the first thirty-two, which is what makes
+    the name impossible to produce by accident.
+    """
+    import base64
+    import hashlib
+
+    name = str(fqdn or "").strip().lower().rstrip(".")
+    if not name.endswith(_TOR_SUFFIX):
+        return False
+    label = name[: -len(_TOR_SUFFIX)].rsplit(".", 1)[-1]
+    if not label or set(label) - _TOR_ALPHABET:
+        return False
+    if len(label) == _TOR_V2_LENGTH:
+        return True
+    if len(label) != _TOR_V3_LENGTH:
+        return False
+    try:
+        # Fifty-six base32 characters are exactly thirty-five bytes, so the
+        # encoding needs no padding and adding any would corrupt it.
+        decoded = base64.b32decode(label.upper())
+    except Exception:  # noqa: BLE001 — a name that will not decode is not one
+        return False
+    if len(decoded) != 35 or decoded[34] != _TOR_V3_VERSION:
+        return False
+    public_key, checksum = decoded[:32], decoded[32:34]
+    expected = hashlib.sha3_256(
+        _TOR_CHECKSUM_SALT + public_key + bytes([_TOR_V3_VERSION])
+    ).digest()[:2]
+    return checksum == expected
+
+
+def corroboration_reason(source: Any, reputation: Any, fqdn: Any = "") -> str | None:
+    """Why this name may be published, or ``None`` when nothing says it may.
+
+    Named rather than left implicit because one of the answers is surprising:
+    a Tor address is published on the strength of its own syntax, and a reader
+    finding it in a bundle beside no sandbox observation is owed the reason.
+    """
+    if source != "strings":
+        return str(source) if source else "recorded without a source"
+    if tor_hidden_service(fqdn):
+        return "tor hidden service address, valid on its own syntax"
+    if isinstance(reputation, dict):
+        for key in ("malicious", "suspicious"):
+            try:
+                if int(reputation.get(key) or 0) > 0:
+                    return "a reputation provider has a record of it"
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+def domain_is_corroborated(source: Any, reputation: Any, fqdn: Any = "") -> bool:
+    """Whether anything but the sample's own byte image knows this name.
+
+    A string sweep turns any run of bytes shaped like a hostname into a
+    "domain": a truncated resource left `rosoft.com` beside `microsoft.com`,
+    an identifier table left `jector.SA`. Those are strings, and the report
+    prints them as strings. Publishing them as indicators, or spending a paid
+    reputation lookup on each, states something no one observed.
+
+    Corroboration is a second source: the sandbox resolved the name, an
+    analyst put it in an artefact, or a reputation provider has a record that
+    names it. A source this layer does not know about is left alone — only
+    ``strings`` is held back.
+
+    A Tor address is the exception, and it has to be: `.onion` does not
+    resolve, so no sandbox can ever confirm one, and holding it to this rule
+    made the strongest string-derived indicator there is unpublishable by any
+    path. Its own syntax is the second source. It stays labelled ``strings``
+    and it is still never sent to a paid provider, which has no record of a
+    hidden service either.
+    """
+    return corroboration_reason(source, reputation, fqdn) is not None
 
 
 def _is_emittable_domain(fqdn: str) -> bool:

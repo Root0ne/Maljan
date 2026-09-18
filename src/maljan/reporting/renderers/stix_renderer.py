@@ -10,15 +10,18 @@ augments it with the richer SDO set required by downstream CTI tooling:
   - ``Note`` containing the LLM-generated executive summary
   - ``Report`` top-level container with object_refs to every member
 
-The renderer is **additive** — judge's existing objects are preserved as-is.
-Producing this bundle is side-effect free; callers serialise it via
-``model_dump(mode="json")``.
+The renderer is additive but for one set: the judge's attack-patterns are
+replaced by one per technique in ``report.ttp_mappings``, so the bundle names
+the techniques the report names, with stable ids and an ATT&CK reference on
+each. Everything else the judge emitted is preserved as-is. Producing this
+bundle is side-effect free; callers serialise it via ``model_dump(mode="json")``.
 """
 
 from __future__ import annotations
 
 import ipaddress
 import re
+import uuid
 from typing import Any
 
 from maljan.agents._indicator_denylists import (
@@ -31,6 +34,7 @@ from maljan.agents._indicator_denylists import (
     URL_DENY_HOSTS,
 )
 from maljan.core.logger import logger
+from maljan.extractors.network_extractor import corroboration_reason, domain_is_corroborated
 from maljan.reporting.models import (
     MalwareReport,
     NetworkDomain,
@@ -62,6 +66,14 @@ class ExtendedSTIXRenderer:
     input bundle is treated as immutable.
     """
 
+    def __init__(self) -> None:
+        # Per render: the techniques whose judge relationships went with them,
+        # as ``(technique, relationships dropped)``. The report node writes
+        # them into ``run_summary.validation`` — an annotation the judge made
+        # about a technique the checks rejected is not a defect of the bundle,
+        # it is part of what the run has to say about that technique.
+        self.unlinked: list[tuple[str, int]] = []
+
     def render(
         self,
         report: MalwareReport,
@@ -79,11 +91,40 @@ class ExtendedSTIXRenderer:
         undercounts.
         """
         objects: list[Any] = []
+        self.unlinked = []
 
-        # 1) Preserve everything the judge already emitted.
+        # 1) Preserve everything the judge already emitted, except its
+        #    attack-patterns: those are rebuilt from the report's published
+        #    technique list below, so the bundle and the report cannot disagree
+        #    about what this run found. One audited run exported ten techniques
+        #    in the report and zero attack-patterns in the bundle; another
+        #    exported three attack-patterns with no ATT&CK reference at all.
+        #
+        #    What the judge said *about* those techniques stays. Its
+        #    relationships carry the confidence, the evidence basis and the
+        #    contributing agents it put on each one, and they point at objects
+        #    that are about to be replaced — so both ends of every ref move to
+        #    the rebuilt object of the same technique before the originals go,
+        #    and the annotations travel unedited. A relationship to a technique
+        #    the checks rejected has nothing to move to: it is taken out here,
+        #    with the technique, and counted as that technique's loss rather
+        #    than left to the integrity pass, which would count it a second
+        #    time as a dangling ref of the judge's bundle.
+        linked: set[str] = set()
         if base_bundle is not None:
             self._normalize_judge_timestamps(base_bundle.objects)
-            objects.extend(base_bundle.objects)
+            remap = _technique_remap(report, base_bundle)
+            gone = _rejected_pattern_ids(base_bundle, remap)
+            for obj in base_bundle.objects:
+                if getattr(obj, "type", "") == "attack-pattern":
+                    continue
+                if _points_at(obj, gone):
+                    continue
+                moved, technique = _relinked(obj, remap)
+                if technique:
+                    linked.add(technique)
+                objects.append(moved)
+            self.unlinked = _unlinked_techniques(base_bundle, gone)
 
         # 2) Identity SDO for Maljan itself.
         identity = Identity(
@@ -105,6 +146,17 @@ class ExtendedSTIXRenderer:
             )
             objects.append(malware_obj)
             malware_id = malware_obj.id
+
+        # 3.5) One attack-pattern per published technique, with a stable id and
+        #      an ATT&CK reference, related to the malware object. The judge's
+        #      own objects carried whatever id the model minted — including
+        #      placeholder UUIDs out of the STIX documentation — and a
+        #      technique the report published reached the bundle only if the
+        #      judge had happened to emit an object for it.
+        for pattern_sdo, uses in _attack_patterns_for(report, malware_id, linked):
+            objects.append(pattern_sdo)
+            if uses is not None:
+                objects.append(uses)
 
         # Collect indicators per-kind, then apply
         # MAX_TOTAL_INDICATORS as a hard cap with priority order
@@ -136,6 +188,12 @@ class ExtendedSTIXRenderer:
 
         # 5) StringIOC → Indicator.
         #
+        # Which names this run may publish at all. One rule, read once, and
+        # every path that mints a domain indicator asks it: the network block
+        # below, and the string rows here, which are the same names arriving
+        # by a second road.
+        publishable_domains = _publishable_domains(report)
+
         # Apply the same acceptance-based filter
         # used by the judge bundle postprocess so deterministic
         # interesting_strings can't smuggle noise (NDK build paths, bundled
@@ -148,7 +206,7 @@ class ExtendedSTIXRenderer:
                 pattern = _stix_pattern_for_string_ioc(ioc)
                 if pattern is None:
                     continue
-                if not _accept_string_ioc(ioc, pattern, file_name_kept):
+                if not _accept_string_ioc(ioc, pattern, file_name_kept, publishable_domains):
                     continue
                 is_file_name = pattern.lstrip().startswith("[file:name")
                 if is_file_name:
@@ -307,6 +365,163 @@ class ExtendedSTIXRenderer:
         return None
 
 
+# The namespace the technique objects' ids are derived in. A UUIDv5 over the
+# technique id, so the same technique is the same object across exports of the
+# same run and across runs — and never a UUID copied out of the STIX
+# documentation, which is what the judge's own objects sometimes carried.
+_ATTACK_PATTERN_NAMESPACE = uuid.UUID("2f0b4c10-6f7e-5b6a-9d3b-1f6a5c7e8d90")
+
+
+def _pattern_id_for(technique_id: str) -> str:
+    """The published object id of one technique. Same id every time."""
+    return f"attack-pattern--{uuid.uuid5(_ATTACK_PATTERN_NAMESPACE, technique_id)}"
+
+
+def _published_ids(report: MalwareReport) -> dict[str, str]:
+    """``technique id -> published object id`` for the validated mappings."""
+    out: dict[str, str] = {}
+    for mapping in report.ttp_mappings:
+        tid = str(mapping.technique_id or "").strip().upper()
+        if tid and tid not in out:
+            out[tid] = _pattern_id_for(tid)
+    return out
+
+
+def _declared_technique(obj: Any) -> str:
+    """The ATT&CK id an attack-pattern declares, from its reference or its name."""
+    for ref in getattr(obj, "external_references", None) or []:
+        if isinstance(ref, dict) and str(ref.get("external_id") or "").strip():
+            return str(ref["external_id"]).strip().upper()
+    name = str(getattr(obj, "name", "") or "").strip().upper()
+    first = name.split()[0].rstrip(":") if name else ""
+    return first if first.startswith("T") else ""
+
+
+def _technique_remap(report: MalwareReport, base_bundle: Bundle) -> dict[str, str]:
+    """``judge object id -> published object id``, per surviving technique."""
+    published = _published_ids(report)
+    remap: dict[str, str] = {}
+    for obj in base_bundle.objects:
+        if getattr(obj, "type", "") != "attack-pattern":
+            continue
+        published_id = published.get(_declared_technique(obj))
+        if published_id:
+            remap[str(getattr(obj, "id", ""))] = published_id
+    return remap
+
+
+def _relinked(obj: Any, remap: dict[str, str]) -> tuple[Any, str]:
+    """``obj`` pointing at the rebuilt technique, and the technique it now uses.
+
+    Both ends: a judge relationship is usually ``malware --uses--> technique``,
+    and one sourced at the technique would dangle just as surely. A copy rather
+    than a write: the judge's bundle is stored as the run's own record and a
+    renderer that edited it would change what the run says it answered.
+
+    The second value is the technique of a ``uses`` edge from the sample —
+    the one edge the rebuild would otherwise mint a second, unannotated copy
+    of. It is ``""`` for every other shape, which keeps the minted edge for a
+    technique the judge only related some other way.
+    """
+    if getattr(obj, "type", "") != "relationship":
+        return obj, ""
+    source = str(getattr(obj, "source_ref", "") or "")
+    target = str(getattr(obj, "target_ref", "") or "")
+    update = {
+        key: remap[ref]
+        for key, ref in (("source_ref", source), ("target_ref", target))
+        if ref in remap
+    }
+    if not update:
+        return obj, ""
+    moved = obj.model_copy(update=update)
+    if str(getattr(obj, "relationship_type", "") or "") != "uses" or target not in remap:
+        return moved, ""
+    technique = str(getattr(obj, "x_maljan_technique_id", "") or "").strip().upper()
+    return moved, technique or remap[target]
+
+
+def _rejected_pattern_ids(base_bundle: Bundle, remap: dict[str, str]) -> dict[str, str]:
+    """``judge object id -> technique`` for the attack-patterns nothing published."""
+    gone: dict[str, str] = {}
+    for obj in base_bundle.objects:
+        object_id = str(getattr(obj, "id", "") or "")
+        if getattr(obj, "type", "") != "attack-pattern" or object_id in remap:
+            continue
+        gone[object_id] = _declared_technique(obj) or str(getattr(obj, "name", "") or "")
+    return gone
+
+
+def _points_at(obj: Any, gone: dict[str, str]) -> bool:
+    """Whether a relationship names an attack-pattern that is not published."""
+    if getattr(obj, "type", "") != "relationship":
+        return False
+    return str(getattr(obj, "source_ref", "") or "") in gone or (
+        str(getattr(obj, "target_ref", "") or "") in gone
+    )
+
+
+def _unlinked_techniques(base_bundle: Bundle, gone: dict[str, str]) -> list[tuple[str, int]]:
+    """Per technique the checks rejected, how many judge relationships went with it."""
+    counts: dict[str, int] = {}
+    for obj in base_bundle.objects:
+        if getattr(obj, "type", "") != "relationship":
+            continue
+        for ref in (getattr(obj, "source_ref", ""), getattr(obj, "target_ref", "")):
+            label = gone.get(str(ref or ""))
+            if label:
+                counts[label] = counts.get(label, 0) + 1
+                break
+    return sorted(counts.items())
+
+
+def _attack_patterns_for(
+    report: MalwareReport, malware_id: str, linked: set[str] | None = None
+) -> list[tuple[AttackPattern, Relationship | None]]:
+    """One attack-pattern per published technique, and the link it still needs.
+
+    The report's ``ttp_mappings`` is the source, so the bundle names exactly
+    the techniques the report names: the same list the ATT&CK section, the
+    References and ``/reports/{id}/mitre`` are built from, with the ids the
+    catalogue check rejected already out of it. A technique the judge already
+    related to the sample gets no second relationship — the judge's own carries
+    its confidence and this one would carry none.
+    """
+    already = linked or set()
+    out: list[tuple[AttackPattern, Relationship | None]] = []
+    seen: set[str] = set()
+    for mapping in report.ttp_mappings:
+        tid = str(mapping.technique_id or "").strip().upper()
+        if not tid or tid in seen:
+            continue
+        seen.add(tid)
+        pattern = AttackPattern(
+            id=_pattern_id_for(tid),
+            name=mapping.technique_name or tid,
+            external_references=[
+                {
+                    "source_name": "mitre-attack",
+                    "external_id": tid,
+                    "url": f"https://attack.mitre.org/techniques/{tid.replace('.', '/')}/",
+                }
+            ],
+        )
+        if tid in already or pattern.id in already:
+            out.append((pattern, None))
+            continue
+        out.append(
+            (
+                pattern,
+                Relationship(
+                    relationship_type="uses",
+                    source_ref=malware_id,
+                    target_ref=pattern.id,
+                ),
+            )
+        )
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Pattern helpers
 # ---------------------------------------------------------------------------
@@ -341,7 +556,32 @@ def _stix_pattern_for_string_ioc(ioc: StringIOC) -> str | None:
     return None
 
 
-def _accept_string_ioc(ioc: StringIOC, pattern: str, file_name_kept: int) -> bool:
+def _publishable_domains(report: Any) -> frozenset[str]:
+    """The domains this report may publish, by the one corroboration rule.
+
+    A name the sample's byte image knows and nothing else is not an
+    observation of infrastructure, so it is not offered to a consumer that
+    would block on it. The network block is where each name's source is
+    recorded, so it is the answer for both minting paths — a `domain` string
+    row is by construction string-derived, and is published only when the
+    network block says a second source names it too.
+    """
+    network = getattr(report, "network", None)
+    if network is None:
+        return frozenset()
+    return frozenset(
+        domain.fqdn.strip().lower().rstrip(".")
+        for domain in network.domains
+        if domain.fqdn and domain_is_corroborated(domain.source, domain.reputation, domain.fqdn)
+    )
+
+
+def _accept_string_ioc(
+    ioc: StringIOC,
+    pattern: str,
+    file_name_kept: int,
+    publishable_domains: frozenset[str] = frozenset(),
+) -> bool:
     """Gate StringIOC → Indicator emission.
 
     Applies the same rules as :func:`maljan.pipeline.validation._indicator_problem`
@@ -353,6 +593,12 @@ def _accept_string_ioc(ioc: StringIOC, pattern: str, file_name_kept: int) -> boo
     """
     stripped = pattern.lstrip()
     value = (ioc.value or "").strip()
+
+    # Domains: the corroboration rule, the same one the network block is
+    # gated by. Every `domain` row here came out of the string scan, so an
+    # uncorroborated one is a run of bytes shaped like a hostname.
+    if stripped.startswith("[domain-name:value"):
+        return value.lower().rstrip(".") in publishable_domains
 
     # URLs: denylist developer/build hosts.
     if stripped.startswith("[url:value"):
@@ -414,6 +660,15 @@ def _indicator_for_domain(domain: NetworkDomain) -> Indicator | None:
     fqdn = domain.fqdn.strip()
     if not fqdn:
         return None
+    admitted = corroboration_reason(domain.source, domain.reputation, fqdn)
+    if admitted is None:
+        # A run of bytes that has the shape of a hostname is not an
+        # observation of infrastructure. One PE's string sweep put fifteen
+        # such fragments into a published bundle, each as an indicator a
+        # downstream consumer would block on. They stay in the report's
+        # network block, labelled with where they came from; they are not
+        # offered to the world until a second source knows the name.
+        return None
     pattern = f"[domain-name:value = '{_escape_stix(fqdn)}']"
     name = f"Domain {fqdn}"
     return Indicator(
@@ -421,7 +676,20 @@ def _indicator_for_domain(domain: NetworkDomain) -> Indicator | None:
         pattern=pattern,
         pattern_type="stix",
         indicator_types=["malicious-activity"] if domain.is_suspicious else ["anomalous-activity"],
-        description=domain.reason,
+        # Only the surprising admission is spelled out. A name the sandbox
+        # resolved needs no explanation, and adding one would rewrite the
+        # description of every domain in every bundle; a Tor address reaches a
+        # bundle on the strength of its own syntax and of nothing anybody
+        # watched, and a reader finding it there is owed that sentence.
+        # ``None`` rather than an empty string: an absent key is what a
+        # consumer saw before there was anything to say, and an empty
+        # description is noise in a published bundle.
+        description="; ".join(
+            part
+            for part in (domain.reason, admitted if domain.source == "strings" else None)
+            if part
+        )
+        or None,
     )
 
 

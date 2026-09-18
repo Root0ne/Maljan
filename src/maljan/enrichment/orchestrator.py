@@ -22,6 +22,7 @@ from maljan.enrichment.abuseipdb_client import AbuseIPDBClient
 from maljan.enrichment.virustotal_client import VirusTotalClient
 from maljan.enrichment.whois_client import WhoisClient
 from maljan.extractors.attribution import populate_similar_samples
+from maljan.extractors.network_extractor import domain_is_corroborated
 
 if TYPE_CHECKING:
     from maljan.memory.long_term_memory import MemoryStore
@@ -180,17 +181,17 @@ async def enrich_malware_report(
         if vt is None and abuse is None:
             logger.warning("enrich: no provider API keys available; reputation fields left null.")
 
-        private_domains_skipped = await _enrich_domains(domains, vt=vt, cap=max_lookups_per_kind)
+        domains_skipped = await _enrich_domains(domains, vt=vt, cap=max_lookups_per_kind)
         await _enrich_ips(ips, vt=vt, abuse=abuse, whois=whois, cap=max_lookups_per_kind)
     finally:
         if own_client:
             await client.aclose()
 
     logger.info(
-        "enrich: completed (domains=%d, ips=%d, private_domains_skipped=%d).",
+        "enrich: completed (domains=%d, ips=%d, domains_not_looked_up=%d).",
         len(domains),
         len(ips),
-        private_domains_skipped,
+        domains_skipped,
     )
     return malware_report
 
@@ -204,15 +205,28 @@ async def _enrich_domains(
     skipped = 0
     if vt is None:
         return skipped
-    for dom in domains[:cap]:
-        if _has_successful_rep(dom):
-            continue
+    askable: list[dict[str, Any]] = []
+    for dom in domains:
         fqdn = dom.get("fqdn")
         if not isinstance(fqdn, str) or not fqdn:
             continue
         if not _is_public_fqdn(fqdn):
             skipped += 1
             continue
+        if not domain_is_corroborated(dom.get("source"), dom.get("reputation"), fqdn):
+            # A name only the sample's byte image knows. One PE's twenty-five
+            # string-derived "domains" held the single enrichment slot for
+            # 452 s, and fifteen of them were fragments of longer names.
+            skipped += 1
+            continue
+        askable.append(dom)
+    # The cap is applied to what is worth asking about, not to the raw list:
+    # a page of string noise at the front used to spend the whole budget
+    # before the first name anything else had seen.
+    for dom in askable[:cap]:
+        if _has_successful_rep(dom):
+            continue
+        fqdn = str(dom["fqdn"])
         rep = await vt.domain_reputation(fqdn)
         if rep is not None:
             _annotate_reputation_age(rep)

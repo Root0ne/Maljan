@@ -76,6 +76,10 @@ class SignatureInfo(BaseModel):
     is_signed: bool = False
     signer_subject: str | None = None
     signer_issuer: str | None = None
+    # SHA-1 over the signer certificate, which is how Windows, VirusTotal and
+    # every signing-certificate feed name one. The identifier the subject and
+    # issuer above were read from.
+    signer_thumbprint: str | None = None
     signature_valid: bool | None = None
     # The pack's ``signing_info`` entry these facts were read from.
     evidence_id: str | None = None
@@ -307,6 +311,12 @@ class NetworkDomain(BaseModel):
     # IDN/punycode homograph signals.
     is_punycode: bool = False
     homograph_target: str | None = None
+    # Where the name came from. ``sandbox`` is a resolution or a request the
+    # sample actually made, ``analyst`` an agent's own artefact, ``strings`` a
+    # run of bytes in the file that has the shape of a hostname — which is a
+    # far weaker claim and was being published as though it were the same one.
+    # ``None`` for a producer that does not record it.
+    source: Literal["sandbox", "analyst", "strings"] | None = None
     # Filled asynchronously by the threat-intel enrichment worker.
     reputation: dict[str, Any] | None = None
 
@@ -850,7 +860,15 @@ class MalwareReport(BaseModel):
     network: NetworkIOCs | None = None
     persistence: list[PersistenceMechanism] = Field(default_factory=list)
     capability_matrix: list[CapabilityCell] = Field(default_factory=list)
+    # The published technique list. Every other technique surface is built from
+    # it — the report's ATT&CK section, its References, the STIX
+    # attack-patterns, ``/reports/{id}/mitre`` — so a technique appears in all
+    # of them or in none, and an id the ATT&CK check rejected appears in none.
     ttp_mappings: list[TTPMapping] = Field(default_factory=list)
+    # What the judge named as an attack-pattern without naming a technique id,
+    # after being asked for one. A behaviour, reported as a behaviour: it is
+    # never published as an ATT&CK technique, and it is not dropped either.
+    unmapped_behaviours: list[str] = Field(default_factory=list)
 
     # --- Attribution ---
     attribution: FamilyAttribution = Field(default_factory=FamilyAttribution)

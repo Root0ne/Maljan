@@ -764,3 +764,59 @@ class TestWhichPackFailuresDegradeTheRun:
         assert run_is_degraded(["triage.hashes_failed"]) is True
         assert run_is_degraded(["triage.capa_failed", "analyst failures: static"]) is True
         assert run_is_degraded([]) is False
+
+
+class TestADegradedAnswerIsAnAnswer:
+    """A tool that answered less than it wanted to still answered.
+
+    `apk_info` without androguard returns the zip-level facts — dex files,
+    ABIs, certificate members — and used to return them beside an `error`
+    key. The ledger read that as a failed call, the pack printed nothing, and
+    an Android run had no container channel at all although the archive was
+    perfectly readable. The facts are recorded, and what is missing from them
+    is its own reason.
+    """
+
+    def test_the_entry_is_recorded_as_a_success(self) -> None:
+        from maljan.pipeline.triage_pack import degradation_reason_for
+
+        answer = {
+            "manifest_present": True,
+            "dex_count": 2,
+            "degraded": "androguard is not installed; the manifest was not decoded",
+            "remediation": "install the optional tool libraries",
+        }
+        assert degradation_reason_for("apk_info", answer) == "triage.apk_info_degraded"
+
+    def test_an_answer_with_nothing_missing_contributes_no_reason(self) -> None:
+        from maljan.pipeline.triage_pack import degradation_reason_for
+
+        assert degradation_reason_for("apk_info", {"manifest_present": True}) is None
+
+    @pytest.mark.parametrize("tool", ["apk_info", "document_info"])
+    def test_the_sentence_says_it_answered_rather_than_that_it_could_not_run(
+        self, tool: str
+    ) -> None:
+        """This sentence goes into the judge's prompt beside the facts the tool
+        produced. Saying the pack could not run it, while the same prompt
+        carries its dex count and its ABIs, is a deterministic statement that
+        is false."""
+        from maljan.pipeline.triage_pack import reason_sentence
+
+        sentence = reason_sentence(f"triage.{tool}_degraded")
+        assert tool in sentence
+        assert "could not run" not in sentence
+        assert "answered" in sentence
+
+    @pytest.mark.parametrize("tool", ["apk_info", "document_info", "capa"])
+    def test_a_failed_tool_still_reads_as_one_that_could_not_run(self, tool: str) -> None:
+        from maljan.pipeline.triage_pack import reason_sentence
+
+        assert reason_sentence(f"triage.{tool}_failed") == (f"the triage pack could not run {tool}")
+
+    def test_the_degraded_reason_does_not_make_the_whole_run_degraded(self) -> None:
+        """Same weight as an optional tool that failed: an absence the reader
+        is told about, not a verdict about the run."""
+        from maljan.pipeline.triage_pack import run_is_degraded
+
+        assert run_is_degraded(["triage.apk_info_degraded"]) is False

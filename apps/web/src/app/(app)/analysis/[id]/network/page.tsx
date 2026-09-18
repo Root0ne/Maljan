@@ -236,6 +236,25 @@ function DomainCard({ domain }: { domain: NetworkDomain }) {
                 DGA {domain.dga_score.toFixed(2)}
               </span>
             )}
+            {/* A name the sandbox watched the sample resolve and a run of
+                bytes shaped like a hostname were drawn identically, and only
+                the first is an observation of infrastructure. The second is
+                also held out of the exported bundle, so a reader comparing
+                the two needs to see which this is. */}
+            {domain.source && (
+              <span
+                className="text-[11px] px-1.5 py-0.5 rounded bg-bg-active text-text-muted shrink-0"
+                title={
+                  domain.source === "strings"
+                    ? "Found in the sample's bytes, not observed on the wire"
+                    : domain.source === "sandbox"
+                      ? "Resolved or requested by the sample under the sandbox"
+                      : "Recorded by an analyst"
+                }
+              >
+                {domain.source}
+              </span>
+            )}
           </div>
           {domain.reason && (
             <div className="text-xs text-text-muted mt-1">{domain.reason}</div>

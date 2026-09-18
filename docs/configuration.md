@@ -367,6 +367,27 @@ means an empty corpus and no matches, not a failure. `analysis.sigma_rules_dir`
 was the previous name for the first of these — a stored override moves into the
 server's `env` automatically on upgrade.
 
+A rule in the YARA corpus fires when any of its patterns is in the sample's
+bytes, and its confidence travels with the hit into every agent's pack. A
+pattern must therefore be a fact about a sample rather than a word that
+describes one: the persistence rules name key paths and not the API that writes
+a value, and the packing rules name section names and packer banners and not
+the words `AES`, `packed` or `compress`, which any program that speaks a
+protocol carries.
+
+A rule may also carry an `all_of` group beside its `patterns`: the patterns
+fire one at a time, the group fires only whole. That is for a technique that
+is a pair rather than a string — `MiniDumpWriteDump` is in a crash reporter
+and `lsass.exe` is in every process lister, and only the two together are
+credential dumping.
+
+A rule that cannot be made that specific is written as a note: it omits
+`technique_id`, and a rule with no technique may not carry a `confidence`
+either. It fires, it says in its description what is in the file, and it
+asserts nothing — which is what `web_client_apis` and `file_enumeration_apis`
+are for. Importing an HTTP client is a fact; calling it a command-and-control
+channel is a claim no substring can support.
+
 ### The evidence budget
 
 `reporting.evidence_budget_bytes` (512 KiB by default) is how many bytes of
@@ -504,6 +525,16 @@ half — it is VirusTotal's own server, richer and maintained by them — while
 the AbuseIPDB half stays the only source for IP abuse reports. A deployment
 with an API key and no agent token keeps working exactly as before.
 
+Both names reach that sidecar through its `env_allow`, and both are defaults
+rather than fixtures: an operator who clears that list in the Configuration tab
+stops the keys reaching the child — for an engagement where the sample must not
+be looked up, or to stay inside a rate-limit budget — and they stay cleared
+until the operator puts them back. The server then answers from its mock, as it
+does on a host that never held a key. See
+[which directories a sidecar may read](#which-directories-a-sidecar-may-read)
+for the three names that a built-in does keep whatever the stored registry
+says.
+
 **The stdio alternative.** The same server runs locally as `vt-mcp`, reading
 the same agent token from `VTAI_TOKEN`, and that form offers one tool the
 remote one cannot: `submit_local_file`, which uploads by path. The remote
@@ -557,12 +588,17 @@ pack runs the real tools in mock mode too, so a local observation run with a
 reputation server enabled makes that one outbound call; a team that withholds
 the server, or `triage.reputation = off`, keeps such a run offline.
 
-The technique check's one heuristic part has three settings in the same
+The technique check's one heuristic part has five settings in the same
 group: `validation.alignment_gate` (`auto` runs the alignment gate only on a
 worker whose ATT&CK index is already built; `off` never),
 `validation.alignment_gate_build` (false; true lets the first run that wants
-the gate build the index once, on a thread, and go without it) and
-`validation.alignment_threshold` (0.05, the paper's gate). See *The technique
+the gate build the index once, on a thread, and go without it),
+`validation.weak_alignment` (false — the ranking is recorded on the claim and
+shown to the judge, and nothing is asked again; true lets it question a claim,
+at one correction turn per batch), `validation.alignment_threshold` (0.05, the
+paper's gate) and `validation.alignment_margin` (0.20, how far a candidate from
+the sample's own domain and another tactic must beat the claimed id before it
+is questioned). The measurement behind the default off is in *The technique
 check* in [architecture.md](architecture.md).
 
 `mobile` and `deep_static` are built from three seeded generic agent
@@ -921,6 +957,49 @@ anything that lands outside the directories they were given:
 Those two, plus `MALJAN_STAGING_TTL_HOURS` above, are the whole of what the
 `analysis` sidecar's `env_allow` carries; the `network` sidecar's carries the
 two in this table and nothing else. Neither sees a credential of any kind.
+
+**How the variable reaches a sidecar.** A stdio child is started with a built
+environment rather than the worker's own: the general-purpose names (`PATH`,
+`HOME`, the locale and temp ones), then exactly the names that server's
+`env_allow` lists, then its `env` map. `MALJAN_SAMPLE_ROOTS` is therefore named
+on the two file-reading built-ins and on no others — a variable that says where
+this host keeps malware is not something every child Maljan starts has any
+business reading. A tool server an operator adds receives it only when they
+put the name in its own `env_allow`, which is the same switch a server of
+theirs that takes paths would need anyway.
+
+The environment is copied into the child when it is spawned, so the roots have
+to be complete before a job's first sidecar starts — and they are: the worker
+exports its download directory and sample mirrors at startup, the mirror step
+and a sandbox capture fetch name theirs while the run is still assembling its
+inputs, and a run that was handed a sample path names that file's directory
+before the pipeline builds. A job's servers are attached after all of it, and a
+sidecar held over from an earlier job is closed and started again for the new
+job, so nothing has to be restarted mid-run for a root to take effect.
+
+**The names a built-in always gets.** Three names are not an operator's to
+take away: `MALJAN_SAMPLE_ROOTS` and `MALJAN_STAGING_DIR` on `analysis` and
+`network`, and `MALJAN_STAGING_TTL_HOURS` on `analysis`. They are what a
+sidecar cannot work out for itself — which directories it may read, where a
+delivered sample lands and how long it is kept — so they are put back on load,
+on save, in the Configuration tab's own view and in the connection test. The
+tab draws them above the box as names that are always passed, so a deletion is
+never accepted and then quietly undone; what stays editable there is the rest
+of the list. The registry is stored as one row holding every server, written
+whole whenever
+anything in it is saved, so without that floor a deployment that had configured
+its servers
+before a sidecar gained a variable would keep starting that sidecar without
+it — which for `MALJAN_SAMPLE_ROOTS` means every tool call on the run's own
+sample refused with `path_outside_roots`.
+
+Every other name a built-in ships with is a default rather than a floor:
+`threatintel`'s `VIRUSTOTAL_API_KEY` and `ABUSEIPDB_API_KEY` are the
+deployment's own credentials, and an `env_allow` an admin empties stays empty
+everywhere that list is read. A name an admin adds to a built-in is kept, after
+the required ones. A server an operator added is left exactly as they typed it,
+required names and all: it reads the sample roots only when its own `env_allow`
+names them.
 
 A refusal is the ordinary structured error with the code `path_outside_roots`
 and a remedy, and it names no host path.

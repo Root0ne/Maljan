@@ -170,11 +170,13 @@ class TestARepeatedCall:
         assert "You already called identify_file with these arguments" in answer
         assert "[ev_0001]" in answer
 
-        third = recorder.entries[2]
-        assert third.repeated_of == "ev_0001"
-        assert third.ok is True
-        assert third.structured is None
-        assert third.output.startswith("You already called identify_file")
+        # The refusal is a message to the model and nothing else. It used to be
+        # written to the ledger as a successful call — ok=true, 0 ms — which
+        # inflated the ledger and the report's "tool call(s) recorded" line and
+        # handed the model a citable id for an entry holding no evidence.
+        assert len(recorder.entries) == 2, "no tool ran, so nothing was recorded"
+        assert all(entry.repeated_of is None for entry in recorder.entries)
+        assert not answer.startswith("[ev_")
 
     def test_different_arguments_are_not_affected(self) -> None:
         calls: list[str] = []
@@ -225,9 +227,11 @@ class TestARepeatedCall:
             answer = wrapped.invoke({"path": "/samples/gone.exe"})
 
         assert calls == ["/samples/gone.exe"] * 2, "one repeat is served, the rest are not"
-        assert "You already called identify_file with these arguments" in answer
-        assert [entry.ok for entry in recorder.entries] == [False, False, True, True]
-        assert recorder.entries[2].repeated_of == "ev_0001"
+        # And it says what is in the entry it points at, which here is a
+        # failure: the live notice sent a model to [ev_0017] for "the result"
+        # and ev_0017 had raised.
+        assert "You already called identify_file with these arguments and it failed" in answer
+        assert [entry.ok for entry in recorder.entries] == [False, False]
 
     def test_a_call_that_starts_failing_still_counts_from_the_first(self) -> None:
         outcomes = iter([RuntimeError("transient"), None])
@@ -245,9 +249,9 @@ class TestARepeatedCall:
         for _ in range(3):
             wrapped.invoke({"path": "/samples/evil.exe"})
 
-        # The retry after the transient failure is the repeat the guard serves.
-        assert [entry.ok for entry in recorder.entries] == [False, True, True]
-        assert recorder.entries[2].repeated_of == "ev_0001"
+        # The retry after the transient failure is the repeat the guard serves;
+        # the third call is refused and writes no entry.
+        assert [entry.ok for entry in recorder.entries] == [False, True]
 
     def test_without_a_guard_every_call_still_runs(self) -> None:
         calls: list[str] = []

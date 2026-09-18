@@ -1014,6 +1014,316 @@ change landed on `main`.
   unpublishable rather than refused: the job says the class name, the sentence
   goes to the log under the same error id, and a test walks every site that
   raises one so a bad sentence fails a build rather than a job.
+- **The sample roots reach a configured deployment's sidecars, not only a
+  fresh one.** The `analysis` and `network` sidecars read a path argument only
+  inside the directories `MALJAN_SAMPLE_ROOTS` names, and they learn them from
+  their own `env_allow` — but the registry of tool servers is stored as a
+  single row holding every server, written whole each time anything in it is
+  saved, and a built-in that was already in that row kept every field it had
+  been saved with. A deployment that had configured its servers before the
+  confinement shipped therefore went on starting both sidecars without the
+  variable, and every analyst tool call on the run's own sample came back
+  refused with `path_outside_roots` — the error meant for a path the sample's
+  author chose. A built-in's `env_allow` now always carries the names its
+  sidecar cannot run without — the sample roots, the staging directory and its
+  retention — on load, on save, in the editor's own view and in the connection
+  test, which launches the server a run launches, so a name a sidecar gains
+  reaches a deployment that has been configured rather than a fresh install
+  alone. The Configuration tab draws those names above the box as always
+  passed, so an admin can no longer delete one, be told the map was saved, and
+  go on believing a sidecar was narrowed. Every other shipped name stays the
+  operator's: a
+  `threatintel` whose `VIRUSTOTAL_API_KEY` and `ABUSEIPDB_API_KEY` an admin has
+  cleared keeps them out of the child, and the sidecar answers from its mock as
+  it does on a host that never held a key. A server an operator added is
+  untouched: it sees the roots only when its own `env_allow` lists them, and
+  the general-purpose environment every child gets is unchanged. Proven through
+  the real spawn path — a live sidecar started the way the registry starts one
+  reads a file under an exported root and still refuses one outside every root.
+- **The repeat guard's notice is a message to the model and nothing else.** A
+  refused third call to the same tool with the same arguments was written to
+  the evidence ledger as a *successful* call — `ok=true`, `duration_ms=0` —
+  which inflated the ledger, inflated the report's "tool call(s) recorded, N
+  failed" line, and handed the model a citable evidence id for an entry holding
+  no evidence. No tool ran, so nothing is recorded, nothing is announced to the
+  console, and the notice points at the earlier entry and says whether that
+  entry was an answer or a failure: one live notice sent a model to `[ev_0017]`
+  for "the result", and `ev_0017` had raised.
+- **A report section is no longer lost to a key its schema does not declare.**
+  The sections forbid unknown keys, so one invented field took the whole
+  section with it: two audited runs shipped with no conclusion and no technical
+  analysis, and nothing in the report said so. The fields the schema declares
+  are kept, the ones it does not are named as a degradation reason, and a
+  section that is genuinely lost — its shape still wrong after the retry, its
+  round timed out or failed — is named in the report's notes with the reason.
+- **A lead that never wrote its report no longer takes its specialists'
+  answers with it.** A lead's report is the only channel its chunk has out of a
+  stage, so a loop that ended without one lost every completed ask: one audited
+  chunk spent 1,830 s, had six specialist asks answered and 52 evidence entries
+  recorded, and merged zero claims. The answers are kept on the caller as the
+  specialists' own ISRs; a lead that produced no claims is given one bounded
+  turn to write its report from them — the forced synthesis the analysts
+  already use — and when that turn produces nothing either, the specialists'
+  ISRs are promoted into the stage's merge with their claims and confidences
+  exactly as they made them. Every answered ask is promoted, in order and
+  keyed by the agent and the ask's number (`deep_static#2`): three asks to one
+  specialist are three answers, and keyed by the agent alone the second and
+  third were dropped. Nothing is promoted beside a report that exists.
+- **Every violation a run recorded reaches the conversation, with what became
+  of it.** Only the batch that triggered a correction turn was published, so a
+  reader watching a run saw neither the violations that survived the retry nor
+  the ones the retry introduced — two `validation_feedback` events in one run's
+  feed beside a summary recording ten unresolved findings. Each violation now
+  carries a `state`: `retried` where the producer is shown it, then `resolved`
+  or `survived` once the loop knows which, and a violation the retry introduced
+  is published once, as `survived`, and so are the findings the judge records
+  after its loop, which reached the run summary and never the conversation.
+  The fields the console keys on — `code`, `agent`, `stage`, `retry_index` —
+  are unchanged; `path` is added beside them, so `(agent, code, path)` folds
+  the two lines about one violation together and keeps two violations of one
+  code on different claims apart.
+- **One source for the techniques a report publishes.** A report's three
+  technique surfaces were built from three sources and disagreed inside single
+  runs: one run exported ten techniques and a STIX bundle with no
+  `attack-pattern` at all; another served three techniques from
+  `/reports/{id}/mitre` with an empty `technique_id`, none in `ttp_mappings`,
+  and three attack-patterns carrying no ATT&CK reference and ids copied out of
+  the STIX documentation; a third published `T1063` — which the validator had
+  already reported as absent from the catalogue — in the report, in the bundle
+  and in the References section. `ttp_mappings` is now the published list and
+  carries no id the catalogue check rejected (the id stays in the capability
+  matrix, marked, spelled as the producer wrote it), the bundle's
+  attack-patterns are minted from that list with ids derived from the technique
+  id and an ATT&CK external reference each, the References section and the
+  `mitre_techniques` column are built from the same list, and no entry without
+  a technique id is stored as a technique. The judge's own `uses` relationships
+  travel with their techniques: each is re-linked to the rebuilt attack-pattern
+  of the same id with its confidence, evidence basis and contributing agents
+  unedited — both ends of the ref, so one sourced at a technique moves too —
+  and the uncertainty annotation that makes these bundles worth exporting is no
+  longer pruned as dangling. A relationship whose technique the checks rejected
+  is taken out with that technique and recorded in `run_summary.validation` as
+  `stix.unlinked_technique`, so it is counted once, as the technique's loss,
+  and not again as a defect of the judge's bundle. An
+  attack-pattern with a name and no id is asked for one (`attck.missing_id`)
+  instead of skipping every ATT&CK check — which is why the Mobile-domain
+  check never ran on an Android sample's techniques — and one that survives is
+  reported as a behaviour, in the new `MalwareReport.unmapped_behaviours` and
+  under its own heading in the markdown.
+- **The ATT&CK alignment gate scores inside the sample's own scope, and asks
+  nothing unless it is turned on.** The index that ranks a claim's text is
+  domain-blind, so a technique claim about a Windows PE was answered with
+  Mobile and ICS candidates, and it scores a correct id near zero often enough
+  that the check questioned 81 of 92 technique claims in one audited run and 33
+  of 33 in another — each batch a full extra model turn. The candidates are now
+  narrowed to the routed sample's ATT&CK domain and platforms before anything
+  is recorded or proposed; a claim is questioned only when its id scores under
+  `validation.alignment_threshold` and an in-scope candidate from neither its
+  own technique family nor any of its tactics beats it by the new
+  `validation.alignment_margin` (0.20); and at most one weak-alignment batch is
+  sent per agent turn. The question itself is behind the new
+  `validation.weak_alignment`, which is off: the ranking is still recorded on
+  every claim and shown to the judge. An index that ranked the claimed id
+  itself in scope questions nothing, wherever it ranked it. Over the audit's
+  own 105 distinct rankings, replayed as a fixture, the narrowed rule questions
+  none of the 36 claims whose id the audit read as right for its sample and 5
+  of the other 69, and none of the 105 derived rows that put the claimed id
+  back into its own ranking; docs/architecture.md carries the measurement.
+- **A judge that never answered no longer produces the verdict "Malware".** The
+  bundle the pipeline builds when the judge's answer was not a bundle carried a
+  `malware` object whatever verdict it was carrying, and the pipeline read the
+  verdict back off the objects — so the "Suspicious" the extraction had read
+  out of the judge's own text was overridden by the bundle's shape, and a
+  signed sample with a clean reputation entry in its own pack, no analyst claim
+  and no technique was reported as Malware because the verdict round timed out.
+  The fallback bundle now states its verdict in `x_maljan_fallback_verdict`
+  (`extracted` from the judge's own text, or `pipeline` when there was nothing
+  to read, which is what a timeout leaves), its object set follows that verdict
+  — no `malware` object for a verdict that is not Malware, and a `note`
+  carrying the degraded-path record instead — and `decide_from_bundle` reads
+  the statement rather than counting objects. `verdict.unsupported_benign` and
+  `verdict.unsupported_malware` run over that bundle on the timeout path too,
+  where the loop used to return before they could be asked; they annotate and
+  change nothing, and they run on every way the round can end: a bundle, a
+  malformed answer the retry fixed, prose the model stood by twice, JSON that
+  is not a bundle, and no answer at all. Such a verdict also takes the path a
+  judge that raised already took: `overall_confidence` is `null`, the header
+  reads "not assessed", and the run summary carries the code once rather than
+  twice — asked off the bundle's own mark rather than off the violation codes,
+  so a fallback built from JSON that was not a bundle is one too.
+- **Every modern APK was reported unsigned.** The APK Signing Block opens with
+  its own size, and the walk over the id-value pairs began on that size field
+  rather than eight bytes later on the first pair. One field out of step is
+  enough that no scheme id is ever recognised, so an APK signed only with
+  schemes v2 and v3 — which is how Android has signed packages for years —
+  came back with `present: false, schemes: []`, and an analyst reading the pack
+  wrote that the application was unsigned and therefore probably repacked. The
+  walk now starts on the first pair, stays inside the block rather than inside
+  the file, and refuses to read a block whose two size fields disagree, because
+  a footer that does not agree with itself was not a block footer.
+- **A run of bytes shaped like a hostname was published as infrastructure.**
+  The string sweep over one PE returned twenty-five domains, fifteen of them
+  fragments of longer names (`rosoft.com` out of a resource that had been cut
+  short before `microsoft.com`), rows of a detection-name table (`jector.SA`,
+  `Bifrose.IE`) or identifiers. Each was exported as a STIX indicator and each
+  cost a reputation lookup — 452 s of the enrichment slot for one report. The
+  domain pattern now takes an underscore as a token boundary; a name that is
+  the tail of a longer one found in the same sample is dropped unless it ends
+  at a label boundary, so `sectigo.com` under `crl.sectigo.com` is kept and
+  `rosoft.com` is not; a candidate that is nothing but a public suffix
+  (`co.uk`, `ne.jp`) is not a name; and a lowercase label wearing a shouted
+  country code is read as a table row rather than a host. Every row the scan
+  produces now carries `source: "strings"`, `NetworkDomain` records where the
+  name came from, and a name only the byte image knows is neither exported as
+  an indicator nor sent to a paid provider until a second source — the
+  sandbox, an analyst artefact or a reputation record — knows it too. A Tor
+  address is the exception and has to be: `.onion` does not resolve, so no
+  sandbox can ever confirm one, and the rule made the strongest string-derived
+  indicator there is unpublishable by any path. Its own syntax is the second
+  source — a v3 address is admitted only when the checksum and version byte in
+  its last three bytes check out against the first thirty-two, a v2 one on its
+  length and alphabet — it stays labelled `strings`, it is still never sent to
+  a paid provider, and the indicator's description says why it was let
+  through. One
+  predicate decides that, and both paths that mint a domain indicator ask it:
+  the network block's own, and the string rows, which reach the bundle as
+  `interesting_strings` and were still being published after the first gate
+  went in. The name is still in the report, labelled with where it came from:
+  the Markdown network table has a Source column, and the console's domain
+  card a badge that says whether the sandbox resolved the name or the byte
+  image merely contained it.
+  Which of two names is a fragment is decided by where the matches sit rather
+  than by how they are spelled, so a longer look-alike no longer deletes the
+  real name — `microsoft.com` beside `xmicrosoft.com`, and
+  `000webhostapp.com` beside `M000webhostapp.com`, are two names each. An
+  address no longer yields a bare host beside itself — `admin@example.com` was
+  one string and two indicators — and the case rule asks for the shouted
+  two-letter country code it was written for, so `Evil.COM` is a hostname
+  again.
+- **The catalogue called drawing a window keylogging.** `BitBlt`,
+  `CreateCompatibleBitmap`, `CreateCompatibleDC`, `GetDC` and `GetDIBits` were
+  filed under `keylogging` at tier `high`, so every program that puts pixels
+  on a screen came back with `catalog_flags: ["suspicious"]` — on a signed SSH
+  client that was one of the two entries the only analyst that spoke cited
+  behind a Malware verdict. The GDI blit calls are now `screen_capture` and
+  the message pump `message_loop`, both `informational`, and both name the
+  APIs that would give them weight — hooks, raw input, the clipboard beside a
+  capture — in a new `corroborated_by` field that `api_capability` puts on the
+  row. The T1113 association is untouched: it is shown as a catalogue
+  association, which is what it always was.
+- **Thirteen rules asserted a technique about a benign GUI network client;
+  none asserts one now.** The corpus was swept rule by rule against two
+  fixtures built from names and words rather than from any sample. Four shapes
+  were doing the damage: a pattern that is a substring of a benign API name
+  (`RegSetValue`, `CreateService`, `ExecuteA`), a pattern that is an English
+  word (`encrypt`, `macro`, `shortcut`), a pattern too short to be evidence
+  (`#24`, the highest authored confidence in the file, and `.scr`, which
+  matches `.scrollbar`), and a pattern the MSVC CRT links into most benign PEs
+  (`IsDebuggerPresent`). Eight rules now want the artefact — a ransom note's own wording, a
+  `rundll32` command line, `comsvcs.dll MiniDump`, a policy key path, a VBA
+  project stream. Five could not be made specific statically and have left the
+  technique-asserting set: `web_client_apis`, `file_enumeration_apis`,
+  `user_activity_apis`, `service_control_apis` and `scripted_runtime_markers`
+  say what is in the file and carry no technique and no confidence, because
+  importing an HTTP client or enumerating files is what ordinary software
+  does. A rule file entry may now omit `technique_id`, and one that does may
+  not carry a confidence either; it may also carry an `all_of` group, which
+  fires only when every string in it is present, for a technique that is a
+  pair rather than a string; one matcher answers which of a rule's strings
+  count, so the layer and the tool that `yara_scan` falls back to cannot
+  disagree about a group, and neither engine lists half a pair among the
+  strings that fired a rule. Two more rules followed: `lsass_dump` asserts
+  T1003.001 on the mimikatz string or a `comsvcs.dll MiniDump` invocation, and
+  on `MiniDumpWriteDump` **together with** `lsass.exe` — either of those two
+  alone is now a `process_dump_apis` note, because a crash reporter imports
+  the one and every process lister carries the other. `ransomware_indicators`
+  loses the bare `.locked` and `.encrypted`, which made `notes.encrypted` read
+  as T1486 at 0.88, and `ransomware_extensions` becomes the
+  `encrypted_file_extensions` note: what makes an extension evidence is the
+  renaming, and this file cannot say "together with" across two groups. Its
+  `.onion` pattern is gone with it — it had been tagging every Tor address in
+  every sample as ransomware.
+- **Three shipped YARA rules fired on words rather than on facts.**
+  `registry_run_keys` (T1547.001 at 0.88) listed `RegSetValueEx` beside the Run
+  key paths, so it matched any program that writes a registry value — on a
+  signed SSH client the hit was in the pack every agent read. It now wants a
+  Run, RunOnce, RunServices or Startup path. `obfuscation_indicators` (T1027 at
+  0.82) and `software_packing` (T1027.002) listed `UPX`, `AES`, `RC4`, `XOR`,
+  `Base64`, `packed` and `compress`, which fire on every implementation of a
+  transport: the same client matched on fourteen occurrences of `aes` and on
+  `uPX` inside a longer word. Both now want a packer section name or a packer's
+  own banner. The section entropies that are the other half of the packing
+  signal are reported by the format tool beside these hits, as before.
+- **A tool that answered less than it wanted to was recorded as having failed.**
+  `apk_info` without androguard returns the zip-level facts — the manifest
+  member, the dex count, the ABIs, the certificate members — and returned them
+  beside an `error` key. Every consumer reads `error` as "this call produced
+  nothing", so the ledger recorded the call as failed and the pack printed none
+  of them: an Android run had no container channel at all although the archive
+  had been read. A degraded answer is now a success carrying `degraded` (the
+  library that is missing, and what was answered without it) and the
+  remediation, the same for `document_info` without olefile, and the pack
+  contributes `triage.<tool>_degraded` rather than `triage.<tool>_failed`. That
+  reason never makes a whole run degraded, because the facts are there and what
+  is missing from them is said beside them. The sentence the judge reads says
+  the tool answered a smaller set than it wanted to, not that the pack could
+  not run it — the same prompt carries the facts it did produce.
+- **A container that had been opened was reported as never opened.** The
+  degradation reason "container was not parsed — no format-aware extraction
+  exists for it; findings come from a raw-byte string sweep only" was decided
+  from the file type alone, so a ZIP whose members `archive_list` had listed —
+  with sizes and CRCs, printed in the report, cited by the analyst — carried it
+  anyway, and the run capped its confidence on the strength of it.
+  `unparsed_container_reason` now asks the evidence ledger whether the routed
+  format's own tool produced a result, and speaks only when it did not, which
+  is still the true answer for a package whose `apk_info` could not load its
+  library. The routed type's tool is the one that counts: an APK, a JAR and a
+  macro document are all zips, and an analyst listing an Android package's zip
+  members has not read its manifest, its permissions or its components.
+- **The timestamp authority was named as the publisher.** A timestamped PE
+  carries the timestamp service's chain in the same PKCS#7 certificate set as
+  its own, so the set has two leaves and "the certificate that issued none of
+  the others" picked whichever the producer wrote first: over the local corpus
+  that named a time-stamping certificate as the publisher on four signed
+  binaries out of seventeen. The publisher is now the certificate the
+  `SignerInfo` names, by issuer and serial number, read with a small
+  definite-length DER walk; failing that, the leaf whose extended key usage
+  carries code signing and not time stamping; and failing that, no publisher
+  at all, because a name that might be the timestamp service's is worse than
+  none. The file is still reported as signed either way.
+- **A signed binary reached the pack anonymous.** `signing_info` reported
+  `authenticode present` and left the subject and issuer for "an enrichment
+  step", and no such step exists — so the strongest benign fact a run could
+  hold named nobody, and on a signed, 0/74-clean binary the only analyst that
+  spoke never had a publisher to weigh. The signer's subject, issuer and SHA-1
+  thumbprint are now read out of the PKCS#7 blob in the certificate table, the
+  signer being the certificate in the bundle that issued none of the others.
+  No chain verdict is claimed: `signature_valid` stays unset, because deciding
+  whether a certificate is trusted needs a root store this process does not
+  have. `SignatureInfo` gains `signer_thumbprint`.
+- **A tool the host cannot run is no longer offered to the model.** One run
+  reported `22/22 tools exposed` while `apk_info`, `archive_list`,
+  `document_info` and `macho_info` were unavailable on that host: the
+  degradation was logged and recorded, and the model was handed the tool
+  anyway, spent a step on it and got a failure back. The registry now drops a
+  tool the server's own manifest marks unavailable from the list the model is
+  given, unless the manifest says what the tool still answers without its
+  library — `archive_list` without py7zr still lists a zip, and withholding it
+  would cost an archive analysis to save a 7z failure. The manifest is
+  unchanged and still names every tool with its reason and remedy, and the
+  degradation reason is now said where the tool is withheld rather than where
+  it would have been bound, so the degraded block reads as it did before.
+- **Every pipeline line was written to stdout twice.** The `maljan` logger
+  installs a handler of its own so a CLI caller with no logging set up still
+  sees something, and it also propagates to the root handler the API and the
+  worker install — so once either had started, each line went out once plain
+  and once through the root formatter. A live worker log held 3 306 coloured
+  lines with every unique message appearing exactly twice. `setup_logging`
+  now calls `hand_over_to_root`, which takes away the package's own handler
+  and leaves the root's; propagation stays on, because that handler is the
+  structured one in production and is also where a test's capture is attached.
+  A caller who configured nothing keeps the handler and sees no change.
+
 - **Four documented facts that had drifted from the code.** The delegation
   section said a lead's 1800 s stage had room for five asks where
   `_asks_that_fit` computes six and the `ask_<key>` description gives the model

@@ -29,6 +29,7 @@ from maljan.core.config import (
     MCPServerConfig,
     _builtin_definitions,
     _builtin_servers,
+    builtin_env_allow,
 )
 from pydantic import ValidationError
 
@@ -121,6 +122,15 @@ def validate_server_map(
             errors[f"{key}.url"] = "an http server needs a URL"
         dumped = model.model_dump(mode="json")
         dumped.pop("auth_token", None)
+        if key in BUILTIN_SERVER_KEYS:
+            # The row an operator saves is the one every later load starts
+            # from, so the names the sidecar cannot run without are written
+            # into it rather than left for the settings model to repair on each
+            # read (``builtin_env_allow``). What the editor shows afterwards is
+            # then what the sidecar is really started with. A shipped default
+            # that is not required — the threat-intel API keys — stays removed
+            # once an admin has taken it out.
+            dumped["env_allow"] = builtin_env_allow(key, dumped.get("env_allow") or [])
         out[key] = dumped
 
     if errors:

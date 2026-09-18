@@ -266,3 +266,154 @@ class TestTheReportSaysTheJudgeDidNotAnswer:
         assert "**Overall Confidence**: 0.92" in markdown
         assert "The judge did not answer" not in markdown
         assert "verdict.fallback" not in str(report["run_summary"].get("validation") or {})
+
+
+class TestAJudgeThatAnsweredWithNoVerdict:
+    """The same rule for a judge that answered with text, or not at all.
+
+    Its body did not raise, so nothing wrote the fallback channel — and the
+    verdict the pipeline then reported carried the analysts' confidence in
+    their own claims, exactly as a judge that raised used to.
+    """
+
+    @staticmethod
+    def _extracted_verdict() -> dict[str, Any]:
+        """A judge that answered JSON that was not a bundle.
+
+        Nothing is wrong with the answer's syntax, so no code says "fallback"
+        on its own; the bundle the pipeline built out of the text is what says
+        so, and that is what the node has to read. Keyed off the codes instead,
+        the report printed the analysts' own confidence beside a verdict no
+        judge expressed.
+        """
+        from unittest.mock import AsyncMock
+
+        from maljan.agents.judge_agent import JudgeVerdict
+        from maljan.schemas.stix_models import Bundle
+
+        container = _Container(EvidenceCounter())
+        judge = container.get_judge_agent(role="judge")
+        judge.give_verdict = AsyncMock(
+            return_value=JudgeVerdict(
+                bundle=Bundle.model_validate(
+                    {
+                        "objects": [],
+                        "x_maljan_fallback_verdict": {
+                            "decision": "Suspicious",
+                            "source": "extracted",
+                        },
+                    }
+                ),
+                violations=[],
+                retries=0,
+                fed_back={},
+            )
+        )
+        return asyncio.run(make_judge_node(container)(_state()))
+
+    def test_a_verdict_extracted_from_text_is_a_fallback_too(self) -> None:
+        update = self._extracted_verdict()
+
+        fallback = update["verdict_fallback"]
+        assert fallback["decision"] == "Suspicious"
+        assert fallback["failure"] == "verdict.fallback"
+
+    def test_whether_the_judge_recorded_it_is_read_from_what_it_recorded(self) -> None:
+        """This judge recorded nothing, so the report node writes the note.
+
+        Hard-coded, the flag said the row was already there and the summary
+        ended up with nothing to say about a verdict no judge expressed.
+        """
+        update = self._extracted_verdict()
+
+        assert update["verdict_fallback"]["recorded"] is False
+
+    def test_and_then_the_summary_carries_it(self) -> None:
+        update = _run_report(
+            {"decision": "Suspicious", "failure": "verdict.fallback", "recorded": False}
+        )
+
+        validation = update["run_summary"]["validation"]
+        assert validation["by_code"]["verdict.fallback"] == 1
+
+    def test_the_report_gives_it_no_confidence(self) -> None:
+        report, markdown = _reported(
+            {"decision": "Suspicious", "failure": "verdict.fallback", "recorded": True}
+        )
+
+        assert report["overall_confidence"] is None
+        assert "0.92" not in markdown.split("## ")[0]
+
+    @staticmethod
+    def _timed_out_verdict(claims: bool) -> dict[str, Any]:
+        from unittest.mock import AsyncMock
+
+        from maljan.agents.judge_agent import (
+            VERDICT_TIMEOUT_CODE,
+            VERDICT_TIMEOUT_REASON,
+            JudgeVerdict,
+        )
+        from maljan.pipeline.validation import Violation
+        from maljan.schemas.stix_models import Bundle
+
+        container = _Container(EvidenceCounter())
+        judge = container.get_judge_agent(role="judge")
+        bundle = Bundle.model_validate(
+            {
+                "objects": [],
+                "x_maljan_fallback_verdict": {"decision": "Suspicious", "source": "pipeline"},
+            }
+        )
+        judge.give_verdict = AsyncMock(
+            return_value=JudgeVerdict(
+                bundle=bundle,
+                violations=[Violation(code=VERDICT_TIMEOUT_CODE, message=VERDICT_TIMEOUT_REASON)],
+                retries=0,
+                fed_back={},
+            )
+        )
+        state = _state()
+        if not claims:
+            state["isr_reports"] = {
+                "static": AgentISR(agent_id="static", domain="static", claims=[])
+            }
+            state["reports"] = {"static": "Nothing was established."}
+        return asyncio.run(make_judge_node(container)(state))
+
+    def test_a_silent_run_whose_judge_timed_out_is_not_malware(self) -> None:
+        """The audit's case: signed, reputation-clean, no claim, no technique."""
+        update = self._timed_out_verdict(claims=False)
+
+        assert update["final_decision"] != "Malware"
+        assert update["final_decision"] == "Suspicious"
+
+    def test_the_fallback_channel_is_written(self) -> None:
+        update = self._timed_out_verdict(claims=True)
+
+        fallback = update["verdict_fallback"]
+        assert fallback["decision"] == "Suspicious"
+        assert fallback["failure"] == "verdict.timeout"
+        assert fallback["recorded"] is True
+
+    def test_the_summary_carries_the_timeout_once(self) -> None:
+        update = self._timed_out_verdict(claims=True)
+
+        validation = update["run_summary"]["validation"]
+        codes = [row["code"] for row in validation["unresolved"]]
+        assert codes.count("verdict.timeout") == 1
+        assert "verdict.fallback" not in codes
+
+    def test_the_report_carries_no_confidence_for_it(self) -> None:
+        report, markdown = _reported(
+            {"decision": "Suspicious", "failure": "verdict.timeout", "recorded": True}
+        )
+
+        assert report["overall_confidence"] is None
+        assert "The judge did not answer" in markdown
+
+    def test_the_note_the_judge_already_recorded_is_not_written_again(self) -> None:
+        update = _run_report(
+            {"decision": "Suspicious", "failure": "verdict.timeout", "recorded": True}
+        )
+
+        assert "validation" not in (update.get("run_summary") or {})

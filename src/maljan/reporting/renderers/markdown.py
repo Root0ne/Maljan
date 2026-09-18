@@ -139,6 +139,11 @@ class MarkdownRenderer:
                 "verdict, confidence and severity below should be treated as tentative "
                 f"and corroborated manually.  \n> Reasons: {reasons}"
             )
+        elif report.degradation_reasons:
+            # A run that is not degraded can still be missing something a
+            # reader would look for — a section the composer could not get past
+            # its schema is simply absent from the report otherwise.
+            header += "\n\n**Notes**: " + "; ".join(report.degradation_reasons) + "."
         # What the report is standing on, said in the header rather than left
         # in a JSON field: a reader who is told nothing was trimmed reads the
         # evidence sections as complete, and a reader who is told twelve
@@ -483,8 +488,8 @@ class MarkdownRenderer:
         if net.domains:
             lines.append("### Domains")
             lines.append("")
-            lines.append("| FQDN | Suspicious | Reason | Resolved IPs | Queried by |")
-            lines.append("|---|---|---|---|---|")
+            lines.append("| FQDN | Source | Suspicious | Reason | Resolved IPs | Queried by |")
+            lines.append("|---|---|---|---|---|---|")
             for d in net.domains[:40]:
                 lines.append(_domain_row(d))
             lines.append("")
@@ -557,7 +562,7 @@ class MarkdownRenderer:
         lines = ["## MITRE ATT&CK Matrix", ""]
         if not cells and not mappings:
             lines.append("_No ATT&CK techniques mapped._")
-            return "\n".join(lines)
+            return "\n".join(lines + _unmapped_behaviour_lines(report))
 
         if cells:
             lines.append("| Tactic | Technique | Confidence | Layers |")
@@ -588,7 +593,7 @@ class MarkdownRenderer:
                 for quote in mapping.evidence_quotes[:6]:
                     lines.append(f"> {_truncate(quote, 240)}")
                 lines.append("")
-        return "\n".join(lines).rstrip()
+        return "\n".join(lines + _unmapped_behaviour_lines(report)).rstrip()
 
     def _section_attribution(self, report: MalwareReport) -> str:
         attr = report.attribution
@@ -1024,6 +1029,26 @@ def _evidence_body(section: Any) -> list[str]:
     return []
 
 
+def _unmapped_behaviour_lines(report: MalwareReport) -> list[str]:
+    """The behaviours the verdict named and could not map to a technique.
+
+    Printed under the matrix and never inside it: a behaviour with no technique
+    id is not an ATT&CK technique, and the run that produced three of them had
+    them published as techniques with an empty id.
+    """
+    names = list(getattr(report, "unmapped_behaviours", None) or [])
+    if not names:
+        return []
+    lines = ["", "### Behaviours with no mapped technique", ""]
+    lines.extend(f"- {_truncate(name, 200)}" for name in names)
+    lines.append("")
+    lines.append(
+        "_Named in the verdict without a MITRE ATT&CK technique id after the id was "
+        "asked for. They are not ATT&CK techniques and are not counted as any._"
+    )
+    return lines
+
+
 def _truncate(value: str, length: int) -> str:
     if value is None:
         return ""
@@ -1082,7 +1107,13 @@ def _domain_row(d: NetworkDomain) -> str:
     # "-" here — but when a dropped child resolves the C2 rather than the
     # parent, this column is the whole story and it was not being printed.
     pids = ", ".join(str(p) for p in d.queried_pids[:6]) or "-"
-    return f"| `{d.fqdn}` | {flag} | {reason} | {ips} | {pids} |"
+    # Where the name came from. `strings` is a run of bytes in the file that
+    # has the shape of a hostname — a far weaker claim than a name the
+    # sandbox watched the sample resolve, and the two were printed
+    # identically. Such a name is also kept out of the exported bundle, so a
+    # reader comparing the table with the bundle needs the column to see why.
+    source = d.source or "-"
+    return f"| `{d.fqdn}` | {source} | {flag} | {reason} | {ips} | {pids} |"
 
 
 def _ip_row(ip: NetworkIP) -> str:
