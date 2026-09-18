@@ -487,3 +487,67 @@ class TestAnEnrichmentGetsOutOfTheWay:
         ctx = self._ctx(redis, _analysis_queue(), pool)
 
         assert await enrich_worker.defer_behind_the_analyses(ctx, "r", 0.0) is None
+
+
+class TestTheDeferralCannotLoseTheWork:
+    """Three ways the deferral could have dropped an enrichment or kept one for ever."""
+
+    @staticmethod
+    def _ctx(queued: list[str], pool: Any) -> dict[str, Any]:
+        redis = MagicMock()
+        redis.zrange = AsyncMock(return_value=[m.encode() for m in queued])
+        redis.connection_pool = MagicMock()
+        return {"redis": redis, "queue": _analysis_queue(), "arq_pool": pool}
+
+    @pytest.mark.asyncio
+    async def test_a_queue_that_refuses_the_job_means_run_now(self) -> None:
+        """arq says no by returning ``None``, not by raising.
+
+        It does that when the id is already queued, when its result is still on
+        file, or when the watch on the key was broken. Nothing was put back, so
+        treating it as a deferral would drop this report's enrichment.
+        """
+        from app.worker import enrich_worker
+
+        pool = MagicMock()
+        pool.enqueue_job = AsyncMock(return_value=None)
+        ctx = self._ctx([str(uuid.uuid4())], pool)
+
+        assert await enrich_worker.defer_behind_the_analyses(ctx, "r", 0.0) is None
+        pool.enqueue_job.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_the_whole_waiting_set_is_read(self) -> None:
+        """A page by rank would be all deferred enrichments and no analysis.
+
+        The deferred jobs this function creates score into the future, so they
+        sort after everything pending: a bounded page can be full of them while
+        an analysis waits just past it.
+        """
+        from app.worker import enrich_worker
+
+        pool = _pool()
+        ctx = self._ctx([f"enrich:{_analysis_queue()}:{uuid.uuid4()}:d60"] * 200, pool)
+        deep = [f"enrich:x:{index}".encode() for index in range(200)]
+        deep.append(str(uuid.uuid4()).encode())
+        ctx["redis"].zrange = AsyncMock(return_value=deep)
+
+        assert await enrich_worker.defer_behind_the_analyses(ctx, "r", 0.0) is not None
+        assert ctx["redis"].zrange.await_args.args[1:] == (0, -1)
+
+    @pytest.mark.asyncio
+    async def test_a_hand_written_negative_total_cannot_defer_for_ever(self) -> None:
+        """The total is a job argument, so it is read as data, not as fact."""
+        from app.worker.enrich_worker import (
+            ENRICHMENT_DEFER_SECONDS,
+            defer_behind_the_analyses,
+        )
+
+        pool = _pool()
+        ctx = self._ctx([str(uuid.uuid4())], pool)
+
+        # A negative total is read as "has not waited yet", so the next one is
+        # one step rather than one step past minus infinity.
+        assert await defer_behind_the_analyses(ctx, "r", -10_000.0) == ENRICHMENT_DEFER_SECONDS
+        # And something that is not a number at all is read the same way.
+        assert await defer_behind_the_analyses(ctx, "r", "soon") == ENRICHMENT_DEFER_SECONDS  # type: ignore[arg-type]

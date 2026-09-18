@@ -26,6 +26,7 @@ one — duplicate work is impossible.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
 from typing import TYPE_CHECKING, Any
@@ -64,6 +65,10 @@ ENRICHMENT_MAX_JOBS = max(1, int(os.environ.get("ENRICHMENT_MAX_JOBS", "2")))
 # enrichment per cap window.
 ENRICHMENT_DEFER_SECONDS = 60
 ENRICHMENT_DEFER_CAP_SECONDS = 1800
+# How long the queue read before a deferral may take. Short: it runs at the
+# head of every enrichment, and a Redis that cannot answer it in this long is
+# not one to hold an enrichment behind.
+QUEUE_READ_TIMEOUT = 5.0
 
 
 def enrichment_health_key() -> str:
@@ -99,10 +104,21 @@ async def analyses_are_waiting(redis_conn: Any) -> bool:
     under ``enrich:…`` and an analysis under its own job id. Never raises — a
     queue that cannot be read is not a reason to defer, because the enrichment
     would then defer for ever.
+
+    The whole waiting set is read rather than a page of it. A rank bound would
+    answer "is an analysis among the first N by score", and the deferred
+    enrichments this very function creates score into the future and sort
+    *after* everything pending — so a page could be all enrichments while an
+    analysis waited just past it. The set is the queue's own backlog, read once
+    per enrichment start, and the read is bounded in time instead: a Redis slow
+    enough to miss that budget is one whose answer this must not wait for,
+    because the analysis it would have yielded to is not going anywhere either.
     """
     try:
-        members = await redis_conn.zrange(ANALYSIS_QUEUE, 0, 100)
-    except Exception as exc:  # noqa: BLE001 — an unreadable queue is not a queue full of work
+        members = await asyncio.wait_for(
+            redis_conn.zrange(ANALYSIS_QUEUE, 0, -1), timeout=QUEUE_READ_TIMEOUT
+        )
+    except (Exception, TimeoutError) as exc:  # noqa: BLE001 — an unreadable queue is not work
         logger.debug("enrich: could not read the analysis queue (%s).", type(exc).__name__)
         return False
     for member in members or []:
@@ -122,6 +138,14 @@ async def defer_behind_the_analyses(ctx: dict, report_id: str, deferred_for: flo
     """
     if ctx.get("queue") == ENRICHMENT_QUEUE:
         return None
+    # The total arrives as a job argument, which a hand-enqueued job may have
+    # written by hand. A negative one would put the cap out of reach and defer
+    # this report for ever; anything that is not a number at all is read as
+    # "has not waited yet".
+    try:
+        deferred_for = max(0.0, float(deferred_for))
+    except (TypeError, ValueError):
+        deferred_for = 0.0
     if deferred_for >= ENRICHMENT_DEFER_CAP_SECONDS:
         logger.info(
             "enrich: report %s waited %.0fs for the analyses; running it now.",
@@ -138,7 +162,7 @@ async def defer_behind_the_analyses(ctx: dict, report_id: str, deferred_for: flo
         from arq.connections import ArqRedis
 
         pool = ctx.get("arq_pool") or ArqRedis(connection_pool=redis_conn.connection_pool)
-        await pool.enqueue_job(
+        queued = await pool.enqueue_job(
             "enrich_threat_intel",
             str(report_id),
             total,
@@ -153,6 +177,17 @@ async def defer_behind_the_analyses(ctx: dict, report_id: str, deferred_for: flo
             "enrich: could not defer report %s (%s); running it now.",
             report_id,
             type(exc).__name__,
+        )
+        return None
+    if queued is None:
+        # arq says no without raising: that id is already queued, or its result
+        # is still on file, or the watch on the key was broken by somebody
+        # else. Deferring on that answer would drop this enrichment, because
+        # nothing was put back — so it runs now.
+        logger.info(
+            "enrich: the queue would not take report %s back (%.0fs deferred); running it now.",
+            report_id,
+            deferred_for,
         )
         return None
     return total
