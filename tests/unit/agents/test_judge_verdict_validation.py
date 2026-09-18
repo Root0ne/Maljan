@@ -300,14 +300,18 @@ class TestUnknownTechniqueIds:
         assert (verdict.retries, len(llm.calls)) == (0, 1)
 
     @pytest.mark.asyncio
-    async def test_a_sigma_reference_does_not_trigger_the_check(self) -> None:
-        judge, llm = _judge(
-            _bundle_json(attack_patterns=[_attack_pattern("5f1c6b0d-1e1a", source_name="sigma")])
+    async def test_a_sigma_reference_is_not_read_as_a_technique_id(self) -> None:
+        """It is not asked about the catalogue — there is no ATT&CK id to look
+        up — it is asked for one, once, and the answer it gives stands."""
+        answer = _bundle_json(
+            attack_patterns=[_attack_pattern("5f1c6b0d-1e1a", source_name="sigma")]
         )
+        judge, llm = _judge(answer, answer)
 
         verdict = await judge.give_verdict(reports=REPORTS, history=[])
 
-        assert (verdict.retries, verdict.violations, len(llm.calls)) == (0, [], 1)
+        assert [v.code for v in verdict.violations] == ["attck.missing_id"]
+        assert (verdict.retries, len(llm.calls)) == (1, 2)
 
     @pytest.mark.asyncio
     async def test_the_object_is_reported_rather_than_dropped_before_the_judge_sees_it(
