@@ -812,9 +812,13 @@ export const MOCK_SETTINGS_VALUES = {
     "core.mcp.servers": {
       value: {
         network: {
+          // A built-in's required names are in every map the API answers with:
+          // it puts them back on load and on save, so a fixture without them
+          // describes a response the API cannot produce.
           enabled: true, transport: "stdio", command: "python",
           args: ["services/network-mcp/server.py"], env: {}, cwd: "services/network-mcp",
-          env_allow: [], url: "", auth_token: "", auth_token_source: "default",
+          env_allow: ["MALJAN_STAGING_DIR", "MALJAN_SAMPLE_ROOTS"],
+          url: "", auth_token: "", auth_token_source: "default",
           tools: null, agents: ["network"], label: "Network MCP",
         },
         threatintel: {
@@ -1348,7 +1352,8 @@ export const MOCK_SETTINGS_VALUES_FULL: SettingsValues = {
         network: {
           enabled: true, transport: "stdio", command: "python",
           args: ["services/network-mcp/server.py"], env: {}, cwd: "services/network-mcp",
-          env_allow: [], url: "", auth_token: "", auth_token_source: "default",
+          env_allow: ["MALJAN_STAGING_DIR", "MALJAN_SAMPLE_ROOTS"],
+          url: "", auth_token: "", auth_token_source: "default",
           tools: null, agents: ["network"], label: "Network MCP",
         },
       },

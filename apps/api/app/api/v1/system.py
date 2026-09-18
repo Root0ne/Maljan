@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import observability
 from app.auth.throttle import throttle_state
 from app.config import settings
-from app.database import get_db
+from app.database import end_read_transaction, get_db
 from app.deps import optional_current_user, require_admin
 from app.logging_config import get_logger
 from app.models.user import User
@@ -180,6 +180,13 @@ async def ltm_purge(
             # URL may carry an API key or a password.
             detail=redact_url(f"memory store unavailable: {exc}"),
         ) from exc
+
+    # The settings that name the collection have been read; the purge itself
+    # talks to Qdrant and scrolls the whole collection, which is no reason to
+    # hold a transaction on Postgres. Outside the block above, so a database
+    # that refused the commit is not reported to the operator as a memory
+    # store that is unavailable.
+    await end_read_transaction(db)
 
     backend_name = type(store).__name__
 

@@ -206,27 +206,85 @@ class TestTheWorkerFailsSuchAJob:
             "no report model is even imported first"
         )
         assert raised < source.index('"phase_change", {"phase": "reporting"}')
-        assert raised < source.index('job.status = "completed"')
+        assert raised < source.index('status="completed"')
 
-    def test_the_failure_path_writes_the_message_to_the_job_row(self) -> None:
+    def test_the_failure_path_writes_the_reason_to_the_job_row(self) -> None:
+        """Through a session of its own, and as a reason rather than a message.
+
+        The row is written by ``mark_job_failed``, which opens a new session:
+        the one the run was writing through is the one a terminated backend
+        leaves unusable. What it writes is ``failure_reason`` — the class of
+        the exception and the error id — because ``job.error_message`` is
+        published on ``JobResponse``.
+        """
         import inspect
 
         from app.worker import analysis_worker
 
         source = inspect.getsource(analysis_worker.run_analysis)
-        handler = source[source.index("except Exception as exc:") :]
+        handler = source[source.index("\n    except Exception as exc:") :]
 
-        assert 'job.status = "failed"' in handler
-        assert "job.error_message = error_msg[:2000]" in handler
-        assert 'error_msg = f"{type(exc).__name__}: {exc}"' in source
+        assert "failure_reason(" in handler, "the row carries a reason, not a message"
+        assert "mark_job_failed(" in handler, "and it is written on a session of its own"
+        assert "db." not in handler.split("finally:")[0], (
+            "the failure path must not reach for the run's own session"
+        )
+
+    def test_the_reason_carries_the_class_and_the_id_and_nothing_else(self) -> None:
+        from app.worker.analysis_worker import AbsentAnalysisError, failure_reason
+
+        assert failure_reason(ValueError("/srv/samples/x.exe is missing"), "abc") == (
+            "ValueError (error id abc)"
+        )
+        # The exceptions whose sentence this module wrote itself.
+        absent = AbsentAnalysisError("no analysis was produced: ... (APIStatusError 402)")
+        assert failure_reason(absent, "abc").startswith("no analysis was produced")
+        assert failure_reason(absent, "abc").endswith("(error id abc)")
+
+    def test_a_sentence_this_module_wrote_reaches_the_operator_whole(self) -> None:
+        """The two attached-report refusals are answers, not stack traces."""
+        from app.worker.analysis_worker import StatedFailure, failure_reason
+
+        stated = StatedFailure("The attached sandbox report does not belong to this sample.")
+        assert failure_reason(stated, "abc") == (
+            "The attached sandbox report does not belong to this sample. (error id abc)"
+        )
 
     def test_the_absent_run_is_its_own_error_class(self) -> None:
         """Its own class so the handler above cannot be reached by accident."""
-        from app.worker.analysis_worker import AbsentAnalysisError
+        from app.worker.analysis_worker import AbsentAnalysisError, StatedFailure
 
-        assert issubclass(AbsentAnalysisError, Exception)
+        assert issubclass(AbsentAnalysisError, StatedFailure)
+        assert issubclass(StatedFailure, Exception)
         error = AbsentAnalysisError("no analysis was produced: ... (APIStatusError 402)")
         assert f"{type(error).__name__}: {error}".startswith("AbsentAnalysisError: ")
+
+    def test_every_worded_refusal_in_the_module_is_a_stated_failure(self) -> None:
+        """A sentence raised as a bare exception would be swallowed by its class.
+
+        Read off the source: a ``raise`` whose argument is a sentence — it ends
+        in a full stop — belongs to the class that keeps sentences.
+        """
+        import ast
+        import inspect
+
+        from app.worker import analysis_worker
+
+        tree = ast.parse(inspect.getsource(analysis_worker))
+        worded: list[str] = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Raise) or not isinstance(node.exc, ast.Call):
+                continue
+            raised = getattr(node.exc.func, "id", "")
+            said = "".join(
+                part.value
+                for part in ast.walk(node.exc)
+                if isinstance(part, ast.Constant) and isinstance(part.value, str)
+            )
+            if said.strip().endswith(".") and " " in said.strip():
+                worded.append(f"{raised}: {said}")
+        assert worded, "the module raises at least one worded refusal"
+        assert all(entry.startswith("StatedFailure:") for entry in worded), worded
 
 
 class TestWhatTheReaderIsTold:

@@ -257,7 +257,9 @@ class TestAProbeLeavesARow:
 
         app = FastAPI()
         app.include_router(settings_module.router, prefix="/api/v1")
-        app.dependency_overrides[get_db] = lambda: MagicMock()
+        # The probe routes end their read transaction before the probe runs,
+        # so the stand-in session has to answer ``commit`` as a session does.
+        app.dependency_overrides[get_db] = lambda: MagicMock(commit=AsyncMock())
         app.dependency_overrides[require_admin] = lambda: user
         monkeypatch.setattr(
             settings_module.SettingsService, "load_overrides", AsyncMock(return_value={})

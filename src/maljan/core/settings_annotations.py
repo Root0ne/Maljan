@@ -1612,7 +1612,10 @@ ANNOTATIONS.update(
             "order": -1,
         },
         "agents.profiles": {
-            "title": "Teams",
+            # Not "Teams": the console's page for this leaf is already called
+            # Teams, and the two headings sat on top of each other. The
+            # agents leaf beside it is "Agent definitions" for the same reason.
+            "title": "Team definitions",
             "description": (
                 "Named teams, each an ordered list of stages: an analysis stage "
                 "runs the agents it names, a debate stage argues over the "

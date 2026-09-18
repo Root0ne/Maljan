@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { buildReviewItems } from "../ReviewList";
+import { attentionLine, buildReviewItems, reviewErrors } from "../ReviewList";
+import { stagedDefinitions } from "../agentStaging";
 import type { ReviewSource } from "../ReviewList";
-import type { CatalogEntry, SettingsSchema } from "@/types/settings";
+import type { AgentDefinitionEntry, CatalogEntry, SettingsSchema } from "@/types/settings";
 
 function entry(overrides: Partial<CatalogEntry>): CatalogEntry {
   return {
@@ -134,8 +135,23 @@ describe("buildReviewItems", () => {
     const items = buildReviewItems(baseSource());
     const byKey = new Map(items.map((i) => [i.key, i]));
 
-    expect(byKey.get(maxTokens.key)?.error).toBe("must be a positive integer");
-    expect(byKey.get(apiKey.key)?.error).toBeUndefined();
+    expect(byKey.get(maxTokens.key)?.errors).toEqual(["must be a positive integer"]);
+    expect(byKey.get(apiKey.key)?.errors).toEqual([]);
+  });
+
+  /* One composite leaf can be refused on several of its fields at once. The
+   * review panel counted rows and joined the messages with semicolons, so it
+   * announced "1 field needs attention" over five sentences read out as one.
+   * A row keeps them apart. */
+  it("keeps a composite leaf's field errors apart", () => {
+    const source = baseSource();
+    source.errors = {
+      [`${maxTokens.key}.alpha`]: "alpha is wrong",
+      [`${maxTokens.key}.beta`]: "beta is wrong",
+    };
+    const byKey = new Map(buildReviewItems(source).map((i) => [i.key, i]));
+
+    expect(byKey.get(maxTokens.key)?.errors).toEqual(["alpha is wrong", "beta is wrong"]);
   });
 
   it("never renders a secret's value, only that a new one was staged", () => {
@@ -143,5 +159,117 @@ describe("buildReviewItems", () => {
     const byKey = new Map(items.map((i) => [i.key, i]));
 
     expect(byKey.get(apiKey.key)?.summary).toBe("new value");
+  });
+});
+
+/* The review panel reads the two halves of an agent-map edit. They are not the
+ * same shape — a staged built-in carries its role and its switch and nothing
+ * else — so comparing them raw reported every built-in as about to have its
+ * prompt, tools and label rewritten. That is the sentence the whole C-C4 fix
+ * exists to stop printing, moved out of the error list and into the change
+ * list. */
+const definitions = entry({
+  key: "core.agents.definitions",
+  group: "agents",
+  title: "Agent definitions",
+  type: "json",
+  editor: "agent_definitions",
+});
+
+function builtin(role: AgentDefinitionEntry["role"], label: string): AgentDefinitionEntry {
+  return { role, label, prompt: null, tools: [], static_provider: null, enabled: true };
+}
+
+const ahmet: AgentDefinitionEntry = {
+  role: "generic",
+  label: "Ahmet",
+  prompt: "Summarise the sample.",
+  tools: [],
+  static_provider: null,
+  enabled: true,
+};
+
+const storedAgents = {
+  static: builtin("static", "Static analyst"),
+  judge: builtin("judge", "Judge"),
+  reporter: builtin("report", "Reporter"),
+};
+
+function agentSource(staged: Record<string, unknown>): ReviewSource {
+  return {
+    schema: {
+      groups: [
+        { key: "agents", title: "Agents", description: "", entries: [definitions] },
+      ],
+    },
+    pending: { [definitions.key]: staged },
+    entriesByKey: { [definitions.key]: definitions },
+    values: {
+      [definitions.key]: {
+        value: storedAgents,
+        is_set: true,
+        hint: null,
+        source: "ui",
+        updated_at: null,
+        updated_by: null,
+      },
+    },
+    hiddenKeys: [],
+    errors: {},
+  };
+}
+
+describe("an agent-map edit, as the review panel describes it", () => {
+  it("announces one added agent and no built-in as changed", () => {
+    const staged = stagedDefinitions({ ...storedAgents, ahmet }, storedAgents);
+    const [line] = buildReviewItems(agentSource(staged));
+
+    expect(line.summary).toBe("1 agent changed");
+    expect(line.detail).toEqual(["ahmet: added"]);
+  });
+
+  it("still names a built-in the operator did turn off", () => {
+    const staged = stagedDefinitions(
+      { ...storedAgents, static: { ...storedAgents.static, enabled: false } },
+      storedAgents,
+    );
+    const [line] = buildReviewItems(agentSource(staged));
+
+    expect(line.summary).toBe("1 agent changed");
+    expect(line.detail).toEqual(["static: disabled"]);
+  });
+
+  it("still names a custom agent that was removed", () => {
+    const withAhmet = { ...storedAgents, ahmet };
+    const source = agentSource(stagedDefinitions(storedAgents, withAhmet));
+    source.values[definitions.key] = { ...source.values[definitions.key], value: withAhmet };
+    const [line] = buildReviewItems(source);
+
+    expect(line.detail).toEqual(["ahmet: removed"]);
+  });
+});
+
+describe("what the review panel announces", () => {
+  it("counts fields across the rows, not rows", () => {
+    const source = baseSource();
+    source.errors = {
+      [`${maxTokens.key}.alpha`]: "alpha is wrong",
+      [`${maxTokens.key}.beta`]: "beta is wrong",
+      [apiKey.key]: "and this one too",
+    };
+    const messages = reviewErrors(buildReviewItems(source));
+
+    expect(messages).toEqual(["alpha is wrong", "beta is wrong", "and this one too"]);
+    expect(attentionLine(messages.length)).toBe("3 fields need attention");
+  });
+
+  it("says it in the singular for one", () => {
+    expect(attentionLine(1)).toBe("1 field needs attention");
+  });
+
+  it("has nothing to announce when the server refused nothing", () => {
+    const source = baseSource();
+    source.errors = {};
+    expect(reviewErrors(buildReviewItems(source))).toEqual([]);
   });
 });

@@ -28,7 +28,9 @@ def test_a_probe_that_fails_before_it_runs_names_no_password() -> None:
 
     app = FastAPI()
     app.include_router(settings_module.router, prefix="/api/v1")
-    app.dependency_overrides[get_db] = lambda: MagicMock()
+    # The route ends its read transaction before the probe, so the stand-in
+    # session answers ``commit`` the way a session does.
+    app.dependency_overrides[get_db] = lambda: MagicMock(commit=AsyncMock())
     app.dependency_overrides[require_admin] = lambda: MagicMock(id="u")
     client = TestClient(app)
 

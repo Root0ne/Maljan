@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { buildReviewItems, ReviewList } from "./ReviewList";
+import { buildReviewItems, ReviewErrorSummary, ReviewList } from "./ReviewList";
 import { useSettingsContext } from "./SettingsContext";
 import { appliesSummary } from "./vocabulary";
+import { countLabel } from "@/lib/report-utils";
 
 const STATUS_DURATION_MS = 6000;
 
@@ -35,9 +36,6 @@ export default function ChangesBar() {
   if (count === 0 && !(statusVisible && lastResult)) return null;
 
   const lines = buildReviewItems(ctx);
-  // Rows of the list below, not raw error entries: one composite leaf can
-  // carry several field-level errors and still be a single row to fix.
-  const errorCount = lines.filter((line) => line.error).length;
 
   const discardAll = () => {
     keys.forEach((k) => ctx.unstage(k));
@@ -75,17 +73,13 @@ export default function ChangesBar() {
           className="fixed inset-x-0 bottom-16 z-40 mx-auto max-w-3xl px-4"
         >
           <div className="border border-border rounded bg-bg-surface shadow-lg px-4 py-3 max-h-[60vh] overflow-auto">
-            {errorCount > 0 && (
-              <p className="text-xs text-status-red mb-2" role="alert">
-                {errorCount} field{errorCount === 1 ? " needs" : "s need"} attention
-              </p>
-            )}
+            <ReviewErrorSummary lines={lines} />
             <ReviewList lines={lines} />
             <div className="flex items-center gap-4 mt-4 pt-3 border-t border-border">
               <button
                 type="button"
                 disabled={saving}
-                className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent text-white rounded hover:bg-accent-hover disabled:opacity-50"
+                className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent-fill text-white rounded hover:bg-accent-fill-hover disabled:opacity-50"
                 onClick={onApply}
               >
                 {saving ? "Saving…" : "Confirm and apply"}
@@ -114,7 +108,7 @@ export default function ChangesBar() {
             aria-label="Discard changes"
             className="mb-3 border border-border rounded bg-bg-deep px-3 py-2"
           >
-            <p className="text-xs text-text-secondary">Discard {count} changes?</p>
+            <p className="text-xs text-text-secondary">Discard {countLabel(count, "change")}.</p>
             <div className="flex gap-3 mt-2">
               <button type="button" className="text-xs text-status-red" onClick={discardAll}>
                 Discard
@@ -138,9 +132,7 @@ export default function ChangesBar() {
 
         <div className="flex items-center gap-4 flex-wrap">
           <span className="text-sm text-text-primary">
-            <span data-testid="changes-count">
-              {count} change{count === 1 ? "" : "s"}
-            </span>
+            <span data-testid="changes-count">{countLabel(count, "change")}</span>
             {hiddenCount > 0 && (
               <span className="text-text-muted">
                 {" "}
@@ -150,7 +142,7 @@ export default function ChangesBar() {
           </span>
           <button
             type="button"
-            className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent text-white rounded hover:bg-accent-hover"
+            className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent-fill text-white rounded hover:bg-accent-fill-hover"
             onClick={() => setReviewing(true)}
           >
             Review

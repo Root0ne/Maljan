@@ -317,7 +317,11 @@ test.describe("Conversation", () => {
     await page.goto(`/analysis/${JOB_ID}/conversation`);
 
     const feed = stream(page);
-    await expect(feed).toContainText("claim_without_evidence");
+    /* The rule key is still on the notice, as its title: what a log line is
+     * grepped for, kept off the row it used to ride in front of. The sentence
+     * the rule writes out is the notice. */
+    await expect(feed.getByTitle("claim_without_evidence")).toBeVisible();
+    await expect(feed).not.toContainText("claim_without_evidence");
     await expect(feed).toContainText("Cite the call behind the injection claim.");
     await expect(feed).toContainText("Which call shows the injection pair being used.");
     await expect(feed).toContainText("Check whether those imports are resolved at runtime.");

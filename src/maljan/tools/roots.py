@@ -83,7 +83,14 @@ def add_sample_root(path: str | Path) -> None:
     "After this" is the whole of the contract. A sidecar's environment is
     copied into the child when it is spawned (``agents.subprocess_env``), so a
     root added once a server is running does not reach that server. Every
-    caller here runs before the registry opens anything.
+    caller here runs before the registry opens anything: the worker names its
+    download directory and sample mirrors at startup, the mirror step and the
+    sandbox capture fetch name theirs while the run is still assembling its
+    inputs, and ``MaljanApp.arun`` names the directory of the sample path it
+    was handed before it builds the pipeline. A job's registry attaches after
+    all of that, and it belongs to the job — a handle held over from an
+    earlier one is closed and started again under the new job id — so no
+    server has to be restarted mid-run for a root to take effect.
     """
     entry = str(path).strip()
     if not entry:

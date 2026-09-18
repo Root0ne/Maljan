@@ -422,7 +422,7 @@ test.describe("Settings → Setup guides (admin)", () => {
     await page.waitForURL("**/settings/configuration/models/llm");
 
     const link = page.getByRole("link", { name: /^LLM & model/ });
-    await expect(link).toHaveAccessibleName(/1 unsaved changes/);
+    await expect(link).toHaveAccessibleName(/1 unsaved change/);
     await expect(page.getByTestId("changes-count")).toHaveText("1 change");
   });
 });

@@ -15,8 +15,9 @@ import {
   saysSomething,
   sectionsForTab,
 } from "@/components/analysis/reportSections";
+import { humaniseRow } from "@/lib/humanise";
 import { fileTypeLabel, platformLabel } from "@/types/malware-report";
-import type { SampleIdentity } from "@/types/malware-report";
+import type { EvidenceSection, SampleIdentity } from "@/types/malware-report";
 
 export default function IdentityTab() {
   const { report, loading } = useReport();
@@ -42,12 +43,17 @@ export default function IdentityTab() {
     section: splitIdentity,
     hashes: ledgerHashes,
     signing: sectionStatesSigning,
+    states: sectionStates,
   } = readIdentitySection(
     identitySection,
     report?.malware_report?.identity?.file_type,
   );
   const evidenceSections = tabSections.flatMap((section) =>
-    section.key === "identity" ? (splitIdentity ? [splitIdentity] : []) : [section],
+    section.key === "identity"
+      ? splitIdentity
+        ? [splitIdentity]
+        : []
+      : [readableHeader(section)],
   );
   const showsTypedIdentity = !isCoveredBySection(reportSections, binarySectionKeys("header"));
 
@@ -120,10 +126,10 @@ export default function IdentityTab() {
         </div>
         {/* A row whose value is nothing is not a row. Seven labels above
             seven "(unknown)"s said only that the extractor has seven fields. */}
-        <div className="p-4 grid grid-cols-2 gap-4">
+        <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
           {[
-            { label: "File Name", value: identity.file_name ?? "" },
-            { label: "File Type", value: identity.file_type ? fileTypeLabel(identity.file_type) : "" },
+            { label: "File name", value: identity.file_name ?? "" },
+            { label: "File type", value: identity.file_type ? fileTypeLabel(identity.file_type) : "" },
             {
               label: "Platform",
               value:
@@ -135,16 +141,18 @@ export default function IdentityTab() {
               label: "Size",
               value: identity.file_size_bytes ? formatBytes(identity.file_size_bytes) : "",
             },
-            { label: "MIME Type", value: identity.mime_type ?? "" },
+            { label: "MIME type", value: identity.mime_type ?? "" },
             {
-              label: "Compile Timestamp",
+              label: "Compile timestamp",
               value: identity.compile_timestamp
                 ? new Date(identity.compile_timestamp).toLocaleString()
                 : "",
             },
-            { label: "Language / Compiler", value: identity.language_or_compiler ?? "" },
+            { label: "Language / compiler", value: identity.language_or_compiler ?? "" },
           ]
-            .filter((field) => saysSomething(field.value))
+            // A field the ledger table above already carries is not drawn
+            // again: `size` appeared in both tables on the one screen.
+            .filter((field) => saysSomething(field.value) && !sectionStates.has(field.label))
             .map((field) => (
               <Field key={field.label} label={field.label} value={field.value} />
             ))}
@@ -168,12 +176,12 @@ export default function IdentityTab() {
               Code Signing
             </h2>
           </div>
-          <div className="p-4 grid grid-cols-2 gap-4">
+          <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
             {[
-              { label: "Signer Subject", value: identity.signing.signer_subject ?? "" },
+              { label: "Signer subject", value: identity.signing.signer_subject ?? "" },
               { label: "Issuer", value: identity.signing.signer_issuer ?? "" },
               {
-                label: "Signature Valid",
+                label: "Signature valid",
                 value:
                   identity.signing.signature_valid === null
                     ? "unverified"
@@ -191,6 +199,19 @@ export default function IdentityTab() {
       )}
     </div>
   );
+}
+
+/**
+ * A binary-info tool's header table, read back into the words it means.
+ *
+ * `machine 34404`, `subsystem 2`, `timestamp 1566949827` and `size 4486656`
+ * are what the file format stores; none of them is a fact about the sample
+ * until it is named. Scoped to the header tables rather than done in
+ * `ArtifactTable`, which is deliberately ignorant of what a tool's fields are.
+ */
+function readableHeader(section: EvidenceSection): EvidenceSection {
+  if (section.kind !== "kv" || !/_header$/.test(section.key)) return section;
+  return { ...section, rows: (section.rows ?? []).map(humaniseRow) };
 }
 
 /** The hashes a reader knows by name, in the order they are usually quoted. */

@@ -22,6 +22,7 @@ from maljan.core.config import (
     ProfileDefinition,
     _builtin_definitions,
     _builtin_profiles,
+    _without_the_empty_builtin_tool_list,
     agent_reference_problems,
     convert_builtin_profile_document,
 )
@@ -134,7 +135,18 @@ def validate_definitions(
         # not "also blank out the label", and without this the identity
         # check below would see a bare-default label and refuse an edit the
         # operator never made.
-        candidate = {**seed, **entry} if seed is not None else entry
+        #
+        # ``_without_the_empty_builtin_tool_list`` is part of that same merge
+        # and was missing here, which is the whole of the console defect the
+        # audit found: a database written before the tool sidecars holds
+        # ``tools: []`` on every built-in, the Settings layer reads that as
+        # "not set" and the seed's tools apply, and this layer read it as an
+        # edit. Every save touching the agent map was then refused with
+        # "'judge' is built in; clone it to change it" on the four built-ins
+        # whose seed has tools -- reporter's is empty, so it alone passed.
+        candidate = (
+            {**seed, **_without_the_empty_builtin_tool_list(entry)} if seed is not None else entry
+        )
         try:
             model = AgentDefinition.model_validate(candidate)
         except ValidationError as exc:

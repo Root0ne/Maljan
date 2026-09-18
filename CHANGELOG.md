@@ -747,6 +747,221 @@ change landed on `main`.
 
 ### Fixed
 
+- **The console stopped clipping itself.** `main` is a flex item, so its
+  `min-width: auto` let it grow to its content's min-content width instead of
+  constraining it: the Detection tab's Suricata block took it to 2542 px
+  inside a 1440 px window and the shell's `overflow:hidden` cut off 1120 px
+  with no scrollbar anywhere to reach it, and the Conversation tab lost its
+  right edge the same way. `min-w-0` on the column and on `main` makes every
+  `overflow-x-auto` inside them engage as it was meant to.
+- **A phone-width layout, and a test that keeps one.** Twenty-one
+  unconditional multi-column grids meant the dashboard kept four stat columns
+  at 375 px with every label clipped, twenty-seven elements past the viewport
+  and no document scroll to reach them. Every grid now starts at one or two
+  columns and widens at a breakpoint, the jobs filter rail stacks, and
+  `styleRules.test.ts` fails on an unconditional `grid-cols-3` or wider.
+- **A custom agent can be saved.** The agents editor staged the whole
+  definition map, so adding one agent re-sent every built-in exactly as it had
+  come back from `GET /settings`, and the API compares a built-in in the body
+  field by field against its seed. A store written before a seed's tool list
+  changed holds `tools: []` on every built-in; the settings model reads that as
+  "not set" and `agent_map.validate_definitions` did not, so every save
+  touching the agent map was refused with "'judge' is built in; clone it to
+  change it" on the four built-ins whose seed has tools. Both halves are
+  fixed: the validator applies the same normalisation the settings model does,
+  and the console stages a built-in as the only two things that may be changed
+  about it — its role and its switch — while drawing the stored entry behind
+  it.
+- **Validation re-runs on the edit.** `useSettings` cleared only the error
+  keyed at the leaf it staged, so a composite leaf's field messages
+  (`core.agents.definitions.ahmet.prompt`) survived every later edit and "a
+  generic agent needs a prompt" went on being printed under a prompt that had
+  one. The review panel also counted rows rather than fields, announcing "1
+  field needs attention" above five messages joined with semicolons into one
+  run-on sentence for a screen reader; the count is of fields and the messages
+  are a list.
+- **The verdict and the severity of a run are reconciled where they
+  disagree.** A run headlined Malicious · 0.95 over a severity card reading
+  Informational 0.5/10 and prose calling the sample legitimate. Neither is
+  overruled — both are the judge's — but the header now names the
+  disagreement once, "Judge: Malicious 0.95 · Severity: Informational", with
+  the sentence that says to read the severity card before quoting either.
+- **Facts printed twice, printed once.** The filename was the `h1` and the
+  "Sample:" line under it; the confidence was `92/100` in the header and
+  `Confidence 0.92.` in the summary paragraph; the search palette printed each
+  row's verdict twice and gave eight runs of one file no way to tell them
+  apart; the agents list printed the key as the key and again as the role; a
+  stage card printed its key in its header and in its Key field; `size`
+  appeared in both of IDENTITY's tables. Each is now in one place, and the
+  palette's rows carry the run's age and its id.
+- **The enrichment banner stopped announcing the past.** The analysis layout
+  walked the event feed from zero, so every `enrichment_complete` in a
+  finished run's history re-toasted "Threat intel enrichment finished" in the
+  present tense on every visit. The refetch still happens; the toast is for
+  events that arrive while the page is open.
+- **WCAG 2.1 AA on the primary button, and the controls a keyboard could not
+  reach.** White on `--accent` measured 3.09:1 on every primary button in the
+  console, so filled buttons use a new `--accent-fill` (4.63:1) and `--accent`
+  keeps its borders, icons and washes. The upload zone was a bare `div` with
+  its file input hidden by `display:none` — unreachable by keyboard and absent
+  from the accessibility tree — and is a button over a visually-hidden input;
+  the analyze dialog returns focus to what opened it; the settings badges move
+  off `--border`, which is the one surface the text-tier contrast analysis
+  never covered; message timestamps move off the disabled tier; every page
+  gains a skip link and an `h1`; every table header gains `scope`; the guide's
+  step chips carry `aria-current` on the button rather than on the list item;
+  and the search palette's rows have ids the combobox names with
+  `aria-activedescendant`.
+- **The audit log says who did it.** It had no actor column at all, a raw
+  action key, a Resource column reading "settings" on every row and an IP
+  column of em dashes, over 1766 entries with no filter. The action is read as
+  a sentence, the actor is drawn, a column every row on the page leaves empty
+  is not drawn, and the action filter goes to the endpoint, which narrows the
+  whole log rather than the twenty rows on screen.
+- **Machine names and machine values are read back before they are drawn.** A
+  section with no typed panel had its tool's own keys as column headers
+  (`optional_dependency`, `technique_ids`) beside hand-written ones, and the
+  binary header tables printed the constants the file format stores — `machine
+  34404`, `subsystem 2`, `timestamp 1566949827`, `entry point 321264`. They
+  now read as sentences and as their named constants, a human size, a UTC date
+  and a hex entry point, and a field nothing knows is drawn as it arrived. The
+  analyze dialog's provider and team menus are labelled rather than keyed, the
+  evidence ledger runs its stage through the same reading as the stage strip,
+  and its Agent and Server columns — "pipeline" on fifteen of forty rows — are
+  one column.
+- **A column that says nothing is not a column.** A column whose every row
+  holds the same value is stated once above the table; one that is empty on
+  every row is dropped. The NETWORK indicator table spent two of its four
+  columns on one evidence id and forty dashes.
+- **Sign out is offered where it works.** Under `NEXT_PUBLIC_AUTH_DISABLED`
+  the handler is an explicit no-op and the header drew the button anyway, so
+  pressing it left the reader on the same page as the same user with nothing
+  said.
+- **The QA warnings box shows that it opens.** `display:flex` on the
+  `<summary>` suppresses Chromium's disclosure triangle, so the box gave no
+  sign of being a disclosure while the RUN RECORD beside it did; the shared
+  explanation is stated once for the group instead of repeated verbatim under
+  each warning, and the field a warning names is named in its sentence rather
+  than restated under it.
+- **The fallback narrative stopped contradicting itself.** It reported "11
+  ATT&CK techniques:" and then listed five, with no ellipsis and no "and 6
+  more"; it pointed the reader at "the Static, Dynamic and Network sections
+  below" whether or not the run filled them, and called tabs sections; and it
+  restated a confidence the header above it already carried, in a different
+  notation. It now says which of the five it is naming, names the tabs the
+  report actually has, and leaves the confidence to the one place that prints
+  it.
+- **The console minors the walkthrough named.** A finished conversation is no
+  longer a live region, so changing a filter does not queue a 23,000-character
+  transcript for re-announcement, and the filter reports "n of m shown" as a
+  status; the jobs list moves the verdict and its labelled confidence inside
+  the link, so dozens of runs of one file are no longer dozens of identically
+  named links, and announces the filtered count; a failed probe says what a
+  `ConnectError` means before quoting it; the two destructive actions on a
+  secret row say what each of them destroys; the "more" toggles say what they
+  are more about; the per-row destructive actions have a button's box and
+  clear the 24 px minimum; a rule key no longer rides in front of the sentence
+  it already reads as; two participants who share a name carry their keys; the
+  DEFENSE tab has a heading; the 404's two links are styled alike; the
+  attribution card's empty rows are one sentence; and the profile form carries
+  `autocomplete` and states its password rule before it is broken.
+- **Six places where the web tree and the code it mirrors had drifted.** A
+  `delegation_answer` left its speaker drawn as working for the rest of the
+  run although it is the callee's own closing line; `EvidenceSummary` did not
+  declare the `failures` the report header prints; `AgentMessageEventData` did
+  not declare the five fields the conversation view reads on a tool line; the
+  section map's comment counted sixteen catalog groups where there are
+  seventeen; the redirect table's comment counted twelve tabs and five where
+  neither number is in the tree; and `REPUTATION_TOOLS` knew two of the three
+  tool names the pipeline recognises.
+- **`core.agents.profiles` is titled "Team definitions".** Its page is already
+  called Teams, so the two headings sat on top of each other.
+- **The worker no longer holds a transaction while the models run.** The
+  analysis task kept one session open for the whole job: it read the settings,
+  and the backend then sat `idle in transaction` for as long as the analysis
+  took — 13 minutes 51 seconds on the run that found it — holding an
+  `AccessShareLock` on `analysis_jobs`, `analysis_reports` and
+  `runtime_settings`. A migration's `ALTER TABLE analysis_reports` queued
+  behind it, every read of that table queued behind the ALTER, and
+  `GET /api/v1/jobs/{id}` timed out for four minutes while `/health` answered
+  in milliseconds. The task now reads the job, its sample, the stored settings
+  and any attached sandbox report in one short session, closes it before the
+  pipeline is built, and opens another for the report, findings, evidence,
+  transcript and completion — which stay in one transaction, because the
+  report's sections cite the ledger's ids. The enrichment task is the same
+  shape: it reads the payload, closes, spends as long as the reputation
+  lookups take (452 s on one measured report) with no session open, and writes
+  through a second one. Cancellation is unchanged, including the feed flush a
+  cancelled run ends with.
+- **A failed job says so, even when its own session is gone.** The failure
+  path wrote through the session the run had been using, which is exactly the
+  session a terminated backend leaves raising `PendingRollbackError`: the run
+  published its `error` event, arq recorded the task as failed, and the row
+  still read `running` with no error and no `completed_at` an hour later. The
+  failure is now recorded through a new session, and what the row says is the
+  class of the exception and the id of the log entry holding the rest, because
+  `error_message` is a field of `JobResponse` and an exception's message names
+  host paths and connection strings. A `cancelled` row is left alone.
+- **No request path waits on a third party inside a transaction.** A
+  request-scoped session is in a transaction from the dependency that resolved
+  the caller, so a handler that then waited on somebody else left a backend
+  `idle in transaction` for the length of that wait. The three probes (up to
+  five minutes at a model endpoint), the VirusTotal registration and the
+  long-term-memory purge now end the read first, through
+  `database.end_read_transaction`. The WebSocket route holds no session across
+  the stream: the handshake decides inside a session and accepts or rejects
+  outside it, and a resume reads one page per session and sends it once that
+  session has closed, rather than holding one open while a thousand frames go
+  out at the client's pace.
+- **A running job says who owns it, and the sweep believes only that.** The
+  sweep marked every `running` row older than five minutes as failed, on the
+  reasoning that this process is the worker and has just booted — true of a
+  single-worker deployment and false of any other, where it would fail a run
+  another worker was performing. Ownership is now a heartbeat the owner writes
+  about the job it is running: `maljan:job-owner:<job id>`, carrying the
+  worker's own id, 90 seconds long, refreshed every 30 and dropped on success,
+  failure and cancellation alike. arq's keys cannot say it — its in-progress
+  claim outlives the process that wrote it by the job timeout, and its
+  queue-wide health key outlives a killed worker by 31 seconds, which is
+  exactly when the restarted container reads it, so an OOM-killed run's row
+  survived the very sweep meant to repair it. The sweep now runs one TTL after
+  startup and every ten minutes after that (which also reaches a job a
+  still-running worker gave up on), leaves a row younger than one TTL for the
+  next pass, never touches a job this process is running, and touches nothing
+  at all when Redis cannot be read, logging that once.
+- **A refusal this worker worded reaches the operator whole.** "The attached
+  sandbox report does not belong to this sample" and "the configured sandbox
+  provider cannot accept an uploaded report" are sentences this module writes
+  from constants, not exception text from a driver or the filesystem. They are
+  now raised as `StatedFailure` — the class `AbsentAnalysisError` already
+  belonged to — and only that class keeps its message on `job.error_message`;
+  everything else still arrives as its class name plus the error id.
+- **The sample roots reach a configured deployment's sidecars, not only a
+  fresh one.** The `analysis` and `network` sidecars read a path argument only
+  inside the directories `MALJAN_SAMPLE_ROOTS` names, and they learn them from
+  their own `env_allow` — but the registry of tool servers is stored as a
+  single row holding every server, written whole each time anything in it is
+  saved, and a built-in that was already in that row kept every field it had
+  been saved with. A deployment that had configured its servers before the
+  confinement shipped therefore went on starting both sidecars without the
+  variable, and every analyst tool call on the run's own sample came back
+  refused with `path_outside_roots` — the error meant for a path the sample's
+  author chose. A built-in's `env_allow` now always carries the names its
+  sidecar cannot run without — the sample roots, the staging directory and its
+  retention — on load, on save, in the editor's own view and in the connection
+  test, which launches the server a run launches, so a name a sidecar gains
+  reaches a deployment that has been configured rather than a fresh install
+  alone. The Configuration tab draws those names above the box as always
+  passed, so an admin can no longer delete one, be told the map was saved, and
+  go on believing a sidecar was narrowed. Every other shipped name stays the
+  operator's: a
+  `threatintel` whose `VIRUSTOTAL_API_KEY` and `ABUSEIPDB_API_KEY` an admin has
+  cleared keeps them out of the child, and the sidecar answers from its mock as
+  it does on a host that never held a key. A server an operator added is
+  untouched: it sees the roots only when its own `env_allow` lists them, and
+  the general-purpose environment every child gets is unchanged. Proven through
+  the real spawn path — a live sidecar started the way the registry starts one
+  reads a file under an exported root and still refuses one outside every root.
 - **The repeat guard's notice is a message to the model and nothing else.** A
   refused third call to the same tool with the same arguments was written to
   the evidence ledger as a *successful* call — `ok=true`, `duration_ms=0` —
@@ -763,7 +978,6 @@ change landed on `main`.
   are kept, the ones it does not are named as a degradation reason, and a
   section that is genuinely lost — its shape still wrong after the retry, its
   round timed out or failed — is named in the report's notes with the reason.
-
 - **A lead that never wrote its report no longer takes its specialists'
   answers with it.** A lead's report is the only channel its chunk has out of a
   stage, so a loop that ended without one lost every completed ask: one audited
@@ -777,7 +991,6 @@ change landed on `main`.
   keyed by the agent and the ask's number (`deep_static#2`): three asks to one
   specialist are three answers, and keyed by the agent alone the second and
   third were dropped. Nothing is promoted beside a report that exists.
-
 - **Every violation a run recorded reaches the conversation, with what became
   of it.** Only the batch that triggered a correction turn was published, so a
   reader watching a run saw neither the violations that survived the retry nor
@@ -791,7 +1004,6 @@ change landed on `main`.
   are unchanged; `path` is added beside them, so `(agent, code, path)` folds
   the two lines about one violation together and keeps two violations of one
   code on different claims apart.
-
 - **One source for the techniques a report publishes.** A report's three
   technique surfaces were built from three sources and disagreed inside single
   runs: one run exported ten techniques and a STIX bundle with no
@@ -820,7 +1032,6 @@ change landed on `main`.
   check never ran on an Android sample's techniques — and one that survives is
   reported as a behaviour, in the new `MalwareReport.unmapped_behaviours` and
   under its own heading in the markdown.
-
 - **The ATT&CK alignment gate scores inside the sample's own scope, and asks
   nothing unless it is turned on.** The index that ranks a claim's text is
   domain-blind, so a technique claim about a Windows PE was answered with
@@ -840,7 +1051,6 @@ change landed on `main`.
   none of the 36 claims whose id the audit read as right for its sample and 5
   of the other 69, and none of the 105 derived rows that put the claimed id
   back into its own ranking; docs/architecture.md carries the measurement.
-
 - **A judge that never answered no longer produces the verdict "Malware".** The
   bundle the pipeline builds when the judge's answer was not a bundle carried a
   `malware` object whatever verdict it was carrying, and the pipeline read the
@@ -863,7 +1073,6 @@ change landed on `main`.
   reads "not assessed", and the run summary carries the code once rather than
   twice — asked off the bundle's own mark rather than off the violation codes,
   so a fallback built from JSON that was not a bundle is one too.
-
 - **Four documented facts that had drifted from the code.** The delegation
   section said a lead's 1800 s stage had room for five asks where
   `_asks_that_fit` computes six and the `ask_<key>` description gives the model

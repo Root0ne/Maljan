@@ -39,7 +39,29 @@ link into the run rather than a second rendering of the list.
 
 The analysis header carries the verdict, the sample, the job status and the
 run's stages, and the stage strip is there and nowhere else, so the shape of
-the run reads the same from every tab. A stage names itself and its members by
+the run reads the same from every tab. The sample is the heading and is not
+restated under it; the confidence is printed here, once, as a two-decimal
+number, and a run whose judge never answered reads "not assessed" rather than
+being scored zero.
+
+**When the verdict and the severity disagree.** A judge can call a sample
+Malicious and rate it Informational in the same run, and the console used to
+present the two as unrelated facts two cards apart — a reader had no way to
+know which to believe. Neither is overruled here: both are the judge's, and
+picking a winner would be the console inventing a finding. Instead the header
+says so, in one line — "Judge: Malicious 0.95 · Severity: Informational" —
+with the sentence that names the disagreement under it.
+
+The rule is deliberately narrow (`apps/web/src/lib/verdictHeader.ts`). Two
+shapes contradict: a malicious verdict over Informational, or over a severity
+block the judge assessed no rating into; and a benign verdict over High or
+Critical. Nothing else does. A malicious verdict at Low severity is what
+adware, unwanted programs and riskware look like on a report that is not
+contradicting itself, and telling that reader not to trust either number would
+spend the trust this rule exists to protect. A Suspicious verdict sits between
+the two by definition, a verdict the console does not recognise implies
+nothing, and a run with no structured report yet has no severity to disagree
+with. A stage names itself and its members by
 the labels an operator gave them — the same names the conversation and the
 per-agent results table use. One selector answers for all of them
 (`apps/web/src/lib/rosterNames.ts`), reading the roster the job carries and
@@ -165,6 +187,20 @@ list is not drawn, and a key/value section whose every row said nothing is not
 drawn either — a heading over an empty table is the "No X yet" placeholder in
 another shape. A table row is left alone, because its cells are positional.
 
+A column says nothing in the same way. A column whose every row holds the same
+value is stated once above the table and taken out of it, and one that is
+empty on every row is dropped: the NETWORK indicator table spent two of its
+four columns on one evidence id and forty dashes.
+
+Machine names and machine values are read back before they are drawn
+(`apps/web/src/lib/humanise.ts`). A section the console has no typed panel for
+is drawn from its own declared shape, so its column headers are whatever key
+the tool used, and a binary header table's values are the constants the file
+format stores — `machine 34404`, `subsystem 2`, `timestamp 1566949827`. The
+keys are read as sentences with an acronym list, and the header values as
+their named constants, a human size, a UTC date and a hex entry point. A field
+or a constant nothing knows is drawn as it arrived rather than guessed at.
+
 IDENTITY applies it twice over. The `identity` section is the one that
 overlaps the tab's own blocks, so it is split: its hashes go to the File
 hashes block, which draws only the fingerprints a tool produced, and its
@@ -186,6 +222,41 @@ needs — a model, a static analyser, a sandbox and a team — and opens the oth
 three once there is a model to test them against. Every setting is editable in
 exactly one group of the console; a guide is the staged, step-by-step way into
 the same keys, and each group header links to the guide that covers it.
+
+## Width, contrast and the keyboard
+
+The content column constrains its content rather than growing to it: `main` is
+a flex item, so without `min-w-0` one wide `<pre>` takes it past the viewport
+and the shell's `overflow:hidden` cuts the rest off with no scrollbar to reach
+it. Every table and code block inside it has its own horizontal scroller, and
+those only work once the column has a width to work against.
+
+The base layout is the phone layout. A multi-column grid starts at one or two
+columns and widens at `sm` / `md` / `lg`; `styleRules.test.ts` fails on an
+unconditional `grid-cols-3` or wider, which is what the dashboard's four stat
+columns at 375 px were.
+
+Contrast is WCAG 2.1 AA on every text tier, on the surfaces that tier is used
+on — which is not the same as on every surface, and the token comment in
+`globals.css` says which. `--accent` is tuned for its own contrast against the
+canvas and reaches only 3.10:1 behind white, so a filled button uses
+`--accent-fill` (4.63:1, hover 6.47:1); `--accent` keeps borders, icons, the
+focus ring and the /10 washes. A chip is painted on `--bg-elevated` (5.30:1 for
+`--text-muted`) rather than on `--border` (4.12:1), which is the one surface
+the text-tier analysis never covered.
+
+`--text-tertiary` is the narrowest tier: 4.94:1 on `--bg-deep` and 4.51:1 on
+`--bg-surface`, but 4.10:1 on `--bg-elevated` and `--bg-hover` and 3.97:1 on
+`--bg-active`. It carries the least-important metadata on the two dark
+surfaces — a message's time of day in the stream, a round divider, a
+placeholder — and anything that can land on a lighter surface, including a
+row that hovers onto one, uses `--text-secondary` instead. The disabled tier
+is for disabled controls and for nothing else.
+
+Every page begins with a "Skip to content" link and has an `h1`; every data
+table's headers carry `scope="col"`; the file inputs are real controls hidden
+with the visually-hidden pattern rather than `display:none`, behind a button
+that says what it does in the console's own language.
 
 ## Style
 

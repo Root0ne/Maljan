@@ -1,5 +1,7 @@
 "use client";
 
+import { probeDetail } from "@/lib/probeDetail";
+import { countLabel } from "@/lib/report-utils";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { ProbeResult } from "@/types/settings";
@@ -91,7 +93,7 @@ export default function GroupHeader({
           {overridden && (
             <button
               type="button"
-              className="text-[11px] text-text-secondary"
+              className="h-6 rounded border border-border px-2 text-[11px] text-text-secondary hover:text-text-primary hover:border-text-muted"
               onClick={() => setConfirming(true)}
             >
               Remove all overrides in this group ({overriddenCount})
@@ -142,7 +144,7 @@ export default function GroupHeader({
                     className={`text-[11px] ${r.ok ? "text-status-green" : "text-status-red"}`}
                     role="status"
                   >
-                    {r.ok ? "ok" : "failed"} · {r.latency_ms} ms · {r.detail}
+                    {r.ok ? "ok" : "failed"} · {r.latency_ms} ms · {probeDetail(r.detail)}
                   </span>
                 )}
                 {running && <span className="text-[11px] text-text-muted">testing…</span>}
@@ -160,7 +162,7 @@ export default function GroupHeader({
           className="mt-3 border border-border rounded bg-bg-deep px-3 py-2"
         >
           <p className="text-xs text-text-secondary">
-            This removes {overriddenCount} stored value(s) from this group now, without Apply.
+            This removes {countLabel(overriddenCount, "stored value")} from this group now, without Apply.
           </p>
           <div className="flex gap-3 mt-2">
             <button

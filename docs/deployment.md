@@ -115,6 +115,12 @@ tool server with transport `stdio` and put the variable name in `env_allow`, so
 the token reaches the child from the worker's environment rather than being
 written into a setting the console echoes back.
 
+A server added this way is started with exactly the names it lists. A built-in
+is the one case where that field has a floor: `analysis` and `network` are
+always passed the sample roots and the staging directory, whatever the stored
+registry holds, because a child without them refuses the run's own sample. See
+[configuration.md](configuration.md#which-directories-a-sidecar-may-read).
+
 ## Upgrades and migrations
 
 The API does not migrate on startup unless `RUN_MIGRATIONS_ON_STARTUP` is set,

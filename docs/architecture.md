@@ -46,6 +46,92 @@ operator can reconfigure.
 6. Threat-intelligence enrichment runs afterwards as its own job, so it never
    delays the verdict.
 
+### What the worker holds while a run is in flight
+
+No database transaction. The worker opens one session before the models start
+— the job row, its sample, the stored settings, any attached sandbox report,
+and the move to `running` — and closes it again before the pipeline is built.
+The run's writes open sessions of their own: the event feed's batches as they
+fill, and one transaction at the end for the report, the agent findings, the
+evidence ledger, the transcript and the completion, which go together because
+the report's sections cite the ledger's ids.
+
+A session held for the length of an analysis is a backend sitting `idle in
+transaction` for as long as the run takes. One was measured at 13 minutes 51
+seconds, holding an `AccessShareLock` on `analysis_jobs`, `analysis_reports`
+and `runtime_settings`: a migration's `ALTER TABLE analysis_reports` queued
+behind it, every read of that table queued behind the ALTER, and
+`GET /api/v1/jobs/{id}` timed out for four minutes while `/health` answered in
+milliseconds. The enrichment task follows the same rule — it reads the
+report's payload, closes, spends as long as the reputation lookups take
+(452 s on one measured report), and opens a second session to write the
+result.
+
+A failed run records its failure through a session of its own. The session the
+run was writing through is the one most likely to be unusable — a terminated
+backend leaves every statement on it raising `PendingRollbackError` — and that
+is how a job came to publish its `error` event and still read `running`, with
+no error and no `completed_at`, for as long as the worker stayed up. What the
+row then says is the class of the exception and the id of the log entry
+holding the rest: `error_message` is a field of `JobResponse`, so an
+exception's own message put there is published, and a failure names a path or
+a connection string as readily as anything else. The exception to that is
+`StatedFailure` and its subclasses — the failures this module words itself,
+from constants and from ids this system issued — whose sentence is the answer
+and travels whole: an absent analysis, an attached report that belongs to
+another sample, a sandbox provider that cannot take one.
+
+### Who owns a running job
+
+The worker that is running it says so, and keeps saying so. While
+`run_analysis` runs it holds `maljan:job-owner:<job id>` with its own id in it,
+for 90 seconds, refreshed every 30 by a task of its own; the key is dropped on
+success, failure and cancellation alike. A `running` row whose key is absent is
+a row nobody is working on.
+
+Neither of arq's own keys can answer that question. The in-progress claim
+(`arq:in-progress:<job id>`) is written once and lives for the job timeout, so
+it outlives the process that wrote it by hours; the health key is queue-wide
+and lives 31 seconds past its last write, so a worker killed a moment ago still
+looks alive — and a restarted container looks at it within seconds of that
+kill, which is exactly the case the sweep exists for.
+
+The sweep therefore runs on its own clock rather than at the instant of
+startup: one owner TTL after the worker boots, so a crashed worker's last
+heartbeat has certainly expired, and every ten minutes after that — which is
+also what reaches a job a still-running worker gave up on, the case that left
+one job reading `running` for an hour. Two rules point the other way, both
+towards leaving a job alone: a row younger than one TTL is left for the next
+pass, because a worker may have claimed it a moment ago, and a job this process
+is running is never swept whatever Redis says. If Redis cannot be read, nothing
+is touched and the reason is logged once, because ownership cannot be
+established without it and guessing costs somebody else's run.
+
+A run that ends in `CancelledError` — arq's `job_timeout`, or SIGTERM — still
+writes no row of its own; its heartbeat goes with the process, so the next
+sweep pass marks it failed within ten minutes.
+
+### What a request holds while it waits on somebody else
+
+Nothing either. A request-scoped session is in a transaction from its first
+statement — on an authenticated route, the dependency that resolved the caller
+— and stays in it until the handler returns, so a handler that then waits on a
+third party leaves a backend `idle in transaction` for the length of that
+wait. The routes that do wait end the read first, through
+`database.end_read_transaction`: the three probes (`/settings/test/{probe}`,
+`/test/mcp`, `/test/agent`, up to five minutes at a model endpoint), the
+VirusTotal registration, and the long-term-memory purge, which scrolls a whole
+Qdrant collection. The session stays usable; the next statement opens a
+transaction of its own.
+
+The WebSocket route holds no session across the stream at all. The handshake
+reads the account and the job's owner inside a session, closes it, and then
+accepts or rejects; a resume reads one page of the feed per session and sends
+it after that session has closed, because the send goes at the client's pace
+and a thousand frames to a slow reader is not something to hold a transaction
+across. The account re-check on the clock opens a session of its own each
+time.
+
 ## Format routing
 
 The platform never refuses a sample for its format. The first thing a job does
