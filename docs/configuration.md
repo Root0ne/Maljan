@@ -461,6 +461,16 @@ half — it is VirusTotal's own server, richer and maintained by them — while
 the AbuseIPDB half stays the only source for IP abuse reports. A deployment
 with an API key and no agent token keeps working exactly as before.
 
+Both names reach that sidecar through its `env_allow`, and both are defaults
+rather than fixtures: an operator who clears that list in the Configuration tab
+stops the keys reaching the child — for an engagement where the sample must not
+be looked up, or to stay inside a rate-limit budget — and they stay cleared
+until the operator puts them back. The server then answers from its mock, as it
+does on a host that never held a key. See
+[which directories a sidecar may read](#which-directories-a-sidecar-may-read)
+for the three names that a built-in does keep whatever the stored registry
+says.
+
 **The stdio alternative.** The same server runs locally as `vt-mcp`, reading
 the same agent token from `VTAI_TOKEN`, and that form offers one tool the
 remote one cannot: `submit_local_file`, which uploads by path. The remote
@@ -898,13 +908,26 @@ before the pipeline builds. A job's servers are attached after all of it, and a
 sidecar held over from an earlier job is closed and started again for the new
 job, so nothing has to be restarted mid-run for a root to take effect.
 
-The `env_allow` of a *built-in* is the shipped list plus whatever an admin
-added to it, and it cannot be made shorter. The registry is stored as one row
-holding every server, written whole whenever anything in it is saved, so
-without that floor a deployment that had configured its servers before a
-sidecar gained a variable would keep starting that sidecar without it — which
-for `MALJAN_SAMPLE_ROOTS` means every tool call on the run's own sample
-refused with `path_outside_roots`.
+**The names a built-in always gets.** Three names are not an operator's to
+take away: `MALJAN_SAMPLE_ROOTS` and `MALJAN_STAGING_DIR` on `analysis` and
+`network`, and `MALJAN_STAGING_TTL_HOURS` on `analysis`. They are what a
+sidecar cannot work out for itself — which directories it may read, where a
+delivered sample lands and how long it is kept — so they are put back on load,
+on save, in the Configuration tab's own view and in the connection test. The
+registry is stored as one row holding every server, written whole whenever
+anything in it is saved, so without that floor a deployment that had configured
+its servers
+before a sidecar gained a variable would keep starting that sidecar without
+it — which for `MALJAN_SAMPLE_ROOTS` means every tool call on the run's own
+sample refused with `path_outside_roots`.
+
+Every other name a built-in ships with is a default rather than a floor:
+`threatintel`'s `VIRUSTOTAL_API_KEY` and `ABUSEIPDB_API_KEY` are the
+deployment's own credentials, and an `env_allow` an admin empties stays empty
+everywhere that list is read. A name an admin adds to a built-in is kept, after
+the required ones. A server an operator added is left exactly as they typed it,
+required names and all: it reads the sample roots only when its own `env_allow`
+names them.
 
 A refusal is the ordinary structured error with the code `path_outside_roots`
 and a remedy, and it names no host path.

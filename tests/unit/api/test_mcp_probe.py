@@ -260,7 +260,7 @@ async def test_a_server_without_a_manifest_has_no_details():
 
 
 @pytest.mark.asyncio
-async def test_a_built_in_is_probed_with_the_environment_names_it_ships_with():
+async def test_a_built_in_is_probed_with_the_environment_names_it_cannot_run_without():
     """A row stored before a sidecar gained a variable must not make the
     connection test launch a different server than the run launches."""
     from maljan.core.config import Settings
@@ -293,3 +293,19 @@ async def test_a_server_the_operator_added_is_probed_with_exactly_its_own_names(
     assert result.ok is True
     assert _Handle.made[-1].config.env_allow == ["R2_HOME"]
     assert SAMPLE_ROOTS_ENV not in _Handle.made[-1].config.env_allow
+
+
+@pytest.mark.asyncio
+async def test_a_built_in_is_probed_without_a_shipped_name_an_admin_took_away():
+    """The console tests the server a run gets, and a run gets no intel key
+    once the admin has emptied that list."""
+    from maljan.core.config import Settings
+
+    stored = Settings(_env_file=None).mcp.servers["threatintel"].model_dump(mode="json")
+    stored.pop("auth_token", None)
+    stored["env_allow"] = []
+
+    result = await run_mcp_probe("threatintel", {}, {"core.mcp.servers": {"threatintel": stored}})
+
+    assert result.ok is True
+    assert _Handle.made[-1].config.env_allow == []

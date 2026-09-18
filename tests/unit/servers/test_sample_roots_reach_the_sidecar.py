@@ -55,6 +55,15 @@ def _path_taking_sidecars() -> list[str]:
 PATH_TAKING = _path_taking_sidecars()
 
 
+def _builtin_keys() -> list[str]:
+    from maljan.core.config import BUILTIN_SERVER_KEYS
+
+    return list(BUILTIN_SERVER_KEYS)
+
+
+BUILTIN_KEYS = _builtin_keys()
+
+
 def _stale_server_map(settings_servers: dict[str, Any]) -> dict[str, Any]:
     """The stored map a deployment saved before the sample roots existed.
 
@@ -69,6 +78,24 @@ def _stale_server_map(settings_servers: dict[str, Any]) -> dict[str, Any]:
         entry["env_allow"] = [
             name for name in entry.get("env_allow", []) if name != "MALJAN_SAMPLE_ROOTS"
         ]
+        out[key] = entry
+    return out
+
+
+def _cleared_server_map() -> dict[str, Any]:
+    """The stored map of an admin who emptied every built-in's ``env_allow``.
+
+    The narrowest thing the editor lets them do to that field, and the shape
+    the policy is easiest to read off: whatever comes back is what a stored row
+    is not allowed to take away.
+    """
+    from maljan.core.config import Settings
+
+    out: dict[str, Any] = {}
+    for key, server in Settings(_env_file=None).mcp.servers.items():
+        entry = server.model_dump(mode="json")
+        entry.pop("auth_token", None)
+        entry["env_allow"] = []
         out[key] = entry
     return out
 
@@ -266,7 +293,7 @@ class TestAStoredServerMapCannotWithholdWhatTheSidecarNeeds:
 
         assert settings.mcp.servers["threatintel"].enabled is False
 
-    def test_a_map_the_editor_validates_is_stored_with_the_shipped_names(self) -> None:
+    def test_a_map_the_editor_validates_is_stored_with_the_required_names(self) -> None:
         """The row an operator saves is normalised on the way in as well."""
         from app.services.server_map import validate_server_map
         from maljan.core.config import Settings
@@ -278,6 +305,107 @@ class TestAStoredServerMapCannotWithholdWhatTheSidecarNeeds:
 
         for name in PATH_TAKING:
             assert SAMPLE_ROOTS_ENV in cleaned[name]["env_allow"], name
+
+    def test_a_name_an_admin_added_survives_the_save(self) -> None:
+        """The save repairs the row without spending the admin's own names."""
+        from app.services.server_map import validate_server_map
+        from maljan.core.config import REQUIRED_ENV_ALLOW, Settings
+
+        stale = _stale_server_map(Settings(_env_file=None).mcp.servers)
+        stale["analysis"]["env_allow"] = ["MY_OWN_VARIABLE"]
+
+        cleaned = validate_server_map(stale)
+
+        assert cleaned["analysis"]["env_allow"] == [
+            *REQUIRED_ENV_ALLOW["analysis"],
+            "MY_OWN_VARIABLE",
+        ]
+
+
+class TestWhatAStoredRowMayTakeAwayAndWhatItMayNot:
+    """A built-in keeps what it cannot run without, and loses what it can.
+
+    The floor is not the shipped list. ``MALJAN_SAMPLE_ROOTS``,
+    ``MALJAN_STAGING_DIR`` and ``MALJAN_STAGING_TTL_HOURS`` are facts a sidecar
+    cannot work out for itself — which directories it may read, where a
+    delivered sample lands and how long it is kept — so a stored row that has
+    lost one gets it back. Every other shipped name is a default: the
+    threat-intel keys are the deployment's credentials, and an admin who
+    clears that list to stop a sample being looked up finds it still clear on
+    the next run, the next save, the next look at the editor and the next
+    connection test.
+    """
+
+    def test_every_required_name_is_one_the_server_ships_with(self) -> None:
+        from maljan.core.config import REQUIRED_ENV_ALLOW, Settings
+
+        servers = Settings(_env_file=None).mcp.servers
+
+        for key, required in REQUIRED_ENV_ALLOW.items():
+            assert set(required) <= set(servers[key].env_allow), key
+
+    def test_nothing_but_the_roots_and_the_staging_names_is_required(self) -> None:
+        """A credential is never a name a stored row is made to carry."""
+        from maljan.core.config import REQUIRED_ENV_ALLOW
+        from maljan.tools.roots import SAMPLE_ROOTS_ENV
+
+        named = {name for required in REQUIRED_ENV_ALLOW.values() for name in required}
+
+        assert named == {SAMPLE_ROOTS_ENV, "MALJAN_STAGING_DIR", "MALJAN_STAGING_TTL_HOURS"}
+
+    @pytest.mark.parametrize("name", PATH_TAKING)
+    def test_a_sidecar_that_confines_paths_may_not_lose_the_roots(self, name: str) -> None:
+        from maljan.core.config import REQUIRED_ENV_ALLOW
+        from maljan.tools.roots import SAMPLE_ROOTS_ENV
+
+        assert SAMPLE_ROOTS_ENV in REQUIRED_ENV_ALLOW.get(name, ())
+
+    @pytest.mark.parametrize("name", BUILTIN_KEYS)
+    def test_a_cleared_list_comes_back_as_the_required_names_alone(self, name: str) -> None:
+        from maljan.core.config import REQUIRED_ENV_ALLOW
+        from maljan.core.settings_overrides import build_settings
+
+        settings = build_settings({"mcp.servers": _cleared_server_map()})
+
+        assert settings.mcp.servers[name].env_allow == list(REQUIRED_ENV_ALLOW.get(name, ()))
+
+    @pytest.mark.parametrize("name", BUILTIN_KEYS)
+    def test_a_save_stores_the_required_names_alone(self, name: str) -> None:
+        from app.services.server_map import validate_server_map
+        from maljan.core.config import REQUIRED_ENV_ALLOW
+
+        cleaned = validate_server_map(_cleared_server_map())
+
+        assert cleaned[name]["env_allow"] == list(REQUIRED_ENV_ALLOW.get(name, ()))
+
+    def test_a_fresh_deployment_is_given_the_whole_shipped_list(self) -> None:
+        """Nothing here narrows what a deployment nobody has configured gets."""
+        from maljan.core.settings_overrides import build_settings
+
+        servers = build_settings({}).mcp.servers
+
+        assert servers["threatintel"].env_allow == ["VIRUSTOTAL_API_KEY", "ABUSEIPDB_API_KEY"]
+        assert servers["analysis"].env_allow == [
+            "MALJAN_STAGING_DIR",
+            "MALJAN_STAGING_TTL_HOURS",
+            "MALJAN_SAMPLE_ROOTS",
+        ]
+
+    def test_a_cleared_intel_list_keeps_the_keys_out_of_the_child(self) -> None:
+        """The removal is worth nothing unless the child really loses them."""
+        from maljan.agents.subprocess_env import child_env
+        from maljan.core.settings_overrides import build_settings
+
+        config = build_settings({"mcp.servers": _cleared_server_map()}).mcp.servers["threatintel"]
+
+        env = child_env(
+            config.env,
+            allow=tuple(config.env_allow),
+            source={"VIRUSTOTAL_API_KEY": "vt", "ABUSEIPDB_API_KEY": "abuse", "PATH": "/usr/bin"},
+        )
+
+        assert "VIRUSTOTAL_API_KEY" not in env
+        assert "ABUSEIPDB_API_KEY" not in env
 
 
 @pytest.mark.skipif(

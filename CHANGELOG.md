@@ -757,15 +757,19 @@ change landed on `main`.
   confinement shipped therefore went on starting both sidecars without the
   variable, and every analyst tool call on the run's own sample came back
   refused with `path_outside_roots` — the error meant for a path the sample's
-  author chose. A built-in's `env_allow` is now the shipped names plus
-  whatever an admin added — on load, on save, in the editor's own view and in
-  the connection test, which launches the server a run launches — so a name a
-  sidecar gains reaches a deployment that has been configured rather than a
-  fresh install alone. A server an operator added is untouched: it sees
-  the roots only when its own `env_allow` lists them, and the general-purpose
-  environment every child gets is unchanged. Proven through the real spawn
-  path — a live sidecar started the way the registry starts one reads a file
-  under an exported root and still refuses one outside every root.
+  author chose. A built-in's `env_allow` now always carries the names its
+  sidecar cannot run without — the sample roots, the staging directory and its
+  retention — on load, on save, in the editor's own view and in the connection
+  test, which launches the server a run launches, so a name a sidecar gains
+  reaches a deployment that has been configured rather than a fresh install
+  alone. Every other shipped name stays the operator's: a
+  `threatintel` whose `VIRUSTOTAL_API_KEY` and `ABUSEIPDB_API_KEY` an admin has
+  cleared keeps them out of the child, and the sidecar answers from its mock as
+  it does on a host that never held a key. A server an operator added is
+  untouched: it sees the roots only when its own `env_allow` lists them, and
+  the general-purpose environment every child gets is unchanged. Proven through
+  the real spawn path — a live sidecar started the way the registry starts one
+  reads a file under an exported root and still refuses one outside every root.
 - **Four documented facts that had drifted from the code.** The delegation
   section said a lead's 1800 s stage had room for five asks where
   `_asks_that_fit` computes six and the `ask_<key>` description gives the model

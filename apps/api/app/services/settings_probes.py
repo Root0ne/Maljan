@@ -756,7 +756,7 @@ async def handshake(config: MCPServerConfig, name: str) -> tuple[list[str], dict
         await handle.aclose()
 
 
-def _probe_config(entry: dict[str, Any], name: str = "") -> MCPServerConfig:
+def _probe_config(entry: dict[str, Any], name: str) -> MCPServerConfig:
     """The entry as configured, forced on and un-narrowed.
 
     A probe answers "what does this server offer"; a disabled entry or an
@@ -764,9 +764,11 @@ def _probe_config(entry: dict[str, Any], name: str = "") -> MCPServerConfig:
     call"), and applying them here would make the manifest unreadable exactly
     when the operator needs it to pick from.
 
-    A built-in is started with the shipped environment names a job starts it
-    with (``builtin_env_allow``), rather than with whatever a stored row holds:
-    the probe exists so that the console tests the same server the run gets.
+    ``name`` is the server's key, not a label: it decides whether this is a
+    built-in, and a built-in is started with the environment names a job
+    starts it with (``builtin_env_allow``) rather than with whatever a stored
+    row holds — the probe exists so that the console tests the same server the
+    run gets.
     """
     config = MCPServerConfig.model_validate(entry)
     update: dict[str, Any] = {"enabled": True, "tools": None}

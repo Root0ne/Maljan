@@ -340,3 +340,22 @@ async def test_the_server_editor_shows_the_environment_names_a_built_in_really_g
     assert SAMPLE_ROOTS_ENV in shown["analysis"]["env_allow"]
     assert SAMPLE_ROOTS_ENV in shown["network"]["env_allow"]
     assert SAMPLE_ROOTS_ENV not in shown["knowledge"]["env_allow"]
+
+
+@pytest.mark.asyncio
+async def test_the_server_editor_shows_a_shipped_name_an_admin_took_away_as_gone(key):
+    """What an admin cleared is not quietly put back under them: the intel keys
+    are the deployment's credentials, and an emptied list is an instruction."""
+    from maljan.core.config import Settings
+
+    stored: dict[str, Any] = {}
+    for name, server in Settings(_env_file=None).mcp.servers.items():
+        entry = server.model_dump(mode="json")
+        entry.pop("auth_token", None)
+        entry["env_allow"] = []
+        stored[name] = entry
+    rows = [RuntimeSetting(key="core.mcp.servers", value=stored, is_secret=False)]
+
+    shown = (await svc.SettingsService(make_db(rows)).values())["core.mcp.servers"].value
+
+    assert shown["threatintel"]["env_allow"] == []

@@ -242,10 +242,15 @@ class SettingsService:
         editor sends the mask straight back for an unchanged field, and
         ``split_server_secrets`` reads that as "leave the row alone".
 
-        A built-in's ``env_allow`` is shown with the shipped names in it
-        (``builtin_env_allow``), which is what its child is really started
-        with, rather than whatever a row saved before one of them existed
-        still holds.
+        A built-in's ``env_allow`` is shown with the names its sidecar cannot
+        run without in it (``builtin_env_allow``), which is what its child is
+        really started with, rather than whatever a row saved before one of
+        them existed still holds. A shipped default an admin has taken out
+        stays out, and is shown as taken out.
+
+        The map shown is the stored one: a built-in key a row predates is
+        re-seeded for the run and written back by the next save
+        (``validate_server_map``), but it is not conjured into this view.
         """
         out: dict[str, Any] = {}
         for name, entry in stored_map.items():
