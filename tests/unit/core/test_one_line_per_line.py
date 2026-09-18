@@ -9,6 +9,13 @@ log, each unique message appearing exactly twice.
 
 The handler that exists for the caller who has none is the one to drop once
 somebody else is formatting.
+
+`arq` has the same shape and had the same fault. Its CLI is the worker's entry
+point and configures logging on the way in, so by the time the application
+configures its own there is already a handler on the `arq` logger and it still
+propagates: a worker log carrying 19 lines with the `[arq.worker]` prefix
+against 21 bare `HH:MM:SS: ` ones is the same line counted twice. The hand-over
+is the same hand-over.
 """
 
 from __future__ import annotations
@@ -69,6 +76,74 @@ class TestTheApplicationLoggerWritesOnce:
             record = logging.LogRecord("maljan", logging.INFO, __file__, 1, "once", None, None)
             assert sum(handler.level <= record.levelno for handler in root.handlers) == 1
         finally:
+            root.handlers.clear()
+            root.handlers.extend(kept)
+            setup_logger("maljan")
+
+
+def _arq_configured() -> logging.Logger:
+    """The `arq` logger as its own CLI leaves it, handler and all."""
+    import logging.config
+
+    from arq.logs import default_log_config
+
+    logging.config.dictConfig(default_log_config(False))
+    return logging.getLogger("arq")
+
+
+class TestTheWorkerRunnerLoggerWritesOnce:
+    def test_its_own_cli_leaves_a_handler_behind(self) -> None:
+        """The fault this is about, stated as the fact it rests on."""
+        arq = _arq_configured()
+        try:
+            assert [handler.get_name() for handler in arq.handlers] == ["arq.standard"]
+            assert arq.propagate is True
+        finally:
+            arq.handlers.clear()
+
+    def test_the_hand_over_leaves_the_root_handler_alone_with_it(self) -> None:
+        from app.logging_config import hand_arq_over_to_root
+
+        arq = _arq_configured()
+        try:
+            assert hand_arq_over_to_root() is True
+            assert arq.handlers == []
+            assert arq.propagate is True
+            assert hand_arq_over_to_root() is False
+        finally:
+            arq.handlers.clear()
+
+    def test_a_handler_somebody_else_added_is_not_taken_away(self) -> None:
+        from app.logging_config import hand_arq_over_to_root
+
+        arq = _arq_configured()
+        mine = logging.NullHandler()
+        arq.addHandler(mine)
+        try:
+            hand_arq_over_to_root()
+            assert arq.handlers == [mine]
+        finally:
+            arq.handlers.clear()
+
+    def test_one_line_is_written_once_in_the_application_format(self) -> None:
+        from app.logging_config import setup_logging
+
+        arq = _arq_configured()
+        root = logging.getLogger()
+        kept = list(root.handlers)
+        try:
+            setup_logging()
+            assert arq.handlers == [], "the root handler formats these lines now"
+            record = logging.LogRecord("arq.worker", logging.INFO, __file__, 1, "once", None, None)
+            writers = [
+                handler
+                for handler in (*arq.handlers, *root.handlers)
+                if handler.level <= record.levelno
+            ]
+            assert len(writers) == 1
+            assert "arq.worker" in writers[0].format(record)
+        finally:
+            arq.handlers.clear()
             root.handlers.clear()
             root.handlers.extend(kept)
             setup_logger("maljan")
