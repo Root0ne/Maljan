@@ -10,15 +10,18 @@ augments it with the richer SDO set required by downstream CTI tooling:
   - ``Note`` containing the LLM-generated executive summary
   - ``Report`` top-level container with object_refs to every member
 
-The renderer is **additive** — judge's existing objects are preserved as-is.
-Producing this bundle is side-effect free; callers serialise it via
-``model_dump(mode="json")``.
+The renderer is additive but for one set: the judge's attack-patterns are
+replaced by one per technique in ``report.ttp_mappings``, so the bundle names
+the techniques the report names, with stable ids and an ATT&CK reference on
+each. Everything else the judge emitted is preserved as-is. Producing this
+bundle is side-effect free; callers serialise it via ``model_dump(mode="json")``.
 """
 
 from __future__ import annotations
 
 import ipaddress
 import re
+import uuid
 from typing import Any
 
 from maljan.agents._indicator_denylists import (
@@ -80,10 +83,17 @@ class ExtendedSTIXRenderer:
         """
         objects: list[Any] = []
 
-        # 1) Preserve everything the judge already emitted.
+        # 1) Preserve everything the judge already emitted, except its
+        #    attack-patterns: those are rebuilt from the report's published
+        #    technique list below, so the bundle and the report cannot disagree
+        #    about what this run found. One audited run exported ten techniques
+        #    in the report and zero attack-patterns in the bundle; another
+        #    exported three attack-patterns with no ATT&CK reference at all.
         if base_bundle is not None:
             self._normalize_judge_timestamps(base_bundle.objects)
-            objects.extend(base_bundle.objects)
+            objects.extend(
+                obj for obj in base_bundle.objects if getattr(obj, "type", "") != "attack-pattern"
+            )
 
         # 2) Identity SDO for Maljan itself.
         identity = Identity(
@@ -105,6 +115,16 @@ class ExtendedSTIXRenderer:
             )
             objects.append(malware_obj)
             malware_id = malware_obj.id
+
+        # 3.5) One attack-pattern per published technique, with a stable id and
+        #      an ATT&CK reference, related to the malware object. The judge's
+        #      own objects carried whatever id the model minted — including
+        #      placeholder UUIDs out of the STIX documentation — and a
+        #      technique the report published reached the bundle only if the
+        #      judge had happened to emit an object for it.
+        for technique, uses in _attack_patterns_for(report, malware_id):
+            objects.append(technique)
+            objects.append(uses)
 
         # Collect indicators per-kind, then apply
         # MAX_TOTAL_INDICATORS as a hard cap with priority order
@@ -305,6 +325,54 @@ class ExtendedSTIXRenderer:
             if obj_type == "malware":
                 return getattr(obj, "id", None)
         return None
+
+
+# The namespace the technique objects' ids are derived in. A UUIDv5 over the
+# technique id, so the same technique is the same object across exports of the
+# same run and across runs — and never a UUID copied out of the STIX
+# documentation, which is what the judge's own objects sometimes carried.
+_ATTACK_PATTERN_NAMESPACE = uuid.UUID("2f0b4c10-6f7e-5b6a-9d3b-1f6a5c7e8d90")
+
+
+def _attack_patterns_for(
+    report: MalwareReport, malware_id: str
+) -> list[tuple[AttackPattern, Relationship]]:
+    """One attack-pattern and one relationship per published technique.
+
+    The report's ``ttp_mappings`` is the source, so the bundle names exactly
+    the techniques the report names: the same list the ATT&CK section, the
+    References and ``/reports/{id}/mitre`` are built from, with the ids the
+    catalogue check rejected already out of it.
+    """
+    out: list[tuple[AttackPattern, Relationship]] = []
+    seen: set[str] = set()
+    for mapping in report.ttp_mappings:
+        tid = str(mapping.technique_id or "").strip().upper()
+        if not tid or tid in seen:
+            continue
+        seen.add(tid)
+        pattern = AttackPattern(
+            id=f"attack-pattern--{uuid.uuid5(_ATTACK_PATTERN_NAMESPACE, tid)}",
+            name=mapping.technique_name or tid,
+            external_references=[
+                {
+                    "source_name": "mitre-attack",
+                    "external_id": tid,
+                    "url": f"https://attack.mitre.org/techniques/{tid.replace('.', '/')}/",
+                }
+            ],
+        )
+        out.append(
+            (
+                pattern,
+                Relationship(
+                    relationship_type="uses",
+                    source_ref=malware_id,
+                    target_ref=pattern.id,
+                ),
+            )
+        )
+    return out
 
 
 # ---------------------------------------------------------------------------

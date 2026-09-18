@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 
 from maljan.core.logger import logger
 from maljan.extractors.attribution import build_family_attribution
-from maljan.extractors.capability_matrix import build_capability_matrix
+from maljan.extractors.capability_matrix import build_capability_matrix, unmapped_behaviours
 from maljan.pipeline.outcome import INCONCLUSIVE_REASONS
 from maljan.reporting.dedupe import MergeTally
 from maljan.reporting.ledger_projection import (
@@ -196,6 +196,7 @@ class MalwareReportBuilder:
             persistence=persistence,
             capability_matrix=cells,
             ttp_mappings=mappings,
+            unmapped_behaviours=unmapped_behaviours(self.stix_output),
             attribution=attribution,
             executive_summary="",  # filled by NarrativeAgent
             capabilities_narrative=[],  # filled by NarrativeAgent

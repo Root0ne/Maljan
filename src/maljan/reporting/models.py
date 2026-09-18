@@ -850,7 +850,15 @@ class MalwareReport(BaseModel):
     network: NetworkIOCs | None = None
     persistence: list[PersistenceMechanism] = Field(default_factory=list)
     capability_matrix: list[CapabilityCell] = Field(default_factory=list)
+    # The published technique list. Every other technique surface is built from
+    # it — the report's ATT&CK section, its References, the STIX
+    # attack-patterns, ``/reports/{id}/mitre`` — so a technique appears in all
+    # of them or in none, and an id the ATT&CK check rejected appears in none.
     ttp_mappings: list[TTPMapping] = Field(default_factory=list)
+    # What the judge named as an attack-pattern without naming a technique id,
+    # after being asked for one. A behaviour, reported as a behaviour: it is
+    # never published as an ATT&CK technique, and it is not dropped either.
+    unmapped_behaviours: list[str] = Field(default_factory=list)
 
     # --- Attribution ---
     attribution: FamilyAttribution = Field(default_factory=FamilyAttribution)

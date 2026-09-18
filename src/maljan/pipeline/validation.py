@@ -662,6 +662,11 @@ def ungrounded_technique_note(findings: Any) -> str:
 
 VALIDITY_CODE = "attck.unknown_id"
 
+# A technique named with no id. Its own code because the answer is different
+# from an id that does not resolve: there is nothing to look up, and a
+# behaviour the model could not map is still a behaviour the report can carry.
+MISSING_ID_CODE = "attck.missing_id"
+
 
 # What the run-quality note says for a check that could not run, per code.
 # A code this table does not know is still named rather than described as
@@ -1261,6 +1266,27 @@ def validate_verdict_bundle(
         elif kind == "attack-pattern":
             tid = _attack_pattern_technique_id(obj)
             if not tid:
+                # A technique with a name and no id used to skip every check
+                # below, because all of them key on the id — which is how an
+                # Android sample's attack-patterns reached a report with the
+                # Mobile-domain check never having run on them, and how three
+                # of them were published as ATT&CK techniques with an empty
+                # `technique_id`. It is asked for once here; if it survives,
+                # the report carries it as an unmapped behaviour.
+                name = str(getattr(obj, "name", "") or "").strip()
+                violations.append(
+                    Violation(
+                        code=MISSING_ID_CODE,
+                        message=(
+                            f"the attack-pattern {name!r} names no MITRE ATT&CK technique id. "
+                            "Give its external_references a mitre-attack entry with the "
+                            "external_id (T#### or T####.###), or drop the object and say "
+                            "what was observed in the assessment: a behaviour with no "
+                            "technique id is reported as a behaviour, not as a technique."
+                        ),
+                        path=f"objects[{index}]",
+                    )
+                )
                 continue
             if not TECHNIQUE_ID_EXACT_RE.match(tid):
                 violations.append(

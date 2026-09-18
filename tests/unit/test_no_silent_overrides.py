@@ -394,3 +394,39 @@ class TestABundleShapeDoesNotOverrideAVerdict:
         )
 
         assert decide_from_bundle(bundle) == "Malware"
+
+
+class TestARejectedIdIsDroppedAndNeverRewritten:
+    """The published technique list carries no id the catalogue rejected.
+
+    Dropping a row from what is published is not a rewrite: the id the producer
+    wrote is still on the record, in the capability matrix, marked. What must
+    never happen is the other thing — the id being silently replaced with one
+    that resolves, which is what the re-grounding pass this phase removed did.
+    """
+
+    @staticmethod
+    def _matrix() -> Any:
+        """One claim whose id the analyst's own loop marked unresolvable."""
+        from maljan.extractors.capability_matrix import build_capability_matrix
+        from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+
+        claim = ClaimEvidence(
+            claim="it hides its own code",
+            evidence_ref="[ev_0001] packer signature",
+            confidence=0.7,
+            technique_id="T0000",
+        )
+        claim.technique_id_valid = False
+        isr = AgentISR(agent_id="static", domain="static", claims=[claim])
+        return build_capability_matrix(stix_output=None, isr_reports={"static": isr})
+
+    def test_the_matrix_keeps_the_id_exactly_as_written(self) -> None:
+        cells, _mappings = self._matrix()
+
+        assert [(c.technique_id, c.technique_id_valid) for c in cells] == [("T0000", False)]
+
+    def test_the_published_list_carries_no_substitute_for_it(self) -> None:
+        _cells, mappings = self._matrix()
+
+        assert mappings == []

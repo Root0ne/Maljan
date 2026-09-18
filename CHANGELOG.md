@@ -747,6 +747,27 @@ change landed on `main`.
 
 ### Fixed
 
+- **One source for the techniques a report publishes.** A report's three
+  technique surfaces were built from three sources and disagreed inside single
+  runs: one run exported ten techniques and a STIX bundle with no
+  `attack-pattern` at all; another served three techniques from
+  `/reports/{id}/mitre` with an empty `technique_id`, none in `ttp_mappings`,
+  and three attack-patterns carrying no ATT&CK reference and ids copied out of
+  the STIX documentation; a third published `T1063` — which the validator had
+  already reported as absent from the catalogue — in the report, in the bundle
+  and in the References section. `ttp_mappings` is now the published list and
+  carries no id the catalogue check rejected (the id stays in the capability
+  matrix, marked, spelled as the producer wrote it), the bundle's
+  attack-patterns are minted from that list with ids derived from the technique
+  id and an ATT&CK external reference each, the References section and the
+  `mitre_techniques` column are built from the same list, and no entry without
+  a technique id is stored as a technique. An attack-pattern with a name and no
+  id is asked for one (`attck.missing_id`) instead of skipping every ATT&CK
+  check — which is why the Mobile-domain check never ran on an Android
+  sample's techniques — and one that survives is reported as a behaviour, in
+  the new `MalwareReport.unmapped_behaviours` and under its own heading in the
+  markdown.
+
 - **The ATT&CK alignment gate scores inside the sample's own scope, and asks
   nothing unless it is turned on.** The index that ranks a claim's text is
   domain-blind, so a technique claim about a Windows PE was answered with

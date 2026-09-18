@@ -557,7 +557,7 @@ class MarkdownRenderer:
         lines = ["## MITRE ATT&CK Matrix", ""]
         if not cells and not mappings:
             lines.append("_No ATT&CK techniques mapped._")
-            return "\n".join(lines)
+            return "\n".join(lines + _unmapped_behaviour_lines(report))
 
         if cells:
             lines.append("| Tactic | Technique | Confidence | Layers |")
@@ -588,7 +588,7 @@ class MarkdownRenderer:
                 for quote in mapping.evidence_quotes[:6]:
                     lines.append(f"> {_truncate(quote, 240)}")
                 lines.append("")
-        return "\n".join(lines).rstrip()
+        return "\n".join(lines + _unmapped_behaviour_lines(report)).rstrip()
 
     def _section_attribution(self, report: MalwareReport) -> str:
         attr = report.attribution
@@ -1022,6 +1022,26 @@ def _evidence_body(section: Any) -> list[str]:
     if section.text:
         return ["```", section.text, "```"]
     return []
+
+
+def _unmapped_behaviour_lines(report: MalwareReport) -> list[str]:
+    """The behaviours the verdict named and could not map to a technique.
+
+    Printed under the matrix and never inside it: a behaviour with no technique
+    id is not an ATT&CK technique, and the run that produced three of them had
+    them published as techniques with an empty id.
+    """
+    names = list(getattr(report, "unmapped_behaviours", None) or [])
+    if not names:
+        return []
+    lines = ["", "### Behaviours with no mapped technique", ""]
+    lines.extend(f"- {_truncate(name, 200)}" for name in names)
+    lines.append("")
+    lines.append(
+        "_Named in the verdict without a MITRE ATT&CK technique id after the id was "
+        "asked for. They are not ATT&CK techniques and are not counted as any._"
+    )
+    return lines
 
 
 def _truncate(value: str, length: int) -> str:

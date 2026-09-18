@@ -846,7 +846,26 @@ is assembled from what the run gathered rather than recomputed beside it:
   arithmetic over constants chosen in the builder, by code that had read no
   evidence.
 * The capability matrix is a projection of the judge's technique list and the
-  analysts' claims, carrying each source's own confidence unadjusted.
+  analysts' claims, carrying each source's own confidence unadjusted. It is
+  where an id the ATT&CK check rejected stays on the record, marked
+  `technique_id_valid=False` and spelled as the producer wrote it.
+* `ttp_mappings` is the *published* technique list, and every other technique
+  surface is built from it: the report's ATT&CK section, its References, the
+  `attack-pattern` objects of the STIX bundle — minted with ids derived from
+  the technique id, so the same technique is the same object across exports —
+  and the `mitre_techniques` column behind `/reports/{id}/mitre`. An id the
+  catalogue check rejected is in the matrix and in none of those. The three
+  surfaces used to be built from three sources and disagreed inside single
+  runs: ten techniques in one report against zero attack-patterns in its
+  bundle; three attack-patterns with no ATT&CK reference and ids copied out of
+  the STIX documentation against an empty `ttp_mappings`; a rejected id
+  published in all three.
+* An attack-pattern with a name and no technique id is asked for one
+  (`attck.missing_id`) — before this it skipped every ATT&CK check, because all
+  of them key on the id, which is why the Mobile-domain check never ran on an
+  Android sample's techniques. One that survives is reported as a behaviour, in
+  `report.unmapped_behaviours` and under its own heading in the markdown, and
+  is never published as a technique.
 * `run_summary.evidence` counts the calls and `run_summary.sections_without_
   evidence` counts the sections that can name neither an entry nor a finding —
   the number that says whether the report is standing on anything.
