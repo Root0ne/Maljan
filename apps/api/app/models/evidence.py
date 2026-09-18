@@ -7,8 +7,10 @@ calls are the part worth keeping.
 
 Append-only and immutable. ``seq`` is the order the ids were issued in across
 the whole job, and it is the ordering key: agent names cannot separate calls
-that two analysts made in parallel, and ``created_at`` is written when the row
-is persisted, long after the call happened.
+that two analysts made in parallel. ``created_at`` is the moment the call
+returned, derived from ``started_at`` and ``duration_ms`` when the row is
+built; a call the recorder never stamped falls back to the write time, which is
+the whole batch's and says only that.
 """
 
 import uuid

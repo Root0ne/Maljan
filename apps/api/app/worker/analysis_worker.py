@@ -622,6 +622,29 @@ def _parse_event_ts(value: Any) -> datetime | None:
         return None
 
 
+def _returned_at(entry: dict[str, Any]) -> datetime | None:
+    """The moment this tool call came back, or ``None`` when it is not known.
+
+    ``started_at`` is a Unix timestamp the recorder stamped when the call went
+    out, and ``duration_ms`` is what it measured; their sum is the only moment
+    in the entry a reader can sort a ledger by. Absent, zero or nonsensical
+    values give ``None``, because a 1970 timestamp on a tool call is not a fact
+    about anything and the column's own default at least says "written then".
+    """
+    started = entry.get("started_at")
+    try:
+        seconds = float(started)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if seconds <= 0:
+        return None
+    try:
+        duration = max(0.0, float(entry.get("duration_ms", 0) or 0) / 1000.0)
+        return datetime.fromtimestamp(seconds + duration, tz=UTC)
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
 def _evidence_row(entry: dict[str, Any], *, job_id: uuid.UUID) -> Any:
     """One ledger entry as the row that keeps it.
 
@@ -633,6 +656,15 @@ def _evidence_row(entry: dict[str, Any], *, job_id: uuid.UUID) -> Any:
     from app.models.evidence import EvidenceEntry
 
     return EvidenceEntry(
+        # When the call returned, which is what a reader of a ledger wants and
+        # what the column could not say: the rows are written in one batch at
+        # the end of the run, so every one of them carried the flush time — one
+        # measured run's thirty entries had one distinct ``created_at`` between
+        # them. The entry knows: ``started_at`` is the call's own clock and
+        # ``duration_ms`` is how long it took. A row whose entry was never
+        # stamped leaves the column to its server default rather than inventing
+        # a moment.
+        created_at=_returned_at(entry),
         job_id=job_id,
         entry_id=str(entry.get("id", ""))[:32],
         stage=str(entry.get("stage", "analysis"))[:32],

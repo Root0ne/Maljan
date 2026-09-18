@@ -766,6 +766,13 @@ failure with a cause that did not happen. `truncated` is persisted alongside
 `repeated_of` (the earlier identical call a repeat was answered from), `symbol`
 and `started_at`, and the evidence endpoint returns all four.
 
+The rows are written in one batch when the run ends, so `created_at` used to be
+the flush for every one of them — thirty entries of one run had one distinct
+value between them, and a ledger sorted by it said nothing about when anything
+happened. It is now the moment the call returned, `started_at + duration_ms`,
+computed as the row is built. A call the recorder never stamped keeps the write
+time, which is honest about being the batch's.
+
 ## Events
 
 A run narrates itself. Every node, every tool wrapper and every retry loop

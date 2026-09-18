@@ -777,6 +777,12 @@ change landed on `main`.
   spent on the answer instead. It is off by default, because Ollama refuses the
   field for a model with no thinking mode, and the same value is sent by the
   agents' calls and by the probe.
+- **The evidence ledger can be read as a timeline.** Every row carried the
+  flush time as its `created_at`, because the ledger is written in one batch
+  when the run ends: one measured run's thirty entries had a single distinct
+  value between them. A row is now stamped with the moment its call returned
+  (`started_at + duration_ms`, both already on the entry), and a call the
+  recorder never stamped keeps the write time rather than an invented one.
 - **The console stopped clipping itself.** `main` is a flex item, so its
   `min-width: auto` let it grow to its content's min-content width instead of
   constraining it: the Detection tab's Suricata block took it to 2542 px
