@@ -84,6 +84,25 @@ test.describe("Search palette", () => {
     await expect(palette.getByRole("alert")).toHaveCount(0);
   });
 
+  /* C-I19: the arrow keys moved `aria-selected` between options that had no
+   * ids, under a combobox with no `aria-activedescendant` — so the highlighted
+   * result was carried by a background colour and by nothing else. */
+  test("announces the row the arrow keys are on", async ({ authenticatedPage: page }) => {
+    const box = await openPalette(page);
+    await box.fill("invoice");
+
+    const palette = page.getByRole("listbox", { name: "Search results" });
+    await expect(palette.getByRole("option").first()).toBeVisible();
+
+    const first = await palette.getByRole("option").first().getAttribute("id");
+    expect(first).toBeTruthy();
+    await expect(box).toHaveAttribute("aria-activedescendant", first!);
+
+    await page.keyboard.press("ArrowDown");
+    const second = await palette.getByRole("option").nth(1).getAttribute("id");
+    await expect(box).toHaveAttribute("aria-activedescendant", second!);
+  });
+
   test("Escape closes it", async ({ authenticatedPage: page }) => {
     const box = await openPalette(page);
 

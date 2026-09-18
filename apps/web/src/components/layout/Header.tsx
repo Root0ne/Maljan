@@ -9,6 +9,8 @@ export default function Header() {
   const { user, logout } = useAuth();
   const [value, setValue] = useState("");
   const [paletteOpen, setPaletteOpen] = useState(false);
+  /** The palette row the arrow keys are on, announced from the input. */
+  const [activeOption, setActiveOption] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   /* Global Cmd/Ctrl+K shortcut to focus the search and open the palette. */
@@ -61,6 +63,7 @@ export default function Header() {
             aria-haspopup="listbox"
             aria-expanded={paletteOpen}
             aria-controls="global-search-palette"
+            aria-activedescendant={activeOption ?? undefined}
           />
           <span className="hidden sm:flex absolute right-2 top-1/2 -translate-y-1/2 items-center gap-1 text-[11px] text-text-muted pointer-events-none">
             <kbd className="px-1 py-px border border-border rounded bg-bg-surface">Ctrl</kbd>
@@ -71,6 +74,7 @@ export default function Header() {
             query={value}
             onClose={() => setPaletteOpen(false)}
             onSelect={() => setValue("")}
+            onActiveChange={setActiveOption}
           />
         </div>
       </div>
