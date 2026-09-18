@@ -172,10 +172,6 @@ async def ltm_purge(
     """
     try:
         store = await _build_memory_store(db)
-        # The settings that name the collection have been read; the purge
-        # itself talks to Qdrant and scrolls the whole collection, which is
-        # no reason to hold a transaction on Postgres.
-        await end_read_transaction(db)
     except Exception as exc:
         logger.warning("ltm_purge: failed to build memory store: %s", exc)
         raise HTTPException(
@@ -184,6 +180,13 @@ async def ltm_purge(
             # URL may carry an API key or a password.
             detail=redact_url(f"memory store unavailable: {exc}"),
         ) from exc
+
+    # The settings that name the collection have been read; the purge itself
+    # talks to Qdrant and scrolls the whole collection, which is no reason to
+    # hold a transaction on Postgres. Outside the block above, so a database
+    # that refused the commit is not reported to the operator as a memory
+    # store that is unavailable.
+    await end_read_transaction(db)
 
     backend_name = type(store).__name__
 

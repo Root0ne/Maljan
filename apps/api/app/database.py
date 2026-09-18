@@ -59,6 +59,14 @@ async def end_read_transaction(session: AsyncSession) -> None:
     Called where the reads are finished and the slow part begins. The session
     stays usable: the next statement opens a transaction of its own, which is
     what the handler's remaining writes want anyway.
+
+    It is a commit, not a rollback, because the request may already have
+    written something it meant to keep — an ``X-API-Key`` caller has
+    ``api_key.last_used_at`` stamped on this session by the dependency that
+    resolved them (``deps.hash_api_key``'s caller), and that key *was* used.
+    So a caller of this function is saying two things: the reads are done, and
+    anything already written is final whatever the slow part answers. A handler
+    that wants a write held until the end must do it after this call.
     """
     await session.commit()
 

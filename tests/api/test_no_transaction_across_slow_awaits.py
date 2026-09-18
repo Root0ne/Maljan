@@ -152,6 +152,39 @@ def test_the_virustotal_registration_runs_with_no_transaction_open(
     assert open_during_the_call == [False]
 
 
+def test_the_memory_purge_runs_with_no_transaction_open(session: FakeSession) -> None:
+    """The purge scrolls a whole Qdrant collection; Postgres waits for none of it."""
+    from app.api.v1.system import router as system_router
+
+    app = FastAPI()
+    app.include_router(system_router, prefix="/api/v1")
+    app.dependency_overrides[require_admin] = lambda: MagicMock(id="admin")
+    app.dependency_overrides[get_db] = lambda: session
+    client = TestClient(app)
+
+    open_during_the_purge: list[bool] = []
+
+    class _Store:
+        _cases: list[Any] = []
+
+        def purge_low_quality(self, **kwargs: Any) -> int:
+            open_during_the_purge.append(session.in_transaction)
+            return 3
+
+    async def _build(db: Any) -> Any:
+        # Reading the settings is what puts the request in a transaction.
+        await db.execute("select the configured collection")
+        return _Store()
+
+    with patch("app.api.v1.system._build_memory_store", _build):
+        response = client.post("/api/v1/system/ltm/purge", json={"dry_run": False})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["removed"] == 3
+    assert open_during_the_purge == [False]
+    assert session.commits >= 1
+
+
 @pytest.mark.asyncio
 async def test_the_websocket_resume_closes_its_session_before_sending() -> None:
     """The send is where a resume spends its time, and it is a client's pace."""
