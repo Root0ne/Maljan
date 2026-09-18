@@ -747,6 +747,15 @@ change landed on `main`.
 
 ### Fixed
 
+- **The two tables a reader meets first say what the code says.**
+  `docs/configuration.md` counted sixteen settings groups and listed sixteen
+  rows where the catalogue holds seventeen: **Live events**, the group
+  `core.events.stream_deltas` and `core.events.retention_days` belong to, was
+  missing from the only place that enumerates them. The README's teams table
+  dropped `triage_pack` from all four seeded teams that open on it, and showed
+  `mobile` and `deep_static` opening on `triage` — the triage *agent*, which is
+  a different stage. Both tables are now checked against `GROUP_ORDER` and
+  `_builtin_profiles()` by a test, so the next drift fails rather than ships.
 - **Semgrep covers the frontend.** The scan ran over `src/ apps/api/ services/
   scripts/` with `.semgrepignore` excluding `apps/web/`, so every file of the
   console was outside it and covered by CodeQL alone. The job and `make

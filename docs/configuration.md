@@ -69,7 +69,7 @@ API fields (`apps/api/app/services/settings_catalog_api.py`), and each entry
 carries its own title, description, type, bounds, choices and the group it
 belongs to (`src/maljan/core/settings_annotations.py`).
 
-The backend exposes sixteen groups, in this order:
+The backend exposes seventeen groups, in this order:
 
 | Group | Covers |
 | :-- | :-- |
@@ -85,6 +85,7 @@ The backend exposes sixteen groups, in this order:
 | Chunking | How large inputs are split before they reach a model. |
 | Reporting | Report contents and the metadata stamped on it. |
 | Agents | The analysts, the active profile and the ReAct limits. |
+| Live events | The conversation feed the console draws a running analysis from, and how long the record of one is kept. |
 | Tracing | LangSmith tracing of model calls. |
 | Enrichment / threat intelligence | Lookups for the indicators a report names. |
 | API | Request limits and login protection; applied immediately. |
