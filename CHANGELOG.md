@@ -796,6 +796,16 @@ change landed on `main`.
   `uPX` inside a longer word. Both now want a packer section name or a packer's
   own banner. The section entropies that are the other half of the packing
   signal are reported by the format tool beside these hits, as before.
+- **A container that had been opened was reported as never opened.** The
+  degradation reason "container was not parsed — no format-aware extraction
+  exists for it; findings come from a raw-byte string sweep only" was decided
+  from the file type alone, so a ZIP whose members `archive_list` had listed —
+  with sizes and CRCs, printed in the report, cited by the analyst — carried it
+  anyway, and the run capped its confidence on the strength of it.
+  `unparsed_container_reason` now asks the evidence ledger whether the format
+  tool for this sample produced a result, and speaks only when none did, which
+  is still the true answer for a package whose `apk_info` could not load its
+  library.
 - **Four documented facts that had drifted from the code.** The delegation
   section said a lead's 1800 s stage had room for five asks where
   `_asks_that_fit` computes six and the `ask_<key>` description gives the model

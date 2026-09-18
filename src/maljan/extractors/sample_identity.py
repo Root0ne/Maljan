@@ -15,6 +15,7 @@ never an exception.
 from __future__ import annotations
 
 import io
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -392,7 +393,38 @@ _UNPARSED_CONTAINER_TYPES: dict[str, str] = {
 }
 
 
-def unparsed_container_reason(sample_path: str | Path | None) -> str | None:
+# The format tools, by the name they are recorded under. These are the entry
+# points of ``tools.binary`` that the pack routes a sample to; one of them
+# answering is what "the container was opened" means.
+_FORMAT_TOOL_NAMES = frozenset(
+    {"pe_info", "elf_info", "macho_info", "apk_info", "document_info", "archive_list"}
+)
+
+
+def _a_format_tool_answered(ledger: Iterable[Any] | None) -> bool:
+    """Whether a format tool in ``ledger`` returned a result about the sample.
+
+    A failed call, and a call whose payload is an error, are both "no result":
+    the Android run whose ``apk_info`` could not load its library really did
+    have nothing but a byte sweep, and saying so was right.
+    """
+    for entry in ledger or ():
+        if isinstance(entry, dict):
+            tool, ok, data = entry.get("tool"), entry.get("ok"), entry.get("structured")
+        else:
+            tool = getattr(entry, "tool", None)
+            ok = getattr(entry, "ok", None)
+            data = getattr(entry, "structured", None)
+        if tool not in _FORMAT_TOOL_NAMES or not ok:
+            continue
+        if isinstance(data, dict) and not data.get("error"):
+            return True
+    return False
+
+
+def unparsed_container_reason(
+    sample_path: str | Path | None, ledger: Iterable[Any] | None = None
+) -> str | None:
     """Say so when the sample's container was never opened.
 
     A ``.docm`` is accepted by the upload allow-list — correctly, since macro
@@ -405,8 +437,18 @@ def unparsed_container_reason(sample_path: str | Path | None) -> str | None:
     That is the gap this closes. Not by refusing the sample, which would be
     worse, but by returning a degradation reason so the report caps its own
     confidence and states plainly what it did not look at.
+
+    The question is about the run, not about the file type. A ZIP whose members
+    ``archive_list`` had listed — with sizes and CRCs, in the report, cited by
+    the analyst — was still described as never opened, and the run capped its
+    confidence for it. So ``ledger`` is asked whether the format tool for this
+    sample produced a result, and the reason is emitted only when none did. A
+    caller with no ledger has nothing to go on and gets the answer the file
+    type alone supports.
     """
     if not sample_path:
+        return None
+    if _a_format_tool_answered(ledger):
         return None
     path = Path(sample_path)
     try:

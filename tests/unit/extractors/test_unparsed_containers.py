@@ -99,3 +99,56 @@ class TestItNeverBreaksARun:
 
     def test_a_directory_is_safe(self, tmp_path: Path) -> None:
         assert unparsed_container_reason(tmp_path) is None
+
+
+class TestAContainerThatWasOpenedIsNotCalledUnparsed:
+    """The reason was decided from the file type alone.
+
+    A ZIP whose members `archive_list` had listed — sizes, CRCs, both entries
+    in the report — still carried "container was not parsed … findings come
+    from a raw-byte string sweep only", and the run capped its confidence on
+    the strength of it. The question the reason answers is whether the format
+    tool for this sample produced a result, so it is asked of the ledger.
+    """
+
+    def _ledger(self, tool: str, payload: dict[str, object], *, ok: bool = True) -> list[dict]:
+        return [{"tool": tool, "ok": ok, "structured": payload}]
+
+    def test_an_archive_whose_members_were_listed_is_not_unparsed(self, tmp_path: Path) -> None:
+        archive = _write(tmp_path, "bundle.zip", b"PK\x03\x04")
+        listed = self._ledger(
+            "archive_list", {"members": [{"name": "payload.elf", "size": 202928}]}
+        )
+        assert unparsed_container_reason(archive, ledger=listed) is None
+
+    def test_an_archive_whose_format_tool_failed_is_still_declared(self, tmp_path: Path) -> None:
+        archive = _write(tmp_path, "bundle.zip", b"PK\x03\x04")
+        failed = self._ledger("archive_list", {"error": "the call failed"}, ok=False)
+        assert "ZIP archive" in (unparsed_container_reason(archive, ledger=failed) or "")
+
+    def test_a_result_carrying_an_error_is_not_a_result(self, tmp_path: Path) -> None:
+        archive = _write(tmp_path, "bundle.zip", b"PK\x03\x04")
+        errored = self._ledger("archive_list", {"error": "not a zip file"})
+        assert "ZIP archive" in (unparsed_container_reason(archive, ledger=errored) or "")
+
+    def test_an_android_package_whose_tool_failed_is_declared(self, tmp_path: Path) -> None:
+        """The true case: `apk_info` could not load, so nothing opened it."""
+        import zipfile
+
+        package = tmp_path / "app.apk"
+        with zipfile.ZipFile(package, "w") as archive:
+            archive.writestr("AndroidManifest.xml", b"\x03\x00\x08\x00binary manifest")
+        failed = self._ledger(
+            "apk_info", {"error": "install the optional tool libraries"}, ok=False
+        )
+        assert "Android package" in (unparsed_container_reason(package, ledger=failed) or "")
+
+    def test_another_tool_answering_says_nothing_about_the_container(self, tmp_path: Path) -> None:
+        document = _write(tmp_path, "invoice.docm")
+        elsewhere = self._ledger("strings", {"strings": [{"text": "anything"}]})
+        assert "Office macro document" in (
+            unparsed_container_reason(document, ledger=elsewhere) or ""
+        )
+
+    def test_a_caller_with_no_ledger_answers_from_the_type_as_before(self, tmp_path: Path) -> None:
+        assert "ZIP archive" in (unparsed_container_reason(_write(tmp_path, "a.zip")) or "")
