@@ -392,13 +392,32 @@ container for the object type in STIX, but the assessment confirms it is
 benign"*. The contradiction was detected, fed back once, survived — and the
 shape-derived verdict was published over the judge's own words.
 
-Three rules follow from the statement:
+The statement is read three ways, not two, and `pipeline.outcome.StatedVerdict`
+carries the difference: the judge wrote a word this pipeline knows, it wrote a
+word this pipeline does not, or it wrote nothing. Only the third is a question
+the object set may answer.
 
-* **Unstated is recorded, not guessed at.** A bundle with no readable verdict
-  is still read by its objects, for stored runs and for a model that omitted
-  the field, and `verdict.unstated` is fed back once and recorded when it
-  survives. A bundle this pipeline built out of text states its own verdict
-  and is not asked for a second one.
+`normalise_verdict` is what "knows" means, and it is the one reading in the
+tree — the report builder's own prefix rule, which the statement is now read
+with too. Case, surrounding whitespace and a qualifier after the word do not
+matter, so "Benign (legitimate utility)" is Benign. Anything the three prefixes
+do not reach is *unrecognised*, which is a fault of its own and never a
+fall-through: a judge that wrote "Not malware" beside a container object would
+have been published as Malware, and one that wrote "Malicious" over a
+reputation-only bundle as Benign.
+
+Four rules follow from the statement:
+
+* **Unstated is recorded, not guessed at.** A bundle whose field is absent is
+  still read by its objects, for stored runs and for a model that omitted it,
+  and `verdict.unstated` is fed back once and recorded when it survives. A
+  bundle this pipeline built out of text states its own verdict and is not
+  asked for a second one.
+* **Unrecognised is asked about, and the objects stay out of it.** The run
+  publishes `INCONCLUSIVE_VERDICT`, the judge's own word is quoted verbatim in
+  a degradation reason the header prints directly under the verdict, no
+  confidence is published, and `verdict.unrecognised` asks once for one of the
+  three words, quoting what the judge wrote.
 * **The conflict check compares the statement with the rest.** The severity
   rating (Malware over Informational, Benign over High or Critical), the
   category (a Malware verdict whose category says the sample is legitimate),
@@ -412,12 +431,23 @@ Three rules follow from the statement:
   neither the judge's nor one the renderer would mint — and the decline is
   recorded as `stix.malware_object_under_benign`. The relationships that would
   dangle go through the integrity pass that already prunes them. Nothing is
-  rewritten: the judge's own bundle is stored with the object in it.
+  rewritten: the judge's own bundle is stored with the object in it. A summary
+  note then has no malware object to be about, so it refers to the indicator
+  carrying the sample's own hash, which the cap keeps in a band of its own; a
+  bundle holding nothing the note could truthfully refer to emits no note, and
+  the summary stays in the report where a reader reads it. STIX requires a
+  note's and a report's `object_refs` and forbids an empty one, and a bundle
+  that breaks that is rejected whole rather than in part.
 
 The published confidence is `x_maljan_assessment.confidence`, the judge's own
-number for its own verdict, and nothing else. A verdict the judge put no number
-on is published with `overall_confidence` `None` and the header says "not
-assessed"; the analysts' mean is their confidence in their own claims and is
+number for the verdict the judge itself stated, and nothing else. It is
+published only *with* such a verdict: on the two other paths the verdict is not
+the judge's, and the number is about something else. Replaying the PuTTY run's
+recorded answer shows what that is worth — it has no `verdict` field, so it
+publishes Malware from the objects, `verdict.unstated` survived, and
+`overall_confidence` `None` where it used to print the judge's `1.00`. A verdict
+the judge stated and put no number on is published with `None` too and the
+header says "not assessed"; the analysts' mean is their confidence in their own claims and is
 not borrowed for a decision they did not reach.
 
 ### A misplaced extension does not cost the bundle
@@ -1155,7 +1185,15 @@ is assembled from what the run gathered rather than recomputed beside it:
   falling open for a sample whose platform is unknown or cross-domain). An APK
   run published enterprise-only `T1027` and `T1005` on all three surfaces with
   both mismatches unresolved; they are in the matrix, with the reason, and on
-  none of the three now. An `isr.ungrounded_technique` alone is not one of the
+  none of the three now. The check's own carve-outs decide what survives, and
+  `PRE` is the one that matters most now that the answer is read to publish
+  by: a technique whose only platform is `PRE` happens before any host is
+  touched, so nothing about a sample contradicts it — including its *domain*,
+  which is why that carve-out is asked before the domain comparison. ATT&CK
+  files every PRE technique in the enterprise matrix and mobile has none, so
+  asking the domain first made each of them cross-domain on an APK and would
+  have taken `T1583 Acquire Infrastructure` off an Android infostealer's C2
+  registration. An `isr.ungrounded_technique` alone is not one of the
   two: it is advisory, and the technique is published and flagged. The three
   surfaces used to be built from three sources and disagreed inside single
   runs: ten techniques in one report against zero attack-patterns in its
@@ -1202,18 +1240,45 @@ indicator it mints carries the reason it was admitted.
 
 URLs record their source the same way and go through the same predicate, asked
 of the URL's host (`url_corroboration_reason`), plus one question no source can
-answer for: whether the host could exist at all. A host that is reserved, has a
-single label, or ends in something that is not a real TLD is never an
-indicator, and neither is a loopback or unspecified address. One bundle
+answer for: whether the host could exist at all (`host_is_public`). One bundle
 published `http://localho`, `http://schq`, `https://q`, `http://3271` and
-`https://fs01n5.sends` — string-sweep cut-offs — as `url:value` indicators. The
-judge's own indicator objects ask the same question; one that fails it is not
-exported and the decline is recorded as `stix.unpublishable_url`, with the
-judge's bundle unchanged.
+`https://fs01n5.sends` as `url:value` indicators.
+
+The host question is syntax, and deliberately the weakest question in the
+chain. A valid Tor address passes it first and on its own checksum, for the
+reason the domains have that carve-out: `.onion` never resolves, so nothing can
+ever be its second source, and a name merely ending in `.onion` is not a host
+either. An address literal passes unless it is loopback, unspecified or
+link-local. A name passes when it is not a reserved name or suffix, every label
+is a label, and its last label is a suffix rather than a word — two or more
+letters, or a punycode label. It is not membership in a list of TLDs somebody
+wrote down: the list this replaced omitted `gov`, `edu`, `mobi`, every punycode
+TLD and most of two continents' ccTLDs, so a sandbox-observed request to a
+university host was dropped from the export with nothing said about it. Four of
+the five above fail this question; `fs01n5.sends` passes it and is held back by
+the corroboration rule instead, which is the true reason and the one recorded.
+
+Whether an endpoint that *could* exist is published stays
+`corroboration_reason`'s decision. Nothing anybody observed is dropped in
+silence: a sandbox or analyst URL the host question refuses, and a judge's own
+indicator object that it refuses, are both recorded as
+`stix.unpublishable_url` with the judge's or the report's own copy unchanged. A
+string-derived URL held back for want of a second source is the rule working
+and is not a finding. The value in such a row goes through
+`pipeline.events.scrub` and a length bound first, so a URL's userinfo never
+reaches the stored report.
 
 `MAX_TOTAL_INDICATORS` is applied where the indicators are rendered into the
 bundle, over every indicator that would be in it rather than over the ones the
-renderer happened to mint, in the priority order the linter's C4 rule names:
-hashes, then network indicators, then file names. Counting only the minted ones
-shipped sixteen indicators against a ceiling of fifteen, which C4 reported on
-the same run. The renderer and the linter read the one constant.
+renderer happened to mint. The integrity pass runs *first*: a corroborated
+string row and the network row that corroborated it are one indicator written
+twice, and capping before the dedupe spent slots on rows it then deleted, so a
+bundle over the cap shipped under it and lost five observed addresses to
+duplicates. Deduplicated first, the cap keeps exactly as many as there is room
+for, in four bands — the sample's own hashes, then the network indicators
+ordered by how strong their origin is (observed, then asserted by an agent or
+the judge, then string-derived and corroborated), then the other hashes the
+judge carried, then the file names. A string-derived row never outranks the
+observed row it duplicates, and when they are the same indicator the queue
+order makes the observation the one that survives the dedupe. The renderer and
+the linter read the one constant.
