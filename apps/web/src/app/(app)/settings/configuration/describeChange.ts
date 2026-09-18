@@ -5,6 +5,8 @@
  * masking rules below are the single place that decides what a viewer sees
  * for a token or a `secret`-typed leaf.
  */
+import { AGENT_DEFINITIONS_KEY } from "./agentStaging";
+import { countLabel } from "@/lib/report-utils";
 import type {
   AgentDefinitionEntry,
   CatalogEntry,
@@ -216,7 +218,7 @@ function describeServerMap(before: unknown, after: unknown): {
   }
 
   return {
-    summary: `${changedCount} server(s) changed`,
+    summary: `${countLabel(changedCount, "server")} changed`,
     detail: detail.length ? detail : undefined,
   };
 }
@@ -291,7 +293,7 @@ function describeDefinitionsMap(before: unknown, after: unknown): {
   }
 
   return {
-    summary: `${changedCount} agent(s) changed`,
+    summary: `${countLabel(changedCount, "agent")} changed`,
     detail: detail.length ? detail : undefined,
   };
 }
@@ -405,7 +407,7 @@ function describeProfilesMap(before: unknown, after: unknown): {
   }
 
   return {
-    summary: `${changedCount} team(s) changed`,
+    summary: `${countLabel(changedCount, "team")} changed`,
     detail: detail.length ? detail : undefined,
   };
 }
@@ -452,7 +454,7 @@ function describeLlmAgentsMap(before: unknown, after: unknown): {
   }
 
   return {
-    summary: `${changedCount} override(s) changed`,
+    summary: `${countLabel(changedCount, "override")} changed`,
     detail: detail.length ? detail : undefined,
   };
 }
@@ -476,7 +478,7 @@ export function describeChange(entry: CatalogEntry, before: unknown, after: unkn
   if (entry.key === "core.mcp.servers") {
     return { ...base, ...describeServerMap(before, after) };
   }
-  if (entry.key === "core.agents.definitions") {
+  if (entry.key === AGENT_DEFINITIONS_KEY) {
     return { ...base, ...describeDefinitionsMap(before, after) };
   }
   if (entry.key === "core.agents.profiles") {

@@ -103,6 +103,15 @@ export interface AgentMessageEventData {
   report?: string;
   report_truncated?: boolean;
   seq?: number;
+  /* A `tool_call` / `tool_result` line. No producer emits either kind today —
+   * `emit_agent_message` calls them an extension point — and the conversation
+   * view already reads these five and falls back on every one. Declared so
+   * the shape the view reads is a shape something describes. */
+  tool?: string;
+  server?: string;
+  evidence_id?: string;
+  ok?: boolean;
+  duration_ms?: number;
 }
 
 export interface AgentMessageDeltaEventData {

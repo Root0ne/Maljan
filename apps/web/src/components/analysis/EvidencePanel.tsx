@@ -4,6 +4,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
+import { humaniseKey } from "@/lib/humanise";
 import type { EvidenceEntry } from "@/types/evidence";
 import {
   EMPTY_OPTIONS,
@@ -148,7 +149,7 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
                   <option value="">all</option>
                   {options[field].map((value) => (
                     <option key={value} value={value}>
-                      {value}
+                      {field === "stage" ? humaniseKey(value) : value}
                     </option>
                   ))}
                 </select>
@@ -180,14 +181,17 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-left text-[10px] uppercase tracking-wider text-text-muted border-b border-border">
-                  <th className="px-3 py-2 font-medium">ID</th>
-                  <th className="px-3 py-2 font-medium">Stage</th>
-                  <th className="px-3 py-2 font-medium">Agent</th>
-                  <th className="px-3 py-2 font-medium">Server</th>
-                  <th className="px-3 py-2 font-medium">Tool</th>
-                  <th className="px-3 py-2 font-medium">Arguments</th>
-                  <th className="px-3 py-2 font-medium text-right">Duration</th>
-                  <th className="px-3 py-2 font-medium">Result</th>
+                  <th scope="col" className="px-3 py-2 font-medium">ID</th>
+                  <th scope="col" className="px-3 py-2 font-medium">Stage</th>
+                  {/* Agent and Server were two columns saying "pipeline" on
+                      fifteen of forty rows. The server is the agent's, so it
+                      follows the agent and only where it names something
+                      else. */}
+                  <th scope="col" className="px-3 py-2 font-medium">Agent</th>
+                  <th scope="col" className="px-3 py-2 font-medium">Tool</th>
+                  <th scope="col" className="px-3 py-2 font-medium">Arguments</th>
+                  <th scope="col" className="px-3 py-2 font-medium text-right">Duration</th>
+                  <th scope="col" className="px-3 py-2 font-medium">Result</th>
                 </tr>
               </thead>
               <tbody>
@@ -222,10 +226,16 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
                             {entry.entry_id}
                           </button>
                         </td>
-                        <td className="px-3 py-2 text-text-secondary">{entry.stage}</td>
-                        <td className="px-3 py-2 text-text-primary">{entry.agent}</td>
-                        <td className="px-3 py-2 text-text-muted">
-                          {entry.server ?? "built-in"}
+                        {/* The stage strip two hundred pixels above says
+                            "Triage pack"; this used to say `triage_pack`. */}
+                        <td className="px-3 py-2 text-text-secondary">
+                          {humaniseKey(entry.stage ?? "")}
+                        </td>
+                        <td className="px-3 py-2 text-text-primary">
+                          {entry.agent}
+                          {entry.server && entry.server !== entry.agent && (
+                            <span className="ml-1.5 text-text-muted">{entry.server}</span>
+                          )}
                         </td>
                         <td className="px-3 py-2 font-mono text-text-primary break-all">
                           {entry.tool}
@@ -246,7 +256,7 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
                       </tr>
                       {!entry.ok && (entry.error || entry.remediation) && (
                         <tr className="border-b border-border-light bg-status-red/5">
-                          <td colSpan={8} className="px-3 py-1.5 text-[11px]">
+                          <td colSpan={7} className="px-3 py-1.5 text-[11px]">
                             <span className="text-status-red">{entry.error ?? "failed"}</span>
                             {entry.remediation && (
                               <span className="text-text-secondary"> — {entry.remediation}</span>
@@ -256,7 +266,7 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
                       )}
                       {expanded && (
                         <tr className="border-b border-border-light bg-bg-deep">
-                          <td colSpan={8} className="px-3 pb-3 pt-1 space-y-3">
+                          <td colSpan={7} className="px-3 pb-3 pt-1 space-y-3">
                             {summary.truncated && (
                               <button
                                 type="button"
@@ -328,7 +338,7 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
                 })}
                 {entries.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="px-3 py-6 text-center text-text-muted">
+                    <td colSpan={7} className="px-3 py-6 text-center text-text-muted">
                       {loading
                         ? "Reading the ledger\u2026"
                         : filtered

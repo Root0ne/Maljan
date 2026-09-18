@@ -29,6 +29,14 @@ interface AuthContextValue {
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, full_name: string) => Promise<void>;
   logout: () => void;
+  /** Whether signing out is a thing this deployment can do at all.
+   *
+   *  Under `NEXT_PUBLIC_AUTH_DISABLED` the handler below is an explicit no-op,
+   *  and the header still drew the button: pressing it left you on the same
+   *  page, as the same user, with nothing said. A control that is offered and
+   *  silently does nothing is worse than an absent one, so the header asks
+   *  first. */
+  canSignOut: boolean;
 }
 
 /**
@@ -297,7 +305,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, loading, authError, retryAuth, login, register, logout }}
+      value={{
+        user,
+        loading,
+        authError,
+        retryAuth,
+        login,
+        register,
+        logout,
+        canSignOut: !AUTH_DISABLED,
+      }}
     >
       {authError ? <SessionCheckFailed error={authError} onRetry={retryAuth} /> : children}
     </AuthContext.Provider>

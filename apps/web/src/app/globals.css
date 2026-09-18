@@ -27,8 +27,21 @@
                                   lighter surfaces (#1c2333 / #21262d),
                                   failing AA there. #8d97a3 clears AA on all
                                   four surfaces (~4.95:1 on the lightest).
-       tertiary   ~4.9:1 (AA)   — least-important metadata on dark surfaces.
+       tertiary   ~4.9:1 (AA)   — least-important metadata, and only on the
+                                  two darkest surfaces: 4.94:1 on --bg-deep
+                                  and 4.51:1 on --bg-surface, but 4.44:1 on
+                                  --bg-reading, 4.10:1 on --bg-elevated and
+                                  --bg-hover and 3.97:1 on --bg-active. Text
+                                  that can land on one of those four is
+                                  --text-secondary (6.21:1 on --bg-elevated
+                                  and --bg-hover, 6.02:1 on --bg-active), not
+                                  this tier.
        disabled   ~3.1:1        — disabled / placeholder only (non-essential).
+     Every tier above is checked against the background it is painted on, and
+     `--border` (#30363d) is one of those backgrounds wherever a chip sits on
+     it: `--text-muted` reaches only 4.12:1 there, so a chip is painted on
+     `--bg-elevated` instead and this list stays the four it was validated
+     against.
      Greys are kept cool/low-chroma to harmonise with the blue-tinted canvas;
      primary stays off-white (never #fff) to avoid halation. */
   --text-primary: #e6edf3;
@@ -51,6 +64,15 @@
 
   --accent: #4493f8;
   --accent-hover: #388bfd;
+  /* The fill under white button text. `--accent` is tuned for its own
+     contrast against the canvas and reaches only 3.09:1 behind #ffffff, which
+     is a WCAG 1.4.3 failure on every primary button in the console — the one
+     thing Lighthouse found. Two steps darker clears AA at 4.63:1 with the
+     same hue, so the button still reads as the accent; the hover is darker
+     again, so the state can only improve the ratio. `--accent` keeps every
+     other job it has: borders, icons, the focus ring and the /10 washes. */
+  --accent-fill: #1f6feb;
+  --accent-fill-hover: #1158c7;
   /* Brighter blue (~7:1) for small inline link text, where the fill-tuned
      --accent (#4493f8, ~6:1) is a touch low. Recommended by 3/4 reports. */
   --accent-strong: #58a6ff;
@@ -86,6 +108,8 @@
 
   --color-accent: var(--accent);
   --color-accent-hover: var(--accent-hover);
+  --color-accent-fill: var(--accent-fill);
+  --color-accent-fill-hover: var(--accent-fill-hover);
   --color-accent-strong: var(--accent-strong);
 
   /* next/font exposes Inter / JetBrains Mono through these CSS variables

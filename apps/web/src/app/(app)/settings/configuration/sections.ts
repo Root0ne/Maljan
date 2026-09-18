@@ -10,7 +10,7 @@ export interface SectionDef {
 
 export type SectionIcon = "models" | "tools" | "agents" | "layers" | "platform";
 
-/** Maps the 16 backend catalog groups onto five settings-page sections. Group
+/** Maps the 17 backend catalog groups onto five settings-page sections. Group
  *  keys not literally listed here fall through to "platform", in schema
  *  order, titled from the schema — see `groupsBySection`. */
 export const SECTIONS: SectionDef[] = [

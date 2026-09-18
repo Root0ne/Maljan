@@ -17,6 +17,28 @@ import type {
 export type Pending = Record<string, unknown>;
 
 /**
+ * The error map with everything the server said about one leaf taken out.
+ *
+ * A composite leaf is staged under one key and refused under several — the
+ * agent map is `core.agents.definitions`, and its messages come back as
+ * `core.agents.definitions.ahmet.prompt`. Dropping only the exact key left
+ * every one of those standing, so "a generic agent needs a prompt" went on
+ * being printed under a prompt field the operator had just filled in, and the
+ * only way to clear it was to reload the page. The prefix rule here is the one
+ * `ReviewList` and the composite editors already use to place a message.
+ */
+export function withoutErrorsFor(
+  errors: Record<string, string>,
+  key: string
+): Record<string, string> {
+  const stale = Object.keys(errors).filter((k) => k === key || k.startsWith(`${key}.`));
+  if (stale.length === 0) return errors;
+  const next = { ...errors };
+  for (const k of stale) delete next[k];
+  return next;
+}
+
+/**
  * Loads the settings schema + current values, tracks in-flight edits, and
  * wraps the seven settings endpoints. Deliberately self-contained: the
  * Configuration tab renders nothing else while this is loading, so every
@@ -120,12 +142,7 @@ export function useSettings() {
         delete n[key];
         return n;
       });
-      setErrors((e) => {
-        if (!(key in e)) return e;
-        const n = { ...e };
-        delete n[key];
-        return n;
-      });
+      setErrors((e) => withoutErrorsFor(e, key));
     },
     [entries, values]
   );
@@ -136,12 +153,7 @@ export function useSettings() {
       delete n[key];
       return n;
     });
-    setErrors((e) => {
-      if (!(key in e)) return e;
-      const n = { ...e };
-      delete n[key];
-      return n;
-    });
+    setErrors((e) => withoutErrorsFor(e, key));
   }, []);
 
   const apply = useCallback(async () => {

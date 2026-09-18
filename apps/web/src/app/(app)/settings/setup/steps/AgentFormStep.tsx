@@ -4,17 +4,22 @@ import { useEffect, useState } from "react";
 import type { AgentDefinitionEntry } from "@/types/settings";
 import {
   AgentDetail,
-  BUILTIN_AGENT_KEYS,
-  cloneDefinition,
   useAgentResolve,
   type AgentLLMOverride,
 } from "../../configuration/AgentDefinitionsEditor";
+import {
+  AGENT_DEFINITIONS_KEY as DEFINITIONS_KEY,
+  BUILTIN_AGENT_KEYS,
+  cloneDefinition,
+  displayedDefinitions,
+  stagedDefinitions,
+  type StagedDefinitionMap,
+} from "../../configuration/agentStaging";
 import { buildFieldRowProps } from "../../configuration/fieldRowProps";
 import { copyKey, mapKeyError } from "../../configuration/mapEditorHelpers";
 import { useSettingsContext } from "../../configuration/SettingsContext";
 import { stateString, type GuideStepProps } from "./types";
 
-const DEFINITIONS_KEY = "core.agents.definitions";
 const LLM_AGENTS_KEY = "core.llm.agents";
 /** The radio value for "not a clone". */
 const BLANK = " blank";
@@ -63,10 +68,21 @@ export default function AgentFormStep({
 }: GuideStepProps & { section: AgentStepSection }) {
   const ctx = useSettingsContext();
   const entry = ctx.entriesByKey[DEFINITIONS_KEY];
-  const definitions = (ctx.pending[DEFINITIONS_KEY] ??
-    ctx.values[DEFINITIONS_KEY]?.value ??
+  /* One `SettingsProvider` covers the guides and the console, so this leaf's
+   * staged value is the same object the agents editor stages — and that value
+   * carries a built-in as its role and its switch alone. Read and write it
+   * through the same pair the editor uses, or the two halves of the console
+   * disagree about the shape of one leaf and a clone of a built-in reads
+   * `tools` off an entry that has none. */
+  const savedDefinitions = (ctx.values[DEFINITIONS_KEY]?.value ??
     entry?.default ??
     {}) as Record<string, AgentDefinitionEntry>;
+  const definitions = displayedDefinitions(
+    (ctx.pending[DEFINITIONS_KEY] ?? null) as StagedDefinitionMap | null,
+    savedDefinitions,
+  );
+  const stageDefinitions = (next: Record<string, AgentDefinitionEntry>) =>
+    ctx.stage(DEFINITIONS_KEY, stagedDefinitions(next, savedDefinitions));
   const llmAgents = (ctx.pending[LLM_AGENTS_KEY] ??
     ctx.values[LLM_AGENTS_KEY]?.value ??
     {}) as Record<string, AgentLLMOverride>;
@@ -105,8 +121,7 @@ export default function AgentFormStep({
       return;
     }
     setKeyError(null);
-    ctx.stage(
-      DEFINITIONS_KEY,
+    stageDefinitions(
       cloneDefinition(definitions, key, source, source ? resolve.probes[source] : undefined)
     );
     if (source && llmAgents[source]) {
@@ -197,7 +212,7 @@ export default function AgentFormStep({
       <AgentDetail
         agentKey={agentKey}
         definitions={definitions}
-        onChange={(v) => ctx.stage(DEFINITIONS_KEY, v)}
+        onChange={stageDefinitions}
         llmAgents={llmAgents}
         onChangeLlmAgents={props.onChangeLlmAgents}
         llmGlobal={props.llmGlobal}

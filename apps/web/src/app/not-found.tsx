@@ -22,7 +22,7 @@ export default function NotFound() {
           <Link href="/dashboard" className="text-sm text-accent-strong hover:underline">
             Back to dashboard
           </Link>
-          <Link href="/jobs" className="text-sm text-text-secondary hover:underline">
+          <Link href="/jobs" className="text-sm text-accent-strong hover:underline">
             Analysis jobs
           </Link>
         </div>

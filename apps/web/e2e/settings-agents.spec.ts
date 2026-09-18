@@ -81,7 +81,7 @@ test.describe("agent definitions and profiles", () => {
       changes: Record<string, unknown> & {
         "core.agents.definitions": Record<
           string,
-          { role: string; static_provider: string | null; prompt: string | null }
+          { role: string; enabled?: boolean; static_provider?: string | null }
         >;
         "core.llm.agents": Record<string, { provider: string; model: string }>;
       };
@@ -89,9 +89,10 @@ test.describe("agent definitions and profiles", () => {
     const sent = body.changes["core.agents.definitions"];
     expect(sent.static_r2.role).toBe("static");
     expect(sent.static_r2.static_provider).toBe("r2");
-    // The source is sent back untouched: a clone must not edit what it copied.
-    expect(sent.static.static_provider).toBeNull();
-    expect(sent.static.prompt).toBeNull();
+    // A built-in goes out as the only thing that may be changed about it —
+    // its role and its switch — and the API fills the rest in from the seed.
+    // Sending it whole is what let a stale stored row refuse every save.
+    expect(sent.static).toEqual({ role: "static", enabled: true });
     // The typed model lands in the `core.llm.agents` map under the clone's
     // own key, not folded into the definitions map. A model-only edit fills
     // in the effective global provider (the fixture's `core.llm.provider`,
@@ -375,11 +376,13 @@ test.describe("agent definitions and profiles", () => {
     await page.getByRole("button", { name: "Confirm and apply" }).click();
 
     const body = patches[0] as {
-      changes: Record<string, Record<string, { enabled: boolean; prompt: string | null }>>;
+      changes: Record<string, Record<string, Record<string, unknown>>>;
     };
     const sent = body.changes["core.agents.definitions"].dynamic;
-    expect(sent.enabled).toBe(false);
-    expect(sent.prompt).toBeNull();
+    // The switch is the edit, and the switch plus the role is the whole of
+    // what goes out for a built-in: the API fills the rest in from the seed,
+    // and sending it whole is what let a stale stored row refuse every save.
+    expect(sent).toEqual({ role: "dynamic", enabled: false });
   });
 
   test("the judge card offers no Clone, because the judge cannot be cloned", async ({
