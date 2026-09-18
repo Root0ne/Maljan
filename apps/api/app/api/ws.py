@@ -206,36 +206,41 @@ async def _replay(websocket: WebSocket, job_id: str, since: int) -> None:
 
         redis_conn = aioredis.from_url(settings.redis_url, decode_responses=True)
         try:
-            async with async_session_factory() as db:
-                for _page in range(_REPLAY_PAGES):
+            for _page in range(_REPLAY_PAGES):
+                # A session per page, closed before the page is sent. The
+                # send is where the time goes — a thousand frames to a client
+                # that reads them as fast as it feels like — and a database
+                # transaction held open across it is a backend idle in
+                # transaction for as long as that client takes.
+                async with async_session_factory() as db:
                     events = await read_events(
                         db, redis_conn, job_id, since=cursor, limit=_REPLAY_PAGE
                     )
-                    if not events:
-                        break
-                    for event in events:
-                        await websocket.send_text(json.dumps(event))
-                    sent += len(events)
-                    highest = max(
-                        (int((e.get("data") or {}).get("seq") or 0) for e in events), default=0
-                    )
-                    if highest <= cursor or len(events) < _REPLAY_PAGE:
-                        # Either the page was short — there is nothing more —
-                        # or it carried no number this could advance past,
-                        # which is a run from before there were numbers and
-                        # has no second page to ask for.
-                        break
-                    cursor = highest
-                    # One page at a time, and the loop gets a turn between
-                    # them: a resume is a burst of sends on a socket that is
-                    # also carrying live events for this job and others.
-                    await asyncio.sleep(0)
-                else:
-                    logger.info(
-                        "WebSocket resume reached its page bound at seq=%s: job=%s",
-                        log_safe(cursor),
-                        log_safe(job_id),
-                    )
+                if not events:
+                    break
+                for event in events:
+                    await websocket.send_text(json.dumps(event))
+                sent += len(events)
+                highest = max(
+                    (int((e.get("data") or {}).get("seq") or 0) for e in events), default=0
+                )
+                if highest <= cursor or len(events) < _REPLAY_PAGE:
+                    # Either the page was short — there is nothing more —
+                    # or it carried no number this could advance past,
+                    # which is a run from before there were numbers and
+                    # has no second page to ask for.
+                    break
+                cursor = highest
+                # One page at a time, and the loop gets a turn between
+                # them: a resume is a burst of sends on a socket that is
+                # also carrying live events for this job and others.
+                await asyncio.sleep(0)
+            else:
+                logger.info(
+                    "WebSocket resume reached its page bound at seq=%s: job=%s",
+                    log_safe(cursor),
+                    log_safe(job_id),
+                )
         finally:
             try:
                 await redis_conn.aclose()
@@ -358,34 +363,46 @@ async def ws_analysis(websocket: WebSocket, job_id: str, since: int | None = Non
     # its own, and then received nothing on any of them.
     job_id = str(job_uuid)
 
+    # Both questions are asked and answered inside the session; the handshake
+    # they decide happens outside it. A rejection is an accept and a close on
+    # a socket whose peer may be slow, and this connection is about to run for
+    # the length of an analysis — neither is something to hold a transaction
+    # across.
     async with async_session_factory() as db:
         # The account first, and before the job: a caller whose account is
         # closed learns nothing about whether the job exists.
-        if not await _account_is_open(db, user_id):
-            logger.warning(
-                "WebSocket rejected: account is not active (user=%s job=%s)",
-                log_safe(user_id),
-                log_safe(job_id),
-            )
-            await _reject(websocket, 1008, "Unauthorized: account is deactivated")
-            return
+        account_open = await _account_is_open(db, user_id)
+        owner: str | None = None
+        job_exists = False
+        if account_open:
+            result = await db.execute(select(AnalysisJob).where(AnalysisJob.id == job_uuid))
+            job = result.scalar_one_or_none()
+            job_exists = job is not None
+            if job is not None:
+                owner = str(job.created_by)
 
-        result = await db.execute(select(AnalysisJob).where(AnalysisJob.id == job_uuid))
-        job = result.scalar_one_or_none()
+    if not account_open:
+        logger.warning(
+            "WebSocket rejected: account is not active (user=%s job=%s)",
+            log_safe(user_id),
+            log_safe(job_id),
+        )
+        await _reject(websocket, 1008, "Unauthorized: account is deactivated")
+        return
 
-        if job is None:
-            logger.warning("WebSocket rejected: job not found (%s)", log_safe(job_id))
-            await _reject(websocket, 1008, "Not found: job does not exist")
-            return
+    if not job_exists:
+        logger.warning("WebSocket rejected: job not found (%s)", log_safe(job_id))
+        await _reject(websocket, 1008, "Not found: job does not exist")
+        return
 
-        if str(job.created_by) != user_id:
-            logger.warning(
-                "WebSocket rejected: user %s does not own job %s",
-                log_safe(user_id),
-                log_safe(job_id),
-            )
-            await _reject(websocket, 1008, "Forbidden: not your job")
-            return
+    if owner != user_id:
+        logger.warning(
+            "WebSocket rejected: user %s does not own job %s",
+            log_safe(user_id),
+            log_safe(job_id),
+        )
+        await _reject(websocket, 1008, "Forbidden: not your job")
+        return
 
     # ── Connection accepted ──────────────────────────────────────────
     logger.info("WebSocket authenticated: user=%s job=%s", log_safe(user_id), log_safe(job_id))

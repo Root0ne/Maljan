@@ -876,6 +876,66 @@ change landed on `main`.
   tool names the pipeline recognises.
 - **`core.agents.profiles` is titled "Team definitions".** Its page is already
   called Teams, so the two headings sat on top of each other.
+- **The worker no longer holds a transaction while the models run.** The
+  analysis task kept one session open for the whole job: it read the settings,
+  and the backend then sat `idle in transaction` for as long as the analysis
+  took — 13 minutes 51 seconds on the run that found it — holding an
+  `AccessShareLock` on `analysis_jobs`, `analysis_reports` and
+  `runtime_settings`. A migration's `ALTER TABLE analysis_reports` queued
+  behind it, every read of that table queued behind the ALTER, and
+  `GET /api/v1/jobs/{id}` timed out for four minutes while `/health` answered
+  in milliseconds. The task now reads the job, its sample, the stored settings
+  and any attached sandbox report in one short session, closes it before the
+  pipeline is built, and opens another for the report, findings, evidence,
+  transcript and completion — which stay in one transaction, because the
+  report's sections cite the ledger's ids. The enrichment task is the same
+  shape: it reads the payload, closes, spends as long as the reputation
+  lookups take (452 s on one measured report) with no session open, and writes
+  through a second one. Cancellation is unchanged, including the feed flush a
+  cancelled run ends with.
+- **A failed job says so, even when its own session is gone.** The failure
+  path wrote through the session the run had been using, which is exactly the
+  session a terminated backend leaves raising `PendingRollbackError`: the run
+  published its `error` event, arq recorded the task as failed, and the row
+  still read `running` with no error and no `completed_at` an hour later. The
+  failure is now recorded through a new session, and what the row says is the
+  class of the exception and the id of the log entry holding the rest, because
+  `error_message` is a field of `JobResponse` and an exception's message names
+  host paths and connection strings. A `cancelled` row is left alone.
+- **No request path waits on a third party inside a transaction.** A
+  request-scoped session is in a transaction from the dependency that resolved
+  the caller, so a handler that then waited on somebody else left a backend
+  `idle in transaction` for the length of that wait. The three probes (up to
+  five minutes at a model endpoint), the VirusTotal registration and the
+  long-term-memory purge now end the read first, through
+  `database.end_read_transaction`. The WebSocket route holds no session across
+  the stream: the handshake decides inside a session and accepts or rejects
+  outside it, and a resume reads one page per session and sends it once that
+  session has closed, rather than holding one open while a thousand frames go
+  out at the client's pace.
+- **A running job says who owns it, and the sweep believes only that.** The
+  sweep marked every `running` row older than five minutes as failed, on the
+  reasoning that this process is the worker and has just booted — true of a
+  single-worker deployment and false of any other, where it would fail a run
+  another worker was performing. Ownership is now a heartbeat the owner writes
+  about the job it is running: `maljan:job-owner:<job id>`, carrying the
+  worker's own id, 90 seconds long, refreshed every 30 and dropped on success,
+  failure and cancellation alike. arq's keys cannot say it — its in-progress
+  claim outlives the process that wrote it by the job timeout, and its
+  queue-wide health key outlives a killed worker by 31 seconds, which is
+  exactly when the restarted container reads it, so an OOM-killed run's row
+  survived the very sweep meant to repair it. The sweep now runs one TTL after
+  startup and every ten minutes after that (which also reaches a job a
+  still-running worker gave up on), leaves a row younger than one TTL for the
+  next pass, never touches a job this process is running, and touches nothing
+  at all when Redis cannot be read, logging that once.
+- **A refusal this worker worded reaches the operator whole.** "The attached
+  sandbox report does not belong to this sample" and "the configured sandbox
+  provider cannot accept an uploaded report" are sentences this module writes
+  from constants, not exception text from a driver or the filesystem. They are
+  now raised as `StatedFailure` — the class `AbsentAnalysisError` already
+  belonged to — and only that class keeps its message on `job.error_message`;
+  everything else still arrives as its class name plus the error id.
 - **The sample roots reach a configured deployment's sidecars, not only a
   fresh one.** The `analysis` and `network` sidecars read a path argument only
   inside the directories `MALJAN_SAMPLE_ROOTS` names, and they learn them from

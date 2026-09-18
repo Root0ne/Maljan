@@ -310,7 +310,7 @@ def test_the_route_is_admin_only_and_passes_the_name_through(monkeypatch):
     app = FastAPI()
     app.include_router(router, prefix="/api/v1")
     app.dependency_overrides[require_admin] = lambda: MagicMock(id="1")
-    app.dependency_overrides[get_db] = lambda: MagicMock()
+    app.dependency_overrides[get_db] = lambda: MagicMock(commit=AsyncMock())
     client = TestClient(app)
 
     seen: list[str] = []

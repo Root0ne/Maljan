@@ -259,11 +259,12 @@ class TestIncrementalPersistence:
         )
 
     def test_the_feed_is_registered_where_the_finally_can_reach_it(self) -> None:
-        """Registered inside the same ``try``'s enclosing block, not above it.
+        """The registration is the statement immediately before the ``try``.
 
-        Registered above the session context, a raise while entering that
-        context left the buffer in the module-global map for the life of the
-        process.
+        Anything between the two can raise, and a raise there leaves the
+        buffer in the module-global map for the life of the process. The
+        registration also has to come before the run's first event, because a
+        feed that starts late starts at the wrong ``seq``.
         """
         import inspect
 
@@ -271,9 +272,14 @@ class TestIncrementalPersistence:
 
         source = inspect.getsource(analysis_worker.run_analysis)
         started = source.index("_start_event_feed(")
-        session = source.index("async with db_session() as db:")
-        assert session < started, "the feed is registered inside the session context"
-        assert started < source.index("\n        try:"), "and before the try that flushes it"
+        guarding_try = source.index("\n    try:")
+        assert started < guarding_try, "the feed is registered before the try that flushes it"
+        between = source[source.index("\n", started) : guarding_try]
+        assert not [line for line in between.splitlines() if line.strip()], (
+            "nothing may run between registering the feed and entering the try"
+        )
+        # And the first session is opened inside that try, not around it.
+        assert guarding_try < source.index("async with db_session() as db:")
 
     def test_a_database_that_refuses_the_batch_never_fails_the_publish(self) -> None:
         class _Broken(_Session):
