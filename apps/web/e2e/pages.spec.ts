@@ -187,10 +187,33 @@ test.describe("Audit log", () => {
     await page.goto("/audit");
 
     await expect(page.getByRole("heading", { name: "Audit Logs" })).toBeVisible();
-    await expect(page.getByText("job.create")).toBeVisible();
+    // The action reads as a sentence, the actor is drawn at all, and the IP
+    // column survives because this fixture row has one.
+    await expect(page.getByText("Job create")).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: "Who" })).toBeVisible();
     await expect(page.getByText("10.0.0.5")).toBeVisible();
     await expect(page.getByText("1 total entry")).toBeVisible();
     await expectNoAlerts(page);
+  });
+
+  /* C-I17: the log had no way to narrow 1766 entries but Previous and Next. */
+  test("narrows the log by action, through the endpoint", async ({
+    authenticatedPage: page,
+  }) => {
+    const asked: string[] = [];
+    await page.route("**/api/v1/audit/logs?**", (route) => {
+      asked.push(new URL(route.request().url()).searchParams.get("action") ?? "");
+      return route.fulfill({
+        json: { items: [], total: 0, page: 1, page_size: 20, pages: 0 },
+      });
+    });
+    await page.goto("/audit");
+
+    await page.getByLabel("Action").fill("settings");
+    await page.getByRole("button", { name: "Filter" }).click();
+
+    await expect(page.getByText("No entry matches “settings”.")).toBeVisible();
+    expect(asked).toContain("settings");
   });
 
   test("a failed fetch is reported, not disguised as an empty log", async ({
