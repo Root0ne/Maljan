@@ -206,19 +206,40 @@ class TestTheWorkerFailsSuchAJob:
             "no report model is even imported first"
         )
         assert raised < source.index('"phase_change", {"phase": "reporting"}')
-        assert raised < source.index('job.status = "completed"')
+        assert raised < source.index('status="completed"')
 
-    def test_the_failure_path_writes_the_message_to_the_job_row(self) -> None:
+    def test_the_failure_path_writes_the_reason_to_the_job_row(self) -> None:
+        """Through a session of its own, and as a reason rather than a message.
+
+        The row is written by ``mark_job_failed``, which opens a new session:
+        the one the run was writing through is the one a terminated backend
+        leaves unusable. What it writes is ``failure_reason`` — the class of
+        the exception and the error id — because ``job.error_message`` is
+        published on ``JobResponse``.
+        """
         import inspect
 
         from app.worker import analysis_worker
 
         source = inspect.getsource(analysis_worker.run_analysis)
-        handler = source[source.index("except Exception as exc:") :]
+        handler = source[source.index("\n    except Exception as exc:") :]
 
-        assert 'job.status = "failed"' in handler
-        assert "job.error_message = error_msg[:2000]" in handler
-        assert 'error_msg = f"{type(exc).__name__}: {exc}"' in source
+        assert "reason = failure_reason(exc, error_id)" in handler
+        assert "await mark_job_failed(db_session, job_uuid, reason=reason" in handler
+        assert "db." not in handler.split("finally:")[0], (
+            "the failure path must not reach for the run's own session"
+        )
+
+    def test_the_reason_carries_the_class_and_the_id_and_nothing_else(self) -> None:
+        from app.worker.analysis_worker import AbsentAnalysisError, failure_reason
+
+        assert failure_reason(ValueError("/srv/samples/x.exe is missing"), "abc") == (
+            "ValueError (error id abc)"
+        )
+        # The one exception whose own sentence is written for an operator.
+        absent = AbsentAnalysisError("no analysis was produced: ... (APIStatusError 402)")
+        assert failure_reason(absent, "abc").startswith("no analysis was produced")
+        assert failure_reason(absent, "abc").endswith("(error id abc)")
 
     def test_the_absent_run_is_its_own_error_class(self) -> None:
         """Its own class so the handler above cannot be reached by accident."""
