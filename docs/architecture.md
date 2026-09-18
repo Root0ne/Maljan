@@ -831,6 +831,14 @@ cannot carry: the import list, the permission set, the endpoints.
 Anything that fails validation is dropped and counted rather than repaired, and
 the block is stripped before the prose reaches the transcript or the report.
 
+A repeated tool call is a message to the model and nothing else. The third
+identical `(tool, arguments)` call in one loop is not run; the model is told
+which entry already holds the answer, and whether that entry was an answer or a
+failure. Nothing is written to the ledger for it and nothing is drawn in the
+console: no tool ran, and recording it as a successful call — which it was —
+inflated the ledger, the report's tool-call count, and gave the model an
+evidence id it could cite for evidence that did not exist.
+
 ## Reporting
 
 Every run emits a structured `MalwareReport` (`src/maljan/reporting/`), and it
