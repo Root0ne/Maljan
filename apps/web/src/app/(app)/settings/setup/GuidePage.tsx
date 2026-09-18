@@ -1,5 +1,6 @@
 "use client";
 
+import { probeDetail } from "@/lib/probeDetail";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -362,7 +363,7 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
               className={`text-[11px] ${result.ok ? "text-status-green" : "text-status-red"}`}
               role="status"
             >
-              {result.ok ? "ok" : "failed"} · {result.latency_ms} ms · {result.detail}
+              {result.ok ? "ok" : "failed"} · {result.latency_ms} ms · {probeDetail(result.detail)}
             </span>
           )}
         </div>

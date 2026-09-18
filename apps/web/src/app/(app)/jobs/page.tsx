@@ -233,7 +233,13 @@ function AnalysesList() {
         {/* The list */}
         <div className="flex-1 min-w-0 bg-bg-surface border border-border rounded">
           <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
-            <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+            {/* A `status` as well as a heading: changing the status filter
+                updated this count silently, and nothing else on the page
+                announced that the list had changed under the reader. */}
+            <h2
+              role="status"
+              className="text-xs font-medium text-text-primary uppercase tracking-wider"
+            >
               Analyses &mdash; {countLabel(filtered.length, "result")}
             </h2>
             {toast && (
@@ -259,6 +265,11 @@ function AnalysesList() {
                     key={row.id}
                     className="flex items-center justify-between px-4 py-3 hover:bg-bg-hover"
                   >
+                    {/* The verdict, the score and the status used to be
+                        siblings *outside* the link, so dozens of rows for one
+                        file were dozens of links all named the same thing.
+                        They are inside it now, which is also where a reader
+                        following one expects to find them. */}
                     <Link
                       href={`/analysis/${row.id}`}
                       className="flex items-center gap-3 flex-1 min-w-0"
@@ -273,20 +284,22 @@ function AnalysesList() {
                           {row.durationSeconds ? ` / ${duration}` : ""}
                         </p>
                       </div>
-                    </Link>
-                    <div className="flex items-center gap-3 ml-3">
                       {row.verdict && (
                         <span
-                          className={`text-xs ${VERDICT_TEXT[verdictBucket(row.verdict)] ?? VERDICT_TEXT.unknown}`}
+                          className={`ml-auto text-xs ${VERDICT_TEXT[verdictBucket(row.verdict)] ?? VERDICT_TEXT.unknown}`}
                         >
                           {verdictLabel(row.verdict)}
+                          {/* A bare `0` beside a confident verdict said
+                              nothing about what the number was. */}
                           {row.confidence !== null && (
                             <span className="ml-1.5 font-mono text-text-muted">
-                              {Math.round(row.confidence * 100)}
+                              confidence {row.confidence.toFixed(2)}
                             </span>
                           )}
                         </span>
                       )}
+                    </Link>
+                    <div className="flex items-center gap-3 ml-3">
                       {canCancel && (
                         <button
                           onClick={(e) => {

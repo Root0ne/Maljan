@@ -1,5 +1,6 @@
 "use client";
 
+import { probeDetail } from "@/lib/probeDetail";
 import { useRef, useState } from "react";
 import { Bot } from "lucide-react";
 import { api } from "@/lib/api";
@@ -441,7 +442,7 @@ export function AgentDetail({
           className={`text-[11px] ${result.ok ? "text-status-green" : "text-status-red"}`}
           role="status"
         >
-          {result.ok ? "ok" : "failed"} · {result.latency_ms} ms · {result.detail}
+          {result.ok ? "ok" : "failed"} · {result.latency_ms} ms · {probeDetail(result.detail)}
           {details ? ` · prompt ${details.prompt_chars} chars` : ""}
         </p>
       )}

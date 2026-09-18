@@ -138,9 +138,17 @@ export default function SecretField({
           >
             {replaceLabel}
           </button>
+          {/* Distinct from the row's "Remove override", which drops the
+              stored value straight away: this stages the removal and it
+              happens on Apply, with everything else. */}
           {status !== "not-set" && (
-            <button type="button" className="text-xs text-status-red" onClick={onClear}>
-              Clear
+            <button
+              type="button"
+              className="text-xs text-status-red"
+              title="Stages the removal; it happens on Apply"
+              onClick={onClear}
+            >
+              Clear on apply
             </button>
           )}
         </>

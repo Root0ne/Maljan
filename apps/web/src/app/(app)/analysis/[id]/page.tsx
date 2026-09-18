@@ -135,6 +135,13 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
   // banner. ``explanation`` is shown as small muted text below each rule.
   const fpWarnings: FpWarning[] = runSummary?.fp_warnings ?? [];
   const hasErrorWarning = fpWarnings.some((w) => w.severity === "error");
+  /* The linter writes one explanation per rule, so a run that tripped one rule
+     three times carried the same paragraph three times. Said once where they
+     agree, listed where they do not. */
+  const explanations = [
+    ...new Set(fpWarnings.map((w) => (w.explanation ?? "").trim()).filter(Boolean)),
+  ];
+  const sharedExplanation = explanations.length === 1 ? explanations[0] : null;
   const evidence = runSummary?.evidence ?? null;
   const ungroundedSections = runSummary?.sections_without_evidence ?? 0;
 
@@ -181,38 +188,57 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
           open={hasErrorWarning}
           className="rounded border border-status-orange/40 bg-status-orange/10 p-3 text-sm"
         >
-          <summary className="flex items-center gap-3 cursor-pointer select-none">
-            <span className="font-semibold text-status-orange">
-              QA WARNINGS
-            </span>
-            <span className="text-xs text-text-muted">
-              {fpWarnings.length} finding{fpWarnings.length === 1 ? "" : "s"}
-              {hasErrorWarning ? " (errors present)" : ""}
+          {/* `display:flex` on the `<summary>` itself suppresses Chromium's
+              disclosure triangle, so this box gave no sign that it opened
+              while the RUN RECORD beside it did. The flex row is a child. */}
+          <summary className="cursor-pointer select-none">
+            <span className="inline-flex items-center gap-3 align-middle">
+              <span className="font-semibold text-status-orange">
+                QA WARNINGS
+              </span>
+              <span className="text-xs text-text-muted">
+                {countLabel(fpWarnings.length, "finding")}
+                {hasErrorWarning ? " (errors present)" : ""}
+              </span>
             </span>
           </summary>
           <ul className="mt-2 space-y-2 text-text-secondary">
             {fpWarnings.map((w, i) => (
               <li key={i} className="space-y-0.5">
+                {/* The field is named in the sentence rather than repeated
+                    under it as `field: defensive_recommendations[1]`, which
+                    restated what the message had just said. */}
                 <p className="text-xs">
                   <code className="font-mono font-semibold">{w.rule}</code>{" "}
                   <span className="uppercase text-text-muted">
                     [{w.severity}]
                   </span>{" "}
                   {w.message}
+                  {w.field ? (
+                    <>
+                      {" "}
+                      <span className="text-text-muted">
+                        (at <code className="font-mono">{w.field}</code>)
+                      </span>
+                    </>
+                  ) : null}
                 </p>
-                {w.field && (
-                  <p className="text-[11px] font-mono text-text-muted">
-                    field: {w.field}
-                  </p>
-                )}
-                {w.explanation && (
-                  <p className="text-[11px] text-text-muted">
-                    {w.explanation}
-                  </p>
-                )}
               </li>
             ))}
           </ul>
+          {/* One explanation for the group. Each warning used to carry its
+              own copy of the same two sentences, verbatim, three times over. */}
+          {sharedExplanation ? (
+            <p className="mt-2 text-[11px] text-text-muted">{sharedExplanation}</p>
+          ) : (
+            <ul className="mt-2 space-y-1">
+              {explanations.map((text, i) => (
+                <li key={i} className="text-[11px] text-text-muted">
+                  {text}
+                </li>
+              ))}
+            </ul>
+          )}
         </details>
       )}
 

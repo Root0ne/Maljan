@@ -89,9 +89,16 @@ export default function AttributionTab() {
                 : "-"
             }
           />
-          <Field label="Actor" value={attribution.actor || "(unknown)"} />
-          <Field label="Campaign" value={attribution.campaign || "(unknown)"} />
+          {attribution.actor && <Field label="Actor" value={attribution.actor} />}
+          {attribution.campaign && <Field label="Campaign" value={attribution.campaign} />}
         </div>
+        {/* A row whose value is "(unknown)" is a field the schema has rather
+            than a fact about the sample. */}
+        {!attribution.actor && !attribution.campaign && (
+          <p className="px-4 pb-3 -mt-2 text-[11px] text-text-muted">
+            No actor and no campaign were named.
+          </p>
+        )}
         {!attribution.family && (
           <div className="px-4 pb-3 -mt-2 text-[11px] text-text-muted">
             No specific malware family was attributed. The behavioural{" "}

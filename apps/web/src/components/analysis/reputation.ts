@@ -16,8 +16,12 @@
 
 import type { EvidenceEntry } from "@/types/evidence";
 
-/** The tool each service answers under, in the order the pipeline asks. */
-export const REPUTATION_TOOLS = ["get_file_report", "check_hash"] as const;
+/** The tool each service answers under, in the order the pipeline asks.
+ *  `reputation` is the third name `triage_pack` and `run_state` recognise;
+ *  nothing emits it today, and a ledger entry recorded under it would
+ *  otherwise leave IDENTITY with no reputation section although the pack had
+ *  counted one. */
+export const REPUTATION_TOOLS = ["get_file_report", "check_hash", "reputation"] as const;
 export type ReputationTool = (typeof REPUTATION_TOOLS)[number];
 
 export interface Reputation {
@@ -41,6 +45,7 @@ export interface Reputation {
 const SERVICE_NAME: Record<ReputationTool, string> = {
   get_file_report: "VirusTotal",
   check_hash: "Threat intelligence",
+  reputation: "Threat intelligence",
 };
 
 /** The first value under `key` within `depth` levels of `value`. */

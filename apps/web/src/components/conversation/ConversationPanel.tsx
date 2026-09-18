@@ -90,10 +90,14 @@ export default function ConversationPanel({
 
   const { counts, partial } = useToolCounts(jobId, events, jobStatus);
 
-  const shown = stages.reduce(
-    (total, stage) => total + stage.rounds.reduce((n, round) => n + round.items.length, 0),
-    0,
-  );
+  const count = (list: typeof stages) =>
+    list.reduce(
+      (running, stage) =>
+        running + stage.rounds.reduce((n, round) => n + round.items.length, 0),
+      0,
+    );
+  const shown = count(stages);
+  const total = count(conversation.stages);
 
   /* What "there is more to see" means.
    *
@@ -168,16 +172,23 @@ export default function ConversationPanel({
           );
         })}
         {(agents.size > 0 || groups.size > 0) && (
-          <button
-            type="button"
-            onClick={() => {
-              setAgents(new Set<string>());
-              setGroups(new Set<ItemGroup>());
-            }}
-            className="text-[11px] text-accent-strong hover:underline"
-          >
-            Clear filters
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                setAgents(new Set<string>());
+                setGroups(new Set<ItemGroup>());
+              }}
+              className="text-[11px] text-accent-strong hover:underline"
+            >
+              Clear filters
+            </button>
+            {/* What the filter did, in one short sentence, rather than the
+                whole stream read out again. */}
+            <span role="status" className="text-[11px] text-text-muted">
+              {shown} of {total} shown
+            </span>
+          </>
         )}
         <span className="ml-auto flex items-center gap-1.5 text-[11px] text-text-muted">
           <Radio
@@ -203,11 +214,14 @@ export default function ConversationPanel({
           ref={streamRef}
           onScroll={onScroll}
           data-testid="conversation-stream"
-          /* A log rather than a region: a screen reader following a live run
-           * is told about the lines that arrive, and nothing else. */
-          role="log"
-          aria-live="polite"
-          aria-relevant="additions text"
+          /* A log rather than a region, while there is something to follow:
+           * a screen reader following a live run is told about the lines that
+           * arrive. On a finished run there is nothing arriving, and leaving
+           * it live meant every filter change queued the whole transcript for
+           * re-announcement. */
+          role={live ? "log" : undefined}
+          aria-live={live ? "polite" : undefined}
+          aria-relevant={live ? "additions text" : undefined}
           aria-label="Conversation"
           /* A scrollable region has to be reachable by keyboard, or the only
            * way through a long run is a pointer. */

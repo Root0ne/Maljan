@@ -1,5 +1,6 @@
 "use client";
 
+import { probeDetail } from "@/lib/probeDetail";
 import { useState } from "react";
 import { Server } from "lucide-react";
 import { api } from "@/lib/api";
@@ -292,7 +293,7 @@ export function ServerDetail({
           className={`text-[11px] ${result.ok ? "text-status-green" : "text-status-red"}`}
           role="status"
         >
-          {result.ok ? "ok" : "failed"} · {result.latency_ms} ms · {result.detail}
+          {result.ok ? "ok" : "failed"} · {result.latency_ms} ms · {probeDetail(result.detail)}
         </p>
       )}
       {/* What the server cannot do on its host, said before any run: each
