@@ -202,6 +202,102 @@ describe("kinds", () => {
   });
 });
 
+describe("one violation, one line", () => {
+  function feedback(data: Record<string, unknown>) {
+    return event("validation_feedback", {
+      stage: "a",
+      agent: "lead",
+      code: "no_evidence",
+      message: "cite a call",
+      retry_index: 1,
+      ...data,
+    });
+  }
+
+  it("folds what the agent was told and how it ended into the first line's place", () => {
+    const { stages } = buildConversation(
+      [
+        feedback({ state: "retried", path: "static.claims[2]" }),
+        event("agent_message", { stage: "a", speaker: "lead", text: "revised" }),
+        feedback({ state: "resolved", path: "static.claims[2]", message: "cite a call" }),
+      ],
+      ROSTER,
+    );
+
+    const items = stages[0].rounds[0].items;
+    expect(items.map((i) => i.kind)).toEqual(["validation_feedback", "says"]);
+    expect(items[0].feedback?.map((f) => f.state)).toEqual(["retried", "resolved"]);
+    expect(items[0].path).toBe("static.claims[2]");
+  });
+
+  it("keeps two violations of one code on different claims apart", () => {
+    const { stages } = buildConversation(
+      [
+        feedback({ state: "retried", path: "static.claims[2]" }),
+        feedback({ state: "retried", path: "static.claims[5]" }),
+        feedback({ state: "survived", path: "static.claims[5]" }),
+        feedback({ state: "resolved", path: "static.claims[2]" }),
+      ],
+      ROSTER,
+    );
+
+    const items = stages[0].rounds[0].items;
+    expect(items.map((i) => i.path)).toEqual(["static.claims[2]", "static.claims[5]"]);
+    expect(items.map((i) => i.feedback?.map((f) => f.state))).toEqual([
+      ["retried", "resolved"],
+      ["retried", "survived"],
+    ]);
+  });
+
+  it("keeps two agents' violations of one code apart", () => {
+    const { stages } = buildConversation(
+      [feedback({ agent: "lead" }), feedback({ agent: "ahmet" })],
+      ROSTER,
+    );
+
+    expect(stages[0].rounds[0].items.map((i) => i.speaker)).toEqual(["lead", "ahmet"]);
+  });
+
+  it("folds a run that published no path on the pair such a run has", () => {
+    const { stages } = buildConversation(
+      [
+        feedback({ state: "retried" }),
+        feedback({ state: "survived" }),
+      ],
+      ROSTER,
+    );
+
+    const items = stages[0].rounds[0].items;
+    expect(items).toHaveLength(1);
+    expect(items[0].path).toBe("");
+    expect(items[0].feedback?.map((f) => f.state)).toEqual(["retried", "survived"]);
+  });
+
+  it("reads a line that states no outcome as one the producer was shown", () => {
+    /* A run recorded before the outcome was published at all: one line per
+     * violation, and that line is the correction turn. */
+    const { stages } = buildConversation([feedback({})], ROSTER);
+
+    expect(stages[0].rounds[0].items[0].feedback).toEqual([
+      { state: "retried", message: "cite a call", retryIndex: 1 },
+    ]);
+  });
+
+  it("carries the last retry number and message the violation was published with", () => {
+    const { stages } = buildConversation(
+      [
+        feedback({ state: "retried", retry_index: 1, message: "cite a call" }),
+        feedback({ state: "survived", retry_index: 2, message: "still no call cited" }),
+      ],
+      ROSTER,
+    );
+
+    const item = stages[0].rounds[0].items[0];
+    expect(item.retryIndex).toBe(2);
+    expect(item.text).toBe("still no call cited");
+  });
+});
+
 describe("streamed turns", () => {
   it("appends deltas into one open bubble", () => {
     const { stages } = buildConversation(

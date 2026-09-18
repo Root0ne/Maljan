@@ -1722,6 +1722,13 @@ change landed on `main`.
   unauthenticated health endpoint, so a wrong bearer token passed the test and
   every job then failed with 401 on the tool schema. It now fetches the schema
   itself and lists the tools it found.
+- **One violation is one line in the conversation.** A validator finding is
+  published as the producer is shown it and again as the retry fixes it or
+  fails to, and the console drew the three states identically — one violation
+  reading as two or three unrelated notices. The conversation now folds them
+  on `(agent, code, path)` into the first line's place, says in words where
+  the violation ended up, and keeps the earlier states under it as that
+  line's history. A run that published no locator folds on `(agent, code)`.
 - **A run longer than one page is replayed whole.** The console's back-fill
   made one call and the events endpoint caps a read at a thousand events, so a
   finished run with more than that rendered as its first thousand and stopped

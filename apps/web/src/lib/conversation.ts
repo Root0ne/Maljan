@@ -83,6 +83,25 @@ export interface ToolDetail {
   summary: string;
 }
 
+/**
+ * What became of a violation, in the publisher's own words.
+ *
+ * `retried` is the producer being shown it, and `resolved` or `survived` is
+ * the loop saying which way it went. A line that states nothing — a run
+ * recorded before the outcome was published — is the correction turn, which
+ * is what `retried` means.
+ */
+export type ValidationState = "retried" | "resolved" | "survived";
+
+const VALIDATION_STATES: ValidationState[] = ["retried", "resolved", "survived"];
+
+/** One line the run published about one violation. */
+export interface FeedbackEntry {
+  state: ValidationState;
+  message: string;
+  retryIndex: number;
+}
+
 export interface ConversationItem {
   id: string;
   kind: ItemKind;
@@ -109,7 +128,14 @@ export interface ConversationItem {
   tool?: ToolDetail;
   /** The validator's code, on a correction. */
   code?: string;
+  /** The producer's own locator for what the correction is about, on a
+   *  correction. Empty on a violation about the answer as a whole, and on one
+   *  a run published before there were locators. */
+  path?: string;
   retryIndex?: number;
+  /** Every state one violation passed through, oldest first. The last of them
+   *  is where the violation ended up. */
+  feedback?: FeedbackEntry[];
 }
 
 export interface ConversationRound {
@@ -240,6 +266,13 @@ function text(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
+/** The state a feedback line states, and `retried` for one that states none. */
+function validationState(value: unknown): ValidationState {
+  return VALIDATION_STATES.includes(value as ValidationState)
+    ? (value as ValidationState)
+    : "retried";
+}
+
 /* ── Building ──────────────────────────────────────────── */
 
 interface StageDraft {
@@ -273,6 +306,9 @@ interface BuilderState {
   participants: Map<string, Participant>;
   streaming: Map<string, Slot>;
   pending: Map<string, Slot[]>;
+  /** Where each violation's line sits, so the next thing the run says about
+   *  it lands on that line rather than under it. */
+  feedback: Map<string, Slot>;
   /** How many events of the array have been folded. */
   consumed: number;
   /** The last event folded, which is how a continuation is recognised. */
@@ -294,6 +330,7 @@ function freshState(roster: JobRoster | null): BuilderState {
     participants: new Map(),
     streaming: new Map(),
     pending: new Map(),
+    feedback: new Map(),
     consumed: 0,
     last: null,
     textLength: 0,
@@ -601,21 +638,50 @@ function fold(state: BuilderState, event: RunEvent): void {
   if (event.type === "validation_feedback") {
     const speaker = text(data.agent);
     const stage = draftOf(state, stageKey);
-    push(state, stage, {
+    const code = text(data.code);
+    const path = text(data.path);
+    const entry: FeedbackEntry = {
+      state: validationState(data.state),
+      message: text(data.message),
+      retryIndex: Number(data.retry_index ?? 0) || 0,
+    };
+    /* One violation is one line. The run publishes it as the producer is shown
+     * it and again as the loop learns whether the retry fixed it, and
+     * `(agent, code, path)` is the key those lines share — the locator is what
+     * keeps two violations of one code on different claims apart. A run that
+     * published no locator folds on the pair, which is the whole key it has.
+     * The line keeps the place of the first event, because that is when the
+     * violation happened. */
+    const key = `${stageKey}|${speaker}|${code}|${path}`;
+    const open = state.feedback.get(key);
+    if (open) {
+      const current = open.stage.items[open.index];
+      replace(state, open, {
+        ...current,
+        text: entry.message,
+        retryIndex: entry.retryIndex,
+        feedback: [...(current.feedback ?? []), entry],
+      });
+      return;
+    }
+    const slot = push(state, stage, {
       id,
       kind: "validation_feedback",
       stage: stageKey,
       round: stage.round,
       speaker,
       displayName: nameOf(state, speaker),
-      text: text(data.message),
+      text: entry.message,
       ts: event.ts,
       seq: event.seq,
       claims: [],
       dissent: [],
-      code: text(data.code),
-      retryIndex: Number(data.retry_index ?? 0) || 0,
+      code,
+      path,
+      retryIndex: entry.retryIndex,
+      feedback: [entry],
     });
+    state.feedback.set(key, slot);
     return;
   }
 
@@ -664,6 +730,9 @@ function fold(state: BuilderState, event: RunEvent): void {
 /** Pull back the slots that sat after one that was removed. */
 function reindexAfter(state: BuilderState, removed: Slot): void {
   for (const slot of state.streaming.values()) {
+    if (slot.stage === removed.stage && slot.index > removed.index) slot.index -= 1;
+  }
+  for (const slot of state.feedback.values()) {
     if (slot.stage === removed.stage && slot.index > removed.index) slot.index -= 1;
   }
   for (const queue of state.pending.values()) {
