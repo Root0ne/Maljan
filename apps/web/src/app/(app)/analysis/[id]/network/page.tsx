@@ -80,7 +80,9 @@ export default function NetworkTab() {
                   {s.value}
                 </code>
                 <span
-                  className="ml-auto text-[10px] text-text-tertiary shrink-0"
+                  /* Secondary rather than tertiary: the row hovers to
+                     `bg-bg-hover`, where tertiary is 4.10:1. */
+                  className="ml-auto text-[10px] text-text-secondary shrink-0"
                   title="Seen in static strings, not in sandbox network telemetry"
                 >
                   static

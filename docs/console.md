@@ -227,13 +227,22 @@ columns and widens at `sm` / `md` / `lg`; `styleRules.test.ts` fails on an
 unconditional `grid-cols-3` or wider, which is what the dashboard's four stat
 columns at 375 px were.
 
-Contrast is WCAG 2.1 AA on every text tier and on the surfaces each tier is
-painted on. `--accent` is tuned for its own contrast against the canvas and
-reaches only 3.09:1 behind white, so a filled button uses `--accent-fill`
-(4.63:1); `--accent` keeps borders, icons, the focus ring and the /10 washes.
-A chip is painted on `--bg-elevated` rather than on `--border`, which is the
-one surface the text-tier analysis never covered. The disabled tier is for
-disabled controls: a message's time of day is content and sits at tertiary.
+Contrast is WCAG 2.1 AA on every text tier, on the surfaces that tier is used
+on — which is not the same as on every surface, and the token comment in
+`globals.css` says which. `--accent` is tuned for its own contrast against the
+canvas and reaches only 3.10:1 behind white, so a filled button uses
+`--accent-fill` (4.63:1, hover 6.47:1); `--accent` keeps borders, icons, the
+focus ring and the /10 washes. A chip is painted on `--bg-elevated` (5.30:1 for
+`--text-muted`) rather than on `--border` (4.12:1), which is the one surface
+the text-tier analysis never covered.
+
+`--text-tertiary` is the narrowest tier: 4.94:1 on `--bg-deep` and 4.51:1 on
+`--bg-surface`, but 4.10:1 on `--bg-elevated` and `--bg-hover` and 3.97:1 on
+`--bg-active`. It carries the least-important metadata on the two dark
+surfaces — a message's time of day in the stream, a round divider, a
+placeholder — and anything that can land on a lighter surface, including a
+row that hovers onto one, uses `--text-secondary` instead. The disabled tier
+is for disabled controls and for nothing else.
 
 Every page begins with a "Skip to content" link and has an `h1`; every data
 table's headers carry `scope="col"`; the file inputs are real controls hidden

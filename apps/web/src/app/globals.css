@@ -27,7 +27,14 @@
                                   lighter surfaces (#1c2333 / #21262d),
                                   failing AA there. #8d97a3 clears AA on all
                                   four surfaces (~4.95:1 on the lightest).
-       tertiary   ~4.9:1 (AA)   — least-important metadata on dark surfaces.
+       tertiary   ~4.9:1 (AA)   — least-important metadata, and only on the
+                                  two darkest surfaces: 4.94:1 on --bg-deep
+                                  and 4.51:1 on --bg-surface, but 4.44:1 on
+                                  --bg-reading, 4.10:1 on --bg-elevated and
+                                  --bg-hover and 3.97:1 on --bg-active. Text
+                                  that can land on one of those four is
+                                  --text-secondary (6.3:1 on --bg-elevated),
+                                  not this tier.
        disabled   ~3.1:1        — disabled / placeholder only (non-essential).
      Every tier above is checked against the background it is painted on, and
      `--border` (#30363d) is one of those backgrounds wherever a chip sits on
