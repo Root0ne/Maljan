@@ -333,7 +333,7 @@ class MalwareReportBuilder:
         named = [f"{m.technique_id} ({m.technique_name})" for m in report.ttp_mappings[:5]]
         rest = len(report.ttp_mappings) - len(named)
         if not named:
-            ttp_summary = "no MITRE techniques mapped"
+            ttp_summary = ""
         elif rest > 0:
             ttp_summary = f"including {', '.join(named)}, and {rest} more"
         else:
@@ -353,10 +353,15 @@ class MalwareReportBuilder:
             # this paragraph draws the verdict and its confidence above it --
             # the console's header chip, the exported report's own header --
             # and the two used to disagree about notation on one screen.
+            techniques = (
+                "The pipeline mapped no MITRE ATT&CK technique. "
+                if not named
+                else f"Pipeline reported {len(report.ttp_mappings)} ATT&CK techniques, "
+                f"{ttp_summary}. "
+            )
             report.executive_summary = (
                 f"Sample classified as {verdict.lower()}. Best-guess family: {family}. "
-                f"Pipeline reported {len(report.ttp_mappings)} ATT&CK techniques, "
-                f"{ttp_summary}. "
+                f"{techniques}"
                 "This is an auto-generated summary (no LLM available); review the "
                 "detailed sections for evidence."
             )
@@ -373,12 +378,13 @@ class MalwareReportBuilder:
             )
             if block is not None
         ]
-        if len(drawn) > 1:
-            where = f"the {', '.join(drawn[:-1])} and {drawn[-1]} tabs"
-        elif drawn:
-            where = f"the {drawn[0]} tab"
-        else:
-            where = "the Evidence tab"
+        # ``identity`` is not optional on a report, so ``drawn`` always names at
+        # least the Identity tab and there is no empty case to write for.
+        where = (
+            f"the {', '.join(drawn[:-1])} and {drawn[-1]} tabs"
+            if len(drawn) > 1
+            else f"the {drawn[0]} tab"
+        )
         report.capabilities_narrative = [
             "Detailed narrative was not generated because the analysis ran in "
             "mock/offline mode or the narrative LLM call failed. The deterministic "

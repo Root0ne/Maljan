@@ -6,7 +6,7 @@ import { Upload, X } from "lucide-react";
 import { api } from "@/lib/api";
 import type { SampleDTO, SandboxReportDTO } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
-import { countLabel, formatDateTime } from "@/lib/report-utils";
+import { countLabel, formatBytes, formatDateTime } from "@/lib/report-utils";
 import {
   profileLabel,
   sandboxProviderLabel,
@@ -38,12 +38,6 @@ function isNamedAfterItsHash(sample: SampleRow): boolean {
   const name = sample.filename.trim().toLowerCase();
   const base = name.replace(/\.[^.]*$/, "");
   return base === sample.sha256.trim().toLowerCase();
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function SamplesPageContent() {
@@ -383,7 +377,7 @@ function SamplesPageContent() {
                       )}
                     </td>
                     <td className="px-4 py-2.5">
-                      <span className="text-xs text-text-secondary">{formatSize(s.file_size)}</span>
+                      <span className="text-xs text-text-secondary">{formatBytes(s.file_size)}</span>
                     </td>
                     <td className="px-4 py-2.5">
                       <span className="text-xs text-text-secondary">{formatDateTime(s.created_at)}</span>
@@ -465,7 +459,7 @@ function SamplesPageContent() {
               <div className="flex gap-6">
                 <div>
                   <span className="text-text-muted uppercase tracking-wider">Size</span>
-                  <p className="text-text-primary mt-0.5">{formatSize(detailSample.file_size_bytes)}</p>
+                  <p className="text-text-primary mt-0.5">{formatBytes(detailSample.file_size_bytes)}</p>
                 </div>
                 {detailSample.mime_type && (
                   <div>

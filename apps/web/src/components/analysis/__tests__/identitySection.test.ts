@@ -180,7 +180,7 @@ describe("what the table already says", () => {
       ]),
       "pe",
     );
-    expect([...states].sort()).toEqual(["Compile Timestamp", "File Type", "Size"]);
+    expect([...states].sort()).toEqual(["Compile timestamp", "File type", "Size"]);
   });
 
   it("reads a file format's own constants back into what they mean", () => {

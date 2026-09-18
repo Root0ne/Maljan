@@ -199,24 +199,29 @@ export default function AnalysisLayout({
    * enrichment lands or when the run finishes, without waiting for the poll
    * to come back round. */
   const lastEventCursor = useRef(0);
-  /* The store folds the whole recorded feed in one commit, so the first batch
-   * to arrive is this run's history. An `enrichment_complete` in it happened
-   * hours ago: worth one refetch, never worth announcing in the present tense
-   * every time the run is opened. */
+  /* When this reader arrived. The store folds the whole recorded feed in one
+   * commit, so an `enrichment_complete` in it happened hours ago: worth one
+   * refetch, never worth announcing in the present tense every time the run is
+   * opened. The event's own timestamp is what says which it is, rather than
+   * which batch it came in — a run whose recorded feed is empty would
+   * otherwise have its first genuinely live event read as history. An event
+   * with no timestamp falls back to the batch it arrived in. */
+  const openedAt = useRef(Date.now());
   const feedIsLive = useRef(false);
   useEffect(() => {
     if (events.length <= lastEventCursor.current) return;
-    const replaying = !feedIsLive.current;
+    const firstBatch = !feedIsLive.current;
     feedIsLive.current = true;
     for (let i = lastEventCursor.current; i < events.length; i++) {
       const e = events[i];
-      if (e.type === "enrichment_complete" || e.type === "completed") {
-        refetchRef.current?.();
-        if (e.type === "enrichment_complete" && !replaying) {
-          setEnrichmentToast("Threat intel enrichment finished. Report refreshed.");
-          setTimeout(() => setEnrichmentToast(null), 5000);
-        }
-      }
+      if (e.type !== "enrichment_complete" && e.type !== "completed") continue;
+      refetchRef.current?.();
+      if (e.type !== "enrichment_complete") continue;
+      const at = e.ts ? Date.parse(e.ts) : NaN;
+      const happenedBefore = Number.isNaN(at) ? firstBatch : at < openedAt.current;
+      if (happenedBefore) continue;
+      setEnrichmentToast("Threat intel enrichment finished. Report refreshed.");
+      setTimeout(() => setEnrichmentToast(null), 5000);
     }
     lastEventCursor.current = events.length;
   }, [events]);

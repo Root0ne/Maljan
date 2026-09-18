@@ -128,8 +128,8 @@ export default function IdentityTab() {
             seven "(unknown)"s said only that the extractor has seven fields. */}
         <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
           {[
-            { label: "File Name", value: identity.file_name ?? "" },
-            { label: "File Type", value: identity.file_type ? fileTypeLabel(identity.file_type) : "" },
+            { label: "File name", value: identity.file_name ?? "" },
+            { label: "File type", value: identity.file_type ? fileTypeLabel(identity.file_type) : "" },
             {
               label: "Platform",
               value:
@@ -141,14 +141,14 @@ export default function IdentityTab() {
               label: "Size",
               value: identity.file_size_bytes ? formatBytes(identity.file_size_bytes) : "",
             },
-            { label: "MIME Type", value: identity.mime_type ?? "" },
+            { label: "MIME type", value: identity.mime_type ?? "" },
             {
-              label: "Compile Timestamp",
+              label: "Compile timestamp",
               value: identity.compile_timestamp
                 ? new Date(identity.compile_timestamp).toLocaleString()
                 : "",
             },
-            { label: "Language / Compiler", value: identity.language_or_compiler ?? "" },
+            { label: "Language / compiler", value: identity.language_or_compiler ?? "" },
           ]
             // A field the ledger table above already carries is not drawn
             // again: `size` appeared in both tables on the one screen.
@@ -178,10 +178,10 @@ export default function IdentityTab() {
           </div>
           <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
             {[
-              { label: "Signer Subject", value: identity.signing.signer_subject ?? "" },
+              { label: "Signer subject", value: identity.signing.signer_subject ?? "" },
               { label: "Issuer", value: identity.signing.signer_issuer ?? "" },
               {
-                label: "Signature Valid",
+                label: "Signature valid",
                 value:
                   identity.signing.signature_valid === null
                     ? "unverified"

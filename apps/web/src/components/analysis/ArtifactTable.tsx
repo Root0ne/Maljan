@@ -106,7 +106,13 @@ function SectionBody({ section, rows }: { section: EvidenceSection; rows: string
     if (rows.length === 0) {
       return <p className="p-4 text-xs text-text-muted">The tool returned no rows.</p>;
     }
-    const narrowed = withoutConstantColumns(declared, rows);
+    /* Only a real table: a key/value block's two columns are its field names
+       and its values, and lifting "Value: yes" out of a two-row block would
+       leave a list of fields with no answers beside them. */
+    const narrowed =
+      section.kind === "table"
+        ? withoutConstantColumns(declared, rows)
+        : { columns: declared, rows, constants: [], empty: [] };
     return (
       <>
         {(narrowed.constants.length > 0 || narrowed.empty.length > 0) && (

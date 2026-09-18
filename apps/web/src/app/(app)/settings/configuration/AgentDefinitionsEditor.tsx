@@ -367,7 +367,11 @@ export function AgentDetail({
     onChangeLlmAgents({ ...llmAgents, [key]: stored });
   };
 
-  /** Only a custom agent has a Remove; a built-in is turned off instead. */
+  /** Removes an agent from the map. The header offers it only where `locked`
+   *  is false; note that `BUILTIN_AGENT_KEYS` is the set the settings model
+   *  locks, which is smaller than the set it re-seeds — the seeded generic
+   *  agents come back on the next load whether or not they are removed here,
+   *  which predates this editor. */
   const remove = (key: string) => onChange(removeEntry(definitions, key));
 
   const sameRef = (a: ToolRefEntry, b: ToolRefEntry) =>

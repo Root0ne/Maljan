@@ -123,13 +123,13 @@ export interface IdentityView {
 
 /** The ledger field each typed identity field restates. */
 const TYPED_FIELD_OF: Record<string, string> = {
-  file_name: "File Name",
-  file_type: "File Type",
+  file_name: "File name",
+  file_type: "File type",
   size: "Size",
   file_size: "Size",
-  mime_type: "MIME Type",
-  timestamp: "Compile Timestamp",
-  compile_timestamp: "Compile Timestamp",
+  mime_type: "MIME type",
+  timestamp: "Compile timestamp",
+  compile_timestamp: "Compile timestamp",
 };
 
 /**

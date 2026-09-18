@@ -876,7 +876,6 @@ change landed on `main`.
   tool names the pipeline recognises.
 - **`core.agents.profiles` is titled "Team definitions".** Its page is already
   called Teams, so the two headings sat on top of each other.
-
 - **Four documented facts that had drifted from the code.** The delegation
   section said a lead's 1800 s stage had room for five asks where
   `_asks_that_fit` computes six and the `ask_<key>` description gives the model
