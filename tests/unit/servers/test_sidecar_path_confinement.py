@@ -48,11 +48,16 @@ def network() -> Any:
 
 @pytest.fixture
 def staging(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A staging directory of this test's own, and no other root."""
+    """A staging directory of this test's own, and no other root.
+
+    The root list is emptied rather than deleted: a deletion of a name the
+    process did not have records nothing to restore, so a root a test exports
+    afterwards would outlive it and be read by every later test.
+    """
     base = tmp_path / "staging"
     base.mkdir()
     monkeypatch.setenv("MALJAN_STAGING_DIR", str(base))
-    monkeypatch.delenv("MALJAN_SAMPLE_ROOTS", raising=False)
+    monkeypatch.setenv("MALJAN_SAMPLE_ROOTS", "")
     return base
 
 
@@ -258,7 +263,7 @@ class TestTheWorkerNamesTheDirectoriesItWritesTo:
         from app.worker import sample_files
         from maljan.tools.roots import configured_roots
 
-        monkeypatch.delenv("MALJAN_SAMPLE_ROOTS", raising=False)
+        monkeypatch.setenv("MALJAN_SAMPLE_ROOTS", "")
         monkeypatch.setattr(sample_files.settings, "samples_dir", str(tmp_path / "samples"))
         monkeypatch.setattr(sample_files.settings, "upload_temp_dir", str(tmp_path / "uploads"))
 
@@ -274,7 +279,7 @@ class TestTheWorkerNamesTheDirectoriesItWritesTo:
     ) -> None:
         from app.worker import sample_files
 
-        monkeypatch.delenv("MALJAN_SAMPLE_ROOTS", raising=False)
+        monkeypatch.setenv("MALJAN_SAMPLE_ROOTS", "")
         monkeypatch.setattr(sample_files.settings, "samples_dir", str(tmp_path / "samples"))
         monkeypatch.setattr(sample_files.settings, "upload_temp_dir", str(tmp_path / "uploads"))
         downloads = sample_files.export_sample_roots()[0]
@@ -287,7 +292,7 @@ class TestTheWorkerNamesTheDirectoriesItWritesTo:
         from app.worker import sample_files
         from maljan.tools.roots import configured_roots
 
-        monkeypatch.delenv("MALJAN_SAMPLE_ROOTS", raising=False)
+        monkeypatch.setenv("MALJAN_SAMPLE_ROOTS", "")
         monkeypatch.setattr(sample_files.settings, "samples_dir", str(tmp_path / "samples"))
         monkeypatch.setattr(sample_files.settings, "upload_temp_dir", str(tmp_path / "uploads"))
 
