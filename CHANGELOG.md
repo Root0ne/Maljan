@@ -759,6 +759,14 @@ change landed on `main`.
   turns `api.enrichment_dedicated_worker` off and gets the old behaviour
   deliberately: enrichment queued beside the analyses, waiting until none is
   running.
+- **The enrichment's own event is kept with the rest of the run's.** Every
+  event takes a sequence number from the job's counter, so the rows stored for
+  a job have to equal the last number issued — the invariant the events
+  endpoint pages by. `enrichment_complete` is published after the run has
+  ended and the feed has been closed, so it took a number and stored nothing:
+  one measured run published 71 events and kept 70, and the missing one was
+  gone for good once the Redis stream expired. The enrichment task now opens
+  the job's feed for that one line and closes it again.
 - **The console stopped clipping itself.** `main` is a flex item, so its
   `min-width: auto` let it grow to its content's min-content width instead of
   constraining it: the Detection tab's Suricata block took it to 2542 px

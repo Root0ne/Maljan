@@ -839,6 +839,15 @@ reaches. `core.events.retention_days` (default 30) bounds the table; the
 worker sweeps it nightly. The transcript, the agent findings and the evidence
 ledger are kept by the report and the job and are not touched by the sweep.
 
+**The count is the last number.** Every event takes a sequence number from the
+run's counter, so the rows stored for a job equal the last number issued for
+it — that is what the events endpoint pages by and what the console checks its
+history against. `enrichment_complete` is published after the run has ended,
+by the other worker, so the enrichment task opens the job's feed for that one
+line and closes it again; otherwise the number would be issued and the row
+never written, which is what one measured run's 71 published and 70 stored
+was. The console already tolerates an event that arrives after the run.
+
 **What never travels.** Tool arguments and results go out as short summaries,
 and every string of every event — a message's text and its report, a
 correction, a cap's detail, a summary — is scrubbed once by the publisher, for

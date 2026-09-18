@@ -210,19 +210,40 @@ async def enrich_threat_intel(ctx: dict, report_id: str) -> dict[str, Any]:
         "similar_samples": similar_samples_count,
     }
 
-    # WebSocket notification — job_id is the parent analysis job; clients
-    # subscribed via /ws/{job_id} get the event automatically. Lazy import
-    # of ``_publish_event`` keeps this module free of a circular dep on
-    # ``analysis_worker`` (which registers this task on its WorkerSettings).
+    # The run's feed, re-opened for one line. ``job_id`` is the parent analysis
+    # job; clients subscribed via /ws/{job_id} get the event automatically, and
+    # the feed's table gets the row.
+    #
+    # It did not, and that broke the invariant both the events endpoint and the
+    # console read the feed by: every event takes a sequence number from the
+    # run's counter, so "how many rows are stored" has to equal "the last
+    # number issued". ``run_analysis`` stops the feed when the job ends, and
+    # this task runs afterwards — in another process now — so its event took a
+    # number and landed nowhere. One measured run published 71 events and
+    # stored 70, and the missing one vanished for good when the Redis stream
+    # expired. Starting the feed here and stopping it again writes the row and
+    # leaves nothing registered behind.
+    #
+    # Lazy import of the publisher keeps this module free of a circular
+    # dependency on ``analysis_worker`` (which registers this task on its
+    # WorkerSettings).
     try:
-        from app.worker.analysis_worker import _publish_event
-
-        await _publish_event(
-            redis_conn,
-            parent_job_id,
-            "enrichment_complete",
-            delta,
+        from app.worker.analysis_worker import (
+            _publish_event,
+            _start_event_feed,
+            _stop_event_feed,
         )
+
+        _start_event_feed(parent_job_id, db_session_factory)
+        try:
+            await _publish_event(
+                redis_conn,
+                parent_job_id,
+                "enrichment_complete",
+                delta,
+            )
+        finally:
+            await _stop_event_feed(parent_job_id)
     except Exception as exc:  # noqa: BLE001
         logger.warning("enrich: WS publish failed (%s)", exc)
 

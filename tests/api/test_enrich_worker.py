@@ -174,8 +174,100 @@ class TestEnrichWorkerSessionLifetime:
 
         assert result["status"] == "ok"
         assert open_during_lookups == [0]
-        assert len(sessions) == 2
+        # Three short ones: the payload read, the enriched write, and the row
+        # the completion event is stored as. None of them spans the lookups.
+        assert len(sessions) == 3
         assert open_sessions == []
+
+
+class TestTheEnrichmentEventIsKept:
+    @pytest.mark.asyncio
+    async def test_the_completion_event_is_written_to_the_feed(self) -> None:
+        """The feed's invariant: stored rows equal the last sequence number.
+
+        Every event takes a number from the run's counter, so an event that
+        takes one and stores nothing leaves the count one short for ever. This
+        task runs after ``run_analysis`` has stopped the feed — in another
+        process now — and its event was exactly that: one measured run
+        published 71 and stored 70.
+        """
+        fake_report = MagicMock()
+        fake_report.id = uuid.uuid4()
+        fake_report.job_id = uuid.uuid4()
+        fake_report.malware_report = _malware_report_dict()
+
+        added: list[Any] = []
+
+        class _Session:
+            def __init__(self) -> None:
+                self.get = AsyncMock(return_value=fake_report)
+                self.commit = AsyncMock()
+
+            def add_all(self, rows: Any) -> None:
+                added.extend(rows)
+
+            async def __aenter__(self) -> Any:
+                return self
+
+            async def __aexit__(self, *exc: Any) -> bool:
+                return False
+
+        redis = AsyncMock()
+        redis.incr = AsyncMock(return_value=71)
+        ctx = {"redis": redis, "db_session": _Session}
+
+        get_patch, get_secret_patch = _enabled_patch()
+        with (
+            patch(
+                "maljan.enrichment.enrich_malware_report",
+                new=AsyncMock(return_value=_malware_report_dict()),
+            ),
+            get_patch,
+            get_secret_patch,
+        ):
+            result = await enrich_threat_intel(ctx, str(fake_report.id))
+
+        assert result["status"] == "ok"
+        assert len(added) == 1, "the completion event is one stored row"
+        row = added[0]
+        assert row.type == "enrichment_complete"
+        assert row.job_id == fake_report.job_id
+        # The number it stored is the number it took.
+        assert row.seq == 71
+        assert row.payload["seq"] == 71
+
+    @pytest.mark.asyncio
+    async def test_the_feed_is_not_left_registered_behind_it(self) -> None:
+        """A buffer left in the process map would collect another job's events."""
+        from app.worker.analysis_worker import _EVENT_BUFFERS
+
+        fake_report = MagicMock()
+        fake_report.id = uuid.uuid4()
+        fake_report.job_id = uuid.uuid4()
+        fake_report.malware_report = _malware_report_dict()
+
+        db = MagicMock()
+        db.get = AsyncMock(return_value=fake_report)
+        db.commit = AsyncMock()
+        db.add_all = MagicMock()
+        session_cm = AsyncMock()
+        session_cm.__aenter__.return_value = db
+        session_cm.__aexit__.return_value = None
+        ctx = {"redis": AsyncMock(), "db_session": MagicMock(return_value=session_cm)}
+
+        before = dict(_EVENT_BUFFERS)
+        get_patch, get_secret_patch = _enabled_patch()
+        with (
+            patch(
+                "maljan.enrichment.enrich_malware_report",
+                new=AsyncMock(return_value=_malware_report_dict()),
+            ),
+            get_patch,
+            get_secret_patch,
+        ):
+            await enrich_threat_intel(ctx, str(fake_report.id))
+
+        assert _EVENT_BUFFERS == before
 
 
 class TestEnrichWorkerSkips:
