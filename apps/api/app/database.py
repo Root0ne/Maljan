@@ -45,6 +45,24 @@ class Base(DeclarativeBase):
     pass
 
 
+async def end_read_transaction(session: AsyncSession) -> None:
+    """End whatever transaction this session is holding, before a slow await.
+
+    A request-scoped session is in a transaction from its first statement —
+    which, on every authenticated route, is the dependency that resolved the
+    caller — and stays in it until the handler returns. A handler that then
+    awaits something slow leaves a backend ``idle in transaction`` for the
+    length of that await: a model probe may spend five minutes on a
+    third-party endpoint, and the transaction it leaves behind holds its locks
+    against every migration and every reader for all of it.
+
+    Called where the reads are finished and the slow part begins. The session
+    stays usable: the next statement opens a transaction of its own, which is
+    what the handler's remaining writes want anyway.
+    """
+    await session.commit()
+
+
 async def get_db() -> AsyncGenerator[AsyncSession]:
     """FastAPI dependency: yield an async DB session, auto-close on exit."""
     async with async_session_factory() as session:

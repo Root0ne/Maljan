@@ -774,6 +774,18 @@ change landed on `main`.
   `error_message` is a field of `JobResponse` and an exception's message names
   host paths and connection strings. A `cancelled` row is left alone.
 
+- **No request path waits on a third party inside a transaction.** A
+  request-scoped session is in a transaction from the dependency that resolved
+  the caller, so a handler that then waited on somebody else left a backend
+  `idle in transaction` for the length of that wait. The three probes (up to
+  five minutes at a model endpoint), the VirusTotal registration and the
+  long-term-memory purge now end the read first, through
+  `database.end_read_transaction`. The WebSocket route holds no session across
+  the stream: the handshake decides inside a session and accepts or rejects
+  outside it, and a resume reads one page per session and sends it once that
+  session has closed, rather than holding one open while a thousand frames go
+  out at the client's pace.
+
 - **The startup sweep reads ownership from the queue instead of assuming it.**
   It marked every `running` row older than five minutes as failed, on the
   reasoning that this process is the worker and has just booted — true of a

@@ -87,6 +87,27 @@ than the grace period (`ORPHAN_JOB_GRACE_SECONDS`, five minutes) is marked
 cannot be established and only jobs past `job_timeout` are swept, because the
 alternative is a sweep that fails a run another worker is performing.
 
+### What a request holds while it waits on somebody else
+
+Nothing either. A request-scoped session is in a transaction from its first
+statement — on an authenticated route, the dependency that resolved the caller
+— and stays in it until the handler returns, so a handler that then waits on a
+third party leaves a backend `idle in transaction` for the length of that
+wait. The routes that do wait end the read first, through
+`database.end_read_transaction`: the three probes (`/settings/test/{probe}`,
+`/test/mcp`, `/test/agent`, up to five minutes at a model endpoint), the
+VirusTotal registration, and the long-term-memory purge, which scrolls a whole
+Qdrant collection. The session stays usable; the next statement opens a
+transaction of its own.
+
+The WebSocket route holds no session across the stream at all. The handshake
+reads the account and the job's owner inside a session, closes it, and then
+accepts or rejects; a resume reads one page of the feed per session and sends
+it after that session has closed, because the send goes at the client's pace
+and a thousand frames to a slow reader is not something to hold a transaction
+across. The account re-check on the clock opens a session of its own each
+time.
+
 ## Format routing
 
 The platform never refuses a sample for its format. The first thing a job does

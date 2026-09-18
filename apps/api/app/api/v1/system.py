@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import observability
 from app.auth.throttle import throttle_state
 from app.config import settings
-from app.database import get_db
+from app.database import end_read_transaction, get_db
 from app.deps import optional_current_user, require_admin
 from app.logging_config import get_logger
 from app.models.user import User
@@ -172,6 +172,10 @@ async def ltm_purge(
     """
     try:
         store = await _build_memory_store(db)
+        # The settings that name the collection have been read; the purge
+        # itself talks to Qdrant and scrolls the whole collection, which is
+        # no reason to hold a transaction on Postgres.
+        await end_read_transaction(db)
     except Exception as exc:
         logger.warning("ltm_purge: failed to build memory store: %s", exc)
         raise HTTPException(
