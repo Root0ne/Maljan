@@ -709,6 +709,28 @@ def _scrub_line(line: str) -> str:
     return _PATH_RUN.sub(_shorten_path, line)
 
 
+# How much of a model-written value reaches a finding row. Such a row is
+# stored with the report and printed verbatim by the console, so what goes in
+# it is held to the same rule an event payload is and then bounded: a value a
+# model wrote is as long as the model cared to make it, and a 4 KB "verdict"
+# drawn as one line of a run record is a page nobody can read.
+FINDING_VALUE_LIMIT = 200
+
+
+def safe_finding_value(value: Any) -> str:
+    """One model-written value, made safe to store in a finding row and to print.
+
+    The same four passes :func:`scrub` makes — an authorization scheme and its
+    secret, a URL cut back to scheme and host so its userinfo goes with the
+    rest, credential-shaped runs redacted, paths cut to their last segment —
+    and then a bound. A validation message, a degradation reason and an export
+    decline all end up in ``run_summary``, in the stored report and on the
+    analysis page, and none of them is an event, so none of them was covered by
+    the scrubbing the publisher does.
+    """
+    return scrub(value)[:FINDING_VALUE_LIMIT]
+
+
 def scrub_keeping_layout(text: Any) -> str:
     """The same four passes, with the text's own lines and indentation kept.
 

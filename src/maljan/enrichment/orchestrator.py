@@ -22,7 +22,7 @@ from maljan.enrichment.abuseipdb_client import AbuseIPDBClient
 from maljan.enrichment.virustotal_client import VirusTotalClient
 from maljan.enrichment.whois_client import WhoisClient
 from maljan.extractors.attribution import populate_similar_samples
-from maljan.extractors.network_extractor import domain_is_corroborated
+from maljan.extractors.network_extractor import domain_is_corroborated, ip_corroboration_reason
 
 if TYPE_CHECKING:
     from maljan.memory.long_term_memory import MemoryStore
@@ -247,7 +247,8 @@ async def _enrich_ips(
     whois: WhoisClient,
     cap: int,
 ) -> None:
-    for ip in ips[:cap]:
+    askable: list[dict[str, Any]] = []
+    for ip in ips:
         address = ip.get("address")
         if not isinstance(address, str) or not address:
             continue
@@ -255,6 +256,19 @@ async def _enrich_ips(
         # they are not real infrastructure — saves API budget and avoids noise.
         if not _is_public_ip(address):
             continue
+        if ip_corroboration_reason(address, ip.get("source"), ip.get("reputation")) is None:
+            # A run of digits the string sweep read as an address, or one no
+            # second source knows. The same answer the domains get, for the
+            # same reason: an endpoint only the sample's own byte image knows
+            # is not worth a paid lookup, and one live run spent its whole
+            # enrichment budget on twenty-five of them.
+            continue
+        askable.append(ip)
+    # The cap is applied to what is worth asking about, as it is for the
+    # domains: a page of string noise at the front used to spend the budget
+    # before the first address anything else had seen.
+    for ip in askable[:cap]:
+        address = str(ip["address"])
         if not _has_successful_rep(ip):
             rep: dict[str, Any] | None = None
             if vt is not None:

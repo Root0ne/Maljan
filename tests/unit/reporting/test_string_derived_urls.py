@@ -171,6 +171,15 @@ class TestWhetherTheHostCouldExist:
     def test_a_malformed_onion_could_not(self) -> None:
         assert host_is_public("notarealaddress.onion") is False
 
+    def test_a_private_network_names_its_own_machines(self) -> None:
+        """Publishing one is a low-value indicator and a small disclosure.
+
+        The suffixes are reserved for exactly this, and the rule that reads
+        them is the one the domains already consult, so both kinds get it.
+        """
+        for host in ("sub.corp.internal", "printer.alt", "nas.home.arpa"):
+            assert host_is_public(host) is False, host
+
     def test_the_question_is_asked_of_every_source(self) -> None:
         """A sandbox that recorded a cut-off recorded a cut-off."""
         assert url_corroboration_reason("http://localhost:8080", "sandbox") is None
@@ -346,6 +355,30 @@ class TestWhatTheBundleCarries:
         renderer.render(_report([NetworkURL(url=REAL[0], source="strings")]))
 
         assert renderer.declined == []
+
+    def test_a_row_with_no_recorded_source_is_read_as_string_derived(self) -> None:
+        """One reading of "unrecorded", not two.
+
+        The publish rule asked corroboration of a source-less row and got
+        "recorded without a source", which publishes; the cap ranked the same
+        row as an observation. Only rows persisted before the field existed
+        reach this, and they are the weakest claim there is.
+        """
+        renderer = ExtendedSTIXRenderer()
+
+        bundle = renderer.render(_report([NetworkURL(url=REAL[0], source=None)]))
+
+        assert not any("url:value" in pattern for pattern in _patterns(bundle))
+        assert renderer.declined == []
+
+    def test_an_impossible_host_is_recorded_whoever_wrote_the_row(self) -> None:
+        """The reason is true for every source, and a reader is owed it."""
+        for source in ("sandbox", "analyst", "strings", None):
+            renderer = ExtendedSTIXRenderer()
+
+            renderer.render(_report([NetworkURL(url="http://localho", source=source)]))
+
+            assert [code for code, _why in renderer.declined] == [UNPUBLISHABLE_URL_CODE], source
 
     def test_a_declined_url_never_carries_a_credential_into_the_record(self) -> None:
         from tests.credential_shapes import prefixed_key

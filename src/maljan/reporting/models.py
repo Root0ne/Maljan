@@ -332,6 +332,13 @@ class NetworkIP(BaseModel):
     asn: str | None = None
     geo: str | None = None
     is_suspicious: bool = False
+    # Where the address came from, with the same three answers and the same
+    # weight a domain's and a URL's carry. The string sweep turns any run of
+    # digits with dots in it into an address — one live bundle published
+    # ``6.0.0.0``, a version number out of the strings table — and until this
+    # the addresses were the one network kind nothing asked about.
+    # ``None`` for a producer that does not record it.
+    source: Literal["sandbox", "analyst", "strings"] | None = None
     reputation: dict[str, Any] | None = None
 
 

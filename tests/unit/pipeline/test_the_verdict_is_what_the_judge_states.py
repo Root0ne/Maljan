@@ -46,6 +46,7 @@ from maljan.pipeline.validation import (
 from maljan.reporting.builder import MalwareReportBuilder
 from maljan.reporting.models import MalwareReport
 from maljan.reporting.renderers.stix_renderer import MALWARE_UNDER_BENIGN_CODE, ExtendedSTIXRenderer
+from maljan.schemas.judgement import VERDICT_VALUES
 from maljan.schemas.stix_models import Bundle
 
 SHA256 = "d0" + "1f" * 31
@@ -130,9 +131,15 @@ def _types(bundle: Bundle) -> list[str]:
 class TestOneReadingOfAVerdictWord:
     """The normaliser the statement and the report builder share.
 
-    The builder mapped ``malw…`` to Malware and ``benign…`` to Benign two
-    layers below the statement, so a stricter reading up here published Malware
-    for a judge the renderer would have called Benign.
+    It matched a prefix, which is the right rule for the builder — whose input
+    the pipeline has already reduced to one of three words — and a dangerous
+    one for free model text: a prefix cannot see what comes after the stem, so
+    ``malware-free`` and ``Malware (false positive)`` published **Malware**,
+    and ``Benignware is unlikely; malware`` published **Benign**, each the
+    inverse of what the judge wrote and each without a code or a feedback turn.
+
+    The whole value has to be one of the three words, once the decoration a
+    model wraps a word in is taken off.
     """
 
     def test_the_three_words_read_as_themselves(self) -> None:
@@ -144,17 +151,106 @@ class TestOneReadingOfAVerdictWord:
         assert normalise_verdict("benign\n") == "Benign"
         assert normalise_verdict(" suspicious") == "Suspicious"
 
-    def test_a_qualifier_after_the_word_does_not_either(self) -> None:
-        assert normalise_verdict("Benign (legitimate utility)") == "Benign"
-        assert normalise_verdict("Malware - loader") == "Malware"
+    def test_punctuation_and_emphasis_around_the_word_do_not_matter(self) -> None:
+        assert normalise_verdict("Malware.") == "Malware"
+        assert normalise_verdict("**Benign**") == "Benign"
+        assert normalise_verdict('"Suspicious"') == "Suspicious"
+        assert normalise_verdict("`Benign`") == "Benign"
+        assert normalise_verdict("_Suspicious_") == "Suspicious"
+        assert normalise_verdict("'Malware'") == "Malware"
+
+    def test_a_negated_or_qualified_word_is_not_that_word(self) -> None:
+        """Each of these published the opposite of what the judge wrote."""
+        for word in (
+            "malware-free",
+            "Malware-free",
+            "Malware (false positive)",
+            "malwarebytes detected nothing",
+            "Benignware is unlikely; malware",
+            "Benign (legitimate utility)",
+            "Malware - loader",
+            "Suspicious but likely benign",
+        ):
+            assert normalise_verdict(word) is None, word
+
+    def test_a_question_mark_is_doubt_and_not_decoration(self) -> None:
+        """A word somebody is unsure of is not the word said plainly."""
+        assert normalise_verdict("Malware?") is None
+        assert normalise_verdict("Benign!") is None
 
     def test_a_word_it_cannot_reach_is_not_guessed_at(self) -> None:
         for word in ("Clean", "Not malware", "Malicious", "Trojan", "Likely malware", "", None):
             assert normalise_verdict(word) is None, word
 
+    def test_a_value_that_is_not_text_is_not_a_word(self) -> None:
+        for value in (["Malware"], 1, 1.0, True, {"value": "Malware"}):
+            assert normalise_verdict(value) is None, value
+
     def test_the_report_builder_reads_it_the_same_way(self) -> None:
-        assert MalwareReportBuilder._verdict_literal("Benign (legitimate utility)") == "Benign"
-        assert MalwareReportBuilder._verdict_literal("Malicious") == INCONCLUSIVE_VERDICT
+        for word in ("Malware", "malware", "Benign", "Suspicious"):
+            assert MalwareReportBuilder._verdict_literal(word) == normalise_verdict(word)
+        for word in ("Benign (legitimate utility)", "Malicious", "unknown", "", "No verdict"):
+            assert MalwareReportBuilder._verdict_literal(word) == INCONCLUSIVE_VERDICT, word
+
+
+class TestWhatTheNormaliserIsGiven:
+    """Its three callers, and what each of them can hand it.
+
+    Two are the judge's free text — the statement and the confidence that goes
+    with it — and one is a decision the pipeline itself has already reduced to
+    one of the three words. Tightening the rule for the first two may not
+    change what the third publishes, and this is where that is checked.
+    """
+
+    def test_the_fallback_extractor_only_ever_yields_an_exact_word(self) -> None:
+        """The other producer of a decision string, read off the judge's prose."""
+        from maljan.agents.judge_agent import JudgeAgent
+
+        corpus = (
+            "This is malware.",
+            "The sample is benign and signed.",
+            "Nothing conclusive here.",
+            "It is not malware, and not clean either.",
+            "",
+            "[TIMEOUT]",
+            "**Verdict**: Malware (loader)",
+            "no verdict could be reached",
+        )
+        for text in corpus:
+            decision = JudgeAgent._verdict_from_text(text)
+            assert decision in VERDICT_VALUES, text
+            assert normalise_verdict(decision) == decision, text
+
+    def test_a_decision_the_pipeline_wrote_survives_the_builder(self) -> None:
+        for decision in (*VERDICT_VALUES, INCONCLUSIVE_VERDICT):
+            assert MalwareReportBuilder._verdict_literal(decision) == decision
+
+    def test_a_stored_decision_it_cannot_read_lands_as_inconclusive(self) -> None:
+        """Never as a guess: an unreadable decision is not half of one."""
+        for stored in ("unknown", "Inconclusive", "No verdict", "", None, "Malware (high conf)"):
+            assert MalwareReportBuilder._verdict_literal(stored) == INCONCLUSIVE_VERDICT, stored
+
+    def test_a_fallback_bundle_publishes_its_own_stated_decision(self) -> None:
+        for decision in VERDICT_VALUES:
+            bundle = Bundle.model_validate(
+                {
+                    "objects": [],
+                    "x_maljan_fallback_verdict": {"decision": decision, "source": "extracted"},
+                }
+            )
+            assert decide_from_bundle(bundle) == decision
+
+    def test_a_fallback_bundle_with_an_unreadable_decision_lands_as_inconclusive(self) -> None:
+        bundle = Bundle.model_validate(
+            {
+                "objects": [],
+                "x_maljan_fallback_verdict": {"decision": "Malware-ish", "source": "extracted"},
+            }
+        )
+
+        assert MalwareReportBuilder._verdict_literal(decide_from_bundle(bundle)) == (
+            INCONCLUSIVE_VERDICT
+        )
 
 
 class TestTheThreeAnswers:
@@ -248,6 +344,154 @@ class TestAWordOutsideTheVocabulary:
         assert [v.code for v in verdict.violations] == []
         assert decide_from_bundle(verdict.bundle) == "Benign"
         assert stated_confidence(verdict.bundle) == 1.0
+
+
+class TestAVerdictThatIsNotText:
+    """A type is one wrong word by another spelling, and costs the same bundle.
+
+    The field was `str | None` and pydantic does not coerce, so a judge
+    answering `["Malware"]` to a field with three allowed values lost its
+    whole answer to `Bundle.model_validate` and the run took the
+    text-extraction fallback — twenty-five objects, the attack-patterns, the
+    indicators and the assessment, which is the failure the relocation pass
+    was written to stop happening for a misplaced block.
+    """
+
+    VALUES = (["Malware"], 1, 1.0, True, {"value": "Malware"}, [])
+
+    def test_the_bundle_still_parses_and_keeps_its_objects(self) -> None:
+        for value in self.VALUES:
+            bundle = _bundle([PUTTY_MALWARE_OBJECT], {"verdict": value, "confidence": 0.9})
+            assert len(bundle.objects) == 1, value
+            assert bundle.x_maljan_fallback_verdict is None, value
+
+    def test_it_reads_as_stated_and_unrecognised(self) -> None:
+        for value in self.VALUES:
+            bundle = _bundle([PUTTY_MALWARE_OBJECT], {"verdict": value, "confidence": 0.9})
+            stated = read_stated_verdict(bundle)
+            assert stated.unrecognised is True, value
+            assert decide_from_bundle(bundle) == INCONCLUSIVE_VERDICT, value
+            assert stated_confidence(bundle) is None, value
+
+    def test_the_judge_is_shown_its_own_answer_as_json(self) -> None:
+        bundle = _bundle([], {"verdict": ["Malware"], "confidence": 0.9})
+
+        assert read_stated_verdict(bundle).written == '["Malware"]'
+        assert '["Malware"]' in stated_verdict_violations(bundle)[0].message
+
+    def test_the_whole_round_keeps_the_answer(self) -> None:
+        import asyncio
+        import json
+        from unittest.mock import MagicMock
+
+        from maljan.agents.judge_agent import VERDICT_FALLBACK_CODE, JudgeAgent
+
+        answer = json.dumps(
+            {
+                "type": "bundle",
+                "objects": [PUTTY_MALWARE_OBJECT],
+                "x_maljan_assessment": {**RECORDED_PUTTY_ASSESSMENT, "verdict": ["Benign"]},
+            }
+        )
+
+        class _Llm:
+            async def ainvoke(self, turns: Any) -> Any:
+                return MagicMock(content=answer)
+
+        judge = JudgeAgent.__new__(JudgeAgent)
+        judge.llm = _Llm()
+        judge.logger = MagicMock()
+        judge.token_ledger = None
+        judge.truncation_ledger = None
+
+        verdict = asyncio.run(judge.give_verdict(reports={"static": "signed"}, history=[]))
+
+        assert len(verdict.bundle.objects) == 1
+        assert VERDICT_FALLBACK_CODE not in [v.code for v in verdict.violations]
+        assert UNRECOGNISED_VERDICT_CODE in [v.code for v in verdict.violations]
+
+
+class TestWhatTheJudgeWroteIsScrubbedBeforeItIsStored:
+    """The judge's own text reaches the stored report and the analysis page.
+
+    A validation row and a degradation reason are not events, so the scrubbing
+    the event publisher does never touched them: a model echoing a credentialled
+    URL it had been shown into the verdict field put the credential in the
+    stored report and drew it on the page, and a four-kilobyte "verdict" was
+    printed as one line of the run record.
+    """
+
+    @staticmethod
+    def _noisy() -> tuple[str, Bundle]:
+        from tests.credential_shapes import prefixed_key
+
+        secret = prefixed_key("ghs_")
+        written = (
+            f"Malicious http://operator:{secret}@evil.example.com/a?token={secret} " + "A" * 4000
+        )
+        return secret, _bundle([], {"verdict": written, "confidence": 0.9})
+
+    def test_the_violation_message_carries_no_credential_and_is_bounded(self) -> None:
+        secret, bundle = self._noisy()
+
+        message = stated_verdict_violations(bundle)[0].message
+
+        assert secret not in message
+        assert "operator" not in message
+        assert len(message) < 700
+
+    def test_the_degradation_reason_carries_no_credential_and_is_bounded(self) -> None:
+        secret, bundle = self._noisy()
+
+        reason = unrecognised_verdict_reason(bundle)
+
+        assert secret not in reason
+        assert "operator" not in reason
+        assert len(reason) <= 300
+
+    def test_the_report_that_prints_it_carries_neither(self) -> None:
+        from maljan.reporting.renderers.markdown import MarkdownRenderer
+
+        secret, bundle = self._noisy()
+        report = _report(bundle, INCONCLUSIVE_VERDICT)
+        report.degradation_reasons.append(unrecognised_verdict_reason(bundle))
+
+        markdown = MarkdownRenderer().render(report)
+
+        assert secret not in markdown
+        assert "operator" not in markdown
+
+    def test_a_category_the_judge_invented_is_scrubbed_too(self) -> None:
+        from tests.credential_shapes import prefixed_key
+
+        secret = prefixed_key("ghs_")
+        bundle = _bundle(
+            [PUTTY_MALWARE_OBJECT],
+            {
+                "verdict": "Malware",
+                "malware_category": f"legitimate http://op:{secret}@x.example.com/ " + "B" * 900,
+            },
+        )
+
+        messages = " ".join(v.message for v in assessment_conflict_violations(bundle))
+
+        assert secret not in messages
+        assert len(messages) < 900
+
+    def test_an_object_the_bundle_cannot_hold_is_scrubbed_too(self) -> None:
+        from maljan.agents.judge_postprocess import lift_misplaced_extensions
+        from tests.credential_shapes import prefixed_key
+
+        secret = prefixed_key("ghs_")
+        data = {
+            "type": "bundle",
+            "objects": [{"type": f"note-http://op:{secret}@x.example.com/ " + "C" * 900}],
+        }
+
+        found = lift_misplaced_extensions(data)
+
+        assert secret not in found[0].message
+        assert len(found[0].message) < 700
 
 
 class TestTheRecordedAnswerReplayedUnchanged:

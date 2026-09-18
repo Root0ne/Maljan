@@ -133,6 +133,7 @@ def lift_misplaced_extensions(bundle_dict: dict[str, Any]) -> list[Violation]:
     a thing to merge, and the one the judge put where it was asked for is the
     one it meant; the inner copy is set aside and recorded beside it.
     """
+    from maljan.pipeline.events import safe_finding_value
     from maljan.pipeline.validation import Violation
     from maljan.schemas.stix_models import ASSESSMENT_PROPERTY, BUNDLE_OBJECT_TYPES
 
@@ -160,7 +161,10 @@ def lift_misplaced_extensions(bundle_dict: dict[str, Any]) -> list[Violation]:
                 )
             )
             continue
-        named = f"objects[{index}]" + (f" of type {kind!r}" if kind else "")
+        # The type is the model's own word and travels into a stored row, so it
+        # is held to the same rule every other model-written value on this path
+        # is: scrubbed, and as long as a value in a finding row may be.
+        named = f"objects[{index}]" + (f" of type {safe_finding_value(kind)!r}" if kind else "")
         why = (
             f"a second {ASSESSMENT_PROPERTY}; the one at the top level of the bundle is the "
             "one that was read"

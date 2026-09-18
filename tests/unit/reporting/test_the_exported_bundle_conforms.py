@@ -33,6 +33,7 @@ from maljan.reporting.models import (
 )
 from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from maljan.schemas.judgement import INDICATOR_TYPES, indicator_type_for
 from maljan.schemas.stix_models import Bundle
 
 # The properties a STIX object carries a reference in.
@@ -44,7 +45,7 @@ _REFS_REQUIRED = ("note", "report")
 
 
 def assert_conforms(bundle: Bundle) -> None:
-    """Every reference resolves, and no required reference list is empty."""
+    """Every reference resolves, no required list is empty, every type is a type."""
     ids = {str(obj.id) for obj in bundle.objects}
     for obj in bundle.objects:
         kind = str(getattr(obj, "type", ""))
@@ -62,6 +63,10 @@ def assert_conforms(bundle: Bundle) -> None:
                 assert str(ref) in ids, f"{kind}.{field} names {ref}, which is not in the bundle"
             if kind in _REFS_REQUIRED:
                 assert refs, f"{kind}.{field} is empty, which STIX does not allow"
+        for declared in getattr(obj, "indicator_types", None) or []:
+            assert str(declared) in INDICATOR_TYPES, (
+                f"{declared!r} is not a value of the indicator-type vocabulary"
+            )
         assert str(getattr(obj, "spec_version", "")) == "2.1"
 
 
@@ -176,6 +181,67 @@ class TestEveryVerdictExportsAValidBundle:
         note = _of_type(bundle, "note")[0]
         target = next(obj for obj in bundle.objects if obj.id == note.object_refs[0])
         assert target.type == "malware"
+
+
+class TestWhatTheSampleOwnIndicatorClaims:
+    """An exported indicator is acted on; the prose around it is not.
+
+    The sample's own hash was typed ``malicious-activity`` whatever the run
+    concluded, so a Benign export told every blocklist that the sample is
+    malicious activity — with the run's own note, pointed at that indicator,
+    saying Benign. That is a stronger contradiction than the malware object the
+    same export declines, because a consumer blocks on the indicator.
+    """
+
+    @staticmethod
+    def _sample_indicator(bundle: Bundle) -> Any:
+        return next(
+            obj
+            for obj in bundle.objects
+            if str(getattr(obj, "type", "")) == "indicator" and "SHA-256" in obj.pattern
+        )
+
+    def test_the_type_follows_the_published_verdict(self) -> None:
+        expected = {
+            "Malware": "malicious-activity",
+            "Suspicious": "anomalous-activity",
+            "Benign": "benign",
+        }
+        for verdict, claim in expected.items():
+            bundle = _render(verdict, summary="something")
+            assert self._sample_indicator(bundle).indicator_types == [claim], verdict
+
+    def test_a_verdict_the_mapping_does_not_name_claims_nothing(self) -> None:
+        assert indicator_type_for("Inconclusive") == "unknown"
+        assert indicator_type_for(None) == "unknown"
+        assert "unknown" in INDICATOR_TYPES
+
+    def test_the_benign_note_is_attached_to_a_benign_indicator(self) -> None:
+        bundle = _render("Benign", summary="A signed utility, and nothing else.")
+
+        note = _of_type(bundle, "note")[0]
+        target = next(obj for obj in bundle.objects if obj.id == note.object_refs[0])
+        assert note.abstract.startswith("Benign")
+        assert target.indicator_types == ["benign"]
+
+    def test_an_endpoint_indicator_keeps_its_own_type_under_a_benign_verdict(self) -> None:
+        """A benign sample still talks to hosts, and those rows are not about it."""
+        report = _report("Benign", summary="A signed utility.")
+        report.network = NetworkIOCs(
+            domains=[NetworkDomain(fqdn="update.example.org", source="sandbox")]
+        )
+
+        bundle = ExtendedSTIXRenderer().render(
+            report, base_bundle=Bundle.model_validate(_judge_bundle("Benign"))
+        )
+
+        domain = next(
+            obj
+            for obj in bundle.objects
+            if str(getattr(obj, "type", "")) == "indicator" and "domain-name" in obj.pattern
+        )
+        assert domain.indicator_types == ["anomalous-activity"]
+        assert_conforms(bundle)
 
 
 class TestWhenThereIsNothingToReferTo:

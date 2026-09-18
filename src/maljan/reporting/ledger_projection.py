@@ -580,12 +580,12 @@ def network_from_ledger(
     from maljan.extractors.network_extractor import (
         _assess_domain,
         _is_emittable_domain,
-        _is_emittable_ip,
+        address_is_publishable,
     )
 
     network = NetworkIOCs()
     domains: dict[str, NetworkDomain] = {}
-    ips: set[str] = set()
+    ips: dict[str, NetworkIP] = {}
     urls: dict[str, NetworkURL] = {}
 
     def _add(kind: str, value: str, source: _DomainSource = "strings") -> None:
@@ -615,11 +615,23 @@ def network_from_ledger(
             )
             domains[value] = domain
             network.domains.append(domain)
-        elif kind == "ip" and value not in ips:
-            if not _is_emittable_ip(value):
+        elif kind == "ip":
+            known_ip = ips.get(value)
+            if known_ip is not None:
+                # The same address from a second source, read the way a
+                # domain's and a URL's are: the stronger origin wins.
+                if _DOMAIN_SOURCE_RANK[source] > _DOMAIN_SOURCE_RANK[known_ip.source or "strings"]:
+                    known_ip.source = source
                 return
-            ips.add(value)
-            network.ips.append(NetworkIP(address=value))
+            # The classes nothing could act on are out here, which is where
+            # they always were; a private address is kept when somebody watched
+            # the sample reach it, because that is lateral movement, and
+            # dropped when a string sweep produced it.
+            if not address_is_publishable(value, source):
+                return
+            created_ip = NetworkIP(address=value, source=source)
+            ips[value] = created_ip
+            network.ips.append(created_ip)
         elif kind == "url":
             # Case-fold the host so one endpoint reached twice under two
             # spellings is one URL, not two.
@@ -640,11 +652,15 @@ def network_from_ledger(
         for key in ("dns", "domains"):
             for row in data.get(key) or []:
                 _add("domain", _first_str(row, "request", "hostname", "domain", "name"), "sandbox")
+        # An address the sample really reached, labelled as one: the default
+        # source is ``strings``, so every observed address was recorded as
+        # though a string sweep had produced it, which is the weakest claim
+        # there is and the one the publish rule holds back.
         for row in data.get("hosts") or []:
-            _add("ip", _first_str(row, "ip", "address", "host"))
+            _add("ip", _first_str(row, "ip", "address", "host"), "sandbox")
         for key in ("tcp", "udp"):
             for row in data.get(key) or []:
-                _add("ip", _first_str(row, "dst", "ip", "address"))
+                _add("ip", _first_str(row, "dst", "ip", "address"), "sandbox")
         for row in data.get("http") or []:
             host = _first_str(row, "host", "hostname")
             _add("domain", host, "sandbox")

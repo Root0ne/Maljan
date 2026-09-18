@@ -38,9 +38,11 @@ from maljan.extractors.network_extractor import (
     corroboration_reason,
     domain_is_corroborated,
     host_is_public,
+    ip_corroboration_reason,
     url_corroboration_reason,
     url_host,
 )
+from maljan.pipeline.events import safe_finding_value
 from maljan.reporting.models import (
     MalwareReport,
     NetworkDomain,
@@ -49,6 +51,7 @@ from maljan.reporting.models import (
     ProcessNode,
     StringIOC,
 )
+from maljan.schemas.judgement import indicator_type_for
 from maljan.schemas.stix_models import (
     AttackPattern,
     Bundle,
@@ -84,9 +87,14 @@ _BAND_FILE_NAME = 3
 # How strong the origin of a network indicator is, which orders the band.
 # Something a sandbox watched outranks something an agent or the judge wrote
 # down, which outranks a run of bytes in the file that a second source happened
-# to know. A producer that recorded no source has not made the weak claim, so
-# it is read as an observation — the same reading ``corroboration_reason``
-# gives it.
+# to know.
+#
+# What an unrecorded source is worth is the caller's answer, not this table's,
+# and the caller gives this function the same value it gave the publish rule:
+# two readings of "unrecorded" is how one of them publishes what the other
+# ranks as noise. A URL row carrying none is read as string-derived by both; a
+# domain or an address carrying none is read the way ``corroboration_reason``
+# reads it, as a producer that did not make the weak claim.
 _NETWORK_SOURCE_RANK: dict[str, int] = {"sandbox": 2, "analyst": 1, "judge": 1, "strings": 0}
 _UNRECORDED_SOURCE_RANK = 2
 
@@ -107,26 +115,6 @@ _NETWORK_PATTERN_PREFIXES = (
 # The literals a STIX pattern quotes, which is where a URL indicator keeps its
 # URL.
 _PATTERN_LITERALS_RE = re.compile(r"'([^']*)'")
-
-# How much of a value reaches a finding row. The row is stored with the report
-# and printed verbatim by the console, so what goes in it is scrubbed the way
-# an event payload is and then bounded: a pattern is model-written text and a
-# finding is not the place to discover how long it can be.
-_FINDING_VALUE_LIMIT = 200
-
-
-def safe_finding_value(value: Any) -> str:
-    """One value, made safe to store in a finding row and to print.
-
-    ``pipeline.events.scrub`` is the project's one answer to "this text is
-    about to be persisted and shown": it cuts a URL back to its scheme and
-    host, which takes the userinfo — a credential outright — with it, and
-    redacts credential-shaped runs. The bound is on top of it, because a host
-    can be as long as a model cares to write.
-    """
-    from maljan.pipeline.events import scrub
-
-    return scrub(value)[:_FINDING_VALUE_LIMIT]
 
 
 def _indicator_band(pattern: str) -> int:
@@ -287,10 +275,11 @@ class ExtendedSTIXRenderer:
                 if kind == "attack-pattern":
                     continue
                 if kind == "malware" and benign:
+                    named = safe_finding_value(getattr(obj, "name", "") or "it")
                     self.declined.append(
                         (
                             MALWARE_UNDER_BENIGN_CODE,
-                            f"the malware object {str(getattr(obj, 'name', '') or 'it')!r} is not "
+                            f"the malware object {named!r} is not "
                             "in the exported bundle: this run's verdict is Benign. The object is "
                             "unchanged in the judge's own bundle and the disagreement is in this "
                             "run's validation findings.",
@@ -364,6 +353,12 @@ class ExtendedSTIXRenderer:
         #    its own: it names the sample, which is what every consumer of this
         #    bundle came for, and it used to queue behind whatever hashes the
         #    judge happened to write.
+        #    What it claims about the sample follows the verdict the run
+        #    publishes. It used to claim ``malicious-activity`` whatever the
+        #    verdict was, so a Benign export told every blocklist that the
+        #    sample's hash is malicious activity — a stronger contradiction
+        #    than the malware object the same export declines, because a
+        #    consumer blocks on the indicator and reads the objects afterwards.
         sample_hash_id: str | None = None
         sha256 = report.identity.hashes.sha256
         if sha256 and _SHA256_RE.match(sha256):
@@ -371,7 +366,7 @@ class ExtendedSTIXRenderer:
                 name=f"Sample hash {sha256[:12]}",
                 pattern=f"[file:hashes.'SHA-256' = '{sha256}']",
                 pattern_type="stix",
-                indicator_types=["malicious-activity"],
+                indicator_types=[indicator_type_for(report.verdict)],
             )
             _queue(indicator, _BAND_OWN_HASH)
             sample_hash_id = indicator.id
@@ -397,17 +392,20 @@ class ExtendedSTIXRenderer:
             for ip in report.network.ips[:40]:
                 ip_ind = _indicator_for_ip(ip)
                 if ip_ind is not None:
-                    _queue(ip_ind, _BAND_NETWORK, getattr(ip, "source", None))
+                    _queue(ip_ind, _BAND_NETWORK, ip.source)
             for url in report.network.urls[:40]:
                 url_ind = _indicator_for_url(url, report)
                 if url_ind is not None:
-                    _queue(url_ind, _BAND_NETWORK, url.source)
+                    # The source the publish rule was given, so the order and
+                    # the decision read the same value: a row with none is
+                    # string-derived to both.
+                    _queue(url_ind, _BAND_NETWORK, url.source or "strings")
                     continue
-                # Something a sandbox watched or an agent wrote down is not a
-                # string sweep's leftover, so a reader is told when one does
-                # not reach the export. A string-derived URL that simply lacks
-                # a second source is the rule working and is not a finding.
-                if url.source not in (None, "strings") and not host_is_public(url_host(url.url)):
+                # A host nothing could answer for is worth telling a reader
+                # about whoever wrote the row down; a row held back only for
+                # want of a second source is the string rule working, and the
+                # rule working is not a finding.
+                if not host_is_public(url_host(url.url)):
                     self.declined.append(
                         (
                             UNPUBLISHABLE_URL_CODE,
@@ -926,8 +924,19 @@ def _indicator_for_domain(domain: NetworkDomain) -> Indicator | None:
 
 
 def _indicator_for_ip(ip: NetworkIP) -> Indicator | None:
+    """The address as an indicator, or ``None`` when this run may not publish it.
+
+    The same rule the domains and the URLs go through. The addresses were the
+    one network kind with no gate at all, so every run of digits the string
+    sweep read as an address was published and ranked as though a sandbox had
+    watched it — one live bundle carried ``6.0.0.0``, a version number out of
+    the strings table.
+    """
     address = ip.address.strip()
     if not address:
+        return None
+    admitted = ip_corroboration_reason(address, ip.source, ip.reputation)
+    if admitted is None:
         return None
     pattern = _ip_pattern(_escape_stix(address))
     return Indicator(
@@ -935,6 +944,10 @@ def _indicator_for_ip(ip: NetworkIP) -> Indicator | None:
         pattern=pattern,
         pattern_type="stix",
         indicator_types=["malicious-activity"] if ip.is_suspicious else ["anomalous-activity"],
+        # As for a domain, only the surprising admission is spelled out: an
+        # address a sandbox watched needs no explanation, and one the file's
+        # own bytes carried reaches a bundle on a reputation record alone.
+        description=admitted if ip.source == "strings" else None,
     )
 
 
@@ -951,7 +964,12 @@ def _indicator_for_url(url: NetworkURL, report: Any = None) -> Indicator | None:
     if not url.url:
         return None
     host = url_host(url.url)
-    admitted = url_corroboration_reason(url.url, url.source, _host_reputation(report, host))
+    # A row that records no source at all is read as the weakest claim there
+    # is, which is the reading the cap gives it as well: two readings of
+    # "unrecorded" is how one of them ends up publishing what the other ranks
+    # as noise. Only a row persisted before the field existed reaches this.
+    source = url.source or "strings"
+    admitted = url_corroboration_reason(url.url, source, _host_reputation(report, host))
     if admitted is None:
         return None
     pattern = f"[url:value = '{_escape_stix(url.url)}']"
@@ -961,7 +979,7 @@ def _indicator_for_url(url: NetworkURL, report: Any = None) -> Indicator | None:
         pattern_type="stix",
         indicator_types=["malicious-activity"],
         # As for a domain, only the surprising admission is spelled out.
-        description=admitted if url.source == "strings" else None,
+        description=admitted if source == "strings" else None,
     )
 
 

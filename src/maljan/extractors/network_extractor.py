@@ -52,7 +52,11 @@ _BENIGN_DOMAINS: frozenset[str] = frozenset(
     }
 )
 
-# RFC 6761/6762 reserved suffixes that must never be emitted as network IOCs.
+# Reserved and special-use suffixes that must never be emitted as network IOCs.
+# ``.internal``, ``.alt`` and ``.home.arpa`` name a private network's own
+# machines: publishing one is a low-value indicator in a shared bundle and a
+# mild disclosure of how the analysis network is named. Every rule that asks
+# ``_is_emittable_domain`` gets them, which is the domains and the URLs both.
 _RESERVED_DOMAIN_SUFFIXES: tuple[str, ...] = (
     ".local",
     ".localhost",
@@ -60,6 +64,9 @@ _RESERVED_DOMAIN_SUFFIXES: tuple[str, ...] = (
     ".example",
     ".invalid",
     ".arpa",
+    ".home.arpa",
+    ".internal",
+    ".alt",
 )
 _RESERVED_DOMAIN_NAMES: frozenset[str] = frozenset({"localhost", "localhost.localdomain"})
 
@@ -664,6 +671,66 @@ def url_corroboration_reason(raw_url: Any, source: Any, reputation: Any = None) 
     if not host_is_public(host):
         return None
     return corroboration_reason(source, reputation, host)
+
+
+# The addresses a document, a specification or an example reserves. Python reads
+# them as private, which is not the same answer: a private address a sandbox
+# really watched is lateral traffic worth publishing, and one of these is
+# nobody's infrastructure whoever recorded it.
+_DOCUMENTATION_NETWORKS = (
+    ipaddress.ip_network("192.0.2.0/24"),
+    ipaddress.ip_network("198.51.100.0/24"),
+    ipaddress.ip_network("203.0.113.0/24"),
+    ipaddress.ip_network("2001:db8::/32"),
+)
+
+# The address every reader of the report would recognise as not an endpoint.
+_BROADCAST_ADDRESS = "255.255.255.255"
+
+
+def address_is_publishable(address: Any, source: Any = None) -> bool:
+    """Whether this address could be infrastructure somebody should act on.
+
+    The classes that are never an indicator, whoever recorded them: loopback,
+    unspecified, link-local, multicast, the broadcast address, anything the
+    registries reserve, and the ranges a document or an example is written
+    with. A private address is the one that depends on who saw it — a sandbox
+    watching a sample reach 10.0.0.5 is lateral movement and worth publishing,
+    while the same run of digits out of a string sweep is a version number
+    somebody typed with dots in it.
+    """
+    try:
+        parsed = ipaddress.ip_address(str(address or "").strip().strip("[]"))
+    except ValueError:
+        return False
+    if (
+        parsed.is_loopback
+        or parsed.is_multicast
+        or parsed.is_link_local
+        or parsed.is_unspecified
+        or parsed.is_reserved
+        or str(parsed) == _BROADCAST_ADDRESS
+    ):
+        return False
+    if any(parsed in network for network in _DOCUMENTATION_NETWORKS):
+        return False
+    if parsed.is_private:
+        return str(source or "").strip().lower() not in ("", "strings")
+    return True
+
+
+def ip_corroboration_reason(address: Any, source: Any, reputation: Any = None) -> str | None:
+    """Why this address may be published, or ``None`` when nothing says it may.
+
+    The predicate the domains and the URLs already go through, asked of an
+    address, so the three network kinds answer one rule rather than three. A
+    string sweep turns any run of digits with dots in it into an "IP" — one
+    live bundle published ``6.0.0.0``, a version number out of the strings
+    table — and until this the IPs were the one kind with no gate at all.
+    """
+    if not address_is_publishable(address, source):
+        return None
+    return corroboration_reason(source, reputation, str(address))
 
 
 def domain_is_corroborated(source: Any, reputation: Any, fqdn: Any = "") -> bool:

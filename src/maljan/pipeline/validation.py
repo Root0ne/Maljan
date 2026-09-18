@@ -40,6 +40,7 @@ from maljan.pipeline.events import (
     VALIDATION_SURVIVED,
     EventSink,
     emit_validation_feedback,
+    safe_finding_value,
 )
 from maljan.schemas.evidence import entry_ids_in
 from maljan.schemas.judgement import SEVERITY_RATINGS, VERDICT_VALUES
@@ -1592,11 +1593,12 @@ def stated_verdict_violations(bundle: Any) -> list[Violation]:
             Violation(
                 code=UNRECOGNISED_VERDICT_CODE,
                 message=(
-                    f"x_maljan_assessment.verdict says {stated.written!r}, which is not one of "
-                    f"{listed}. Answer with one of those three words exactly; put anything you "
-                    "want to qualify it with in severity.rationale. Until it is one of them this "
-                    f"run publishes {INCONCLUSIVE_VERDICT} and no confidence, and your own word "
-                    "is printed beside it."
+                    f"x_maljan_assessment.verdict says {safe_finding_value(stated.written)!r}, "
+                    f"which is not one of {listed}. Answer with exactly one of those three words "
+                    "and nothing else — no qualifier, no parenthesis, no sentence; put anything "
+                    "you want to qualify it with in severity.rationale. Until it is one of them "
+                    f"this run publishes {INCONCLUSIVE_VERDICT} and no confidence, and your own "
+                    "answer is printed beside it."
                 ),
                 path="x_maljan_assessment.verdict",
             )
@@ -1696,9 +1698,9 @@ def assessment_conflict_violations(bundle: Any) -> list[Violation]:
                 code=ASSESSMENT_CONFLICT_CODE,
                 message=(
                     f"This bundle's verdict is Malware and x_maljan_assessment."
-                    f"malware_category says {category!r}, which says it is not. Reconcile "
-                    "them: give the verdict the category describes, or a category that "
-                    "describes the verdict."
+                    f"malware_category says {safe_finding_value(category)!r}, which says it is "
+                    "not. Reconcile them: give the verdict the category describes, or a category "
+                    "that describes the verdict."
                 ),
                 path="x_maljan_assessment.malware_category",
             )

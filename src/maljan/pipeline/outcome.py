@@ -14,6 +14,7 @@ about what the run was.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -79,36 +80,45 @@ def _one_line(text: str, limit: int = _MESSAGE_LIMIT) -> str:
     return flattened[:limit]
 
 
-# How a written verdict is recognised, in one place. The prefixes are the
-# report builder's own rule, which mapped "malw…" to Malware and "benign…" to
-# Benign two layers below this and was therefore more forgiving than the
-# statement it was rendering; "suspic…" is the third, which that rule reached
-# through its default. A word this table cannot match is not a verdict this
-# pipeline can act on, and saying so is a different answer from saying the
-# judge wrote nothing.
-_VERDICT_PREFIXES: tuple[tuple[str, str], ...] = (
-    ("malw", "Malware"),
-    ("benign", "Benign"),
-    ("suspic", "Suspicious"),
-)
+# What is taken off a written verdict before it is compared: the punctuation
+# and the markdown emphasis a model wraps a word in. Every one of these says
+# nothing about the word itself — ``**Benign**`` is Benign and ``"Suspicious"``
+# is Suspicious.
+#
+# A question mark is deliberately not among them, and neither is a bracket or a
+# comma. ``Malware?`` is not a decorated "Malware": it is doubt, and reading
+# doubt as the confident word is the whole class of fault this rule exists to
+# close. So is a bracket, which opens a qualifier.
+_VERDICT_TRIM = " \t\r\n.\"'`*_"
+
+_RECOGNISED_VERDICTS: dict[str, str] = {value.lower(): value for value in VERDICT_VALUES}
 
 
 def normalise_verdict(written: Any) -> str | None:
     """One of :data:`VERDICT_VALUES` for what somebody wrote, or ``None``.
 
     The single reading of a verdict word, shared by the pipeline and by the
-    report builder that renders it. Case and surrounding whitespace do not
-    matter and a qualifier after the word does not either: "Benign (legitimate
-    utility)" is Benign. What the prefixes do not reach — "Clean", "Not
-    malware", "Malicious", "Trojan" — is answered ``None``, never guessed at
-    and never silently dropped, because both of those turn a judge's own word
-    into the object set's answer.
+    report builder that renders it. The whole value has to *be* one of the
+    three words once whitespace, case and the decoration above are taken off:
+    ``"Malware."``, ``**Benign**`` and ``" suspicious\\n"`` are the words they
+    are wrapped in, and anything more than a word is not one of them.
+
+    This was a prefix match, which is the right rule for the builder — whose
+    input the pipeline has already reduced to one of three words — and a
+    dangerous one for free model text, because a prefix cannot see what comes
+    after the stem. ``malware-free``, ``Malware (false positive)`` and
+    ``malwarebytes detected nothing`` all read as Malware, and
+    ``Benignware is unlikely; malware`` read as Benign: the published verdict
+    was the inverse of what the judge wrote, with no code and no feedback turn.
+
+    Nothing here interprets a qualifier. A value this cannot match is answered
+    ``None`` — stated and unrecognised, which the caller publishes
+    conservatively and the judge is asked about once.
     """
-    text = " ".join(str(written or "").split()).lower()
-    for prefix, value in _VERDICT_PREFIXES:
-        if text.startswith(prefix):
-            return value
-    return None
+    if written is None:
+        return None
+    text = " ".join(str(written).split()).strip(_VERDICT_TRIM).lower()
+    return _RECOGNISED_VERDICTS.get(text)
 
 
 @dataclass(frozen=True)
@@ -137,6 +147,25 @@ class StatedVerdict:
         return bool(self.written) and self.recognised is None
 
 
+def written_verdict_text(raw: Any) -> str:
+    """What the judge put in the field, as one line of text, or ``""``.
+
+    The field takes anything, because a type is one wrong word by another
+    spelling and losing the bundle over either is the failure this schema was
+    shaped to avoid. A list, a number or an object is written back to the judge
+    and shown in the report as its own compact JSON, which is what the judge
+    wrote rather than a Python repr of it.
+    """
+    if raw is None:
+        return ""
+    if isinstance(raw, str):
+        return " ".join(raw.split())
+    try:
+        return json.dumps(raw, separators=(",", ":"), default=str)
+    except (TypeError, ValueError):
+        return " ".join(str(raw).split())
+
+
 def read_stated_verdict(bundle: Any) -> StatedVerdict:
     """The verdict statement on a bundle, read once for every reader of it.
 
@@ -147,8 +176,8 @@ def read_stated_verdict(bundle: Any) -> StatedVerdict:
     assessment = getattr(bundle, "x_maljan_assessment", None)
     if assessment is None:
         return StatedVerdict()
-    written = " ".join(str(getattr(assessment, "verdict", "") or "").split())
-    return StatedVerdict(written=written, recognised=normalise_verdict(written))
+    raw = getattr(assessment, "verdict", None)
+    return StatedVerdict(written=written_verdict_text(raw), recognised=normalise_verdict(raw))
 
 
 def stated_confidence(bundle: Any) -> float | None:
@@ -184,12 +213,18 @@ def unrecognised_verdict_reason(bundle: Any) -> str:
     directly under the verdict, so a reader who sees "Suspicious" over a run
     whose judge wrote "Malicious" is told that in the same breath.
     """
+    from maljan.pipeline.events import safe_finding_value
+
     stated = read_stated_verdict(bundle)
     if not stated.unrecognised:
         return ""
+    # The judge's own text, and it is the judge's own text that makes this
+    # worth scrubbing: a model echoing a credentialled URL it was shown into
+    # the verdict field would otherwise put the credential in the stored report
+    # and on the analysis page, under the verdict, where the header prints it.
     return _one_line(
-        f"the judge stated the verdict {stated.written!r}, which is not one of "
-        f"{', '.join(VERDICT_VALUES)}; the verdict reported is {INCONCLUSIVE_VERDICT} and no "
+        f"the judge stated the verdict {safe_finding_value(stated.written)!r}, which is not one "
+        f"of {', '.join(VERDICT_VALUES)}; the verdict reported is {INCONCLUSIVE_VERDICT} and no "
         "confidence is published for it"
     )
 

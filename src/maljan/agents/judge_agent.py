@@ -198,8 +198,10 @@ JUDGE_VERDICT_SYSTEM = (
     '                 "evidence_ids": ["ev_0012"]},\n'
     '      "confidence": 0.0-1.0\n'
     "    }\n"
-    "  State the verdict in that one field and give your own confidence in it "
-    "under ``confidence``; both are published as you wrote them. Omit any of "
+    "  ``verdict`` is exactly one of those three words and nothing else — no "
+    "qualifier, no parenthesis, no sentence; anything you want to qualify it "
+    "with goes in ``severity.rationale``. Give your own confidence in it under "
+    "``confidence``; both are published as you wrote them. Omit any of "
     "the other three you cannot support. A family name MUST cite the evidence "
     "ids it was read from; a family with no evidence ids is a guess, and the "
     "report will say so.\n"
