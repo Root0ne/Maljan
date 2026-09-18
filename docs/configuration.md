@@ -324,6 +324,14 @@ means an empty corpus and no matches, not a failure. `analysis.sigma_rules_dir`
 was the previous name for the first of these — a stored override moves into the
 server's `env` automatically on upgrade.
 
+A rule in the YARA corpus fires when any of its patterns is in the sample's
+bytes, and its confidence travels with the hit into every agent's pack. A
+pattern must therefore be a fact about a sample rather than a word that
+describes one: the persistence rules name key paths and not the API that writes
+a value, and the packing rules name section names and packer banners and not
+the words `AES`, `packed` or `compress`, which any program that speaks a
+protocol carries.
+
 ### The evidence budget
 
 `reporting.evidence_budget_bytes` (512 KiB by default) is how many bytes of

@@ -28,16 +28,21 @@ rules:
       - "Process Hollowing"
 
   # T1547.001 - Registry Run Keys
+  #
+  # The key path, never the API name. `RegSetValueEx` is how a program writes
+  # any value to any key, and matching it published T1547.001 at 0.88 against
+  # a signed SSH client that stores its session settings under its own key.
   - id: registry_run_keys
     technique_id: "T1547.001"
     confidence: 0.88
     description: "Persistence via Registry Run/RunOnce keys"
     platform: ["windows"]
     patterns:
-      - "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run"
-      - "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce"
-      - "RegSetValueEx"
-      - "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+      - "CurrentVersion\\Run"
+      - "CurrentVersion\\RunOnce"
+      - "CurrentVersion\\RunServices"
+      - "CurrentVersion\\Explorer\\Shell Folders\\Startup"
+      - "Start Menu\\Programs\\Startup"
 
   # T1059.001 - PowerShell
   - id: powershell_execution
@@ -104,34 +109,62 @@ rules:
       - "wget http"
 
   # T1027 - Obfuscated Files or Information
+  #
+  # Packer artefacts, not the words for what they do. `AES`, `RC4`, `XOR`,
+  # `Base64`, `packed` and a bare `UPX` are in every program that speaks a
+  # protocol or compresses anything: fourteen occurrences of `aes` and one
+  # `uPX` inside a longer word carried T1027 at 0.82 into a report about a
+  # signed SSH client. A packer section name or a packer's own banner is a
+  # fact about the file; the name of a cipher is not. Entropy is the other
+  # half of this signal and belongs to the format tool, which reports the
+  # section entropies beside these hits.
   - id: obfuscation_indicators
     technique_id: "T1027"
     confidence: 0.82
     description: "Obfuscation and packing indicators"
     platform: ["any"]
     patterns:
-      - "UPX"
-      - "packed"
-      - "obfuscated"
-      - "encrypted payload"
-      - "RC4"
-      - "AES"
-      - "XOR"
-      - "Base64"
+      - "UPX0"
+      - "UPX1"
+      - "UPX!"
+      - "This file is packed with the UPX"
+      - ".aspack"
+      - ".adata"
+      - ".themida"
+      - ".winlice"
+      - ".vmp0"
+      - ".vmp1"
+      - ".enigma1"
+      - "MPRESS1"
+      - "MPRESS2"
+      - ".petite"
+      - "PECompact2"
+      - "FSG!"
+      - ".nsp0"
+      - ".boom"
 
   # T1027.002 - Software Packing
+  #
+  # Same rule about evidence: a section name a packer writes, not the word
+  # "compress" — which an SSH client carries because it negotiates zlib.
   - id: software_packing
     technique_id: "T1027.002"
     confidence: 0.85
     description: "Software packing detected"
     platform: ["any"]
     patterns:
-      - "UPX"
-      - "ASPack"
-      - "PECompact"
-      - "packed"
-      - "compress"
-      - "lzma"
+      - "UPX0"
+      - "UPX1"
+      - "UPX!"
+      - ".aspack"
+      - ".adata"
+      - ".themida"
+      - ".winlice"
+      - ".vmp0"
+      - "MPRESS1"
+      - ".petite"
+      - "PECompact2"
+      - "FSG!"
 
   # T1083 - File and Directory Discovery
   - id: file_discovery

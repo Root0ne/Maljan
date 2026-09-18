@@ -336,3 +336,56 @@ class TestYaraPlatformFiltering:
             }
         )
         assert rule.platform == ("windows",)
+
+
+# ---------------------------------------------------------------------------
+# What the shipped rules fire on
+# ---------------------------------------------------------------------------
+
+
+# Strings a signed SSH client actually carries, in the shapes that made two
+# shipped rules fire on it: the name of the API that writes a registry value,
+# and the cipher and compression words in a transport implementation. Nothing
+# here is a persistence key or a packer artefact.
+_A_BENIGN_WINDOWS_CLIENT = (
+    b"RegSetValueExA\x00RegCreateKeyExA\x00RegQueryValueExA\x00"
+    b"aes256-ctr\x00aes192-cbc\x00AES-GCM\x00chacha20-poly1305\x00"
+    b"zlib compression\x00compress packet\x00uPXfer window\x00"
+    b"Software\\SimonTatham\\PuTTY\\Sessions\x00"
+)
+
+# The same two rules' real subjects: the Run key a persistence routine writes,
+# and the section names a packer leaves behind.
+_A_SAMPLE_THAT_PERSISTS = b"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run\x00svchost\x00"
+_A_PACKED_SAMPLE = b"UPX0\x00UPX1\x00UPX!\x00This file is packed with the UPX\x00"
+
+
+def _fired(data: bytes) -> set[str]:
+    layer = YaraLayer.from_default_rules()
+    if layer.rule_count == 0:
+        pytest.skip("Default rules file not found.")
+    return {match.rule_id for match in layer.scan(data, sample_platform="windows")}
+
+
+class TestTheRunKeyRuleWantsARunKey:
+    def test_the_name_of_the_api_is_not_persistence(self) -> None:
+        """`RegSetValueEx` is how a program writes any value anywhere. The rule
+        matched it on a signed SSH client and published T1547.001 at 0.88."""
+        assert "registry_run_keys" not in _fired(_A_BENIGN_WINDOWS_CLIENT)
+
+    def test_the_run_key_path_still_fires(self) -> None:
+        assert "registry_run_keys" in _fired(_A_SAMPLE_THAT_PERSISTS)
+
+
+class TestThePackingRulesWantAPackerArtefact:
+    def test_a_cipher_name_and_a_compression_word_are_not_obfuscation(self) -> None:
+        """Fourteen occurrences of `aes` and one `uPX` inside a longer word
+        carried T1027 at 0.82 into a report about a benign binary."""
+        fired = _fired(_A_BENIGN_WINDOWS_CLIENT)
+        assert "obfuscation_indicators" not in fired
+        assert "software_packing" not in fired
+
+    def test_a_packer_section_name_still_fires(self) -> None:
+        fired = _fired(_A_PACKED_SAMPLE)
+        assert "obfuscation_indicators" in fired
+        assert "software_packing" in fired

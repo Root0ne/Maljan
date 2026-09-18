@@ -785,6 +785,17 @@ change landed on `main`.
   capture — in a new `corroborated_by` field that `api_capability` puts on the
   row. The T1113 association is untouched: it is shown as a catalogue
   association, which is what it always was.
+- **Three shipped YARA rules fired on words rather than on facts.**
+  `registry_run_keys` (T1547.001 at 0.88) listed `RegSetValueEx` beside the Run
+  key paths, so it matched any program that writes a registry value — on a
+  signed SSH client the hit was in the pack every agent read. It now wants a
+  Run, RunOnce, RunServices or Startup path. `obfuscation_indicators` (T1027 at
+  0.82) and `software_packing` (T1027.002) listed `UPX`, `AES`, `RC4`, `XOR`,
+  `Base64`, `packed` and `compress`, which fire on every implementation of a
+  transport: the same client matched on fourteen occurrences of `aes` and on
+  `uPX` inside a longer word. Both now want a packer section name or a packer's
+  own banner. The section entropies that are the other half of the packing
+  signal are reported by the format tool beside these hits, as before.
 - **Four documented facts that had drifted from the code.** The delegation
   section said a lead's 1800 s stage had room for five asks where
   `_asks_that_fit` computes six and the `ask_<key>` description gives the model
