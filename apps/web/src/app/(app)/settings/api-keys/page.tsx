@@ -189,6 +189,9 @@ export default function SettingsApiKeysPage() {
       )}
 
       {/* Key list */}
+      <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+        Issued keys
+      </h2>
       {apiKeysLoading ? (
         <div className="text-xs text-text-muted">Loading API keys...</div>
       ) : apiKeysError ? (

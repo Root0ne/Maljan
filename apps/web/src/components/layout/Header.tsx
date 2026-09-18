@@ -6,7 +6,7 @@ import { useAuth } from "@/lib/auth";
 import SearchPalette from "@/components/layout/SearchPalette";
 
 export default function Header() {
-  const { user, logout } = useAuth();
+  const { user, logout, canSignOut } = useAuth();
   const [value, setValue] = useState("");
   const [paletteOpen, setPaletteOpen] = useState(false);
   /** The palette row the arrow keys are on, announced from the input. */
@@ -84,12 +84,17 @@ export default function Header() {
         {user && (
           <>
             <span className="text-xs text-text-secondary">{user.email}</span>
-            <button
-              onClick={logout}
-              className="text-xs text-text-muted hover:text-text-primary"
-            >
-              Sign out
-            </button>
+            {/* Offered only where it does something. With authentication
+                disabled the handler is a documented no-op, so the button was
+                a control that silently changed nothing. */}
+            {canSignOut && (
+              <button
+                onClick={logout}
+                className="flex h-6 items-center rounded px-1.5 text-xs text-text-muted hover:text-text-primary"
+              >
+                Sign out
+              </button>
+            )}
           </>
         )}
       </div>

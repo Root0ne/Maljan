@@ -283,9 +283,14 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
 
       <ol aria-label="Steps" className="flex flex-wrap gap-2 mb-4">
         {steps.map((s, i) => (
-          <li key={s.id} aria-current={i === index ? "step" : undefined}>
+          <li key={s.id}>
+            {/* On the button, not on the list item that wraps it: which step
+                you are on was carried by a border colour and by an attribute
+                the accessibility tree reported on nothing focusable (WCAG
+                1.4.1, 4.1.2). */}
             <button
               type="button"
+              aria-current={i === index ? "step" : undefined}
               onClick={() => goTo(s.id)}
               className={`text-xs px-2 py-1 rounded border ${
                 i === index
@@ -446,9 +451,8 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
             {blockedReason && <span className="text-xs text-text-muted">{blockedReason}</span>}
           </>
         )}
-        <Link href={guide.groupHref} className="text-xs text-accent-strong">
-          Open in the full settings
-        </Link>
+        {/* "Open in the full settings" is in the guide's header, above every
+            step. A second copy here put the same link on one screen twice. */}
       </div>
     </section>
   );
