@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -224,7 +225,9 @@ async def test_mock_pipeline_completes(
     assert result["verdict"] == "Malware"
     statuses = updates_in(recorded, "analysis_jobs")
     assert [u["status"] for u in statuses] == ["running", "completed"]
-    assert statuses[-1]["completed_at"] is not None
+    completed_at = statuses[-1]["completed_at"]
+    assert isinstance(completed_at, datetime)
+    assert (datetime.now(UTC) - completed_at).total_seconds() < 60
     assert mock_db_session.commit.call_count >= 2  # running + completed
 
 
@@ -281,7 +284,7 @@ async def test_report_less_pipeline_result_fails_the_job(
     failed = [u for u in updates_in(recorded, "analysis_jobs") if u["status"] == "failed"]
     assert len(failed) == 1
     assert failed[0]["error_message"] == result["error"]
-    assert failed[0]["completed_at"] is not None
+    assert isinstance(failed[0]["completed_at"], datetime)
 
 
 @pytest.mark.asyncio
@@ -383,7 +386,7 @@ async def test_pipeline_failure_sets_failed_status(
     assert "Simulated pipeline crash" not in result["error"]
     failed = [u for u in updates_in(recorded, "analysis_jobs") if u["status"] == "failed"]
     assert len(failed) == 1
-    assert failed[0]["completed_at"] is not None
+    assert isinstance(failed[0]["completed_at"], datetime)
 
 
 @pytest.mark.asyncio
@@ -461,9 +464,11 @@ async def test_mock_mode_with_an_attached_report_fails_with_a_worded_message(
 
     assert result["status"] == "failed"
     assert "AttributeError" not in result["error"]
-    # The wording itself is in the log entry the id names; what the job says
-    # is the class the worker raised deliberately for this case.
-    assert result["error"].startswith("ValueError (error id ")
+    # The sentence this module wrote is what the operator reads, with the id
+    # of the log entry that holds the rest. Only a ``StatedFailure`` keeps its
+    # message; anything else would arrive as its class name alone.
+    assert "cannot accept an uploaded report" in result["error"]
+    assert "(error id " in result["error"]
     failed = [u for u in updates_in(recorded, "analysis_jobs") if u["status"] == "failed"]
     assert len(failed) == 1
     assert failed[0]["error_message"] == result["error"]

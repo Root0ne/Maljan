@@ -10,13 +10,20 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
 
-from app.worker.analysis_worker import run_analysis
+from app.worker.analysis_worker import (
+    _OWNED_JOBS,
+    JOB_OWNER_TTL_SECONDS,
+    WORKER_ID,
+    job_owner_key,
+    run_analysis,
+)
 from tests.integration._session_probe import (
     SessionFactory,
     fake_job,
@@ -46,7 +53,19 @@ async def redis_stub() -> MagicMock:
     redis.publish = AsyncMock()
     redis.aclose = AsyncMock()
     redis.get = AsyncMock(return_value=None)
+    # The owner heartbeat this run writes and drops.
+    redis.set = AsyncMock()
+    redis.delete = AsyncMock()
     return redis
+
+
+def _heartbeats(redis: MagicMock) -> list[str]:
+    """The keys this run claimed, in the order it claimed them."""
+    return [str(call.args[0]) for call in redis.set.call_args_list]
+
+
+def _released(redis: MagicMock) -> list[str]:
+    return [str(call.args[0]) for call in redis.delete.call_args_list]
 
 
 def _pipeline_result() -> dict[str, Any]:
@@ -187,7 +206,8 @@ async def test_the_job_is_marked_failed_through_a_fresh_session(
     failures = [u for u in updates_to(factory, "analysis_jobs") if u.get("status") == "failed"]
     assert failures, "the job row was never marked failed"
     recorded = failures[-1]
-    assert recorded["completed_at"] is not None
+    assert isinstance(recorded["completed_at"], datetime)
+    assert (datetime.now(UTC) - recorded["completed_at"]).total_seconds() < 60
     assert "PendingRollbackError" in recorded["error_message"]
     assert "error id" in recorded["error_message"]
     # The reason carries the class and the id, never the exception's text.
@@ -306,7 +326,8 @@ async def test_the_operators_cancellation_writes_the_cancelled_row(
     assert result["status"] == "cancelled"
     cancelled = [u for u in updates_to(factory, "analysis_jobs") if u.get("status") == "cancelled"]
     assert len(cancelled) == 1
-    assert cancelled[0]["completed_at"] is not None
+    assert isinstance(cancelled[0]["completed_at"], datetime)
+    assert (datetime.now(UTC) - cancelled[0]["completed_at"]).total_seconds() < 60
 
 
 @pytest.mark.asyncio
@@ -330,3 +351,128 @@ async def test_a_cancelled_row_is_not_overwritten_by_a_failure() -> None:
     statement = factory.statements()[0]
     where = str(statement.whereclause)
     assert "status" in where and "!=" in where
+
+
+@pytest.mark.asyncio
+async def test_the_run_claims_its_job_and_drops_the_claim_on_success(
+    redis_stub: MagicMock,
+) -> None:
+    """The heartbeat is what the sweep reads, so it spans exactly the run."""
+    job = fake_job()
+    sample = fake_sample(job.sample_id)
+    factory = SessionFactory(rows_for(job, sample))
+    owned_during_the_run: list[bool] = []
+
+    async def _pipeline(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        owned_during_the_run.append(str(job.id) in _OWNED_JOBS)
+        return _pipeline_result()
+
+    from app import config as api_config
+
+    api_config._settings = None
+    with (
+        _mock_mode(),
+        patch("maljan.app.MaljanApp.arun", new=AsyncMock(side_effect=_pipeline)),
+    ):
+        result = await run_analysis({"redis": redis_stub, "db_session": factory}, str(job.id))
+    api_config._settings = None
+
+    assert result["status"] == "completed"
+    assert owned_during_the_run == [True]
+    assert _heartbeats(redis_stub) == [job_owner_key(str(job.id))]
+    assert redis_stub.set.call_args_list[0].kwargs["ex"] == JOB_OWNER_TTL_SECONDS
+    assert redis_stub.set.call_args_list[0].args[1] == WORKER_ID
+    assert _released(redis_stub) == [job_owner_key(str(job.id))]
+    assert str(job.id) not in _OWNED_JOBS
+
+
+@pytest.mark.asyncio
+async def test_the_claim_is_dropped_when_the_run_fails(redis_stub: MagicMock) -> None:
+    job = fake_job()
+    sample = fake_sample(job.sample_id)
+    factory = SessionFactory(rows_for(job, sample))
+
+    from app import config as api_config
+
+    api_config._settings = None
+    with (
+        _mock_mode(),
+        patch("maljan.app.MaljanApp.arun", new=AsyncMock(side_effect=RuntimeError("no"))),
+    ):
+        result = await run_analysis({"redis": redis_stub, "db_session": factory}, str(job.id))
+    api_config._settings = None
+
+    assert result["status"] == "failed"
+    assert _released(redis_stub) == [job_owner_key(str(job.id))]
+    assert str(job.id) not in _OWNED_JOBS
+
+
+@pytest.mark.asyncio
+async def test_the_claim_is_dropped_when_the_run_is_cancelled(redis_stub: MagicMock) -> None:
+    job = fake_job()
+    sample = fake_sample(job.sample_id)
+    factory = SessionFactory(rows_for(job, sample))
+
+    async def _cancelled(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise asyncio.CancelledError
+
+    from app import config as api_config
+
+    api_config._settings = None
+    with (
+        _mock_mode(),
+        patch("maljan.app.MaljanApp.arun", new=AsyncMock(side_effect=_cancelled)),
+        pytest.raises(asyncio.CancelledError),
+    ):
+        await run_analysis({"redis": redis_stub, "db_session": factory}, str(job.id))
+    api_config._settings = None
+
+    assert _released(redis_stub) == [job_owner_key(str(job.id))]
+    assert str(job.id) not in _OWNED_JOBS
+
+
+@pytest.mark.asyncio
+async def test_the_refresher_cannot_outlive_the_job(redis_stub: MagicMock) -> None:
+    """A refresher still running would keep saying a finished job is running."""
+    job = fake_job()
+    sample = fake_sample(job.sample_id)
+    factory = SessionFactory(rows_for(job, sample))
+    before = {id(task) for task in asyncio.all_tasks()}
+
+    from app import config as api_config
+
+    api_config._settings = None
+    with (
+        _mock_mode(),
+        patch("maljan.app.MaljanApp.arun", new=AsyncMock(return_value=_pipeline_result())),
+    ):
+        await run_analysis({"redis": redis_stub, "db_session": factory}, str(job.id))
+    api_config._settings = None
+
+    left = [task for task in asyncio.all_tasks() if id(task) not in before and not task.done()]
+    assert left == []
+
+
+@pytest.mark.asyncio
+async def test_a_redis_that_refuses_the_claim_never_costs_the_run(
+    redis_stub: MagicMock,
+) -> None:
+    """The sweep skips the jobs this process is running, so the run is safe."""
+    job = fake_job()
+    sample = fake_sample(job.sample_id)
+    factory = SessionFactory(rows_for(job, sample))
+    redis_stub.set = AsyncMock(side_effect=ConnectionError("queue unreachable"))
+    redis_stub.delete = AsyncMock(side_effect=ConnectionError("queue unreachable"))
+
+    from app import config as api_config
+
+    api_config._settings = None
+    with (
+        _mock_mode(),
+        patch("maljan.app.MaljanApp.arun", new=AsyncMock(return_value=_pipeline_result())),
+    ):
+        result = await run_analysis({"redis": redis_stub, "db_session": factory}, str(job.id))
+    api_config._settings = None
+
+    assert result["status"] == "completed"
+    assert str(job.id) not in _OWNED_JOBS

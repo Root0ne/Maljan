@@ -11,11 +11,13 @@ pipeline, streaming progress events via Redis PubSub.
 import asyncio
 import gc
 import os
+import platform
 import signal
 import time
 import traceback
 import uuid
 from collections.abc import Callable, Iterable
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -41,13 +43,32 @@ logger = get_logger("worker")
 _SECRET_PATHS = [e.path for e in core_catalog() if e.secret]
 
 
-class AbsentAnalysisError(Exception):
+class StatedFailure(Exception):
+    """A failure whose message this module wrote for an operator to read.
+
+    Every word of it is composed here, from constants and from ids this system
+    issued — never by a driver, a filesystem or a model — so it carries no host
+    path, no connection string and nothing a sample author chose. That is what
+    makes it safe to publish, and ``failure_reason`` keeps the message of this
+    class where it puts only the exception's class name for everything else.
+
+    Raise it wherever this module knows better than the caller's stack trace
+    what the operator should do next; a bare ``ValueError`` in the same place
+    reaches the console as ``ValueError (error id …)`` and the sentence stays
+    in the log.
+    """
+
+
+class AbsentAnalysisError(StatedFailure):
     """The pipeline ran and produced no analysis at all.
 
     Its own class rather than a flag, so the one failure path already in this
     module marks the job failed, records the message and persists no report —
     a job that says "completed" over a run nobody performed is worse than one
     that says it failed, because only the first is read as a result.
+
+    The message comes from ``pipeline.outcome``, which composes it from a
+    provider's error class and status and never from its body.
     """
 
 
@@ -748,6 +769,123 @@ def _make_event_sink(
 CANCEL_POLL_SECONDS = 15.0
 
 
+# ── Job ownership ───────────────────────────────────────────────
+
+
+# The key a worker holds while it is running a job, and how long it lives.
+#
+# Ownership has to be a statement by the process that is doing the work, about
+# the job it is doing. arq's own keys cannot say that: the in-progress claim is
+# written once and lives for the job timeout, so it outlives the process that
+# made it by hours, and the health key is queue-wide and lives thirty-one
+# seconds past its last write, so a worker that was killed a moment ago still
+# looks alive — which is exactly the case the sweep exists for.
+#
+# A heartbeat under the job's own id says both things at once: it exists only
+# while a worker is alive *and* still on that job, and it names which worker,
+# so a second worker's job is never mistaken for an abandoned one. The value is
+# for the log; the sweep reads only whether the key is there.
+JOB_OWNER_KEY_PREFIX = "maljan:job-owner:"
+JOB_OWNER_TTL_SECONDS = 90
+JOB_OWNER_REFRESH_SECONDS = 30
+
+# This process, as the heartbeat names it.
+WORKER_ID = f"{platform.node()}:{os.getpid()}"
+
+
+def job_owner_key(job_id: str) -> str:
+    """Where this job's owner writes that it is still running it."""
+    return f"{JOB_OWNER_KEY_PREFIX}{job_id}"
+
+
+# The jobs this process is running right now. The sweep skips them whatever
+# Redis says: a heartbeat that could not be written is a Redis problem, and a
+# worker that failed its own live job over one would be a worse one.
+_OWNED_JOBS: set[str] = set()
+
+
+async def claim_job(redis_conn: Any, job_id: str) -> bool:
+    """Say this worker is running this job, for the next TTL. Never raises."""
+    _OWNED_JOBS.add(job_id)
+    try:
+        await redis_conn.set(job_owner_key(job_id), WORKER_ID, ex=JOB_OWNER_TTL_SECONDS)
+    except Exception as exc:  # noqa: BLE001 — a heartbeat never costs a run
+        logger.warning(
+            "Could not write the owner heartbeat for job %s (%s); the sweep skips "
+            "the jobs this process is running, so the run is unaffected.",
+            job_id,
+            type(exc).__name__,
+            extra={"job_id": job_id, "component": "worker.lifecycle"},
+        )
+        return False
+    return True
+
+
+async def release_job(redis_conn: Any, job_id: str) -> None:
+    """Stop claiming this job, on every way out of it. Never raises."""
+    _OWNED_JOBS.discard(job_id)
+    try:
+        await redis_conn.delete(job_owner_key(job_id))
+    except Exception as exc:  # noqa: BLE001 — the key expires on its own
+        logger.debug(
+            "Could not drop the owner heartbeat for job %s (%s); it expires in %ds.",
+            job_id,
+            type(exc).__name__,
+            JOB_OWNER_TTL_SECONDS,
+            extra={"job_id": job_id},
+        )
+
+
+async def hold_job_owner(redis_conn: Any, job_id: str) -> None:
+    """Refresh this job's claim until the task running this is cancelled.
+
+    Three refreshes inside one TTL, so a missed write — a Redis blip, a loop
+    that was busy — does not expire the claim on its own.
+    """
+    while True:
+        await asyncio.sleep(JOB_OWNER_REFRESH_SECONDS)
+        await claim_job(redis_conn, job_id)
+
+
+async def live_owners(redis_conn: Any, job_ids: list[str]) -> set[str] | None:
+    """Which of these jobs a worker is currently saying it owns.
+
+    ``None`` when Redis cannot answer, which is not the same as "nobody owns
+    them" and is treated differently by the caller.
+    """
+    if not job_ids:
+        return set()
+    global _QUEUE_UNREADABLE_SAID
+    try:
+        held = await redis_conn.mget([job_owner_key(job_id) for job_id in job_ids])
+    except Exception as exc:  # noqa: BLE001 — an unreadable queue is not a verdict
+        _log_unreadable_queue(type(exc).__name__)
+        return None
+    # Readable again, so the next outage is worth saying out loud as well.
+    _QUEUE_UNREADABLE_SAID = False
+    return {job_id for job_id, value in zip(job_ids, held, strict=False) if value is not None}
+
+
+# Whether the "Redis cannot be read" line has been logged since the last time
+# it could be. The sweep runs every few minutes for the life of the worker, and
+# an outage that logged on every pass would bury everything else.
+_QUEUE_UNREADABLE_SAID = False
+
+
+def _log_unreadable_queue(reason: str) -> None:
+    global _QUEUE_UNREADABLE_SAID
+    if _QUEUE_UNREADABLE_SAID:
+        logger.debug("Orphan sweep: the queue is still unreadable (%s).", reason)
+        return
+    _QUEUE_UNREADABLE_SAID = True
+    logger.warning(
+        "Orphan sweep: the queue could not be read (%s); no job row is touched "
+        "until it can be, because ownership cannot be established without it.",
+        reason,
+        extra={"component": "worker.lifecycle"},
+    )
+
+
 # ── Job outcome ─────────────────────────────────────────────────
 
 
@@ -761,12 +899,12 @@ def failure_reason(exc: BaseException, error_id: str) -> str:
     it was configured with. The same rule the event feed already follows —
     a failed node travels as the class of its exception, never its message.
 
-    ``AbsentAnalysisError`` is the exception this module raises itself, with a
-    sentence written for an operator (``pipeline.outcome`` composes it from a
-    provider's error class and status, never from its body), so that sentence
-    is what the job says.
+    ``StatedFailure`` is the exception this module raises with a sentence it
+    wrote itself — the absent analysis, an attached report that belongs to
+    another sample, a sandbox provider that cannot take one — so that sentence
+    is what the job says, and it is the reason the class exists.
     """
-    if isinstance(exc, AbsentAnalysisError):
+    if isinstance(exc, StatedFailure):
         return f"{exc} (error id {error_id})"
     return f"{type(exc).__name__} (error id {error_id})"
 
@@ -860,6 +998,9 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
     # degradation makes it into both run_summary and the report banner
     # even though nothing in the pipeline itself reads the stored flag.
     _report_hash_mismatch_reason: str | None = None
+    # The task that keeps this job's owner heartbeat alive, cancelled by the
+    # ``finally`` below so it cannot outlive the run it speaks for.
+    owner_task: asyncio.Task | None = None
     # Registered here rather than above the session: this is the statement
     # before the ``try`` whose ``finally`` unregisters it, so there is no
     # window in which a raise leaves a buffer in the module-global map for
@@ -878,6 +1019,13 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             logger.error(f"Invalid job_id UUID: {job_id}", extra={"job_id": job_id})
             await _publish_event(redis_conn, job_id, "error", {"message": "Invalid job ID"})
             return {"status": "error", "message": f"Invalid job ID: {exc}"}
+
+        # Before the row is touched, so there is no moment in which a job says
+        # ``running`` and no worker says it is running it. Refreshed by a task
+        # of its own for as long as the run lasts, and dropped by the
+        # ``finally`` below on success, failure and cancellation alike.
+        await claim_job(redis_conn, job_id)
+        owner_task = asyncio.create_task(hold_job_owner(redis_conn, job_id))
 
         # Everything this run needs out of the database before the models
         # start, in one short session that is closed again before the
@@ -981,7 +1129,9 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     )
                 ).scalar_one_or_none()
                 if attached_report is None:
-                    raise ValueError("The attached sandbox report does not belong to this sample.")
+                    raise StatedFailure(
+                        "The attached sandbox report does not belong to this sample."
+                    )
                 _attached_storage_path = str(attached_report.storage_path)
                 _attached_row_id = attached_report.id
                 _attached_hash_matches = attached_report.sample_sha256_match
@@ -1139,9 +1289,11 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # Checked by capability, not by provider id, the same way every
             # other branch in this layer is: an attribute error escaping to
             # job.error_message would show the user a raw internal exception
-            # instead of saying what actually happened.
+            # instead of saying what actually happened. ``StatedFailure``
+            # rather than ``ValueError`` for the same reason: this sentence is
+            # the answer, and only that class reaches the console whole.
             if not sandbox_provider.capabilities.accepts_uploaded_report:
-                raise ValueError(
+                raise StatedFailure(
                     "A sandbox report is attached to this job, but the configured "
                     f"sandbox provider ({sandbox_provider.id!r}) cannot accept an "
                     "uploaded report."
@@ -1843,6 +1995,16 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         # its last lines, not the ones from two seconds earlier.
         await _stop_event_feed(job_id)
 
+        # The claim goes with the run, on every way out of it. Cancelled and
+        # awaited rather than left to the garbage collector: a refresher that
+        # outlived its job would keep saying a finished job is running, which
+        # is the one thing the sweep believes.
+        if owner_task is not None:
+            owner_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await owner_task
+        await release_job(redis_conn, job_id)
+
         # The worker's own private copies of the sample never outlive the
         # job that downloaded them, on success, failure or cancellation
         # alike (H3, security hardening). ``remove_quietly`` is a no-op
@@ -2019,96 +2181,53 @@ def _extract_mitre(result: dict) -> list | None:
 # ── ARQ Worker Configuration ────────────────────────────────────
 
 
-# How long a ``running`` row may be untouched at worker boot before it is
-# considered abandoned. See ``_sweep_orphan_jobs``.
-_ORPHAN_GRACE_SECONDS = int(os.environ.get("ORPHAN_JOB_GRACE_SECONDS", "300"))
-
-
-def health_check_key() -> str:
-    """The key an arq worker writes its health line to.
-
-    Present means a worker was alive within the last
-    ``health_check_interval + 1`` seconds — arq sets it with that expiry — so
-    its absence at boot is a statement about the queue, not about this
-    process, which has not recorded its own health yet when ``on_startup``
-    runs.
-    """
-    from arq.constants import default_queue_name, health_check_key_suffix
-
-    return f"{default_queue_name}{health_check_key_suffix}"
-
-
-async def claimed_job_ids(redis_conn: Any, job_ids: list[str]) -> set[str] | None:
-    """Which of these jobs the queue says a live worker is holding.
-
-    ``None`` when the queue cannot answer at all, which is a different thing
-    from "nobody holds them" and is treated as such by the caller: a sweep
-    that guessed here would fail a run another worker is performing.
-
-    arq claims a job by setting ``arq:in-progress:<id>`` for the length of the
-    job timeout and enqueues under our own job id, so the key names the job
-    row directly. A claim outlives the process that made it — the key is set
-    once, not refreshed — so a claim only counts while some worker is alive.
-    """
-    if redis_conn is None or not job_ids:
-        return None
-    from arq.constants import in_progress_key_prefix
-
-    try:
-        if not await redis_conn.exists(health_check_key()):
-            return set()
-        held = await redis_conn.mget([f"{in_progress_key_prefix}{job_id}" for job_id in job_ids])
-    except Exception as exc:  # noqa: BLE001 — an unreadable queue is not a verdict
-        logger.warning(
-            "Startup orphan sweep: the queue could not be read (%s); "
-            "only jobs past the job timeout will be swept.",
-            type(exc).__name__,
-            extra={"component": "worker.lifecycle"},
-        )
-        return None
-    return {job_id for job_id, value in zip(job_ids, held, strict=False) if value is not None}
-
-
-# What a swept row says about itself. Two reasons, because the two cases are
-# different facts about the queue and an operator reading the row acts on them
-# differently.
-_SWEPT_ABANDONED = (
-    "No worker holds this job: the queue has no claim on it and no worker is "
-    "alive. Marked failed by the startup sweep — re-submit the sample if needed."
+# What a swept row says about itself: the fact the sweep established, and what
+# the operator can do about it.
+_SWEPT_NO_OWNER = (
+    "No worker is holding this job: its owner heartbeat has expired, so the "
+    "process that was running it is gone. Marked failed by the orphan sweep — "
+    "re-submit the sample if needed."
 )
-_SWEPT_OVER_TIMEOUT = (
-    "This job has been running for longer than the worker's job timeout, which "
-    "no run outlives. Marked failed by the startup sweep — re-submit the sample "
-    "if needed."
-)
+
+# When the sweep runs. Not at the instant of startup: a worker that crashed
+# leaves its last heartbeat behind for up to one TTL, and a sweep that ran
+# inside that window would read the dead worker's own claim as ownership and
+# leave the row it exists to repair. Waiting one TTL costs a minute and a half
+# on a restart and makes the first pass conclusive.
+#
+# Then every ten minutes for the life of the process, because a worker that
+# gives up on a job while staying up — the case that left job 892659bc reading
+# ``running`` for an hour — is not repaired by anything that only runs at boot.
+SWEEP_FIRST_DELAY_SECONDS = JOB_OWNER_TTL_SECONDS
+SWEEP_INTERVAL_SECONDS = 600
 
 
 async def _sweep_orphan_jobs(db_session: async_sessionmaker, redis_conn: Any = None) -> None:
-    """Mark ``running`` rows with no live owner as ``failed`` at worker startup.
+    """Mark ``running`` rows that no worker is holding as ``failed``.
 
-    When the worker process is killed mid-flight (e.g. operator
-    ``Stop-Process`` during development, OOM kill, deploy rollover, the RSS
-    recycler) the ``run_analysis`` task has no chance to flip the row from
-    ``running`` → ``failed`` in its ``except`` block. The DB then carries
-    phantom ``running`` rows forever — the dashboard reports them as in-flight
-    even though no worker holds them, and the false-positive statistics count
-    analyses that never ended.
+    When a worker process dies mid-flight (OOM kill, the RSS recycler, an
+    operator stopping it, a deploy rollover) the ``run_analysis`` task has no
+    chance to flip the row from ``running`` → ``failed``. The database then
+    carries a phantom ``running`` row for ever: the dashboard reports an
+    analysis as in flight, nothing retries it (``max_tries = 1``), and the
+    false-positive statistics count a run that never ended.
 
-    Ownership is read from the queue rather than assumed from this process.
-    The sweep used to mark every ``running`` row older than the grace period,
-    on the reasoning that this process is the worker and has just started;
-    that is true of a single-worker deployment and false of any other, where
-    it would fail a run another worker is performing. A job is left alone when
-    arq holds a claim on it (``arq:in-progress:<id>``, written under our own
-    job id) *and* a worker is alive to be holding it (the queue's health key,
-    which expires seconds after a worker stops writing it). A job that has
-    been running longer than ``job_timeout`` is swept whatever the queue says,
-    because no run outlives that ceiling; and when the queue cannot be read at
-    all, only those are swept.
+    Ownership is the heartbeat the owner itself writes (``claim_job``), not
+    anything arq keeps. arq's in-progress key is written once and lives for the
+    job timeout, so it outlives the process that wrote it by hours; its health
+    key is queue-wide and lives thirty-one seconds past its last write, so a
+    worker killed a moment ago still looks alive — and a restart lands inside
+    that window, which is exactly when this runs. A per-job heartbeat with a
+    ninety-second life, refreshed every thirty, says what neither of those can:
+    *this* worker is still on *this* job.
 
-    The grace period bounds the other direction: a row is only a candidate
-    once it has been ``running`` for ``_ORPHAN_GRACE_SECONDS``, which covers
-    the seconds between the API writing the row and a worker claiming it.
+    So a ``running`` row is orphaned when its heartbeat key is absent. Two
+    exceptions, both in the direction of leaving a job alone: a row younger
+    than one TTL is left for the next pass, because a worker may have claimed
+    it a moment ago, and a job this process is running is never swept whatever
+    Redis says. When Redis cannot be read at all, nothing is touched and the
+    reason is logged once: ownership cannot be established without it, and
+    guessing costs somebody else's run.
     """
     from datetime import UTC as _UTC
     from datetime import datetime as _datetime
@@ -2116,10 +2235,11 @@ async def _sweep_orphan_jobs(db_session: async_sessionmaker, redis_conn: Any = N
 
     from app.models.job import AnalysisJob
 
-    now = _datetime.now(_UTC)
-    grace_seconds = min(WorkerSettings.job_timeout, _ORPHAN_GRACE_SECONDS)
-    grace_ts = now - _timedelta(seconds=grace_seconds)
-    timeout_ts = now - _timedelta(seconds=WorkerSettings.job_timeout)
+    if redis_conn is None:
+        _log_unreadable_queue("no Redis connection")
+        return
+
+    young_cutoff = _datetime.now(_UTC) - _timedelta(seconds=JOB_OWNER_TTL_SECONDS)
 
     async with db_session() as db:
         candidates = (
@@ -2137,52 +2257,78 @@ async def _sweep_orphan_jobs(db_session: async_sessionmaker, redis_conn: Any = N
         # stay ``running`` for ever by having no clock.
         return row[1] or row[2]
 
-    aged = [row for row in candidates if _since(row) is not None and _since(row) < grace_ts]
-    over_timeout = {str(row[0]) for row in aged if _since(row) < timeout_ts}
-    still_within = [str(row[0]) for row in aged if str(row[0]) not in over_timeout]
+    aged = [str(row[0]) for row in candidates if _since(row) is None or _since(row) < young_cutoff]
+    if not aged:
+        logger.debug("Orphan sweep: nothing old enough to judge.")
+        return
 
-    claimed = await claimed_job_ids(redis_conn, still_within)
-    if claimed is None:
-        abandoned = set()
-    else:
-        abandoned = {job_id for job_id in still_within if job_id not in claimed}
+    owners = await live_owners(redis_conn, aged)
+    if owners is None:
+        return
+    orphans = [job_id for job_id in aged if job_id not in owners and job_id not in _OWNED_JOBS]
+    if not orphans:
+        logger.debug("Orphan sweep: every running job has an owner.")
+        return
 
-    groups = [
-        (ids, reason)
-        for ids, reason in ((over_timeout, _SWEPT_OVER_TIMEOUT), (abandoned, _SWEPT_ABANDONED))
-        if ids
-    ]
-    affected: list[str] = []
-    if groups:
-        async with db_session() as db:
-            for ids, reason in groups:
-                result = await db.execute(
-                    update(AnalysisJob)
-                    .where(
-                        AnalysisJob.id.in_([uuid.UUID(job_id) for job_id in ids]),
-                        # Re-checked in the statement: a worker may have
-                        # finished one of these between the read above and
-                        # this write.
-                        AnalysisJob.status == "running",
-                    )
-                    .values(status="failed", completed_at=func.now(), error_message=reason)
-                    .returning(AnalysisJob.id)
-                )
-                affected.extend(str(row[0]) for row in result.all())
-            await db.commit()
+    async with db_session() as db:
+        result = await db.execute(
+            update(AnalysisJob)
+            .where(
+                AnalysisJob.id.in_([uuid.UUID(job_id) for job_id in orphans]),
+                # Re-checked in the statement: a worker may have finished one
+                # of these between the read above and this write.
+                AnalysisJob.status == "running",
+            )
+            .values(status="failed", completed_at=func.now(), error_message=_SWEPT_NO_OWNER)
+            .returning(AnalysisJob.id)
+        )
+        affected = [str(row[0]) for row in result.all()]
+        await db.commit()
 
     if affected:
         logger.warning(
-            "Startup orphan sweep: marked %d unowned 'running' job(s) as 'failed': %s",
+            "Orphan sweep: marked %d unowned 'running' job(s) as 'failed': %s",
             len(affected),
             ", ".join(affected[:8]) + (" ..." if len(affected) > 8 else ""),
             extra={"component": "worker.lifecycle", "job_count": len(affected)},
         )
-    else:
-        logger.info(
-            "Startup orphan sweep: no unowned 'running' jobs found.",
-            extra={"component": "worker.lifecycle"},
-        )
+
+
+async def sweep_orphans_forever(
+    ctx: dict,
+    *,
+    first_delay: float | None = None,
+    interval: float | None = None,
+) -> None:
+    """Run the orphan sweep on its own clock, for the life of the worker.
+
+    A task rather than a cron job: this worker runs one job at a time, so a
+    scheduled task would queue behind whatever analysis is in flight and only
+    run when there is nothing to repair.
+
+    Never raises out of a pass: a sweep that took the worker down with it would
+    trade every future job for one stale row.
+
+    The two delays are arguments with the constants as their defaults, so a
+    test can watch the loop turn without waiting a minute and a half for the
+    first pass.
+    """
+    wait_first = SWEEP_FIRST_DELAY_SECONDS if first_delay is None else first_delay
+    wait_between = SWEEP_INTERVAL_SECONDS if interval is None else interval
+    await asyncio.sleep(wait_first)
+    while True:
+        try:
+            await _sweep_orphan_jobs(ctx["db_session"], ctx.get("redis"))
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — a sweep never costs the worker
+            logger.warning(
+                "Orphan sweep failed (%s); trying again in %ss.",
+                type(exc).__name__,
+                wait_between,
+                extra={"component": "worker.lifecycle"},
+            )
+        await asyncio.sleep(wait_between)
 
 
 async def startup(ctx: dict) -> None:
@@ -2236,18 +2382,12 @@ async def startup(ctx: dict) -> None:
     # Store a Redis connection for PubSub
     ctx["redis"] = aioredis.from_url(settings.redis_url)
 
-    # Clean up phantom 'running' rows left behind
-    # when the previous worker was killed mid-flight (no shutdown hook
-    # fired). Without this, the dashboard accumulates fake in-flight
-    # jobs every time the operator restarts the worker.
-    try:
-        await _sweep_orphan_jobs(ctx["db_session"], ctx.get("redis"))
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "Startup orphan sweep failed (non-fatal): %s",
-            exc,
-            extra={"component": "worker.lifecycle"},
-        )
+    # Repair the phantom 'running' rows a killed worker leaves behind, and
+    # keep repairing them: the first pass waits one owner TTL so a crashed
+    # worker's last heartbeat has expired before anything is judged, and the
+    # passes after it run every ten minutes, which is what reaches a job a
+    # still-running worker gave up on.
+    ctx["sweep_task"] = asyncio.create_task(sweep_orphans_forever(ctx))
 
     logger.info(
         "Worker started: connected to DB and Redis",
@@ -2257,6 +2397,13 @@ async def startup(ctx: dict) -> None:
 
 async def shutdown(ctx: dict) -> None:
     """Called when the ARQ worker shuts down."""
+    # Before the connections it uses are closed under it.
+    sweep_task: asyncio.Task | None = ctx.get("sweep_task")
+    if sweep_task is not None:
+        sweep_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await sweep_task
+
     redis_conn: aioredis.Redis | None = ctx.get("redis")
     if redis_conn:
         await redis_conn.aclose()

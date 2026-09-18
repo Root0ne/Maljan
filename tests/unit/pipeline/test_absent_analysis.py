@@ -224,8 +224,8 @@ class TestTheWorkerFailsSuchAJob:
         source = inspect.getsource(analysis_worker.run_analysis)
         handler = source[source.index("\n    except Exception as exc:") :]
 
-        assert "reason = failure_reason(exc, error_id)" in handler
-        assert "await mark_job_failed(db_session, job_uuid, reason=reason" in handler
+        assert "failure_reason(" in handler, "the row carries a reason, not a message"
+        assert "mark_job_failed(" in handler, "and it is written on a session of its own"
         assert "db." not in handler.split("finally:")[0], (
             "the failure path must not reach for the run's own session"
         )
@@ -236,18 +236,55 @@ class TestTheWorkerFailsSuchAJob:
         assert failure_reason(ValueError("/srv/samples/x.exe is missing"), "abc") == (
             "ValueError (error id abc)"
         )
-        # The one exception whose own sentence is written for an operator.
+        # The exceptions whose sentence this module wrote itself.
         absent = AbsentAnalysisError("no analysis was produced: ... (APIStatusError 402)")
         assert failure_reason(absent, "abc").startswith("no analysis was produced")
         assert failure_reason(absent, "abc").endswith("(error id abc)")
 
+    def test_a_sentence_this_module_wrote_reaches_the_operator_whole(self) -> None:
+        """The two attached-report refusals are answers, not stack traces."""
+        from app.worker.analysis_worker import StatedFailure, failure_reason
+
+        stated = StatedFailure("The attached sandbox report does not belong to this sample.")
+        assert failure_reason(stated, "abc") == (
+            "The attached sandbox report does not belong to this sample. (error id abc)"
+        )
+
     def test_the_absent_run_is_its_own_error_class(self) -> None:
         """Its own class so the handler above cannot be reached by accident."""
-        from app.worker.analysis_worker import AbsentAnalysisError
+        from app.worker.analysis_worker import AbsentAnalysisError, StatedFailure
 
-        assert issubclass(AbsentAnalysisError, Exception)
+        assert issubclass(AbsentAnalysisError, StatedFailure)
+        assert issubclass(StatedFailure, Exception)
         error = AbsentAnalysisError("no analysis was produced: ... (APIStatusError 402)")
         assert f"{type(error).__name__}: {error}".startswith("AbsentAnalysisError: ")
+
+    def test_every_worded_refusal_in_the_module_is_a_stated_failure(self) -> None:
+        """A sentence raised as a bare exception would be swallowed by its class.
+
+        Read off the source: a ``raise`` whose argument is a sentence — it ends
+        in a full stop — belongs to the class that keeps sentences.
+        """
+        import ast
+        import inspect
+
+        from app.worker import analysis_worker
+
+        tree = ast.parse(inspect.getsource(analysis_worker))
+        worded: list[str] = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Raise) or not isinstance(node.exc, ast.Call):
+                continue
+            raised = getattr(node.exc.func, "id", "")
+            said = "".join(
+                part.value
+                for part in ast.walk(node.exc)
+                if isinstance(part, ast.Constant) and isinstance(part.value, str)
+            )
+            if said.strip().endswith(".") and " " in said.strip():
+                worded.append(f"{raised}: {said}")
+        assert worded, "the module raises at least one worded refusal"
+        assert all(entry.startswith("StatedFailure:") for entry in worded), worded
 
 
 class TestWhatTheReaderIsTold:

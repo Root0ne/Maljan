@@ -75,17 +75,41 @@ no error and no `completed_at`, for as long as the worker stayed up. What the
 row then says is the class of the exception and the id of the log entry
 holding the rest: `error_message` is a field of `JobResponse`, so an
 exception's own message put there is published, and a failure names a path or
-a connection string as readily as anything else.
+a connection string as readily as anything else. The exception to that is
+`StatedFailure` and its subclasses — the failures this module words itself,
+from constants and from ids this system issued — whose sentence is the answer
+and travels whole: an absent analysis, an attached report that belongs to
+another sample, a sandbox provider that cannot take one.
 
-A `running` row with no live owner is repaired at worker boot. Ownership is
-read from the queue: arq holds `arq:in-progress:<job id>` for a job a worker
-has claimed, and writes its health key every `health_check_interval`, so a job
-that is claimed while a worker is alive is left alone however long it has been
-running, up to `job_timeout`. Everything else that has been `running` longer
-than the grace period (`ORPHAN_JOB_GRACE_SECONDS`, five minutes) is marked
-`failed` with a reason saying so. When Redis cannot be reached, ownership
-cannot be established and only jobs past `job_timeout` are swept, because the
-alternative is a sweep that fails a run another worker is performing.
+### Who owns a running job
+
+The worker that is running it says so, and keeps saying so. While
+`run_analysis` runs it holds `maljan:job-owner:<job id>` with its own id in it,
+for 90 seconds, refreshed every 30 by a task of its own; the key is dropped on
+success, failure and cancellation alike. A `running` row whose key is absent is
+a row nobody is working on.
+
+Neither of arq's own keys can answer that question. The in-progress claim
+(`arq:in-progress:<job id>`) is written once and lives for the job timeout, so
+it outlives the process that wrote it by hours; the health key is queue-wide
+and lives 31 seconds past its last write, so a worker killed a moment ago still
+looks alive — and a restarted container looks at it within seconds of that
+kill, which is exactly the case the sweep exists for.
+
+The sweep therefore runs on its own clock rather than at the instant of
+startup: one owner TTL after the worker boots, so a crashed worker's last
+heartbeat has certainly expired, and every ten minutes after that — which is
+also what reaches a job a still-running worker gave up on, the case that left
+one job reading `running` for an hour. Two rules point the other way, both
+towards leaving a job alone: a row younger than one TTL is left for the next
+pass, because a worker may have claimed it a moment ago, and a job this process
+is running is never swept whatever Redis says. If Redis cannot be read, nothing
+is touched and the reason is logged once, because ownership cannot be
+established without it and guessing costs somebody else's run.
+
+A run that ends in `CancelledError` — arq's `job_timeout`, or SIGTERM — still
+writes no row of its own; its heartbeat goes with the process, so the next
+sweep pass marks it failed within ten minutes.
 
 ### What a request holds while it waits on somebody else
 

@@ -773,7 +773,6 @@ change landed on `main`.
   class of the exception and the id of the log entry holding the rest, because
   `error_message` is a field of `JobResponse` and an exception's message names
   host paths and connection strings. A `cancelled` row is left alone.
-
 - **No request path waits on a third party inside a transaction.** A
   request-scoped session is in a transaction from the dependency that resolved
   the caller, so a handler that then waited on somebody else left a backend
@@ -785,17 +784,29 @@ change landed on `main`.
   outside it, and a resume reads one page per session and sends it once that
   session has closed, rather than holding one open while a thousand frames go
   out at the client's pace.
-
-- **The startup sweep reads ownership from the queue instead of assuming it.**
-  It marked every `running` row older than five minutes as failed, on the
+- **A running job says who owns it, and the sweep believes only that.** The
+  sweep marked every `running` row older than five minutes as failed, on the
   reasoning that this process is the worker and has just booted — true of a
   single-worker deployment and false of any other, where it would fail a run
-  another worker was performing. A job is now left alone while arq holds a
-  claim on it (`arq:in-progress:<job id>`, written under our own job id) and a
-  worker is alive to be holding it (the queue's health key, which expires
-  seconds after a worker stops writing it). A job running longer than
-  `job_timeout` is swept whatever the queue says, and when the queue cannot be
-  read, only those are. The row's reason now names which of the two it was.
+  another worker was performing. Ownership is now a heartbeat the owner writes
+  about the job it is running: `maljan:job-owner:<job id>`, carrying the
+  worker's own id, 90 seconds long, refreshed every 30 and dropped on success,
+  failure and cancellation alike. arq's keys cannot say it — its in-progress
+  claim outlives the process that wrote it by the job timeout, and its
+  queue-wide health key outlives a killed worker by 31 seconds, which is
+  exactly when the restarted container reads it, so an OOM-killed run's row
+  survived the very sweep meant to repair it. The sweep now runs one TTL after
+  startup and every ten minutes after that (which also reaches a job a
+  still-running worker gave up on), leaves a row younger than one TTL for the
+  next pass, never touches a job this process is running, and touches nothing
+  at all when Redis cannot be read, logging that once.
+- **A refusal this worker worded reaches the operator whole.** "The attached
+  sandbox report does not belong to this sample" and "the configured sandbox
+  provider cannot accept an uploaded report" are sentences this module writes
+  from constants, not exception text from a driver or the filesystem. They are
+  now raised as `StatedFailure` — the class `AbsentAnalysisError` already
+  belonged to — and only that class keeps its message on `job.error_message`;
+  everything else still arrives as its class name plus the error id.
 
 - **Four documented facts that had drifted from the code.** The delegation
   section said a lead's 1800 s stage had room for five asks where
