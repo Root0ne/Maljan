@@ -100,7 +100,11 @@ gives its reason there rather than leaving an unexplained gap.
 **Following.** While a run is live the view follows the newest message as long
 as the reader is at the bottom of the stream, and stops the moment they scroll
 up; a "Jump to latest" button brings them back. The strip at the foot of the
-stream says who is working right now.
+stream says who is working right now. For an agent a stage names, that comes
+from the `agent_progress` events the worker publishes; for a specialist a lead
+reaches through `ask_<key>`, which no stage names and which therefore gets
+none, it is inferred from the agent's own lines — so such a specialist is
+`waiting` until it first speaks.
 
 **Leaving and coming back.** The events, the roster and the socket live in a
 run store keyed by job id (`apps/web/src/lib/runStore.ts`), not in the page.

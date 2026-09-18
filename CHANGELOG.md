@@ -747,6 +747,17 @@ change landed on `main`.
 
 ### Fixed
 
+- **Four documented facts that had drifted from the code.** The delegation
+  section said a lead's 1800 s stage had room for five asks where
+  `_asks_that_fit` computes six and the `ask_<key>` description gives the model
+  six; the events table omitted `via` from the roster row, `ran` from
+  `stage_finished`, `report_truncated` from `agent_message` and the
+  `enrichment_complete` row entirely; the evidence paragraph credited the
+  console with reading `run_summary.evidence.failures`, which it does not; and
+  the roster cache's comment justified itself with a live view that no longer
+  exists. The participants strip's own documentation now says that a
+  specialist reached through `ask_<key>` has its state inferred from its lines,
+  because no stage names it and `agent_progress` is published per stage.
 - **A long agent key inside a published sentence.** A key of 24 characters or
   more has the shape of a credential, and nothing is exempt from that rule for
   being lowercase, so such a key reads as `***` inside the prose of an event —

@@ -628,8 +628,9 @@ A call that failed is an entry with `ok` false whichever way it failed: a
 tool that raised, and a tool that returned an error. The entry keeps the
 message in `error` and, when the tool authored one, the remedy in
 `remediation`; `run_summary.evidence.failures` lists each distinct failure
-once with its count, the report header prints that list, and the console's
-evidence row shows the message and the remedy under the call.
+once with its count and the report header prints that list. The console does
+not read that summary — its evidence row shows the message and the remedy
+under the call itself, from the ledger entry.
 
 The tool loop also meters itself. `budget_tick` events carry an agent's steps
 against its cap and seconds against its limit every five steps and at the end
@@ -667,17 +668,18 @@ and the console draws the running analysis from them.
 |---|---|---|
 | `status_change` | the worker | `status` |
 | `pipeline_started` | the worker | `agents`, `sample_filename`, `sha256` |
-| `roster` | the worker, once, before anybody speaks | `agents[{key, label, role, stages}]`, `stages[{key, label, kind, agents}]` |
+| `roster` | the worker, once, before anybody speaks | `agents[{key, label, role, stages, via}]`, `stages[{key, label, kind, agents}]` |
 | `agent_progress` | the worker and the analyst nodes | `agent`, `phase` |
 | `phase_change` | the worker | `phase` |
-| `stage_started` / `stage_skipped` / `stage_finished` | the stage nodes | `stage`, `kind`, and `agents` / `reason` / `duration_ms` |
-| `agent_message` | every speaking node | `speaker`, `role`, `round`, `status`, `text`, `kind`, and optionally `stage`, `addressed_to`, `display_name`, `confidence`, `claims`, `dissent`, `report` |
+| `stage_started` / `stage_skipped` / `stage_finished` | the stage nodes | `stage`, `kind`, and `agents` / `reason` / `ran`, `duration_ms` |
+| `agent_message` | every speaking node | `speaker`, `role`, `round`, `status`, `text`, `kind`, and optionally `stage`, `addressed_to`, `display_name`, `confidence`, `claims`, `dissent`, `report`, `report_truncated` |
 | `agent_message_delta` | the analyst loop, behind `core.events.stream_deltas` | `stage`, `agent`, `text_delta` |
 | `tool_call_started` | the evidence recorder | `stage`, `agent`, `tool`, `server`, `args_summary` |
 | `tool_call_finished` | the evidence recorder, as each entry is written | `stage`, `agent`, `tool`, `server`, `evidence_id`, `ok`, `duration_ms`, `summary` |
 | `validation_feedback` | `pipeline/validation.retry_with_feedback` | `stage`, `agent`, `code`, `message`, `retry_index` |
 | `judge_question` | the judge's ReAct loop | `stage`, `text`, `addressed_to` |
 | `budget_tick` / `stage_ended_at_cap` | the budget meter | see *The evidence ledger* |
+| `enrichment_complete` | the enrichment worker, after the run | `report_id`, `domains_enriched`, `ips_enriched`, `similar_samples` |
 | `completed` / `error` / `cancelled` | the worker | the outcome |
 
 `agent_message.kind` is one of `says`, `tool_call`, `tool_result`,

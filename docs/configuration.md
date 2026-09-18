@@ -609,9 +609,11 @@ its own cap does.
 
 That makes the caller's stage timeout the thing that decides how many asks fit
 in one loop: the seeded `lead` has `react_agent_timeout_overrides` of 1800 s
-and `react_agent_max_steps_overrides` of 40, which is room for five asks and
-the turns to weigh them. The `ask_<key>` tool's description tells the model
-the same numbers. See *Delegation* in [architecture.md](architecture.md) for
+and `react_agent_max_steps_overrides` of 40, which is room for six asks and
+the turns to weigh them — 1800 s over the default 300 s per ask, and two steps
+per ask. The `ask_<key>` tool's description gives the model the same number,
+computed by `delegation._asks_that_fit` from the caller's own timeout rather
+than written down twice. See *Delegation* in [architecture.md](architecture.md) for
 what the ledger and the transcript record.
 
 ### A name a later release takes

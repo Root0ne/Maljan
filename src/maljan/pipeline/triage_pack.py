@@ -150,7 +150,12 @@ def run_is_degraded(reasons: Sequence[str]) -> bool:
 
 
 # The reputation tools, whichever server answered: their failure is one
-# sentence, about the lookup.
+# sentence, about the lookup. ``reputation`` is not a tool any server has: it
+# is what the pack records a lookup it could not make under — no enabled
+# server, the budget already spent, the call itself raising — so an entry
+# under that name never carries a service's answer. That is why the console's
+# own list of reputation tools has only the two real ones: an entry it would
+# draw an IDENTITY section from is always one of those.
 _REPUTATION_TOOLS: frozenset[str] = frozenset({"reputation", "get_file_report", "check_hash"})
 
 

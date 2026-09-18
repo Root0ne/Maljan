@@ -262,7 +262,7 @@ async def get_job(
 
 
 # One job's roster, remembered for a few seconds. The analysis layout polls
-# this endpoint every 3 s and the live view every 5 s, and the roster is a
+# this endpoint every 3 s, and the roster is a
 # property of the team the run was composed from rather than of the run's
 # progress — so rebuilding it on every poll spent a settings query and a full
 # builtin-map merge per poll, per open run, on an answer that cannot change.

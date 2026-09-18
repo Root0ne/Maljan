@@ -2694,10 +2694,12 @@ class Settings(BaseSettings):
             # Override via ``REACT_AGENT_TIMEOUT_OVERRIDES__static=1500``.
             "static": 1500,
             # A lead's stage has to hold several asks end to end. At the
-            # default 300 s per ask, 1800 fits five of them with the lead's
-            # own turns around them; the per-ask timeout is what bounds any
-            # one specialist, and the refusal is what stops the last ask that
-            # would not fit.
+            # default 300 s per ask, 1800 fits six of them — which is the
+            # number ``delegation._asks_that_fit`` computes and the number the
+            # ``ask_<key>`` tool's description gives the model — with the
+            # lead's own turns around them; the per-ask timeout is what bounds
+            # any one specialist, and the refusal is what stops the last ask
+            # that would not fit.
             "lead": 1800,
             # Judge budget bumped 300 → 600 for the same reason — the
             # final-verdict LLM call on Qwen 35B repeatedly bottlenecked
