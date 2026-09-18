@@ -1693,6 +1693,10 @@ def make_stage_agent_node(
             update.update(_budget_update(bound_agent, agent_name))
             return update
 
+        # Bound before the try so the failure paths below can ask it what it
+        # already had: a container that cannot build the agent at all leaves it
+        # None, and nothing is promoted from an agent that never existed.
+        agent: Any = None
         try:
             agent = container.get_agent(agent_name)
             bound_agent = agent
