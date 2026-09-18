@@ -67,8 +67,6 @@ rules:
     patterns:
       - "cmd.exe /c"
       - "cmd.exe /k"
-      - "%COMSPEC%"
-      - "bat&"
 
   # T1059.005 - Visual Basic
   - id: vbs_execution
@@ -79,8 +77,8 @@ rules:
     patterns:
       - "wscript.exe"
       - "cscript.exe"
-      - "CreateObject"
       - "WScript.Shell"
+      - "WScript.Network"
 
   # T1059.007 - JavaScript
   - id: js_execution
@@ -95,18 +93,18 @@ rules:
       - "JScript"
 
   # T1071.001 - Application Layer Protocol: Web Protocols
-  - id: web_c2_communication
-    technique_id: "T1071.001"
-    confidence: 0.85
-    description: "C2 communication over HTTP/HTTPS"
+  # A string note, not a technique. Every program that checks for an update
+  # calls these, so their presence cannot establish a C2 channel; what the
+  # sample did on the wire is the sandbox's answer. The note still says the
+  # names are there.
+  - id: web_client_apis
+    description: "HTTP client APIs are present (not evidence of C2 on their own)"
     platform: ["any"]
     patterns:
       - "HttpSendRequest"
       - "InternetOpenUrl"
       - "WinHttpConnect"
       - "URLDownloadToFile"
-      - "curl http"
-      - "wget http"
 
   # T1027 - Obfuscated Files or Information
   #
@@ -167,10 +165,10 @@ rules:
       - "FSG!"
 
   # T1083 - File and Directory Discovery
-  - id: file_discovery
-    technique_id: "T1083"
-    confidence: 0.78
-    description: "File and directory discovery"
+  # A string note: enumerating files is what a file manager, an installer and
+  # a backup tool all do, so the API names cannot establish the technique.
+  - id: file_enumeration_apis
+    description: "File enumeration APIs are present (ubiquitous in benign software)"
     platform: ["windows"]
     patterns:
       - "FindFirstFile"
@@ -185,11 +183,11 @@ rules:
     description: "Registry modification for defense evasion"
     platform: ["windows"]
     patterns:
-      - "RegSetValue"
-      - "RegCreateKey"
-      - "RegDeleteKey"
       - "DisableTaskMgr"
       - "DisableRegistryTools"
+      - "DisableTaskManager"
+      - "Policies\\System\\EnableLUA"
+      - "Policies\\Explorer\\NoRun"
 
   # T1685 - Disable or Modify Tools (T1562.001 until ATT&CK 19.2)
   - id: disable_defense_tools
@@ -218,7 +216,6 @@ rules:
     # 2026-07 round 2: dropped bare "sandbox" — matched any incidental mention
     # of the word. Keep VM/debugger-detection-specific markers only.
     patterns:
-      - "IsDebuggerPresent"
       - "CheckRemoteDebuggerPresent"
       - "NtGlobalFlag"
       - "vmware"
@@ -228,19 +225,17 @@ rules:
       - "VBoxTray"
 
   # T1497.001 - System Checks
-  - id: system_checks_evasion
-    technique_id: "T1497.001"
-    confidence: 0.82
-    description: "System checks for sandbox evasion"
+  # A string note. The timing APIs went earlier for being ubiquitous; the
+  # user-activity ones are no different — reading the cursor, the foreground
+  # window and the idle timer is what every interactive program does. The
+  # pattern of use is the signal, and a substring cannot see it.
+  - id: user_activity_apis
+    description: "User-activity APIs are present (ubiquitous in interactive software)"
     platform: ["windows"]
-    # 2026-07 round 2: dropped "Sleep", "GetTickCount", "QueryPerformanceCounter"
-    # — ubiquitous benign timing APIs that fired T1497.001 on ordinary apps.
-    # Keep user-activity / interaction checks that are evasion-specific.
     patterns:
       - "GetCursorPos"
       - "GetForegroundWindow"
       - "GetLastInputInfo"
-      - "mouse_event"
       - "GetSystemFirmwareTable"
 
   # T1003 - OS Credential Dumping
@@ -267,8 +262,8 @@ rules:
       - "lsass.exe"
       - "MiniDumpWriteDump"
       - "sekurlsa::logonpasswords"
-      - "comsvcs.dll"
-      - "#24"
+      - "comsvcs.dll, MiniDump"
+      - "comsvcs.dll MiniDump"
 
   # T1105 - Ingress Tool Transfer
   - id: tool_transfer
@@ -289,9 +284,11 @@ rules:
     description: "System Binary Proxy Execution via rundll32"
     platform: ["windows"]
     patterns:
-      - "rundll32.exe"
-      - "ExecuteA"
-      - "DllRegisterServer"
+      - "rundll32.exe javascript:"
+      - "rundll32.exe url.dll,OpenURL"
+      - "rundll32.exe advpack.dll,LaunchINFSection"
+      - "rundll32.exe shell32.dll,ShellExec_RunDLL"
+      - "rundll32.exe zipfldr.dll,RouteTheCall"
 
   # T1218.005 - Mshta
   - id: mshta_abuse
@@ -301,9 +298,8 @@ rules:
     platform: ["windows"]
     patterns:
       - "mshta.exe"
-      - "javascript:"
+      - "mshta http"
       - "vbscript:"
-      - "hta:"
 
   # T1218.010 - Regsvr32
   - id: regsvr32_abuse
@@ -324,14 +320,14 @@ rules:
     description: "Ransomware data encryption indicators"
     platform: ["any"]
     patterns:
-      - "ransom"
-      - "encrypt"
+      - "YOUR FILES HAVE BEEN ENCRYPTED"
+      - "ALL YOUR FILES ARE ENCRYPTED"
+      - "HOW_TO_DECRYPT"
+      - "DECRYPT_INSTRUCTION"
+      - "_readme.txt"
+      - "RECOVERY_KEY"
       - ".locked"
       - ".encrypted"
-      - "READ_ME"
-      - "DECRYPT"
-      - "Bitcoin"
-      - "monero"
 
   # T1486 - Additional ransomware file extensions
   - id: ransomware_extensions
@@ -354,27 +350,23 @@ rules:
     description: "Spearphishing attachment delivery"
     platform: ["windows"]
     patterns:
-      - "macro"
       - "AutoOpen"
       - "Document_Open"
       - "AutoExec"
-      - "Embedded OLE"
-      - ".docm"
-      - ".xlsm"
+      - "Workbook_Open"
+      - "vbaProject.bin"
 
   # T1204.002 - Malicious File
-  - id: malicious_file_execution
-    technique_id: "T1204.002"
-    confidence: 0.82
-    description: "User execution of malicious file"
+  # A string note: an interpreter's name and a file extension say what a
+  # thing is, never that a user was tricked into running it. The technique is
+  # about the delivery, which no static string witnesses.
+  - id: scripted_runtime_markers
+    description: "Scripted-runtime markers are present (the format, not the delivery)"
     platform: ["windows"]
     patterns:
-      - "AutoIt"
-      - "AutoHotkey"
-      - ".scr"
-      - ".pif"
-      - "shortcut"
-      - ".lnk"
+      - "AutoIt3.exe"
+      - "AutoHotkey.exe"
+      - "AutoIt v3 Script"
 
   # T1053.005 - Scheduled Task/Job
   - id: scheduled_task
@@ -390,17 +382,16 @@ rules:
       - "cmd /c start"
 
   # T1543.003 - Windows Service
-  - id: windows_service_persistence
-    technique_id: "T1543.003"
-    confidence: 0.82
-    description: "Persistence via Windows Service"
+  # A string note: installing a service is what installers do, and these API
+  # names are in every one of them. A service *as persistence* is the key
+  # path and the command line, which the registry rule and the sandbox see.
+  - id: service_control_apis
+    description: "Service-control APIs are present (ubiquitous in installers)"
     platform: ["windows"]
     patterns:
       - "CreateService"
       - "StartService"
       - "OpenSCManager"
-      - "services.exe"
-      - " SERVICE_"
 
   # T1574.001 - DLL (side-loading; T1574.002 until ATT&CK merged it into T1574.001)
   - id: dll_side_loading

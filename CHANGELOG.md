@@ -792,6 +792,23 @@ change landed on `main`.
   capture — in a new `corroborated_by` field that `api_capability` puts on the
   row. The T1113 association is untouched: it is shown as a catalogue
   association, which is what it always was.
+- **Thirteen rules fired on a benign GUI network client; none does now.** The
+  corpus was swept rule by rule against two fixtures built from names and
+  words rather than from any sample. Four shapes were doing the damage: a
+  pattern that is a substring of a benign API name (`RegSetValue`,
+  `CreateService`, `ExecuteA`), a pattern that is an English word (`encrypt`,
+  `macro`, `shortcut`), a pattern too short to be evidence (`#24`, the highest
+  authored confidence in the file, and `.scr`, which matches `.scrollbar`),
+  and a pattern the MSVC CRT links into most benign PEs (`IsDebuggerPresent`).
+  Eight rules now want the artefact — a ransom note's own wording, a
+  `rundll32` command line, `comsvcs.dll MiniDump`, a policy key path, a VBA
+  project stream. Five could not be made specific statically and have left the
+  technique-asserting set: `web_client_apis`, `file_enumeration_apis`,
+  `user_activity_apis`, `service_control_apis` and `scripted_runtime_markers`
+  say what is in the file and carry no technique and no confidence, because
+  importing an HTTP client or enumerating files is what ordinary software
+  does. A rule file entry may now omit `technique_id`, and one that does may
+  not carry a confidence either.
 - **Three shipped YARA rules fired on words rather than on facts.**
   `registry_run_keys` (T1547.001 at 0.88) listed `RegSetValueEx` beside the Run
   key paths, so it matched any program that writes a registry value — on a

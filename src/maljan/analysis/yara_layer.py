@@ -83,7 +83,7 @@ class YaraTTPRule:
 
     id: str
     technique_id: str
-    confidence: float
+    confidence: float | None
     description: str
     patterns: tuple[str, ...]
     platform: tuple[str, ...] = ("any",)
@@ -91,7 +91,16 @@ class YaraTTPRule:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> YaraTTPRule:
         """Construct a YaraTTPRule from a YAML rule dict."""
-        confidence = max(float(data.get("confidence", 0.75)), _CONFIDENCE_FLOOR)
+        technique_id = str(data.get("technique_id") or "")
+        # A rule whose patterns cannot establish a technique statically is a
+        # string note: it says what it found and asserts nothing, so it
+        # carries no id and no authored confidence to be read as one. A rule
+        # that does assert keeps the old default when its author wrote none.
+        confidence = (
+            None
+            if not technique_id
+            else max(float(data.get("confidence", 0.75)), _CONFIDENCE_FLOOR)
+        )
         patterns = tuple(str(p) for p in data.get("patterns", []))
         raw_platforms = data.get("platform") or ["any"]
         if isinstance(raw_platforms, str):
@@ -101,7 +110,7 @@ class YaraTTPRule:
             platform = ("any",)
         return cls(
             id=str(data["id"]),
-            technique_id=str(data["technique_id"]),
+            technique_id=technique_id,
             confidence=confidence,
             description=str(data.get("description", "")),
             patterns=patterns,
@@ -160,7 +169,7 @@ class YaraMatch:
 
     rule_id: str
     technique_id: str
-    confidence: float
+    confidence: float | None
     description: str
     matched_patterns: list[str] = field(default_factory=list)
     rule_platforms: tuple[str, ...] = ()
@@ -338,13 +347,19 @@ class YaraLayer:
                 f'        ${i} = "{_escape_yara_string(p)}" nocase'
                 for i, p in enumerate(rule.patterns)
             )
-            # YARA meta values: string, integer, boolean only (no float)
+            # YARA meta values: string, integer, boolean only (no float). A
+            # note rule writes neither id nor confidence, so nothing reading
+            # the match can mistake it for an assertion.
+            claims = ""
+            if rule.technique_id:
+                claims += f'        technique_id = "{rule.technique_id}"\n'
+            if rule.confidence is not None:
+                claims += f'        confidence = "{rule.confidence}"\n'
             src = (
                 f"rule {yara_id} {{\n"
                 f"    meta:\n"
                 f'        original_id = "{rule.id}"\n'
-                f'        technique_id = "{rule.technique_id}"\n'
-                f'        confidence = "{rule.confidence}"\n'
+                f"{claims}"
                 f'        description = "{_escape_yara_string(rule.description)}"\n'
                 f"    strings:\n"
                 f"{strings_block}\n"
@@ -382,8 +397,9 @@ class YaraLayer:
             meta = match.meta
             yara_id = match.rule
             rule_id = id_map.get(yara_id, yara_id)
-            technique_id = meta.get("technique_id", "")
-            confidence = float(meta.get("confidence", "0.75"))
+            technique_id = str(meta.get("technique_id", "") or "")
+            raw_confidence = meta.get("confidence")
+            confidence = None if raw_confidence is None else float(raw_confidence)
             description = meta.get("description", "")
 
             # Collect matched strings from yara result.

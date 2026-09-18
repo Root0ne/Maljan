@@ -332,6 +332,13 @@ a value, and the packing rules name section names and packer banners and not
 the words `AES`, `packed` or `compress`, which any program that speaks a
 protocol carries.
 
+A rule that cannot be made that specific is written as a note: it omits
+`technique_id`, and a rule with no technique may not carry a `confidence`
+either. It fires, it says in its description what is in the file, and it
+asserts nothing — which is what `web_client_apis` and `file_enumeration_apis`
+are for. Importing an HTTP client is a fact; calling it a command-and-control
+channel is a claim no substring can support.
+
 ### The evidence budget
 
 `reporting.evidence_budget_bytes` (512 KiB by default) is how many bytes of
