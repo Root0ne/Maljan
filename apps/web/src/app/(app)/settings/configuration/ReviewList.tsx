@@ -109,12 +109,17 @@ export function attentionLine(count: number): string {
  */
 export function ReviewErrorSummary({ lines }: { lines: ReviewItem[] }) {
   const messages = reviewErrors(lines);
-  if (messages.length === 0) return null;
   return (
     <>
-      <p className="text-xs text-status-red mb-2">{attentionLine(messages.length)}</p>
+      {messages.length > 0 && (
+        <p className="text-xs text-status-red mb-2">{attentionLine(messages.length)}</p>
+      )}
+      {/* Rendered whether or not there is anything in it. A live region that
+          arrives in the DOM together with its first content is announced by
+          NVDA and not by VoiceOver; one that is already there when the text
+          lands is announced by both. */}
       <p role="status" className="sr-only">
-        {[attentionLine(messages.length), ...messages].join(". ")}
+        {messages.length > 0 ? [attentionLine(messages.length), ...messages].join(". ") : ""}
       </p>
     </>
   );

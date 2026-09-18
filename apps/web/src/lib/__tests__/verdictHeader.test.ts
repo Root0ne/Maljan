@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  assessedSeverity,
   formatConfidence,
+  NO_REPORT,
+  NO_SEVERITY,
   verdictHeadline,
   verdictSeverityConflict,
 } from "../verdictHeader";
+import type { MalwareReport } from "@/types/malware-report";
 
 describe("a verdict against the severity the same run assessed", () => {
   it("calls Malicious over Informational a disagreement", () => {
@@ -12,20 +16,19 @@ describe("a verdict against the severity the same run assessed", () => {
   });
 
   it("calls a malicious verdict the judge assessed no severity for a disagreement", () => {
-    expect(verdictSeverityConflict("Malware", null)).toBe(true);
+    expect(verdictSeverityConflict("Malware", NO_SEVERITY)).toBe(true);
   });
 
   /* A run with no structured report has no severity block to disagree with,
    * which is not the same as a judge that assessed none into one. */
   it("stays quiet while there is no report to carry a severity", () => {
-    expect(verdictSeverityConflict("Malware", undefined)).toBe(false);
-    expect(verdictSeverityConflict("Benign", undefined)).toBe(false);
+    expect(verdictSeverityConflict("Malware", NO_REPORT)).toBe(false);
+    expect(verdictSeverityConflict("Benign", NO_REPORT)).toBe(false);
   });
 
   it("calls Benign over High or Critical a disagreement", () => {
     expect(verdictSeverityConflict("Benign", "Critical")).toBe(true);
     expect(verdictSeverityConflict("Benign", "High")).toBe(true);
-    expect(verdictSeverityConflict("Clean", "Critical")).toBe(true);
   });
 
   /* Adware, unwanted programs and riskware are a Malicious verdict at Low
@@ -40,7 +43,7 @@ describe("a verdict against the severity the same run assessed", () => {
   it("leaves Benign over the low end and Suspicious over everything alone", () => {
     expect(verdictSeverityConflict("Benign", "Low")).toBe(false);
     expect(verdictSeverityConflict("Benign", "Medium")).toBe(false);
-    expect(verdictSeverityConflict("Benign", null)).toBe(false);
+    expect(verdictSeverityConflict("Benign", NO_SEVERITY)).toBe(false);
     for (const rating of ["Informational", "Low", "Medium", "High", "Critical"] as const) {
       expect(verdictSeverityConflict("Suspicious", rating)).toBe(false);
     }
@@ -67,7 +70,7 @@ describe("the header's verdict chip", () => {
   });
 
   it("names a missing severity rather than leaving a gap", () => {
-    expect(verdictHeadline("Malware", 0.8, null).text).toBe(
+    expect(verdictHeadline("Malware", 0.8, NO_SEVERITY).text).toBe(
       "Judge: Malicious 0.80 · Severity: not assessed",
     );
   });
@@ -81,9 +84,28 @@ describe("the header's verdict chip", () => {
 
   it("says a fallback verdict was never assessed rather than scoring it zero", () => {
     expect(formatConfidence(null)).toBe("not assessed");
-    expect(verdictHeadline("Suspicious", null, null).text).toBe(
+    expect(verdictHeadline("Suspicious", null, NO_REPORT).text).toBe(
       "Suspicious · Confidence: not assessed",
     );
     expect(formatConfidence(0)).toBe("0.00");
+  });
+});
+
+/* The three answers a run can give about its own severity, read in one place
+ * so no caller has to decide which absence means which. */
+describe("what a report says about its severity", () => {
+  it("says there is no report when there is none", () => {
+    expect(assessedSeverity(null)).toBe(NO_REPORT);
+    expect(assessedSeverity(undefined)).toBe(NO_REPORT);
+  });
+
+  it("says the judge assessed none when the block is empty", () => {
+    expect(assessedSeverity({ severity: null } as MalwareReport)).toBe(NO_SEVERITY);
+  });
+
+  it("gives the rating when there is one", () => {
+    expect(
+      assessedSeverity({ severity: { rating: "High" } } as MalwareReport),
+    ).toBe("High");
   });
 });

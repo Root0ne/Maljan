@@ -21,7 +21,29 @@
 
 import { verdictBucket, verdictLabel } from "./verdict";
 import type { VerdictBucket } from "./verdict";
-import type { SeverityRating } from "@/types/malware-report";
+import type { MalwareReport, SeverityRating } from "@/types/malware-report";
+
+/**
+ * What a run says about its own severity, as three answers rather than two
+ * absences.
+ *
+ * `null` and `undefined` were carrying that distinction, and nothing but a
+ * comment stopped a caller writing `?? null` for "there is no report" — which
+ * would have put the disagreement line on every running job. These are the
+ * three states, and `assessedSeverity` is the one place that reads them off a
+ * report, so no caller has to know which absence is which.
+ */
+export const NO_SEVERITY = "assessed none";
+export const NO_REPORT = "no report yet";
+export type AssessedSeverity = SeverityRating | typeof NO_SEVERITY | typeof NO_REPORT;
+
+/** What a report says about its severity, in the three states above. */
+export function assessedSeverity(
+  malwareReport: MalwareReport | null | undefined,
+): AssessedSeverity {
+  if (!malwareReport) return NO_REPORT;
+  return malwareReport.severity?.rating ?? NO_SEVERITY;
+}
 
 /**
  * The severity a verdict has to be read against before it contradicts it.
@@ -40,30 +62,28 @@ import type { SeverityRating } from "@/types/malware-report";
  * Suspicious sits between the two by definition and can disagree with nothing;
  * an unknown verdict implies nothing, so it disagrees with nothing either.
  */
-const CONTRADICTS: Partial<Record<VerdictBucket, ReadonlySet<SeverityRating | "none">>> = {
-  malicious: new Set<SeverityRating | "none">(["Informational", "none"]),
-  benign: new Set<SeverityRating | "none">(["High", "Critical"]),
+const CONTRADICTS: Partial<Record<VerdictBucket, ReadonlySet<AssessedSeverity>>> = {
+  malicious: new Set<AssessedSeverity>(["Informational", NO_SEVERITY]),
+  benign: new Set<AssessedSeverity>(["High", "Critical"]),
 };
 
 /**
  * Whether the verdict and the assessed severity contradict each other.
  *
- * `rating` distinguishes two absences that are not the same claim. `null` is a
- * run that has a severity block and a judge that assessed no rating into it —
- * a malicious verdict with nothing behind it, which is worth saying.
- * `undefined` is a run with no structured report at all: one still going, or
- * one written before the report payload existed. There is no severity there to
- * disagree with, and announcing a contradiction would be this view inventing
- * one out of a report that has not been written yet.
+ * `NO_SEVERITY` is a run with a severity block and a judge that assessed no
+ * rating into it — a malicious verdict with nothing behind it, which is worth
+ * saying. `NO_REPORT` is a run with no structured report at all: one still
+ * going, or one written before the report payload existed. There is no
+ * severity there to disagree with, and announcing a contradiction would be
+ * this view inventing one out of a report nobody has written yet.
  */
 export function verdictSeverityConflict(
   verdict: string | null | undefined,
-  rating: SeverityRating | null | undefined,
+  severity: AssessedSeverity,
 ): boolean {
-  if (rating === undefined) return false;
+  if (severity === NO_REPORT) return false;
   const against = CONTRADICTS[verdictBucket(verdict)];
-  if (!against) return false;
-  return against.has(rating ?? "none");
+  return against ? against.has(severity) : false;
 }
 
 /**
@@ -94,21 +114,21 @@ export interface VerdictHeadline {
 export function verdictHeadline(
   verdict: string | null | undefined,
   confidence: number | null | undefined,
-  rating: SeverityRating | null | undefined,
+  severity: AssessedSeverity,
 ): VerdictHeadline {
   const label = verdictLabel(verdict);
   const number = formatConfidence(confidence);
-  if (!verdictSeverityConflict(verdict, rating)) {
+  if (!verdictSeverityConflict(verdict, severity)) {
     return { text: `${label} · Confidence: ${number}`, conflict: false };
   }
-  const severity = rating ?? "not assessed";
+  const rating = severity === NO_SEVERITY ? "not assessed" : severity;
   // The number is labelled only where it is not one: "Malicious 0.95" reads as
   // a confidence in the place a reader expects one, but "Malicious not
   // assessed" does not read as anything.
   const judged = confidence === null || confidence === undefined
     ? `${label} · Confidence: ${number}`
     : `${label} ${number}`;
-  return { text: `Judge: ${judged} · Severity: ${severity}`, conflict: true };
+  return { text: `Judge: ${judged} · Severity: ${rating}`, conflict: true };
 }
 
 /** The sentence under a disagreeing header, which says what to do about it. */

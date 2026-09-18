@@ -21,11 +21,7 @@ export function verdictBucket(v?: string | null): VerdictBucket {
   const s = (v ?? "").trim().toLowerCase();
   if (s === "malware" || s === "malicious") return "malicious";
   if (s === "suspicious") return "suspicious";
-  // `clean` is not in the report model's vocabulary
-  // (`reporting/models.py:822` is Malware | Suspicious | Benign); it is read
-  // here because a stored row from an older one can still carry it, and a
-  // verdict nothing recognises falls to "unknown", which is a different claim.
-  if (s === "benign" || s === "clean") return "benign";
+  if (s === "benign") return "benign";
   return "unknown";
 }
 

@@ -34,7 +34,11 @@ import {
 import { useRun } from "@/lib/useRun";
 import { formatDateTime, formatDuration } from "@/lib/report-utils";
 import { verdictBucket } from "@/lib/verdict";
-import { verdictHeadline, VERDICT_CONFLICT_NOTE } from "@/lib/verdictHeader";
+import {
+  assessedSeverity,
+  verdictHeadline,
+  VERDICT_CONFLICT_NOTE,
+} from "@/lib/verdictHeader";
 import { getErrorMessage, isApiStatus } from "@/lib/errors";
 import type { VerdictBucket } from "@/lib/verdict";
 
@@ -199,30 +203,46 @@ export default function AnalysisLayout({
    * enrichment lands or when the run finishes, without waiting for the poll
    * to come back round. */
   const lastEventCursor = useRef(0);
-  /* When this reader arrived. The store folds the whole recorded feed in one
-   * commit, so an `enrichment_complete` in it happened hours ago: worth one
-   * refetch, never worth announcing in the present tense every time the run is
-   * opened. The event's own timestamp is what says which it is, rather than
-   * which batch it came in — a run whose recorded feed is empty would
-   * otherwise have its first genuinely live event read as history. An event
-   * with no timestamp falls back to the batch it arrived in. */
-  const openedAt = useRef(Date.now());
-  const feedIsLive = useRef(false);
+  /* Which enrichment is news.
+   *
+   * The store folds the whole recorded feed in one commit, so an
+   * `enrichment_complete` in it happened hours ago: worth one refetch, never
+   * worth announcing in the present tense every time the run is opened. What
+   * separates the two is the newest event this reader already held — the
+   * publisher's own timestamp on both sides of the comparison, so no clock but
+   * the API's is ever consulted. The client's clock used to be the other half
+   * of it, and a dev box a few seconds ahead of the API could swallow a live
+   * toast.
+   *
+   * The first batch is the recorded feed by construction, and its newest
+   * timestamp becomes the watermark everything after it is read against. */
+  const newestHeld = useRef<string | null>(null);
   useEffect(() => {
     if (events.length <= lastEventCursor.current) return;
-    const firstBatch = !feedIsLive.current;
-    feedIsLive.current = true;
+    const firstBatch = newestHeld.current === null;
+    const watermark = newestHeld.current;
     for (let i = lastEventCursor.current; i < events.length; i++) {
       const e = events[i];
       if (e.type !== "enrichment_complete" && e.type !== "completed") continue;
       refetchRef.current?.();
       if (e.type !== "enrichment_complete") continue;
-      const at = e.ts ? Date.parse(e.ts) : NaN;
-      const happenedBefore = Number.isNaN(at) ? firstBatch : at < openedAt.current;
-      if (happenedBefore) continue;
+      // `ts` is non-optional on the wire; an empty or unparseable one falls
+      // back to the batch, which is the same answer the watermark would give.
+      const alreadyHappened =
+        firstBatch || !e.ts || (watermark !== null && e.ts <= watermark);
+      if (alreadyHappened) continue;
       setEnrichmentToast("Threat intel enrichment finished. Report refreshed.");
       setTimeout(() => setEnrichmentToast(null), 5000);
     }
+    for (let i = lastEventCursor.current; i < events.length; i++) {
+      const ts = events[i].ts;
+      if (ts && (newestHeld.current === null || ts > newestHeld.current)) {
+        newestHeld.current = ts;
+      }
+    }
+    // A batch whose every event is unstamped still has to move the feed off
+    // "nothing held yet", or the next batch would read as the first one.
+    if (newestHeld.current === null) newestHeld.current = "";
     lastEventCursor.current = events.length;
   }, [events]);
 
@@ -244,17 +264,10 @@ export default function AnalysisLayout({
 
   /* Derive header data strictly from real API data — no mock fallback */
   const verdict = verdictBucket(report?.verdict);
-  /* `undefined` while there is no structured report to carry a severity, and
-   * `null` once there is one and the judge assessed no rating into it — the
-   * second contradicts a malicious verdict, the first is a run that has not
-   * finished being written. */
-  const severityRating = report?.malware_report
-    ? (report.malware_report.severity?.rating ?? null)
-    : undefined;
   const headline = verdictHeadline(
     report?.verdict,
     report?.overall_confidence,
-    severityRating,
+    assessedSeverity(report?.malware_report),
   );
   const category = report?.malware_category ?? "";
   // Prefer a readable sample identity (filename, then hash prefix) over
