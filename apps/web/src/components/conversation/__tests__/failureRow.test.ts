@@ -11,6 +11,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import FailureRow from "@/components/conversation/FailureRow";
+import { copyErrorIdLabel } from "@/components/ui/FailureNote";
 import type { ConversationItem } from "@/lib/conversation";
 import { FAILURE_LOG_NOTE } from "@/lib/runFailure";
 
@@ -45,6 +46,21 @@ describe("a failed run's closing line", () => {
     expect(markup).toContain(`<code class="select-all break-all font-mono text-text-primary">${ID}</code>`);
     expect(markup).toContain(">Copy<");
     expect(markup).toContain(FAILURE_LOG_NOTE);
+  });
+
+  it("says what the copy control copies, and has somewhere to announce it", () => {
+    const markup = render(failed("Analysis failed.", ID));
+
+    expect(markup).toContain(`aria-label="${copyErrorIdLabel(false)}"`);
+    // The live region is in the DOM before there is anything to announce.
+    expect(markup).toContain('<p role="status" class="sr-only"></p>');
+  });
+
+  it("keeps the control's own word inside the name it is given", () => {
+    /* A name that drops the visible word is a name nobody can speak to the
+     * button (WCAG 2.5.3), in either of its two states. */
+    expect(copyErrorIdLabel(false).toLowerCase()).toContain("copy");
+    expect(copyErrorIdLabel(true).toLowerCase()).toContain("copied");
   });
 
   it("draws a failure the run filed under no id", () => {
