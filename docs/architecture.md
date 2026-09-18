@@ -1278,11 +1278,16 @@ provider and — once the export's cap began ordering by how strong an origin
 was — ranked as though a sandbox had watched it, because an address carried no
 origin to read. One live bundle published `6.0.0.0`, a version number out of
 the strings table. `address_is_publishable` answers the question no source can
-answer for: loopback, unspecified, link-local, multicast, the broadcast
-address, anything the registries reserve and the ranges a document is written
-with are never indicators, and a *private* address is published only when
-somebody watched the sample reach it, because that is lateral movement rather
-than a version number typed with dots in it.
+answer for:
+
+| addresses | published |
+|---|---|
+| loopback, unspecified, link-local, multicast, `255.255.255.255`, registry-reserved, and the documentation ranges `192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`, `2001:db8::/32` | never, whoever recorded them |
+| private (`10/8`, `172.16/12`, `192.168/16`, `fc00::/7`) and the shared address space `100.64.0.0/10` | only when a sandbox, an analyst or the judge observed them — that is lateral movement; out of a string sweep it is a version number typed with dots in it |
+| everything else | when the corroboration rule admits it, like a domain or a URL |
+
+`100.64.0.0/10` is named rather than reached through `is_private`, which
+answers False for it.
 
 URLs record their source the same way and go through the same predicate, asked
 of the URL's host (`url_corroboration_reason`), plus one question no source can
@@ -1297,24 +1302,51 @@ ever be its second source, and a name merely ending in `.onion` is not a host
 either. An address literal passes unless it is loopback, unspecified or
 link-local. A name passes when it is not a reserved name or suffix, every label
 is a label, and its last label is a suffix rather than a word — two or more
-letters, or a punycode label. The reserved suffixes include `.internal`, `.alt`
-and `.home.arpa`, which name a private network's own machines: publishing one
-is a low-value indicator in a shared bundle and a small disclosure of how the
-analysis network is named. The same list gates the domains, because
-`_is_emittable_domain` is what both ask. The last label's rule is not
-membership in a list of TLDs somebody
+letters, or a punycode label. It also refuses `.internal`, `.alt` and
+`.home.arpa`, which name a private network's own machines: publishing one is a
+low-value indicator in a shared bundle and a small disclosure of how the
+analysis network is named.
+
+That is an **export** decision, and it is made where an indicator is minted.
+Made at the projection instead, it erased the observation: a sandbox-observed
+`fileserver.corp.internal` never reached `report.network.domains` at all, so an
+analyst reading a lateral-movement case could not see which internal host the
+sample resolved, while the URL carrying the same host survived and was refused
+at the export with a row beside it. Nothing a sandbox, an analyst or the judge
+observed is dropped at the projection now: the row keeps its place in the
+network block with the source that saw it, and the export records
+`stix.unpublishable_domain` — *a name that does not resolve outside the
+analysed network*. A name only the string sweep produced is unchanged, held
+back by `_is_emittable_domain` at the projection and silent, because a run of
+bytes ending in `.local` is not an observation of anything. The last label's
+rule is not membership in a list of TLDs somebody
 wrote down: the list this replaced omitted `gov`, `edu`, `mobi`, every punycode
 TLD and most of two continents' ccTLDs, so a sandbox-observed request to a
 university host was dropped from the export with nothing said about it. Four of
 the five above fail this question; `fs01n5.sends` passes it and is held back by
 the corroboration rule instead, which is the true reason and the one recorded.
 
+One function writes a STIX pattern for a network endpoint —
+`stix_renderer.network_pattern` — and one answers whether this run may publish
+one: `network_publish_reason`, which dispatches to the domain, address or URL
+rule. Every minting path asks it: the network block's own rows, the string rows
+that reach the bundle through `static.interesting_strings`, and the judge's own
+indicator objects. It was three rules on four paths, and the fourth — a
+`StringIOC` of kind `ip`, which the deterministic IOC extractor produces on
+every sample — asked none of them, so `6.0.0.0` was refused by the network block
+and exported by the string scan two sections later, typed `malicious-activity`.
+`tests/unit/reporting/test_one_network_publish_rule.py` walks the tree for a
+literal that *builds* one of the four patterns and fails if a second place
+starts doing it.
+
 Whether an endpoint that *could* exist is published stays
-`corroboration_reason`'s decision. A URL the host question refuses is recorded
-as `stix.unpublishable_url` whoever wrote the row down — the report's own
-network block or the judge's indicator object, both left unchanged — because
-the reason is true of all of them and a reader is owed it. A URL held back only
-for want of a second source is the rule working and is not a finding.
+`corroboration_reason`'s decision. A URL or a name the host question refuses is
+recorded as `stix.unpublishable_url` or `stix.unpublishable_domain` when a
+sandbox, an analyst or the judge is the one that recorded it — the report's own
+network block and the judge's own bundle both left unchanged. A row held back
+only for want of a second source is the rule working and is not a finding, and
+neither is a string sweep's own cut-off: a report carries up to forty of them,
+and forty unresolved findings nobody can act on bury the ones somebody can.
 
 Every model-written value on this path — a URL echoed into a decline, the
 judge's own verdict word, the category it invented, the type of an object the

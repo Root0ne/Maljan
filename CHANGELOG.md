@@ -2046,7 +2046,12 @@ change landed on `main`.
   published confidence is the judge's own number for the verdict the judge
   itself stated, and it is published only together with one: on the fail-safe
   and unrecognised paths the verdict is not the judge's, so there is no number
-  to print beside it. Replaying the PuTTY run's recorded answer — which has no
+  to print beside it. How the verdict was read is recorded rather than
+  inferred: `run_summary.verdict_reading` is `stated`, `unrecognised`,
+  `unstated` or `fallback`, the report endpoint carries it, and the console
+  draws the matching one-line note beside the verdict and says in its degraded
+  banner whose confidence — the judge's own or none at all — the number above it
+  is. Replaying the PuTTY run's recorded answer — which has no
   `verdict` field, because there was none to write — now publishes Malware from
   the objects with `verdict.unstated` recorded and **no confidence**, where it
   used to print the judge's `1.00`.
@@ -2081,9 +2086,11 @@ change landed on `main`.
   projection adds it, shown in the report and on the console's card — and goes
   through the same publish predicate. Loopback, unspecified, link-local,
   multicast, broadcast, reserved and the ranges a document is written with are
-  never indicators; a private address is published only when somebody watched
-  the sample reach it, which is lateral movement rather than a version number
-  typed with dots in it. A string-derived address costs no reputation lookup
+  never indicators; a private address — and the shared address space
+  `100.64.0.0/10`, which `is_private` answers False for and which is therefore
+  named on its own — is published only when somebody watched the sample reach
+  it, which is lateral movement rather than a version number typed with dots in
+  it. A string-derived address costs no reputation lookup
   either, as a string-derived domain already did not.
 - **One misplaced extension object no longer costs the judge its whole
   bundle.** The prompt asks for `x_maljan_assessment` beside `objects`; a model
@@ -2132,17 +2139,39 @@ change landed on `main`.
   the corroboration rule's decision, so `https://fs01n5.sends` from the string
   scan alone is held back for want of a second source, which is the reason the
   report gives for it. Every minting path asks both, including the judge's own
-  indicator objects — one that fails is not exported and the decline is
-  recorded as `stix.unpublishable_url` whoever wrote the row down, never
-  rewritten, because the reason is true of all of them. A row held back only
-  for want of a second source is the rule working and is not a finding, and a
-  row that records no source at all is read as string-derived, which is what
-  the export's cap ranks it as. Every model-written value the verdict path puts
+  indicator objects, and there is now one place that asks and one that writes:
+  `network_publish_reason` answers for a domain, an address or a URL alike, and
+  `network_pattern` is the only function that builds a `domain-name`, `url`,
+  `ipv4-addr` or `ipv6-addr` pattern string. That was three rules over four
+  paths, and the fourth — a string row of kind `ip`, which the deterministic
+  extractor produces on every sample — asked none of them, so an address the
+  network block refused was exported by the string scan two sections later,
+  typed `malicious-activity`; a test walks the tree for a second place building
+  one of those four patterns and fails when one appears. A row that fails is
+  not exported, and the decline is recorded as `stix.unpublishable_url` or
+  `stix.unpublishable_domain` when a sandbox, an analyst or the judge is the one
+  that recorded the row, because those are the rows a reader is owed a reason
+  for; the string sweep's own cut-offs are not findings — a report carries up to
+  forty of them and forty unresolved rows nobody can act on bury the ones
+  somebody can. A row held back only for want of a second source is the rule
+  working and is not a finding either, and a row that records no source at all
+  is read as string-derived, which is what the export's cap ranks it as. The
+  host question is an export decision and is made where the indicator is
+  minted: applied at the projection instead it erased the observation, and a
+  sandbox-observed `fileserver.corp.internal` never reached the report's network
+  block at all, so an analyst reading a lateral-movement case could not see
+  which internal host the sample resolved. Nothing a sandbox, an analyst or the
+  judge observed is dropped at the projection now; the projection still holds
+  back a name only the byte image knows, because a run of bytes ending in
+  `.local` is not an observation of anything. Every model-written value the verdict path puts
   into a validation row, a degradation reason or an export decline goes through
   the scrubber the events use and a length bound — a validation row is not an
   event, so none of them was covered by the scrubbing the publisher does, and a
   model echoing a credentialled URL into the verdict field put the credential
-  in the stored report and drew it on the analysis page.
+  in the stored report and drew it on the analysis page. A guard test reads the
+  validation module and fails on a violation message that interpolates a name
+  the code does not own without wrapping it, so the next row added is covered
+  by the rule rather than by having been remembered.
   `MAX_TOTAL_INDICATORS` is applied over every indicator that would be in the
   bundle rather than over the ones the renderer minted, in the linter's stated
   priority order, so the two read one constant and agree: a run whose bundle
