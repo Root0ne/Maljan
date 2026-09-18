@@ -4,7 +4,9 @@ import {
   buildConversation,
   filterConversation,
   groupOf,
+  runStatus,
   toolCallsFromFeed,
+  type ConversationItem,
   type ConversationStage,
 } from "@/lib/conversation";
 import type { RunEvent } from "@/lib/runStore";
@@ -199,6 +201,251 @@ describe("kinds", () => {
     );
 
     expect(stages[0].rounds[0].items[0].kind).toBe("says");
+  });
+});
+
+describe("a run that failed", () => {
+  it("closes the conversation on what the worker published", () => {
+    const { stages } = buildConversation(
+      [
+        event("agent_message", { stage: "analysis", speaker: "lead", text: "reading imports" }),
+        event("error", {
+          status: "failed",
+          error_id: "5f3a9c1d4e2b48f7a0c6d8e1b3f5a7c9",
+          message: "Analysis failed. See server logs for details.",
+        }),
+      ],
+      ROSTER,
+    );
+
+    const closing = stages[stages.length - 1].rounds[0].items.at(-1) as ConversationItem;
+    expect(closing.kind).toBe("run_failed");
+    expect(groupOf(closing.kind)).toBe("notices");
+    expect(closing.errorId).toBe("5f3a9c1d4e2b48f7a0c6d8e1b3f5a7c9");
+    expect(closing.text).toBe("Analysis failed. See server logs for details.");
+  });
+
+  it("is drawn after every stage, wherever the run was when it failed", () => {
+    const { stages } = buildConversation(
+      [
+        event("stage_started", { stage: "analysis", kind: "analysis" }),
+        event("agent_message", { stage: "analysis", speaker: "lead", text: "reading imports" }),
+        event("error", { status: "failed", error_id: "abc123abc123", message: "Analysis failed." }),
+      ],
+      ROSTER,
+    );
+
+    expect(itemsOf(stages)).toEqual(["analysis/0/says", "/0/run_failed"]);
+  });
+
+  it("is drawn after a line that was said outside every stage", () => {
+    /* A run replayed from its stored conversation files every line it has no
+     * stage for under one keyless section, and that section is the first one.
+     * The failure closes the run, not that section. */
+    const { stages } = buildConversation(
+      [
+        event("agent_message", { speaker: "lead", text: "said before any stage" }),
+        event("stage_started", { stage: "analysis", kind: "analysis" }),
+        event("agent_message", { stage: "analysis", speaker: "lead", text: "reading imports" }),
+        event("error", { status: "failed", message: "Analysis failed." }),
+      ],
+      ROSTER,
+    );
+
+    expect(itemsOf(stages)).toEqual(["/0/says", "analysis/0/says", "/0/run_failed"]);
+    expect(stages[stages.length - 1].rounds[0].items).toHaveLength(1);
+  });
+
+  it("keeps its section's identity when a filter drops another section", () => {
+    /* A run draws two sections with no stage key: its own stageless lines and
+     * the failure that closes it. What tells them apart cannot be where they
+     * sit, because a filter chip removes whole sections from in front of them
+     * — and a closing line that changes identity is a row redrawn from
+     * scratch, which is a copy button losing what it had just been told. */
+    const conversation = buildConversation(
+      [
+        event("agent_message", { speaker: "lead", text: "said before any stage" }),
+        event("stage_started", { stage: "analysis", kind: "analysis" }),
+        event("agent_message", { stage: "analysis", speaker: "lead", text: "reading imports" }),
+        event("error", { status: "failed", message: "Analysis failed." }),
+      ],
+      ROSTER,
+    );
+
+    const all = conversation.stages;
+    expect(all.map((s) => s.id)).toEqual(["stage:", "stage:analysis", "closing"]);
+
+    const notices = filterConversation(all, {
+      agents: new Set<string>(),
+      groups: new Set(["notices"] as const),
+    });
+
+    expect(notices.map((s) => s.id)).toEqual(["closing"]);
+    expect(notices[0].id).toBe(all[all.length - 1].id);
+  });
+
+  it("draws nothing for a run an operator stopped", () => {
+    /* A cancel publishes its own event and no failure: the worker records a
+     * cancelled row with no message, and leaves a cancelled row alone when
+     * something else tries to mark it failed. A closing failure line here
+     * would report the operator's own decision as a fault. */
+    const { stages } = buildConversation(
+      [
+        event("agent_message", { stage: "analysis", speaker: "lead", text: "reading imports" }),
+        event("cancelled", {}),
+      ],
+      ROSTER,
+    );
+
+    expect(itemsOf(stages)).toEqual(["analysis/0/says"]);
+    expect(runStatus([event("cancelled", {})])).toBe("cancelled");
+  });
+
+  it("says the run failed when the event carried no words of its own", () => {
+    const { stages } = buildConversation([event("error", { status: "failed" })], ROSTER);
+
+    const closing = stages[0].rounds[0].items[0];
+    expect(closing.text).toBe("The run failed.");
+    expect(closing.errorId).toBeUndefined();
+  });
+});
+
+describe("one violation, one line", () => {
+  function feedback(data: Record<string, unknown>) {
+    return event("validation_feedback", {
+      stage: "a",
+      agent: "lead",
+      code: "no_evidence",
+      message: "cite a call",
+      retry_index: 1,
+      ...data,
+    });
+  }
+
+  it("folds what the agent was told and how it ended into the first line's place", () => {
+    const { stages } = buildConversation(
+      [
+        feedback({ state: "retried", path: "static.claims[2]" }),
+        event("agent_message", { stage: "a", speaker: "lead", text: "revised" }),
+        feedback({ state: "resolved", path: "static.claims[2]", message: "cite a call" }),
+      ],
+      ROSTER,
+    );
+
+    const items = stages[0].rounds[0].items;
+    expect(items.map((i) => i.kind)).toEqual(["validation_feedback", "says"]);
+    expect(items[0].feedback?.map((f) => f.state)).toEqual(["retried", "resolved"]);
+    expect(items[0].path).toBe("static.claims[2]");
+  });
+
+  it("keeps two violations of one code on different claims apart", () => {
+    const { stages } = buildConversation(
+      [
+        feedback({ state: "retried", path: "static.claims[2]" }),
+        feedback({ state: "retried", path: "static.claims[5]" }),
+        feedback({ state: "survived", path: "static.claims[5]" }),
+        feedback({ state: "resolved", path: "static.claims[2]" }),
+      ],
+      ROSTER,
+    );
+
+    const items = stages[0].rounds[0].items;
+    expect(items.map((i) => i.path)).toEqual(["static.claims[2]", "static.claims[5]"]);
+    expect(items.map((i) => i.feedback?.map((f) => f.state))).toEqual([
+      ["retried", "resolved"],
+      ["retried", "survived"],
+    ]);
+  });
+
+  it("keeps two agents' violations of one code apart", () => {
+    const { stages } = buildConversation(
+      [feedback({ agent: "lead" }), feedback({ agent: "ahmet" })],
+      ROSTER,
+    );
+
+    expect(stages[0].rounds[0].items.map((i) => i.speaker)).toEqual(["lead", "ahmet"]);
+  });
+
+  it("folds a run that published no path on the pair such a run has", () => {
+    const { stages } = buildConversation(
+      [
+        feedback({ state: "retried" }),
+        feedback({ state: "survived" }),
+      ],
+      ROSTER,
+    );
+
+    const items = stages[0].rounds[0].items;
+    expect(items).toHaveLength(1);
+    expect(items[0].path).toBe("");
+    expect(items[0].feedback?.map((f) => f.state)).toEqual(["retried", "survived"]);
+  });
+
+  it("reads a line that states no outcome as one the producer was shown", () => {
+    /* A run recorded before the outcome was published at all: one line per
+     * violation, and that line is the correction turn. */
+    const { stages } = buildConversation([feedback({})], ROSTER);
+
+    expect(stages[0].rounds[0].items[0].feedback).toEqual([
+      { state: "retried", message: "cite a call", retryIndex: 1 },
+    ]);
+  });
+
+  it("starts a new line where a violation that ended is raised again", () => {
+    /* A second revision round can raise the same violation the first one
+     * settled. Folding it back into the settled line would file it under the
+     * round the run had already moved on from. */
+    const { stages } = buildConversation(
+      [
+        feedback({ state: "retried", path: "static.claims[2]" }),
+        feedback({ state: "resolved", path: "static.claims[2]" }),
+        event("agent_message", { stage: "a", speaker: "lead", round: 1, text: "revised again" }),
+        feedback({ state: "retried", path: "static.claims[2]", retry_index: 2 }),
+        feedback({ state: "survived", path: "static.claims[2]", retry_index: 2 }),
+      ],
+      ROSTER,
+    );
+
+    const items = stages[0].rounds.flatMap((round) => round.items);
+    expect(items.map((i) => i.kind)).toEqual(["validation_feedback", "says", "validation_feedback"]);
+    expect(items[0].feedback?.map((f) => f.state)).toEqual(["retried", "resolved"]);
+    expect(items[2].feedback?.map((f) => f.state)).toEqual(["retried", "survived"]);
+    expect(items.map((i) => i.round)).toEqual([0, 1, 1]);
+  });
+
+  it("lands on its own line when the speaker streamed the turn it corrects", () => {
+    /* A finished message replaces the bubble its own deltas opened, and every
+     * line filed after that bubble moves up one. A violation whose first state
+     * was recorded before the replacement must move with them, or its second
+     * state overwrites the message the agent had just finished saying. */
+    const { stages } = buildConversation(
+      [
+        event("agent_message_delta", { stage: "a", agent: "lead", text_delta: "Reading " }),
+        feedback({ state: "retried", path: "static.claims[2]" }),
+        event("agent_message", { stage: "a", speaker: "lead", text: "the imports resolve at runtime" }),
+        feedback({ state: "survived", path: "static.claims[2]" }),
+      ],
+      ROSTER,
+    );
+
+    const items = stages[0].rounds[0].items;
+    expect(items.map((i) => i.kind)).toEqual(["validation_feedback", "says"]);
+    expect(items[0].feedback?.map((f) => f.state)).toEqual(["retried", "survived"]);
+    expect(items[1].text).toBe("the imports resolve at runtime");
+  });
+
+  it("carries the last retry number and message the violation was published with", () => {
+    const { stages } = buildConversation(
+      [
+        feedback({ state: "retried", retry_index: 1, message: "cite a call" }),
+        feedback({ state: "survived", retry_index: 2, message: "still no call cited" }),
+      ],
+      ROSTER,
+    );
+
+    const item = stages[0].rounds[0].items[0];
+    expect(item.retryIndex).toBe(2);
+    expect(item.text).toBe("still no call cited");
   });
 });
 

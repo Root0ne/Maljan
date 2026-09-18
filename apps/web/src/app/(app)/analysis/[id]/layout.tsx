@@ -25,6 +25,7 @@ import type { LucideIcon } from "lucide-react";
 import { api } from "@/lib/api";
 import type { ReportDetailDTO, JobDTO } from "@/lib/api";
 import PipelineStrip from "@/components/analysis/PipelineStrip";
+import FailureNote from "@/components/ui/FailureNote";
 import { TAB_GROUP_ORDER, tabsFor, type TabIcon } from "@/components/analysis/analysisTabs";
 import {
   hydrateRunTranscript,
@@ -40,6 +41,7 @@ import {
   VERDICT_CONFLICT_NOTE,
 } from "@/lib/verdictHeader";
 import { getErrorMessage, isApiStatus } from "@/lib/errors";
+import { jobFailure } from "@/lib/runFailure";
 import type { VerdictBucket } from "@/lib/verdict";
 
 /* ── Report Context (shared with child tabs) ─────────── */
@@ -286,6 +288,13 @@ export default function AnalysisLayout({
   const v = VERDICT_CONFIG[verdict];
   const VerdictIcon = v.icon;
 
+  /* What a failed run says about itself. The status chip said that it failed
+   * and nothing said why: the worker's own sentence, and the id the log
+   * entries holding the traceback are filed under, were on the job all along.
+   * A row carrying neither, and a run that ended any other way, are left to
+   * the chip. */
+  const failure = jobFailure(job?.status, job?.error_message);
+
   /* The tabs this run earned. A tab is a promise that there is something
    * behind it, so one the run never filled is absent rather than present and
    * apologetic — and while the job is still running only the three that can
@@ -410,6 +419,8 @@ export default function AnalysisLayout({
               {headline.conflict && (
                 <p className="mb-1 text-xs text-status-orange">{VERDICT_CONFLICT_NOTE}</p>
               )}
+
+              {failure && <FailureNote failure={failure} className="mb-1.5" />}
 
               {/* The sample is the `h1` above. A "Sample:" line under it was
                   the same filename a second time, and for a hash-named sample

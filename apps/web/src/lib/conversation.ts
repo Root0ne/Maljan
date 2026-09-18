@@ -66,7 +66,10 @@ export type ItemKind =
   | "delegation_ask"
   | "delegation_answer"
   | "validation_feedback"
-  | "tool_call";
+  | "tool_call"
+  /** How a run that failed ends. Published by the worker rather than said by
+   *  anybody, and never a kind an `agent_message` names. */
+  | "run_failed";
 
 /** The three things a reader filters by: speech, machine work, and the notes
  *  the room makes about both. */
@@ -81,6 +84,25 @@ export interface ToolDetail {
   ok: boolean | null;
   durationMs: number;
   summary: string;
+}
+
+/**
+ * What became of a violation, in the publisher's own words.
+ *
+ * `retried` is the producer being shown it, and `resolved` or `survived` is
+ * the loop saying which way it went. A line that states nothing — a run
+ * recorded before the outcome was published — is the correction turn, which
+ * is what `retried` means.
+ */
+export type ValidationState = "retried" | "resolved" | "survived";
+
+const VALIDATION_STATES: ValidationState[] = ["retried", "resolved", "survived"];
+
+/** One line the run published about one violation. */
+export interface FeedbackEntry {
+  state: ValidationState;
+  message: string;
+  retryIndex: number;
 }
 
 export interface ConversationItem {
@@ -109,7 +131,17 @@ export interface ConversationItem {
   tool?: ToolDetail;
   /** The validator's code, on a correction. */
   code?: string;
+  /** The producer's own locator for what the correction is about, on a
+   *  correction. Empty on a violation about the answer as a whole, and on one
+   *  a run published before there were locators. */
+  path?: string;
   retryIndex?: number;
+  /** Every state one violation passed through, oldest first. The last of them
+   *  is where the violation ended up. */
+  feedback?: FeedbackEntry[];
+  /** The id the logs file a failed run's details under, on the line that
+   *  closes such a run. */
+  errorId?: string;
 }
 
 export interface ConversationRound {
@@ -120,6 +152,12 @@ export interface ConversationRound {
 export type StageState = "running" | "done" | "skipped" | "pending";
 
 export interface ConversationStage {
+  /** What this section is, for a view that has to draw the same section
+   *  twice running. Two sections carry no stage key — the lines a run said
+   *  outside every stage, and the failure that closes it — so the key alone
+   *  cannot tell them apart, and their position cannot either: a filter
+   *  removes whole sections from in front of them. */
+  id: string;
   key: string;
   label: string;
   kind: string;
@@ -217,7 +255,9 @@ function kindOf(value: unknown): ItemKind {
 
 export function groupOf(kind: ItemKind): ItemGroup {
   if (kind === "tool_call") return "tools";
-  if (kind === "validation_feedback" || kind === "system") return "notices";
+  if (kind === "validation_feedback" || kind === "system" || kind === "run_failed") {
+    return "notices";
+  }
   return "says";
 }
 
@@ -238,6 +278,13 @@ export function prettyName(key: string): string {
 
 function text(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+/** The state a feedback line states, and `retried` for one that states none. */
+function validationState(value: unknown): ValidationState {
+  return VALIDATION_STATES.includes(value as ValidationState)
+    ? (value as ValidationState)
+    : "retried";
 }
 
 /* ── Building ──────────────────────────────────────────── */
@@ -273,6 +320,12 @@ interface BuilderState {
   participants: Map<string, Participant>;
   streaming: Map<string, Slot>;
   pending: Map<string, Slot[]>;
+  /** Where each violation's line sits, so the next thing the run says about
+   *  it lands on that line rather than under it. */
+  feedback: Map<string, Slot>;
+  /** The line a failed run ends on, held apart from the stages so that it is
+   *  drawn after all of them whenever in the run it arrived. */
+  closing: ConversationItem | null;
   /** How many events of the array have been folded. */
   consumed: number;
   /** The last event folded, which is how a continuation is recognised. */
@@ -294,6 +347,8 @@ function freshState(roster: JobRoster | null): BuilderState {
     participants: new Map(),
     streaming: new Map(),
     pending: new Map(),
+    feedback: new Map(),
+    closing: null,
     consumed: 0,
     last: null,
     textLength: 0,
@@ -601,21 +656,61 @@ function fold(state: BuilderState, event: RunEvent): void {
   if (event.type === "validation_feedback") {
     const speaker = text(data.agent);
     const stage = draftOf(state, stageKey);
-    push(state, stage, {
+    const code = text(data.code);
+    const path = text(data.path);
+    const entry: FeedbackEntry = {
+      state: validationState(data.state),
+      message: text(data.message),
+      retryIndex: Number(data.retry_index ?? 0) || 0,
+    };
+    /* One violation is one line. The run publishes it as the producer is shown
+     * it and again as the loop learns whether the retry fixed it, and
+     * `(agent, code, path)` is the key those lines share — the locator is what
+     * keeps two violations of one code on different claims apart. A run that
+     * published no locator folds on the pair, which is the whole key it has.
+     * The line keeps the place of the first event, because that is when the
+     * violation happened.
+     *
+     * Only an open violation folds. A second revision round can raise one the
+     * first round settled, and that is a violation the run came back to rather
+     * than the same one still being argued — a line of its own, where it
+     * happened, instead of one more state on a line filed under a round the
+     * run had already left. */
+    const key = `${stageKey}|${speaker}|${code}|${path}`;
+    const ended = entry.state !== "retried";
+    const open = state.feedback.get(key);
+    if (open) {
+      const current = open.stage.items[open.index];
+      replace(state, open, {
+        ...current,
+        text: entry.message,
+        retryIndex: entry.retryIndex,
+        feedback: [...(current.feedback ?? []), entry],
+      });
+      if (ended) state.feedback.delete(key);
+      return;
+    }
+    const slot = push(state, stage, {
       id,
       kind: "validation_feedback",
       stage: stageKey,
       round: stage.round,
       speaker,
       displayName: nameOf(state, speaker),
-      text: text(data.message),
+      text: entry.message,
       ts: event.ts,
       seq: event.seq,
       claims: [],
       dissent: [],
-      code: text(data.code),
-      retryIndex: Number(data.retry_index ?? 0) || 0,
+      code,
+      path,
+      retryIndex: entry.retryIndex,
+      feedback: [entry],
     });
+    /* A violation the producer was never shown — the judge's own late checks
+     * arrive as `survived` once — is closed on arrival, and nothing later
+     * folds into it. */
+    if (!ended) state.feedback.set(key, slot);
     return;
   }
 
@@ -637,6 +732,34 @@ function fold(state: BuilderState, event: RunEvent): void {
       claims: [],
       dissent: [],
     });
+    return;
+  }
+
+  if (event.type === "error") {
+    /* The line a failed run ends on. The worker publishes one sentence to
+     * every reader and the id it filed the traceback under as its own field,
+     * so nothing here reads an id out of a sentence.
+     *
+     * It is held rather than filed under a stage: the event names none, and a
+     * run replayed from its stored conversation keeps every stageless line in
+     * one section that comes before the stages — which is where the failure
+     * ended up, opening the conversation it closed. `snapshot` puts it last. */
+    const closing: ConversationItem = {
+      id,
+      kind: "run_failed",
+      stage: "",
+      round: 0,
+      speaker: "",
+      displayName: "",
+      text: text(data.message) || "The run failed.",
+      ts: event.ts,
+      seq: event.seq,
+      claims: [],
+      dissent: [],
+      errorId: text(data.error_id) || undefined,
+    };
+    state.textLength += closing.text.length - (state.closing?.text.length ?? 0);
+    state.closing = closing;
     return;
   }
 
@@ -666,6 +789,9 @@ function reindexAfter(state: BuilderState, removed: Slot): void {
   for (const slot of state.streaming.values()) {
     if (slot.stage === removed.stage && slot.index > removed.index) slot.index -= 1;
   }
+  for (const slot of state.feedback.values()) {
+    if (slot.stage === removed.stage && slot.index > removed.index) slot.index -= 1;
+  }
   for (const queue of state.pending.values()) {
     for (const slot of queue) {
       if (slot.stage === removed.stage && slot.index > removed.index) slot.index -= 1;
@@ -686,21 +812,39 @@ function intoRounds(items: ConversationItem[]): ConversationRound[] {
 }
 
 function snapshot(state: BuilderState): Conversation {
+  const stages = state.order.map((key) => {
+    const stage = state.stages.get(key) as StageDraft;
+    return {
+      id: `stage:${stage.key}`,
+      key: stage.key,
+      label: stage.label,
+      kind: stage.kind,
+      state: stage.state,
+      reason: stage.reason,
+      durationMs: stage.durationMs,
+      rounds: intoRounds(stage.items),
+    };
+  });
+  /* How the run ended, after everything it did. A section of its own, keyed
+   * by nothing so that no stage header is drawn over it, holding the one
+   * line. The item itself is the object the builder has held all along, so a
+   * drawn row is not remounted by a later snapshot. */
+  if (state.closing) {
+    stages.push({
+      id: "closing",
+      key: "",
+      label: "",
+      kind: "",
+      state: "done",
+      reason: "",
+      durationMs: 0,
+      rounds: [{ round: state.closing.round, items: [state.closing] }],
+    });
+  }
   return {
     participants: [...state.participants.values()].map((p) => ({ ...p })),
     textLength: state.textLength,
-    stages: state.order.map((key) => {
-      const stage = state.stages.get(key) as StageDraft;
-      return {
-        key: stage.key,
-        label: stage.label,
-        kind: stage.kind,
-        state: stage.state,
-        reason: stage.reason,
-        durationMs: stage.durationMs,
-        rounds: intoRounds(stage.items),
-      };
-    }),
+    stages,
   };
 }
 

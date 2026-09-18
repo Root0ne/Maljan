@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   applyRunEvents,
+  BACKFILL_LIMIT,
   configureRunTransport,
   getRun,
   hydrateRunTranscript,
@@ -339,6 +340,28 @@ describe("the recorded conversation", () => {
     expect(analysis[1].addressedToName).toBe("Lead analyst");
   });
 
+  it("closes a replayed run on its failure, after what was said", async () => {
+    /* A failed run whose feed kept only the failure. The stored rows carry no
+     * number, so they sort after the numbered failure event and used to be
+     * folded into the same keyless section behind it — the conversation
+     * opening on the line that ends it. */
+    const { transport } = fakeTransport([
+      event("error", { seq: 1, status: "failed", error_id: "5f3a9c1d4e2b", message: "Analysis failed." }),
+    ]);
+    configureRunTransport(transport);
+    resetConversationCache();
+    hydrateRunTranscript(JOB, ROWS);
+    subscribeRun(JOB, () => {});
+    await vi.advanceTimersByTimeAsync(0);
+
+    const run = getRun(JOB);
+    const items = buildConversation(run.events, run.roster).stages.flatMap((stage) =>
+      stage.rounds.flatMap((round) => round.items),
+    );
+    expect(items.map((i) => i.kind)).toEqual(["says", "verdict", "run_failed"]);
+    expect(items[2].errorId).toBe("5f3a9c1d4e2b");
+  });
+
   it("waits for the feed to answer before standing in for it", () => {
     hydrateRunTranscript(JOB, ROWS);
 
@@ -361,6 +384,184 @@ describe("the recorded conversation", () => {
 
     expect(getRun(JOB).events).toHaveLength(2);
     expect(getRun(JOB).feedError).toContain("stream unavailable");
+  });
+});
+
+describe("the back-fill", () => {
+  /** A recorded feed served the way the endpoint serves it: one capped page
+   *  per read, from the cursor the caller asked with. */
+  function pagingTransport(feed: IncomingEvent[]) {
+    const reads: (number | undefined)[] = [];
+    const transport: RunTransport = {
+      async readEvents(_jobId, since) {
+        reads.push(since);
+        const from = since === undefined ? 0 : since;
+        return feed.filter((e) => Number(e.data?.seq) > from).slice(0, BACKFILL_LIMIT);
+      },
+      connect() {
+        return { close() {} };
+      },
+    };
+    return { transport, reads };
+  }
+
+  function recorded(count: number): IncomingEvent[] {
+    return Array.from({ length: count }, (_, i) =>
+      event("agent_message", { seq: i + 1, text: `line ${i + 1}` }),
+    );
+  }
+
+  it("reads a run longer than one page, in order, to its last event", async () => {
+    const { transport, reads } = pagingTransport(recorded(2500));
+    configureRunTransport(transport);
+
+    subscribeRun(JOB, () => {});
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(reads).toEqual([undefined, 1000, 2000]);
+    const events = getRun(JOB).events;
+    expect(events).toHaveLength(2500);
+    expect(events.map((e) => e.seq)).toEqual(events.map((_, i) => i + 1));
+    expect(getRun(JOB).lastSeq).toBe(2500);
+    expect(getRun(JOB).feedError).toBeNull();
+  });
+
+  it("stops on a page that does not advance, and says the run is cut short", async () => {
+    const page = recorded(BACKFILL_LIMIT);
+    let reads = 0;
+    configureRunTransport({
+      async readEvents() {
+        reads += 1;
+        return page;
+      },
+      connect() {
+        return { close() {} };
+      },
+    });
+
+    subscribeRun(JOB, () => {});
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(reads).toBe(2);
+    expect(getRun(JOB).events).toHaveLength(BACKFILL_LIMIT);
+    expect(getRun(JOB).feedError).toContain("only part of this run");
+  });
+
+  it("reaches an enrichment published after the run itself ended", async () => {
+    /* Enrichment runs after the verdict, on its own queue, and its event is
+     * numbered from where the run's own numbering stopped. A run whose last
+     * page is exactly full therefore has one more page behind it, holding a
+     * line the reader is waiting for — the reputation the report is about to
+     * gain. */
+    const run = recorded(BACKFILL_LIMIT);
+    const late = event("enrichment_complete", { seq: BACKFILL_LIMIT + 500, domains_enriched: 3 });
+    const { transport, reads } = pagingTransport([...run, late]);
+    configureRunTransport(transport);
+
+    subscribeRun(JOB, () => {});
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(reads).toEqual([undefined, BACKFILL_LIMIT]);
+    const events = getRun(JOB).events;
+    expect(events).toHaveLength(BACKFILL_LIMIT + 1);
+    expect(events[events.length - 1].type).toBe("enrichment_complete");
+    expect(getRun(JOB).lastSeq).toBe(BACKFILL_LIMIT + 500);
+    expect(getRun(JOB).feedError).toBeNull();
+  });
+
+  it("drops a page that comes back for a run the store was told to forget", async () => {
+    /* A reader who leaves is why a long run is evicted at all: the pages keep
+     * arriving, and folding one by job id would put the whole run back in the
+     * map under an entry nobody is reading. */
+    const { transport, reads } = pagingTransport(recorded(2500));
+    let pages = 0;
+    configureRunTransport({
+      async readEvents(jobId, since) {
+        pages += 1;
+        const page = await transport.readEvents(jobId, since);
+        if (pages === 1) resetRun(JOB);
+        return page;
+      },
+      connect() {
+        return { close() {} };
+      },
+    });
+
+    subscribeRun(JOB, () => {});
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(reads).toEqual([undefined]);
+    expect(getRun(JOB).events).toHaveLength(0);
+    expect(getRun(JOB).jobId).toBe("");
+  });
+
+  it("leaves a fresh reader of the same run unpolluted by the abandoned read", async () => {
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const reads: (number | undefined)[] = [];
+    let call = 0;
+    configureRunTransport({
+      async readEvents(_jobId, since) {
+        call += 1;
+        reads.push(since);
+        if (call === 1) {
+          await held;
+          // A full page, so an unguarded loop would also ask for a second one.
+          return recorded(BACKFILL_LIMIT);
+        }
+        return [event("agent_message", { seq: 1, text: "read again" })];
+      },
+      connect() {
+        return { close() {} };
+      },
+    });
+
+    subscribeRun(JOB, () => {});
+    await vi.advanceTimersByTimeAsync(0);
+    resetRun(JOB);
+    subscribeRun(JOB, () => {});
+    await vi.advanceTimersByTimeAsync(0);
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(reads).toHaveLength(2);
+    expect(getRun(JOB).events.map((e) => e.data.text)).toEqual(["read again"]);
+    expect(getRun(JOB).feedError).toBeNull();
+  });
+
+  it("keeps one copy of an event that arrives while a page is in flight", async () => {
+    /* The run is still being published while its recording is read. A frame
+     * committed between two pages is the same event the next page carries,
+     * and the page after it must still be asked for from the recording's own
+     * cursor rather than from the number the live frame brought. */
+    const feed = recorded(1500);
+    const { transport, reads } = pagingTransport(feed);
+    let pagesRead = 0;
+    configureRunTransport({
+      async readEvents(jobId, since) {
+        pagesRead += 1;
+        if (pagesRead === 1) {
+          const page = await transport.readEvents(jobId, since);
+          applyRunEvents(JOB, [event("agent_message", { seq: 1200, text: "line 1200" })]);
+          return page;
+        }
+        return transport.readEvents(jobId, since);
+      },
+      connect() {
+        return { close() {} };
+      },
+    });
+
+    subscribeRun(JOB, () => {});
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(reads).toEqual([undefined, 1000]);
+    const events = getRun(JOB).events;
+    expect(events).toHaveLength(1500);
+    expect(events.filter((e) => e.seq === 1200)).toHaveLength(1);
+    expect(events.map((e) => e.seq)).toEqual(events.map((_, i) => i + 1));
   });
 });
 

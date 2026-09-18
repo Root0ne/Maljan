@@ -464,6 +464,15 @@ change landed on `main`.
   redialling and re-reading; the socket outlives the page by a grace period.
   Events order and dedupe on the publisher's `seq`, and a run recorded before
   the numbering existed keeps the order its events arrived in.
+- **The dashboard says when enrichment has nobody to run it.**
+  `GET /api/v1/system/status` reports `enrichment_worker`, and the console
+  draws one notice for the single state an operator can act on: enrichment
+  queued for a worker of its own with nothing reading that queue, which leaves
+  every finished analysis holding its VirusTotal and AbuseIPDB lookups while
+  the report reads as though there were none to make. The notice names what is
+  waiting and the setting it is waiting on, `api.enrichment_dedicated_worker`.
+  Nothing is drawn where enrichment runs beside the analyses, where its worker
+  is up, or against an API that does not answer with the field.
 
 ### Changed
 
@@ -1975,6 +1984,28 @@ change landed on `main`.
   unauthenticated health endpoint, so a wrong bearer token passed the test and
   every job then failed with 401 on the tool schema. It now fetches the schema
   itself and lists the tools it found.
+- **A failed run points at its error id.** The worker publishes no exception
+  text — a message it did not write itself can name a host path — so a failure
+  reaches the console as the class of the exception, or the sentence the worker
+  composed, followed by the id its log entries are filed under. The run header
+  showed none of it and the conversation simply stopped. Both now draw the
+  failure, with the id as its own labelled, selectable value beside a copy
+  control and one sentence saying that the API and worker logs carry the rest
+  under it.
+- **One violation is one line in the conversation.** A validator finding is
+  published as the producer is shown it and again as the retry fixes it or
+  fails to, and the console drew the three states identically — one violation
+  reading as two or three unrelated notices. The conversation now folds them
+  on `(agent, code, path)` into the first line's place, says in words where
+  the violation ended up, and keeps the earlier states under it as that
+  line's history. A run that published no locator folds on `(agent, code)`.
+- **A run longer than one page is replayed whole.** The console's back-fill
+  made one call and the events endpoint caps a read at a thousand events, so a
+  finished run with more than that rendered as its first thousand and stopped
+  mid-debate with nothing saying so. It now pages on `since` until a page
+  comes back short of the cap, and a page that does not advance the sequence
+  ends the read and says on the conversation that what is drawn is only part
+  of the run.
 
 ### Removed
 

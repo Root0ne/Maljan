@@ -27,6 +27,7 @@ import type { RunConnection, RunEvent } from "@/lib/runStore";
 import { useToolCounts } from "@/lib/useToolCounts";
 import type { JobRoster } from "@/types";
 import { agentInitials } from "./agentIdentity";
+import FailureRow from "./FailureRow";
 import MessageBubble from "./MessageBubble";
 import NoticeRow from "./NoticeRow";
 import ParticipantsBar from "./ParticipantsBar";
@@ -237,8 +238,11 @@ export default function ConversationPanel({
                   : "No message matches the current filters."}
             </p>
           ) : (
+            /* Keyed by what the section is, never by where it sits: a filter
+               chip drops whole sections, and a closing line that changed
+               identity would be redrawn from nothing every time one did. */
             stages.map((stage) => (
-              <section key={stage.key || "run"} className="space-y-3">
+              <section key={stage.id} className="space-y-3">
                 {stage.key && (
                   <StageHeader
                     label={stage.label || stage.key}
@@ -345,6 +349,9 @@ const Item = memo(function Item({
   const group = groupOf(item.kind);
   if (group === "tools") {
     return <ToolCallRow item={item} jobId={jobId} showSpeaker={first} />;
+  }
+  if (item.kind === "run_failed") {
+    return <FailureRow item={item} />;
   }
   if (group === "notices") {
     return <NoticeRow item={item} />;

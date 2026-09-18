@@ -136,6 +136,12 @@ export interface SystemStatusDTO {
   app_version: string;
   mock_mode_allowed: boolean;
   enrichment_enabled: boolean;
+  /** Where enrichment runs and whether anything is there to run it:
+   *  `not_required` when it is queued beside the analyses, `up` when its own
+   *  worker is reading its queue, `down` when that worker is expected and
+   *  absent, `unknown` when the queue could not be read. Absent from an API
+   *  older than the field. */
+  enrichment_worker?: string;
   has_virustotal_key: boolean;
   has_abuseipdb_key: boolean;
 }
@@ -259,6 +265,9 @@ const _SYSTEM_STATUS_SCHEMA: Record<string, ExpectedShape> = {
   app_version: "string",
   mock_mode_allowed: "boolean",
   enrichment_enabled: "boolean",
+  // Optional: an API older than the field answers without it, and the console
+  // draws nothing rather than warning about a shape nobody broke.
+  enrichment_worker: "string?",
   has_virustotal_key: "boolean",
   has_abuseipdb_key: "boolean",
 };
