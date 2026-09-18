@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import type { ChangeLine } from "./describeChange";
+import { comparableSaved } from "./agentStaging";
 import { describeChange } from "./describeChange";
 import { groupsBySection, pathForKey } from "./sections";
 import { APPLIES_SENTENCE } from "./vocabulary";
@@ -62,7 +63,14 @@ export function buildReviewItems(ctx: ReviewSource): ReviewItem[] {
   for (const entry of schema.groups.flatMap((g) => g.entries)) {
     const key = entry.key;
     if (!(key in pending)) continue;
-    const line = describeChange(entriesByKey[key] ?? entry, values[key]?.value, pending[key]);
+    const line = describeChange(
+      entriesByKey[key] ?? entry,
+      // The stored value in the shape the staged one is sent in: for the agent
+      // map those differ, and comparing them raw named five untouched
+      // built-ins as changed.
+      comparableSaved(key, values[key]?.value),
+      pending[key],
+    );
     const href = pathForKey(schema, key);
     const titles = titlesByPath.get(href) ?? { sectionTitle: "", groupTitle: "" };
     items.push({

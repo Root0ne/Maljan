@@ -88,10 +88,23 @@ test.describe("a custom agent", () => {
     }
 
     await page.getByRole("button", { name: "Review" }).click();
+
+    // What the panel says it is about to do. Comparing the stored map against
+    // the narrowed staged one used to report all five built-ins as having
+    // their prompts, tools and labels rewritten.
+    const review = page.getByRole("dialog", { name: "Review changes" });
+    await expect(review).toContainText("ahmet: added");
+    await expect(review).toContainText("1 agent changed");
+    for (const key of ["judge", "static", "dynamic", "network"]) {
+      await expect(review).not.toContainText(`${key}: changed`);
+    }
+
     await page.getByRole("button", { name: "Confirm and apply" }).click();
 
-    // The bar clears, which is the console saying the PATCH was accepted.
-    await expect(page.getByTestId("changes-count")).toHaveCount(0);
+    // The status the apply leaves behind, which is the console saying the
+    // PATCH was accepted. Waiting on this rather than on the bar disappearing
+    // keeps the test off the six-second window the status line lingers for.
+    await expect(page.getByRole("status")).toBeVisible();
     const sent = patches[0][DEFINITIONS] as DefinitionMap;
     expect(sent.ahmet).toMatchObject({ role: "generic", label: "Ahmet" });
     expect(sent.judge).toEqual({ role: "judge", enabled: true });
@@ -105,7 +118,7 @@ test.describe("a custom agent", () => {
     await page.locator('[data-agent-detail="ahmet"]').getByRole("button", { name: "Remove" }).click();
     await page.getByRole("button", { name: "Review" }).click();
     await page.getByRole("button", { name: "Confirm and apply" }).click();
-    await expect(page.getByTestId("changes-count")).toHaveCount(0);
+    await expect(page.getByRole("status")).toBeVisible();
 
     await page.goto(AGENTS_PATH);
     await expect(page.locator('[data-agent="ahmet"]')).toHaveCount(0);

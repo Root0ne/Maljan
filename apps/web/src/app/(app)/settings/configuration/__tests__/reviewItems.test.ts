@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { buildReviewItems } from "../ReviewList";
+import { stagedDefinitions } from "../agentStaging";
 import type { ReviewSource } from "../ReviewList";
-import type { CatalogEntry, SettingsSchema } from "@/types/settings";
+import type { AgentDefinitionEntry, CatalogEntry, SettingsSchema } from "@/types/settings";
 
 function entry(overrides: Partial<CatalogEntry>): CatalogEntry {
   return {
@@ -158,5 +159,92 @@ describe("buildReviewItems", () => {
     const byKey = new Map(items.map((i) => [i.key, i]));
 
     expect(byKey.get(apiKey.key)?.summary).toBe("new value");
+  });
+});
+
+/* The review panel reads the two halves of an agent-map edit. They are not the
+ * same shape — a staged built-in carries its role and its switch and nothing
+ * else — so comparing them raw reported every built-in as about to have its
+ * prompt, tools and label rewritten. That is the sentence the whole C-C4 fix
+ * exists to stop printing, moved out of the error list and into the change
+ * list. */
+const definitions = entry({
+  key: "core.agents.definitions",
+  group: "agents",
+  title: "Agent definitions",
+  type: "json",
+  editor: "agent_definitions",
+});
+
+function builtin(role: AgentDefinitionEntry["role"], label: string): AgentDefinitionEntry {
+  return { role, label, prompt: null, tools: [], static_provider: null, enabled: true };
+}
+
+const ahmet: AgentDefinitionEntry = {
+  role: "generic",
+  label: "Ahmet",
+  prompt: "Summarise the sample.",
+  tools: [],
+  static_provider: null,
+  enabled: true,
+};
+
+const storedAgents = {
+  static: builtin("static", "Static analyst"),
+  judge: builtin("judge", "Judge"),
+  reporter: builtin("report", "Reporter"),
+};
+
+function agentSource(staged: Record<string, unknown>): ReviewSource {
+  return {
+    schema: {
+      groups: [
+        { key: "agents", title: "Agents", description: "", entries: [definitions] },
+      ],
+    },
+    pending: { [definitions.key]: staged },
+    entriesByKey: { [definitions.key]: definitions },
+    values: {
+      [definitions.key]: {
+        value: storedAgents,
+        is_set: true,
+        hint: null,
+        source: "ui",
+        updated_at: null,
+        updated_by: null,
+      },
+    },
+    hiddenKeys: [],
+    errors: {},
+  };
+}
+
+describe("an agent-map edit, as the review panel describes it", () => {
+  it("announces one added agent and no built-in as changed", () => {
+    const staged = stagedDefinitions({ ...storedAgents, ahmet }, storedAgents);
+    const [line] = buildReviewItems(agentSource(staged));
+
+    expect(line.summary).toBe("1 agent changed");
+    expect(line.detail).toEqual(["ahmet: added"]);
+  });
+
+  it("still names a built-in the operator did turn off", () => {
+    const staged = stagedDefinitions(
+      { ...storedAgents, static: { ...storedAgents.static, enabled: false } },
+      storedAgents,
+    );
+    const [line] = buildReviewItems(agentSource(staged));
+
+    expect(line.summary).toBe("1 agent changed");
+    expect(line.detail).toEqual(["static: disabled"]);
+  });
+
+  it("still names a custom agent that was removed", () => {
+    const withAhmet = { ...storedAgents, ahmet };
+    const source = agentSource(stagedDefinitions(storedAgents, withAhmet));
+    source.values[definitions.key] = { ...source.values[definitions.key], value: withAhmet };
+    const [line] = buildReviewItems(source);
+
+    expect(line.detail).toEqual(["ahmet: removed"]);
   });
 });

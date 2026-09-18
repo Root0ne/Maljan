@@ -43,6 +43,20 @@ export type DefinitionMap = Record<string, AgentDefinitionEntry>;
 /** The map as it goes on the wire: built-ins narrowed, custom agents whole. */
 export type StagedDefinitionMap = Record<string, AgentDefinitionEntry | BuiltinOverride>;
 
+/** The leaf this narrowing belongs to. */
+export const AGENT_DEFINITIONS_KEY = "core.agents.definitions";
+
+/** Every built-in of a map reduced to what may be edited about it. */
+export function narrowBuiltins(map: DefinitionMap): StagedDefinitionMap {
+  const out: StagedDefinitionMap = {};
+  for (const [key, entry] of Object.entries(map)) {
+    out[key] = BUILTIN_AGENT_KEYS.has(key)
+      ? { role: entry.role, enabled: entry.enabled }
+      : entry;
+  }
+  return out;
+}
+
 /** The map to stage for `core.agents.definitions`. */
 export function stagedDefinitions(next: DefinitionMap, saved: DefinitionMap): StagedDefinitionMap {
   // A map that is back where it started is staged as it stands, so the apply
@@ -50,14 +64,23 @@ export function stagedDefinitions(next: DefinitionMap, saved: DefinitionMap): St
   // never deep-equals the stored one, and would leave "1 change" on screen
   // after an add and a remove that cancelled out.
   if (deepEqual(next, saved)) return next;
+  return narrowBuiltins(next);
+}
 
-  const out: StagedDefinitionMap = {};
-  for (const [key, entry] of Object.entries(next)) {
-    out[key] = BUILTIN_AGENT_KEYS.has(key)
-      ? { role: entry.role, enabled: entry.enabled }
-      : entry;
-  }
-  return out;
+/**
+ * The stored value of a leaf, in the shape a staged edit to it is sent in.
+ *
+ * The review panel compares what is stored against what is staged, and for
+ * this leaf those were two different shapes: the full stored map against the
+ * narrowed one. Every built-in then read as "changed: prompt, tools, label",
+ * because `undefined` is not `null` — so adding one agent announced that five
+ * built-ins were about to be rewritten, which is the sentence the whole fix
+ * exists to stop printing. Both sides are narrowed before they are compared.
+ */
+export function comparableSaved(key: string, saved: unknown): unknown {
+  if (key !== AGENT_DEFINITIONS_KEY) return saved;
+  if (!saved || typeof saved !== "object" || Array.isArray(saved)) return saved;
+  return narrowBuiltins(saved as DefinitionMap);
 }
 
 /** The map the editor draws, given what is staged and what is stored. */
