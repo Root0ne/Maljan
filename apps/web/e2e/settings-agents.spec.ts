@@ -376,11 +376,13 @@ test.describe("agent definitions and profiles", () => {
     await page.getByRole("button", { name: "Confirm and apply" }).click();
 
     const body = patches[0] as {
-      changes: Record<string, Record<string, { enabled: boolean; prompt: string | null }>>;
+      changes: Record<string, Record<string, Record<string, unknown>>>;
     };
     const sent = body.changes["core.agents.definitions"].dynamic;
-    expect(sent.enabled).toBe(false);
-    expect(sent.prompt).toBeNull();
+    // The switch is the edit, and the switch plus the role is the whole of
+    // what goes out for a built-in: the API fills the rest in from the seed,
+    // and sending it whole is what let a stale stored row refuse every save.
+    expect(sent).toEqual({ role: "dynamic", enabled: false });
   });
 
   test("the judge card offers no Clone, because the judge cannot be cloned", async ({

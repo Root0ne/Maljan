@@ -112,7 +112,12 @@ test.describe("a custom agent", () => {
     await page.goto(AGENTS_PATH);
     const row = page.locator('[data-agent="ahmet"]');
     await expect(row).toBeVisible();
-    await expect(row.getByText("Ahmet")).toBeVisible();
+    // `exact` because the row carries both the label and the key, and a
+    // substring match is case-insensitive: "Ahmet" would also find "ahmet".
+    // That the two are drawn side by side is the rule — a key follows a label
+    // only where they differ.
+    await expect(row.getByText("Ahmet", { exact: true })).toBeVisible();
+    await expect(row.getByText("ahmet", { exact: true })).toBeVisible();
 
     await row.click();
     await page.locator('[data-agent-detail="ahmet"]').getByRole("button", { name: "Remove" }).click();
