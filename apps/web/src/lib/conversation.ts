@@ -152,6 +152,12 @@ export interface ConversationRound {
 export type StageState = "running" | "done" | "skipped" | "pending";
 
 export interface ConversationStage {
+  /** What this section is, for a view that has to draw the same section
+   *  twice running. Two sections carry no stage key — the lines a run said
+   *  outside every stage, and the failure that closes it — so the key alone
+   *  cannot tell them apart, and their position cannot either: a filter
+   *  removes whole sections from in front of them. */
+  id: string;
   key: string;
   label: string;
   kind: string;
@@ -809,6 +815,7 @@ function snapshot(state: BuilderState): Conversation {
   const stages = state.order.map((key) => {
     const stage = state.stages.get(key) as StageDraft;
     return {
+      id: `stage:${stage.key}`,
       key: stage.key,
       label: stage.label,
       kind: stage.kind,
@@ -824,6 +831,7 @@ function snapshot(state: BuilderState): Conversation {
    * drawn row is not remounted by a later snapshot. */
   if (state.closing) {
     stages.push({
+      id: "closing",
       key: "",
       label: "",
       kind: "",

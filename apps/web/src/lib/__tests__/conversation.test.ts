@@ -255,6 +255,34 @@ describe("a run that failed", () => {
     expect(stages[stages.length - 1].rounds[0].items).toHaveLength(1);
   });
 
+  it("keeps its section's identity when a filter drops another section", () => {
+    /* A run draws two sections with no stage key: its own stageless lines and
+     * the failure that closes it. What tells them apart cannot be where they
+     * sit, because a filter chip removes whole sections from in front of them
+     * — and a closing line that changes identity is a row redrawn from
+     * scratch, which is a copy button losing what it had just been told. */
+    const conversation = buildConversation(
+      [
+        event("agent_message", { speaker: "lead", text: "said before any stage" }),
+        event("stage_started", { stage: "analysis", kind: "analysis" }),
+        event("agent_message", { stage: "analysis", speaker: "lead", text: "reading imports" }),
+        event("error", { status: "failed", message: "Analysis failed." }),
+      ],
+      ROSTER,
+    );
+
+    const all = conversation.stages;
+    expect(all.map((s) => s.id)).toEqual(["stage:", "stage:analysis", "closing"]);
+
+    const notices = filterConversation(all, {
+      agents: new Set<string>(),
+      groups: new Set(["notices"] as const),
+    });
+
+    expect(notices.map((s) => s.id)).toEqual(["closing"]);
+    expect(notices[0].id).toBe(all[all.length - 1].id);
+  });
+
   it("says the run failed when the event carried no words of its own", () => {
     const { stages } = buildConversation([event("error", { status: "failed" })], ROSTER);
 

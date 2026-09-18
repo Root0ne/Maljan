@@ -4,12 +4,14 @@
  *
  * The run header and the conversation's closing line both draw a failure, and
  * both used to draw it as one sentence with the id the log entries are filed
- * under buried inside it. It lives on the shared shelf rather than with either
- * of them because it belongs to both, and the conversation components already
- * reach into the analysis ones — putting it under either feature would have
- * that feature's neighbour import it back across. The id is the whole point of the line: it is the
+ * under buried inside it. The id is the whole point of the line: it is the
  * only handle from this screen to the traceback, so it is labelled, selectable
  * and copyable, and one sentence says where it leads.
+ *
+ * It lives on the shared shelf rather than with either of the two views,
+ * because it belongs to both and the conversation components already reach
+ * into the analysis ones — putting it under either feature would have that
+ * feature's neighbour import it back across.
  */
 
 import { useState } from "react";
