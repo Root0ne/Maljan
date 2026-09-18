@@ -120,7 +120,7 @@ export default function IdentityTab() {
         </div>
         {/* A row whose value is nothing is not a row. Seven labels above
             seven "(unknown)"s said only that the extractor has seven fields. */}
-        <div className="p-4 grid grid-cols-2 gap-4">
+        <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
           {[
             { label: "File Name", value: identity.file_name ?? "" },
             { label: "File Type", value: identity.file_type ? fileTypeLabel(identity.file_type) : "" },
@@ -168,7 +168,7 @@ export default function IdentityTab() {
               Code Signing
             </h2>
           </div>
-          <div className="p-4 grid grid-cols-2 gap-4">
+          <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
             {[
               { label: "Signer Subject", value: identity.signing.signer_subject ?? "" },
               { label: "Issuer", value: identity.signing.signer_issuer ?? "" },

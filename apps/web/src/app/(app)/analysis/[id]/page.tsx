@@ -139,13 +139,13 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
   const ungroundedSections = runSummary?.sections_without_evidence ?? 0;
 
   return (
-    <div className="grid grid-cols-2 gap-4">
+    <div className="flex flex-col gap-4">
       <DownloadBar reportId={reportId} mr={mr} shortHash={shortHash} />
 
       {isDegraded && (
         <div
           role="alert"
-          className="col-span-2 flex items-start gap-3 rounded border border-status-orange/40 bg-status-orange/10 p-3 text-sm"
+          className="flex items-start gap-3 rounded border border-status-orange/40 bg-status-orange/10 p-3 text-sm"
         >
           <span className="font-semibold text-status-orange shrink-0">
             DEGRADED RUN
@@ -179,7 +179,7 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
       {fpWarnings.length > 0 && (
         <details
           open={hasErrorWarning}
-          className="col-span-2 rounded border border-status-orange/40 bg-status-orange/10 p-3 text-sm"
+          className="rounded border border-status-orange/40 bg-status-orange/10 p-3 text-sm"
         >
           <summary className="flex items-center gap-3 cursor-pointer select-none">
             <span className="font-semibold text-status-orange">
@@ -224,7 +224,7 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
           every tab can see them; repeating them here made the same two facts
           read twice on the one tab that also carries the argument for them. */}
       {(mr.severity || mr.malware_category) && (
-        <div className="bg-bg-surface border border-border rounded col-span-2">
+        <div className="bg-bg-surface border border-border rounded">
           <div className="px-4 py-3 border-b border-border">
             <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
               Severity
@@ -279,13 +279,13 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
           listing the first five of each here was the same finding twice, and
           the shorter of the two copies. */}
       {jobId && (ttpCount > 0 || net.domains + net.ips + net.urls > 0) && (
-        <div className="col-span-2 bg-bg-surface border border-border rounded">
+        <div className="bg-bg-surface border border-border rounded">
           <div className="px-4 py-3 border-b border-border">
             <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
               Findings
             </h2>
           </div>
-          <div className="p-4 grid grid-cols-5 gap-3 text-center">
+          <div className="p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 text-center">
             <CountLink
               label="Techniques"
               value={ttpCount}
@@ -309,7 +309,7 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
           of it is not — a section with neither a ledger entry nor a named
           finding behind it is a defect, and this is where it shows. */}
       {evidence && (
-        <div className="col-span-2 bg-bg-surface border border-border rounded">
+        <div className="bg-bg-surface border border-border rounded">
           <div className="px-4 py-3 border-b border-border flex items-center gap-3">
             <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
               Evidence
@@ -323,7 +323,7 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
               </Link>
             )}
           </div>
-          <div className="p-4 grid grid-cols-5 gap-3 text-center">
+          <div className="p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 text-center">
             <Stat label="Calls" value={evidence.entries ?? 0} />
             <Stat label="Succeeded" value={evidence.ok ?? 0} accent="text-status-green" />
             <Stat
@@ -351,7 +351,7 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
       {/* Executive summary — drawn when the run wrote one. A heading over an
           apology is a section that exists to say it has nothing. */}
       {(mr.executive_summary.trim() || mr.capabilities_narrative.length > 0) && (
-        <div className="col-span-2 bg-bg-reading border border-border rounded">
+        <div className="bg-bg-reading border border-border rounded">
           <div className="px-4 py-3 border-b border-border">
             <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
               Executive Summary
@@ -443,11 +443,11 @@ function RunRecord({
   );
 
   return (
-    <details className="col-span-2 bg-bg-surface border border-border rounded">
+    <details className="bg-bg-surface border border-border rounded">
       <summary className="px-4 py-3 cursor-pointer select-none text-xs font-medium text-text-primary uppercase tracking-wider">
         Run record
       </summary>
-      <div className="px-4 pb-4 grid grid-cols-2 gap-6 text-xs text-text-secondary">
+      <div className="px-4 pb-4 grid grid-cols-1 md:grid-cols-2 gap-6 text-xs text-text-secondary">
         <div>
           <h3 className="text-[11px] uppercase tracking-wider text-text-muted mb-1.5">
             Configuration
@@ -607,7 +607,7 @@ function DownloadBar({
   const mispDisabled = !mr.misp_attributes || mr.misp_attributes.length === 0;
 
   return (
-    <div className="col-span-2 flex flex-wrap items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       <span className="text-[11px] text-text-muted uppercase tracking-wider mr-1">
         Export
       </span>

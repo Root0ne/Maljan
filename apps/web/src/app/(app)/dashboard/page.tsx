@@ -136,14 +136,14 @@ export default function DashboardPage() {
   if (loading) {
     return (
       <div>
-        <div className="grid grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           <StatCardSkeleton />
           <StatCardSkeleton />
           <StatCardSkeleton />
           <StatCardSkeleton />
         </div>
-        <div className="grid grid-cols-3 gap-4">
-          <div className="col-span-2 bg-bg-surface border border-border rounded animate-pulse">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="lg:col-span-2 bg-bg-surface border border-border rounded animate-pulse">
             <div className="h-10 border-b border-border" />
             <div className="p-4 space-y-3">
               {Array.from({ length: 5 }).map((_, i) => (
@@ -206,7 +206,7 @@ export default function DashboardPage() {
       )}
 
       {/* Stats Row */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <StatCard label="Total Analyses" value={stats?.total_jobs ?? 0} />
         <StatCard
           label="Completed"
@@ -224,9 +224,9 @@ export default function DashboardPage() {
         />
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Recent Analyses */}
-        <div className="col-span-2 bg-bg-surface border border-border rounded">
+        <div className="lg:col-span-2 bg-bg-surface border border-border rounded">
           <div className="flex items-center justify-between px-4 py-3 border-b border-border">
             <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
               Latest runs

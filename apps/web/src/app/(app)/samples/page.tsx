@@ -322,64 +322,66 @@ function SamplesPageContent() {
             No samples uploaded yet.
           </div>
         ) : (
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-border">
-                <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider">Filename</th>
-                <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider">SHA256</th>
-                <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-24">Size</th>
-                <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-36">Uploaded</th>
-                <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-32">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border-light">
-              {samples.map((s) => (
-                <tr key={s.id} className="hover:bg-bg-hover">
-                  <td className="px-4 py-2.5">
-                    <span className="text-sm text-text-primary">{s.filename}</span>
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <code className="text-xs text-text-secondary font-mono">
-                      {s.sha256.slice(0, 16)}...
-                    </code>
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <span className="text-xs text-text-secondary">{formatSize(s.file_size)}</span>
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <span className="text-xs text-text-secondary">{formatDateTime(s.created_at)}</span>
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <div className="flex gap-1.5">
-                      <button
-                        onClick={async () => {
-                          setActionError(null);
-                          try {
-                            const detail = await api.getSample(s.id);
-                            setDetailSample(detail);
-                          } catch (err) {
-                            setActionError(getErrorMessage(err) || "Failed to load sample details.");
-                          }
-                        }}
-                        className="px-2.5 py-1 text-xs border border-border text-text-secondary rounded hover:bg-bg-hover"
-                      >
-                        Details
-                      </button>
-                      <button
-                        onClick={() => {
-                          setActionError(null);
-                          openSubmitDialog(s);
-                        }}
-                        className="px-2.5 py-1 text-xs bg-accent text-white rounded hover:bg-accent-hover"
-                      >
-                        Analyze
-                      </button>
-                    </div>
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-border">
+                  <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider">Filename</th>
+                  <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider">SHA256</th>
+                  <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-24">Size</th>
+                  <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-36">Uploaded</th>
+                  <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-32">Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-border-light">
+                {samples.map((s) => (
+                  <tr key={s.id} className="hover:bg-bg-hover">
+                    <td className="px-4 py-2.5">
+                      <span className="text-sm text-text-primary">{s.filename}</span>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <code className="text-xs text-text-secondary font-mono">
+                        {s.sha256.slice(0, 16)}...
+                      </code>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <span className="text-xs text-text-secondary">{formatSize(s.file_size)}</span>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <span className="text-xs text-text-secondary">{formatDateTime(s.created_at)}</span>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <div className="flex gap-1.5">
+                        <button
+                          onClick={async () => {
+                            setActionError(null);
+                            try {
+                              const detail = await api.getSample(s.id);
+                              setDetailSample(detail);
+                            } catch (err) {
+                              setActionError(getErrorMessage(err) || "Failed to load sample details.");
+                            }
+                          }}
+                          className="px-2.5 py-1 text-xs border border-border text-text-secondary rounded hover:bg-bg-hover"
+                        >
+                          Details
+                        </button>
+                        <button
+                          onClick={() => {
+                            setActionError(null);
+                            openSubmitDialog(s);
+                          }}
+                          className="px-2.5 py-1 text-xs bg-accent text-white rounded hover:bg-accent-hover"
+                        >
+                          Analyze
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 

@@ -147,8 +147,8 @@ function AnalysesList() {
     return (
       <div className="animate-pulse">
         <div className="h-8 w-48 bg-bg-active rounded mb-4" />
-        <div className="flex gap-6">
-          <div className="w-48 shrink-0">
+        <div className="flex flex-col md:flex-row gap-6">
+          <div className="w-full md:w-48 shrink-0">
             <div className="h-64 bg-bg-surface border border-border rounded" />
           </div>
           <div className="flex-1 bg-bg-surface border border-border rounded">
@@ -182,9 +182,9 @@ function AnalysesList() {
           {refreshError}
         </div>
       )}
-      <div className="flex gap-6">
+      <div className="flex flex-col md:flex-row gap-6">
         {/* Filter Sidebar */}
-        <div className="w-48 shrink-0">
+        <div className="w-full md:w-48 shrink-0">
           <div className="bg-bg-surface border border-border rounded p-3">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-xs font-medium text-text-primary uppercase tracking-wider">Filters</h3>
@@ -230,7 +230,7 @@ function AnalysesList() {
         </div>
 
         {/* The list */}
-        <div className="flex-1 bg-bg-surface border border-border rounded">
+        <div className="flex-1 min-w-0 bg-bg-surface border border-border rounded">
           <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
             <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
               Analyses &mdash; {countLabel(filtered.length, "result")}
