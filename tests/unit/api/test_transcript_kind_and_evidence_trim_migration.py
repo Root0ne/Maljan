@@ -167,20 +167,28 @@ def test_a_report_may_say_that_no_confidence_was_assessed() -> None:
         assert stored == [None, 0.91]
 
 
-def test_the_downgrade_says_what_it_costs_a_report_with_no_confidence() -> None:
-    """A zero, because the older schema cannot express the difference."""
+def test_the_downgrade_says_what_it_costs_a_report_with_no_confidence(caplog) -> None:
+    """A zero, because the older schema cannot express the difference.
+
+    And it says how many: an operator downgrading wants to know how many
+    reports stopped being able to say "not assessed", not only that some may
+    have.
+    """
+    import logging
+
     from alembic.operations import Operations
     from alembic.runtime.migration import MigrationContext
 
     engine = sa.create_engine("sqlite://")
     with engine.connect() as conn:
         module = _upgraded(conn)
-        conn.execute(
-            sa.text("INSERT INTO analysis_reports (id, overall_confidence) VALUES (:i, NULL)"),
-            {"i": str(uuid.uuid4())},
-        )
+        for _ in range(2):
+            conn.execute(
+                sa.text("INSERT INTO analysis_reports (id, overall_confidence) VALUES (:i, NULL)"),
+                {"i": str(uuid.uuid4())},
+            )
         conn.commit()
-        with Operations.context(MigrationContext.configure(conn)):
+        with caplog.at_level(logging.INFO), Operations.context(MigrationContext.configure(conn)):
             module.downgrade()
         stored = (
             conn.execute(
@@ -191,7 +199,22 @@ def test_the_downgrade_says_what_it_costs_a_report_with_no_confidence() -> None:
             .scalars()
             .all()
         )
-        assert stored == [0.0, 0.91]
+        assert stored == [0.0, 0.0, 0.91]
+        assert "2 report(s) with no assessed confidence" in caplog.text
+
+
+def test_the_nullability_change_needs_no_grammar_sqlite_lacks() -> None:
+    """Through a batch, so the revision does not depend on a bundled SQLite.
+
+    A plain ``alter_column`` renders ``ALTER TABLE … ALTER COLUMN … DROP NOT
+    NULL``, which SQLite has no grammar for at all; whether it was accepted
+    depended on which SQLite the running interpreter happened to bundle. A
+    batch rewrites the table instead, which every SQLite understands, and is a
+    plain ``ALTER`` on Postgres where the batch is a no-op wrapper.
+    """
+    text = _REV.read_text(encoding="utf-8")
+    assert "batch_alter_table" in text
+    assert "op.alter_column(" not in text
 
 
 def test_upgrade_downgrade_upgrade_is_a_clean_round_trip() -> None:

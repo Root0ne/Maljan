@@ -34,8 +34,13 @@ of them made. ``NULL`` is the fact, and the header says "not assessed".
 
 Downgrade drops the seven columns and restores the NOT NULL. It has to write a
 zero into every row that says "not assessed", because the older schema has no
-way to express the difference; that is a loss the downgrade cannot avoid and
-the reason it is recorded here.
+way to express the difference; that is a loss the downgrade cannot avoid, so
+it is recorded here and the number of rows it touched is logged when it runs.
+
+The nullability change goes through ``batch_alter_table``: alembic renders a
+plain ``alter_column`` as ``ALTER COLUMN … DROP NOT NULL``, which SQLite has
+no grammar for, so whether the revision could be exercised at all depended on
+which SQLite the running interpreter bundles.
 
 Revision ID: 20260926000000
 Revises: 20260925000000
@@ -43,8 +48,12 @@ Revises: 20260925000000
 
 from __future__ import annotations
 
+import logging
+
 import sqlalchemy as sa
 from alembic import op
+
+logger = logging.getLogger(__name__)
 
 revision = "20260926000000"
 down_revision = "20260925000000"
@@ -65,18 +74,33 @@ def upgrade() -> None:
     op.add_column("evidence_entries", sa.Column("symbol", sa.String(length=200), nullable=True))
     op.add_column("evidence_entries", sa.Column("started_at", sa.Float(), nullable=True))
 
-    op.alter_column(
-        "analysis_reports", "overall_confidence", existing_type=sa.Float(), nullable=True
-    )
+    # Through a batch operation, so this runs on SQLite as well as on
+    # Postgres. Alembic renders a plain ``alter_column`` as ``ALTER TABLE …
+    # ALTER COLUMN … DROP NOT NULL``, which SQLite has no grammar for: whether
+    # it is accepted depends on the SQLite the running interpreter happens to
+    # bundle, which is not a property a migration may depend on. A batch
+    # rewrites the table instead, and is a no-op wrapper on Postgres.
+    with op.batch_alter_table("analysis_reports") as batch:
+        batch.alter_column("overall_confidence", existing_type=sa.Float(), nullable=True)
 
 
 def downgrade() -> None:
-    op.execute(
-        "UPDATE analysis_reports SET overall_confidence = 0 WHERE overall_confidence IS NULL"
+    # The old schema cannot hold "nothing assessed one", so those reports are
+    # given a zero. It is the one thing this downgrade cannot preserve, so it
+    # says how many rows it happened to rather than leaving an operator to
+    # infer it from the fact that some may exist.
+    zeroed = op.get_bind().execute(
+        sa.text(
+            "UPDATE analysis_reports SET overall_confidence = 0 WHERE overall_confidence IS NULL"
+        )
     )
-    op.alter_column(
-        "analysis_reports", "overall_confidence", existing_type=sa.Float(), nullable=False
+    logger.info(
+        "analysis_reports: %s report(s) with no assessed confidence were set to 0 to restore "
+        "the NOT NULL constraint.",
+        zeroed.rowcount,
     )
+    with op.batch_alter_table("analysis_reports") as batch:
+        batch.alter_column("overall_confidence", existing_type=sa.Float(), nullable=False)
 
     op.drop_column("evidence_entries", "started_at")
     op.drop_column("evidence_entries", "symbol")
