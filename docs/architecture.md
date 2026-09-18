@@ -506,9 +506,12 @@ without one used to take every answered ask down with it: one audited chunk
 spent 1,830 s, collected six answers and 52 ledger entries, and merged zero
 claims. The lead is given one bounded turn to write its report from the answers
 it already holds, and when that turn produces nothing either the specialists'
-own ISRs are promoted into the stage's merge under their own agent keys, with
-their own claims and confidences untouched. Nothing is promoted beside a report
-that exists. Two `agent_message`
+own ISRs are promoted into the stage's merge, with their own claims and
+confidences untouched. Every answered ask is promoted, in the order it was
+asked: a lead asks the same specialist about the imports, then the strings,
+then the packer, and those are three answers, so the key carries the agent and
+the ask's number (`deep_static#2`) rather than the agent alone. Nothing is
+promoted beside a report that exists. Two `agent_message`
 events carry the exchange, each with `stage`, `round` and `addressed_to`: the
 caller's ask, addressed to the callee, and the callee's answer with its claims,
 addressed to the caller. The console draws the arrow live, and in the replay

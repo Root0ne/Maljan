@@ -161,6 +161,13 @@ def promoted_asks(agent: Any, own: AgentISR | None = None) -> dict[str, AgentISR
     team, they carry the agent that produced them, and here they stand in for
     the report the lead never wrote. Empty when the lead did answer: nothing is
     promoted beside a report that exists.
+
+    Every answered ask, in the order the lead asked it. A lead asks the same
+    specialist about the imports, then the strings, then the packer, and those
+    are three answers, not one: keyed by agent alone the second and third were
+    dropped, which is the loss this exists to stop. The key carries the agent
+    and the ask's number (``deep_static#2``), so nothing collapses and nothing
+    collides with a stage agent's own key either.
     """
     if own is not None and getattr(own, "claims", None):
         return {}
@@ -168,16 +175,18 @@ def promoted_asks(agent: Any, own: AgentISR | None = None) -> dict[str, AgentISR
     if not callable(answers):
         return {}
     out: dict[str, AgentISR] = {}
+    asked: dict[str, int] = {}
     for isr in answers() or []:
         key = str(getattr(isr, "agent_id", "") or "").strip()
-        if not key or not getattr(isr, "claims", None) or key in out:
+        if not key or not getattr(isr, "claims", None):
             continue
-        out[key] = isr
+        asked[key] = asked.get(key, 0) + 1
+        out[f"{key}#{asked[key]}"] = isr
     if out:
         logger.warning(
             "The lead produced no claims; promoting %d answered ask(s) into the stage: %s.",
             len(out),
-            ", ".join(sorted(out)),
+            ", ".join(out),
         )
     return out
 

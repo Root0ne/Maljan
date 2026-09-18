@@ -772,9 +772,11 @@ change landed on `main`.
   specialists' own ISRs; a lead that produced no claims is given one bounded
   turn to write its report from them — the forced synthesis the analysts
   already use — and when that turn produces nothing either, the specialists'
-  ISRs are promoted into the stage's merge under their own agent keys, with
-  their claims and confidences exactly as they made them. Nothing is promoted
-  beside a report that exists.
+  ISRs are promoted into the stage's merge with their claims and confidences
+  exactly as they made them. Every answered ask is promoted, in order and
+  keyed by the agent and the ask's number (`deep_static#2`): three asks to one
+  specialist are three answers, and keyed by the agent alone the second and
+  third were dropped. Nothing is promoted beside a report that exists.
 
 - **Every violation a run recorded reaches the conversation, with what became
   of it.** Only the batch that triggered a correction turn was published, so a
