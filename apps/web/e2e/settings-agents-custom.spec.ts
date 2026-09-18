@@ -17,6 +17,10 @@ import { MOCK_USER, MOCK_SETTINGS_VALUES } from "./mocks";
  * The store is mocked, so "reload" here is a `page.goto` against a values
  * fixture the PATCH has updated — the same thing the browser does, without a
  * backend.
+ *
+ * The third case is the same agent before it is applied at all: the Teams
+ * editor reads the staged map laid over the stored one, so an agent staged on
+ * one page is offered by its label on the other and leaves with the edit.
  */
 
 const AGENTS_PATH = "/settings/configuration/agents/agents";
@@ -128,6 +132,55 @@ test.describe("a custom agent", () => {
     await page.goto(AGENTS_PATH);
     await expect(page.locator('[data-agent="ahmet"]')).toHaveCount(0);
     await expect(page.locator('[data-agent="judge"]')).toBeVisible();
+  });
+
+  test("is offered by the Teams editor while it is only staged", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto(AGENTS_PATH);
+
+    await page.getByLabel("new agent name").fill("ahmet");
+    await page.getByRole("button", { name: "Add agent" }).click();
+    await page.locator('[data-agent-detail="ahmet"]').getByLabel("ahmet label").fill("Ahmet");
+
+    // A rail-link switch keeps both editors' staged edits in the one
+    // `SettingsProvider` the /settings/configuration tree shares, which is
+    // what puts an unapplied agent in front of the Teams editor at all.
+    await page.getByRole("link", { name: /^Teams/ }).click();
+
+    // A built-in team's stages are the paper's architecture and stay fixed, so
+    // the picker that offers agents belongs to a team of the operator's own.
+    await page.getByLabel("new team name").fill("audit");
+    await page.locator('[data-profile="default"]').getByRole("button", { name: "Clone" }).click();
+
+    const picker = () =>
+      page
+        .locator('[data-profile="audit"] [data-stage="analysis"]')
+        .getByLabel("audit analysis add agent");
+    // By the label its operator gave it, not by the key: the picker reads the
+    // staged map laid over the stored one, and a staged built-in carries only
+    // its role and its switch.
+    await expect(picker().getByRole("option", { name: "Ahmet (ahmet)" })).toHaveCount(1);
+    // And the built-ins are still themselves underneath it: a staged built-in
+    // goes out as its role and its switch, so a card reading the staged map
+    // raw would name them by key for as long as the edit is unapplied.
+    const analysis = page.locator('[data-profile="audit"] [data-stage="analysis"]');
+    await expect(analysis.getByText("Static analyst", { exact: true })).toBeVisible();
+
+    // Discarding the agent-map edit leaves the team staged and takes the agent
+    // with it, on both pages. The leaf the discard belongs to is named, because
+    // the Teams page has a Discard of its own — for the staged team — and
+    // clicking that one instead would prove nothing.
+    await page.getByRole("link", { name: /^Agents/ }).click();
+    await page
+      .locator('button[aria-describedby="setting-label-core.agents.definitions"]')
+      .filter({ hasText: /^Discard$/ })
+      .click();
+    await expect(page.locator('[data-agent="ahmet"]')).toHaveCount(0);
+
+    await page.getByRole("link", { name: /^Teams/ }).click();
+    await expect(page.locator('[data-profile="audit"]')).toBeVisible();
+    await expect(picker().getByRole("option", { name: "Ahmet (ahmet)" })).toHaveCount(0);
   });
 
   test("names every field the server refused, and clears each one as it is fixed", async ({
