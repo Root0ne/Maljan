@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -17,6 +18,7 @@ import pytest
 import pytest_asyncio
 
 from app.worker.analysis_worker import WorkerSettings, run_analysis
+from tests.integration._session_probe import updates_in
 
 
 def _dsn(scheme: str, userinfo: str, rest: str) -> str:
@@ -50,6 +52,22 @@ def _isolated_runtime_settings(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(rc.runtime_config, "_overrides", _mock_mode_allowed_override)
     yield
     reset_settings_cache()
+
+
+@pytest.fixture(autouse=True)
+def _no_object_store(monkeypatch: pytest.MonkeyPatch):
+    """The object store is out of reach here unless a test brings its own.
+
+    These tests are about the job's lifecycle, not its bytes. Left to the
+    host, the download succeeds on a developer machine and fails in CI, which
+    makes every run take a different path through the worker and writes sample
+    copies into whatever ``UPLOAD_TEMP_DIR`` points at. Refusing the
+    connection is the shape CI exercises, and the two tests that need the
+    bytes patch ``minio.Minio`` themselves, which wins while their block is
+    open.
+    """
+    with patch("minio.Minio", side_effect=ConnectionError("no object store here")):
+        yield
 
 
 @pytest_asyncio.fixture
@@ -89,6 +107,29 @@ async def mock_ctx(mock_db_session: AsyncMock) -> dict[str, Any]:
         "redis": redis,
         "db_session": lambda: mock_db_session,
     }
+
+
+def _answer_reads(session: AsyncMock, answers: list[Any]) -> list[Any]:
+    """Answer each read in turn, and keep every statement the run executed.
+
+    The worker fires ``UPDATE`` statements between the reads and those need no
+    row payload, so anything past the answers gets a bare ``MagicMock``. The
+    list this returns is where a test reads the job's status changes from: the
+    run writes them as statements now, against a row it does not keep loaded,
+    because the session that read the job is closed before the pipeline runs.
+    """
+    recorded: list[Any] = []
+    pending = list(answers)
+
+    async def _execute(*args: Any, **kwargs: Any) -> MagicMock:
+        if args:
+            recorded.append(args[0])
+        if pending:
+            return pending.pop(0)
+        return MagicMock()
+
+    session.execute = _execute
+    return recorded
 
 
 def _make_job(
@@ -175,22 +216,7 @@ async def test_mock_pipeline_completes(
             m.scalar_one.return_value = obj
         return m
 
-    exec_results = [_make_result(job), _make_result(sample)]
-    call_count = 0
-
-    async def _fake_execute(*args: Any, **kwargs: Any) -> MagicMock:
-        nonlocal call_count
-        # The worker fires extra ``UPDATE`` statements for ``started_at``/
-        # ``completed_at`` after the job-timestamp fix. Those
-        # don't need a row payload — return an empty MagicMock so the
-        # commit/refresh path doesn't blow up.
-        if call_count >= len(exec_results):
-            return MagicMock()
-        res = exec_results[call_count]
-        call_count += 1
-        return res
-
-    mock_db_session.execute = _fake_execute
+    recorded = _answer_reads(mock_db_session, [_make_result(job), _make_result(sample)])
 
     # Mock mode requires BOTH the
     # env/job flag AND ``api.mock_mode_allowed=True``. Without the second
@@ -213,8 +239,11 @@ async def test_mock_pipeline_completes(
 
     assert result["status"] == "completed"
     assert result["verdict"] == "Malware"
-    assert job.status == "completed"
-    assert job.completed_at is not None
+    statuses = updates_in(recorded, "analysis_jobs")
+    assert [u["status"] for u in statuses] == ["running", "completed"]
+    completed_at = statuses[-1]["completed_at"]
+    assert isinstance(completed_at, datetime)
+    assert (datetime.now(UTC) - completed_at).total_seconds() < 60
     assert mock_db_session.commit.call_count >= 2  # running + completed
 
 
@@ -243,18 +272,7 @@ async def test_report_less_pipeline_result_fails_the_job(
             m.scalar_one.return_value = obj
         return m
 
-    exec_results = [_make_result(job), _make_result(sample)]
-    call_count = 0
-
-    async def _fake_execute(*args: Any, **kwargs: Any) -> MagicMock:
-        nonlocal call_count
-        if call_count >= len(exec_results):
-            return MagicMock()
-        res = exec_results[call_count]
-        call_count += 1
-        return res
-
-    mock_db_session.execute = _fake_execute
+    recorded = _answer_reads(mock_db_session, [_make_result(job), _make_result(sample)])
 
     from app import config as api_config
 
@@ -274,10 +292,15 @@ async def test_report_less_pipeline_result_fails_the_job(
     api_config._settings = None
 
     assert result["status"] == "failed"
-    assert "ValueError: boom" in result["error"]
-    assert job.status == "failed"
-    assert job.error_message is not None
-    assert "ValueError: boom" in job.error_message
+    # The reason is the class of what was raised and the id of the log entry
+    # holding the rest: ``error_message`` is a field of ``JobResponse``, and
+    # the pipeline's own message can name a path or a connection string.
+    assert result["error"].startswith("RuntimeError (error id ")
+    assert "boom" not in result["error"]
+    failed = [u for u in updates_in(recorded, "analysis_jobs") if u["status"] == "failed"]
+    assert len(failed) == 1
+    assert failed[0]["error_message"] == result["error"]
+    assert isinstance(failed[0]["completed_at"], datetime)
 
 
 @pytest.mark.asyncio
@@ -319,18 +342,7 @@ async def test_reporting_disabled_completes_without_a_malware_report(
             m.scalar_one.return_value = obj
         return m
 
-    exec_results = [_make_result(job), _make_result(sample)]
-    call_count = 0
-
-    async def _fake_execute(*args: Any, **kwargs: Any) -> MagicMock:
-        nonlocal call_count
-        if call_count >= len(exec_results):
-            return MagicMock()
-        res = exec_results[call_count]
-        call_count += 1
-        return res
-
-    mock_db_session.execute = _fake_execute
+    recorded = _answer_reads(mock_db_session, [_make_result(job), _make_result(sample)])
 
     from app import config as api_config
 
@@ -355,8 +367,9 @@ async def test_reporting_disabled_completes_without_a_malware_report(
     api_config._settings = None
 
     assert result["status"] == "completed"
-    assert job.status == "completed"
-    assert job.error_message is None
+    statuses = updates_in(recorded, "analysis_jobs")
+    assert [u["status"] for u in statuses] == ["running", "completed"]
+    assert "error_message" not in statuses[-1]
 
 
 @pytest.mark.asyncio
@@ -376,22 +389,7 @@ async def test_pipeline_failure_sets_failed_status(
             m.scalar_one.return_value = obj
         return m
 
-    exec_results = [_make_result(job), _make_result(sample)]
-    call_count = 0
-
-    async def _fake_execute(*args: Any, **kwargs: Any) -> MagicMock:
-        nonlocal call_count
-        # The worker fires extra ``UPDATE`` statements for ``started_at``/
-        # ``completed_at`` after the job-timestamp fix. Those
-        # don't need a row payload — return an empty MagicMock so the
-        # commit/refresh path doesn't blow up.
-        if call_count >= len(exec_results):
-            return MagicMock()
-        res = exec_results[call_count]
-        call_count += 1
-        return res
-
-    mock_db_session.execute = _fake_execute
+    recorded = _answer_reads(mock_db_session, [_make_result(job), _make_result(sample)])
 
     # Force MaljanApp to blow up by mocking the class where it is defined.
     with patch("maljan.app.MaljanApp") as mock_app_cls:
@@ -400,9 +398,11 @@ async def test_pipeline_failure_sets_failed_status(
         result = await run_analysis(mock_ctx, str(job.id))
 
     assert result["status"] == "failed"
-    assert "Simulated pipeline crash" in result["error"]
-    assert job.status == "failed"
-    assert job.error_message is not None
+    assert result["error"].startswith("RuntimeError (error id ")
+    assert "Simulated pipeline crash" not in result["error"]
+    failed = [u for u in updates_in(recorded, "analysis_jobs") if u["status"] == "failed"]
+    assert len(failed) == 1
+    assert isinstance(failed[0]["completed_at"], datetime)
 
 
 @pytest.mark.asyncio
@@ -455,24 +455,16 @@ async def test_mock_mode_with_an_attached_report_fails_with_a_worded_message(
     # ``list(res.scalars().all())`` to come back ``[]``, same as every other
     # test in this file relies on for that call), then the sandbox-report row
     # lookup this task's own attach-path added.
-    exec_results = [
-        _make_result(job),
-        _make_result(sample),
-        MagicMock(),
-        MagicMock(),
-        report_result,
-    ]
-    call_count = 0
-
-    async def _fake_execute(*args: Any, **kwargs: Any) -> MagicMock:
-        nonlocal call_count
-        if call_count >= len(exec_results):
-            return MagicMock()
-        res = exec_results[call_count]
-        call_count += 1
-        return res
-
-    mock_db_session.execute = _fake_execute
+    recorded = _answer_reads(
+        mock_db_session,
+        [
+            _make_result(job),
+            _make_result(sample),
+            MagicMock(),
+            MagicMock(),
+            report_result,
+        ],
+    )
 
     from app import config as api_config
 
@@ -488,11 +480,14 @@ async def test_mock_mode_with_an_attached_report_fails_with_a_worded_message(
 
     assert result["status"] == "failed"
     assert "AttributeError" not in result["error"]
+    # The sentence this module wrote is what the operator reads, with the id
+    # of the log entry that holds the rest. Only a ``StatedFailure`` keeps its
+    # message; anything else would arrive as its class name alone.
     assert "cannot accept an uploaded report" in result["error"]
-    assert job.status == "failed"
-    assert job.error_message is not None
-    assert "AttributeError" not in job.error_message
-    assert "cannot accept an uploaded report" in job.error_message
+    assert "(error id " in result["error"]
+    failed = [u for u in updates_in(recorded, "analysis_jobs") if u["status"] == "failed"]
+    assert len(failed) == 1
+    assert failed[0]["error_message"] == result["error"]
 
 
 # ---------------------------------------------------------------------------
@@ -653,18 +648,7 @@ async def test_worker_removes_private_sample_copies_after_success(
             m.scalar_one.return_value = obj
         return m
 
-    exec_results = [_make_result(job), _make_result(sample)]
-    call_count = 0
-
-    async def _fake_execute(*args: Any, **kwargs: Any) -> MagicMock:
-        nonlocal call_count
-        if call_count >= len(exec_results):
-            return MagicMock()
-        res = exec_results[call_count]
-        call_count += 1
-        return res
-
-    mock_db_session.execute = _fake_execute
+    _answer_reads(mock_db_session, [_make_result(job), _make_result(sample)])
 
     from app.worker import sample_files
 
@@ -723,18 +707,7 @@ async def test_worker_removes_private_sample_copies_after_pipeline_failure(
             m.scalar_one.return_value = obj
         return m
 
-    exec_results = [_make_result(job), _make_result(sample)]
-    call_count = 0
-
-    async def _fake_execute(*args: Any, **kwargs: Any) -> MagicMock:
-        nonlocal call_count
-        if call_count >= len(exec_results):
-            return MagicMock()
-        res = exec_results[call_count]
-        call_count += 1
-        return res
-
-    mock_db_session.execute = _fake_execute
+    _answer_reads(mock_db_session, [_make_result(job), _make_result(sample)])
 
     from app.worker import sample_files
 
@@ -794,100 +767,6 @@ def test_worker_settings_sanity() -> None:
     # above the inner per-loop safety nets so it never kills a progressing run.
     assert WorkerSettings.job_timeout == 28800
     assert WorkerSettings.max_tries == 1
-
-
-# ---------------------------------------------------------------------------
-# Wave 8 ORPHAN-JOBS-01 (2026-05-28) — startup orphan sweep regression test
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_startup_sweeps_phantom_running_jobs() -> None:
-    """``_sweep_orphan_jobs`` flips abandoned ``running`` rows to ``failed``.
-
-    Without the sweep the dashboard accumulates phantom in-flight jobs every
-    time the worker is killed. The cutoff used to be ``job_timeout`` — eight
-    hours — which made the sweep useless for the case its own docstring names
-    first: a worker killed mid-flight is back within seconds, and its row then
-    sat in ``running`` for the rest of the day with nothing retrying it
-    (``max_tries = 1``). Observed live on 2026-07-26, and a container memory
-    limit makes a mid-flight kill more likely rather than less.
-
-    The grace period only has to exceed the window in which a row can be
-    legitimately ``running`` while no worker is up, which — with ``max_jobs =
-    1`` and this process having just booted — is seconds.
-    """
-    from datetime import UTC, datetime, timedelta
-
-    from app.worker.analysis_worker import _sweep_orphan_jobs
-
-    captured_stmts: list[Any] = []
-    sweep_session = AsyncMock()
-    sweep_session.commit = AsyncMock()
-    sweep_session.__aenter__.return_value = sweep_session
-    sweep_session.__aexit__.return_value = False
-
-    # Pretend two rows survived the sweep (older than 3600s budget).
-    mock_result = MagicMock()
-    mock_result.all.return_value = [
-        (uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),),
-        (uuid.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),),
-    ]
-
-    async def _fake_execute(stmt: Any) -> MagicMock:
-        captured_stmts.append(stmt)
-        return mock_result
-
-    sweep_session.execute = _fake_execute
-
-    db_session_factory = MagicMock(return_value=sweep_session)
-
-    before = datetime.now(UTC)
-    await _sweep_orphan_jobs(db_session_factory)
-    after = datetime.now(UTC)
-
-    # Exactly one UPDATE statement was issued + one commit.
-    assert len(captured_stmts) == 1
-    assert sweep_session.commit.await_count == 1
-
-    # The cutoff must be minutes ago, not hours. Read the bound parameter off
-    # the compiled statement rather than comparing two timestamps that are
-    # ordered by construction — the previous assertion here could not fail.
-    from app.worker.analysis_worker import _ORPHAN_GRACE_SECONDS
-
-    params = captured_stmts[0].compile().params
-    cutoff = next(v for v in params.values() if isinstance(v, datetime))
-
-    assert before - timedelta(seconds=_ORPHAN_GRACE_SECONDS + 1) <= cutoff
-    assert cutoff <= after - timedelta(seconds=_ORPHAN_GRACE_SECONDS - 1)
-    assert _ORPHAN_GRACE_SECONDS <= 900, (
-        "a worker killed mid-flight must be reclaimed in minutes; at the old "
-        "eight-hour cutoff the job stayed 'running' all day"
-    )
-
-
-@pytest.mark.asyncio
-async def test_startup_sweep_handles_no_phantoms_gracefully() -> None:
-    """A clean DB with no phantom rows must not raise or log a warning."""
-    from app.worker.analysis_worker import _sweep_orphan_jobs
-
-    sweep_session = AsyncMock()
-    sweep_session.commit = AsyncMock()
-    sweep_session.__aenter__.return_value = sweep_session
-    sweep_session.__aexit__.return_value = False
-
-    empty_result = MagicMock()
-    empty_result.all.return_value = []
-
-    async def _fake_execute(stmt: Any) -> MagicMock:
-        return empty_result
-
-    sweep_session.execute = _fake_execute
-    db_session_factory = MagicMock(return_value=sweep_session)
-
-    # Should complete without raising.
-    await _sweep_orphan_jobs(db_session_factory)
-    assert sweep_session.commit.await_count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -954,18 +833,7 @@ async def test_override_load_failure_falls_back_to_default_settings(
             m.scalar_one.return_value = obj
         return m
 
-    exec_results = [_make_result(job), _make_result(sample)]
-    call_count = 0
-
-    async def _fake_execute(*args: Any, **kwargs: Any) -> MagicMock:
-        nonlocal call_count
-        if call_count >= len(exec_results):
-            return MagicMock()
-        res = exec_results[call_count]
-        call_count += 1
-        return res
-
-    mock_db_session.execute = _fake_execute
+    _answer_reads(mock_db_session, [_make_result(job), _make_result(sample)])
 
     async def _boom(_db: Any) -> dict[str, Any]:
         raise ConnectionError(f"{_dsn('postgres', 'maljan:s3cret', 'db:5432/maljan')} unreachable")

@@ -17,7 +17,7 @@ from maljan.core.virustotal import SERVER_KEY as VIRUSTOTAL_SERVER_KEY
 from maljan.pipeline.conditions import validate_condition
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
+from app.database import end_read_transaction, get_db
 from app.deps import require_admin
 from app.logging_config import get_logger
 from app.logsafe import log_safe
@@ -507,6 +507,10 @@ async def test_mcp_server(
     ``/test/{probe}`` so the fixed path wins the match.
     """
     stored = await SettingsService(db).load_overrides()
+    # The staged values are read; what follows launches a server and waits on
+    # it. Nothing below needs the transaction that read them, and a probe is
+    # the longest await this API makes.
+    await end_read_transaction(db)
     response = await _probe_response(run_mcp_probe(server, body.values, stored))
     await _record_the_probe(request, user, "mcp", body, response, server=server)
     return response
@@ -527,6 +531,10 @@ async def register_virustotal_agent(
     502 with their own sentence in it, because the fix is on their side or in
     the operator's network, not in the stored settings.
     """
+    # The caller was resolved from the database by the dependency above, so
+    # this request is already in a transaction; the registration is a call to
+    # somebody else's service and must not be made inside it.
+    await end_read_transaction(db)
     try:
         facts = await register_agent()
     except RegistrationError as exc:
@@ -618,6 +626,9 @@ async def test_agent(
     nothing has ever answered for.
     """
     stored = await SettingsService(db).load_overrides()
+    # The definition is resolved; the call to the model is not this
+    # transaction's business and may take the whole probe budget.
+    await end_read_transaction(db)
     response = await _probe_response(run_agent_probe(name, body.values, stored))
     await _write_down_what_was_reached(db, (response.details or {}).get("completions") or [])
     await _record_the_probe(request, user, "agent", body, response, agent=name)
@@ -635,6 +646,9 @@ async def test_probe(
     if probe not in PROBES:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown probe: {probe}")
     stored = await SettingsService(db).load_overrides()
+    # An LLM probe is allowed five minutes at a third-party endpoint; the read
+    # that prepared it ends here rather than waiting for the answer.
+    await end_read_transaction(db)
     response = await _probe_response(run_probe(probe, body.values, stored))
     if probe == "llm":
         await _write_down_what_was_reached(db, (response.details or {}).get("completions") or [])

@@ -11,11 +11,13 @@ pipeline, streaming progress events via Redis PubSub.
 import asyncio
 import gc
 import os
+import platform
 import signal
 import time
 import traceback
 import uuid
 from collections.abc import Callable, Iterable
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -41,13 +43,32 @@ logger = get_logger("worker")
 _SECRET_PATHS = [e.path for e in core_catalog() if e.secret]
 
 
-class AbsentAnalysisError(Exception):
+class StatedFailure(Exception):
+    """A failure whose message this module wrote for an operator to read.
+
+    Every word of it is composed here, from constants and from ids this system
+    issued — never by a driver, a filesystem or a model — so it carries no host
+    path, no connection string and nothing a sample author chose. That is what
+    makes it safe to publish, and ``failure_reason`` keeps the message of this
+    class where it puts only the exception's class name for everything else.
+
+    Raise it wherever this module knows better than the caller's stack trace
+    what the operator should do next; a bare ``ValueError`` in the same place
+    reaches the console as ``ValueError (error id …)`` and the sentence stays
+    in the log.
+    """
+
+
+class AbsentAnalysisError(StatedFailure):
     """The pipeline ran and produced no analysis at all.
 
     Its own class rather than a flag, so the one failure path already in this
     module marks the job failed, records the message and persists no report —
     a job that says "completed" over a run nobody performed is worse than one
     that says it failed, because only the first is read as a result.
+
+    The message comes from ``pipeline.outcome``, which composes it from a
+    provider's error class and status and never from its body.
     """
 
 
@@ -741,6 +762,218 @@ def _make_event_sink(
     return sink
 
 
+# How long the heartbeat waits between reads of this job's cancel flag. It is
+# also how long the log goes quiet between "still running" lines, so it is a
+# name rather than a literal: a test that has to see one poll happen does not
+# have to wait a quarter of a minute for it.
+CANCEL_POLL_SECONDS = 15.0
+
+
+# ── Job ownership ───────────────────────────────────────────────
+
+
+# The key a worker holds while it is running a job, and how long it lives.
+#
+# Ownership has to be a statement by the process that is doing the work, about
+# the job it is doing. arq's own keys cannot say that: the in-progress claim is
+# written once and lives for the job timeout, so it outlives the process that
+# made it by hours, and the health key is queue-wide and lives thirty-one
+# seconds past its last write, so a worker that was killed a moment ago still
+# looks alive — which is exactly the case the sweep exists for.
+#
+# A heartbeat under the job's own id says both things at once: it exists only
+# while a worker is alive *and* still on that job, and it names which worker,
+# so a second worker's job is never mistaken for an abandoned one. The value is
+# for the log; the sweep reads only whether the key is there.
+JOB_OWNER_KEY_PREFIX = "maljan:job-owner:"
+JOB_OWNER_TTL_SECONDS = 90
+JOB_OWNER_REFRESH_SECONDS = 30
+
+# This process, as the heartbeat names it.
+WORKER_ID = f"{platform.node()}:{os.getpid()}"
+
+
+def canonical_job_id(job_id: str) -> str:
+    """One spelling of a job id, whatever spelling arrived.
+
+    A claim comes in as arq passed it and the sweep spells the same job from
+    its database row, and ``uuid.UUID`` accepts the uppercase, brace-wrapped
+    and unhyphenated forms of one id. Two spellings would mean a key written
+    under one and looked for under the other — a live job with no heartbeat as
+    far as the sweep can tell. Anything that does not parse is left as it is:
+    this is a spelling, never a gate.
+    """
+    try:
+        return str(uuid.UUID(job_id))
+    except (ValueError, AttributeError, TypeError):
+        return job_id
+
+
+def job_owner_key(job_id: str) -> str:
+    """Where this job's owner writes that it is still running it."""
+    return f"{JOB_OWNER_KEY_PREFIX}{canonical_job_id(job_id)}"
+
+
+# The jobs this process is running right now, under the one spelling. The sweep
+# skips them whatever Redis says: a heartbeat that could not be written is a
+# Redis problem, and a worker that failed its own live job over one would be a
+# worse one.
+_OWNED_JOBS: set[str] = set()
+
+
+async def claim_job(redis_conn: Any, job_id: str) -> bool:
+    """Say this worker is running this job, for the next TTL. Never raises."""
+    canonical = canonical_job_id(job_id)
+    _OWNED_JOBS.add(canonical)
+    try:
+        await redis_conn.set(job_owner_key(canonical), WORKER_ID, ex=JOB_OWNER_TTL_SECONDS)
+    except Exception as exc:  # noqa: BLE001 — a heartbeat never costs a run
+        logger.warning(
+            "Could not write the owner heartbeat for job %s (%s); the sweep skips "
+            "the jobs this process is running, so the run is unaffected.",
+            canonical,
+            type(exc).__name__,
+            extra={"job_id": canonical, "component": "worker.lifecycle"},
+        )
+        return False
+    return True
+
+
+async def release_job(redis_conn: Any, job_id: str) -> None:
+    """Stop claiming this job, on every way out of it. Never raises."""
+    canonical = canonical_job_id(job_id)
+    _OWNED_JOBS.discard(canonical)
+    try:
+        await redis_conn.delete(job_owner_key(canonical))
+    except Exception as exc:  # noqa: BLE001 — the key expires on its own
+        logger.debug(
+            "Could not drop the owner heartbeat for job %s (%s); it expires in %ds.",
+            canonical,
+            type(exc).__name__,
+            JOB_OWNER_TTL_SECONDS,
+            extra={"job_id": canonical},
+        )
+
+
+async def hold_job_owner(redis_conn: Any, job_id: str) -> None:
+    """Refresh this job's claim until the task running this is cancelled.
+
+    Two refreshes inside one TTL, so a missed write — a Redis blip, a loop that
+    was busy — does not expire the claim on its own.
+    """
+    while True:
+        await asyncio.sleep(JOB_OWNER_REFRESH_SECONDS)
+        await claim_job(redis_conn, job_id)
+
+
+async def live_owners(redis_conn: Any, job_ids: list[str]) -> set[str] | None:
+    """Which of these jobs a worker is currently saying it owns.
+
+    ``None`` when Redis cannot answer, which is not the same as "nobody owns
+    them" and is treated differently by the caller.
+    """
+    if not job_ids:
+        return set()
+    global _QUEUE_UNREADABLE_SAID
+    try:
+        held = await redis_conn.mget([job_owner_key(job_id) for job_id in job_ids])
+    except Exception as exc:  # noqa: BLE001 — an unreadable queue is not a verdict
+        _log_unreadable_queue(type(exc).__name__)
+        return None
+    # Readable again, so the next outage is worth saying out loud as well.
+    _QUEUE_UNREADABLE_SAID = False
+    return {job_id for job_id, value in zip(job_ids, held, strict=False) if value is not None}
+
+
+# Whether the "Redis cannot be read" line has been logged since the last time
+# it could be. The sweep runs every few minutes for the life of the worker, and
+# an outage that logged on every pass would bury everything else.
+_QUEUE_UNREADABLE_SAID = False
+
+
+def _log_unreadable_queue(reason: str) -> None:
+    global _QUEUE_UNREADABLE_SAID
+    if _QUEUE_UNREADABLE_SAID:
+        logger.debug("Orphan sweep: the queue is still unreadable (%s).", reason)
+        return
+    _QUEUE_UNREADABLE_SAID = True
+    logger.warning(
+        "Orphan sweep: the queue could not be read (%s); no job row is touched "
+        "until it can be, because ownership cannot be established without it.",
+        reason,
+        extra={"component": "worker.lifecycle"},
+    )
+
+
+# ── Job outcome ─────────────────────────────────────────────────
+
+
+def failure_reason(exc: BaseException, error_id: str) -> str:
+    """What a failed job says about itself, on the API and in the console.
+
+    The class of the exception and the id that reaches the log entry holding
+    everything else. ``job.error_message`` is a field of ``JobResponse``, so
+    the message of an exception put there is published: a file the worker
+    could not open names a host path, and a driver names the connection string
+    it was configured with. The same rule the event feed already follows —
+    a failed node travels as the class of its exception, never its message.
+
+    ``StatedFailure`` is the exception this module raises with a sentence it
+    wrote itself — the absent analysis, an attached report that belongs to
+    another sample, a sandbox provider that cannot take one — so that sentence
+    is what the job says, and it is the reason the class exists.
+    """
+    if isinstance(exc, StatedFailure):
+        return f"{exc} (error id {error_id})"
+    return f"{type(exc).__name__} (error id {error_id})"
+
+
+async def mark_job_failed(
+    db_session: async_sessionmaker,
+    job_uuid: uuid.UUID,
+    *,
+    reason: str,
+    error_id: str,
+) -> bool:
+    """Record a failure on a session of its own. Never raises.
+
+    Opens a new session rather than reusing whichever one the job was writing
+    through, because the session that was writing is the one most likely to be
+    unusable: once a backend has been terminated under it, every statement on
+    it raises ``PendingRollbackError`` and the failure cannot be recorded at
+    all. A new session takes a new connection from the pool, so the row is
+    written even when the job's own connection is gone.
+
+    A ``cancelled`` row is left alone: the operator's decision outranks
+    whatever the run raised on its way down.
+    """
+    from app.models.job import AnalysisJob
+
+    try:
+        async with db_session() as db:
+            await db.execute(
+                update(AnalysisJob)
+                .where(AnalysisJob.id == job_uuid, AnalysisJob.status != "cancelled")
+                .values(
+                    status="failed",
+                    error_message=reason[:2000],
+                    completed_at=datetime.now(UTC),
+                )
+            )
+            await db.commit()
+        return True
+    except Exception as exc:  # noqa: BLE001 — the run has already failed
+        logger.error(
+            "Could not mark job %s failed (%s); error_id=%s. The startup sweep "
+            "repairs the row when this worker next boots.",
+            job_uuid,
+            type(exc).__name__,
+            error_id,
+            extra={"job_id": str(job_uuid), "error_id": error_id},
+        )
+        return False
+
+
 # ── Main analysis task ──────────────────────────────────────────
 
 
@@ -766,44 +999,71 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
     redis_conn: aioredis.Redis = ctx["redis"]
     db_session: async_sessionmaker = ctx["db_session"]
 
-    async with db_session() as db:
-        job = None  # Ensure job is defined for the except block
-        app: Any = None  # released in the finally below, whichever way we leave
-        # Declared here (rather than at the download site further down) so the
-        # outer ``finally`` can always remove them, including on every early
-        # return above the download (invalid job id, job not found, already
-        # cancelled) — those paths never reach the download but still run
-        # this function's one ``finally``, which references both names.
-        temp_path: str | None = None
-        # One entry per provider actually mirrored (a profile with two
-        # static analysts on two providers mirrors twice); the ``finally``
-        # below removes every one of them, symmetric with today's single-path
-        # cleanup.
-        host_mirrors: list[Path] = []
-        # L2 (live-run finding): set below when an attached sandbox report's
-        # own claimed hash disagreed with the sample at upload time, so the
-        # degradation makes it into both run_summary and the report banner
-        # even though nothing in the pipeline itself reads the stored flag.
-        _report_hash_mismatch_reason: str | None = None
-        # Registered here rather than above the session: this is the statement
-        # before the ``try`` whose ``finally`` unregisters it, so there is no
-        # window in which a raise leaves a buffer in the module-global map for
-        # the life of the process. Still before the run's first event — the
-        # status change below — because a feed that starts late starts at the
-        # wrong ``seq``.
-        _start_event_feed(job_id, db_session)
+    job_uuid: uuid.UUID | None = None  # set once the id parses; read by the failure path
+    app: Any = None  # released in the finally below, whichever way we leave
+    # Declared here (rather than at the download site further down) so the
+    # outer ``finally`` can always remove them, including on every early
+    # return above the download (invalid job id, job not found, already
+    # cancelled) — those paths never reach the download but still run
+    # this function's one ``finally``, which references both names.
+    temp_path: str | None = None
+    # One entry per provider actually mirrored (a profile with two
+    # static analysts on two providers mirrors twice); the ``finally``
+    # below removes every one of them, symmetric with today's single-path
+    # cleanup.
+    host_mirrors: list[Path] = []
+    # L2 (live-run finding): set below when an attached sandbox report's
+    # own claimed hash disagreed with the sample at upload time, so the
+    # degradation makes it into both run_summary and the report banner
+    # even though nothing in the pipeline itself reads the stored flag.
+    _report_hash_mismatch_reason: str | None = None
+    # The task that keeps this job's owner heartbeat alive, cancelled by the
+    # ``finally`` below so it cannot outlive the run it speaks for.
+    owner_task: asyncio.Task | None = None
+    # Registered here rather than above the session: this is the statement
+    # before the ``try`` whose ``finally`` unregisters it, so there is no
+    # window in which a raise leaves a buffer in the module-global map for
+    # the life of the process. Still before the run's first event — the
+    # status change below — because a feed that starts late starts at the
+    # wrong ``seq``.
+    _start_event_feed(job_id, db_session)
+    try:
+        # ── 1. Load job ──────────────────────────────────────
+        from app.models.job import AnalysisJob
+        from app.models.sample import Sample
+
         try:
-            # ── 1. Load job ──────────────────────────────────────
-            from app.models.job import AnalysisJob
-            from app.models.sample import Sample
+            job_uuid = uuid.UUID(job_id)
+        except ValueError as exc:
+            logger.error(f"Invalid job_id UUID: {job_id}", extra={"job_id": job_id})
+            await _publish_event(redis_conn, job_id, "error", {"message": "Invalid job ID"})
+            return {"status": "error", "message": f"Invalid job ID: {exc}"}
 
-            try:
-                job_uuid = uuid.UUID(job_id)
-            except ValueError as exc:
-                logger.error(f"Invalid job_id UUID: {job_id}", extra={"job_id": job_id})
-                await _publish_event(redis_conn, job_id, "error", {"message": "Invalid job ID"})
-                return {"status": "error", "message": f"Invalid job ID: {exc}"}
+        # Before the row is touched, so there is no moment in which a job says
+        # ``running`` and no worker says it is running it. Refreshed by a task
+        # of its own for as long as the run lasts, and dropped by the
+        # ``finally`` below on success, failure and cancellation alike. Under
+        # the id as it parsed, which is the spelling the sweep reads back out
+        # of the database.
+        await claim_job(redis_conn, str(job_uuid))
+        owner_task = asyncio.create_task(hold_job_owner(redis_conn, str(job_uuid)))
 
+        # Everything this run needs out of the database before the models
+        # start, in one short session that is closed again before the
+        # pipeline is built: the job row, its sample, the stored settings
+        # and any attached sandbox report, plus the move to ``running``.
+        #
+        # The session used to stay open for the whole analysis. That left a
+        # backend ``idle in transaction`` for as long as the run took —
+        # thirteen minutes and more — holding an ``AccessShareLock`` on
+        # ``analysis_jobs``, ``analysis_reports`` and ``runtime_settings``
+        # and pinning a snapshot. A migration's ``ALTER TABLE
+        # analysis_reports`` queued behind it and every read of that table
+        # queued behind the ALTER, so a running analysis could stall the
+        # API's own job reads. It also made the run fragile: one lost
+        # connection invalidated the transaction the whole job wrote
+        # through.
+        async with db_session() as db:
             result = await db.execute(select(AnalysisJob).where(AnalysisJob.id == job_uuid))
             job = result.scalar_one_or_none()
 
@@ -817,15 +1077,26 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 await _publish_event(redis_conn, job_id, "cancelled", {})
                 return {"status": "cancelled"}
 
+            # Read out as plain values rather than carried as ORM objects:
+            # the session ends here and an attribute that had to be
+            # refreshed afterwards would open a transaction of its own,
+            # somewhere in the middle of the run, on whichever session
+            # happened to be at hand.
+            job_config: dict[str, Any] = dict(job.config or {})
+
             # Load associated sample
             sample_result = await db.execute(select(Sample).where(Sample.id == job.sample_id))
             sample = sample_result.scalar_one()
+            sample_uuid = sample.id
+            sample_sha256 = str(sample.sha256)
+            sample_filename = str(sample.original_filename or "")
+            sample_storage_path = str(sample.storage_path or "")
 
             logger.info(
                 "Processing sample: sha256=%s... filename=%s",
-                sample.sha256[:16],
-                sample.original_filename,
-                extra={"job_id": job_id, "sample_id": str(sample.id)},
+                sample_sha256[:16],
+                sample_filename,
+                extra={"job_id": job_id, "sample_id": str(sample_uuid)},
             )
 
             # ── 2. Transition to running ─────────────────────────
@@ -834,29 +1105,13 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # (which is also ``server_default=func.now()``). Mixing host
             # time ``datetime.now(UTC)`` here produced ``started_at <
             # created_at`` on Windows hosts where Docker Desktop's VM
-            # clock drifts after sleep/hibernate. We still touch the
-            # Python attribute so synchronous callers/tests with mocked
-            # sessions can read the value before ``refresh`` lands.
-            job.status = "running"
-            job.started_at = datetime.now(UTC)
+            # clock drifts after sleep/hibernate.
             await db.execute(
-                update(AnalysisJob).where(AnalysisJob.id == job.id).values(started_at=func.now())
+                update(AnalysisJob)
+                .where(AnalysisJob.id == job_uuid)
+                .values(status="running", started_at=func.now())
             )
             await db.commit()
-            await db.refresh(job)
-
-            await _publish_event(redis_conn, job_id, "status_change", {"status": "running"})
-            logger.info(f"Job status -> running: {job_id}", extra={"job_id": job_id})
-
-            # ── 3. Run the pipeline ──────────────────────────────
-            start_time = time.time()
-
-            from maljan.app import MaljanApp
-
-            logger.info(
-                "Starting pipeline execution...",
-                extra={"job_id": job_id, "component": "pipeline"},
-            )
 
             # Build this job's Settings from any stored UI overrides plus
             # model defaults (UI > default; see settings_overrides.
@@ -864,8 +1119,6 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # the job's own config on top. A DB error loading overrides must
             # not fail the job -- fall back to default-only settings and say
             # so, without ever logging a secret value.
-            from maljan.core.config import install_settings
-
             from app.services.settings_service import load_core_overrides
 
             try:
@@ -879,488 +1132,547 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     extra={"job_id": job_id},
                 )
                 overrides = {}
-            try:
-                core_settings = build_job_settings(overrides, job.config)
-            except (ValidationError, ValueError) as exc:
-                # Stored overrides that validated when saved can stop validating
-                # after a deploy narrows a field, and two orphan rows can nest
-                # into a conflict. One job must not take the queue down: run on
-                # default settings, name the fields.
-                bad = (
-                    sorted({".".join(str(x) for x in e["loc"]) for e in exc.errors()})
-                    if isinstance(exc, ValidationError)
-                    else [type(exc).__name__]
-                )
-                logger.warning(
-                    "Runtime settings rejected by the model (%s); "
-                    "retrying job %s without the stored overrides.",
-                    ", ".join(bad),
-                    job_id,
-                    extra={"job_id": job_id},
-                )
-                overrides = {}
-                try:
-                    core_settings = build_job_settings({}, job.config)
-                except (ValidationError, ValueError):
-                    # The rejected value was the job's own config, not a
-                    # stored override (the API validates it at submit time,
-                    # but a row written another way still reaches here).
-                    logger.warning(
-                        "Job %s config rejected by the model; running on default settings only.",
-                        job_id,
-                        extra={"job_id": job_id},
+
+            # A job that names an attached report is read here too, for the
+            # same reason: the row is wanted before the pipeline starts and
+            # the ownership question belongs to the read. The bytes are
+            # fetched later, once the container's sandbox provider is
+            # known. The ownership is part of the query
+            # (``attached_report_stmt``), so a report attached to somebody
+            # else's sample is never read at all -- guessing a UUID returns
+            # nothing rather than a row this then refuses.
+            attached_report: Any = None
+            _attached_report_id = job_config.get("sandbox_report_id")
+            if _attached_report_id:
+                attached_report = (
+                    await db.execute(
+                        attached_report_stmt(uuid.UUID(str(_attached_report_id)), sample_uuid)
                     )
-                    core_settings = build_job_settings({}, None)
-            # Agents, pipeline nodes and extractors read the process singleton
-            # (``get_settings()``), not the config handed to MaljanApp. With
-            # ``max_jobs = 1`` installing this job's Settings there is what
-            # makes a UI override reach every consumer, not only the container.
-            # The object stays installed after the job: ``enrich_threat_intel``
-            # runs in this process too but reads only API settings and
-            # ``runtime_config`` today; if it ever needs core config it must
-            # install its own.
-            install_settings(core_settings)
-            if overrides:
-                logger.info(
-                    "Applying %d runtime setting override(s) from the UI.",
-                    len(overrides),
-                    extra={"job_id": job_id},
-                )
-
-            # Mock-mode resolution.
-            # Two independent toggles must agree before the pipeline runs
-            # in mock mode:
-            #   1. ``api.mock_mode_allowed`` — operator-level gate
-            #      (defaults False; must be flipped via the settings store).
-            #   2. Either the per-job ``config.mock_mode`` flag OR the
-            #      ``MALJAN_MOCK_MODE`` env var.
-            # A leaked env var alone is no longer sufficient — production
-            # workers stay on the real LLM/sandbox path even if a stale
-            # shell exports ``MALJAN_MOCK_MODE=true``.
-            _env_mock = os.environ.get("MALJAN_MOCK_MODE", "false").lower() == "true"
-            _job_mock = bool(job.config and job.config.get("mock_mode"))
-            _mock_requested = _env_mock or _job_mock
-            _mock_mode_allowed = await runtime_config.get("mock_mode_allowed")
-            _mock_active = bool(_mock_mode_allowed and _mock_requested)
-            if _mock_requested and not _mock_active:
-                logger.warning(
-                    "Pipeline mock requested (env=%s, job=%s) but blocked: "
-                    "api.mock_mode_allowed=False. Running real pipeline.",
-                    _env_mock,
-                    _job_mock,
-                )
-            logger.info(
-                "Pipeline mode: %s (env=%s job=%s allowed=%s).",
-                "MOCK" if _mock_active else "REAL",
-                _env_mock,
-                _job_mock,
-                _mock_mode_allowed,
-            )
-            # The sink is what turns a 30-minute silent run into a readable
-            # transcript: each node reports its own findings as it produces
-            # them, straight onto the same PubSub channel the Live tab is
-            # already attached to. ``transcript`` collects those same messages
-            # so they can be written to ``agent_messages`` when the run
-            # finishes — the live feed and the permanent record are one list,
-            # not two derivations that can drift.
-            transcript: list[dict[str, Any]] = []
-            from maljan.core import memprobe
-
-            memprobe.reset()
-            memprobe.probe("job:start", job_id=job_id)
-            app = MaljanApp(
-                config=core_settings,
-                mock=_mock_active,
-                job_id=job_id,
-                event_sink=_make_event_sink(
-                    redis_conn,
-                    job_id,
-                    asyncio.get_running_loop(),
-                    recorder=transcript,
-                ),
-            )
-
-            # A job that names an attached report hands its bytes to the
-            # sandbox provider before anything else runs: build_job_settings
-            # already forced sandbox.provider="upload" above, so the provider
-            # this container builds is the one that reads what the operator
-            # brought instead of detonating anything. The ownership is part of
-            # the query (``attached_report_stmt``), so a report attached to
-            # somebody else's sample is never read at all -- guessing a UUID
-            # returns nothing rather than a row this then refuses.
-            report_id = (job.config or {}).get("sandbox_report_id")
-            if report_id:
-                from app.api.v1.sandbox_reports import get_object
-
-                row = (
-                    await db.execute(attached_report_stmt(uuid.UUID(str(report_id)), sample.id))
                 ).scalar_one_or_none()
-                if row is None:
-                    raise ValueError("The attached sandbox report does not belong to this sample.")
-                # L2: the upload endpoint's mismatch warning promises "The
-                # analysis will still run and will say so in its findings" —
-                # nothing threaded the stored flag into the run until now.
-                if row.sample_sha256_match is False:
-                    _report_hash_mismatch_reason = (
-                        "uploaded sandbox report's target hash differs from the sample"
+                if attached_report is None:
+                    raise StatedFailure(
+                        "The attached sandbox report does not belong to this sample."
                     )
-                    logger.warning(
-                        "Attached sandbox report %s claims a target hash that does not "
-                        "match sample %s; recording it as a run degradation.",
-                        row.id,
-                        sample.sha256[:12],
-                        extra={"job_id": job_id},
-                    )
-                sandbox_provider = app.container.get_sandbox_provider()
-                # A mock-mode job still resolves sandbox.provider="upload" through
-                # build_job_settings, but ServiceContainer.get_sandbox_provider()'s
-                # own mock override runs after that and wins, so the object here
-                # can be a MockSandboxProvider with no set_pending_blob at all.
-                # Checked by capability, not by provider id, the same way every
-                # other branch in this layer is: an attribute error escaping to
-                # job.error_message would show the user a raw internal exception
-                # instead of saying what actually happened.
-                if not sandbox_provider.capabilities.accepts_uploaded_report:
-                    raise ValueError(
-                        "A sandbox report is attached to this job, but the configured "
-                        f"sandbox provider ({sandbox_provider.id!r}) cannot accept an "
-                        "uploaded report."
-                    )
-                sandbox_provider.set_pending_blob(
-                    await asyncio.to_thread(get_object, row.storage_path),
-                    filename=f"{row.id}.json",
-                )
+                _attached_storage_path = str(attached_report.storage_path)
+                _attached_row_id = attached_report.id
+                _attached_hash_matches = attached_report.sample_sha256_match
 
-            # Announce which analysts are about to run so the frontend can show
-            # them. The active profile, not the class registry: a job that runs
-            # four analysts must not announce three.
-            registered_agents = app.container.analyst_keys()
+            # The reads above opened a transaction of their own after the
+            # commit. Ending it here is what makes the session's whole life
+            # the length of this block rather than the length of the run.
+            await db.commit()
+
+        await _publish_event(redis_conn, job_id, "status_change", {"status": "running"})
+        logger.info(f"Job status -> running: {job_id}", extra={"job_id": job_id})
+
+        # ── 3. Run the pipeline ──────────────────────────────
+        start_time = time.time()
+
+        from maljan.app import MaljanApp
+
+        logger.info(
+            "Starting pipeline execution...",
+            extra={"job_id": job_id, "component": "pipeline"},
+        )
+
+        from maljan.core.config import install_settings
+
+        try:
+            core_settings = build_job_settings(overrides, job_config)
+        except (ValidationError, ValueError) as exc:
+            # Stored overrides that validated when saved can stop validating
+            # after a deploy narrows a field, and two orphan rows can nest
+            # into a conflict. One job must not take the queue down: run on
+            # default settings, name the fields.
+            bad = (
+                sorted({".".join(str(x) for x in e["loc"]) for e in exc.errors()})
+                if isinstance(exc, ValidationError)
+                else [type(exc).__name__]
+            )
+            logger.warning(
+                "Runtime settings rejected by the model (%s); "
+                "retrying job %s without the stored overrides.",
+                ", ".join(bad),
+                job_id,
+                extra={"job_id": job_id},
+            )
+            overrides = {}
+            try:
+                core_settings = build_job_settings({}, job_config)
+            except (ValidationError, ValueError):
+                # The rejected value was the job's own config, not a
+                # stored override (the API validates it at submit time,
+                # but a row written another way still reaches here).
+                logger.warning(
+                    "Job %s config rejected by the model; running on default settings only.",
+                    job_id,
+                    extra={"job_id": job_id},
+                )
+                core_settings = build_job_settings({}, None)
+        # Agents, pipeline nodes and extractors read the process singleton
+        # (``get_settings()``), not the config handed to MaljanApp. With
+        # ``max_jobs = 1`` installing this job's Settings there is what
+        # makes a UI override reach every consumer, not only the container.
+        # The object stays installed after the job: ``enrich_threat_intel``
+        # runs in this process too but reads only API settings and
+        # ``runtime_config`` today; if it ever needs core config it must
+        # install its own.
+        install_settings(core_settings)
+        if overrides:
+            logger.info(
+                "Applying %d runtime setting override(s) from the UI.",
+                len(overrides),
+                extra={"job_id": job_id},
+            )
+
+        # Mock-mode resolution.
+        # Two independent toggles must agree before the pipeline runs
+        # in mock mode:
+        #   1. ``api.mock_mode_allowed`` — operator-level gate
+        #      (defaults False; must be flipped via the settings store).
+        #   2. Either the per-job ``config.mock_mode`` flag OR the
+        #      ``MALJAN_MOCK_MODE`` env var.
+        # A leaked env var alone is no longer sufficient — production
+        # workers stay on the real LLM/sandbox path even if a stale
+        # shell exports ``MALJAN_MOCK_MODE=true``.
+        _env_mock = os.environ.get("MALJAN_MOCK_MODE", "false").lower() == "true"
+        _job_mock = bool(job_config.get("mock_mode"))
+        _mock_requested = _env_mock or _job_mock
+        _mock_mode_allowed = await runtime_config.get("mock_mode_allowed")
+        _mock_active = bool(_mock_mode_allowed and _mock_requested)
+        # Each flag is logged as a word this module chose, not as the value it
+        # read. Two of the three come out of the settings store, and a value
+        # interpolated straight from there is a settings value in a log line —
+        # which is what it looks like to a reader and to a scanner alike,
+        # whatever this particular key happens to hold. The reader learns the
+        # same thing either way: which of the three switches was on.
+        _said_env = "yes" if _env_mock else "no"
+        _said_job = "yes" if _job_mock else "no"
+        _said_allowed = "yes" if _mock_mode_allowed else "no"
+        if _mock_requested and not _mock_active:
+            logger.warning(
+                "Pipeline mock requested (env=%s, job=%s) but blocked: "
+                "api.mock_mode_allowed is off. Running real pipeline.",
+                _said_env,
+                _said_job,
+            )
+        logger.info(
+            "Pipeline mode: %s (env=%s job=%s allowed=%s).",
+            "MOCK" if _mock_active else "REAL",
+            _said_env,
+            _said_job,
+            _said_allowed,
+        )
+        # The sink is what turns a 30-minute silent run into a readable
+        # transcript: each node reports its own findings as it produces
+        # them, straight onto the same PubSub channel the Live tab is
+        # already attached to. ``transcript`` collects those same messages
+        # so they can be written to ``agent_messages`` when the run
+        # finishes — the live feed and the permanent record are one list,
+        # not two derivations that can drift.
+        transcript: list[dict[str, Any]] = []
+        from maljan.core import memprobe
+
+        memprobe.reset()
+        memprobe.probe("job:start", job_id=job_id)
+        app = MaljanApp(
+            config=core_settings,
+            mock=_mock_active,
+            job_id=job_id,
+            event_sink=_make_event_sink(
+                redis_conn,
+                job_id,
+                asyncio.get_running_loop(),
+                recorder=transcript,
+            ),
+        )
+
+        # A job that names an attached report hands its bytes to the
+        # sandbox provider before anything else runs: build_job_settings
+        # already forced sandbox.provider="upload" above, so the provider
+        # this container builds is the one that reads what the operator
+        # brought instead of detonating anything. The row itself was read
+        # and checked in the session above; what is left here needs the
+        # container rather than the database.
+        if attached_report is not None:
+            from app.api.v1.sandbox_reports import get_object
+
+            # L2: the upload endpoint's mismatch warning promises "The
+            # analysis will still run and will say so in its findings" —
+            # nothing threaded the stored flag into the run until now.
+            if _attached_hash_matches is False:
+                _report_hash_mismatch_reason = (
+                    "uploaded sandbox report's target hash differs from the sample"
+                )
+                logger.warning(
+                    "Attached sandbox report %s claims a target hash that does not "
+                    "match sample %s; recording it as a run degradation.",
+                    _attached_row_id,
+                    sample_sha256[:12],
+                    extra={"job_id": job_id},
+                )
+            sandbox_provider = app.container.get_sandbox_provider()
+            # A mock-mode job still resolves sandbox.provider="upload" through
+            # build_job_settings, but ServiceContainer.get_sandbox_provider()'s
+            # own mock override runs after that and wins, so the object here
+            # can be a MockSandboxProvider with no set_pending_blob at all.
+            # Checked by capability, not by provider id, the same way every
+            # other branch in this layer is: an attribute error escaping to
+            # job.error_message would show the user a raw internal exception
+            # instead of saying what actually happened. ``StatedFailure``
+            # rather than ``ValueError`` for the same reason: this sentence is
+            # the answer, and only that class reaches the console whole.
+            if not sandbox_provider.capabilities.accepts_uploaded_report:
+                raise StatedFailure(
+                    "A sandbox report is attached to this job, but the configured "
+                    f"sandbox provider ({sandbox_provider.id!r}) cannot accept an "
+                    "uploaded report."
+                )
+            sandbox_provider.set_pending_blob(
+                await asyncio.to_thread(get_object, _attached_storage_path),
+                filename=f"{_attached_row_id}.json",
+            )
+
+        # Announce which analysts are about to run so the frontend can show
+        # them. The active profile, not the class registry: a job that runs
+        # four analysts must not announce three.
+        registered_agents = app.container.analyst_keys()
+        await _publish_event(
+            redis_conn,
+            job_id,
+            "pipeline_started",
+            {
+                "agents": registered_agents,
+                "sample_filename": sample_filename,
+                "sha256": sample_sha256[:16] + "...",
+            },
+        )
+        # Everyone who can speak in this run and the stages they speak in,
+        # once, before anybody does. ``pipeline_started`` names the
+        # analysis-stage agents by key; this names every participant of
+        # every stage, with the label the operator gave it, so a reader
+        # who cannot open the admin settings still sees a name.
+        await _publish_event(redis_conn, job_id, "roster", _roster_for(app.container))
+        # Roster only — "waiting", not "analyzing". Analysts are serialised
+        # on the single-slot local model, so marking them all busy up front
+        # was simply false; each analyst node now announces its own start
+        # (see maljan.pipeline.nodes), which is the real signal.
+        for agent_name in registered_agents:
             await _publish_event(
                 redis_conn,
                 job_id,
-                "pipeline_started",
-                {
-                    "agents": registered_agents,
-                    "sample_filename": sample.original_filename,
-                    "sha256": sample.sha256[:16] + "...",
-                },
+                "agent_progress",
+                {"agent": agent_name, "phase": "waiting"},
             )
-            # Everyone who can speak in this run and the stages they speak in,
-            # once, before anybody does. ``pipeline_started`` names the
-            # analysis-stage agents by key; this names every participant of
-            # every stage, with the label the operator gave it, so a reader
-            # who cannot open the admin settings still sees a name.
-            await _publish_event(redis_conn, job_id, "roster", _roster_for(app.container))
-            # Roster only — "waiting", not "analyzing". Analysts are serialised
-            # on the single-slot local model, so marking them all busy up front
-            # was simply false; each analyst node now announces its own start
-            # (see maljan.pipeline.nodes), which is the real signal.
-            for agent_name in registered_agents:
-                await _publish_event(
-                    redis_conn,
-                    job_id,
-                    "agent_progress",
-                    {"agent": agent_name, "phase": "waiting"},
-                )
 
-            # Download sample from MinIO for sandbox submission
-            # (temp_path / host_mirrors are declared above, before the early
-            # returns, so the outer finally can always find them)
-            static_sample_path: str | None = None
-            static_sample_paths: dict[str, str] = {}
-            try:
-                from minio import Minio
-                from pydantic import SecretStr as _SecretStr
+        # Download sample from MinIO for sandbox submission
+        # (temp_path / host_mirrors are declared above, before the early
+        # returns, so the outer finally can always find them)
+        static_sample_path: str | None = None
+        static_sample_paths: dict[str, str] = {}
+        try:
+            from minio import Minio
+            from pydantic import SecretStr as _SecretStr
 
-                secret = settings.minio_secret_key
-                secret_value = (
-                    secret.get_secret_value() if isinstance(secret, _SecretStr) else str(secret)
-                )
-                minio_client = Minio(
-                    settings.minio_endpoint,
-                    access_key=settings.minio_access_key,
-                    secret_key=secret_value,
-                    secure=settings.minio_secure,
-                )
-                # Re-derive the storage path from the sha256 instead of trusting
-                # the value in the DB row (defence in depth against tampering).
-                derived_path = f"samples/{sample.sha256[:2]}/{sample.sha256}"
-                if sample.storage_path != derived_path:
-                    logger.warning(
-                        "Sample storage_path drift detected: db=%s expected=%s",
-                        sample.storage_path,
-                        derived_path,
-                    )
-                # Preserve the original filename extension so the sandbox
-                # backend can pick the right VM profile from the suffix
-                # (``.elf`` → Linux, ``.exe`` → Windows, etc.). Otherwise
-                # the bare sha256 would be treated as an unknown blob.
-                _orig_ext = Path(sample.original_filename or "").suffix
-                # Use the Defender-excluded upload tmp dir instead of the
-                # system temp dir. See ``APISettings.upload_temp_dir``.
-                # ``.resolve()`` is critical here — an ELF smoke test
-                # produced a relative ``data\uploads\.tmp\<sha>.elf`` path
-                # which then broke the sandbox client's submit path with
-                # ``[Errno 22] Invalid argument`` when its httpx coroutine
-                # opened the path from a different CWD. The fix is to
-                # resolve once at use-site so every downstream consumer
-                # (sandbox submit, Ghidra container path map, sandbox
-                # uploader) receives an absolute path.
-                from app.worker import sample_files
-
-                _worker_tmp = sample_files.temp_dir()
-                temp_path = str(_worker_tmp / f"{sample.sha256}{_orig_ext}")
-                minio_client.fget_object(
-                    settings.minio_bucket,
-                    derived_path,
-                    temp_path,
-                )
-                # 0o600 on the file; the parent dir is already 0o700 (owner-
-                # only) via ``sample_files.temp_dir()``, so this file is
-                # unreachable to anyone but the worker's own user either way.
-                os.chmod(temp_path, 0o600)
-                logger.info(
-                    "Downloaded sample from MinIO: %s -> %s",
-                    sample.storage_path,
-                    temp_path,
-                    extra={"job_id": job_id, "component": "minio"},
-                )
-
-                # Every sample used to be mirrored into
-                # ``<samples_dir>/.work/<sha256><ext>`` for the Ghidra
-                # container unconditionally. Provider capabilities turned
-                # that into a capability read: a
-                # capa/YARA or radare2 provider reads the bytes in place and
-                # needs no copy at all, so ``mirror_target_for`` asks the
-                # configured static provider first and returns None when it
-                # has nothing to mirror. When it does, the container-visible
-                # path still mirrors the bind mount in
-                # docker/docker-compose.yml (``../data/samples:/data/samples``).
-                #
-                # The mirror is a private
-                # 0o600 copy under a 0o700 ``.work`` subdirectory of
-                # ``samples_dir`` — never the operator's own corpus directory
-                # itself — and is removed by the ``finally`` below when the
-                # job ends, whichever way it ends.
-                # The mirror runs once per distinct static provider host path;
-                # ``mirror_static_samples`` is the tested unit for that loop,
-                # including the dedup that keeps two providers sharing one
-                # host path (e.g. Ghidra and a co-located r2mcp) from copying
-                # the sample twice — see test_worker_profile_mirror.py.
-                new_mirrors, new_sample_paths = mirror_static_samples(
-                    app.container,
-                    temp_path=temp_path,
-                    sha256=sample.sha256,
-                    extension=_orig_ext,
-                    copy_fn=sample_files.private_copy,
-                    job_id=job_id,
-                )
-                host_mirrors.extend(new_mirrors)
-                static_sample_paths.update(new_sample_paths)
-                static_sample_path = global_mirror_path(
-                    static_sample_paths, app.container.config.static
-                )
-            except Exception as exc:
+            secret = settings.minio_secret_key
+            secret_value = (
+                secret.get_secret_value() if isinstance(secret, _SecretStr) else str(secret)
+            )
+            minio_client = Minio(
+                settings.minio_endpoint,
+                access_key=settings.minio_access_key,
+                secret_key=secret_value,
+                secure=settings.minio_secure,
+            )
+            # Re-derive the storage path from the sha256 instead of trusting
+            # the value in the DB row (defence in depth against tampering).
+            derived_path = f"samples/{sample_sha256[:2]}/{sample_sha256}"
+            if sample_storage_path != derived_path:
                 logger.warning(
-                    "Failed to download sample from MinIO: %s. Sandbox submission skipped.",
-                    exc,
-                    extra={"job_id": job_id, "component": "minio"},
+                    "Sample storage_path drift detected: db=%s expected=%s",
+                    sample_storage_path,
+                    derived_path,
                 )
-                temp_path = None
+            # Preserve the original filename extension so the sandbox
+            # backend can pick the right VM profile from the suffix
+            # (``.elf`` → Linux, ``.exe`` → Windows, etc.). Otherwise
+            # the bare sha256 would be treated as an unknown blob.
+            _orig_ext = Path(sample_filename).suffix
+            # Use the Defender-excluded upload tmp dir instead of the
+            # system temp dir. See ``APISettings.upload_temp_dir``.
+            # ``.resolve()`` is critical here — an ELF smoke test
+            # produced a relative ``data\uploads\.tmp\<sha>.elf`` path
+            # which then broke the sandbox client's submit path with
+            # ``[Errno 22] Invalid argument`` when its httpx coroutine
+            # opened the path from a different CWD. The fix is to
+            # resolve once at use-site so every downstream consumer
+            # (sandbox submit, Ghidra container path map, sandbox
+            # uploader) receives an absolute path.
+            from app.worker import sample_files
 
-            # Execute the asynchronous pipeline natively to
-            # avoid "Event loop is closed" errors caused by threading mismatches.
-            # Heartbeat task keeps the job alive in the DB and logs progress.
-            heartbeat_stop_event = asyncio.Event()
-            pipeline_task: asyncio.Task | None = None
-            cancelled_by_user = False
-
-            async def _heartbeat() -> None:
-                # The heartbeat is also the cancellation
-                # poller. `cancel_job` sets `analysis:{job_id}:cancel`; the
-                # pipeline is a single long `await`, so cancelling that task is
-                # the only way to stop the run. Previously the worker checked the
-                # job status exactly once (before starting), so a cancel issued
-                # mid-run was ignored and the finished pipeline overwrote the
-                # `cancelled` row with `completed`/`failed`.
-                nonlocal cancelled_by_user
-                while not heartbeat_stop_event.is_set():
-                    try:
-                        await asyncio.wait_for(heartbeat_stop_event.wait(), timeout=15.0)
-                    except TimeoutError:
-                        try:
-                            if await redis_conn.get(f"analysis:{job_id}:cancel"):
-                                cancelled_by_user = True
-                                logger.info(
-                                    "Cancellation requested for job=%s — stopping pipeline.",
-                                    job_id,
-                                    extra={"job_id": job_id, "component": "heartbeat"},
-                                )
-                                if pipeline_task is not None:
-                                    pipeline_task.cancel()
-                                return
-                        except Exception as exc:  # noqa: BLE001 — polling must never kill the run
-                            logger.debug("Cancel-flag poll failed: %s", exc)
-                        logger.info(
-                            "Pipeline heartbeat: job=%s still running...",
-                            job_id,
-                            extra={"job_id": job_id, "component": "heartbeat"},
-                        )
-
-            heartbeat_task = asyncio.create_task(_heartbeat())
-
-            # The pipeline (analysts -> mediator -> judge -> report nodes)
-            # runs inside ``app.arun()`` as a single LangGraph step, so the
-            # worker only sees phase boundaries at the start and end. We
-            # emit a phase marker here so live consumers can distinguish
-            # "running but no agent events yet" from "agents actively
-            # working". Mid-pipeline phases would require LangGraph
-            # callback wiring.
-            await _publish_event(redis_conn, job_id, "phase_change", {"phase": "analyzing"})
-            try:
-                # Run the pipeline as a task so the heartbeat poller can cancel
-                # it when the user cancels the job.
-                pipeline_task = asyncio.create_task(
-                    app.arun(
-                        file_hash=sample.sha256,
-                        file_name=sample.original_filename,
-                        sample_path=temp_path,
-                        static_sample_path=static_sample_path,
-                        static_sample_paths=static_sample_paths,
-                    )
-                )
-                pipeline_result = await pipeline_task
-            except asyncio.CancelledError:
-                if not cancelled_by_user:
-                    raise
-                logger.info(
-                    "Pipeline cancelled by user request: job=%s",
-                    job_id,
-                    extra={"job_id": job_id},
-                )
-                await _publish_event(redis_conn, job_id, "cancelled", {})
-                async with db_session() as cleanup_db:
-                    await cleanup_db.execute(
-                        update(AnalysisJob)
-                        .where(AnalysisJob.id == job.id)
-                        .values(status="cancelled", completed_at=datetime.now(UTC))
-                    )
-                    await cleanup_db.commit()
-                return {"status": "cancelled", "job_id": job_id}
-            finally:
-                heartbeat_stop_event.set()
-                try:
-                    heartbeat_task.cancel()
-                    await heartbeat_task
-                except asyncio.CancelledError:
-                    pass
-
-            # Announce that all analysts have finished (pipeline -> negotiation phase)
-            for agent_name in registered_agents:
-                await _publish_event(
-                    redis_conn,
-                    job_id,
-                    "agent_progress",
-                    {"agent": agent_name, "phase": "done"},
-                )
-            await _publish_event(redis_conn, job_id, "phase_change", {"phase": "negotiation"})
-
-            elapsed = time.time() - start_time
+            _worker_tmp = sample_files.temp_dir()
+            temp_path = str(_worker_tmp / f"{sample_sha256}{_orig_ext}")
+            minio_client.fget_object(
+                settings.minio_bucket,
+                derived_path,
+                temp_path,
+            )
+            # 0o600 on the file; the parent dir is already 0o700 (owner-
+            # only) via ``sample_files.temp_dir()``, so this file is
+            # unreachable to anyone but the worker's own user either way.
+            os.chmod(temp_path, 0o600)
             logger.info(
-                f"Pipeline completed in {elapsed:.1f}s: job={job_id}",
-                extra={"job_id": job_id, "duration_ms": round(elapsed * 1000)},
+                "Downloaded sample from MinIO: %s -> %s",
+                sample_storage_path,
+                temp_path,
+                extra={"job_id": job_id, "component": "minio"},
             )
 
-            # A run in which no analyst answered and the judge never answered
-            # is not a degraded analysis, it is an absent one. Saving a report
-            # for it would publish a verdict and a confidence drawn from
-            # nothing, which is what a provider that refused every request
-            # produced: "completed", Suspicious, 0.0, no evidence and no error
-            # for the operator to act on. Raised rather than handled here so
-            # the one failure path below marks the job, records the message and
-            # persists nothing.
-            absent = absent_analysis_message(pipeline_result)
-            if absent:
-                raise AbsentAnalysisError(absent)
+            # Every sample used to be mirrored into
+            # ``<samples_dir>/.work/<sha256><ext>`` for the Ghidra
+            # container unconditionally. Provider capabilities turned
+            # that into a capability read: a
+            # capa/YARA or radare2 provider reads the bytes in place and
+            # needs no copy at all, so ``mirror_target_for`` asks the
+            # configured static provider first and returns None when it
+            # has nothing to mirror. When it does, the container-visible
+            # path still mirrors the bind mount in
+            # docker/docker-compose.yml (``../data/samples:/data/samples``).
+            #
+            # The mirror is a private
+            # 0o600 copy under a 0o700 ``.work`` subdirectory of
+            # ``samples_dir`` — never the operator's own corpus directory
+            # itself — and is removed by the ``finally`` below when the
+            # job ends, whichever way it ends.
+            # The mirror runs once per distinct static provider host path;
+            # ``mirror_static_samples`` is the tested unit for that loop,
+            # including the dedup that keeps two providers sharing one
+            # host path (e.g. Ghidra and a co-located r2mcp) from copying
+            # the sample twice — see test_worker_profile_mirror.py.
+            new_mirrors, new_sample_paths = mirror_static_samples(
+                app.container,
+                temp_path=temp_path,
+                sha256=sample_sha256,
+                extension=_orig_ext,
+                copy_fn=sample_files.private_copy,
+                job_id=job_id,
+            )
+            host_mirrors.extend(new_mirrors)
+            static_sample_paths.update(new_sample_paths)
+            static_sample_path = global_mirror_path(
+                static_sample_paths, app.container.config.static
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to download sample from MinIO: %s. Sandbox submission skipped.",
+                exc,
+                extra={"job_id": job_id, "component": "minio"},
+            )
+            temp_path = None
 
-            # Persistence phase begins — the worker is about to insert
-            # the report and findings into Postgres. Live consumers use
-            # this to switch the UI into a "saving results" state.
-            await _publish_event(redis_conn, job_id, "phase_change", {"phase": "reporting"})
+        # Execute the asynchronous pipeline natively to
+        # avoid "Event loop is closed" errors caused by threading mismatches.
+        # Heartbeat task keeps the job alive in the DB and logs progress.
+        heartbeat_stop_event = asyncio.Event()
+        pipeline_task: asyncio.Task | None = None
+        cancelled_by_user = False
 
-            # ── 4. Save report ───────────────────────────────────
-            from app.models.report import AgentFinding, AnalysisReport
+        async def _heartbeat() -> None:
+            # The heartbeat is also the cancellation
+            # poller. `cancel_job` sets `analysis:{job_id}:cancel`; the
+            # pipeline is a single long `await`, so cancelling that task is
+            # the only way to stop the run. Previously the worker checked the
+            # job status exactly once (before starting), so a cancel issued
+            # mid-run was ignored and the finished pipeline overwrote the
+            # `cancelled` row with `completed`/`failed`.
+            nonlocal cancelled_by_user
+            while not heartbeat_stop_event.is_set():
+                try:
+                    await asyncio.wait_for(heartbeat_stop_event.wait(), timeout=CANCEL_POLL_SECONDS)
+                except TimeoutError:
+                    try:
+                        if await redis_conn.get(f"analysis:{job_id}:cancel"):
+                            cancelled_by_user = True
+                            logger.info(
+                                "Cancellation requested for job=%s — stopping pipeline.",
+                                job_id,
+                                extra={"job_id": job_id, "component": "heartbeat"},
+                            )
+                            if pipeline_task is not None:
+                                pipeline_task.cancel()
+                            return
+                    except Exception as exc:  # noqa: BLE001 — polling must never kill the run
+                        logger.debug("Cancel-flag poll failed: %s", exc)
+                    logger.info(
+                        "Pipeline heartbeat: job=%s still running...",
+                        job_id,
+                        extra={"job_id": job_id, "component": "heartbeat"},
+                    )
 
-            # Prefer the rich extended bundle produced by ``report_node``
-            # (54+ objects with Identity/Indicator/ObservedData/Note/Report
-            # SDOs) over the minimal judge bundle. The legacy field is the
-            # fallback for callers that pre-date the MalwareReport refactor.
-            stix_bundle_for_persist = pipeline_result.get(
-                "stix_bundle_extended"
-            ) or pipeline_result.get("stix_output")
-            # Ensure STIX 2.1 ``spec_version`` is present on every bundle —
-            # the OASIS spec requires it on top-level bundle objects, and
-            # downstream tooling (OpenCTI / MISP / TAXII clients) silently
-            # rejects bundles that omit the field. Defensive: covers the
-            # case where the producer dropped it during serialization.
-            if isinstance(stix_bundle_for_persist, dict):
-                stix_bundle_for_persist.setdefault("spec_version", "2.1")
+        heartbeat_task = asyncio.create_task(_heartbeat())
 
-            # A masked, non-secret record of the Settings this job actually
-            # ran with, plus which core keys came from a stored UI override
-            # rather than the environment/default -- lets a report reader
-            # tell what was in effect without re-deriving it.
-            _run_summary = pipeline_result.get("run_summary")
-            _run_summary = dict(_run_summary) if isinstance(_run_summary, dict) else {}
-            _run_summary["settings_snapshot"] = settings_snapshot(core_settings, overrides.keys())
-            if _report_hash_mismatch_reason:
-                # Threaded in here rather than through the pipeline state:
-                # the mismatch is known before the graph runs (it is on the
-                # stored row, checked at upload time), and both the run
-                # summary and the report banner read a plain list of
-                # strings, so appending to each is the whole fix.
-                _existing_reasons = _run_summary.get("degradation_reasons")
-                _run_summary["degradation_reasons"] = [
-                    *(_existing_reasons if isinstance(_existing_reasons, list) else []),
+        # The pipeline (analysts -> mediator -> judge -> report nodes)
+        # runs inside ``app.arun()`` as a single LangGraph step, so the
+        # worker only sees phase boundaries at the start and end. We
+        # emit a phase marker here so live consumers can distinguish
+        # "running but no agent events yet" from "agents actively
+        # working". Mid-pipeline phases would require LangGraph
+        # callback wiring.
+        await _publish_event(redis_conn, job_id, "phase_change", {"phase": "analyzing"})
+        try:
+            # Run the pipeline as a task so the heartbeat poller can cancel
+            # it when the user cancels the job.
+            pipeline_task = asyncio.create_task(
+                app.arun(
+                    file_hash=sample_sha256,
+                    file_name=sample_filename,
+                    sample_path=temp_path,
+                    static_sample_path=static_sample_path,
+                    static_sample_paths=static_sample_paths,
+                )
+            )
+            pipeline_result = await pipeline_task
+        except asyncio.CancelledError:
+            if not cancelled_by_user:
+                raise
+            logger.info(
+                "Pipeline cancelled by user request: job=%s",
+                job_id,
+                extra={"job_id": job_id},
+            )
+            await _publish_event(redis_conn, job_id, "cancelled", {})
+            async with db_session() as cleanup_db:
+                await cleanup_db.execute(
+                    update(AnalysisJob)
+                    .where(AnalysisJob.id == job_uuid)
+                    .values(status="cancelled", completed_at=datetime.now(UTC))
+                )
+                await cleanup_db.commit()
+            return {"status": "cancelled", "job_id": job_id}
+        finally:
+            heartbeat_stop_event.set()
+            try:
+                heartbeat_task.cancel()
+                await heartbeat_task
+            except asyncio.CancelledError:
+                pass
+
+        # Announce that all analysts have finished (pipeline -> negotiation phase)
+        for agent_name in registered_agents:
+            await _publish_event(
+                redis_conn,
+                job_id,
+                "agent_progress",
+                {"agent": agent_name, "phase": "done"},
+            )
+        await _publish_event(redis_conn, job_id, "phase_change", {"phase": "negotiation"})
+
+        elapsed = time.time() - start_time
+        logger.info(
+            f"Pipeline completed in {elapsed:.1f}s: job={job_id}",
+            extra={"job_id": job_id, "duration_ms": round(elapsed * 1000)},
+        )
+
+        # A run in which no analyst answered and the judge never answered
+        # is not a degraded analysis, it is an absent one. Saving a report
+        # for it would publish a verdict and a confidence drawn from
+        # nothing, which is what a provider that refused every request
+        # produced: "completed", Suspicious, 0.0, no evidence and no error
+        # for the operator to act on. Raised rather than handled here so
+        # the one failure path below marks the job, records the message and
+        # persists nothing.
+        absent = absent_analysis_message(pipeline_result)
+        if absent:
+            raise AbsentAnalysisError(absent)
+
+        # Persistence phase begins — the worker is about to insert
+        # the report and findings into Postgres. Live consumers use
+        # this to switch the UI into a "saving results" state.
+        await _publish_event(redis_conn, job_id, "phase_change", {"phase": "reporting"})
+
+        # ── 4. Build the report ──────────────────────────────
+        from app.models.report import AgentFinding, AnalysisReport
+
+        # Prefer the rich extended bundle produced by ``report_node``
+        # (54+ objects with Identity/Indicator/ObservedData/Note/Report
+        # SDOs) over the minimal judge bundle. The legacy field is the
+        # fallback for callers that pre-date the MalwareReport refactor.
+        stix_bundle_for_persist = pipeline_result.get(
+            "stix_bundle_extended"
+        ) or pipeline_result.get("stix_output")
+        # Ensure STIX 2.1 ``spec_version`` is present on every bundle —
+        # the OASIS spec requires it on top-level bundle objects, and
+        # downstream tooling (OpenCTI / MISP / TAXII clients) silently
+        # rejects bundles that omit the field. Defensive: covers the
+        # case where the producer dropped it during serialization.
+        if isinstance(stix_bundle_for_persist, dict):
+            stix_bundle_for_persist.setdefault("spec_version", "2.1")
+
+        # A masked, non-secret record of the Settings this job actually
+        # ran with, plus which core keys came from a stored UI override
+        # rather than the environment/default -- lets a report reader
+        # tell what was in effect without re-deriving it.
+        _run_summary = pipeline_result.get("run_summary")
+        _run_summary = dict(_run_summary) if isinstance(_run_summary, dict) else {}
+        _run_summary["settings_snapshot"] = settings_snapshot(core_settings, overrides.keys())
+        if _report_hash_mismatch_reason:
+            # Threaded in here rather than through the pipeline state:
+            # the mismatch is known before the graph runs (it is on the
+            # stored row, checked at upload time), and both the run
+            # summary and the report banner read a plain list of
+            # strings, so appending to each is the whole fix.
+            _existing_reasons = _run_summary.get("degradation_reasons")
+            _run_summary["degradation_reasons"] = [
+                *(_existing_reasons if isinstance(_existing_reasons, list) else []),
+                _report_hash_mismatch_reason,
+            ]
+            _malware_report = pipeline_result.get("malware_report")
+            if isinstance(_malware_report, dict):
+                _report_reasons = _malware_report.get("degradation_reasons")
+                _malware_report["degradation_reasons"] = [
+                    *(_report_reasons if isinstance(_report_reasons, list) else []),
                     _report_hash_mismatch_reason,
                 ]
-                _malware_report = pipeline_result.get("malware_report")
-                if isinstance(_malware_report, dict):
-                    _report_reasons = _malware_report.get("degradation_reasons")
-                    _malware_report["degradation_reasons"] = [
-                        *(_report_reasons if isinstance(_report_reasons, list) else []),
-                        _report_hash_mismatch_reason,
-                    ]
 
-            # A pipeline that produced no report is a failed run, not a
-            # completed one with nothing in it (L15, security hardening):
-            # ``report_node`` returns ``{"report_error": "<type>: <msg>"}``
-            # instead of a ``malware_report`` when the deterministic build
-            # raised. Surface that message through the same failure path
-            # every other pipeline exception takes, below.
-            #
-            # A missing ``malware_report`` is not on its own evidence of a
-            # failure, though: with ``reporting.enabled = False`` the graph
-            # routes judge -> END and never runs the report node at all
-            # (``pipeline/builder.py``, ``pipeline/state.py``), so
-            # ``malware_report`` stays ``None`` by design on every run. Only
-            # fail the job when the report node actually raised
-            # (``report_error`` present) or reporting was expected to run
-            # for this job and did not produce one.
-            _report_error = pipeline_result.get("report_error")
-            if _report_error or (
-                core_settings.reporting.enabled and not pipeline_result.get("malware_report")
-            ):
-                logger.error(
-                    "Pipeline produced no report: job=%s report_error=%s",
-                    job_id,
-                    _report_error,
-                    extra={"job_id": job_id},
-                )
-                raise RuntimeError(_report_error or "pipeline produced no report")
+        # A pipeline that produced no report is a failed run, not a
+        # completed one with nothing in it (L15, security hardening):
+        # ``report_node`` returns ``{"report_error": "<type>: <msg>"}``
+        # instead of a ``malware_report`` when the deterministic build
+        # raised. Surface that message through the same failure path
+        # every other pipeline exception takes, below.
+        #
+        # A missing ``malware_report`` is not on its own evidence of a
+        # failure, though: with ``reporting.enabled = False`` the graph
+        # routes judge -> END and never runs the report node at all
+        # (``pipeline/builder.py``, ``pipeline/state.py``), so
+        # ``malware_report`` stays ``None`` by design on every run. Only
+        # fail the job when the report node actually raised
+        # (``report_error`` present) or reporting was expected to run
+        # for this job and did not produce one.
+        _report_error = pipeline_result.get("report_error")
+        if _report_error or (
+            core_settings.reporting.enabled and not pipeline_result.get("malware_report")
+        ):
+            logger.error(
+                "Pipeline produced no report: job=%s report_error=%s",
+                job_id,
+                _report_error,
+                extra={"job_id": job_id},
+            )
+            raise RuntimeError(_report_error or "pipeline produced no report")
 
+        # ── 4a. Save the report and everything that cites it ─
+        # The run's own writes, in one short transaction of their own,
+        # opened only now that the models have stopped. The report, the
+        # per-agent findings, the evidence ledger, the transcript and the
+        # completion go together because the report's sections cite the
+        # ledger's ids and a reader who is told the job completed then goes
+        # looking for them: a report whose citations resolve to nothing, or
+        # a "completed" row with no report under it, is worse than one more
+        # run of the analysis.
+        async with db_session() as db:
             report = AnalysisReport(
-                job_id=job.id,
+                job_id=job_uuid,
                 verdict=pipeline_result.get("final_decision", "Unknown"),
                 overall_confidence=_extract_confidence(pipeline_result),
                 malware_category=_extract_category(pipeline_result),
@@ -1434,7 +1746,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # is unique and this path only ever inserted, so an arq retry --
             # which arq schedules on its own -- reached the end of a full
             # analysis and threw the result away on a UniqueViolationError.
-            await _supersede_previous_report(db, job.id)
+            await _supersede_previous_report(db, job_uuid)
             db.add(report)
             await db.flush()
 
@@ -1528,10 +1840,10 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             for _entry in _ledger:
                 if not isinstance(_entry, dict):
                     continue
-                db.add(_evidence_row(_entry, job_id=job.id))
+                db.add(_evidence_row(_entry, job_id=job_uuid))
 
             logger.info(
-                f"Saved {len(_ledger)} evidence entries for job={job.id}",
+                f"Saved {len(_ledger)} evidence entries for job={job_id}",
                 extra={"job_id": job_id},
             )
 
@@ -1576,13 +1888,14 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # for a 20-minute pipeline. ``duration_seconds`` is computed in
             # Python anyway so a single clock source is correct.
             now = datetime.now(UTC)
-            job.status = "completed"
-            job.completed_at = now
-            job.duration_seconds = round(float(elapsed), 1)
+            # The status travels in the statement rather than on a loaded
+            # row: this session has never seen the job row, and the one that
+            # read it was closed before the pipeline started.
             await db.execute(
                 update(AnalysisJob)
-                .where(AnalysisJob.id == job.id)
+                .where(AnalysisJob.id == job_uuid)
                 .values(
+                    status="completed",
                     completed_at=now,
                     # Round to one decimal so sub-second jobs (~0.7s) don't
                     # collapse to zero; the column is ``Numeric(10,2)`` so
@@ -1591,175 +1904,187 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 )
             )
             await db.commit()
-            await db.refresh(job)
+            # Read off the report while its session is still open, so nothing
+            # below can send this function back to the database for a value.
+            report_uuid = report.id
+            report_verdict = report.verdict
+            report_confidence = report.overall_confidence
+            report_has_malware_report = bool(report.malware_report)
 
-            await _publish_event(
-                redis_conn,
-                job_id,
-                "completed",
-                {
-                    "status": "completed",
-                    "verdict": report.verdict,
-                    "confidence": report.overall_confidence,
-                    "duration_seconds": int(elapsed),
-                    "report_id": str(report.id),
-                },
-            )
-
-            logger.info(
-                f"Job completed: job={job_id} verdict={report.verdict} duration={int(elapsed)}s",
-                extra={"job_id": job_id, "component": "lifecycle"},
-            )
-
-            # ── 6. Auto-enqueue threat-intel enrichment ───────────────
-            # The enrichment job is post-hoc; pipeline latency is unaffected.
-            # ARQ enforces the unique ``_job_id`` so duplicate triggers
-            # (e.g. operator also calling /enrich manually) are coalesced.
-            if await runtime_config.get("enrichment_enabled") and report.malware_report:
-                try:
-                    arq_pool = ctx.get("arq_pool")
-                    if arq_pool is None:
-                        from arq.connections import ArqRedis
-
-                        arq_pool = ArqRedis(connection_pool=redis_conn.connection_pool)
-                    await arq_pool.enqueue_job(
-                        "enrich_threat_intel",
-                        str(report.id),
-                        _job_id=f"enrich:{report.id}",
-                    )
-                    logger.info(
-                        "enrich: queued report=%s",
-                        report.id,
-                        extra={"job_id": job_id, "component": "enrich"},
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("enrich: enqueue failed (%s).", exc)
-
-            return {
+        await _publish_event(
+            redis_conn,
+            job_id,
+            "completed",
+            {
                 "status": "completed",
-                "verdict": report.verdict,
-                "confidence": report.overall_confidence,
+                "verdict": report_verdict,
+                "confidence": report_confidence,
                 "duration_seconds": int(elapsed),
-            }
+                "report_id": str(report_uuid),
+            },
+        )
 
-        except Exception as exc:
-            # ── Error handling ────────────────────────────────────
-            tb = traceback.format_exc()
-            error_msg = f"{type(exc).__name__}: {exc}"
+        logger.info(
+            f"Job completed: job={job_id} verdict={report_verdict} duration={int(elapsed)}s",
+            extra={"job_id": job_id, "component": "lifecycle"},
+        )
 
-            logger.error(
-                f"Analysis failed: job={job_id} error={error_msg}",
-                exc_info=True,
-                extra={"job_id": job_id, "component": "pipeline"},
+        # ── 6. Auto-enqueue threat-intel enrichment ───────────────
+        # The enrichment job is post-hoc; pipeline latency is unaffected.
+        # ARQ enforces the unique ``_job_id`` so duplicate triggers
+        # (e.g. operator also calling /enrich manually) are coalesced.
+        if await runtime_config.get("enrichment_enabled") and report_has_malware_report:
+            try:
+                arq_pool = ctx.get("arq_pool")
+                if arq_pool is None:
+                    from arq.connections import ArqRedis
+
+                    arq_pool = ArqRedis(connection_pool=redis_conn.connection_pool)
+                await arq_pool.enqueue_job(
+                    "enrich_threat_intel",
+                    str(report_uuid),
+                    _job_id=f"enrich:{report_uuid}",
+                )
+                logger.info(
+                    "enrich: queued report=%s",
+                    report_uuid,
+                    extra={"job_id": job_id, "component": "enrich"},
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("enrich: enqueue failed (%s).", exc)
+
+        return {
+            "status": "completed",
+            "verdict": report_verdict,
+            "confidence": report_confidence,
+            "duration_seconds": int(elapsed),
+        }
+
+    except Exception as exc:
+        # ── Error handling ────────────────────────────────────
+        # The error id is minted first: it is what the job row, the event and
+        # the log entry below are joined on, and it is the only handle a
+        # reader of any of the three is given.
+        error_id = uuid.uuid4().hex
+        tb = traceback.format_exc()
+
+        logger.error(
+            "Analysis failed: job=%s error=%s: %s error_id=%s",
+            job_id,
+            type(exc).__name__,
+            exc,
+            error_id,
+            exc_info=True,
+            extra={"job_id": job_id, "component": "pipeline", "error_id": error_id},
+        )
+        logger.error(
+            "Pipeline failure error_id=%s job=%s traceback=%s",
+            error_id,
+            job_id,
+            tb,
+            extra={"job_id": job_id, "error_id": error_id},
+        )
+
+        reason = failure_reason(exc, error_id)
+        if job_uuid is not None:
+            # A session of its own, always. The session this job read through
+            # was closed before the pipeline started, and the one that was
+            # writing when a failure happened is exactly the session that may
+            # be unusable — a backend killed under it leaves every statement
+            # on it raising ``PendingRollbackError``, which is how a run that
+            # failed came to publish its ``error`` event and still leave the
+            # row saying ``running``, with no error and no ``completed_at``,
+            # for as long as the worker stayed up.
+            await mark_job_failed(db_session, job_uuid, reason=reason, error_id=error_id)
+        else:
+            logger.warning(
+                "Cannot update job status: the job id did not parse (job_id=%s).",
+                job_id,
+                extra={"job_id": job_id},
             )
 
+        # Do not leak tracebacks to clients — only emit an opaque error id
+        # that maps back to the structured log entries above.
+        await _publish_event(
+            redis_conn,
+            job_id,
+            "error",
+            {
+                "status": "failed",
+                "error_id": error_id,
+                "message": "Analysis failed. See server logs for details.",
+            },
+        )
+
+        return {"status": "failed", "error": reason}
+
+    finally:
+        # Whatever is still queued of this job's conversation, written
+        # before the task returns. First in the block: the teardown below
+        # can take a while and a reader who opens a cancelled run wants
+        # its last lines, not the ones from two seconds earlier.
+        await _stop_event_feed(job_id)
+
+        # The claim goes with the run, on every way out of it. Cancelled and
+        # awaited rather than left to the garbage collector: a refresher that
+        # outlived its job would keep saying a finished job is running, which
+        # is the one thing the sweep believes.
+        if owner_task is not None:
+            owner_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await owner_task
+        await release_job(redis_conn, job_id)
+
+        # The worker's own private copies of the sample never outlive the
+        # job that downloaded them, on success, failure or cancellation
+        # alike (H3, security hardening). ``remove_quietly`` is a no-op
+        # on ``None`` (nothing was ever downloaded) and never raises.
+        from app.worker import sample_files
+
+        sample_files.remove_quietly(temp_path, job_id=job_id)
+        for _host_mirror in host_mirrors:
+            sample_files.remove_quietly(_host_mirror, job_id=job_id)
+
+        # Release the agents' MCP toolkits, their stdio subprocesses and the
+        # per-job caches. A ``finally`` rather than ``async with`` because
+        # the body above spans ~500 lines and returns early on the
+        # user-cancelled path — this covers success, failure and
+        # cancellation without re-indenting any of it.
+        #
+        # ``aclose`` is total by construction (see MaljanApp.aclose), so a
+        # failed teardown cannot turn a completed analysis into a failed
+        # one. Whether it actually reclaims the memory is a separate
+        # question, which is why the readings are logged either side of it
+        # and why the worker also carries a hard recycle backstop.
+        if app is not None:
+            from maljan.core import memprobe
+
+            memprobe.probe("job:before_teardown", job_id=job_id)
             try:
-                if job is not None:
-                    job.status = "failed"
-                    job.error_message = error_msg[:2000]
-                    job.completed_at = datetime.now(UTC)
-                    await db.execute(
-                        update(AnalysisJob)
-                        .where(AnalysisJob.id == job.id)
-                        .values(completed_at=job.completed_at)
-                    )
-                    await db.commit()
-                else:
-                    logger.warning(
-                        "Cannot update job status: job was never loaded (job_id=%s).",
-                        job_id,
-                        extra={"job_id": job_id},
-                    )
-            except Exception as db_exc:
+                # The outermost fence. Each toolkit close is bounded, and
+                # the container bounds them again — this bounds the lot,
+                # because a job is not finished until this returns and
+                # ``max_jobs = 1`` means the next one cannot start.
+                #
+                # Earned the hard way: a run that had already written its
+                # report sat here for 42 minutes with arq still reporting
+                # ``j_ongoing=1``, and only ended on SIGTERM. An ``mcp``
+                # stdio exit stack waits on its child process, and a child
+                # that does not exit waits forever.
+                await asyncio.wait_for(app.aclose(), timeout=_TEARDOWN_BUDGET)
+            except TimeoutError:
                 logger.error(
-                    f"Failed to update job status: {db_exc}",
-                    exc_info=True,
+                    "Teardown exceeded %.0fs and was abandoned; the job is "
+                    "complete and its result is stored, but MCP subprocesses "
+                    "may have leaked. The RSS ceiling will recycle the worker.",
+                    _TEARDOWN_BUDGET,
                     extra={"job_id": job_id},
                 )
-                await db.rollback()
-
-            # Do not leak tracebacks to clients — only emit an opaque error id
-            # that maps back to the structured log entry above.
-            import uuid as _uuid
-
-            error_id = _uuid.uuid4().hex
-            logger.error(
-                "Pipeline failure error_id=%s job=%s traceback=%s",
-                error_id,
-                job_id,
-                tb,
-                extra={"job_id": job_id, "error_id": error_id},
-            )
-            await _publish_event(
-                redis_conn,
-                job_id,
-                "error",
-                {
-                    "status": "failed",
-                    "error_id": error_id,
-                    "message": "Analysis failed. See server logs for details.",
-                },
-            )
-
-            return {"status": "failed", "error": error_msg}
-
-        finally:
-            # Whatever is still queued of this job's conversation, written
-            # before the task returns. First in the block: the teardown below
-            # can take a while and a reader who opens a cancelled run wants
-            # its last lines, not the ones from two seconds earlier.
-            await _stop_event_feed(job_id)
-
-            # The worker's own private copies of the sample never outlive the
-            # job that downloaded them, on success, failure or cancellation
-            # alike (H3, security hardening). ``remove_quietly`` is a no-op
-            # on ``None`` (nothing was ever downloaded) and never raises.
-            from app.worker import sample_files
-
-            sample_files.remove_quietly(temp_path, job_id=job_id)
-            for _host_mirror in host_mirrors:
-                sample_files.remove_quietly(_host_mirror, job_id=job_id)
-
-            # Release the agents' MCP toolkits, their stdio subprocesses and the
-            # per-job caches. A ``finally`` rather than ``async with`` because
-            # the body above spans ~500 lines and returns early on the
-            # user-cancelled path — this covers success, failure and
-            # cancellation without re-indenting any of it.
-            #
-            # ``aclose`` is total by construction (see MaljanApp.aclose), so a
-            # failed teardown cannot turn a completed analysis into a failed
-            # one. Whether it actually reclaims the memory is a separate
-            # question, which is why the readings are logged either side of it
-            # and why the worker also carries a hard recycle backstop.
-            if app is not None:
-                from maljan.core import memprobe
-
-                memprobe.probe("job:before_teardown", job_id=job_id)
-                try:
-                    # The outermost fence. Each toolkit close is bounded, and
-                    # the container bounds them again — this bounds the lot,
-                    # because a job is not finished until this returns and
-                    # ``max_jobs = 1`` means the next one cannot start.
-                    #
-                    # Earned the hard way: a run that had already written its
-                    # report sat here for 42 minutes with arq still reporting
-                    # ``j_ongoing=1``, and only ended on SIGTERM. An ``mcp``
-                    # stdio exit stack waits on its child process, and a child
-                    # that does not exit waits forever.
-                    await asyncio.wait_for(app.aclose(), timeout=_TEARDOWN_BUDGET)
-                except TimeoutError:
-                    logger.error(
-                        "Teardown exceeded %.0fs and was abandoned; the job is "
-                        "complete and its result is stored, but MCP subprocesses "
-                        "may have leaked. The RSS ceiling will recycle the worker.",
-                        _TEARDOWN_BUDGET,
-                        extra={"job_id": job_id},
-                    )
-                except Exception as exc:  # noqa: BLE001 — teardown never fails a job
-                    logger.warning("Teardown failed (non-fatal): %s", exc)
-                gc.collect()
-                reclaimed = memprobe.malloc_trim()
-                memprobe.probe("job:end", job_id=job_id, trim_reclaimed_mb=reclaimed)
+            except Exception as exc:  # noqa: BLE001 — teardown never fails a job
+                logger.warning("Teardown failed (non-fatal): %s", exc)
+            gc.collect()
+            reclaimed = memprobe.malloc_trim()
+            memprobe.probe("job:end", job_id=job_id, trim_reclaimed_mb=reclaimed)
 
 
 # ── Helpers ──────────────────────────────────────────────────────
@@ -1886,88 +2211,154 @@ def _extract_mitre(result: dict) -> list | None:
 # ── ARQ Worker Configuration ────────────────────────────────────
 
 
-# How long a ``running`` row may be untouched at worker boot before it is
-# considered abandoned. See ``_sweep_orphan_jobs``.
-_ORPHAN_GRACE_SECONDS = int(os.environ.get("ORPHAN_JOB_GRACE_SECONDS", "300"))
+# What a swept row says about itself: the fact the sweep established, and what
+# the operator can do about it.
+_SWEPT_NO_OWNER = (
+    "No worker is holding this job: its owner heartbeat has expired, so the "
+    "process that was running it is gone. Marked failed by the orphan sweep — "
+    "re-submit the sample if needed."
+)
+
+# When the sweep runs. Not at the instant of startup: a worker that crashed
+# leaves its last heartbeat behind for up to one TTL, and a sweep that ran
+# inside that window would read the dead worker's own claim as ownership and
+# leave the row it exists to repair. Waiting one TTL costs a minute and a half
+# on a restart and makes the first pass conclusive.
+#
+# Then every ten minutes for the life of the process, because a worker that
+# gives up on a job while staying up — the case that left job 892659bc reading
+# ``running`` for an hour — is not repaired by anything that only runs at boot.
+SWEEP_FIRST_DELAY_SECONDS = JOB_OWNER_TTL_SECONDS
+SWEEP_INTERVAL_SECONDS = 600
 
 
-async def _sweep_orphan_jobs(db_session: async_sessionmaker) -> None:
-    """Mark abandoned ``running`` rows as ``failed`` at worker startup.
+async def _sweep_orphan_jobs(db_session: async_sessionmaker, redis_conn: Any = None) -> None:
+    """Mark ``running`` rows that no worker is holding as ``failed``.
 
-    When the worker process is killed
-    mid-flight (e.g. operator ``Stop-Process`` during development, OOM
-    kill, deploy rollover) the ``run_analysis`` task has no chance to
-    flip the row from ``running`` → ``failed`` in its ``except`` block.
-    The DB then carries phantom ``running`` rows forever — the
-    dashboard reports them as in-flight even though no worker holds
-    them. Auditors looking at the legacy data assume the pipeline is
-    still busy.
+    When a worker process dies mid-flight (OOM kill, the RSS recycler, an
+    operator stopping it, a deploy rollover) the ``run_analysis`` task has no
+    chance to flip the row from ``running`` → ``failed``. The database then
+    carries a phantom ``running`` row for ever: the dashboard reports an
+    analysis as in flight, nothing retries it (``max_tries = 1``), and the
+    false-positive statistics count a run that never ended.
 
-    Cleanup rule: at boot, any ``running`` row older than
-    ``_ORPHAN_GRACE_SECONDS`` cannot be held by a live worker — this
-    process is the worker, ``max_jobs = 1``, and it has just started.
-    Flip it to ``failed`` with a clear ``error_message`` so the UI shows
-    the right state and the FP-rate stats become real.
+    Ownership is the heartbeat the owner itself writes (``claim_job``), not
+    anything arq keeps. arq's in-progress key is written once and lives for the
+    job timeout, so it outlives the process that wrote it by hours; its health
+    key is queue-wide and lives thirty-one seconds past its last write, so a
+    worker killed a moment ago still looks alive — and a restart lands inside
+    that window, which is exactly when this runs. A per-job heartbeat with a
+    ninety-second life, refreshed every thirty, says what neither of those can:
+    *this* worker is still on *this* job.
 
-    This runs once per worker boot and cannot race with an active job:
-    the only rows in the window are ones written before this process
-    existed.
+    So a ``running`` row is orphaned when its heartbeat key is absent. Two
+    exceptions, both in the direction of leaving a job alone: a row younger
+    than one TTL is left for the next pass, because a worker may have claimed
+    it a moment ago, and a job this process is running is never swept whatever
+    Redis says. When Redis cannot be read at all, nothing is touched and the
+    reason is logged once: ownership cannot be established without it, and
+    guessing costs somebody else's run.
     """
     from datetime import UTC as _UTC
     from datetime import datetime as _datetime
     from datetime import timedelta as _timedelta
 
-    # 2026-07-27: the cutoff used to be ``job_timeout`` — eight hours — which
-    # made this sweep useless for the case it names first in its own docstring.
-    # A worker killed mid-flight comes back within seconds, and its abandoned
-    # row then sat in ``running`` for the rest of the day: no worker held it,
-    # ``max_tries=1`` meant nothing retried it, and the UI showed an analysis
-    # that was permanently five minutes from finishing. Observed exactly that
-    # on a verification run, and adding a container memory limit makes a
-    # mid-flight kill *more* likely, not less.
-    #
-    # The grace period only has to exceed the window in which a job can be
-    # legitimately ``running`` while no worker is up. Since ``max_jobs = 1``
-    # and this process has just booted, that window is the time between the
-    # API writing the row and the worker picking it up — seconds. Five minutes
-    # is generous and still bounded.
-    cutoff_seconds = min(WorkerSettings.job_timeout, _ORPHAN_GRACE_SECONDS)
-    cutoff_ts = _datetime.now(_UTC) - _timedelta(seconds=cutoff_seconds)
+    from app.models.job import AnalysisJob
+
+    if redis_conn is None:
+        _log_unreadable_queue("no Redis connection")
+        return
+
+    young_cutoff = _datetime.now(_UTC) - _timedelta(seconds=JOB_OWNER_TTL_SECONDS)
 
     async with db_session() as db:
-        from app.models.job import AnalysisJob
+        candidates = (
+            await db.execute(
+                select(AnalysisJob.id, AnalysisJob.started_at, AnalysisJob.created_at).where(
+                    AnalysisJob.status == "running"
+                )
+            )
+        ).all()
+        await db.commit()
 
-        stmt = (
+    def _since(row: Any) -> Any:
+        # ``started_at`` is written with the status change; ``created_at`` is
+        # the fallback for a row that somehow carries none, so a job cannot
+        # stay ``running`` for ever by having no clock.
+        return row[1] or row[2]
+
+    aged = [str(row[0]) for row in candidates if _since(row) is None or _since(row) < young_cutoff]
+    if not aged:
+        logger.debug("Orphan sweep: nothing old enough to judge.")
+        return
+
+    owners = await live_owners(redis_conn, aged)
+    if owners is None:
+        return
+    orphans = [job_id for job_id in aged if job_id not in owners and job_id not in _OWNED_JOBS]
+    if not orphans:
+        logger.debug("Orphan sweep: every running job has an owner.")
+        return
+
+    async with db_session() as db:
+        result = await db.execute(
             update(AnalysisJob)
             .where(
+                AnalysisJob.id.in_([uuid.UUID(job_id) for job_id in orphans]),
+                # Re-checked in the statement: a worker may have finished one
+                # of these between the read above and this write.
                 AnalysisJob.status == "running",
-                AnalysisJob.started_at < cutoff_ts,
             )
-            .values(
-                status="failed",
-                completed_at=func.now(),
-                error_message=(
-                    "Worker process was killed mid-flight (no shutdown hook ran). "
-                    "Marked failed by startup sweep — re-submit the sample if needed."
-                ),
-            )
+            .values(status="failed", completed_at=func.now(), error_message=_SWEPT_NO_OWNER)
             .returning(AnalysisJob.id)
         )
-        result = await db.execute(stmt)
         affected = [str(row[0]) for row in result.all()]
         await db.commit()
-        if affected:
+
+    if affected:
+        logger.warning(
+            "Orphan sweep: marked %d unowned 'running' job(s) as 'failed': %s",
+            len(affected),
+            ", ".join(affected[:8]) + (" ..." if len(affected) > 8 else ""),
+            extra={"component": "worker.lifecycle", "job_count": len(affected)},
+        )
+
+
+async def sweep_orphans_forever(
+    ctx: dict,
+    *,
+    first_delay: float | None = None,
+    interval: float | None = None,
+) -> None:
+    """Run the orphan sweep on its own clock, for the life of the worker.
+
+    A task rather than a cron job: this worker runs one job at a time, so a
+    scheduled task would queue behind whatever analysis is in flight and only
+    run when there is nothing to repair.
+
+    Never raises out of a pass: a sweep that took the worker down with it would
+    trade every future job for one stale row.
+
+    The two delays are arguments with the constants as their defaults, so a
+    test can watch the loop turn without waiting a minute and a half for the
+    first pass.
+    """
+    wait_first = SWEEP_FIRST_DELAY_SECONDS if first_delay is None else first_delay
+    wait_between = SWEEP_INTERVAL_SECONDS if interval is None else interval
+    await asyncio.sleep(wait_first)
+    while True:
+        try:
+            await _sweep_orphan_jobs(ctx["db_session"], ctx.get("redis"))
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — a sweep never costs the worker
             logger.warning(
-                "Startup orphan sweep: marked %d phantom 'running' job(s) as 'failed': %s",
-                len(affected),
-                ", ".join(affected[:8]) + (" ..." if len(affected) > 8 else ""),
-                extra={"component": "worker.lifecycle", "job_count": len(affected)},
-            )
-        else:
-            logger.info(
-                "Startup orphan sweep: no phantom 'running' jobs found.",
+                "Orphan sweep failed (%s); trying again in %ss.",
+                type(exc).__name__,
+                wait_between,
                 extra={"component": "worker.lifecycle"},
             )
+        await asyncio.sleep(wait_between)
 
 
 async def startup(ctx: dict) -> None:
@@ -2021,18 +2412,12 @@ async def startup(ctx: dict) -> None:
     # Store a Redis connection for PubSub
     ctx["redis"] = aioredis.from_url(settings.redis_url)
 
-    # Clean up phantom 'running' rows left behind
-    # when the previous worker was killed mid-flight (no shutdown hook
-    # fired). Without this, the dashboard accumulates fake in-flight
-    # jobs every time the operator restarts the worker.
-    try:
-        await _sweep_orphan_jobs(ctx["db_session"])
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "Startup orphan sweep failed (non-fatal): %s",
-            exc,
-            extra={"component": "worker.lifecycle"},
-        )
+    # Repair the phantom 'running' rows a killed worker leaves behind, and
+    # keep repairing them: the first pass waits one owner TTL so a crashed
+    # worker's last heartbeat has expired before anything is judged, and the
+    # passes after it run every ten minutes, which is what reaches a job a
+    # still-running worker gave up on.
+    ctx["sweep_task"] = asyncio.create_task(sweep_orphans_forever(ctx))
 
     logger.info(
         "Worker started: connected to DB and Redis",
@@ -2042,6 +2427,13 @@ async def startup(ctx: dict) -> None:
 
 async def shutdown(ctx: dict) -> None:
     """Called when the ARQ worker shuts down."""
+    # Before the connections it uses are closed under it.
+    sweep_task: asyncio.Task | None = ctx.get("sweep_task")
+    if sweep_task is not None:
+        sweep_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await sweep_task
+
     redis_conn: aioredis.Redis | None = ctx.get("redis")
     if redis_conn:
         await redis_conn.aclose()
