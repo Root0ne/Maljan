@@ -896,6 +896,7 @@ def emit_validation_feedback(
     message: str,
     retry_index: int,
     state: str = VALIDATION_RETRIED,
+    path: str = "",
 ) -> None:
     """One violation, and what became of it.
 
@@ -910,6 +911,14 @@ def emit_validation_feedback(
     triggered a retry and never the ones that survived it or the ones the retry
     introduced — two events in the feed of a run whose summary recorded ten
     unresolved findings.
+
+    **Folding.** ``(agent, code, path)`` is the key: the same violation, shown
+    and then resolved or survived, arrives under it twice, and a reader that
+    draws one line per violation folds on it. ``path`` is the producer's own
+    locator — ``static.claims[2]`` for an analyst, ``objects[3]`` for the
+    judge's bundle — and it is what separates two violations of one code on
+    different claims; it is ``""`` for a violation about the answer as a whole,
+    where ``(agent, code)`` is already the whole key.
     """
     emit(
         sink,
@@ -921,6 +930,7 @@ def emit_validation_feedback(
             "message": str(message),
             "retry_index": max(0, int(retry_index)),
             "state": str(state),
+            "path": str(path),
         },
     )
 

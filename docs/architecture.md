@@ -756,7 +756,7 @@ and the console draws the running analysis from them.
 | `agent_message_delta` | the analyst loop, behind `core.events.stream_deltas` | `stage`, `agent`, `text_delta` |
 | `tool_call_started` | the evidence recorder | `stage`, `agent`, `tool`, `server`, `args_summary` |
 | `tool_call_finished` | the evidence recorder, as each entry is written | `stage`, `agent`, `tool`, `server`, `evidence_id`, `ok`, `duration_ms`, `summary` |
-| `validation_feedback` | `pipeline/validation.retry_with_feedback` | `stage`, `agent`, `code`, `message`, `retry_index`, `state` |
+| `validation_feedback` | `pipeline/validation.retry_with_feedback` | `stage`, `agent`, `code`, `message`, `retry_index`, `state`, `path` |
 | `judge_question` | the judge's ReAct loop | `stage`, `text`, `addressed_to` |
 | `budget_tick` / `stage_ended_at_cap` | the budget meter | see *The evidence ledger* |
 | `enrichment_complete` | the enrichment worker, after the run | `report_id`, `domains_enriched`, `ips_enriched`, `similar_samples` |
@@ -764,6 +764,14 @@ and the console draws the running analysis from them.
 
 `agent_message.kind` is one of `says`, `tool_call`, `tool_result`,
 `validation_feedback`, `judge_question`, `verdict`, `system`,
+A violation is published as `retried` where the producer is shown it and again
+as `resolved` or `survived` once the loop knows which; one the retry introduced
+is published once. `(agent, code, path)` is the key those two lines share, so a
+reader that draws one line per violation folds on it, and two violations of one
+code on different claims stay apart. A finding the producer was never shown —
+the judge appends its timeout, its fallback and its two verdict checks after
+the loop — is published once, as `survived`.
+
 `delegation_ask`, `delegation_answer`. An ask and its answer are the last two,
 with `addressed_to` naming the other side, which is what draws a delegated
 exchange as an arrow between two participants rather than as two lines to the

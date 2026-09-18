@@ -52,6 +52,7 @@ from maljan.pipeline.state import AgentArgument
 from maljan.pipeline.validation import (
     ValidationTally,
     Violation,
+    announce_unresolved,
     assessment_conflict_violations,
     assessment_violations,
     drop_ungrounded_indicators,
@@ -1097,6 +1098,7 @@ class JudgeAgent(BudgetMeter):
             agent="judge",
             stage=str(getattr(self, "pipeline_stage", "") or "verdict"),
         )
+        _from_the_loop = list(violations)
         if timed_out:
             # No answer at all, so there is nothing to feed back and nothing
             # was: the bundle is this pipeline's own conservative verdict.
@@ -1127,6 +1129,17 @@ class JudgeAgent(BudgetMeter):
         # the run summary to carry it twice would say the judge was told twice.
         _already = {(v.code, v.path) for v in violations}
         violations.extend(v for v in _verdict_checks(bundle) if (v.code, v.path) not in _already)
+        # What was added after the loop — the timeout, the fallback, the two
+        # verdict checks — is in the run summary, and the conversation showed
+        # none of it. Nobody was asked about them, so they are published as
+        # what they are: findings that survived this round.
+        announce_unresolved(
+            self._event_sink(),
+            agent="judge",
+            stage=str(getattr(self, "pipeline_stage", "") or "verdict"),
+            violations=[v for v in violations if v not in _from_the_loop],
+            retry_index=retries,
+        )
         dropped = drop_ungrounded_indicators(bundle, violations)
         if dropped:
             self.logger.warning(

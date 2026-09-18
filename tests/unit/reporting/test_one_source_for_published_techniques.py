@@ -34,10 +34,19 @@ KNOWN = "T1055"
 INVENTED = "T1063"
 
 
+# One stable object id per technique the fixtures use. A hash of the id would
+# move with ``PYTHONHASHSEED`` and make two runs of this file different runs.
+_OBJECT_IDS = {
+    "T1055": "attack-pattern--0f1e2d3c-4b5a-4968-8776-655443332201",
+    "T1027": "attack-pattern--0f1e2d3c-4b5a-4968-8776-655443332202",
+    "T1063": "attack-pattern--0f1e2d3c-4b5a-4968-8776-655443332203",
+}
+
+
 def _attack_pattern(tid: str) -> dict[str, Any]:
     return {
         "type": "attack-pattern",
-        "id": f"attack-pattern--0f1e2d3c-4b5a-4968-8776-6554433322{abs(hash(tid)) % 90 + 10}",
+        "id": _OBJECT_IDS[tid],
         "name": tid,
         "external_references": [{"source_name": "mitre-attack", "external_id": tid}],
     }

@@ -785,8 +785,12 @@ change landed on `main`.
   feed beside a summary recording ten unresolved findings. Each violation now
   carries a `state`: `retried` where the producer is shown it, then `resolved`
   or `survived` once the loop knows which, and a violation the retry introduced
-  is published once, as `survived`. The fields the console keys on — `code`,
-  `agent`, `stage`, `retry_index` — are unchanged.
+  is published once, as `survived`, and so are the findings the judge records
+  after its loop, which reached the run summary and never the conversation.
+  The fields the console keys on — `code`, `agent`, `stage`, `retry_index` —
+  are unchanged; `path` is added beside them, so `(agent, code, path)` folds
+  the two lines about one violation together and keeps two violations of one
+  code on different claims apart.
 
 - **One source for the techniques a report publishes.** A report's three
   technique surfaces were built from three sources and disagreed inside single

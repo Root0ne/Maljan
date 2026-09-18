@@ -24,7 +24,7 @@ import json
 import re
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, get_args
+from typing import Any, get_args, get_origin
 
 from pydantic import ValidationError
 
@@ -859,6 +859,7 @@ def keep_known_keys(model: Any, payload: Any) -> tuple[Any, list[str]]:
 
     def _walk_field(field: Any, value: Any, path: str) -> Any:
         annotation = getattr(field, "annotation", None)
+        origin = get_origin(annotation)
         nested = [
             arg
             for arg in ([annotation, *get_args(annotation)])
@@ -868,6 +869,12 @@ def keep_known_keys(model: Any, payload: Any) -> tuple[Any, list[str]]:
             return value
         if isinstance(value, list):
             return [_walk(nested[0], item, f"{path}{index}.") for index, item in enumerate(value)]
+        if origin in (dict, Mapping) and isinstance(value, dict):
+            # A mapping of models: the keys are the caller's own, not fields,
+            # so the sub-model is asked about each *value*. Walked as the
+            # dict itself, every key would be reported dropped and the field
+            # would come back empty.
+            return {key: _walk(nested[-1], item, f"{path}{key}.") for key, item in value.items()}
         return _walk(nested[0], value, path)
 
     return _walk(model, payload, ""), dropped
@@ -1872,7 +1879,30 @@ class _FeedbackFeed:
             message=str(violation.message),
             retry_index=retry_index,
             state=state,
+            # The producer's own locator, so the two lines about one violation
+            # fold together and two violations of one code on different claims
+            # do not.
+            path=str(violation.path),
         )
+
+
+def announce_unresolved(
+    sink: EventSink | None,
+    *,
+    agent: str,
+    stage: str,
+    violations: Sequence[Violation],
+    retry_index: int = 0,
+) -> None:
+    """Publish findings nobody was shown, as findings that survived.
+
+    For a producer that records a violation outside the retry loop — the judge
+    appends the timeout, the fallback and its two verdict checks after it —
+    where the run summary carried a row the conversation never showed.
+    """
+    feed = _feed(sink, agent, stage)
+    if feed is not None and violations:
+        feed.outcome([], violations, retry_index)
 
 
 def _feed(sink: EventSink | None, agent: str, stage: str) -> _FeedbackFeed | None:

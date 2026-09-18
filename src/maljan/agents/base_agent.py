@@ -1933,6 +1933,11 @@ class BaseAnalyst(BudgetMeter, ABC):
         # that produced them, and they are what the salvage below and the
         # stage's merge fall back to.
         self._delegated_isrs: list[AgentISR] = []
+        # How many of them a salvage turn has already been shown. The buffer
+        # itself is never drained: the stage promotes every answered ask, and
+        # a chunked lead's later salvage would otherwise re-read the first
+        # chunk's answers as if they were its own.
+        self._asks_already_synthesised = 0
         # Declared here rather than only in the subclasses that populate them,
         # because ``close_tools`` below has to be able to release them for any
         # analyst. ``toolkit`` is an MCP toolkit or a Ghidra HTTP client
@@ -3264,18 +3269,31 @@ class BaseAnalyst(BudgetMeter, ABC):
                     isr = salvaged
             return self._validate_isr(self._apply_consistency_gate(isr, truncated), truncated)
         except AnalystError:
-            salvaged = self._synthesise_from_answered_asks()
+            salvaged = self._salvaged_isr(data)
             if salvaged is not None:
-                return self._validate_isr(salvaged, data)
+                return salvaged
             raise
         except Exception as e:
             self.logger.error("ISR analysis failed: %s", describe_exception_for_log(e))
-            salvaged = self._synthesise_from_answered_asks()
+            salvaged = self._salvaged_isr(data)
             if salvaged is not None:
-                return self._validate_isr(salvaged, data)
+                return salvaged
             raise AnalystError(
                 f"{self.name} ISR analysis failed: {describe_exception_for_log(e)}"
             ) from e
+
+    def _salvaged_isr(self, data: str) -> AgentISR | None:
+        """A report written from the answered asks, checked like any other.
+
+        Through the same gate and the same validation the ordinary path takes:
+        a salvaged report that cites what it cannot see is the failure mode
+        the gate exists for, and it is the report most likely to.
+        """
+        salvaged = self._synthesise_from_answered_asks()
+        if salvaged is None:
+            return None
+        truncated = self._truncate_input(data)
+        return self._validate_isr(self._apply_consistency_gate(salvaged, truncated), truncated)
 
     def answered_asks(self) -> list[AgentISR]:
         """The specialists' own ISRs, for the asks this agent got answers to.
@@ -3308,9 +3326,14 @@ class BaseAnalyst(BudgetMeter, ABC):
         the specialists' answers instead, which loses the lead's synthesis but
         no completed ask.
         """
-        answers = self.answered_asks()
+        answers = self.answered_asks()[self._asks_already_synthesised :]
         if not answers:
             return None
+        # A chunked lead re-enters this loop once per chunk, and the answers it
+        # got in the first chunk are not answers to the second chunk's asks.
+        # The buffer keeps all of them — the stage promotes every one — and
+        # each salvage turn is shown only what came in since the last.
+        self._asks_already_synthesised = len(self.answered_asks())
         self.logger.warning(
             "%s: the loop ended without a report and %d ask(s) had been answered; "
             "synthesising from those answers.",

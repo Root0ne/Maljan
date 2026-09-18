@@ -206,6 +206,10 @@ class TestEveryViolationSaysWhatBecameOfIt:
         return [(row["code"], row["state"]) for row in sink.of("validation_feedback")]
 
     @staticmethod
+    def _keys(sink: _Sink) -> list[tuple[str, str, str]]:
+        return [(row["agent"], row["code"], row["path"]) for row in sink.of("validation_feedback")]
+
+    @staticmethod
     def _loop(sink: _Sink, rounds: list[list[Violation]]) -> None:
         answers = iter(["first", "second", "third"])
         remaining = list(rounds)
@@ -246,6 +250,28 @@ class TestEveryViolationSaysWhatBecameOfIt:
             ("isr.empty_evidence", "resolved"),
             ("attck.unknown_id", "survived"),
         ]
+
+    def test_the_two_lines_about_one_violation_fold_together(self) -> None:
+        """``(agent, code, path)``, so a reader can draw one line per violation."""
+        sink = _Sink()
+        kept = Violation(
+            code="attck.unknown_id",
+            message="T9999 is not in the catalogue",
+            path="static.claims[2]",
+        )
+
+        self._loop(sink, [[kept], [kept]])
+
+        assert self._keys(sink) == [("static", "attck.unknown_id", "static.claims[2]")] * 2
+
+    def test_two_claims_with_the_same_code_do_not_fold(self) -> None:
+        sink = _Sink()
+        first = Violation(code="attck.unknown_id", message="T9999", path="static.claims[0]")
+        second = Violation(code="attck.unknown_id", message="T8888", path="static.claims[1]")
+
+        self._loop(sink, [[first, second], []])
+
+        assert len(set(self._keys(sink))) == 2
 
     def test_an_answer_that_needed_no_correction_publishes_nothing(self) -> None:
         sink = _Sink()

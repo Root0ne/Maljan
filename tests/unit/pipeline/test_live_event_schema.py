@@ -722,7 +722,15 @@ class TestValidationFeedback:
         )
         (event_type, data) = recorded[0]
         assert event_type == "validation_feedback"
-        assert set(data) == {"stage", "agent", "code", "message", "retry_index", "state"}
+        assert set(data) == {
+            "stage",
+            "agent",
+            "code",
+            "message",
+            "retry_index",
+            "state",
+            "path",
+        }
         assert data["retry_index"] == 1
         assert data["state"] == "retried"
 

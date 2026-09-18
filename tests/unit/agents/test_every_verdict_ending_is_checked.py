@@ -21,6 +21,7 @@ verdict was asked and could not answer.
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -170,6 +171,25 @@ class TestTheBenignDirection:
 
         assert VERDICT_FALLBACK_CODE in _codes(verdict)
         assert UNSUPPORTED_BENIGN_CODE in _codes(verdict)
+
+
+class TestWhatTheConversationIsTold:
+    """A finding nobody was shown is still a finding a reader should see."""
+
+    @pytest.mark.asyncio
+    async def test_the_endings_publish_what_they_recorded(self) -> None:
+        published: list[tuple[str, dict[str, Any]]] = []
+        judge = JudgeAgent(llm=_Llm("This is malware.", "It is malware."))  # type: ignore[arg-type]
+        container = SimpleNamespace(event_sink=lambda kind, data: published.append((kind, data)))
+        judge._container = container
+
+        await judge.give_verdict(reports=REPORTS, history=[], isr_reports=SILENT, ledger_ids=LEDGER)
+
+        rows = [data for kind, data in published if kind == "validation_feedback"]
+        assert [row["state"] for row in rows if row["code"] == UNSUPPORTED_MALWARE_CODE] == [
+            "survived"
+        ]
+        assert any(row["code"] == VERDICT_FALLBACK_CODE for row in rows)
 
 
 class TestARunWithClaimsBehindItIsAskedNothing:

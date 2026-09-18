@@ -106,6 +106,11 @@ _SYSTEM = (
     "6. Output MUST conform to the provided JSON schema."
 )
 
+# How many invented keys a degradation reason names. A model that invents
+# forty writes forty names into the report header otherwise, and the sentence
+# stops being readable long before that.
+_MAX_NAMED_KEYS = 6
+
 # Narrative technical subsections authored as free prose (TechnicalSubsection).
 _PROSE_SECTIONS: dict[str, str] = {
     "packing_obfuscation": "Packing & Obfuscation",
@@ -394,9 +399,12 @@ class ReportComposer:
                     len(dropped),
                     ", ".join(dropped),
                 )
+                named = ", ".join(dropped[:_MAX_NAMED_KEYS])
+                if len(dropped) > _MAX_NAMED_KEYS:
+                    named += f" and {len(dropped) - _MAX_NAMED_KEYS} more"
                 self._note_degradation(
                     f"report section '{section or schema.__name__}' dropped the keys "
-                    f"{', '.join(dropped)}, which its schema does not declare"
+                    f"{named}, which its schema does not declare"
                 )
             return kept
 
