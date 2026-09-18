@@ -233,15 +233,17 @@ function AnalysesList() {
         {/* The list */}
         <div className="flex-1 min-w-0 bg-bg-surface border border-border rounded">
           <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
-            {/* A `status` as well as a heading: changing the status filter
-                updated this count silently, and nothing else on the page
-                announced that the list had changed under the reader. */}
-            <h2
-              role="status"
-              className="text-xs font-medium text-text-primary uppercase tracking-wider"
-            >
+            <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
               Analyses &mdash; {countLabel(filtered.length, "result")}
             </h2>
+            {/* The count, announced. An explicit role *replaces* an element's
+                native one, so putting `status` on the heading above would have
+                taken the heading away from the outline this page just gained.
+                A node of its own carries the liveness, which is what the
+                conversation filter already does. */}
+            <span role="status" className="sr-only">
+              {countLabel(filtered.length, "result")}
+            </span>
             {toast && (
               <span className="text-xs text-status-green bg-status-green/10 border border-status-green/20 rounded px-2 py-0.5">
                 {toast}
