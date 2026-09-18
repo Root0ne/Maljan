@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import type { JobDTO, ReportSummaryDTO, SampleDTO } from "@/lib/api";
 import { analysisRows } from "@/lib/analyses";
+import { timeAgo } from "@/lib/report-utils";
 import { verdictBucket, verdictLabel } from "@/lib/verdict";
 import { getErrorMessage } from "@/lib/errors";
 import type { VerdictBucket } from "@/lib/verdict";
@@ -27,6 +28,11 @@ interface ResultItem {
   href: string;
 }
 
+/** The DOM id of one result row, which is what `aria-activedescendant` names. */
+export function optionId(key: string): string {
+  return `search-result-${key}`;
+}
+
 interface SearchPaletteProps {
   open: boolean;
   query: string;
@@ -36,6 +42,15 @@ interface SearchPaletteProps {
    * Lets the parent clear the input value if it chooses to.
    */
   onSelect?: () => void;
+  /**
+   * The id of the row the arrow keys are on, or `null` when there is none.
+   *
+   * The combobox is on the header's input, not here, and `aria-activedescendant`
+   * has to sit on the element that holds the focus — so the palette reports the
+   * highlight and the input announces it. Without this the arrow keys moved a
+   * background colour and told a screen reader nothing (WCAG 4.1.2).
+   */
+  onActiveChange?: (id: string | null) => void;
 }
 
 /* ── Helpers ───────────────────────────────────────────── */
@@ -73,6 +88,7 @@ export default function SearchPalette({
   query,
   onClose,
   onSelect,
+  onActiveChange,
 }: SearchPaletteProps) {
   const router = useRouter();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -213,11 +229,18 @@ export default function SearchPalette({
         group: "analyses",
         key: `analysis-${row.id}`,
         primary: row.sample,
-        secondary: row.malwareCategory
-          ? `${verdictLabel(row.verdict)} · ${row.malwareCategory}`
-          : row.verdict
-            ? verdictLabel(row.verdict)
-            : `job ${row.id.slice(0, 12)}…`,
+        // The verdict is the badge. Eight runs of one file were eight
+        // identical rows, each stating its verdict twice — once in grey
+        // mixed case and once in colour, uppercase — with nothing to tell
+        // one run from another. What differs is when it ran and which run
+        // it is, so that is what the secondary line carries.
+        secondary: [
+          row.createdAt ? timeAgo(row.createdAt) : "",
+          row.malwareCategory,
+          row.id.slice(0, 8),
+        ]
+          .filter(Boolean)
+          .join(" · "),
         badge: row.verdict ? verdictLabel(row.verdict) : row.status,
         badgeClass: row.verdict ? verdictClass(row.verdict) : STATUS_CLASS[row.status] ?? "text-text-muted",
         href: `/analysis/${row.id}`,
@@ -262,6 +285,12 @@ export default function SearchPalette({
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, results, activeIndex, onClose]);
+
+  /* Tell the combobox which row it is pointing at. */
+  useEffect(() => {
+    const active = open ? results[activeIndex] : undefined;
+    onActiveChange?.(active ? optionId(active.key) : null);
+  }, [open, results, activeIndex, onActiveChange]);
 
   /* Click outside closes. */
   useEffect(() => {
@@ -335,6 +364,7 @@ export default function SearchPalette({
                   return (
                     <button
                       key={r.key}
+                      id={optionId(r.key)}
                       type="button"
                       role="option"
                       aria-selected={isActive}

@@ -33,7 +33,12 @@ import {
 } from "@/lib/runStore";
 import { useRun } from "@/lib/useRun";
 import { formatDateTime, formatDuration } from "@/lib/report-utils";
-import { verdictBucket, verdictLabel } from "@/lib/verdict";
+import { verdictBucket } from "@/lib/verdict";
+import {
+  assessedSeverity,
+  verdictHeadline,
+  VERDICT_CONFLICT_NOTE,
+} from "@/lib/verdictHeader";
 import { getErrorMessage, isApiStatus } from "@/lib/errors";
 import type { VerdictBucket } from "@/lib/verdict";
 
@@ -198,18 +203,46 @@ export default function AnalysisLayout({
    * enrichment lands or when the run finishes, without waiting for the poll
    * to come back round. */
   const lastEventCursor = useRef(0);
+  /* Which enrichment is news.
+   *
+   * The store folds the whole recorded feed in one commit, so an
+   * `enrichment_complete` in it happened hours ago: worth one refetch, never
+   * worth announcing in the present tense every time the run is opened. What
+   * separates the two is the newest event this reader already held — the
+   * publisher's own timestamp on both sides of the comparison, so no clock but
+   * the API's is ever consulted. The client's clock used to be the other half
+   * of it, and a dev box a few seconds ahead of the API could swallow a live
+   * toast.
+   *
+   * The first batch is the recorded feed by construction, and its newest
+   * timestamp becomes the watermark everything after it is read against. */
+  const newestHeld = useRef<string | null>(null);
   useEffect(() => {
     if (events.length <= lastEventCursor.current) return;
+    const firstBatch = newestHeld.current === null;
+    const watermark = newestHeld.current;
     for (let i = lastEventCursor.current; i < events.length; i++) {
       const e = events[i];
-      if (e.type === "enrichment_complete" || e.type === "completed") {
-        refetchRef.current?.();
-        if (e.type === "enrichment_complete") {
-          setEnrichmentToast("Threat intel enrichment finished. Report refreshed.");
-          setTimeout(() => setEnrichmentToast(null), 5000);
-        }
+      if (e.type !== "enrichment_complete" && e.type !== "completed") continue;
+      refetchRef.current?.();
+      if (e.type !== "enrichment_complete") continue;
+      // `ts` is non-optional on the wire; an empty or unparseable one falls
+      // back to the batch, which is the same answer the watermark would give.
+      const alreadyHappened =
+        firstBatch || !e.ts || (watermark !== null && e.ts <= watermark);
+      if (alreadyHappened) continue;
+      setEnrichmentToast("Threat intel enrichment finished. Report refreshed.");
+      setTimeout(() => setEnrichmentToast(null), 5000);
+    }
+    for (let i = lastEventCursor.current; i < events.length; i++) {
+      const ts = events[i].ts;
+      if (ts && (newestHeld.current === null || ts > newestHeld.current)) {
+        newestHeld.current = ts;
       }
     }
+    // A batch whose every event is unstamped still has to move the feed off
+    // "nothing held yet", or the next batch would read as the first one.
+    if (newestHeld.current === null) newestHeld.current = "";
     lastEventCursor.current = events.length;
   }, [events]);
 
@@ -231,17 +264,15 @@ export default function AnalysisLayout({
 
   /* Derive header data strictly from real API data — no mock fallback */
   const verdict = verdictBucket(report?.verdict);
-  /* "not assessed" rather than 0/100: a run whose judge never answered has no
-   * confidence, and 0 is a confidence — the lowest one there is. */
-  const confidence =
-    report?.overall_confidence == null
-      ? null
-      : Math.round(report.overall_confidence * 100);
+  const headline = verdictHeadline(
+    report?.verdict,
+    report?.overall_confidence,
+    assessedSeverity(report?.malware_report),
+  );
   const category = report?.malware_category ?? "";
   // Prefer a readable sample identity (filename, then hash prefix) over
   // the opaque sample_id UUID — available from the job even during the live run,
   // before the rich report's identity payload lands.
-  const sampleId = job?.sample_id ?? "";
   const jobSampleLabel =
     job?.sample_filename ||
     (job?.sample_sha256 ? `${job.sample_sha256.slice(0, 16)}…` : "");
@@ -338,11 +369,14 @@ export default function AnalysisLayout({
                 <h1 className="text-lg font-semibold text-text-primary truncate max-w-full" title={headerTitle}>
                   {headerTitle}
                 </h1>
-                <span className={`text-xs px-2 py-0.5 rounded bg-bg-active ${v.text}`}>
-                  {verdictLabel(report?.verdict)}
-                </span>
-                <span className="text-xs text-text-secondary bg-bg-active px-2 py-0.5 rounded">
-                  {confidence === null ? "Confidence: not assessed" : `Confidence: ${confidence}/100`}
+                <span
+                  className={`text-xs px-2 py-0.5 rounded ${
+                    headline.conflict
+                      ? "border border-status-orange/40 bg-status-orange/10 text-status-orange"
+                      : `bg-bg-active ${v.text}`
+                  }`}
+                >
+                  {headline.text}
                 </span>
                 {headerSubtitle && (
                   <span className="text-xs text-text-secondary bg-bg-active px-2 py-0.5 rounded">
@@ -373,13 +407,14 @@ export default function AnalysisLayout({
                 )}
               </div>
 
+              {headline.conflict && (
+                <p className="mb-1 text-xs text-status-orange">{VERDICT_CONFLICT_NOTE}</p>
+              )}
+
+              {/* The sample is the `h1` above. A "Sample:" line under it was
+                  the same filename a second time, and for a hash-named sample
+                  the same hash. */}
               <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-text-secondary">
-                <div>
-                  <span className="text-text-muted">Sample: </span>
-                  <code className="font-mono">
-                    {fileName || jobSampleLabel || sampleId.slice(0, 12)}
-                  </code>
-                </div>
                 <div>
                   <span className="text-text-muted">Duration: </span>
                   {duration}

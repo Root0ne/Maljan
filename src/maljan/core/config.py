@@ -22,7 +22,7 @@ Heterogeneous Model Ensemble:
 import contextvars
 import re
 import sys
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from pathlib import PurePosixPath
 from typing import Annotated, Any, Literal
 
@@ -717,6 +717,26 @@ class MCPServerConfig(BaseModel):
     label: str = ""
 
 
+# The names a built-in sidecar is always started with, whatever a stored
+# registry row says. They are the two facts a sidecar cannot work out for
+# itself: which directories it may read a path argument in, and where a
+# delivered sample lands and for how long. A child that loses
+# ``MALJAN_SAMPLE_ROOTS`` refuses every tool call on the run's own sample;
+# one that loses ``MALJAN_STAGING_DIR`` writes its uploads somewhere the rest
+# of the deployment does not look, and one that loses
+# ``MALJAN_STAGING_TTL_HOURS`` silently keeps live malware on disk for the
+# default day instead of the hours the deployment chose.
+#
+# Everything else a built-in ships with is a default an operator may take
+# away. ``threatintel``'s ``VIRUSTOTAL_API_KEY`` and ``ABUSEIPDB_API_KEY`` are
+# the deployment's own credentials: clearing that list is how an operator stops
+# a sample being looked up, and it stays cleared.
+REQUIRED_ENV_ALLOW: dict[str, tuple[str, ...]] = {
+    "analysis": ("MALJAN_STAGING_DIR", "MALJAN_STAGING_TTL_HOURS", "MALJAN_SAMPLE_ROOTS"),
+    "network": ("MALJAN_STAGING_DIR", "MALJAN_SAMPLE_ROOTS"),
+}
+
+
 def _builtin_servers() -> dict[str, MCPServerConfig]:
     """The servers a deployment starts with, as settings rather than constants.
 
@@ -817,6 +837,34 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
     }
 
 
+def builtin_env_allow(key: str, configured: Iterable[str]) -> list[str]:
+    """The names a built-in's child may read: the required ones, then the stored ones.
+
+    Some of a built-in sidecar's environment belongs to the code that ships
+    with it rather than to a stored setting. ``analysis`` and ``network``
+    refuse a path argument that lands outside the directories
+    ``MALJAN_SAMPLE_ROOTS`` names, so a child that cannot read that variable
+    refuses the very sample its run is about — with the error a real escape
+    attempt gets, in the ledger and in front of the model.
+
+    The registry is stored as a single row holding every server, written whole
+    whenever an operator saves anything in it: a token, a server of their own,
+    a built-in switched off. Each save therefore pins the built-ins' launch
+    parameters as they stood that day, and re-seeding only the *missing* keys
+    left a name added to a sidecar afterwards reaching fresh installs alone.
+    ``REQUIRED_ENV_ALLOW`` is what a stored row cannot take away.
+
+    It is a floor, not the whole shipped list. Every other default is the
+    operator's to remove — a ``threatintel`` whose ``env_allow`` an admin has
+    emptied keeps its API keys out of the child on load, on save, in the
+    editor's view and in the connection test. Stored names are kept, after the
+    required ones, so a name an admin added still reaches the child. A key with
+    nothing required of it — every server an operator added, and a built-in
+    that takes no path — is left exactly as stored.
+    """
+    return list(dict.fromkeys([*REQUIRED_ENV_ALLOW.get(key, ()), *configured]))
+
+
 class MCPConfig(BaseModel):
     """The operator-visible registry of tool servers.
 
@@ -840,9 +888,14 @@ class MCPConfig(BaseModel):
         keeps every other field they set. An override written before a built-in
         existed simply gains it. Neither can end with a run silently missing a
         sidecar the pipeline assumes.
+
+        A stored ``env_allow`` is kept as it is, except that the names in
+        ``REQUIRED_ENV_ALLOW`` come back — see ``builtin_env_allow``.
         """
         for key, default in _builtin_servers().items():
-            self.servers.setdefault(key, default)
+            stored = self.servers.setdefault(key, default)
+            if stored is not default:
+                stored.env_allow = builtin_env_allow(key, stored.env_allow)
         return self
 
 
@@ -2536,13 +2589,23 @@ class ValidationConfig(BaseModel):
     index costs seconds and hundreds of megabytes to build. ``auto`` runs the
     gate only when this worker already built the index; ``alignment_gate_build``
     lets the first run that needs it build it once, in a thread, for the runs
-    after. ``alignment_threshold`` is the paper's gate: a claimed id below it
-    that the index also did not rank among its candidates is questioned.
+    after. The ranking it produces is recorded on the claim and shown to the
+    judge whenever the gate runs.
+
+    Whether that ranking may also *question* a claim is ``weak_alignment``, and
+    it is off. The index scores a correct id near zero often enough that the
+    check questioned 81 of 92 claims in one audited run, each one costing a
+    full model turn; it stays off until it clears the bar the recorded fixture
+    sets. With it on, a claim is questioned when its id scores under
+    ``alignment_threshold`` — the paper's gate — and an in-scope candidate from
+    another tactic beats that score by ``alignment_margin``.
     """
 
     alignment_gate: Literal["auto", "off"] = "auto"
     alignment_gate_build: bool = False
     alignment_threshold: Annotated[float, Field(ge=0.0, le=1.0)] = 0.05
+    alignment_margin: Annotated[float, Field(ge=0.0, le=1.0)] = 0.20
+    weak_alignment: bool = False
 
 
 # ---------------------------------------------------------------------------

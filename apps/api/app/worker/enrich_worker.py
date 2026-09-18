@@ -99,6 +99,12 @@ async def enrich_threat_intel(ctx: dict, report_id: str) -> dict[str, Any]:
         logger.warning("enrich: invalid report_id %s", report_id)
         return {"status": "invalid_id"}
 
+    # Two short sessions with the lookups between them, rather than one held
+    # open across every call. The reputation lookups are third-party HTTP and
+    # take as long as they take — 452 s of VirusTotal on one measured report —
+    # and a session held across them is a backend sitting ``idle in
+    # transaction`` for the whole of it, holding its locks and pinning a
+    # snapshot while a migration or another reader waits behind it.
     async with db_session_factory() as db:
         report = await db.get(AnalysisReport, report_uuid)
         if report is None:
@@ -107,31 +113,41 @@ async def enrich_threat_intel(ctx: dict, report_id: str) -> dict[str, Any]:
         if not report.malware_report:
             logger.info("enrich: report %s has no malware_report payload", report_id)
             return {"status": "skipped"}
+        payload = dict(report.malware_report)
+        parent_job_id = str(report.job_id)
+        await db.commit()
 
-        # Lazy import keeps the API/worker startup graph free of optional
-        # maljan-core dependencies.
-        from maljan.enrichment import enrich_malware_report
+    # Lazy import keeps the API/worker startup graph free of optional
+    # maljan-core dependencies.
+    from maljan.enrichment import enrich_malware_report
 
-        vt_key = await runtime_config.get_secret("virustotal_api_key") or None
-        abuse_key = await runtime_config.get_secret("abuseipdb_api_key") or None
+    vt_key = await runtime_config.get_secret("virustotal_api_key") or None
+    abuse_key = await runtime_config.get_secret("abuseipdb_api_key") or None
 
-        before_domain_reps = _count_reputations(report.malware_report, "domains")
-        before_ip_reps = _count_reputations(report.malware_report, "ips")
+    before_domain_reps = _count_reputations(payload, "domains")
+    before_ip_reps = _count_reputations(payload, "ips")
 
-        memory_store = await _get_memory_store()
+    memory_store = await _get_memory_store()
 
-        try:
-            updated = await enrich_malware_report(
-                dict(report.malware_report),
-                vt_api_key=vt_key,
-                abuseipdb_api_key=abuse_key,
-                max_lookups_per_kind=await runtime_config.get("enrichment_max_lookups"),
-                memory_store=memory_store,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.error("enrich: orchestrator failed (%s)", exc, exc_info=True)
-            return {"status": "error", "error": str(exc)[:200]}
+    try:
+        updated = await enrich_malware_report(
+            payload,
+            vt_api_key=vt_key,
+            abuseipdb_api_key=abuse_key,
+            max_lookups_per_kind=await runtime_config.get("enrichment_max_lookups"),
+            memory_store=memory_store,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.error("enrich: orchestrator failed (%s)", exc, exc_info=True)
+        return {"status": "error", "error": str(exc)[:200]}
 
+    async with db_session_factory() as db:
+        report = await db.get(AnalysisReport, report_uuid)
+        if report is None:
+            # Superseded by a re-run while the lookups were in flight. The
+            # enrichment belongs to a report that no longer exists.
+            logger.warning("enrich: report %s went away during enrichment", report_id)
+            return {"status": "not_found"}
         report.malware_report = updated
         # SQLAlchemy needs an explicit flag for in-place JSONB mutation.
         from sqlalchemy.orm.attributes import flag_modified
@@ -139,9 +155,9 @@ async def enrich_threat_intel(ctx: dict, report_id: str) -> dict[str, Any]:
         flag_modified(report, "malware_report")
         await db.commit()
 
-        after_domain_reps = _count_reputations(updated, "domains")
-        after_ip_reps = _count_reputations(updated, "ips")
-        similar_samples_count = _count_similar_samples(updated)
+    after_domain_reps = _count_reputations(updated, "domains")
+    after_ip_reps = _count_reputations(updated, "ips")
+    similar_samples_count = _count_similar_samples(updated)
 
     delta = {
         "report_id": report_id,
@@ -159,7 +175,7 @@ async def enrich_threat_intel(ctx: dict, report_id: str) -> dict[str, Any]:
 
         await _publish_event(
             redis_conn,
-            str(report.job_id),
+            parent_job_id,
             "enrichment_complete",
             delta,
         )

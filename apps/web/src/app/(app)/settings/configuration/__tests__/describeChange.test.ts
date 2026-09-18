@@ -155,7 +155,7 @@ describe("describeChange: core.mcp.servers", () => {
     };
     const line = describeChange(serversEntry, before, after);
     expect(line.detail).toEqual(["network: disabled", "old: removed", "r2: added"]);
-    expect(line.summary).toBe("3 server(s) changed");
+    expect(line.summary).toBe("3 servers changed");
   });
 
   it("never prints a token", () => {
@@ -241,7 +241,7 @@ describe("describeChange: core.agents.definitions", () => {
     };
     const line = describeChange(definitionsEntry, before, after);
     expect(line.detail).toEqual(["network-2: added (clone of network)"]);
-    expect(line.summary).toBe("1 agent(s) changed");
+    expect(line.summary).toBe("1 agent changed");
   });
 
   it("adds a definition plainly when it is not a clone", () => {
@@ -320,7 +320,7 @@ describe("describeChange: core.agents.profiles", () => {
   it("reports an added team", () => {
     const line = describeChange(profilesEntry, {}, { p1: team("P1", stage({})) });
     expect(line.detail).toEqual(["p1: added"]);
-    expect(line.summary).toBe("1 team(s) changed");
+    expect(line.summary).toBe("1 team changed");
   });
 
   it("reports a removed team", () => {
@@ -431,7 +431,7 @@ describe("describeChange: core.agents.profiles", () => {
     const after = { p1: team("Renamed", stage({ agents: ["a", "c"] })) };
     const line = describeChange(profilesEntry, before, after);
     expect(line.detail).toEqual(["p1/analysis: agents changed (+1 −1)", "p1: label changed"]);
-    expect(line.summary).toBe("1 team(s) changed");
+    expect(line.summary).toBe("1 team changed");
   });
 });
 
@@ -448,7 +448,7 @@ describe("describeChange: core.llm.agents", () => {
     const after = { network: { provider: "anthropic", model: "claude", temperature: 0.2 } };
     const line = describeChange(llmAgentsEntry, before, after);
     expect(line.detail).toEqual(["network: anthropic/claude (temp 0.2)"]);
-    expect(line.summary).toBe("1 override(s) changed");
+    expect(line.summary).toBe("1 override changed");
   });
 
   it("omits the temp suffix when temperature is unset", () => {

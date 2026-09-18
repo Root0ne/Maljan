@@ -79,7 +79,14 @@ def _one_line(text: str, limit: int = _MESSAGE_LIMIT) -> str:
 def decide_from_bundle(bundle: Any) -> str:
     """Map a final STIX bundle to a high-level verdict.
 
-    Heuristic:
+    A bundle carrying ``x_maljan_fallback_verdict`` was built by this pipeline
+    because the judge's answer was not a bundle, and it states its verdict
+    rather than implying it through its objects. That statement is read first
+    and nothing else is counted: the object set of such a bundle follows the
+    decision, so reading it back would only be this function agreeing with
+    itself — and when it did not, a judge that timed out produced "Malware".
+
+    For a bundle a judge produced, the heuristic:
       * a ``malware`` object marks the sample malicious.
       * an ``indicator``/``attack-pattern``/``relationship`` set with no
         ``malware`` object but suspicious confidence is "Suspicious".
@@ -91,6 +98,11 @@ def decide_from_bundle(bundle: Any) -> str:
     that asks whether the judge's own severity agrees with its verdict has to
     read the verdict the same way the pipeline does.
     """
+    stated = getattr(bundle, "x_maljan_fallback_verdict", None)
+    if stated is not None:
+        decision = str(getattr(stated, "decision", "") or "").strip()
+        return decision or INCONCLUSIVE_VERDICT
+
     has_malware = False
     has_suspicious_indicator = False
     for obj in getattr(bundle, "objects", None) or []:

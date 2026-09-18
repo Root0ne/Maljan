@@ -39,6 +39,9 @@ export default function DefenseTab() {
 
   return (
     <div className="space-y-6">
+      <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+        Defensive recommendations
+      </h2>
       {groups.map(({ priority, items }) => {
         const style = PRIORITY_STYLES[priority];
         return (

@@ -1,5 +1,6 @@
 "use client";
 
+import { probeDetail } from "@/lib/probeDetail";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -7,7 +8,11 @@ import type { CatalogEntry, PatchResult, ProbeResult } from "@/types/settings";
 import FieldRow from "../configuration/FieldRow";
 import { buildFieldRowProps } from "../configuration/fieldRowProps";
 import { probeLabel } from "../configuration/GroupHeader";
-import { buildReviewItems, ReviewList } from "../configuration/ReviewList";
+import {
+  buildReviewItems,
+  ReviewErrorSummary,
+  ReviewList,
+} from "../configuration/ReviewList";
 import { useSettingsContext, type SettingsContextValue } from "../configuration/SettingsContext";
 import { appliesSummary } from "../configuration/vocabulary";
 import { isProbeStale, probeFingerprint } from "./probeStale";
@@ -260,7 +265,6 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
   const stagedCount = lines.length + alsoStaged.length;
   // Counted as rows of the two lists above, not as raw error entries: one
   // composite leaf can carry several field-level errors and still be one row.
-  const errorCount = [...lines, ...alsoStaged].filter((item) => item.error).length;
   const probeId = step.probe;
   const result = probeId ? probeResult(probeId) : undefined;
 
@@ -283,9 +287,14 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
 
       <ol aria-label="Steps" className="flex flex-wrap gap-2 mb-4">
         {steps.map((s, i) => (
-          <li key={s.id} aria-current={i === index ? "step" : undefined}>
+          <li key={s.id}>
+            {/* On the button, not on the list item that wraps it: which step
+                you are on was carried by a border colour and by an attribute
+                the accessibility tree reported on nothing focusable (WCAG
+                1.4.1, 4.1.2). */}
             <button
               type="button"
+              aria-current={i === index ? "step" : undefined}
               onClick={() => goTo(s.id)}
               className={`text-xs px-2 py-1 rounded border ${
                 i === index
@@ -357,7 +366,7 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
               className={`text-[11px] ${result.ok ? "text-status-green" : "text-status-red"}`}
               role="status"
             >
-              {result.ok ? "ok" : "failed"} · {result.latency_ms} ms · {result.detail}
+              {result.ok ? "ok" : "failed"} · {result.latency_ms} ms · {probeDetail(result.detail)}
             </span>
           )}
         </div>
@@ -382,11 +391,7 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
             <p className="text-sm text-text-secondary">Nothing to apply.</p>
           ) : (
             <>
-              {errorCount > 0 && (
-                <p className="text-xs text-status-red mb-2" role="alert">
-                  {errorCount} field{errorCount === 1 ? " needs" : "s need"} attention
-                </p>
-              )}
+              <ReviewErrorSummary lines={[...lines, ...alsoStaged]} />
               <ReviewList lines={lines} />
               {alsoStaged.length > 0 && (
                 <div className="mt-4 pt-3 border-t border-border">
@@ -418,7 +423,7 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
             <button
               type="button"
               disabled={ctx.saving || stagedCount === 0 || applied !== null}
-              className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent text-white rounded hover:bg-accent-hover disabled:opacity-50"
+              className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent-fill text-white rounded hover:bg-accent-fill-hover disabled:opacity-50"
               onClick={onApply}
             >
               {ctx.saving ? "Saving…" : "Apply"}
@@ -435,7 +440,7 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
             <button
               type="button"
               disabled={blockedReason !== null || index >= steps.length - 1}
-              className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent text-white rounded hover:bg-accent-hover disabled:opacity-50"
+              className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent-fill text-white rounded hover:bg-accent-fill-hover disabled:opacity-50"
               onClick={() => {
                 const next = steps[index + 1];
                 if (next) goTo(next.id);
@@ -446,9 +451,8 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
             {blockedReason && <span className="text-xs text-text-muted">{blockedReason}</span>}
           </>
         )}
-        <Link href={guide.groupHref} className="text-xs text-accent-strong">
-          Open in the full settings
-        </Link>
+        {/* "Open in the full settings" is in the guide's header, above every
+            step. A second copy here put the same link on one screen twice. */}
       </div>
     </section>
   );

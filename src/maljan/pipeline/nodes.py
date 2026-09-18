@@ -100,6 +100,12 @@ if TYPE_CHECKING:
 _NARRATIVE_TIMEOUT_SECONDS = 600
 
 
+# What the run summary calls a judge annotation whose technique did not
+# survive validation. Its own code: the technique's own rejection is recorded
+# under its own, and this row says what that rejection cost the export.
+UNLINKED_TECHNIQUE_CODE = "stix.unlinked_technique"
+
+
 def _empty_isr(agent_name: str, revision_round: int = 0) -> AgentISR:
     """Build an empty placeholder ISR (e.g. for mock or error paths)."""
     return AgentISR(
@@ -109,6 +115,82 @@ def _empty_isr(agent_name: str, revision_round: int = 0) -> AgentISR:
         dissent_items=[],
         revision_round=revision_round,
     )
+
+
+def _note_unlinked_techniques(report: Any, unlinked: Sequence[tuple[str, int]]) -> None:
+    """Record the judge annotations that went with a rejected technique.
+
+    One row per technique, under a code of its own — the technique's own
+    rejection is recorded under ``attck.unknown_id`` or
+    ``stix.unknown_technique``, and this says what that rejection cost the
+    export — so a reader of ``run_summary.validation`` finds the annotation's
+    fate beside the reason the technique was dropped.
+    """
+    if not unlinked:
+        return
+    summary = dict(getattr(report, "run_summary", None) or {})
+    validation = dict(summary.get("validation") or {})
+    rows = [dict(row) for row in validation.get("unresolved") or []]
+    by_code = dict(validation.get("by_code") or {})
+    for technique, count in unlinked:
+        rows.append(
+            {
+                "agent": JUDGE_AGENT_KEY,
+                "code": UNLINKED_TECHNIQUE_CODE,
+                "message": (
+                    f"{count} judge relationship(s) about {technique} were not published: "
+                    "the technique is not in the report's validated list."
+                ),
+            }
+        )
+        by_code[UNLINKED_TECHNIQUE_CODE] = by_code.get(UNLINKED_TECHNIQUE_CODE, 0) + 1
+    validation["unresolved"] = rows
+    validation["by_code"] = dict(sorted(by_code.items()))
+    validation.setdefault("retries", int(validation.get("retries") or 0))
+    validation.setdefault("not_run", list(validation.get("not_run") or []))
+    summary["validation"] = validation
+    report.run_summary = summary
+
+
+def promoted_asks(agent: Any, own: AgentISR | None = None) -> dict[str, AgentISR]:
+    """The answered asks a stage takes when the caller's own report is empty.
+
+    A lead's report is the only channel its stage has, so a lead that produced
+    nothing — its loop hit the wall-clock cap, or it failed outright — used to
+    take every answer it had already received down with it: one audited chunk
+    spent 1,830 s, collected six answered asks and 52 ledger entries, and
+    merged zero claims. The specialists' own ISRs are model output of this
+    team, they carry the agent that produced them, and here they stand in for
+    the report the lead never wrote. Empty when the lead did answer: nothing is
+    promoted beside a report that exists.
+
+    Every answered ask, in the order the lead asked it. A lead asks the same
+    specialist about the imports, then the strings, then the packer, and those
+    are three answers, not one: keyed by agent alone the second and third were
+    dropped, which is the loss this exists to stop. The key carries the agent
+    and the ask's number (``deep_static#2``), so nothing collapses and nothing
+    collides with a stage agent's own key either.
+    """
+    if own is not None and getattr(own, "claims", None):
+        return {}
+    answers = getattr(agent, "answered_asks", None)
+    if not callable(answers):
+        return {}
+    out: dict[str, AgentISR] = {}
+    asked: dict[str, int] = {}
+    for isr in answers() or []:
+        key = str(getattr(isr, "agent_id", "") or "").strip()
+        if not key or not getattr(isr, "claims", None):
+            continue
+        asked[key] = asked.get(key, 0) + 1
+        out[f"{key}#{asked[key]}"] = isr
+    if out:
+        logger.warning(
+            "The lead produced no claims; promoting %d answered ask(s) into the stage: %s.",
+            len(out),
+            ", ".join(out),
+        )
+    return out
 
 
 # The file-loader placeholder for a missing per-sample fixture
@@ -1661,6 +1743,10 @@ def make_stage_agent_node(
             update.update(_budget_update(bound_agent, agent_name))
             return update
 
+        # Bound before the try so the failure paths below can ask it what it
+        # already had: a container that cannot build the agent at all leaves it
+        # None, and nothing is promoted from an agent that never existed.
+        agent: Any = None
         try:
             agent = container.get_agent(agent_name)
             bound_agent = agent
@@ -1857,9 +1943,16 @@ def make_stage_agent_node(
             technique_ids = tuple(
                 dict.fromkeys(str(c.technique_id) for c in isr.claims if c.technique_id is not None)
             )
+            # A lead that answered with no claims still has whatever its
+            # specialists answered, and their ISRs are the only place those
+            # answers survive.
+            _promoted = promoted_asks(agent, isr)
             node_out: dict[str, Any] = {
-                "reports": {agent_name: report},
-                "isr_reports": {agent_name: isr},
+                "reports": {
+                    agent_name: report,
+                    **{key: answer.to_text_summary() for key, answer in _promoted.items()},
+                },
+                "isr_reports": {agent_name: isr, **_promoted},
                 **stage_record(
                     stage,
                     ran=True,
@@ -1903,10 +1996,14 @@ def make_stage_agent_node(
                 stage=stage_key_of(stage, "analysis"),
                 display_name=label_of(container, agent_name),
             )
+            _promoted = promoted_asks(agent)
             return _closing(
                 {
-                    "reports": {agent_name: failed_text},
-                    "isr_reports": {agent_name: _empty_isr(agent_name)},
+                    "reports": {
+                        agent_name: failed_text,
+                        **{key: answer.to_text_summary() for key, answer in _promoted.items()},
+                    },
+                    "isr_reports": {agent_name: _empty_isr(agent_name), **_promoted},
                     **_evidence_update(),
                     **stage_record(
                         stage,
@@ -3001,10 +3098,11 @@ def make_judge_node(
             # answer this pipeline can produce — no severity, no reasoning the
             # model stands behind — and before this it reached the reader as an
             # ordinary verdict with a slightly emptier STIX object.
-            if any(v.code == VERDICT_FALLBACK_CODE for v in verdict.violations):
+            _verdict_codes = {v.code for v in verdict.violations}
+            if VERDICT_FALLBACK_CODE in _verdict_codes:
                 _degradation_reasons.append(VERDICT_FALLBACK_REASON)
                 _degraded_mode = True
-            if any(v.code == VERDICT_TIMEOUT_CODE for v in verdict.violations):
+            if VERDICT_TIMEOUT_CODE in _verdict_codes:
                 _degradation_reasons.append(VERDICT_TIMEOUT_REASON)
                 _degraded_mode = True
 
@@ -3022,6 +3120,34 @@ def make_judge_node(
             if _inconclusive:
                 _degradation_reasons.append(_inconclusive)
                 _degraded_mode = True
+
+            # A verdict the judge expressed as text, or never expressed at
+            # all, is not a verdict a model put a confidence on. The bundle
+            # itself says when it is one this pipeline built, and that mark is
+            # what is asked: keying off the violation codes missed the bundle
+            # built from JSON that was not a bundle, and the report then
+            # printed a confidence averaged from the analysts' own claims
+            # beside a verdict no judge expressed. It travels on the same
+            # channel a judge that raised uses, so the report node has one
+            # question to ask; ``recorded`` says the violation is already among
+            # the leftovers below, so the summary is not told twice.
+            _verdict_fallback: dict[str, Any] | None = None
+            _stated = bundle.x_maljan_fallback_verdict if isinstance(bundle, Bundle) else None
+            _recorded = bool(_verdict_codes & {VERDICT_FALLBACK_CODE, VERDICT_TIMEOUT_CODE})
+            if _stated is not None or _recorded:
+                _verdict_fallback = {
+                    "decision": decision,
+                    "failure": (
+                        VERDICT_TIMEOUT_CODE
+                        if VERDICT_TIMEOUT_CODE in _verdict_codes
+                        else VERDICT_FALLBACK_CODE
+                    ),
+                    # Whether the judge's own row is already among the
+                    # leftovers, asked of them rather than assumed: a bundle
+                    # that carries the mark and no code would otherwise leave
+                    # the summary with nothing at all to say about it.
+                    "recorded": _recorded,
+                }
 
             # What the analysts and the judge were told and did not fix. Both
             # are recorded rather than resolved, and both are what
@@ -3275,12 +3401,12 @@ def make_judge_node(
                     "final_decision": decision,
                     "judge_report": "Analyzed negotiation history and expert reports.",
                     "stix_output": stix_output,
-                    # This judge answered, so there is no pipeline-authored
-                    # verdict to declare. Written rather than left alone: the
-                    # verdict stage runs once today, and a channel that is only
-                    # ever set would suppress a real confidence the first time
-                    # it is not.
-                    "verdict_fallback": None,
+                    # Set when the judge's answer was not the verdict it was
+                    # asked for — text, or nothing at all. Written rather than
+                    # left alone: the verdict stage runs once today, and a
+                    # channel that is only ever set would suppress a real
+                    # confidence the first time it is not.
+                    "verdict_fallback": _verdict_fallback,
                     "run_summary": run_summary_dict,
                     # The judge's own tool calls — threat intel on a disputed
                     # indicator, a knowledge lookup — on the same append-only
@@ -3597,9 +3723,11 @@ def make_report_node(
         # report worth reading.
         _summary = dict(report.run_summary or {})
         _summary["evidence"] = evidence_summary(_ledger)
-        if _fallback:
+        if _fallback and not _fallback.get("recorded"):
             # The run summary says the same thing the report header says: this
-            # verdict has no model behind it.
+            # verdict has no model behind it. A judge that answered with
+            # something other than a bundle has already recorded its own
+            # unresolved finding, so that one is not written a second time.
             _summary["validation"] = with_verdict_fallback(
                 _summary.get("validation"), str(_fallback.get("failure", "") or "unknown")
             )
@@ -3697,6 +3825,12 @@ def make_report_node(
                     "report_node: ReportComposer.compose raised (%s); spine skipped.", exc
                 )
             _report_tally.merge(getattr(composer, "validation_tally", ValidationTally()))
+            # What the spine lost, said where the report says what it is
+            # missing. A section dropped after its retries used to leave the
+            # report with no conclusion and no sentence about it anywhere.
+            for _reason in getattr(composer, "degradations", None) or []:
+                if _reason not in report.degradation_reasons:
+                    report.degradation_reasons.append(str(_reason))
 
         # Deterministic figures (inline SVG + Ghidra
         # code listings) generated from the report's own data — real charts, no
@@ -3740,10 +3874,16 @@ def make_report_node(
                 )
                 base = None
             try:
-                extended_bundle = ExtendedSTIXRenderer().render(
+                _renderer = ExtendedSTIXRenderer()
+                extended_bundle = _renderer.render(
                     report, base, ledger=container.get_truncation_ledger()
                 )
                 extended_dump = extended_bundle.model_dump(mode="json")
+                # What the judge said about a technique the checks rejected
+                # went with that technique. Recorded where the run's other
+                # unresolved findings are, not counted as a bundle defect: the
+                # annotation was sound, the technique it was about was not.
+                _note_unlinked_techniques(report, _renderer.unlinked)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("report_node: extended STIX render failed (%s).", exc)
                 extended_dump = None

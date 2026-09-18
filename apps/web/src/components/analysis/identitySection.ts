@@ -22,6 +22,7 @@
  * than draw as findings about the sample.
  */
 
+import { humaniseKey, humaniseValue } from "@/lib/humanise";
 import { saysSomething } from "./reportSections";
 import type { EvidenceSection } from "@/types/malware-report";
 
@@ -113,7 +114,23 @@ export interface IdentityView {
   /** Whether the table now states whether the sample is signed, so the typed
    *  block's own badge can stand down rather than say it a second time. */
   signing: boolean;
+  /** The typed block's own field labels this table already carries, so that
+   *  block can drop them rather than print the same fact beside it. `size`
+   *  used to appear in both tables on one screen, once as `4486656` and once
+   *  as "4.3 MB". */
+  states: ReadonlySet<string>;
 }
+
+/** The ledger field each typed identity field restates. */
+const TYPED_FIELD_OF: Record<string, string> = {
+  file_name: "File name",
+  file_type: "File type",
+  size: "Size",
+  file_size: "Size",
+  mime_type: "MIME type",
+  timestamp: "Compile timestamp",
+  compile_timestamp: "Compile timestamp",
+};
 
 /**
  * Split the identity section into the table and the hashes.
@@ -130,7 +147,8 @@ export function readIdentitySection(
   fileType: string | null | undefined,
 ): IdentityView {
   const hashes: Partial<Record<HashField, string>> = {};
-  if (!section) return { section: null, hashes, signing: false };
+  const states = new Set<string>();
+  if (!section) return { section: null, hashes, signing: false, states };
 
   const routed = signingBlockFor(fileType);
   const rows: string[][] = [];
@@ -153,14 +171,19 @@ export function readIdentitySection(
       const sentence = signingSentence(value);
       if (!sentence) continue;
       signing = true;
-      rows.push([routed?.label ?? `${field} signature`, sentence]);
+      rows.push([routed?.label ?? `${humaniseKey(field)} signature`, sentence]);
       continue;
     }
 
     if (!saysSomething(value)) continue;
-    rows.push([field, value]);
+    const typed = TYPED_FIELD_OF[field.toLowerCase().replace(/\s+/g, "_")];
+    if (typed) states.add(typed);
+    // A file format's own constants — `machine 34404`, `subsystem 2`, an
+    // epoch, a byte count — are facts about the sample only once they are read
+    // back into the words an analyst quotes.
+    rows.push([humaniseKey(field), humaniseValue(field, value)]);
   }
 
-  if (rows.length === 0) return { section: null, hashes, signing };
-  return { section: { ...section, rows }, hashes, signing };
+  if (rows.length === 0) return { section: null, hashes, signing, states };
+  return { section: { ...section, rows }, hashes, signing, states };
 }

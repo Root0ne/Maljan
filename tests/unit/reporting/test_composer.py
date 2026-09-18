@@ -357,3 +357,67 @@ class TestTheManualPathGetsOneTurnToFixItsShape:
 
         assert result is None
         assert len(llm.sent) == 2
+
+
+class TestASectionWithKeysItsSchemaDoesNotDeclare:
+    """The model invents a field and the whole section used to be refused.
+
+    Two audited runs lost their conclusion and their technical analysis that
+    way — "Extra inputs are not permitted … sophistication_rating, text" — and
+    the delivered report simply had no conclusion, with nothing saying why. The
+    known fields are kept, the invented ones are named as a degradation reason,
+    and a section that really is lost is named too.
+    """
+
+    def _invoke(self, *answers: str) -> tuple[Any, ReportComposer]:
+        from langchain_core.messages import HumanMessage
+
+        from maljan.reporting.models import Conclusion
+
+        llm = TestTheManualPathGetsOneTurnToFixItsShape._RawLLM(*answers)
+        comp = ReportComposer(llm=llm, per_section_timeout=5)  # type: ignore[arg-type]
+        with patch(
+            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+        ):
+            result = asyncio.run(
+                comp._invoke([HumanMessage(content="write it")], Conclusion, section="conclusion")
+            )
+        return result, comp
+
+    # The fields ``Conclusion`` declares, plus two the model made up.
+    _INVENTED = json.dumps(
+        {
+            "text": "The sample is a loader.",
+            "sophistication_rating": "medium",
+            "confidence_statement": "Confidence is moderate.",
+            "grade": "B",
+        }
+    )
+    # A string field answered with an object: wrong in a way a retry does not
+    # fix, which is how a section is really lost.
+    _UNFIXABLE = json.dumps({"text": {"body": "The sample is a loader."}})
+
+    def test_the_known_subset_is_kept(self) -> None:
+        result, _comp = self._invoke(self._INVENTED)
+
+        assert result is not None
+        assert result.text == "The sample is a loader."
+        assert result.sophistication_rating == "medium"
+
+    def test_the_keys_it_dropped_are_a_degradation_reason(self) -> None:
+        _result, comp = self._invoke(self._INVENTED)
+
+        reason = next(r for r in comp.degradations if "conclusion" in r)
+        assert "confidence_statement" in reason
+        assert "grade" in reason
+
+    def test_a_section_lost_after_its_retries_is_named(self) -> None:
+        result, comp = self._invoke(self._UNFIXABLE, self._UNFIXABLE)
+
+        assert result is None
+        assert any("conclusion" in reason and "missing" in reason for reason in comp.degradations)
+
+    def test_a_section_that_answered_cleanly_says_nothing(self) -> None:
+        _result, comp = self._invoke(json.dumps({"text": "The sample is a loader."}))
+
+        assert comp.degradations == []

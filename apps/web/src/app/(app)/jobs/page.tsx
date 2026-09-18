@@ -147,8 +147,8 @@ function AnalysesList() {
     return (
       <div className="animate-pulse">
         <div className="h-8 w-48 bg-bg-active rounded mb-4" />
-        <div className="flex gap-6">
-          <div className="w-48 shrink-0">
+        <div className="flex flex-col md:flex-row gap-6">
+          <div className="w-full md:w-48 shrink-0">
             <div className="h-64 bg-bg-surface border border-border rounded" />
           </div>
           <div className="flex-1 bg-bg-surface border border-border rounded">
@@ -174,6 +174,7 @@ function AnalysesList() {
 
   return (
     <div>
+      <h1 className="sr-only">Analyses</h1>
       {refreshError && (
         <div
           role="alert"
@@ -182,12 +183,12 @@ function AnalysesList() {
           {refreshError}
         </div>
       )}
-      <div className="flex gap-6">
+      <div className="flex flex-col md:flex-row gap-6">
         {/* Filter Sidebar */}
-        <div className="w-48 shrink-0">
+        <div className="w-full md:w-48 shrink-0">
           <div className="bg-bg-surface border border-border rounded p-3">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-xs font-medium text-text-primary uppercase tracking-wider">Filters</h3>
+              <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">Filters</h2>
               {filter !== "all" && (
                 <button
                   onClick={() => setFilter("all")}
@@ -230,11 +231,19 @@ function AnalysesList() {
         </div>
 
         {/* The list */}
-        <div className="flex-1 bg-bg-surface border border-border rounded">
+        <div className="flex-1 min-w-0 bg-bg-surface border border-border rounded">
           <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
             <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
               Analyses &mdash; {countLabel(filtered.length, "result")}
             </h2>
+            {/* The count, announced. An explicit role *replaces* an element's
+                native one, so putting `status` on the heading above would have
+                taken the heading away from the outline this page just gained.
+                A node of its own carries the liveness, which is what the
+                conversation filter already does. */}
+            <span role="status" className="sr-only">
+              {countLabel(filtered.length, "result")}
+            </span>
             {toast && (
               <span className="text-xs text-status-green bg-status-green/10 border border-status-green/20 rounded px-2 py-0.5">
                 {toast}
@@ -258,6 +267,11 @@ function AnalysesList() {
                     key={row.id}
                     className="flex items-center justify-between px-4 py-3 hover:bg-bg-hover"
                   >
+                    {/* The verdict, the score and the status used to be
+                        siblings *outside* the link, so dozens of rows for one
+                        file were dozens of links all named the same thing.
+                        They are inside it now, which is also where a reader
+                        following one expects to find them. */}
                     <Link
                       href={`/analysis/${row.id}`}
                       className="flex items-center gap-3 flex-1 min-w-0"
@@ -272,20 +286,22 @@ function AnalysesList() {
                           {row.durationSeconds ? ` / ${duration}` : ""}
                         </p>
                       </div>
-                    </Link>
-                    <div className="flex items-center gap-3 ml-3">
                       {row.verdict && (
                         <span
-                          className={`text-xs ${VERDICT_TEXT[verdictBucket(row.verdict)] ?? VERDICT_TEXT.unknown}`}
+                          className={`ml-auto text-xs ${VERDICT_TEXT[verdictBucket(row.verdict)] ?? VERDICT_TEXT.unknown}`}
                         >
                           {verdictLabel(row.verdict)}
+                          {/* A bare `0` beside a confident verdict said
+                              nothing about what the number was. */}
                           {row.confidence !== null && (
                             <span className="ml-1.5 font-mono text-text-muted">
-                              {Math.round(row.confidence * 100)}
+                              confidence {row.confidence.toFixed(2)}
                             </span>
                           )}
                         </span>
                       )}
+                    </Link>
+                    <div className="flex items-center gap-3 ml-3">
                       {canCancel && (
                         <button
                           onClick={(e) => {

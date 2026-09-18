@@ -1,3 +1,4 @@
+import { AGENT_DEFINITIONS_KEY } from "../configuration/agentStaging";
 import type { SettingsSchema } from "@/types/settings";
 
 export type GuideId =
@@ -542,7 +543,7 @@ const AGENT_GUIDE: GuideDef = {
       intro: "Clone a built-in analyst to inherit its prompt, or start from a blank generic one.",
       component: "agent-form",
       section: "identity",
-      reviewKeys: ["core.agents.definitions", "core.llm.agents"],
+      reviewKeys: [AGENT_DEFINITIONS_KEY, "core.llm.agents"],
       canContinue: (c) => (stateHas(c, "agentKey") ? null : "name the agent"),
     },
     {

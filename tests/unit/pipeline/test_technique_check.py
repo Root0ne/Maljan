@@ -55,6 +55,9 @@ class _Attck:
     def __init__(self, available: bool = True) -> None:
         self.available = available
         self.lookups: list[str] = []
+        # Per id, the tactics the catalogue would give it. Empty for most of
+        # them: a catalogue that cannot say is not a reason to stay silent.
+        self.tactics: dict[str, list[str]] = {}
 
     def attck_validate(self, ids: list[str]) -> dict[str, Any]:
         return {"invalid": [{"id": t} for t in ids if t not in CATALOGUE], "checked": len(ids)}
@@ -67,6 +70,7 @@ class _Attck:
             "technique_id": technique_id,
             "domain": row.get("domain"),
             "platforms": list(row.get("platforms") or []),
+            "tactics": list(self.tactics.get(technique_id) or []),
         }
 
     def resolve_technique(self, text: str, k: int = 5) -> dict[str, Any]:
@@ -192,12 +196,24 @@ def _gate(candidates: list[tuple[str, float]], gate_score: float):
 
 
 class TestTheAlignmentGate:
-    def test_an_id_the_index_neither_ranked_nor_scored_is_questioned_with_the_candidates(
-        self,
-    ) -> None:
+    """It ranks, it records, and it questions only inside the sample's scope.
+
+    The check as it shipped scored an id against a domain-blind index and
+    questioned everything the index had not ranked. The audit measured what
+    that costs: a claim about a Windows PE answered with Mobile and ICS
+    techniques, and four runs in which nearly every technique claim was
+    questioned, each batch a model turn. What a question now needs is a
+    candidate from the sample's own domain and platforms, from another tactic
+    than the claim's id, beating that id's score by the margin — and the
+    question is only asked at all when it is turned on.
+    """
+
+    def test_a_better_in_scope_candidate_is_named_with_its_score(self) -> None:
         isr = _isr(_claim("T1547.001", "the sample allocates memory in another process"))
         gate = _gate([("T1055", 0.41), ("T1055.001", 0.33)], gate_score=0.01)
-        violations = validate_isr(isr, attck=_Attck(), sample=PE, alignment=gate)
+        violations = validate_isr(
+            isr, attck=_Attck(), sample=PE, alignment=gate, weak_alignment_challenges=True
+        )
         assert _codes(violations) == [WEAK_ALIGNMENT_CODE]
         message = violations[0].message
         assert "T1547.001" in message and "0.01" in message and "0.05" in message
@@ -206,6 +222,12 @@ class TestTheAlignmentGate:
         # The claim text, not the id, is what the index was asked about.
         assert gate.seen[0][0].startswith("the sample allocates memory")
         assert gate.seen[0][1] == "T1547.001"
+
+    def test_it_questions_nothing_unless_it_is_turned_on(self) -> None:
+        isr = _isr(_claim("T1547.001"))
+        gate = _gate([("T1055", 0.41)], gate_score=0.01)
+        assert validate_isr(isr, attck=_Attck(), sample=PE, alignment=gate) == []
+        assert isr.claims[0].alignment["gate_score"] == 0.01
 
     def test_the_ranking_is_written_on_the_claim_and_the_id_is_not_replaced(self) -> None:
         isr = _isr(_claim("T1547.001"))
@@ -217,24 +239,111 @@ class TestTheAlignmentGate:
             "candidates": [{"technique_id": "T1055", "score_gate": 0.41}],
         }
 
+    def test_an_out_of_scope_candidate_is_never_proposed(self) -> None:
+        """``T1417`` is Mobile, and the index offered it for a Windows PE."""
+        isr = _isr(_claim("T1547.001"))
+        gate = _gate([("T1417", 0.62), ("T1055", 0.10)], gate_score=0.01)
+        violations = validate_isr(
+            isr, attck=_Attck(), sample=PE, alignment=gate, weak_alignment_challenges=True
+        )
+        assert violations == []
+        assert isr.claims[0].alignment["candidates"] == [
+            {"technique_id": "T1055", "score_gate": 0.10}
+        ]
+
+    def test_a_candidate_inside_the_margin_is_a_ranking_not_a_question(self) -> None:
+        isr = _isr(_claim("T1547.001"))
+        gate = _gate([("T1055", 0.15)], gate_score=0.01)
+        assert (
+            validate_isr(
+                isr, attck=_Attck(), sample=PE, alignment=gate, weak_alignment_challenges=True
+            )
+            == []
+        )
+
+    def test_the_margin_is_the_caller_s(self) -> None:
+        isr = _isr(_claim("T1547.001"))
+        gate = _gate([("T1055", 0.15)], gate_score=0.01)
+        violations = validate_isr(
+            isr,
+            attck=_Attck(),
+            sample=PE,
+            alignment=gate,
+            alignment_margin=0.1,
+            weak_alignment_challenges=True,
+        )
+        assert _codes(violations) == [WEAK_ALIGNMENT_CODE]
+
+    def test_a_candidate_from_the_claim_own_family_is_not_a_disagreement(self) -> None:
+        isr = _isr(_claim("T1055"))
+        gate = _gate([("T1055.001", 0.41)], gate_score=0.01)
+        assert (
+            validate_isr(
+                isr, attck=_Attck(), sample=PE, alignment=gate, weak_alignment_challenges=True
+            )
+            == []
+        )
+
+    def test_a_candidate_from_the_claim_own_tactic_is_not_a_disagreement(self) -> None:
+        attck = _Attck()
+        attck.tactics = {"T1547.001": ["persistence"], "T1055": ["persistence"]}
+        isr = _isr(_claim("T1547.001"))
+        gate = _gate([("T1055", 0.41)], gate_score=0.01)
+        assert (
+            validate_isr(
+                isr, attck=attck, sample=PE, alignment=gate, weak_alignment_challenges=True
+            )
+            == []
+        )
+
     def test_an_id_among_the_candidates_passes_whatever_its_score(self) -> None:
         isr = _isr(_claim("T1055"))
         gate = _gate([("T1055", 0.02)], gate_score=0.02)
-        assert validate_isr(isr, attck=_Attck(), sample=PE, alignment=gate) == []
+        assert (
+            validate_isr(
+                isr, attck=_Attck(), sample=PE, alignment=gate, weak_alignment_challenges=True
+            )
+            == []
+        )
         assert isr.claims[0].alignment["gate_score"] == 0.02
 
     def test_an_id_above_the_threshold_passes_although_unranked(self) -> None:
         isr = _isr(_claim("T1547.001"))
         gate = _gate([("T1055", 0.41)], gate_score=0.2)
-        assert validate_isr(isr, attck=_Attck(), sample=PE, alignment=gate) == []
+        assert (
+            validate_isr(
+                isr, attck=_Attck(), sample=PE, alignment=gate, weak_alignment_challenges=True
+            )
+            == []
+        )
 
     def test_the_threshold_is_the_caller_s(self) -> None:
         isr = _isr(_claim("T1547.001"))
         gate = _gate([("T1055", 0.41)], gate_score=0.2)
         violations = validate_isr(
-            isr, attck=_Attck(), sample=PE, alignment=gate, alignment_threshold=0.5
+            isr,
+            attck=_Attck(),
+            sample=PE,
+            alignment=gate,
+            alignment_threshold=0.5,
+            weak_alignment_challenges=True,
         )
         assert _codes(violations) == [WEAK_ALIGNMENT_CODE]
+
+    def test_a_sample_with_no_scope_is_ranked_and_never_questioned(self) -> None:
+        isr = _isr(_claim("T1547.001"))
+        gate = _gate([("T1055", 0.41)], gate_score=0.01)
+        violations = validate_isr(
+            isr,
+            attck=_Attck(),
+            sample={"platform": "multi", "file_type": "jar"},
+            alignment=gate,
+            weak_alignment_challenges=True,
+        )
+        assert violations == []
+        assert isr.claims[0].alignment["candidates"] == [
+            {"technique_id": "T1055", "score_gate": 0.41}
+        ]
 
     def test_no_gate_means_no_ranking_and_no_question(self) -> None:
         isr = _isr(_claim("T1547.001"))

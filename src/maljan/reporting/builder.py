@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 
 from maljan.core.logger import logger
 from maljan.extractors.attribution import build_family_attribution
-from maljan.extractors.capability_matrix import build_capability_matrix
+from maljan.extractors.capability_matrix import build_capability_matrix, unmapped_behaviours
 from maljan.pipeline.outcome import INCONCLUSIVE_REASONS
 from maljan.reporting.dedupe import MergeTally
 from maljan.reporting.ledger_projection import (
@@ -196,6 +196,7 @@ class MalwareReportBuilder:
             persistence=persistence,
             capability_matrix=cells,
             ttp_mappings=mappings,
+            unmapped_behaviours=unmapped_behaviours(self.stix_output),
             attribution=attribution,
             executive_summary="",  # filled by NarrativeAgent
             capabilities_narrative=[],  # filled by NarrativeAgent
@@ -327,8 +328,14 @@ class MalwareReportBuilder:
         """
         verdict = report.verdict
         family = report.attribution.family or report.malware_category or "unclassified malware"
-        ttp_lines = [f"{m.technique_id} ({m.technique_name})" for m in report.ttp_mappings[:5]]
-        ttp_summary = ", ".join(ttp_lines) if ttp_lines else "no MITRE techniques mapped"
+        # A count followed by a shorter list has to say it is a shorter list.
+        # "reported 11 ATT&CK techniques: T1027 ..., T1055 ..." and then five
+        # of them reads as a contradiction rather than as a sample.
+        named = [f"{m.technique_id} ({m.technique_name})" for m in report.ttp_mappings[:5]]
+        rest = len(report.ttp_mappings) - len(named)
+        ttp_summary = (
+            f"including {', '.join(named)}, and {rest} more" if rest > 0 else ", ".join(named)
+        )
         if any(reason in INCONCLUSIVE_REASONS for reason in report.degradation_reasons or []):
             # A run that examined nothing has no classification to report, and
             # "classified as suspicious" would read as a finding drawn from
@@ -340,23 +347,46 @@ class MalwareReportBuilder:
                 "cause named in the degradation reasons is resolved."
             )
         else:
+            # The confidence is not restated here. Every surface that draws
+            # this paragraph draws the verdict and its confidence above it --
+            # the console's header chip, the exported report's own header --
+            # and the two used to disagree about notation on one screen.
+            techniques = (
+                "The pipeline mapped no ATT&CK technique. "
+                if not named
+                else f"The pipeline mapped {len(report.ttp_mappings)} ATT&CK techniques, "
+                f"{ttp_summary}. "
+            )
             report.executive_summary = (
                 f"Sample classified as {verdict.lower()}. Best-guess family: {family}. "
-                f"Pipeline reported {len(report.ttp_mappings)} ATT&CK techniques: "
-                f"{ttp_summary}. "
-                + (
-                    "Confidence not assessed. "
-                    if report.overall_confidence is None
-                    else f"Confidence {report.overall_confidence:.2f}. "
-                )
-                + "This is an auto-generated summary (no LLM available); review the "
+                f"{techniques}"
+                "This is an auto-generated summary (no LLM available); review the "
                 "detailed sections for evidence."
             )
+        # Which tabs to point at is read from the report rather than written
+        # down: the console offers a tab only when the run filled it, so a
+        # fixed "Static, Dynamic and Network" named one it had chosen to hide.
+        drawn = [
+            name
+            for name, block in (
+                ("Identity", report.identity),
+                ("Static", report.static),
+                ("Dynamic", report.dynamic),
+                ("Network", report.network),
+            )
+            if block is not None
+        ]
+        # ``identity`` is not optional on a report, so ``drawn`` always names at
+        # least the Identity tab and there is no empty case to write for.
+        where = (
+            f"the {', '.join(drawn[:-1])} and {drawn[-1]} tabs"
+            if len(drawn) > 1
+            else f"the {drawn[0]} tab"
+        )
         report.capabilities_narrative = [
             "Detailed narrative was not generated because the analysis ran in "
             "mock/offline mode or the narrative LLM call failed. The deterministic "
-            "evidence in the Static, Dynamic and Network sections below carries "
-            "the full picture.",
+            f"evidence on {where} carries the full picture.",
         ]
         report.defensive_recommendations = [
             DefensiveRecommendation(

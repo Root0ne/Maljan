@@ -16,6 +16,12 @@ the model emits routinely — sails past it and dies on the `[0]`.
 
 The tests below feed it every shape a model has produced or plausibly could.
 None of them should be able to fail a run.
+
+What such an object costs is its own row. An attack-pattern that names no
+technique id is not a technique, and one audited run served three of them from
+here as techniques with an empty ``technique_id`` while the report's own
+``ttp_mappings`` was empty; a behaviour with no id is reported as a behaviour,
+in ``MalwareReport.unmapped_behaviours``.
 """
 
 from __future__ import annotations
@@ -31,34 +37,38 @@ def _bundle(*objects: dict[str, Any]) -> dict[str, Any]:
 
 class TestMalformedStixCannotFailTheRun:
     def test_an_empty_external_references_list(self) -> None:
-        """The exact shape that killed two live runs."""
-        result = _extract_mitre(
-            _bundle(
-                {"type": "attack-pattern", "name": "Process Injection", "external_references": []}
+        """The exact shape that killed two live runs: it costs its own row."""
+        assert (
+            _extract_mitre(
+                _bundle(
+                    {
+                        "type": "attack-pattern",
+                        "name": "Process Injection",
+                        "external_references": [],
+                    }
+                )
             )
+            is None
         )
-        assert result is not None
-        assert result[0]["technique_id"] == ""
-        assert result[0]["name"] == "Process Injection", "the rest of the object survives"
 
     def test_a_missing_external_references_key(self) -> None:
-        result = _extract_mitre(_bundle({"type": "attack-pattern", "name": "Masquerading"}))
-        assert result is not None
-        assert result[0]["technique_id"] == ""
+        assert _extract_mitre(_bundle({"type": "attack-pattern", "name": "Masquerading"})) is None
 
     def test_external_references_that_is_not_a_list(self) -> None:
-        result = _extract_mitre(
-            _bundle({"type": "attack-pattern", "name": "X", "external_references": "T1055"})
+        assert (
+            _extract_mitre(
+                _bundle({"type": "attack-pattern", "name": "X", "external_references": "T1055"})
+            )
+            is None
         )
-        assert result is not None
-        assert result[0]["technique_id"] == ""
 
     def test_a_reference_that_is_not_a_dict(self) -> None:
-        result = _extract_mitre(
-            _bundle({"type": "attack-pattern", "name": "X", "external_references": ["T1055"]})
+        assert (
+            _extract_mitre(
+                _bundle({"type": "attack-pattern", "name": "X", "external_references": ["T1055"]})
+            )
+            is None
         )
-        assert result is not None
-        assert result[0]["technique_id"] == ""
 
     def test_an_object_that_is_not_a_dict_at_all(self) -> None:
         assert _extract_mitre({"stix_output": {"objects": ["nonsense", None, 42]}}) is None
@@ -76,7 +86,7 @@ class TestMalformedStixCannotFailTheRun:
             )
         )
         assert result is not None
-        assert [t["technique_id"] for t in result] == ["", "T1055"]
+        assert [t["technique_id"] for t in result] == ["T1055"]
 
 
 class TestTheHappyPathIsUnchanged:

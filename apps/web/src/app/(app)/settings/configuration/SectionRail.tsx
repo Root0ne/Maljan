@@ -1,5 +1,6 @@
 "use client";
 
+import { countLabel } from "@/lib/report-utils";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Brain, FileText, Server, Users, Wrench } from "lucide-react";
@@ -58,10 +59,10 @@ export default function SectionRail() {
           const Icon = SECTION_ICON[section.icon];
           return (
           <div key={section.key}>
-            <h3 className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-text-muted px-2 mb-1">
+            <h2 className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-text-muted px-2 mb-1">
               <Icon size={16} aria-hidden="true" />
               {section.title}
-            </h3>
+            </h2>
             <ul className="space-y-0.5">
               {groups.map((group) => {
                 const active = pathname === group.path;
@@ -81,7 +82,7 @@ export default function SectionRail() {
                       {count > 0 && (
                         <span className="flex items-center justify-center min-w-[1.25rem] h-5 px-1 text-[10px] font-medium rounded-full bg-accent/20 text-accent-strong">
                           <span aria-hidden="true">{count}</span>
-                          <span className="sr-only">{count} unsaved changes</span>
+                          <span className="sr-only">{countLabel(count, "unsaved change")}</span>
                         </span>
                       )}
                     </Link>

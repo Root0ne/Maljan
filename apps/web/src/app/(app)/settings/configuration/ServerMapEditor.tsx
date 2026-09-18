@@ -1,5 +1,6 @@
 "use client";
 
+import { probeDetail } from "@/lib/probeDetail";
 import { useState } from "react";
 import { Server } from "lucide-react";
 import { api } from "@/lib/api";
@@ -7,6 +8,7 @@ import { getErrorMessage } from "@/lib/errors";
 import type { CatalogEntry, McpServerEntry, ProbeResult, SettingValue } from "@/types/settings";
 import { unavailableTools } from "@/types/settings";
 import Dot from "./Dot";
+import { addedEnvNames, requiredEnvNames, withRequiredEnvNames } from "./envAllow";
 import { deepEqual, mapKeyError, putEntry, removeEntry } from "./mapEditorHelpers";
 import SecretField, { type SecretStatus } from "./SecretField";
 
@@ -138,6 +140,59 @@ function EnvMapField({
   );
 }
 
+/**
+ * The names a stdio child inherits from the worker's own environment.
+ *
+ * A built-in's required names are drawn above the box rather than in it. The
+ * API passes them whatever the stored registry says (`envAllow.ts`), so a line
+ * an admin deleted here used to be accepted, put back on save, and reported as
+ * saved — a server that looked narrowed and was not. What stays editable is
+ * the rest of the list, which is theirs.
+ *
+ * The typed text is local state for the reason the environment map's is: a
+ * half-typed name is not reformatted under the cursor, and what is staged is
+ * always the fixed names plus the typed ones.
+ */
+function EnvAllowField({
+  serverKey,
+  envAllow,
+  onChange,
+}: {
+  serverKey: string;
+  envAllow: string[];
+  onChange: (envAllow: string[]) => void;
+}) {
+  const required = requiredEnvNames(serverKey);
+  const [text, setText] = useState(() => addedEnvNames(serverKey, envAllow).join("\n"));
+
+  const stage = (next: string) => {
+    setText(next);
+    onChange(withRequiredEnvNames(serverKey, next.split("\n").filter((name) => name !== "")));
+  };
+
+  return (
+    <label className="block">
+      <span className="text-text-muted">
+        {required.length > 0
+          ? "Other environment names passed through (one per line)"
+          : "Environment names passed through (one per line)"}
+      </span>
+      {required.length > 0 && (
+        <p className="text-[11px] text-text-secondary" data-required-env={serverKey}>
+          Always passed: <span className="font-mono text-text-primary">{required.join(", ")}</span>
+        </p>
+      )}
+      <textarea
+        className={input}
+        rows={2}
+        aria-label={`${serverKey} env allow`}
+        value={text}
+        onChange={(e) => stage(e.target.value)}
+      />
+    </label>
+  );
+}
+
 /** Which blocks of the detail pane to draw. The console editor draws all of
  *  them; a guide step draws the one its step is about. */
 export type ServerSection = "header" | "connection" | "tools" | "agents";
@@ -253,13 +308,8 @@ export function ServerDetail({
     onChange(putEntry(value, key, next));
   };
 
-  const remove = (key: string) => {
-    if (BUILTIN.has(key)) {
-      put(key, { enabled: false });
-      return;
-    }
-    onChange(removeEntry(value, key));
-  };
+  /** Only a custom server has a Remove; a built-in is turned off instead. */
+  const remove = (key: string) => onChange(removeEntry(value, key));
 
   if (!server) return null;
 
@@ -297,7 +347,7 @@ export function ServerDetail({
           className={`text-[11px] ${result.ok ? "text-status-green" : "text-status-red"}`}
           role="status"
         >
-          {result.ok ? "ok" : "failed"} · {result.latency_ms} ms · {result.detail}
+          {result.ok ? "ok" : "failed"} · {result.latency_ms} ms · {probeDetail(result.detail)}
         </p>
       )}
       {/* What the server cannot do on its host, said before any run: each
@@ -354,13 +404,17 @@ export function ServerDetail({
               >
                 Test
               </button>
-              <button
-                type="button"
-                className="text-xs text-text-secondary"
-                onClick={() => remove(serverKey)}
-              >
-                {BUILTIN.has(serverKey) ? "Disable" : "Remove"}
-              </button>
+              {/* A built-in server has no Remove, and the switch two
+                  controls to the left is already how it is turned off. */}
+              {!BUILTIN.has(serverKey) && (
+                <button
+                  type="button"
+                  className="text-xs text-text-secondary"
+                  onClick={() => remove(serverKey)}
+                >
+                  Remove
+                </button>
+              )}
             </div>
           </div>
 
@@ -432,22 +486,11 @@ export function ServerDetail({
                   env={server.env ?? {}}
                   onChange={(env) => put(serverKey, { env })}
                 />
-                <label className="block">
-                  <span className="text-text-muted">
-                    Environment names passed through (one per line)
-                  </span>
-                  <textarea
-                    className={input}
-                    rows={2}
-                    aria-label={`${serverKey} env allow`}
-                    value={server.env_allow.join("\n")}
-                    onChange={(e) =>
-                      put(serverKey, {
-                        env_allow: e.target.value.split("\n").filter((a) => a !== ""),
-                      })
-                    }
-                  />
-                </label>
+                <EnvAllowField
+                  serverKey={serverKey}
+                  envAllow={server.env_allow}
+                  onChange={(env_allow) => put(serverKey, { env_allow })}
+                />
               </>
             ) : (
               <>
@@ -704,11 +747,19 @@ export default function ServerMapEditor({
                     label={item.enabled ? "enabled" : "disabled"}
                     className={item.enabled ? "bg-status-green" : "bg-border"}
                   />
-                  <span className="text-sm font-mono text-text-primary truncate">{key}</span>
+                  {/* Label first, key after it, which is how the sibling
+                      agents list reads. This one showed the key alone while
+                      its own detail pane held "Network MCP". */}
+                  <span className="text-sm text-text-primary truncate">
+                    {item.label?.trim() || key}
+                  </span>
                   {changed && <Dot label="changed" className="bg-accent-strong" />}
                   {errorFor(key) && <Dot label="invalid" className="bg-status-red" />}
                 </div>
                 <div className="flex items-center gap-2 text-[11px] text-text-muted pl-3.5">
+                  {item.label?.trim() && item.label.trim() !== key && (
+                    <span className="font-mono">{key}</span>
+                  )}
                   <span>{item.transport}</span>
                   {verdict && (
                     <span

@@ -13,14 +13,49 @@ test.describe("Job submission with providers", () => {
     await page.goto("/samples");
     await page.getByRole("button", { name: "Analyze" }).first().click();
 
+    // Each option is named, with its registry key after it — the key is what
+    // the job config carries and what a log line says, so it stays on screen,
+    // but it is no longer the whole of what a reader is asked to choose
+    // between. The `value` is still the bare key; every `selectOption` below
+    // relies on that.
     const sandbox = page.locator("#sandbox-provider");
     await expect(sandbox.locator("option")).toHaveText([
-      "Inherit from settings", "mock", "cape2", "upload", "triage", "rest",
+      "Inherit from settings",
+      "Mock sandbox (mock)",
+      "CAPE v2 (cape2)",
+      "A report you attach (upload)",
+      "Hatching Triage (triage)",
+      "Any HTTP sandbox (rest)",
     ]);
     const staticSelect = page.locator("#static-provider");
     await expect(staticSelect.locator("option")).toHaveText([
-      "Inherit from settings", "ghidra", "r2", "capa_yara", "generic_mcp", "none",
+      "Inherit from settings",
+      "Ghidra (ghidra)",
+      "radare2 (r2)",
+      "capa + YARA (capa_yara)",
+      "Any MCP tool server (generic_mcp)",
+      "No static provider (none)",
     ]);
+  });
+
+  test("closing the dialog gives the focus back to the button that opened it", async ({
+    authenticatedPage: page,
+  }) => {
+    /* Escape used to drop a keyboard user on `<body>`, at the top of the
+     * document, with the whole page to tab through again (WCAG 2.4.3). */
+    await page.goto("/samples");
+    const analyze = page.getByRole("button", { name: "Analyze" }).first();
+    await analyze.click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(analyze).toBeFocused();
+
+    // And by the dialog's own Cancel, which is the same close path.
+    await analyze.click();
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await expect(analyze).toBeFocused();
   });
 
   test("submitting without touching the selects sends today's payload", async ({
@@ -206,8 +241,10 @@ test.describe("Job submission with providers", () => {
     await page.getByRole("button", { name: "Analyze" }).first().click();
 
     const profile = page.locator("#agent-profile");
+    // A team is keyed after what it is, so reading the key back is the whole
+    // of its name and there is nothing left for the key to add.
     await expect(profile.locator("option")).toHaveText([
-      "Inherit from settings", "default", "lean",
+      "Inherit from settings", "Default", "Lean",
     ]);
     await profile.selectOption("lean");
     await page.getByRole("button", { name: "Start analysis" }).click();
