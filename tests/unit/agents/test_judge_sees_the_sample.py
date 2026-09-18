@@ -383,8 +383,9 @@ class TestTheSampleSOwnIdentityIsGrounded:
             '{"type": "bundle", "objects": [{"type": "indicator", '
             '"id": "indicator--0f1e2d3c-4b5a-4968-8776-655443332201", '
             f"\"pattern\": \"[file:hashes.'SHA-256' = '{'e' * 64}']\", "
-            '"pattern_type": "stix"}], "x_maljan_assessment": {"severity": '
-            '{"rating": "Low", "rationale": "signed"}, "malware_category": "none"}}'
+            '"pattern_type": "stix"}], "x_maljan_assessment": {"verdict": "Suspicious", '
+            '"severity": {"rating": "Low", "rationale": "signed"}, '
+            '"malware_category": "none"}}'
         )
         judge = JudgeAgent.__new__(JudgeAgent)
         judge.logger = MagicMock()

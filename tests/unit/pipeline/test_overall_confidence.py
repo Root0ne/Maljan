@@ -1,15 +1,18 @@
-"""The report's confidence is the judge's, or the analysts' who had something to say.
+"""The report's confidence is the judge's, and nobody else's.
 
 Live run 2: one static analyst produced a single claim at 0.50, the dynamic and
 network analysts were skipped for want of a sandbox report, and the report's
 front page said 0.167 beside a "Malware" verdict — the mean of 0.5, 0 and 0.
-An analyst that had nothing to read is not a vote of no confidence, and run 1's
-0.98 was only right because all three of its analysts happened to run.
+Excluding the analysts that never ran fixed the arithmetic and left the wrong
+author: the number still belonged to the analysts' own claims and was printed
+as the verdict's confidence.
 
-The judge decides the verdict, so the judge's own confidence is the verdict's
-confidence. Failing that, the mean over the analysts that produced claims.
-Failing that, zero — which says the run reached no confidence rather than
-naming one.
+The judge decides the verdict and says how sure it is of it. That number is the
+verdict's; when the judge gives none the report says "not assessed", which is a
+different fact from zero and from an average of something else.
+
+``mean_claim_confidence`` stays, for the one reader that wants it as what it is:
+the analysts' confidence in their own claims.
 """
 
 from __future__ import annotations
@@ -62,22 +65,27 @@ class TestTheAnalystMean:
 class TestWhoDecides:
     def test_the_judge_when_it_gave_a_number(self) -> None:
         assessment = JudgeAssessment(
-            severity=SeverityVerdict(rating="High", rationale="it injects"), confidence=0.9
+            verdict="Malware",
+            severity=SeverityVerdict(rating="High", rationale="it injects"),
+            confidence=0.9,
         )
-        isrs = {"static": _isr("static", 0.5), "dynamic": _isr("dynamic")}
-        assert _overall_confidence(assessment, isrs) == 0.9
+        assert _overall_confidence(assessment) == 0.9
 
-    def test_the_analysts_when_the_judge_abstained(self) -> None:
-        assessment = JudgeAssessment(malware_category="loader")
-        isrs = {"static": _isr("static", 0.5), "dynamic": _isr("dynamic")}
-        assert _overall_confidence(assessment, isrs) == 0.5
+    def test_nothing_when_the_judge_abstained(self) -> None:
+        assert _overall_confidence(JudgeAssessment(malware_category="loader")) is None
 
-    def test_the_analysts_when_there_is_no_assessment_at_all(self) -> None:
-        assert _overall_confidence(None, {"static": _isr("static", 0.8)}) == 0.8
+    def test_nothing_when_there_is_no_assessment_at_all(self) -> None:
+        assert _overall_confidence(None) is None
 
-    def test_zero_when_nobody_answered(self) -> None:
-        assert _overall_confidence(None, {"static": _isr("static")}) == 0.0
+    def test_nothing_when_the_judge_never_answered(self) -> None:
+        assessment = JudgeAssessment(verdict="Malware", confidence=0.9)
+        assert _overall_confidence(assessment, judged=False) is None
 
     def test_a_judge_confidence_of_zero_is_still_the_judge_speaking(self) -> None:
-        assessment = JudgeAssessment(confidence=0.0)
-        assert _overall_confidence(assessment, {"static": _isr("static", 0.9)}) == 0.0
+        assert _overall_confidence(JudgeAssessment(confidence=0.0)) == 0.0
+
+    def test_a_confidence_that_is_not_a_number_is_not_assessed(self) -> None:
+        class _Odd:
+            confidence = "very"
+
+        assert _overall_confidence(_Odd()) is None

@@ -149,6 +149,10 @@ class MalwareReportBuilder:
         cells, mappings = build_capability_matrix(
             stix_output=self.stix_output,
             isr_reports=self.isr_reports,
+            # The routed minimum, which is what the analyst loop and the
+            # judge's bundle check were given: a technique from a domain this
+            # sample cannot host is kept in the matrix and left unpublished.
+            sample={"platform": self.sample_platform, "file_type": self.sample_file_type},
         )
         severity = self._severity_from_judge(static, dynamic, identity)
         verdict = self._verdict_literal(self.final_decision)

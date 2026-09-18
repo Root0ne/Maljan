@@ -79,17 +79,26 @@ def build_capability_matrix(
     *,
     stix_output: dict[str, Any] | None,
     isr_reports: dict[str, Any] | None,
+    sample: dict[str, Any] | None = None,
 ) -> tuple[list[CapabilityCell], list[TTPMapping]]:
     """Return ``(capability_cells, ttp_mappings)`` for the report.
 
     Both lists are sorted by descending confidence so the UI renders the
     most relevant rows first.
+
+    ``sample`` is the routed platform and file type. With it, a technique from
+    an ATT&CK domain the sample cannot host — two enterprise-only ids on an
+    Android package, in the run that made the case — joins the rule an
+    unresolvable id already follows: kept in the matrix with the reason
+    written beside it, and out of the published list. Without it the question
+    is not asked, which is the same fall-open answer the validator gives.
     """
     techniques = _collect_techniques(stix_output, isr_reports)
     if not techniques:
         return [], []
 
     index = _load_attck_index()
+    out_of_scope = _out_of_scope(list(techniques), sample)
 
     cells: list[CapabilityCell] = []
     mappings: list[TTPMapping] = []
@@ -112,12 +121,18 @@ def build_capability_matrix(
 
         tactic_id, tactic_name = _resolve_tactic(index, tactic_slug)
         domain, platforms = _catalogue_scope(tid)
-        # The cell keeps an id the catalogue rejected, marked: it is the
-        # producer's answer and deleting it would delete the record of it. The
-        # mapping does not, because ``ttp_mappings`` is the published technique
-        # list — the report's ATT&CK section, its References, the STIX
-        # attack-patterns and ``/reports/{id}/mitre`` are all built from it —
-        # and an id the check rejected is not a technique this run found.
+        # The cell keeps an id the catalogue rejected or the sample cannot
+        # host, with the reason written beside it: it is the producer's answer
+        # and deleting it would delete the record of it. The mapping does not,
+        # because ``ttp_mappings`` is the published technique list — the
+        # report's ATT&CK section, its References, the STIX attack-patterns and
+        # ``/reports/{id}/mitre`` are all built from it — and a technique a
+        # check rejected is not one this run found.
+        not_published = (
+            "the ATT&CK catalogue has no entry for this id in any domain"
+            if not valid
+            else out_of_scope.get(tid, "")
+        )
         cells.append(
             CapabilityCell(
                 tactic=tactic_id or "TA0000",
@@ -130,13 +145,15 @@ def build_capability_matrix(
                 technique_id_valid=valid,
                 platforms=platforms,
                 domain=domain,
+                not_published=not_published,
             )
         )
-        if not valid:
+        if not_published:
             logger.info(
                 "capability_matrix: %s stays in the matrix marked and out of the published "
-                "technique list; the ATT&CK catalogue has no entry for it.",
+                "technique list; %s.",
                 tid,
+                not_published,
             )
             continue
         mappings.append(
@@ -165,6 +182,43 @@ def build_capability_matrix(
 # analysts rather than the sample, so counting it would turn one analyst's
 # claim into two agreeing sources.
 _JUDGE_SOURCE = "judge"
+
+
+def _out_of_scope(ids: list[str], sample: dict[str, Any] | None) -> dict[str, str]:
+    """Per technique the sample cannot host, why — in the check's own words.
+
+    The same function the analyst loop and the judge's bundle check ask
+    (``pipeline.validation.platform_mismatch_message``), over the same
+    catalogue, so the sentence the report carries is the one the producer was
+    shown. It runs here rather than reading the surviving violations back
+    because this is after the feedback turn by construction: a technique the
+    retry replaced is not in the matrix to be asked about.
+
+    Never raises, and answers nothing for a sample whose platform is unknown or
+    cross-domain — the check falls open, so a question nobody can answer is not
+    counted as a mismatch.
+    """
+    if not sample:
+        return {}
+    try:
+        from maljan.pipeline.validation import expected_technique_scope, platform_mismatch_message
+        from maljan.tools import knowledge
+    except Exception as exc:  # noqa: BLE001 — a knowledge lookup degrades, never raises
+        logger.debug("capability_matrix: the platform check is unavailable (%s)", exc)
+        return {}
+    scope = expected_technique_scope(sample)
+    if scope[0] is None:
+        return {}
+    found: dict[str, str] = {}
+    for tid in ids:
+        try:
+            message = platform_mismatch_message(tid, knowledge, scope)
+        except Exception as exc:  # noqa: BLE001 — an unanswered lookup is no mismatch
+            logger.debug("capability_matrix: no platform answer for %s (%s)", tid, exc)
+            continue
+        if message:
+            found[tid] = " ".join(message.split())
+    return found
 
 
 def _catalogue_scope(technique_id: str) -> tuple[str, list[str]]:

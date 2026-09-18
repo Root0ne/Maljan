@@ -12,7 +12,11 @@ recorded unresolved when the retry omits it too.
 
 from __future__ import annotations
 
-from maljan.pipeline.validation import ASSESSMENT_MISSING_CODE, assessment_violations
+from maljan.pipeline.validation import (
+    ASSESSMENT_MISSING_CODE,
+    UNSTATED_VERDICT_CODE,
+    assessment_violations,
+)
 from maljan.schemas.judgement import FamilyVerdict, JudgeAssessment, SeverityVerdict
 from maljan.schemas.stix_models import Bundle
 
@@ -39,6 +43,7 @@ def _examined() -> dict:
 
 def _assessment(**overrides: object) -> JudgeAssessment:
     fields: dict[str, object] = {
+        "verdict": "Malware",
         "severity": SeverityVerdict(rating="High", rationale="it injects into a remote process"),
         "malware_category": "loader",
         "family": FamilyVerdict(name="AsyncRAT", confidence=0.7, evidence_ids=["ev_0004"]),
@@ -57,11 +62,12 @@ class TestTheAssessmentIsRequired:
         message = assessment_violations(Bundle(objects=[]))[0].message
         assert message.startswith("Add x_maljan_assessment")
         # Where the parser reads it: a top-level property of the bundle. A
-        # block nested inside ``objects`` is discarded by the schema, which is
-        # the failure this violation exists to fix.
+        # block nested inside ``objects`` is lifted there before validation and
+        # the lift is recorded, so the judge is told where it belongs.
         assert "top level of the bundle" in message
         assert 'sibling of "objects" and not inside it' in message
         for field in (
+            "verdict",
             "severity",
             "rating",
             "rationale",
@@ -106,8 +112,8 @@ class TestTheJudgeAsksOnce:
             (
                 '{"type": "bundle", "objects": [{"type": "malware", '
                 '"id": "malware--aaaaaaaa-0000-4000-8000-bbbbbbbbbbbb", "name": "loader"}], '
-                '"x_maljan_assessment": '
-                '{"severity": {"rating": "High", "rationale": "it injects"}, '
+                '"x_maljan_assessment": {"verdict": "Malware", '
+                '"severity": {"rating": "High", "rationale": "it injects"}, '
                 '"malware_category": "loader", "confidence": 0.8}}'
             ),
         ]
@@ -127,9 +133,12 @@ class TestTheJudgeAsksOnce:
         )
 
         assert verdict.retries == 1
-        assert verdict.fed_back == {ASSESSMENT_MISSING_CODE: 1}
+        # The first answer says nothing at all, so it is missing the block and
+        # the verdict the block carries; both are named in the one turn.
+        assert verdict.fed_back == {ASSESSMENT_MISSING_CODE: 1, UNSTATED_VERDICT_CODE: 1}
         assert verdict.violations == []
         assert verdict.bundle.x_maljan_assessment is not None
+        assert verdict.bundle.x_maljan_assessment.verdict == "Malware"
         assert verdict.bundle.x_maljan_assessment.confidence == 0.8
 
     def test_a_second_answer_without_one_is_recorded_unresolved(self) -> None:
@@ -153,7 +162,10 @@ class TestTheJudgeAsksOnce:
         )
 
         assert verdict.retries == 1
-        assert [v.code for v in verdict.violations] == [ASSESSMENT_MISSING_CODE]
+        assert [v.code for v in verdict.violations] == [
+            ASSESSMENT_MISSING_CODE,
+            UNSTATED_VERDICT_CODE,
+        ]
         assert verdict.bundle.x_maljan_assessment is None
 
 
@@ -165,9 +177,9 @@ class TestThePromptAndTheFeedbackAgree:
         assert "top-level" in JUDGE_VERDICT_SYSTEM
         assert "top level of the bundle" in ASSESSMENT_MISSING_MESSAGE
 
-    def test_the_prompt_counts_the_fields_it_lists(self) -> None:
-        """``confidence`` joined severity, malware_category and family."""
+    def test_the_prompt_counts_the_fields_the_judge_may_omit(self) -> None:
+        """``verdict`` and ``confidence`` are asked for; the other three may be omitted."""
         from maljan.agents.judge_agent import JUDGE_VERDICT_SYSTEM
 
-        assert "Omit any of the four you cannot support" in JUDGE_VERDICT_SYSTEM
-        assert "Omit any of the three" not in JUDGE_VERDICT_SYSTEM
+        assert "Omit any of the other three you cannot support" in JUDGE_VERDICT_SYSTEM
+        assert "Omit any of the four" not in JUDGE_VERDICT_SYSTEM

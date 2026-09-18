@@ -22,6 +22,11 @@ from pydantic import BaseModel, Field
 
 SEVERITY_RATINGS: tuple[str, ...] = ("Critical", "High", "Medium", "Low", "Informational")
 
+# The verdicts the judge may state, and the whole vocabulary the pipeline has:
+# ``pipeline.outcome`` reads a run's verdict against these three and nothing
+# else, and ``INCONCLUSIVE_VERDICT`` there is one of them rather than a fourth.
+VERDICT_VALUES: tuple[str, ...] = ("Malware", "Suspicious", "Benign")
+
 
 class SeverityVerdict(BaseModel):
     """How bad this is, and why the judge says so.
@@ -52,13 +57,28 @@ class FamilyVerdict(BaseModel):
 
 
 class JudgeAssessment(BaseModel):
-    """The non-STIX part of the verdict: severity, category, family.
+    """The non-STIX part of the verdict: the verdict itself, severity, category, family.
 
     Every field is optional because the judge is allowed to abstain, and an
     abstention has to survive to the report. A missing severity prints as "not
     assessed"; it does not fall back to a number some other component made up.
+
+    ``verdict`` is asked for and is not optional in any other sense: the prompt
+    requires it, ``pipeline.validation`` records a bundle that states none, and
+    ``pipeline.outcome`` falls back to reading the object set only because a
+    stored run may predate the field. It is a plain string for the reason
+    ``SeverityVerdict.rating`` is one -- a ``Literal`` would fail the whole
+    bundle over one wrong word and send the run down the text fallback, where
+    nobody learns which word it was.
     """
 
+    verdict: str | None = Field(
+        None,
+        description=(
+            " | ".join(VERDICT_VALUES)
+            + ". The verdict this bundle states; the object set follows it."
+        ),
+    )
     severity: SeverityVerdict | None = Field(
         None, description="The severity rating and its rationale."
     )
@@ -73,7 +93,8 @@ class JudgeAssessment(BaseModel):
         ge=0.0,
         le=1.0,
         description=(
-            "How sure the judge is of this verdict overall. The report's "
-            "overall confidence, when the judge gives one."
+            "How sure the judge is of the verdict it stated above. The "
+            "report's overall confidence, and the only source of it: a "
+            "verdict the judge put no number on is published with none."
         ),
     )

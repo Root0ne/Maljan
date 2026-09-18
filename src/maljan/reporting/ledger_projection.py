@@ -586,7 +586,7 @@ def network_from_ledger(
     network = NetworkIOCs()
     domains: dict[str, NetworkDomain] = {}
     ips: set[str] = set()
-    urls: set[str] = set()
+    urls: dict[str, NetworkURL] = {}
 
     def _add(kind: str, value: str, source: _DomainSource = "strings") -> None:
         value = (value or "").strip()
@@ -624,10 +624,17 @@ def network_from_ledger(
             # Case-fold the host so one endpoint reached twice under two
             # spellings is one URL, not two.
             value = _fold_url_host(value)
-            if value in urls:
+            known_url = urls.get(value)
+            if known_url is not None:
+                # The same endpoint from a second source, read the way a
+                # domain's is: the stronger origin wins, and that is the
+                # corroboration the indicator rule asks for.
+                if _DOMAIN_SOURCE_RANK[source] > _DOMAIN_SOURCE_RANK[known_url.source or "strings"]:
+                    known_url.source = source
                 return
-            urls.add(value)
-            network.urls.append(NetworkURL(url=value))
+            created = NetworkURL(url=value, source=source)
+            urls[value] = created
+            network.urls.append(created)
 
     for _entry, data in _payloads(ledger, "sandbox_network"):
         for key in ("dns", "domains"):
@@ -641,7 +648,10 @@ def network_from_ledger(
         for row in data.get("http") or []:
             host = _first_str(row, "host", "hostname")
             _add("domain", host, "sandbox")
-            _add("url", _http_url(row, host))
+            # A request the sample made, and labelled as one: the default
+            # source is ``strings``, so an observed URL used to be recorded as
+            # though it had been read out of the file's bytes.
+            _add("url", _http_url(row, host), "sandbox")
 
     for _entry, data in _payloads(ledger, "iocs_from_file", "iocs_from_text"):
         for row in data.get("iocs") or []:

@@ -344,6 +344,12 @@ class NetworkURL(BaseModel):
     method: str = "GET"
     status: int | None = None
     user_agent: str | None = None
+    # Where the URL came from, with the same three answers and the same weight
+    # a domain's ``source`` carries. A run of bytes in the file that has the
+    # shape of a URL is a far weaker claim than a request the sample made, and
+    # the two were being published as though they were the same one.
+    # ``None`` for a producer that does not record it.
+    source: Literal["sandbox", "analyst", "strings"] | None = None
 
 
 class NetworkIOCs(BaseModel):
@@ -449,6 +455,12 @@ class CapabilityCell(BaseModel):
     # linter's platform check reads them.
     platforms: list[str] = Field(default_factory=list)
     domain: str = ""
+    # Why this technique is not in ``ttp_mappings``, in words, and empty when
+    # it is. Two rules put a sentence here: an id the ATT&CK catalogue has no
+    # entry for, and one whose domain or platforms the sample cannot host
+    # after the producer was told and kept it. The row itself stays exactly as
+    # the producer wrote it — this says what the report did with it.
+    not_published: str = ""
 
 
 class TTPMapping(BaseModel):

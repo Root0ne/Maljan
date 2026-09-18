@@ -127,10 +127,11 @@ class MarkdownRenderer:
         )
         if report.overall_confidence is None:
             header += (
-                "\n\n> **[NO JUDGE VERDICT]** The judge did not answer, so this "
-                "verdict was written by the pipeline rather than decided by a "
-                "model, and no confidence was assessed for it. The analysts' own "
-                "reports below stand; the decision above does not rest on them."
+                "\n\n> **[NO CONFIDENCE ASSESSED]** This verdict carries no "
+                "confidence: the judge assessed none, or never answered at all. "
+                "Nothing is substituted for one — the analysts' confidence "
+                "belongs to their own claims, and a verdict none of them reached "
+                "is not something they rated."
             )
         if report.degraded_mode:
             reasons = "; ".join(report.degradation_reasons) or "low analyst/sandbox data"
@@ -562,7 +563,9 @@ class MarkdownRenderer:
         lines = ["## MITRE ATT&CK Matrix", ""]
         if not cells and not mappings:
             lines.append("_No ATT&CK techniques mapped._")
-            return "\n".join(lines + _unmapped_behaviour_lines(report))
+            return "\n".join(
+                lines + _not_published_lines(report) + _unmapped_behaviour_lines(report)
+            )
 
         if cells:
             lines.append("| Tactic | Technique | Confidence | Layers |")
@@ -593,7 +596,9 @@ class MarkdownRenderer:
                 for quote in mapping.evidence_quotes[:6]:
                     lines.append(f"> {_truncate(quote, 240)}")
                 lines.append("")
-        return "\n".join(lines + _unmapped_behaviour_lines(report)).rstrip()
+        return "\n".join(
+            lines + _not_published_lines(report) + _unmapped_behaviour_lines(report)
+        ).rstrip()
 
     def _section_attribution(self, report: MalwareReport) -> str:
         attr = report.attribution
@@ -1027,6 +1032,28 @@ def _evidence_body(section: Any) -> list[str]:
     if section.text:
         return ["```", section.text, "```"]
     return []
+
+
+def _not_published_lines(report: MalwareReport) -> list[str]:
+    """The techniques a producer claimed and this report does not publish.
+
+    They are in the matrix above, with the confidence and the layers that
+    claimed them, because the claim is the producer's. They are in none of the
+    technique surfaces — not the evidence list below, not the References, not
+    the STIX attack-patterns, not ``/reports/{id}/mitre`` — and this is where a
+    reader is told which ones and why.
+    """
+    rows = [
+        cell for cell in (getattr(report, "capability_matrix", None) or []) if cell.not_published
+    ]
+    if not rows:
+        return []
+    lines = ["", "### Claims that were not published as techniques", ""]
+    lines.extend(
+        f"- {cell.technique_id} {cell.technique_name}: {_truncate(cell.not_published, 300)}"
+        for cell in rows
+    )
+    return lines
 
 
 def _unmapped_behaviour_lines(report: MalwareReport) -> list[str]:

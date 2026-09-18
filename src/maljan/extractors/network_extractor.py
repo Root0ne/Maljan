@@ -587,6 +587,57 @@ def corroboration_reason(source: Any, reputation: Any, fqdn: Any = "") -> str | 
     return None
 
 
+def url_host(raw_url: Any) -> str:
+    """The host of a URL, lowercased, or ``""`` when it has none."""
+    from urllib.parse import urlparse
+
+    try:
+        return (urlparse(str(raw_url or "")).hostname or "").strip().lower().rstrip(".")
+    except (ValueError, TypeError):
+        return ""
+
+
+def host_is_public(host: Any) -> bool:
+    """Whether ``host`` is a name or address that could exist on the internet.
+
+    A string sweep cuts hostnames wherever the surrounding bytes end, and the
+    pieces are shaped like URLs: ``http://localho``, ``https://q``,
+    ``http://3271``, ``https://fs01n5.sends``. Five of them were published as
+    STIX indicators in one live run, each one something a consumer would block
+    on. The two questions that settle it are the ones the domain rules already
+    answer — is the name reserved or single-label, and does it end in a TLD
+    that exists — with an address literal allowed on its own if it is not
+    loopback or unspecified, since an address needs no name to resolve.
+    """
+    from maljan.tools.strings import _KNOWN_TLDS
+
+    name = str(host or "").strip().lower().rstrip(".")
+    if not name:
+        return False
+    try:
+        address = ipaddress.ip_address(name.strip("[]"))
+    except ValueError:
+        pass
+    else:
+        return not (address.is_loopback or address.is_unspecified)
+    if not _is_emittable_domain(name):
+        return False
+    return name.rsplit(".", 1)[-1] in _KNOWN_TLDS
+
+
+def url_corroboration_reason(raw_url: Any, source: Any, reputation: Any = None) -> str | None:
+    """Why this URL may be published, or ``None`` when nothing says it may.
+
+    The same rule the domains go through, asked of the URL's host, plus the
+    syntactic question above — which no source can answer for: a cut-off host
+    is not an endpoint whoever recorded it meant, whatever recorded it.
+    """
+    host = url_host(raw_url)
+    if not host_is_public(host):
+        return None
+    return corroboration_reason(source, reputation, host)
+
+
 def domain_is_corroborated(source: Any, reputation: Any, fqdn: Any = "") -> bool:
     """Whether anything but the sample's own byte image knows this name.
 

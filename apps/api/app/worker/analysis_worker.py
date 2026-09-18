@@ -2355,10 +2355,10 @@ def _extract_confidence(result: dict) -> float | None:
     not carry was reading whichever of them this function happened to reach.
 
     A report that carries the key explicitly set to ``None`` has said that no
-    confidence was assessed — the verdict is the pipeline's own, written
-    because the judge never answered — and that answer is final. Falling
-    through to the confidence history there would take the analysts' certainty
-    in their own claims and print it beside a decision none of them made.
+    confidence was assessed — the judge put no number on its verdict, or never
+    answered at all — and that answer is final. Falling through to the
+    confidence history there would take the analysts' certainty in their own
+    claims and print it beside a decision none of them made.
     """
     malware_report = result.get("malware_report")
     if isinstance(malware_report, dict) and "overall_confidence" in malware_report:

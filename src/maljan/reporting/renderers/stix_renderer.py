@@ -34,7 +34,12 @@ from maljan.agents._indicator_denylists import (
     URL_DENY_HOSTS,
 )
 from maljan.core.logger import logger
-from maljan.extractors.network_extractor import corroboration_reason, domain_is_corroborated
+from maljan.extractors.network_extractor import (
+    corroboration_reason,
+    domain_is_corroborated,
+    url_corroboration_reason,
+    url_host,
+)
 from maljan.reporting.models import (
     MalwareReport,
     NetworkDomain,
@@ -58,6 +63,60 @@ from maljan.schemas.stix_models import (
 
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 
+# What the run summary calls a judge object this export declined to carry. Each
+# says what is not in the bundle and why; nothing is rewritten, and the judge's
+# own bundle keeps the object.
+MALWARE_UNDER_BENIGN_CODE = "stix.malware_object_under_benign"
+UNPUBLISHABLE_URL_CODE = "stix.unpublishable_url"
+
+# Which of the three priority kinds an indicator belongs to, by its pattern.
+# The cap spends its budget in this order: hashes, then network indicators,
+# then the file names, which are the noisiest thing a string sweep produces.
+_NETWORK_PATTERN_PREFIXES = (
+    "[url:value",
+    "[domain-name:value",
+    "[ipv4-addr:value",
+    "[ipv6-addr:value",
+)
+
+
+# The literals a STIX pattern quotes, which is where a URL indicator keeps its
+# URL.
+_PATTERN_LITERALS_RE = re.compile(r"'([^']*)'")
+
+
+def _indicator_kind(pattern: str) -> str:
+    """``hash``, ``network`` or ``string`` for one indicator pattern."""
+    stripped = (pattern or "").lstrip()
+    if stripped.startswith("[file:hashes"):
+        return "hash"
+    if any(stripped.startswith(prefix) for prefix in _NETWORK_PATTERN_PREFIXES):
+        return "network"
+    return "string"
+
+
+def _judge_indicator_problem(indicator: Indicator) -> tuple[str, str] | None:
+    """Why this judge indicator is not exported, as ``(code, sentence)``, or ``None``.
+
+    The judge's objects go through the same publish rule the deterministic
+    rows do, and the answer for one that fails it is the one this pipeline
+    gives everywhere else: not published, recorded, never rewritten. A URL is
+    the only kind asked so far — it is the one the string sweep feeds and the
+    one a cut-off host reaches a consumer through.
+    """
+    pattern = (indicator.pattern or "").lstrip()
+    if not pattern.startswith("[url:value"):
+        return None
+    for literal in _PATTERN_LITERALS_RE.findall(pattern):
+        if url_corroboration_reason(literal, "judge") is None:
+            return (
+                UNPUBLISHABLE_URL_CODE,
+                f"the URL indicator for {literal!r} is not in the exported bundle: its host is "
+                "not a name or address that could exist. It is unchanged in the judge's own "
+                "bundle.",
+            )
+    return None
+
 
 class ExtendedSTIXRenderer:
     """Augment a minimal Bundle with the SDOs derived from a ``MalwareReport``.
@@ -73,6 +132,12 @@ class ExtendedSTIXRenderer:
         # about a technique the checks rejected is not a defect of the bundle,
         # it is part of what the run has to say about that technique.
         self.unlinked: list[tuple[str, int]] = []
+        # Per render: the objects this export declined to carry, as
+        # ``(validation code, what and why)``. Nothing is rewritten — the
+        # judge's bundle is stored as the run's own record — and the report
+        # node writes these rows beside the run's other findings so a reader
+        # of the export is told what is not in it.
+        self.declined: list[tuple[str, str]] = []
 
     def render(
         self,
@@ -92,6 +157,14 @@ class ExtendedSTIXRenderer:
         """
         objects: list[Any] = []
         self.unlinked = []
+        self.declined = []
+        # A verdict of Benign is a finding that this sample is not malware, so
+        # the bundle it publishes carries no malware object — neither one the
+        # judge wrote as "a container for the object type in STIX" beside an
+        # assessment calling the sample benign, nor one minted here. The
+        # verdict is the judge's and is published as stated; what is declined
+        # is the object that contradicts it, and the decline is recorded.
+        benign = str(getattr(report, "verdict", "") or "").strip().lower() == "benign"
 
         # 1) Preserve everything the judge already emitted, except its
         #    attack-patterns: those are rebuilt from the report's published
@@ -110,19 +183,44 @@ class ExtendedSTIXRenderer:
         #    with the technique, and counted as that technique's loss rather
         #    than left to the integrity pass, which would count it a second
         #    time as a dangling ref of the judge's bundle.
+        # ``carried`` holds the judge's own indicators, which go through the
+        # same cap the minted ones do: the cap used to count only what this
+        # renderer made, so a bundle with two judge indicators and fourteen
+        # minted ones shipped sixteen against a ceiling of fifteen and the
+        # report's own linter said so.
         linked: set[str] = set()
+        carried: list[Indicator] = []
         if base_bundle is not None:
             self._normalize_judge_timestamps(base_bundle.objects)
             remap = _technique_remap(report, base_bundle)
             gone = _rejected_pattern_ids(base_bundle, remap)
             for obj in base_bundle.objects:
-                if getattr(obj, "type", "") == "attack-pattern":
+                kind = getattr(obj, "type", "")
+                if kind == "attack-pattern":
+                    continue
+                if kind == "malware" and benign:
+                    self.declined.append(
+                        (
+                            MALWARE_UNDER_BENIGN_CODE,
+                            f"the malware object {str(getattr(obj, 'name', '') or 'it')!r} is not "
+                            "in the exported bundle: this run's verdict is Benign. The object is "
+                            "unchanged in the judge's own bundle and the disagreement is in this "
+                            "run's validation findings.",
+                        )
+                    )
                     continue
                 if _points_at(obj, gone):
                     continue
                 moved, technique = _relinked(obj, remap)
                 if technique:
                     linked.add(technique)
+                if isinstance(moved, Indicator):
+                    declined = _judge_indicator_problem(moved)
+                    if declined:
+                        self.declined.append(declined)
+                        continue
+                    carried.append(moved)
+                    continue
                 objects.append(moved)
             self.unlinked = _unlinked_techniques(base_bundle, gone)
 
@@ -135,8 +233,11 @@ class ExtendedSTIXRenderer:
         objects.append(identity)
 
         # 3) Locate the Malware object (created by judge or here as fallback).
-        malware_id = self._find_malware_id(objects)
-        if malware_id is None:
+        #    A Benign verdict gets none: the fallback used to mint one on every
+        #    run, so the object a Benign export declines above was replaced by
+        #    an identical one two steps later.
+        malware_id = None if benign else self._find_malware_id(objects)
+        if malware_id is None and not benign:
             malware_name = report.attribution.family or report.malware_category or "unknown"
             malware_obj = Malware(
                 name=str(malware_name),
@@ -152,7 +253,9 @@ class ExtendedSTIXRenderer:
         #      own objects carried whatever id the model minted — including
         #      placeholder UUIDs out of the STIX documentation — and a
         #      technique the report published reached the bundle only if the
-        #      judge had happened to emit an object for it.
+        #      judge had happened to emit an object for it. With no malware
+        #      object there is nothing for a ``uses`` edge to start at, and the
+        #      techniques are published without one.
         for pattern_sdo, uses in _attack_patterns_for(report, malware_id, linked):
             objects.append(pattern_sdo)
             if uses is not None:
@@ -164,11 +267,16 @@ class ExtendedSTIXRenderer:
         # ELF audit found 19 indicators leaking past the ≤15 ceiling
         # because the per-kind cap (MAX_FILE_NAME_INDICATORS=10) ignored
         # hashes and network IOCs.
-        # ``hash_inds`` always pairs an Indicator with its "indicates"
-        # Relationship; the tuple shape is explicit so mypy can narrow.
-        hash_inds: list[tuple[Indicator, Relationship]] = []
-        network_inds: list[Indicator] = []
-        string_inds: list[Indicator] = []
+        by_kind: dict[str, list[Indicator]] = {"hash": [], "network": [], "string": []}
+        # The ``indicates`` edge a published indicator still needs, by the id of
+        # the indicator it belongs to, so an indicator the cap leaves out does
+        # not put a dangling edge in the bundle.
+        indicates: dict[str, Relationship] = {}
+
+        # The judge's own indicators, sorted into the same three kinds as the
+        # minted ones and ahead of them, because they are the verdict's.
+        for carried_indicator in carried:
+            by_kind[_indicator_kind(carried_indicator.pattern)].append(carried_indicator)
 
         # 4) Indicator for the file hash itself (always present).
         sha256 = report.identity.hashes.sha256
@@ -179,12 +287,13 @@ class ExtendedSTIXRenderer:
                 pattern_type="stix",
                 indicator_types=["malicious-activity"],
             )
-            rel = Relationship(
-                relationship_type="indicates",
-                source_ref=indicator.id,
-                target_ref=malware_id,
-            )
-            hash_inds.append((indicator, rel))
+            by_kind["hash"].append(indicator)
+            if malware_id is not None:
+                indicates[indicator.id] = Relationship(
+                    relationship_type="indicates",
+                    source_ref=indicator.id,
+                    target_ref=malware_id,
+                )
 
         # 5) StringIOC → Indicator.
         #
@@ -222,45 +331,38 @@ class ExtendedSTIXRenderer:
                         ["anomalous-activity"] if is_file_name else ["malicious-activity"]
                     ),
                 )
-                string_inds.append(ind)
+                by_kind[_indicator_kind(pattern)].append(ind)
 
         # 6) Network domain/IP/URL → Indicator.
         if report.network is not None:
             for domain in report.network.domains[:40]:
                 dom_ind = _indicator_for_domain(domain)
                 if dom_ind is not None:
-                    network_inds.append(dom_ind)
+                    by_kind["network"].append(dom_ind)
             for ip in report.network.ips[:40]:
                 ip_ind = _indicator_for_ip(ip)
                 if ip_ind is not None:
-                    network_inds.append(ip_ind)
+                    by_kind["network"].append(ip_ind)
             for url in report.network.urls[:40]:
-                url_ind = _indicator_for_url(url)
+                url_ind = _indicator_for_url(url, report)
                 if url_ind is not None:
-                    network_inds.append(url_ind)
+                    by_kind["network"].append(url_ind)
 
-        # 6.5) Apply the total-indicator cap with priority order.
+        # 6.5) Apply the total-indicator cap with priority order, over every
+        #      indicator that would be in the bundle rather than over the ones
+        #      this renderer happened to mint.
         budget = MAX_TOTAL_INDICATORS
         dropped_counts = {"hash": 0, "network": 0, "string": 0}
-        for ind, rel in hash_inds:
-            if budget > 0:
+        for kind in ("hash", "network", "string"):
+            for ind in by_kind[kind]:
+                if budget <= 0:
+                    dropped_counts[kind] += 1
+                    continue
                 objects.append(ind)
-                objects.append(rel)
+                edge = indicates.get(ind.id)
+                if edge is not None:
+                    objects.append(edge)
                 budget -= 1
-            else:
-                dropped_counts["hash"] += 1
-        for ind in network_inds:
-            if budget > 0:
-                objects.append(ind)
-                budget -= 1
-            else:
-                dropped_counts["network"] += 1
-        for ind in string_inds:
-            if budget > 0:
-                objects.append(ind)
-                budget -= 1
-            else:
-                dropped_counts["string"] += 1
         if sum(dropped_counts.values()):
             logger.warning(
                 "stix_renderer: total indicator cap (%d) exceeded; dropped "
@@ -296,7 +398,7 @@ class ExtendedSTIXRenderer:
                     )
                 ),
                 content=summary,
-                object_refs=[malware_id],
+                object_refs=[malware_id] if malware_id is not None else [],
             )
             objects.append(note)
 
@@ -476,7 +578,7 @@ def _unlinked_techniques(base_bundle: Bundle, gone: dict[str, str]) -> list[tupl
 
 
 def _attack_patterns_for(
-    report: MalwareReport, malware_id: str, linked: set[str] | None = None
+    report: MalwareReport, malware_id: str | None, linked: set[str] | None = None
 ) -> list[tuple[AttackPattern, Relationship | None]]:
     """One attack-pattern per published technique, and the link it still needs.
 
@@ -485,7 +587,8 @@ def _attack_patterns_for(
     References and ``/reports/{id}/mitre`` are built from, with the ids the
     catalogue check rejected already out of it. A technique the judge already
     related to the sample gets no second relationship — the judge's own carries
-    its confidence and this one would carry none.
+    its confidence and this one would carry none — and neither does one in a
+    bundle with no malware object, which a Benign verdict publishes.
     """
     already = linked or set()
     out: list[tuple[AttackPattern, Relationship | None]] = []
@@ -506,7 +609,7 @@ def _attack_patterns_for(
                 }
             ],
         )
-        if tid in already or pattern.id in already:
+        if malware_id is None or tid in already or pattern.id in already:
             out.append((pattern, None))
             continue
         out.append(
@@ -600,12 +703,14 @@ def _accept_string_ioc(
     if stripped.startswith("[domain-name:value"):
         return value.lower().rstrip(".") in publishable_domains
 
-    # URLs: denylist developer/build hosts.
+    # URLs: the corroboration rule, then the denylist of developer and build
+    # hosts. Every ``url`` row here came out of the string scan, so it is
+    # string-derived by construction and asks the predicate as one.
     if stripped.startswith("[url:value"):
         host = _extract_url_host(value)
         if host and any(host.endswith(d) or d in host for d in URL_DENY_HOSTS):
             return False
-        return True
+        return url_corroboration_reason(value, "strings") is not None
 
     # file:name: acceptance-based admission + per-report cap.
     if stripped.startswith("[file:name"):
@@ -706,8 +811,21 @@ def _indicator_for_ip(ip: NetworkIP) -> Indicator | None:
     )
 
 
-def _indicator_for_url(url: NetworkURL) -> Indicator | None:
+def _indicator_for_url(url: NetworkURL, report: Any = None) -> Indicator | None:
+    """The URL as an indicator, or ``None`` when this run may not publish it.
+
+    The same rule the domains go through, for the same reason: a URL pulled out
+    of the file's bytes is not an endpoint anybody watched, and one live run
+    published five string-sweep cut-offs — ``http://localho``, ``https://q``,
+    ``http://3271`` — as indicators a consumer would block on. The host's own
+    reputation row, where the enrichment wrote one, is what a second source
+    looks like here.
+    """
     if not url.url:
+        return None
+    host = url_host(url.url)
+    admitted = url_corroboration_reason(url.url, url.source, _host_reputation(report, host))
+    if admitted is None:
         return None
     pattern = f"[url:value = '{_escape_stix(url.url)}']"
     return Indicator(
@@ -715,7 +833,21 @@ def _indicator_for_url(url: NetworkURL) -> Indicator | None:
         pattern=pattern,
         pattern_type="stix",
         indicator_types=["malicious-activity"],
+        # As for a domain, only the surprising admission is spelled out.
+        description=admitted if url.source == "strings" else None,
     )
+
+
+def _host_reputation(report: Any, host: str) -> dict[str, Any] | None:
+    """What a reputation provider said about this host, from the network block."""
+    network = getattr(report, "network", None)
+    if network is None or not host:
+        return None
+    for domain in network.domains:
+        if domain.fqdn.strip().lower().rstrip(".") == host:
+            reputation = domain.reputation
+            return reputation if isinstance(reputation, dict) else None
+    return None
 
 
 def _processes_to_observed(roots: list[ProcessNode]) -> dict[str, dict[str, Any]]:

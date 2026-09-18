@@ -17,6 +17,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from maljan.schemas.judgement import VERDICT_VALUES
+
 # What the run summary and the report header say about a verdict drawn from an
 # empty run. It is a degradation reason and not an override: the judge made no
 # claim that this replaces, because there was nothing for it to claim.
@@ -76,8 +78,46 @@ def _one_line(text: str, limit: int = _MESSAGE_LIMIT) -> str:
     return flattened[:limit]
 
 
+def stated_verdict(bundle: Any) -> str:
+    """The verdict the judge wrote in its assessment, or ``""``.
+
+    One reading, so that the pipeline, the conflict check and the export all
+    take the judge at its word in the same words. A value outside
+    :data:`VERDICT_VALUES` is not a verdict this pipeline can act on and reads
+    as unstated; ``pipeline.validation`` is where the judge is told so.
+    """
+    assessment = getattr(bundle, "x_maljan_assessment", None)
+    if assessment is None:
+        return ""
+    written = str(getattr(assessment, "verdict", "") or "").strip()
+    for value in VERDICT_VALUES:
+        if written.lower() == value.lower():
+            return value
+    return ""
+
+
+def stated_confidence(bundle: Any) -> float | None:
+    """The judge's own confidence for the verdict it stated, or ``None``.
+
+    ``None`` is the answer for a judge that stated no number, and the report
+    prints "not assessed" for it. Nothing else may stand in: a confidence
+    averaged from the analysts belongs to the analysts' own claims, and one
+    derived from the presence of an object is the object deciding.
+    """
+    assessment = getattr(bundle, "x_maljan_assessment", None)
+    declared = getattr(assessment, "confidence", None) if assessment is not None else None
+    if declared is None:
+        return None
+    try:
+        return float(declared)
+    except (TypeError, ValueError):
+        return None
+
+
 def decide_from_bundle(bundle: Any) -> str:
-    """Map a final STIX bundle to a high-level verdict.
+    """The verdict a final STIX bundle carries.
+
+    Three readings, in this order, and the order is the whole function.
 
     A bundle carrying ``x_maljan_fallback_verdict`` was built by this pipeline
     because the judge's answer was not a bundle, and it states its verdict
@@ -86,7 +126,16 @@ def decide_from_bundle(bundle: Any) -> str:
     decision, so reading it back would only be this function agreeing with
     itself — and when it did not, a judge that timed out produced "Malware".
 
-    For a bundle a judge produced, the heuristic:
+    Then the judge's own statement, ``x_maljan_assessment.verdict``. A signed,
+    clean PuTTY was published as "Malware @ 1.0" over a judge that had rated
+    it Informational, categorised it ``legitimate-utility`` and written that
+    the assessment confirms it is benign — because the bundle carried a
+    ``malware`` object and the object set was read as the answer. The judge
+    decides; the objects illustrate the decision.
+
+    The object set is read only for a bundle that states nothing — a stored
+    run, or a model that omitted the field, which ``pipeline.validation``
+    records as ``verdict.unstated``:
       * a ``malware`` object marks the sample malicious.
       * an ``indicator``/``attack-pattern``/``relationship`` set with no
         ``malware`` object but suspicious confidence is "Suspicious".
@@ -98,10 +147,14 @@ def decide_from_bundle(bundle: Any) -> str:
     that asks whether the judge's own severity agrees with its verdict has to
     read the verdict the same way the pipeline does.
     """
-    stated = getattr(bundle, "x_maljan_fallback_verdict", None)
-    if stated is not None:
-        decision = str(getattr(stated, "decision", "") or "").strip()
+    fallback = getattr(bundle, "x_maljan_fallback_verdict", None)
+    if fallback is not None:
+        decision = str(getattr(fallback, "decision", "") or "").strip()
         return decision or INCONCLUSIVE_VERDICT
+
+    stated = stated_verdict(bundle)
+    if stated:
+        return stated
 
     has_malware = False
     has_suspicious_indicator = False

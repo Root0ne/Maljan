@@ -126,25 +126,38 @@ def _note_unlinked_techniques(report: Any, unlinked: Sequence[tuple[str, int]]) 
     export — so a reader of ``run_summary.validation`` finds the annotation's
     fate beside the reason the technique was dropped.
     """
-    if not unlinked:
+    _note_export_findings(
+        report,
+        [
+            (
+                UNLINKED_TECHNIQUE_CODE,
+                f"{count} judge relationship(s) about {technique} were not published: "
+                "the technique is not in the report's validated list.",
+            )
+            for technique, count in unlinked
+        ],
+    )
+
+
+def _note_export_findings(report: Any, rows: Sequence[tuple[str, str]]) -> None:
+    """Record what the STIX export left out, where the run's findings are.
+
+    The export declines to carry an object that contradicts the verdict the
+    run publishes — a malware object under a Benign one — or that no consumer
+    could act on, such as a URL whose host is a string sweep's cut-off. The
+    object is never edited and the judge's own bundle keeps it; these rows are
+    how a reader of ``run_summary.validation`` learns it is not in the export.
+    """
+    if not rows:
         return
     summary = dict(getattr(report, "run_summary", None) or {})
     validation = dict(summary.get("validation") or {})
-    rows = [dict(row) for row in validation.get("unresolved") or []]
+    unresolved = [dict(row) for row in validation.get("unresolved") or []]
     by_code = dict(validation.get("by_code") or {})
-    for technique, count in unlinked:
-        rows.append(
-            {
-                "agent": JUDGE_AGENT_KEY,
-                "code": UNLINKED_TECHNIQUE_CODE,
-                "message": (
-                    f"{count} judge relationship(s) about {technique} were not published: "
-                    "the technique is not in the report's validated list."
-                ),
-            }
-        )
-        by_code[UNLINKED_TECHNIQUE_CODE] = by_code.get(UNLINKED_TECHNIQUE_CODE, 0) + 1
-    validation["unresolved"] = rows
+    for code, message in rows:
+        unresolved.append({"agent": JUDGE_AGENT_KEY, "code": code, "message": message})
+        by_code[code] = by_code.get(code, 0) + 1
+    validation["unresolved"] = unresolved
     validation["by_code"] = dict(sorted(by_code.items()))
     validation.setdefault("retries", int(validation.get("retries") or 0))
     validation.setdefault("not_run", list(validation.get("not_run") or []))
@@ -397,30 +410,29 @@ def mean_claim_confidence(isrs: Any) -> float | None:
     return sum(values) / len(values) if values else None
 
 
-def _overall_confidence(assessment: Any, isrs: Any, *, judged: bool = True) -> float | None:
-    """The judge's confidence when it gave one, else the analysts' own mean.
+def _overall_confidence(assessment: Any, *, judged: bool = True) -> float | None:
+    """The judge's confidence in its own verdict, or ``None``.
 
-    Three answers in order, and the order is the point: the judge decides the
-    verdict, so the judge's number is the verdict's number; failing that, the
-    analysts that actually produced claims; failing that, zero, which says the
-    run reached no confidence rather than naming one.
+    One answer, because the verdict has one author. The judge decides the
+    verdict and says how sure it is, and that number is the run's. There is no
+    second answer to fall to: the analysts' mean is their confidence in their
+    own claims and not in a verdict they did not reach, so attaching it to one
+    puts a number on a decision nobody rated. ``None`` says the confidence was
+    not assessed, which is the fact.
 
     ``judged`` is false when the judge never answered and the verdict is the
-    pipeline's own fallback. Then there is no fourth answer to fall to: the
-    analysts' mean is their confidence in their own claims, and attaching it to
-    a verdict none of them reached would put a number on a decision nothing
-    made. ``None`` says the confidence was not assessed, which is the fact.
+    pipeline's own fallback, which nobody put a number on either.
     """
     if not judged:
         return None
     declared = getattr(assessment, "confidence", None)
-    if declared is not None:
-        try:
-            return float(declared)
-        except (TypeError, ValueError):
-            logger.warning("report_node: the judge's confidence %r is not a number.", declared)
-    mean = mean_claim_confidence(isrs)
-    return float(mean) if mean is not None else 0.0
+    if declared is None:
+        return None
+    try:
+        return float(declared)
+    except (TypeError, ValueError):
+        logger.warning("report_node: the judge's confidence %r is not a number.", declared)
+        return None
 
 
 def isr_status(isr: Any) -> str:
@@ -3558,19 +3570,16 @@ def make_report_node(
             logger.warning("report_node: the judge's assessment could not be read (%s).", exc)
         malware_category = getattr(_bundle_assessment, "malware_category", None)
 
-        # And so does the confidence. It used to be the negotiation's mean over
-        # *every* analyst, with a skipped one counted as a zero: one analyst at
-        # 0.50 beside two that never ran produced 0.167 on the front page of a
-        # "Malware" verdict. An analyst that had nothing to read is not a vote
-        # of no confidence, and the mean of the analysts that did produce
-        # claims is the fallback — the judge's own number is the answer when
-        # the judge gave one.
-        # A verdict the judge never answered for gets no confidence at all;
-        # see ``_overall_confidence``.
+        # And so does the confidence, from the same block and from nowhere
+        # else. It used to be the negotiation's mean over *every* analyst, with
+        # a skipped one counted as a zero: one analyst at 0.50 beside two that
+        # never ran produced 0.167 on the front page of a "Malware" verdict.
+        # Narrowing that to the analysts who did claim something left a number
+        # that still belonged to their claims rather than to the verdict. The
+        # judge's own number is the verdict's, and a verdict the judge put no
+        # number on is published with none; see ``_overall_confidence``.
         _fallback = state.get("verdict_fallback") or None
-        overall_confidence = _overall_confidence(
-            _bundle_assessment, isr_reports, judged=not _fallback
-        )
+        overall_confidence = _overall_confidence(_bundle_assessment, judged=not _fallback)
 
         # A degraded run is not capped here. It is said to the judge in the
         # verdict prompt and printed in the report header, and the confidence
@@ -3884,6 +3893,11 @@ def make_report_node(
                 # unresolved findings are, not counted as a bundle defect: the
                 # annotation was sound, the technique it was about was not.
                 _note_unlinked_techniques(report, _renderer.unlinked)
+                # And what the export declined to carry at all. Recorded the
+                # same way and for the same reason: the object is the judge's,
+                # the bundle is what a consumer acts on, and a reader is owed
+                # the sentence saying which one this run kept.
+                _note_export_findings(report, _renderer.declined)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("report_node: extended STIX render failed (%s).", exc)
                 extended_dump = None

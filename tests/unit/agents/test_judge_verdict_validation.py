@@ -31,6 +31,7 @@ from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 def _bundle_json(
     *,
     severity: str = "High",
+    verdict: str | None = "Malware",
     indicators: list[str] | None = None,
     family: dict[str, Any] | None = None,
     attack_patterns: list[dict[str, Any]] | None = None,
@@ -57,6 +58,8 @@ def _bundle_json(
         "severity": {"rating": severity, "rationale": "it does harm"},
         "malware_category": "loader",
     }
+    if verdict is not None:
+        assessment["verdict"] = verdict
     if family is not None:
         assessment["family"] = family
     return json.dumps(
@@ -125,13 +128,14 @@ class TestWhatReachesThePrompt:
         assert "Weigh your confidence accordingly" in prompt
 
     @pytest.mark.asyncio
-    async def test_the_prompt_asks_for_severity_category_and_family(self) -> None:
+    async def test_the_prompt_asks_for_the_verdict_severity_category_and_family(self) -> None:
         judge, llm = _judge(_bundle_json())
 
         await judge.give_verdict(reports=REPORTS, history=[])
 
         prompt = _prompt_text(llm)
         assert "x_maljan_assessment" in prompt
+        assert '"verdict": "Malware|Suspicious|Benign"' in prompt
         assert "malware_category" in prompt
         assert "evidence_ids" in prompt
 
