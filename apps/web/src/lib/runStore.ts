@@ -118,9 +118,18 @@ const NO_RETRY_CLOSE_CODES = new Set([1008, 4401]);
  *  nothing and a tab left on another page does not hold one open forever. */
 const GRACE_MS = 30_000;
 
-/** How much of the recorded feed one back-fill asks for. What it does not
- *  reach, the socket's own resume carries. */
-const BACKFILL_LIMIT = 1000;
+/** How much of the recorded feed one back-fill page asks for.
+ *
+ * The same ceiling the events endpoint caps a single read at, which is what
+ * makes the count of a page the answer to whether there is more behind it: a
+ * full page may have, a short one cannot. Exported because a test that pages
+ * a long run has to know where the pages fall. */
+export const BACKFILL_LIMIT = 1000;
+
+/** What a reader is told when the recording stops answering mid-run. */
+const TRUNCATED_FEED =
+  "The recorded feed stopped advancing, so only part of this run could be " +
+  "replayed. The conversation below is incomplete.";
 
 function backoffDelay(attempt: number): number {
   const ceiling = Math.min(MAX_DELAY_MS, BASE_DELAY_MS * 2 ** attempt);
@@ -495,16 +504,56 @@ function dial(entry: RunEntry): void {
   });
 }
 
+/** The highest number a page carries, and 0 for a page that carries none. */
+function topSeq(page: IncomingEvent[]): number {
+  let top = 0;
+  for (const raw of page) {
+    const seq = asSeq((raw?.data ?? {}).seq);
+    if (seq !== undefined && seq > top) top = seq;
+  }
+  return top;
+}
+
+/**
+ * Read the whole recording, one page at a time.
+ *
+ * One read used to be the whole back-fill, and a run with more events than the
+ * endpoint's cap rendered as its first thousand with nothing saying so — the
+ * conversation simply stopped, mid-debate, on a finished run. Each page
+ * resumes from the highest number the page before it carried, which is the
+ * cursor the recording itself hands back; the live feed's own numbers never
+ * become that cursor, so a frame committing between two pages cannot make the
+ * next page skip the run's middle. The store dedupes on `seq`, so an event
+ * both the socket and a page carry is held once.
+ */
 async function backfill(entry: RunEntry): Promise<void> {
   if (entry.asked) return;
   entry.asked = true;
   const jobId = entry.state.jobId;
   try {
-    /* No cursor on the first read: the whole run, from its first event, which
+    /* No cursor on the first page: the whole run, from its first event, which
      * the events table answers once the stream has been trimmed. */
-    const events = await transport.readEvents(jobId);
-    applyRunEvents(jobId, events);
-    if (entry.state.feedError) patch(entry, { feedError: null });
+    let since: number | undefined;
+    let truncated: string | null = null;
+    for (;;) {
+      const page = await transport.readEvents(jobId, since);
+      applyRunEvents(jobId, page);
+      /* A page short of the cap is the end of the recording. The count
+       * against the cap is the whole of what the endpoint says about that. */
+      if (page.length < BACKFILL_LIMIT) break;
+      const top = topSeq(page);
+      /* A full page that does not move the cursor would be asked for again
+       * forever — a server repeating itself, or a run recorded before there
+       * were numbers to page on. It is also the one case a reader has to be
+       * told about, because what is on screen is part of a run and nothing
+       * else on the page would say so. */
+      if (top <= (since ?? 0)) {
+        truncated = TRUNCATED_FEED;
+        break;
+      }
+      since = top;
+    }
+    if (entry.state.feedError !== truncated) patch(entry, { feedError: truncated });
   } catch (error) {
     patch(entry, {
       feedError: `Earlier events could not be replayed (${getErrorMessage(error)}). The conversation starts from here.`,

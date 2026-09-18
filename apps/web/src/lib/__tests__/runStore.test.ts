@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   applyRunEvents,
+  BACKFILL_LIMIT,
   configureRunTransport,
   getRun,
   hydrateRunTranscript,
@@ -361,6 +362,100 @@ describe("the recorded conversation", () => {
 
     expect(getRun(JOB).events).toHaveLength(2);
     expect(getRun(JOB).feedError).toContain("stream unavailable");
+  });
+});
+
+describe("the back-fill", () => {
+  /** A recorded feed served the way the endpoint serves it: one capped page
+   *  per read, from the cursor the caller asked with. */
+  function pagingTransport(feed: IncomingEvent[]) {
+    const reads: (number | undefined)[] = [];
+    const transport: RunTransport = {
+      async readEvents(_jobId, since) {
+        reads.push(since);
+        const from = since === undefined ? 0 : since;
+        return feed.filter((e) => Number(e.data?.seq) > from).slice(0, BACKFILL_LIMIT);
+      },
+      connect() {
+        return { close() {} };
+      },
+    };
+    return { transport, reads };
+  }
+
+  function recorded(count: number): IncomingEvent[] {
+    return Array.from({ length: count }, (_, i) =>
+      event("agent_message", { seq: i + 1, text: `line ${i + 1}` }),
+    );
+  }
+
+  it("reads a run longer than one page, in order, to its last event", async () => {
+    const { transport, reads } = pagingTransport(recorded(2500));
+    configureRunTransport(transport);
+
+    subscribeRun(JOB, () => {});
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(reads).toEqual([undefined, 1000, 2000]);
+    const events = getRun(JOB).events;
+    expect(events).toHaveLength(2500);
+    expect(events.map((e) => e.seq)).toEqual(events.map((_, i) => i + 1));
+    expect(getRun(JOB).lastSeq).toBe(2500);
+    expect(getRun(JOB).feedError).toBeNull();
+  });
+
+  it("stops on a page that does not advance, and says the run is cut short", async () => {
+    const page = recorded(BACKFILL_LIMIT);
+    let reads = 0;
+    configureRunTransport({
+      async readEvents() {
+        reads += 1;
+        return page;
+      },
+      connect() {
+        return { close() {} };
+      },
+    });
+
+    subscribeRun(JOB, () => {});
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(reads).toBe(2);
+    expect(getRun(JOB).events).toHaveLength(BACKFILL_LIMIT);
+    expect(getRun(JOB).feedError).toContain("only part of this run");
+  });
+
+  it("keeps one copy of an event that arrives while a page is in flight", async () => {
+    /* The run is still being published while its recording is read. A frame
+     * committed between two pages is the same event the next page carries,
+     * and the page after it must still be asked for from the recording's own
+     * cursor rather than from the number the live frame brought. */
+    const feed = recorded(1500);
+    const { transport, reads } = pagingTransport(feed);
+    let pagesRead = 0;
+    configureRunTransport({
+      async readEvents(jobId, since) {
+        pagesRead += 1;
+        if (pagesRead === 1) {
+          const page = await transport.readEvents(jobId, since);
+          applyRunEvents(JOB, [event("agent_message", { seq: 1200, text: "line 1200" })]);
+          return page;
+        }
+        return transport.readEvents(jobId, since);
+      },
+      connect() {
+        return { close() {} };
+      },
+    });
+
+    subscribeRun(JOB, () => {});
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(reads).toEqual([undefined, 1000]);
+    const events = getRun(JOB).events;
+    expect(events).toHaveLength(1500);
+    expect(events.filter((e) => e.seq === 1200)).toHaveLength(1);
+    expect(events.map((e) => e.seq)).toEqual(events.map((_, i) => i + 1));
   });
 });
 

@@ -1722,6 +1722,13 @@ change landed on `main`.
   unauthenticated health endpoint, so a wrong bearer token passed the test and
   every job then failed with 401 on the tool schema. It now fetches the schema
   itself and lists the tools it found.
+- **A run longer than one page is replayed whole.** The console's back-fill
+  made one call and the events endpoint caps a read at a thousand events, so a
+  finished run with more than that rendered as its first thousand and stopped
+  mid-debate with nothing saying so. It now pages on `since` until a page
+  comes back short of the cap, and a page that does not advance the sequence
+  ends the read and says on the conversation that what is drawn is only part
+  of the run.
 
 ### Removed
 
