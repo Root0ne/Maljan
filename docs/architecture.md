@@ -259,7 +259,9 @@ decides.
    technique with an import set (BitBlt and CreateCompatibleDC read as screen
    capture on any GUI program), so its associations travel under
    `associated_by`, shown in a Catalogue column for reference and counted for
-   nothing. An asserted id the catalogue has retired
+   nothing. The catalogue's own `screen_capture` and `message_loop` groups are
+   `informational` for the same reason and name, in `corroborated_by`, the
+   APIs whose presence beside them would mean something. An asserted id the catalogue has retired
    (upstream Sigma rules and the case corpus still name a few) is marked
    `retired in ATT&CK 19.2` in the table. Two flat lists in
    `run_summary.corroboration`, rendered as a table in the report and shown

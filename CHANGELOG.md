@@ -774,6 +774,17 @@ change landed on `main`.
   an indicator nor sent to a paid provider until a second source — the
   sandbox, an analyst artefact or a reputation record — knows it too. It is
   still in the report's network block, labelled.
+- **The catalogue called drawing a window keylogging.** `BitBlt`,
+  `CreateCompatibleBitmap`, `CreateCompatibleDC`, `GetDC` and `GetDIBits` were
+  filed under `keylogging` at tier `high`, so every program that puts pixels
+  on a screen came back with `catalog_flags: ["suspicious"]` — on a signed SSH
+  client that was one of the two entries the only analyst that spoke cited
+  behind a Malware verdict. The GDI blit calls are now `screen_capture` and
+  the message pump `message_loop`, both `informational`, and both name the
+  APIs that would give them weight — hooks, raw input, the clipboard beside a
+  capture — in a new `corroborated_by` field that `api_capability` puts on the
+  row. The T1113 association is untouched: it is shown as a catalogue
+  association, which is what it always was.
 - **Four documented facts that had drifted from the code.** The delegation
   section said a lead's 1800 s stage had room for five asks where
   `_asks_that_fit` computes six and the `ask_<key>` description gives the model
