@@ -1,8 +1,10 @@
 "use client";
 
 import type { EvidenceSection } from "@/types/malware-report";
+import { humaniseKey } from "@/lib/humanise";
 import EvidenceChips from "./EvidenceChips";
 import { saysSomething } from "./reportSections";
+import { withoutConstantColumns } from "./tableColumns";
 
 /**
  * One report section, drawn from its own declared shape.
@@ -30,8 +32,10 @@ export default function ArtifactTable({ section }: { section: EvidenceSection })
   return (
     <div className="bg-bg-surface border border-border rounded">
       <div className="px-4 py-3 border-b border-border flex flex-wrap items-center gap-2">
+        {/* A tool that named its section gets its name; one that did not gets
+            its key read back rather than printed as a key. */}
         <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-          {section.title || section.key}
+          {section.title || humaniseKey(section.key)}
         </h2>
         <span className="text-[10px] font-mono text-text-muted">{section.key}</span>
         <span className="ml-auto flex items-center gap-2">
@@ -72,47 +76,66 @@ function SectionBody({ section, rows }: { section: EvidenceSection; rows: string
    * which is how a tool that answered once with a dict and once with prose
    * still shows the prose. */
   if (section.kind === "table" || (section.kind === "kv" && rows.length > 0)) {
-    const columns =
+    /* Column headers come from the tool, so they arrive as whatever key it
+       used: `optional_dependency` and `technique_ids` sat beside the
+       hand-written "Rule category" of the table below. Read back rather than
+       renamed — the console does not know what a tool's columns mean, only
+       how a key is spelled. */
+    const declared = (
       section.columns.length > 0
         ? section.columns
         : section.kind === "kv"
         ? ["Field", "Value"]
-        : rows[0]?.map((_, i) => `Column ${i + 1}`) ?? [];
+        : rows[0]?.map((_, i) => `Column ${i + 1}`) ?? []
+    ).map(humaniseKey);
     if (rows.length === 0) {
       return <p className="p-4 text-xs text-text-muted">The tool returned no rows.</p>;
     }
+    const narrowed = withoutConstantColumns(declared, rows);
     return (
-      <div className="overflow-x-auto">
-        <table className="w-full">
-          <thead>
-            <tr className="border-b border-border">
-              {columns.map((column) => (
-                <th
-                  key={column}
-                  scope="col"
-                  className="px-4 py-2 text-left text-[10px] font-medium uppercase tracking-wider text-text-muted"
-                >
-                  {column}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border-light">
-            {rows.map((row, i) => (
-              <tr key={i} className="hover:bg-bg-hover">
-                {row.map((cell, j) => (
-                  <td
-                    key={j}
-                    className="px-4 py-2 text-xs font-mono text-text-secondary break-all align-top"
+      <>
+        {(narrowed.constants.length > 0 || narrowed.empty.length > 0) && (
+          <p className="px-4 pt-3 text-[11px] text-text-muted">
+            {narrowed.constants.map((c) => `${c.column}: ${c.value}`).join(" · ")}
+            {narrowed.constants.length > 0 && narrowed.empty.length > 0 ? " · " : ""}
+            {narrowed.empty.length > 0
+              ? `${narrowed.empty.join(", ")}: nothing on any row`
+              : ""}
+            {" — the same on every row below."}
+          </p>
+        )}
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border">
+                {narrowed.columns.map((column) => (
+                  <th
+                    key={column}
+                    scope="col"
+                    className="px-4 py-2 text-left text-[10px] font-medium uppercase tracking-wider text-text-muted"
                   >
-                    {cell || "-"}
-                  </td>
+                    {column}
+                  </th>
                 ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody className="divide-y divide-border-light">
+              {narrowed.rows.map((row, i) => (
+                <tr key={i} className="hover:bg-bg-hover">
+                  {row.map((cell, j) => (
+                    <td
+                      key={j}
+                      className="px-4 py-2 text-xs font-mono text-text-secondary break-all align-top"
+                    >
+                      {cell || "-"}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </>
     );
   }
 

@@ -703,11 +703,19 @@ export default function ServerMapEditor({
                     label={item.enabled ? "enabled" : "disabled"}
                     className={item.enabled ? "bg-status-green" : "bg-border"}
                   />
-                  <span className="text-sm font-mono text-text-primary truncate">{key}</span>
+                  {/* Label first, key after it, which is how the sibling
+                      agents list reads. This one showed the key alone while
+                      its own detail pane held "Network MCP". */}
+                  <span className="text-sm text-text-primary truncate">
+                    {item.label?.trim() || key}
+                  </span>
                   {changed && <Dot label="changed" className="bg-accent-strong" />}
                   {errorFor(key) && <Dot label="invalid" className="bg-status-red" />}
                 </div>
                 <div className="flex items-center gap-2 text-[11px] text-text-muted pl-3.5">
+                  {item.label?.trim() && item.label.trim() !== key && (
+                    <span className="font-mono">{key}</span>
+                  )}
                   <span>{item.transport}</span>
                   {verdict && (
                     <span

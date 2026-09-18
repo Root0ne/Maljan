@@ -98,7 +98,7 @@ describe("the signing rows become the one that applies", () => {
       ]),
       "unknown",
     );
-    expect(section?.rows).toEqual([["macho signature", "Carries a signature"]]);
+    expect(section?.rows).toEqual([["Macho signature", "Carries a signature"]]);
   });
 
   it("draws no row about what the tool looks for", () => {
@@ -115,7 +115,7 @@ describe("the signing rows become the one that applies", () => {
       "elf",
     );
 
-    expect(section?.rows).toEqual([["file type", "elf"]]);
+    expect(section?.rows).toEqual([["File type", "ELF"]]);
     expect(signing).toBe(false);
   });
 
@@ -130,7 +130,7 @@ describe("the signing rows become the one that applies", () => {
     );
 
     expect(section?.rows).toEqual([
-      ["file type", "pe"],
+      ["File type", "PE"],
       ["Authenticode", "Carries a signature"],
     ]);
     expect(signing).toBe(true);
@@ -152,7 +152,7 @@ describe("a row that says nothing", () => {
       ]),
       "pe",
     );
-    expect(section?.rows).toEqual([["file type", "pe"]]);
+    expect(section?.rows).toEqual([["File type", "PE"]]);
   });
 
   it("leaves no section at all when every row said nothing", () => {
@@ -165,6 +165,39 @@ describe("a row that says nothing", () => {
       section: null,
       hashes: {},
       signing: false,
+      states: new Set(),
     });
+  });
+});
+
+describe("what the table already says", () => {
+  it("names the typed fields it carries, so they are not drawn twice", () => {
+    const { states } = readIdentitySection(
+      identity([
+        ["file type", "pe"],
+        ["size", "4486656"],
+        ["timestamp", "1566949827"],
+      ]),
+      "pe",
+    );
+    expect([...states].sort()).toEqual(["Compile Timestamp", "File Type", "Size"]);
+  });
+
+  it("reads a file format's own constants back into what they mean", () => {
+    const { section } = readIdentitySection(
+      identity([
+        ["size", "4486656"],
+        ["machine", "34404"],
+        ["subsystem", "2"],
+        ["entry point", "321264"],
+      ]),
+      "pe",
+    );
+    expect(section?.rows).toEqual([
+      ["Size", "4.28 MB"],
+      ["Machine", "x86-64"],
+      ["Subsystem", "Windows GUI"],
+      ["Entry point", "0x0004e6f0"],
+    ]);
   });
 });

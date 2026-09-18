@@ -7,6 +7,11 @@ import { api } from "@/lib/api";
 import type { SampleDTO, SandboxReportDTO } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import { countLabel, formatDateTime } from "@/lib/report-utils";
+import {
+  profileLabel,
+  sandboxProviderLabel,
+  staticProviderLabel,
+} from "@/lib/providerLabels";
 import { useProviderChoices } from "./useProviderChoices";
 
 /* ── Display interface (maps from SampleDTO) ───────── */
@@ -26,6 +31,13 @@ function mapSample(s: SampleDTO): SampleRow {
     file_size: s.file_size_bytes,
     created_at: s.uploaded_at,
   };
+}
+
+/** Whether the filename is the hash, which three of the seeded samples are. */
+function isNamedAfterItsHash(sample: SampleRow): boolean {
+  const name = sample.filename.trim().toLowerCase();
+  const base = name.replace(/\.[^.]*$/, "");
+  return base === sample.sha256.trim().toLowerCase();
 }
 
 function formatSize(bytes: number): string {
@@ -353,9 +365,19 @@ function SamplesPageContent() {
                       <span className="text-sm text-text-primary">{s.filename}</span>
                     </td>
                     <td className="px-4 py-2.5">
-                      <code className="text-xs text-text-secondary font-mono">
-                        {s.sha256.slice(0, 16)}...
-                      </code>
+                      {/* For a sample named after its hash the two cells held
+                          the same value, the second of them cut short for no
+                          reason. */}
+                      {isNamedAfterItsHash(s) ? (
+                        <span className="text-xs text-text-muted">same as the filename</span>
+                      ) : (
+                        <code
+                          className="text-xs text-text-secondary font-mono"
+                          title={s.sha256}
+                        >
+                          {s.sha256.slice(0, 16)}…
+                        </code>
+                      )}
                     </td>
                     <td className="px-4 py-2.5">
                       <span className="text-xs text-text-secondary">{formatSize(s.file_size)}</span>
@@ -508,7 +530,7 @@ function SamplesPageContent() {
                 >
                   <option value="">Inherit from settings</option>
                   {staticProviders.map((p) => (
-                    <option key={p} value={p}>{p}</option>
+                    <option key={p} value={p}>{staticProviderLabel(p)}</option>
                   ))}
                 </select>
               </div>
@@ -526,7 +548,7 @@ function SamplesPageContent() {
                 >
                   <option value="">Inherit from settings</option>
                   {sandboxProviders.map((p) => (
-                    <option key={p} value={p}>{p}</option>
+                    <option key={p} value={p}>{sandboxProviderLabel(p)}</option>
                   ))}
                 </select>
                 {attachedReport && (
@@ -548,7 +570,7 @@ function SamplesPageContent() {
                 >
                   <option value="">Inherit from settings</option>
                   {profiles.map((p) => (
-                    <option key={p} value={p}>{p}</option>
+                    <option key={p} value={p}>{profileLabel(p)}</option>
                   ))}
                 </select>
               </div>

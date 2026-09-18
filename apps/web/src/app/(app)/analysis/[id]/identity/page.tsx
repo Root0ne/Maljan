@@ -42,6 +42,7 @@ export default function IdentityTab() {
     section: splitIdentity,
     hashes: ledgerHashes,
     signing: sectionStatesSigning,
+    states: sectionStates,
   } = readIdentitySection(
     identitySection,
     report?.malware_report?.identity?.file_type,
@@ -144,7 +145,9 @@ export default function IdentityTab() {
             },
             { label: "Language / Compiler", value: identity.language_or_compiler ?? "" },
           ]
-            .filter((field) => saysSomething(field.value))
+            // A field the ledger table above already carries is not drawn
+            // again: `size` appeared in both tables on the one screen.
+            .filter((field) => saysSomething(field.value) && !sectionStates.has(field.label))
             .map((field) => (
               <Field key={field.label} label={field.label} value={field.value} />
             ))}

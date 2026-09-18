@@ -1,5 +1,6 @@
 "use client";
 
+import { humaniseKey } from "@/lib/humanise";
 import { useRef, useState } from "react";
 import { api } from "@/lib/api";
 import type {
@@ -416,11 +417,16 @@ function StageCard({
   return (
     <li className="border border-border rounded p-2" data-stage={stage.key}>
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-mono text-text-primary">
-          {index + 1}. {stage.key}
-          <span className="ml-2 text-[10px] uppercase tracking-wider text-text-muted">
-            {stage.kind}
-          </span>
+        {/* The name leads and the key stays in the Key field below, which is
+            the one place it is edited. The header used to carry both, so
+            `triage_pack` was on screen twice, two rows apart. */}
+        <span className="text-xs text-text-primary">
+          {index + 1}. {stage.label?.trim() || humaniseKey(stage.key)}
+          {stage.kind !== stage.key && (
+            <span className="ml-2 text-[10px] uppercase tracking-wider text-text-muted">
+              {stage.kind}
+            </span>
+          )}
         </span>
         <div className="flex items-center gap-2">
           <button
