@@ -1047,11 +1047,13 @@ class JudgeAgent(BudgetMeter):
         def _verdict_checks(bundle: Bundle) -> list[Violation]:
             """What a Benign or a Malware verdict over a silent run cites.
 
-            Its own function because it runs on the timeout path too, where it
-            is recorded rather than fed back: those two checks are the ones
-            that ask whether the verdict in front of them has anything behind
-            it, and the path that most needed asking was the one path that
-            skipped them.
+            Its own function because it runs on every way this round can end,
+            not only on the one where the judge answered a bundle: prose the
+            model stood by twice, JSON that was not a bundle, and a timeout all
+            produce a verdict, and the two paths that produce one out of *text*
+            were the two that reached a report unasked. Where the loop ran them
+            they were fed back once; everywhere else they are recorded, because
+            they annotate the verdict and never change it.
             """
             return [
                 *unsupported_benign_violations(
@@ -1098,26 +1100,33 @@ class JudgeAgent(BudgetMeter):
         if timed_out:
             # No answer at all, so there is nothing to feed back and nothing
             # was: the bundle is this pipeline's own conservative verdict.
-            # Cheap to record and invisible without it. The two verdict checks
-            # run here rather than in the loop: they annotate what the fallback
-            # carries, they do not change it, and a retry is not what they ask
-            # for on a path where nobody is listening.
+            # Cheap to record and invisible without it.
             violations = [
                 *violations,
                 Violation(code=VERDICT_TIMEOUT_CODE, message=VERDICT_TIMEOUT_REASON),
-                *_verdict_checks(bundle),
             ]
-        if not_json:
-            # The retry answered with prose or a tool call as well, so the
-            # bundle is whatever the text extraction could make of it. That is
-            # a fact about this run, not a schema problem the model can fix:
-            # the feedback violation is replaced by one that says the verdict
-            # is a fallback, and it stays unresolved so the run summary and the
-            # report's degradation reasons both carry it.
+        elif bundle.x_maljan_fallback_verdict is not None:
+            # The bundle says it is one this pipeline built, which happens two
+            # ways: the model answered prose twice, or it answered JSON that
+            # was not a bundle. The second used to say nothing at all, so a
+            # verdict no judge expressed reached the report with a confidence
+            # derived from the analysts' own claims. Asked off the bundle's own
+            # mark rather than off the path, so neither way can be forgotten.
+            # It is a fact about this run, not a schema problem the model can
+            # fix: the feedback violation is replaced by one that says the
+            # verdict is a fallback, and it stays unresolved so the run summary
+            # and the report's degradation reasons both carry it.
             violations = [v for v in violations if v.code != "verdict.not_json"]
-            violations.append(
-                Violation(code=VERDICT_FALLBACK_CODE, message=VERDICT_FALLBACK_REASON)
-            )
+            if not any(v.code == VERDICT_FALLBACK_CODE for v in violations):
+                violations.append(
+                    Violation(code=VERDICT_FALLBACK_CODE, message=VERDICT_FALLBACK_REASON)
+                )
+        # And the two verdict checks over the bundle that is actually going to
+        # be reported, on every ending. One row each: a check the loop already
+        # fed back and that survived is in ``violations`` already, and asking
+        # the run summary to carry it twice would say the judge was told twice.
+        _already = {(v.code, v.path) for v in violations}
+        violations.extend(v for v in _verdict_checks(bundle) if (v.code, v.path) not in _already)
         dropped = drop_ungrounded_indicators(bundle, violations)
         if dropped:
             self.logger.warning(

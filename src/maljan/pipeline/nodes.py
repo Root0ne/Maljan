@@ -3069,13 +3069,22 @@ def make_judge_node(
                 _degradation_reasons.append(_inconclusive)
                 _degraded_mode = True
 
-            # A verdict the judge expressed as text, or never expressed at all,
-            # is not a verdict a model put a confidence on. It travels on the
-            # same channel a judge that raised uses, so the report node has one
+            # A verdict the judge expressed as text, or never expressed at
+            # all, is not a verdict a model put a confidence on. The bundle
+            # itself says when it is one this pipeline built, and that mark is
+            # what is asked: keying off the violation codes missed the bundle
+            # built from JSON that was not a bundle, and the report then
+            # printed a confidence averaged from the analysts' own claims
+            # beside a verdict no judge expressed. It travels on the same
+            # channel a judge that raised uses, so the report node has one
             # question to ask; ``recorded`` says the violation is already among
             # the leftovers below, so the summary is not told twice.
             _verdict_fallback: dict[str, Any] | None = None
-            if _verdict_codes & {VERDICT_FALLBACK_CODE, VERDICT_TIMEOUT_CODE}:
+            _stated = bundle.x_maljan_fallback_verdict if isinstance(bundle, Bundle) else None
+            if _stated is not None or _verdict_codes & {
+                VERDICT_FALLBACK_CODE,
+                VERDICT_TIMEOUT_CODE,
+            }:
                 _verdict_fallback = {
                     "decision": decision,
                     "failure": (

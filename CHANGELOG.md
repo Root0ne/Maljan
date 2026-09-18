@@ -840,9 +840,13 @@ change landed on `main`.
   the statement rather than counting objects. `verdict.unsupported_benign` and
   `verdict.unsupported_malware` run over that bundle on the timeout path too,
   where the loop used to return before they could be asked; they annotate and
-  change nothing. Such a verdict also takes the path a judge that raised
-  already took: `overall_confidence` is `null`, the header reads "not
-  assessed", and the run summary carries the code once rather than twice.
+  change nothing, and they run on every way the round can end: a bundle, a
+  malformed answer the retry fixed, prose the model stood by twice, JSON that
+  is not a bundle, and no answer at all. Such a verdict also takes the path a
+  judge that raised already took: `overall_confidence` is `null`, the header
+  reads "not assessed", and the run summary carries the code once rather than
+  twice — asked off the bundle's own mark rather than off the violation codes,
+  so a fallback built from JSON that was not a bundle is one too.
 
 - **Four documented facts that had drifted from the code.** The delegation
   section said a lead's 1800 s stage had room for five asks where

@@ -202,10 +202,13 @@ Two producers use it:
   signature is the usual one) and `verdict.unsupported_malware` for the entries
   that establish Malware (a reputation entry, a rule hit); either way the
   alternative offered is Suspicious with an inconclusive rationale, the judge
-  is asked once, and the second answer is kept as given. Both rules also run
-  over the fallback bundle on the timeout path, where nothing is asked again —
-  a second full judge timeout buys nothing — and what they find is recorded in
-  `run_summary.validation` beside the verdict it describes.
+  is asked once, and the second answer is kept as given. Both rules run over
+  the bundle that is actually reported, on every way the round can end — a
+  bundle, a malformed answer the retry fixed, prose the model stood by twice,
+  JSON that is not a bundle, and no answer at all. Where the loop ran them they
+  were fed back once; on the endings that produce a verdict out of text nothing
+  is asked again and what they find is recorded in `run_summary.validation`
+  beside the verdict it describes, once each.
 
 * **A judge that did not answer with a bundle** — the pipeline builds one from
   whatever text there was, and that bundle states its verdict in
@@ -318,8 +321,10 @@ family the judge could not cite evidence for is kept and flagged unverified
 rather than silently zeroed.
 
 A verdict no judge decided carries no confidence. The judge node writes
-`verdict_fallback` on the state whenever its own body raised, its answer was
-not a bundle, or it never answered; the report node reads that one channel and
+`verdict_fallback` on the state whenever its own body raised, or the bundle
+being reported carries `x_maljan_fallback_verdict` — which is what a bundle
+this pipeline built out of text says about itself, however the round ended;
+the report node reads that one channel and
 sets `overall_confidence` to `None` rather than deriving a number from the
 analysts' confidence in their own claims, and the header prints "not assessed".
 The reason is recorded once: a judge that raised is filed under

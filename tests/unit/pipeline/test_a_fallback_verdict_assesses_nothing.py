@@ -277,6 +277,56 @@ class TestAJudgeThatAnsweredWithNoVerdict:
     """
 
     @staticmethod
+    def _extracted_verdict() -> dict[str, Any]:
+        """A judge that answered JSON that was not a bundle.
+
+        Nothing is wrong with the answer's syntax, so no code says "fallback"
+        on its own; the bundle the pipeline built out of the text is what says
+        so, and that is what the node has to read. Keyed off the codes instead,
+        the report printed the analysts' own confidence beside a verdict no
+        judge expressed.
+        """
+        from unittest.mock import AsyncMock
+
+        from maljan.agents.judge_agent import JudgeVerdict
+        from maljan.schemas.stix_models import Bundle
+
+        container = _Container(EvidenceCounter())
+        judge = container.get_judge_agent(role="judge")
+        judge.give_verdict = AsyncMock(
+            return_value=JudgeVerdict(
+                bundle=Bundle.model_validate(
+                    {
+                        "objects": [],
+                        "x_maljan_fallback_verdict": {
+                            "decision": "Suspicious",
+                            "source": "extracted",
+                        },
+                    }
+                ),
+                violations=[],
+                retries=0,
+                fed_back={},
+            )
+        )
+        return asyncio.run(make_judge_node(container)(_state()))
+
+    def test_a_verdict_extracted_from_text_is_a_fallback_too(self) -> None:
+        update = self._extracted_verdict()
+
+        fallback = update["verdict_fallback"]
+        assert fallback["decision"] == "Suspicious"
+        assert fallback["failure"] == "verdict.fallback"
+
+    def test_the_report_gives_it_no_confidence(self) -> None:
+        report, markdown = _reported(
+            {"decision": "Suspicious", "failure": "verdict.fallback", "recorded": True}
+        )
+
+        assert report["overall_confidence"] is None
+        assert "0.92" not in markdown.split("## ")[0]
+
+    @staticmethod
     def _timed_out_verdict(claims: bool) -> dict[str, Any]:
         from unittest.mock import AsyncMock
 
