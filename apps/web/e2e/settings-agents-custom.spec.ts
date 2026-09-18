@@ -153,10 +153,14 @@ test.describe("a custom agent", () => {
     await page.getByLabel("new team name").fill("audit");
     await page.locator('[data-profile="default"]').getByRole("button", { name: "Clone" }).click();
 
-    const picker = () =>
-      page
-        .locator('[data-profile="audit"] [data-stage="analysis"]')
-        .getByLabel("audit analysis add agent");
+    const analysis = page.locator('[data-profile="audit"] [data-stage="analysis"]');
+    const picker = () => analysis.getByLabel("audit analysis add agent");
+    // The picker offers the agents a stage does not already have, so a built-in
+    // is taken out of this one: it keeps the picker on screen once the staged
+    // agent is gone, and a picker that is still there is what makes the last
+    // assertion of this test mean anything.
+    await analysis.getByRole("button", { name: "Remove agent network from analysis" }).click();
+
     // By the label its operator gave it, not by the key: the picker reads the
     // staged map laid over the stored one, and a staged built-in carries only
     // its role and its switch.
@@ -164,8 +168,8 @@ test.describe("a custom agent", () => {
     // And the built-ins are still themselves underneath it: a staged built-in
     // goes out as its role and its switch, so a card reading the staged map
     // raw would name them by key for as long as the edit is unapplied.
-    const analysis = page.locator('[data-profile="audit"] [data-stage="analysis"]');
     await expect(analysis.getByText("Static analyst", { exact: true })).toBeVisible();
+    await expect(picker().getByRole("option", { name: "Network analyst (network)" })).toHaveCount(1);
 
     // Discarding the agent-map edit leaves the team staged and takes the agent
     // with it, on both pages. The leaf the discard belongs to is named, because
@@ -180,6 +184,9 @@ test.describe("a custom agent", () => {
 
     await page.getByRole("link", { name: /^Teams/ }).click();
     await expect(page.locator('[data-profile="audit"]')).toBeVisible();
+    // The picker is still there and still offers the built-in, so the absence
+    // below is the staged agent's and not the whole control's.
+    await expect(picker().getByRole("option", { name: "Network analyst (network)" })).toHaveCount(1);
     await expect(picker().getByRole("option", { name: "Ahmet (ahmet)" })).toHaveCount(0);
   });
 
