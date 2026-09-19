@@ -164,6 +164,7 @@ async def complete_one_turn(
         return None, (
             f"{model!r} did not answer within {int(COMPLETION_TIMEOUT)} s; it may still be "
             "loading — try again once it is warm. Nothing was written down for it."
+            + _thinking_remediation(provider, disable_thinking)
         )
     except httpx.HTTPError as exc:
         return False, redact_url(f"{model!r} could not be reached: {type(exc).__name__}: {exc}")
@@ -173,8 +174,30 @@ async def complete_one_turn(
         # A 2xx with nothing in it is the failure this check exists for: a
         # proxy that answers politely for a model it cannot serve, a response
         # whose only candidate was filtered away.
-        return False, f"{model!r} answered nothing"
+        return False, f"{model!r} answered nothing" + _thinking_remediation(
+            provider, disable_thinking
+        )
     return True, f"{model!r} answered"
+
+
+# The setting whose default a reasoning model on Ollama fails the gate at, and
+# the sentence that names it. A measured trial: a 12B reasoning model answered
+# nothing in 55 s at the default and answered in 243 ms with the setting on,
+# and with ``core.llm.require_probe`` on the API refuses every job until an
+# operator finds the switch. The default stays — an operator who wants the
+# model's reasoning gets it — but the wall names its door.
+THINKING_SETTING = "core.llm.ollama.disable_thinking"
+
+
+def _thinking_remediation(provider: str, disable_thinking: bool) -> str:
+    """What to try when an Ollama model spends its budget thinking, or ``""``."""
+    if provider != "ollama" or disable_thinking:
+        return ""
+    return (
+        f" A reasoning model answers in its thinking channel and leaves the answer empty:"
+        f" set {THINKING_SETTING} to true, which asks Ollama for the answer without the"
+        f" reasoning, and test again."
+    )
 
 
 def _spoken(value: Any) -> str:

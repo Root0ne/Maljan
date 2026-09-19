@@ -135,7 +135,7 @@ class TestWhatReachesThePrompt:
 
         prompt = _prompt_text(llm)
         assert "x_maljan_assessment" in prompt
-        assert '"verdict": "Malware|Suspicious|Benign"' in prompt
+        assert '"verdict": "Malware" | "Suspicious" | "Benign"' in prompt
         assert "malware_category" in prompt
         assert "evidence_ids" in prompt
 

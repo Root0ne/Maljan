@@ -1117,3 +1117,94 @@ def test_a_reasoning_object_beside_real_text_is_still_an_answer():
     """The guard drops the field, not the message: text elsewhere still counts."""
     spoke = _answer({"choices": [{"message": {"content": "ok", "reasoning": {"steps": ["a"]}}}]})
     assert probes._said_something("openai", spoke) is True
+
+
+# ---------------------------------------------------------------------------
+# A reasoning model added on Ollama fails the gate at the shipped default, and
+# the operator has no way to know which setting turns it around. Measured: a
+# 12B reasoning model answered nothing in 55 s at the default and answered in
+# 243 ms with ``core.llm.ollama.disable_thinking`` on, and with
+# ``core.llm.require_probe`` the API refuses every job in between. The default
+# stays the operator's decision; the failure names its door.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_an_ollama_model_that_answered_nothing_names_the_setting(monkeypatch):
+    monkeypatch.setattr(
+        probes,
+        "_client",
+        lambda *_a, **_k: httpx.AsyncClient(
+            transport=transport(lambda r: httpx.Response(200, json={"response": ""})), timeout=10
+        ),
+    )
+
+    ok, said = await probes.complete_one_turn(
+        "ollama", endpoint="http://127.0.0.1:11434", model="gemma4:12b"
+    )
+
+    assert ok is False
+    assert probes.THINKING_SETTING in said
+    assert "answered nothing" in said
+
+
+@pytest.mark.asyncio
+async def test_the_sentence_is_gone_once_the_setting_is_on(monkeypatch):
+    monkeypatch.setattr(
+        probes,
+        "_client",
+        lambda *_a, **_k: httpx.AsyncClient(
+            transport=transport(lambda r: httpx.Response(200, json={"response": ""})), timeout=10
+        ),
+    )
+
+    _ok, said = await probes.complete_one_turn(
+        "ollama",
+        endpoint="http://127.0.0.1:11434",
+        model="gemma4:12b",
+        disable_thinking=True,
+    )
+
+    assert probes.THINKING_SETTING not in said
+
+
+@pytest.mark.asyncio
+async def test_a_timeout_names_it_too(monkeypatch):
+    class _Timeout:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_exc):
+            return False
+
+        async def post(self, *_a, **_k):
+            raise httpx.TimeoutException("too slow")
+
+    monkeypatch.setattr(probes, "_client", lambda *_a, **_k: _Timeout())
+
+    ok, said = await probes.complete_one_turn(
+        "ollama", endpoint="http://127.0.0.1:11434", model="gemma4:12b"
+    )
+
+    assert ok is None
+    assert probes.THINKING_SETTING in said
+
+
+@pytest.mark.asyncio
+async def test_another_provider_is_not_told_about_an_ollama_setting(monkeypatch):
+    monkeypatch.setattr(
+        probes,
+        "_client",
+        lambda *_a, **_k: httpx.AsyncClient(
+            transport=transport(
+                lambda r: httpx.Response(200, json={"choices": [{"message": {"content": ""}}]})
+            ),
+            timeout=10,
+        ),
+    )
+
+    _ok, said = await probes.complete_one_turn(
+        "openai", endpoint="http://127.0.0.1:8080/v1", model="qwen"
+    )
+
+    assert probes.THINKING_SETTING not in said

@@ -18,7 +18,8 @@ no evidence, leave it empty — never invent** (the renderer states absence).
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from types import UnionType
+from typing import Any, Union, get_args, get_origin
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
@@ -120,9 +121,56 @@ _PROSE_SECTIONS: dict[str, str] = {
 }
 
 
+# What one field of a section schema is answered with, by its declared type.
+# A model that is shown the object it has to produce produces it; a model shown
+# only the section's name and the word "schema" invents a shape, and six live
+# runs on two unrelated models invented one every time.
+_PLACEHOLDER_BY_TYPE: dict[Any, str] = {
+    str: '"..."',
+    bool: "true",
+    int: "0",
+    float: "0.0",
+}
+
+
+def _field_placeholder(annotation: Any, depth: int = 0) -> str:
+    """The value one declared field is answered with, written as JSON."""
+    if depth > 2:
+        return "null"
+    origin = get_origin(annotation)
+    args = [arg for arg in get_args(annotation) if arg is not type(None)]
+    if origin in (list, tuple) and args:
+        return f"[{_field_placeholder(args[0], depth + 1)}]"
+    if origin is UnionType or origin is Union:
+        return _field_placeholder(args[0], depth) if args else "null"
+    if isinstance(annotation, type) and hasattr(annotation, "model_fields"):
+        return _expected_object(annotation, depth + 1)
+    return _PLACEHOLDER_BY_TYPE.get(annotation, '"..."')
+
+
+def _expected_object(schema: type[BaseModel], depth: int = 0) -> str:
+    """The exact JSON object a section must answer with, keys and all.
+
+    Built from the schema rather than written out beside it, so the two cannot
+    drift: the prompt's rule 6 used to say "conform to the provided JSON
+    schema" on a path where no schema was provided at all.
+    """
+    fields = getattr(schema, "model_fields", {}) or {}
+    body = ", ".join(
+        f'"{name}": {_field_placeholder(field.annotation, depth)}' for name, field in fields.items()
+    )
+    return "{" + body + "}"
+
+
 def _bundle_text(section: str, bundle: dict[str, Any]) -> str:
-    """Render an evidence bundle into a compact prompt body."""
-    lines: list[str] = [f"SECTION: {section}", ""]
+    """Render an evidence bundle into a compact prompt body.
+
+    The heading used to be the bare line ``SECTION: <name>``, which is a key
+    with a value next to it: both models answered with ``{"SECTION": ...,
+    "content": ...}`` often enough that it cannot be a coincidence. It is a
+    sentence now.
+    """
+    lines: list[str] = [f"The evidence for the {section} section follows.", ""]
     # First, and labelled as outranking everything below it. This block is the
     # same on every section and is deliberately NOT part of ``facts``: the
     # skip-on-empty check keys off ``facts``, and folding an always-present
@@ -305,9 +353,17 @@ class ReportComposer:
         facts = str(getattr(self, "_facts_block", "") or "")
         if facts:
             head.append(facts)
-        # The two standing blocks lead, then the instruction, then the
-        # section's own bundle.
-        human = "\n\n".join([*head, instruction, _bundle_text(section, bundle)])
+        # The two standing blocks lead, then the instruction, then the exact
+        # object the answer has to be, then the section's own bundle. The
+        # object is in the prompt because the manual parse is the primary path
+        # on a local server — ``with_structured_output`` is skipped there — and
+        # on that path nothing had ever shown the model a key name.
+        contract = (
+            "Answer with exactly this JSON object, these keys and no others:\n"
+            f"{_expected_object(schema)}\n"
+            "A field the evidence does not support is left empty or null; the keys stay."
+        )
+        human = "\n\n".join([*head, instruction, contract, _bundle_text(section, bundle)])
         messages = [
             SystemMessage(content=_SYSTEM),
             HumanMessage(content=human),
@@ -387,7 +443,9 @@ class ReportComposer:
             declined = bool(payload) and _section_declined(payload, schema)
             if not payload or declined:
                 return None
-            kept, dropped = keep_known_keys(schema, _unwrap_section_envelope(payload, schema))
+            opened = _unwrap_section_envelope(payload, schema)
+            opened = _section_text_envelope(opened, schema, section)
+            kept, dropped = keep_known_keys(schema, opened)
             if dropped:
                 # Kept, not refused: the fields the schema declares were
                 # answered and the section is publishable. What was dropped is
@@ -521,6 +579,52 @@ def _unwrap_section_envelope(payload: Any, schema: type[BaseModel]) -> Any:
     if key in schema.model_fields or not isinstance(value, dict):
         return payload
     return value
+
+
+def _the_prose_field(schema: type[BaseModel]) -> str | None:
+    """Which field of ``schema`` holds the section's own prose, or ``None``.
+
+    ``text`` when the schema declares one, and otherwise the schema's single
+    string-typed field. A schema with several — a ransom note has a filename
+    and its verbatim content, an encryption scheme has nine — has no such
+    field, and guessing one would be interpretation rather than a move.
+    """
+    fields = getattr(schema, "model_fields", {}) or {}
+    if "text" in fields:
+        return "text"
+    strings = [name for name, field in fields.items() if _is_a_string_field(field.annotation)]
+    return strings[0] if len(strings) == 1 else None
+
+
+def _is_a_string_field(annotation: Any) -> bool:
+    """Whether this field holds one string, rather than a list of them."""
+    if annotation is str:
+        return True
+    if get_origin(annotation) in (UnionType, Union):
+        return [arg for arg in get_args(annotation) if arg is not type(None)] == [str]
+    return False
+
+
+def _section_text_envelope(payload: Any, schema: type[BaseModel], section: str) -> Any:
+    """``{"<section>": "the prose"}`` put where the schema wants it.
+
+    A move, not a guess. Both models answered every section with the section's
+    own name as the key, six runs out of six, and where the value was a string
+    the section's whole text was thrown away for want of a field name. It is
+    opened only when the one key *is* this section's name, its value is a
+    string, and the schema has one field that holds prose; anything else — a
+    renamed key, two keys, a value that is a list — needs interpretation and is
+    dropped as before, named in the report's own degradation reasons.
+    """
+    if not isinstance(payload, dict) or len(payload) != 1:
+        return payload
+    ((key, value),) = payload.items()
+    if not isinstance(value, str) or not value.strip():
+        return payload
+    if key in getattr(schema, "model_fields", {}) or key.strip().lower() != section.strip().lower():
+        return payload
+    field = _the_prose_field(schema)
+    return payload if field is None else {field: value}
 
 
 def _message_text(msg: Any) -> str:

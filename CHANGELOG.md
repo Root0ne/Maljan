@@ -2302,6 +2302,45 @@ change landed on `main`.
   writes `claimed, not published` beside such an id; the summary counts "N
   claimed, M published"; and the console's ATT&CK tab draws from the capability
   matrix so the claim is visible there, in words, with the reason under it.
+- **The sample's path is not the model's to give.** A static analyst typed it
+  by hand, dropped three characters out of the sha256 in it, then spent its
+  whole step budget guessing directories; nineteen of that run's thirty-five
+  tool calls failed. The correction that existed recognises the spellings the
+  model was shown and the sample's own basename in the wrong directory, and a
+  mistyped name is neither. On the three built-in sidecars, an argument whose
+  name means the file under analysis is now taken out of the schema the model
+  binds to and filled by `pin_paths` with the path that server can open — the
+  sidecar's own signature unchanged, only the model-facing copy narrowed. A
+  qualified path argument (`pcap_path`, a rule file, a member inside an
+  archive) names something other than the sample and stays the model's. The
+  delivery primitives `put_sample`, `put_sample_begin`, `put_sample_chunk` and
+  `put_sample_finish` are not offered to the model at all.
+- **The report composer shows each section the object it has to answer with.**
+  Six runs on two unrelated models authored zero professional sections between
+  them, answering every section with renamed or superset keys. On the
+  manual-parse path — the primary path on a local server, because structured
+  output is skipped there — the prompt said "conform to the provided JSON
+  schema" and provided none, and the only key name a model ever saw was the
+  bundle's opening line, `SECTION: <name>`. The exact object is now built from
+  the section's own schema and printed in the prompt, and the heading is a
+  sentence. One shape is accepted as a move: `{"<section name>": "the prose"}`
+  goes into the field that holds the section's prose; anything that needs
+  interpreting is still dropped and named.
+- **The judge is shown the answer's whole shape.** `x_maljan_assessment` was
+  asked for in a bullet among ten, with "Return ONLY a valid JSON STIX 2.1
+  Bundle" last — and a STIX bundle is `{type, id, objects}`. The default model
+  omitted the block on its first attempt in three runs of three and spent its
+  one verdict retry on it every time. The prompt now ends with the skeleton,
+  `x_maljan_assessment` beside `objects`, with the three accepted verdict words
+  written where the verdict is asked for. Prompt text only.
+- **A reasoning model on Ollama is told which setting to turn on.** It fails
+  the connection test at the shipped default — the answer goes into the
+  thinking channel and the probe reports that it answered nothing — and with
+  `core.llm.require_probe` on, the API then refuses every job. The default is
+  unchanged, and the failure and the timeout now carry a sentence naming
+  `core.llm.ollama.disable_thinking` and what it does; the Ollama setup guide
+  says the same, and `docs/getting-started.md` documents `gemma4:12b` with that
+  setting as a measured low-memory option.
 
 ### Removed
 

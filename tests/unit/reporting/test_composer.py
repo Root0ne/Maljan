@@ -212,7 +212,7 @@ class TestHelpers:
 
         b = bundle_for("executive_summary", r)
         text = _bundle_text("executive_summary", b)
-        assert "SECTION: executive_summary" in text
+        assert "the executive_summary section" in text
         assert "verdict" in text
 
 

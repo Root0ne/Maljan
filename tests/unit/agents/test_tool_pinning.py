@@ -29,7 +29,18 @@ class _Args(BaseModel):
     query: str = ""
 
 
-def _tool(name: str, seen: list[dict[str, Any]], server: str = "") -> StructuredTool:
+class _PcapArgs(BaseModel):
+    """A qualified path argument: it names a capture, not the sample."""
+
+    pcap_path: str = ""
+
+
+def _tool(
+    name: str,
+    seen: list[dict[str, Any]],
+    server: str = "",
+    schema: type[BaseModel] = _Args,
+) -> StructuredTool:
     def _run(**kwargs: Any) -> str:
         seen.append(dict(kwargs))
         return "ok"
@@ -38,7 +49,7 @@ def _tool(name: str, seen: list[dict[str, Any]], server: str = "") -> Structured
         func=_run,
         name=name,
         description=name,
-        args_schema=_Args,
+        args_schema=schema,
         infer_schema=False,
         metadata={"maljan_server": server} if server else None,
     )
@@ -232,19 +243,19 @@ class TestPerServerPaths:
 
         assert seen[0]["file_path"] == STAGED
 
-    def test_an_unrelated_file_name_is_still_left_alone(self) -> None:
+    def test_an_unrelated_file_name_is_left_alone_on_a_qualified_argument(self) -> None:
         """Widening the match set must not widen it to every string: a tool
-        reading a dropped file keeps the name it was given."""
+        reading a capture or a rule file keeps the name it was given."""
         seen: list[dict[str, Any]] = []
         pinned = pin_paths(
-            [_tool("identify_file", seen, server="analysis")],
+            [_tool("read_pcap_summary", seen, server="network", schema=_PcapArgs)],
             default_path=HOST,
-            path_by_server={"analysis": STAGED},
+            path_by_server={"network": STAGED},
         )
 
-        pinned[0].invoke({"file_path": "dropped.dll"})
+        pinned[0].invoke({"pcap_path": "capture.pcap"})
 
-        assert seen[0]["file_path"] == "dropped.dll"
+        assert seen[0]["pcap_path"] == "capture.pcap"
 
     def test_the_server_stamp_survives_the_wrap(self) -> None:
         seen: list[dict[str, Any]] = []

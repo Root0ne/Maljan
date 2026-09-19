@@ -234,7 +234,13 @@ tokens are spent thinking and `response` comes back empty, and with
 `llm.require_probe` on the deployment could then create no job at all.
 `llm.ollama.disable_thinking` sends `think: false`, so the budget is spent on
 the answer instead; it is off by default, because Ollama refuses the field for
-a model that has no thinking mode.
+a model that has no thinking mode. A model whose thinking field is empty as
+well — some do not fill it at eight tokens — still comes back as *answered
+nothing*, so that failure and a timeout both carry a sentence naming the
+setting and what it does. A measured 12B reasoning model failed the probe in
+55 s at the default and passed in 243 ms with the setting on; with
+`llm.require_probe` on, every job is refused in between. See the low-memory
+option in [getting-started.md](getting-started.md).
 The completion gets ninety seconds of its own, because a local server reloads a
 model it had unloaded and a large one is not a ten-second load.
 

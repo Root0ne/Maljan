@@ -392,6 +392,17 @@ container for the object type in STIX, but the assessment confirms it is
 benign"*. The contradiction was detected, fed back once, survived — and the
 shape-derived verdict was published over the judge's own words.
 
+The judge is shown the whole answer as a skeleton, with
+`x_maljan_assessment` beside `objects` and the three accepted words written
+where the verdict is asked for. It used to be asked for in a bullet among ten
+others, with the STIX bundle framing around it and *"Return ONLY a valid JSON
+STIX 2.1 Bundle"* last — and a bundle is `{type, id, objects}`, so a model that
+had read the spec left the extension out. The default model omitted the block
+entirely on its first attempt in three runs of three and supplied it on the
+retry; a smaller model wrote it inside `objects[0]` in three of three, which
+costs no retry because a misplaced block is moved. Prompt text only: nothing in
+this pipeline writes a verdict.
+
 The statement is read three ways, not two, and `pipeline.outcome.StatedVerdict`
 carries the difference: the judge wrote a word this pipeline knows, it wrote a
 word this pipeline does not, or it wrote nothing. Only the third is a question
@@ -937,6 +948,33 @@ is handed the sample rather than a path to it; a stdio sidecar is handed the
 path. See the remote-delivery section of
 [configuration.md](configuration.md).
 
+**The sample's path is not the model's to give.** On the three built-in
+sidecars, an argument whose name means the file under analysis — `path`,
+`file`, `file_path`, `binary`, `sample`, `target`, `program` and the rest of
+`tool_pinning.SAMPLE_ARG_NAMES` — is taken out of the schema the model binds to
+and filled by `pin_paths` with the path that server can open. The sidecar's own
+signature is unchanged; only the model-facing copy is narrowed, and the
+platform's own calls still pass the argument. A *qualified* path argument —
+`pcap_path` for a capture, a rule file, a member inside an archive or an APK —
+names something other than the sample, which is a choice, and stays where it
+is. A server an operator added is theirs: this project does not narrow what its
+tools advertise.
+
+The correction that preceded it is still there for those arguments, and it was
+never enough on its own: it recognises the spellings the model was shown and
+the sample's own basename under a directory that holds no such file, and a live
+static analyst typed a sample path with three characters missing from the
+sha256 in its name, which matches none of them. It then spent its whole step
+budget guessing directories — `/`, `.`, `samples`, `staging`, `carved`,
+`uploads`, `private` — and nineteen of that run's thirty-five tool calls failed.
+An argument the model cannot see is an argument it cannot mistype.
+
+`put_sample`, `put_sample_begin`, `put_sample_chunk` and `put_sample_finish`
+are the platform's delivery primitive and never an analysis step, so they are
+not in the toolbox the model is shown. The same run called `put_sample` with
+`{"sha256": "null", "content_b64": ""}` and was told, correctly, that the empty
+string's digest is not the sample's.
+
 ## Providers
 
 The provider layer (`src/maljan/providers/`) puts one interface in front of
@@ -1290,7 +1328,25 @@ is assembled from what the run gathered rather than recomputed beside it:
 * `run_summary.evidence` counts the calls and `run_summary.sections_without_
   evidence` counts the sections that can name neither an entry nor a finding —
   the number that says whether the report is standing on anything.
-* The section-wise composer keeps the fields a section's schema declares and
+* The section-wise composer shows each section **the exact JSON object it has
+  to answer with**, built from the section's own schema so the prompt and the
+  validator cannot drift. This is the manual-parse path, which is the *primary*
+  path on a local server — structured output is skipped there — and on it the
+  prompt's own rule said "conform to the provided JSON schema" with no schema
+  provided: the only key name a model ever saw was the bundle's opening line,
+  and that line read `SECTION: <name>`. Two unrelated models answered six runs
+  out of six with `SECTION`/`content` or with the section's own name as the key,
+  and every one of those runs authored zero sections. The heading is a sentence
+  now.
+* One shape the models produce is accepted as a *move* rather than a guess:
+  `{"<section name>": "the prose"}`, where the key is this section's own name
+  and the value is a string, is put into the field that holds the section's
+  prose — `text` when the schema declares one, otherwise its single
+  string-typed field. A schema with several (a ransom note, an encryption
+  scheme) or none (a channel list) has no such field and is left alone; so is a
+  renamed key, a second key, or a value that is not a string. Anything not
+  accepted is dropped and named, as before.
+* The composer keeps the fields a section's schema declares and
   drops the ones it does not, rather than refusing the whole section over an
   invented key — which is how two runs shipped with no conclusion. What it
   dropped, and any section it lost outright (still off-schema after its retry,

@@ -285,7 +285,7 @@ class TestTheReportRounds:
             human.index(RUN_STATE_BEGIN)
             < human.index(PACK_HEADING)
             < human.index("Write an intro.")
-            < human.index("SECTION: introduction")
+            < human.index("the introduction section")
         )
 
     def test_compose_hands_the_pack_to_its_sections(self) -> None:

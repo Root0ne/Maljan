@@ -187,10 +187,11 @@ JUDGE_VERDICT_SYSTEM = (
     "Indicators — the deterministic renderer will fill them in.\n"
     "- You decide the verdict, the severity, the malware category and the "
     "family; nothing downstream computes them for you and nothing overrides "
-    "what you say. Add a top-level ``x_maljan_assessment`` object to the "
-    "bundle:\n"
+    "what you say. ``x_maljan_assessment`` is a sibling of ``objects``, beside "
+    "the list and not inside it:\n"
     '    "x_maljan_assessment": {\n'
-    '      "verdict": "Malware|Suspicious|Benign",\n'
+    '      "verdict": "Malware" or "Suspicious" or "Benign" — exactly one of '
+    "those three words,\n"
     '      "severity": {"rating": "Critical|High|Medium|Low|Informational",\n'
     '                   "rationale": "why the evidence supports that rating"},\n'
     '      "malware_category": "free text, e.g. ransomware / loader / infostealer",\n'
@@ -213,7 +214,22 @@ JUDGE_VERDICT_SYSTEM = (
     "and nothing malicious was in it. If this run produced no evidence and no "
     "analyst claim, say so and return Suspicious: an empty report is not a "
     "clean sample.\n"
-    "- Return ONLY a valid JSON STIX 2.1 Bundle. No markdown wrappers."
+    "- Return ONLY a valid JSON STIX 2.1 Bundle. No markdown wrappers.\n"
+    "\n"
+    "The answer has exactly this shape. Both top-level keys are required, and "
+    "``x_maljan_assessment`` sits beside ``objects`` rather than inside it:\n"
+    "{\n"
+    '  "type": "bundle",\n'
+    '  "id": "bundle--<uuid4>",\n'
+    '  "x_maljan_assessment": {\n'
+    '    "verdict": "Malware" | "Suspicious" | "Benign",\n'
+    '    "confidence": 0.0-1.0,\n'
+    '    "severity": {"rating": "...", "rationale": "..."},\n'
+    '    "malware_category": "...",\n'
+    '    "family": {"name": "...", "confidence": 0.0-1.0, "evidence_ids": ["ev_0012"]}\n'
+    "  },\n"
+    '  "objects": [ ... ]\n'
+    "}"
 )
 
 
