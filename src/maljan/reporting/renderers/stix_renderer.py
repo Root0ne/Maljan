@@ -168,13 +168,20 @@ _DIRECT_PATHS = {
 # and ``domain-name:resolves_to_refs[*].value`` is what the name resolved to.
 # Either could be a name or an address, so both questions are asked of it.
 #
-# Only from these two owners. A reference is not an endpoint by itself —
-# ``email-message:from_ref.value`` is a mailbox — and asking a mailbox the host
-# question would decline an object for a reason that is not so, which is the
-# thing the checked set exists to avoid.
+# These three references from these two owners, and no others. A reference is
+# not an endpoint by itself — ``email-message:from_ref.value`` is a mailbox and
+# ``network-traffic:src_payload_ref`` points at an artefact — and asking either
+# of them the host question would decline an object for a reason that is not
+# so, which is the thing the checked set exists to avoid.
 _ENDPOINT_KIND = "endpoint"
 _REFERENCE_OWNERS = ("network-traffic", "domain-name")
-_REFERENCE_STEP_RE = re.compile(r"(?:^|\.)[a-z0-9_]*_refs?\.")
+_REFERENCE_STEP_RE = re.compile(r"(?:^|\.)(?:src_ref|dst_ref|resolves_to_refs)\.")
+
+# A hardware address, which is a legal target of ``src_ref`` and ``dst_ref``
+# and is not a host. There is no true host question to ask of one, so it is
+# carried as the judge wrote it rather than declined with a sentence about
+# names and addresses that could exist outside the analysed network.
+_MAC_ADDRESS_RE = re.compile(r"^[0-9a-f]{2}([:-])(?:[0-9a-f]{2}\1){4}[0-9a-f]{2}$", re.IGNORECASE)
 
 # A list step inside an object path says which element, never what the value is.
 _INDEX_STEP_RE = re.compile(r"\[[^\]]*\]")
@@ -406,10 +413,14 @@ def _endpoint_is_publishable(kind: str, literal: str) -> bool:
     if kind == "file":
         return path_names_a_file(literal)
     if kind == _ENDPOINT_KIND:
-        # A reference's value is whichever of the two it happens to be, so it
-        # is asked the question that fits what is written.
+        # A reference's value is whichever of the three it happens to be, so it
+        # is asked the question that fits what is written, and a hardware
+        # address is asked none of them.
+        text = str(literal).strip()
+        if _MAC_ADDRESS_RE.match(text):
+            return True
         try:
-            ipaddress.ip_address(str(literal).strip().strip("[]"))
+            ipaddress.ip_address(text.strip("[]"))
         except ValueError:
             return host_is_public(literal)
     # The judge asserting an address is somebody observing it, so a private one
@@ -836,8 +847,8 @@ class ExtendedSTIXRenderer:
         # Only what the cap orphaned is left to sweep, and it is the cap's
         # doing rather than a defect of anybody's bundle — so it is counted
         # under a reason of its own. Counted it must be: the pass used to run
-        # here with no ledger at all, and a reader totalling what the aggregate
-        # says was removed could not reconcile it with the objects in the file.
+        # here with no ledger at all, so this sweep's losses appeared in no
+        # total. The cap's own removals still appear in none.
         return Bundle(
             objects=enforce_bundle_integrity(capped, ledger=ledger, dropped_as=CAP_ORPHAN_REASON)
         )

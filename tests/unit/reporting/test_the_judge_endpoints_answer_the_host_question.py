@@ -21,6 +21,7 @@ is not responsible for.
 
 from __future__ import annotations
 
+import ast
 import pathlib
 import re
 from typing import Any
@@ -312,6 +313,24 @@ class TestAPatternIsNotOneComparison:
         assert exported == [pattern]
         assert declined == []
 
+    def test_a_reference_at_something_that_is_not_an_endpoint_is_carried(self) -> None:
+        """``src_payload_ref`` points at an artefact, which has no host to ask about."""
+        pattern = "[network-traffic:src_payload_ref.value = 'localhost']"
+
+        exported, declined = _render(pattern)
+
+        assert exported == [pattern]
+        assert declined == []
+
+    def test_a_hardware_address_is_not_told_it_could_not_exist(self) -> None:
+        """A MAC is a legal ``dst_ref`` target and is not a host."""
+        pattern = "[network-traffic:dst_ref.value = '00:11:22:33:44:55']"
+
+        exported, declined = _render(pattern)
+
+        assert exported == [pattern]
+        assert declined == []
+
     def test_a_hash_under_a_quoted_algorithm_is_not_read_as_a_file_name(self) -> None:
         """The key inside the object path is the reader's business, not a heuristic."""
         pattern = "[file:extensions['pe'].pe_imphash = '" + "f" * 32 + "']"
@@ -380,24 +399,78 @@ class TestTheConsoleReadsTheseCodesAsTheExportsOwn:
     failure to fix a decision this pipeline made about the judge's work.
     """
 
+    SRC = pathlib.Path(__file__).resolve().parents[3] / "src" / "maljan"
     ROWS = pathlib.Path(__file__).resolve().parents[3] / "apps/web/src/lib/validationRows.ts"
 
-    def test_every_code_the_export_declines_under_is_on_the_consoles_list(self) -> None:
-        from maljan.reporting.renderers import stix_renderer
+    # A ``stix.`` code a producer really can fix, and that the console is right
+    # to draw as the producer's own unresolved finding: the judge was asked
+    # about the object and kept it.
+    PRODUCER_FIXABLE = frozenset({"stix.ungrounded_indicator", "stix.unknown_object"})
 
-        listed = set(re.findall(r'"(stix\.[a-z_]+)"', self.ROWS.read_text(encoding="utf-8")))
+    @classmethod
+    def _listed(cls) -> set[str]:
+        """The codes inside the console's own set, read as a set and not as text.
+
+        Parsed out of the literal rather than found anywhere in the file: a
+        mention in a comment satisfied the file-wide search while the set that
+        decides the wording had lost the code.
+        """
+        text = cls.ROWS.read_text(encoding="utf-8")
+        opened = text.index("EXPORT_DECIDED")
+        body = text[text.index("[", opened) : text.index("]", opened)]
+        return set(re.findall(r'"([^"]+)"', body))
+
+    @classmethod
+    def _minted(cls) -> dict[str, str]:
+        """Every ``stix.`` code this tree mints, and the module that mints it."""
+        found: dict[str, str] = {}
+        for path in sorted(cls.SRC.rglob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for node in tree.body:
+                if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Constant):
+                    continue
+                value = node.value.value
+                if not isinstance(value, str) or not value.startswith("stix."):
+                    continue
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id.endswith("_CODE"):
+                        found[value] = str(path.relative_to(cls.SRC))
+        return found
+
+    def test_the_scan_reads_more_than_one_module(self) -> None:
+        """The renderer is not the only place a run's export codes come from."""
+        minted = self._minted()
+
+        assert len(set(minted.values())) >= 2, minted
+        assert minted.get("stix.unlinked_technique") == "pipeline/nodes.py"
+
+    def test_every_code_the_export_declines_under_is_on_the_consoles_list(self) -> None:
+        listed = self._listed()
         minted = {
-            getattr(stix_renderer, name)
-            for name in dir(stix_renderer)
-            if name.endswith("_CODE") and isinstance(getattr(stix_renderer, name), str)
+            code: module
+            for code, module in self._minted().items()
+            if code not in self.PRODUCER_FIXABLE
         }
 
         assert minted, "the scan found no decline code to check"
-        assert minted <= listed, sorted(minted - listed)
+        missing = {code: module for code, module in minted.items() if code not in listed}
+        assert not missing, missing
+
+    def test_a_code_a_producer_can_fix_is_not_drawn_as_the_exports_own(self) -> None:
+        listed = self._listed()
+
+        assert not (self.PRODUCER_FIXABLE & listed), sorted(self.PRODUCER_FIXABLE & listed)
 
     def test_the_codes_a_stored_run_carries_are_still_read(self) -> None:
         from maljan.reporting.renderers.stix_renderer import LEGACY_UNPUBLISHABLE_CODES
 
-        listed = set(re.findall(r'"(stix\.[a-z_]+)"', self.ROWS.read_text(encoding="utf-8")))
+        assert set(LEGACY_UNPUBLISHABLE_CODES) <= self._listed()
 
-        assert set(LEGACY_UNPUBLISHABLE_CODES) <= listed
+    def test_a_mention_outside_the_set_does_not_satisfy_it(self) -> None:
+        """The scan passes trivially if it reads the whole file, so prove it does not."""
+        text = self.ROWS.read_text(encoding="utf-8")
+        opened = text.index("EXPORT_DECIDED")
+        body = text[text.index("[", opened) : text.index("]", opened)]
+
+        assert "stix.unpublishable_endpoint" in body
+        assert "EXPORT_DECIDED" not in body
