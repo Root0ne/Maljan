@@ -232,22 +232,16 @@ def malformed_hash_in(pattern: str) -> tuple[str, str] | None:
     return None
 
 
-# What can be part of one indicator value: the characters a host name, a path,
-# a mailbox, a digest or a registry key is written with. A value found in the
-# evidence between two of anything else is that value; one flanked by these is
-# a slice of a longer value and is not.
-_VALUE_CHARACTER_RE = re.compile(r"[A-Za-z0-9._\-@:/\\+%~]")
+# What continues one label of a value: the characters a host name, a path
+# segment, a mailbox, a digest or a registry key is written with. What is *not*
+# here is as load bearing: a slash, a backslash and a colon join the parts of a
+# compound value rather than extend a part, so each of them bounds a part.
+_CONTINUES_A_VALUE_RE = re.compile(r"[A-Za-z0-9._\-@+%~]")
 
-# The punctuation a value is written with and a sentence ends with. Either
-# reading is possible for the same character, and which one it is shows in what
-# follows it: ``a@b.com.`` ends a sentence, ``a@b.com.tr`` is a longer name.
-_TERMINAL_PUNCTUATION = (".", ":", ",")
-
-# A URI scheme and the colon that closes it, at the end of the text before a
-# value. ``mailto:`` introduces a mailbox and ``ssh://`` a host, and neither is
-# part of the value it introduces — while the dot of ``192.168.`` is. Anchored
-# to a boundary of its own so the tail of a longer token cannot pass as one.
-_SCHEME_END_RE = re.compile(r"(?:^|[^A-Za-z0-9._\-@:/\\+%~])[A-Za-z][A-Za-z0-9+.\-]*:$")
+# The one character that is a value's and a sentence's both. Which it is shows
+# in what follows it: ``a@b.com.`` ends a sentence, ``a@b.com.tr`` is a longer
+# name.
+_TERMINAL_DOT = "."
 
 
 def whole_value_in(literal: str, haystack: str) -> bool:
@@ -259,14 +253,16 @@ def whole_value_in(literal: str, haystack: str) -> bool:
     something else that this value is a slice of. Both arguments are compared
     lowercased, because the corpus is.
 
-    The boundary rule, in one place because both ends read it. A value ends
-    where a character that cannot be part of one begins — and also at a ``.``,
-    ``:`` or ``,`` that nothing continues, because that one is the sentence's
-    and not the value's. A value begins where a character that cannot be part
-    of one ends — and also after a URI scheme's colon, because ``mailto:`` and
-    ``ssh://`` introduce a value rather than extend one. Everything else that
-    could continue a value does: the ``.`` of ``192.168.1.1`` keeps ``168.1.1``
-    from being found in it, which is the whole point of asking.
+    The boundary rule, once, because both ends read it. A value runs from one
+    boundary to the next, and a boundary is anything that does not continue a
+    label: a space, a bracket, a quote — and the three characters that join the
+    parts of a compound value rather than extend a part, ``/``, ``\\`` and
+    ``:``. That is what makes the host of ``http://evil.example/x`` findable, and
+    the host of ``evil.example:443``, and a mailbox after ``mailto:``. A ``.``
+    continues a label, so ``168.1.1`` is still not found inside ``192.168.1.1``
+    and ``evil.com`` is still not found inside ``notevil.com``,
+    ``sub.evil.com`` or ``evil.com.br`` — except at the end of a value, where a
+    ``.`` that nothing continues is the sentence's full stop.
     """
     lowered = str(literal or "").lower()
     if not lowered:
@@ -281,17 +277,15 @@ def whole_value_in(literal: str, haystack: str) -> bool:
 
 def _opens_a_value(haystack: str, start: int) -> bool:
     """Whether a value may begin at ``start`` rather than continue a longer one."""
-    if start == 0 or not _VALUE_CHARACTER_RE.match(haystack[start - 1]):
-        return True
-    return _SCHEME_END_RE.search(haystack[:start]) is not None
+    return start == 0 or not _CONTINUES_A_VALUE_RE.match(haystack[start - 1])
 
 
 def _closes_a_value(haystack: str, end: int) -> bool:
     """Whether a value may end at ``end`` rather than run on into a longer one."""
     after = haystack[end : end + 1]
-    if not after or not _VALUE_CHARACTER_RE.match(after):
+    if not after or not _CONTINUES_A_VALUE_RE.match(after):
         return True
-    if after not in _TERMINAL_PUNCTUATION:
+    if after != _TERMINAL_DOT:
         return False
     following = haystack[end + 1 : end + 2]
-    return not following or not _VALUE_CHARACTER_RE.match(following)
+    return not following or not _CONTINUES_A_VALUE_RE.match(following)
