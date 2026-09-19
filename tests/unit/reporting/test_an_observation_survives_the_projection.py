@@ -25,8 +25,7 @@ from maljan.reporting.builder import MalwareReportBuilder
 from maljan.reporting.ledger_projection import network_from_ledger
 from maljan.reporting.models import MalwareReport, NetworkIOCs
 from maljan.reporting.renderers.stix_renderer import (
-    UNPUBLISHABLE_DOMAIN_CODE,
-    UNPUBLISHABLE_URL_CODE,
+    UNPUBLISHABLE_ENDPOINT_CODE,
     ExtendedSTIXRenderer,
 )
 from maljan.schemas.evidence import build_entry
@@ -160,16 +159,16 @@ class TestTheExportRefusesItAndSaysSo:
         renderer.render(_report(network_from_ledger(_sandbox_ledger())))
 
         rows = dict(renderer.declined)
-        assert UNPUBLISHABLE_DOMAIN_CODE in rows
-        assert INTERNAL in rows[UNPUBLISHABLE_DOMAIN_CODE]
-        assert "does not resolve outside the analysed network" in rows[UNPUBLISHABLE_DOMAIN_CODE]
+        assert UNPUBLISHABLE_ENDPOINT_CODE in rows
+        assert INTERNAL in rows[UNPUBLISHABLE_ENDPOINT_CODE]
+        assert "does not resolve outside the analysed network" in rows[UNPUBLISHABLE_ENDPOINT_CODE]
 
     def test_the_url_on_the_same_host_is_recorded_as_it_was(self) -> None:
         renderer = ExtendedSTIXRenderer()
 
         renderer.render(_report(network_from_ledger(_sandbox_ledger())))
 
-        assert UNPUBLISHABLE_URL_CODE in dict(renderer.declined)
+        assert UNPUBLISHABLE_ENDPOINT_CODE in dict(renderer.declined)
 
     def test_a_string_derived_name_is_held_back_without_a_row(self) -> None:
         from maljan.reporting.models import NetworkDomain

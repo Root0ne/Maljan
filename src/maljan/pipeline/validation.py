@@ -44,6 +44,7 @@ from maljan.pipeline.events import (
 )
 from maljan.schemas.evidence import entry_ids_in
 from maljan.schemas.judgement import SEVERITY_RATINGS, VERDICT_VALUES
+from maljan.schemas.stix_pattern import read_comparisons
 
 # How many alternatives a suggestion list carries. Three is what fits in one
 # line of feedback; a longer list reads as a menu and the model picks from the
@@ -62,9 +63,6 @@ ALIGNMENT_MARGIN = 0.20
 # as noise rather than as a correction.
 MAX_SCHEMA_VIOLATIONS = 6
 
-
-# The literals a STIX pattern quotes, e.g. ``[file:name = 'x.exe']`` -> ``x.exe``.
-_PATTERN_LITERAL_RE = re.compile(r"'([^']*)'")
 
 # The sentence the retry turn opens with. A constant because two call sites
 # send it and a test reads it.
@@ -1810,6 +1808,12 @@ def _runtime_paths(evidence_corpus: set[str] | None) -> set[str]:
     return found
 
 
+# A place written as a place: a root — a POSIX slash, a drive letter, a UNC
+# share, an environment variable — and at least one step under it. A directory
+# carries no extension, so the shape of the path is what is left to ask about;
+# a bare ``/I FyD`` out of a strings table has a root and nothing under it.
+_DIRECTORY_SHAPE_RE = re.compile(r"^(?:/|[A-Za-z]:[\\/]|\\\\|%[A-Za-z_]+%[\\/])[^\\/]+[\\/]")
+
 # A run of hexadecimal on its own, and the lengths a digest this project can
 # name comes in. Anything else quoted in a pattern is asked the corpus question
 # as it always was.
@@ -1822,36 +1826,20 @@ _DIGEST_LENGTHS = frozenset({32, 40, 56, 64, 96, 128})
 _TOKEN_BOUNDARY_RE = re.compile(r"[0-9a-f]", re.IGNORECASE)
 
 
-# An object path in a pattern comparison, read outside the quotes: the type,
-# then the property. Case carries no meaning in a STIX object path.
-_COMPARISON_PATH_RE = re.compile(r"([a-z0-9-]+:[a-z_.]+)", re.IGNORECASE)
-
-
 def _comparisons(pattern: str) -> list[tuple[str, str]]:
     """Every ``(object path, quoted literal)`` the pattern compares, in order.
 
-    Split on the quotes rather than on the paths, because a literal is where a
-    URL lives and a URL carries anything that looks like an object path inside
-    it. Only what is written outside the quotes says what is being compared,
-    and each literal is credited to the path most recently written before it —
-    an ``IN ('a', 'b')`` list writes the path once and quotes twice.
+    :func:`~maljan.schemas.stix_pattern.read_comparisons` is the one reader of
+    a pattern this repository has; the STIX renderer asks it the same question
+    about the same syntax, and two readers of one pattern is how one of them
+    publishes what the other vetoes. What is kept here is this caller's own
+    filter: a value that is only whitespace is not a value to ask about.
     """
-    found: list[tuple[str, str]] = []
-    path = ""
-    inside_the_path = False
-    for index, chunk in enumerate(pattern.split("'")):
-        if index % 2 == 0:
-            paths = list(_COMPARISON_PATH_RE.finditer(chunk))
-            if paths:
-                path = paths[-1].group(1).lower()
-            # A quote that opens where the object path is still being written
-            # holds a key, not a value: ``file:hashes.'MD5'`` names the
-            # algorithm and ``file:extensions['pe']`` names the extension. The
-            # value is what follows the comparison operator.
-            inside_the_path = chunk.rstrip().endswith((".", "["))
-        elif chunk.strip() and not inside_the_path:
-            found.append((path, chunk.strip()))
-    return found
+    return [
+        (comparison.path, comparison.literal.strip())
+        for comparison in read_comparisons(pattern)
+        if comparison.literal.strip()
+    ]
 
 
 def _whole_token_in(literal: str, haystack: str, own: set[str]) -> bool:
@@ -1903,7 +1891,8 @@ def _indicator_problem(
     # matched against, and a scrubbed path would answer a different question
     # from the one this check asks. The sentence they end up in is what the
     # caller wraps, because that is what is stored and shown.
-    literals = [str(v).strip() for v in _PATTERN_LITERAL_RE.findall(pattern) if str(v).strip()]
+    comparisons = _comparisons(pattern)
+    literals = [literal for _path, literal in comparisons]
     if not literals:
         return "the indicator pattern quotes no value."
     own = set(identity)
@@ -1935,7 +1924,7 @@ def _indicator_problem(
     # answered for the whole expression. What one comparison establishes is
     # that *it* raised no problem; the others are still asked.
     grounded = False
-    for path, literal in _comparisons(pattern):
+    for path, literal in comparisons:
         if path.startswith("file:hashes") or path.endswith("imphash"):
             if _HEX_TOKEN_RE.match(literal) and len(literal) in _DIGEST_LENGTHS:
                 if not _whole_token_in(literal, haystack, own):
@@ -1982,12 +1971,26 @@ def _indicator_problem(
                     "not a file on disk."
                 )
             lowered = literal.lower()
-            if not (
-                any(lowered.endswith(ext) for ext in IOC_FILE_EXTENSIONS)
-                or any(literal.startswith(prefix) for prefix in IOC_OS_RESOURCE_PREFIXES)
+            anchored = (
+                any(literal.startswith(prefix) for prefix in IOC_OS_RESOURCE_PREFIXES)
                 or lowered in runtime_paths
                 or lowered in own
-            ):
+            )
+            if path.startswith("directory:path"):
+                # A directory has no extension to answer with, and telling the
+                # judge its own row "has no file extension … so nothing says it
+                # is a real path" was untrue of the thing it had written. What
+                # is asked of a place is whether it is written as one: a root
+                # and a step under it, or a location this run watched.
+                if not (anchored or _DIRECTORY_SHAPE_RE.match(literal)):
+                    return (
+                        f"{safe_finding_value(literal)!r} is not anchored to a filesystem "
+                        "location and was not observed at runtime, so nothing says it is a "
+                        "directory on the analysed machine."
+                    )
+                grounded = True
+                continue
+            if not (anchored or any(lowered.endswith(ext) for ext in IOC_FILE_EXTENSIONS)):
                 return (
                     f"{safe_finding_value(literal)!r} has no file extension, no filesystem "
                     "anchor and was not "

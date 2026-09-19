@@ -259,7 +259,9 @@ class TestAHashWithNoLength:
         """``file:hashes.'SSDEEP'`` names the algorithm inside the object path."""
         from maljan.pipeline.validation import _comparisons
 
-        assert _comparisons(f"[file:hashes.'SSDEEP' = '{SSDEEP}']") == [("file:hashes.", SSDEEP)]
+        assert _comparisons(f"[file:hashes.'SSDEEP' = '{SSDEEP}']") == [
+            ("file:hashes.'ssdeep'", SSDEEP)
+        ]
 
     def test_a_named_algorithm_still_answers_for_its_length(self) -> None:
         bundle = Bundle(objects=[_indicator("[file:hashes.'MD5' = '3:abcd:efgh']")])

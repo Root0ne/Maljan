@@ -294,6 +294,30 @@ class TestIndicatorAdmission:
         assert violation is not None
         assert "empty pattern" in violation.message
 
+    def test_a_directory_is_not_told_it_has_no_file_extension(self):
+        """A directory has none, and the file-name sentence was untrue of one."""
+        violation = self._violation("[directory:path = '/opt/stage']", set())
+
+        assert violation is None
+
+    def test_a_directory_with_nothing_under_its_root_is_refused_as_a_place(self):
+        violation = self._violation("[directory:path = '/I FyD']", {"/i fyd"})
+
+        assert violation is not None
+        assert "nothing says it is a directory on the analysed machine" in violation.message
+        assert "file extension" not in violation.message
+
+    def test_a_toolchain_directory_is_still_reported_as_an_artefact(self):
+        ndk = "/buildbot/src/android/ndk-r25-release/toolchain/llvm-project"
+        violation = self._violation(f"[directory:path = '{ndk}']", {ndk.lower()})
+
+        assert violation is not None
+        assert "compiler or toolchain artefact" in violation.message
+
+    def test_a_name_with_an_escaped_quote_in_it_is_read_whole(self):
+        r"""``it\'s.exe`` used to be read as ``it\`` and refused for not being one."""
+        assert self._violation(r"[file:name = 'it\'s.exe']", {"it's.exe"}) is None
+
 
 class TestDropUngroundedIndicators:
     def test_the_named_indicator_goes_and_the_rest_stay(self):

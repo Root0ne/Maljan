@@ -228,6 +228,18 @@ class TestThePredicateAnswersEveryKind:
             ), kind
 
 
+def _docstrings(tree: ast.AST) -> set[int]:
+    """The string constants that are prose rather than a value the code builds."""
+    found: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        first = next(iter(node.body), None)
+        if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
+            found.add(id(first.value))
+    return found
+
+
 class TestOnlyOnePlaceWritesOne:
     """A fifth minting path is a fifth place the rule could be forgotten."""
 
@@ -238,7 +250,8 @@ class TestOnlyOnePlaceWritesOne:
         A build carries a value: the literal has an assignment in it, or a
         substitution. A literal that is only a prefix — ``"[url:value"`` — is
         something reading a pattern somebody else wrote, which is not this
-        rule's business.
+        rule's business. Neither is a docstring: a module that explains what a
+        pattern looks like writes one out, and nothing is minted from prose.
         """
         found: list[tuple[str, str, int]] = []
         for path in sorted(SRC.rglob("*.py")):
@@ -248,7 +261,10 @@ class TestOnlyOnePlaceWritesOne:
                 for node in ast.walk(tree)
                 if isinstance(node, ast.FunctionDef)
             }
+            prose = _docstrings(tree)
             for node in ast.walk(tree):
+                if id(node) in prose:
+                    continue
                 if isinstance(node, ast.JoinedStr):
                     text = "".join(
                         part.value for part in node.values if isinstance(part, ast.Constant)
