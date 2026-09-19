@@ -71,6 +71,12 @@ FEEDBACK_PREAMBLE = "Your previous answer had these problems:"
 FEEDBACK_CLOSING = "Fix them and answer again in the same format."
 
 
+# What joins the agents of a route inside one serialised row. A unit separator
+# rather than a comma: an agent key is an operator's word and a comma in one
+# would split a name in half on the way back.
+ROUTE_SEPARATOR = "\x1f"
+
+
 @dataclass(frozen=True)
 class Violation:
     """One thing wrong with an answer, in the words the producer will read."""
@@ -86,15 +92,31 @@ class Violation:
     # output" is not a statement the platform is entitled to make. The row
     # says what was searched and what was not; the object stays.
     advisory: bool = False
+    # The agents this row was handed through, outermost first, and the
+    # finding's own words. Two values rather than one string: a hand-over adds
+    # a name in front of the sentence and the whole is bounded, and a bound
+    # applied to one string has to work out where the route ends — which it
+    # cannot do, and which cost a sentence opening ``T1055: `` its identifier.
+    # Carried apart, the bound can only ever shorten the route.
+    route: tuple[str, ...] = ()
+    sentence: str = ""
+
+    def __post_init__(self) -> None:
+        # A row written by a validator has no route, and its message is its
+        # sentence. Everything downstream may then read either.
+        if not self.sentence:
+            object.__setattr__(self, "sentence", self.message)
 
     def to_dict(self) -> dict[str, str]:
         return {
             "code": self.code,
             "message": self.message,
             "path": self.path,
-            # A string, because every other value in the row is one and the
+            # Strings, because every other value in the row is one and the
             # channel that carries it is ``dict[str, list[dict[str, str]]]``.
             "advisory": "true" if self.advisory else "",
+            "sentence": self.sentence,
+            "route": ROUTE_SEPARATOR.join(self.route),
         }
 
 

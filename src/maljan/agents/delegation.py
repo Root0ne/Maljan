@@ -49,8 +49,8 @@ spent by its specialists' work — only by the wall clock it waits through.
 
 from __future__ import annotations
 
-import re
 import time
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
@@ -58,7 +58,7 @@ from pydantic import BaseModel, Field
 from maljan.agents.tool_pinning import SERVER_METADATA_KEY
 from maljan.core.logger import logger
 from maljan.pipeline.events import claims_to_payload, emit_agent_message, summarize_claims
-from maljan.pipeline.validation import Violation
+from maljan.pipeline.validation import ROUTE_SEPARATOR, Violation
 
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
@@ -575,56 +575,45 @@ HANDED_OVER_LIMIT = 800
 # What a chain that had to be cut begins with. Not a name, so it cannot be
 # read as one, and short enough that the bound survives it.
 ELIDED_CHAIN = "…: "
-# The shape of one step of the chain: an agent key an operator typed, and the
-# separator this module writes after it. Deliberately narrow — a sentence that
-# happens to contain a colon is not a step, and a step that does not match is
-# read as the start of the sentence, which costs room rather than truth.
-_CHAIN_STEP_RE = re.compile(r"^([A-Za-z0-9_][A-Za-z0-9_.\-]{0,63}): ")
 
 
-def prefixed_within_the_bound(message: str, name: str, limit: int = HANDED_OVER_LIMIT) -> str:
-    """``message`` with ``name`` in front of it, bounded by cutting the chain.
+def joined_within_the_bound(
+    route: Sequence[str], sentence: str, limit: int = HANDED_OVER_LIMIT
+) -> tuple[str, tuple[str, ...]]:
+    """``route`` in front of ``sentence``, bounded, and the route that survived.
 
-    A row handed up N levels of delegation carries N names before the finding's
-    own sentence. The sentence is never cut: it is what the producer is being
-    told, and two hundred characters of it are already a wrapped value. What is
-    cut is the chain, oldest step first, because the step nearest the sentence
-    is the agent that actually found the thing and the outer ones are the route
-    it took. A cut chain says so with :data:`ELIDED_CHAIN`.
+    Two values in, so the bound can only ever shorten the route. ``sentence``
+    is what the producer is being told — a validator wrote it and
+    ``safe_finding_value`` already bounded the value inside it — and it is
+    returned whole, always. Nothing here reads it: an earlier shape parsed the
+    joined string looking for where the route ended, could not tell a route
+    step from a finding that opens ``T1055: ``, and deleted the identifier.
 
-    A sentence that is over the bound on its own comes back whole and
-    unprefixed: the bound is on what this function adds, and truncating a
-    finding to fit a name in front of it would lose the finding.
+    ``route`` is outermost first, so what is dropped when room runs out is the
+    outermost step: the one nearest the sentence is the agent that found the
+    thing, and the ones before it are the way the ask travelled. A route that
+    lost anything says so with :data:`ELIDED_CHAIN`, always — including when
+    nothing of it is left.
     """
-    whole = f"{name}: {message}"
-    if len(whole) <= limit:
-        return whole
+    steps = [str(step).strip() for step in route if str(step).strip()]
+    if not steps:
+        return sentence, ()
+    whole = "".join(f"{step}: " for step in steps)
+    if len(whole) + len(sentence) <= limit:
+        return f"{whole}{sentence}", tuple(steps)
 
-    # Only now is the chain read, and only its own steps are moved: what is
-    # kept keeps its order, so the sentence reads as its writer wrote it.
-    steps: list[str] = [f"{name}: "]
-    # A chain cut once already carries the marker, and a second one beside it
-    # says nothing the first does not.
-    rest = message[len(ELIDED_CHAIN) :] if message.startswith(ELIDED_CHAIN) else message
-    while True:
-        match = _CHAIN_STEP_RE.match(rest)
-        if match is None:
-            break
-        steps.append(match.group(0))
-        rest = rest[match.end() :]
-
-    # The marker's own room is taken before any name's: a chain that was cut
+    # The marker's own room is taken before any name's: a route that was cut
     # and does not say so is worse than one name fewer.
-    room = limit - len(rest) - len(ELIDED_CHAIN)
+    room = limit - len(sentence) - len(ELIDED_CHAIN)
     kept: list[str] = []
     for step in reversed(steps):
-        if len(step) > room:
+        cost = len(step) + 2
+        if cost > room:
             break
         kept.insert(0, step)
-        room -= len(step)
-    if not kept:
-        return rest if len(rest) >= limit else f"{ELIDED_CHAIN}{rest}"
-    return f"{ELIDED_CHAIN}{''.join(kept)}{rest}"
+        room -= cost
+    chain = "".join(f"{step}: " for step in kept)
+    return f"{ELIDED_CHAIN}{chain}{sentence}", tuple(kept)
 
 
 def _hand_over_the_record(caller: Any, callee: Any, *, still_running: bool = True) -> None:
@@ -672,11 +661,21 @@ def _hand_over_the_record(caller: Any, callee: Any, *, still_running: bool = Tru
         logger.debug("delegation: the callee's validation state could not be read (%s).", exc)
         return
     for row in rows:
+        # The route and the finding's own sentence, carried apart: the row the
+        # callee drained kept both, so this level prepends a name to a list
+        # rather than to a string and nothing ever reads the sentence looking
+        # for where the route ends.
+        sentence = str(row.get("sentence") or row.get("message") or "")
+        carried = [step for step in str(row.get("route") or "").split(ROUTE_SEPARATOR) if step]
+        message, route = joined_within_the_bound([str(callee.name), *carried], sentence)
         caller.validation_findings.append(
             Violation(
                 code=str(row.get("code", "")),
-                message=prefixed_within_the_bound(str(row.get("message", "")), str(callee.name)),
+                message=message,
                 path=str(row.get("path", "")),
+                advisory=bool(row.get("advisory")),
+                route=route,
+                sentence=sentence,
             )
         )
     # The two counters are read-modify-write and this runs on an executor

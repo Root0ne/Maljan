@@ -345,8 +345,12 @@ DIRECTORY_SHAPES: list[tuple[str, bool]] = [
     ("/usr/lib/systemd/", True),
     # A root with nothing named under it.
     ("/", False),
+    # A bare drive root is a root and not a place, the same answer ``/`` and
+    # ``\\`` get. Decided rather than inherited: the branch that required the
+    # drive's separator is the moment to say so.
     ("C:\\", False),
     ("C:/", False),
+    ("C:\\.", False),
     ("\\\\", False),
     ("~", False),
     ("%TEMP%", False),

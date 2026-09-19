@@ -271,7 +271,7 @@ MESSAGE_BUILDERS: frozenset[str] = frozenset(
         "_weak_alignment",
         "_schema_message",
         "_indicator_problem",
-        "prefixed_within_the_bound",
+        "joined_within_the_bound",
         "shortened_evidence_note",
         "partial_evidence_note",
     }
@@ -295,8 +295,8 @@ OWNED_IN: dict[tuple[str, str], frozenset[str]] = {
     # ``name`` is the agent key. This function writes no sentence of its own —
     # it puts the name in front and cuts the route when the whole grows past
     # the limit the rows are held to.
-    ("agents/delegation.py", "prefixed_within_the_bound"): frozenset(
-        {"message", "name", "rest", "kept", "steps", "whole", "step", "match"}
+    ("agents/delegation.py", "joined_within_the_bound"): frozenset(
+        {"sentence", "route", "kept", "steps", "whole", "step", "chain"}
     ),
 }
 
@@ -528,26 +528,51 @@ def _violation_messages(node: ast.Call) -> list[ast.expr]:
     """
     found = [kw.value for kw in node.keywords if kw.arg == "message"]
     found += [kw.value for kw in node.keywords if kw.arg is None]
+    found += [kw.value for kw in node.keywords if kw.arg == "update"]
     if len(node.args) >= 2:
         found.append(node.args[1])
     return found
 
 
-# ``dataclasses.replace(violation, message=…)`` writes a new row off an old
-# one, and the message it writes is as much a message as a constructor's. The
-# ``message=`` keyword is what identifies it: no other ``replace`` in this tree
-# takes one, so this cannot collide with ``str.replace``.
-REPLACER = "replace"
+# The rewriters: a call that writes a new row off an old one rather than
+# constructing one. ``dataclasses.replace`` and pydantic's ``model_copy`` are
+# the two this tree can reach. Identified by the keyword they carry rather than
+# by their name alone, so ``str.replace`` and an ordinary ``model_copy`` are
+# not mistaken for one.
+REWRITERS: frozenset[str] = frozenset({"replace", "model_copy"})
+
+
+def _writes_a_message(node: ast.Call) -> bool:
+    """Whether this rewriting call sets a row's ``message``.
+
+    Three spellings: the keyword, a mapping splatted into it, and
+    ``model_copy(update={...})``. A rewriter whose message this scan cannot
+    see is one it asks about, exactly as it asks about ``Violation(**payload)``.
+    """
+    for keyword in node.keywords:
+        if keyword.arg == "message" or keyword.arg is None:
+            return True
+        if keyword.arg == "update":
+            return True
+    return False
 
 
 def _is_row_call(node: ast.AST, constructors: frozenset[str] | set[str]) -> bool:
-    """Whether this call writes a finding row."""
+    """Whether this call writes a finding row.
+
+    A rewriter counts only where the module also constructs one — ``replace``
+    and ``model_copy`` are ordinary names on ordinary objects, and treating
+    every one of them as a row call put six modules that have never seen a
+    ``Violation`` into the walk. The constructor set carries that decision:
+    :func:`_row_constructors` puts the rewriters in it only for a module that
+    builds a row outright.
+    """
     if not isinstance(node, ast.Call):
         return False
     name = called_name(node)
     if name in constructors:
         return True
-    return name == REPLACER and any(kw.arg == "message" for kw in node.keywords)
+    return name in REWRITERS and name in constructors
 
 
 def _row_constructors(tree: ast.AST) -> set[str]:
@@ -572,6 +597,19 @@ def _row_constructors(tree: ast.AST) -> set[str]:
                 found.add(node.name)
         if len(found) == before:
             break
+    # The rewriters, in a module that builds a row outright. ``replace`` and
+    # ``model_copy`` are ordinary names on ordinary objects, so a module with
+    # no constructor call has no row for one of them to rewrite — and reading
+    # every such call as a row call put six modules that have never held a
+    # ``Violation`` into the walk.
+    if any(isinstance(node, ast.Call) and called_name(node) in found for node in ast.walk(tree)):
+        found |= {
+            called_name(node)
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and called_name(node) in REWRITERS
+            and _writes_a_message(node)
+        }
     return found
 
 
@@ -585,6 +623,33 @@ def _interpolations(
         for node in ast.walk(expression)
         if isinstance(node, ast.FormattedValue)
     ]
+
+
+def _every_function(tree: ast.AST) -> list[ast.FunctionDef]:
+    """Every function in a module, because a mutation names no constructor.
+
+    ``_functions_that_matter`` finds the functions that *call* one; a message
+    written straight onto a row is an assignment, so the function that does it
+    may name nothing this scan keys on.
+    """
+    return [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)]
+
+
+def _message_mutations(function: ast.FunctionDef) -> list[ast.expr]:
+    """Every ``something.message = …`` this function writes.
+
+    A row is a mutable dataclass, so a message can be set after the row exists
+    and no call names it. ``message`` is the only attribute asked about, which
+    is why this cannot fire on an unrelated object's unrelated field.
+    """
+    found: list[ast.expr] = []
+    for node in ast.walk(function):
+        if not isinstance(node, ast.Assign):
+            continue
+        for target in node.targets:
+            if isinstance(target, ast.Attribute) and target.attr == "message":
+                found.append(node.value)
+    return found
 
 
 def _functions_that_matter(
@@ -609,8 +674,32 @@ def _builds_a_row(tree: ast.AST) -> bool:
     return any(_is_row_call(node, constructors) for node in ast.walk(tree))
 
 
+def _qualified(tree: ast.AST) -> dict[int, str]:
+    """Every function in this module, by id, under its qualified name.
+
+    ``Class.method`` and ``outer.inner`` rather than a bare ``method``: keyed
+    by the bare name, a nested function or a method sharing the name of a
+    vouched function in the same module inherited its vouching, and a helper
+    called ``_indicator_problem`` inside another function was owned for it.
+    """
+    found: dict[int, str] = {}
+
+    def _walk(node: ast.AST, prefix: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+                name = f"{prefix}.{child.name}" if prefix else child.name
+                if not isinstance(child, ast.ClassDef):
+                    found[id(child)] = name
+                _walk(child, name)
+            else:
+                _walk(child, prefix)
+
+    _walk(tree, "")
+    return found
+
+
 def _owned_for(
-    function: ast.FunctionDef, module: frozenset[str], where: str = ""
+    function: ast.FunctionDef, module: frozenset[str], where: str = "", name: str = ""
 ) -> frozenset[str]:
     """Every name whose value this codebase owns *where this function reads it*.
 
@@ -619,8 +708,10 @@ def _owned_for(
     say whether the text is this repository's — which is why a local is asked
     about its value and never about its name.
 
-    ``where`` is the walked module the function was read from, because both
-    vouched lists are keyed by the place as well as the spelling.
+    ``where`` is the walked module the function was read from and ``name`` its
+    qualified name inside it, because both vouched lists are keyed by the place
+    as well as the spelling — a method or a nested function that borrows a
+    vouched function's bare name is a different function.
     """
     bindings = _bindings(function)
     # ``CODE_OWNED`` survives a binding and the module's own names do not, and
@@ -631,7 +722,7 @@ def _owned_for(
     # entirely — and there are 251 of those spellings across the walked
     # modules, several of them ordinary lowercase words a function would reach
     # for.
-    key = (where, function.name)
+    key = (where, name or function.name)
     vouched = CODE_OWNED.get(key, frozenset()) | OWNED_IN.get(key, frozenset())
     outer = frozenset(vouched | ((BUILTIN_NAMES | module) - set(bindings)))
     return outer | frozenset(_owned_locals(function, outer, bindings))
@@ -679,8 +770,9 @@ class TestEveryRowIsHeldToTheSameRule:
             tree = _tree_of(name)
             module = _module_names(tree)
             constructors = _row_constructors(tree)
+            qualified = _qualified(tree)
             for function in _functions_that_matter(tree, constructors):
-                owned = _owned_for(function, module, name)
+                owned = _owned_for(function, module, name, qualified.get(id(function), ""))
                 for value in _interpolations(function, constructors):
                     if _is_wrapped(value) or _is_code_owned(value, owned):
                         continue
@@ -693,6 +785,25 @@ class TestEveryRowIsHeldToTheSameRule:
             "value this codebase owns goes on CODE_OWNED with a reason:\n  " + "\n  ".join(offences)
         )
 
+    def test_no_message_is_written_straight_onto_a_row(self) -> None:
+        """A row is mutable, so a message can be set with no call to name it."""
+        offences: list[str] = []
+        for name in WALKED:
+            tree = _tree_of(name)
+            module = _module_names(tree)
+            qualified = _qualified(tree)
+            for function in _every_function(tree):
+                owned = _owned_for(function, module, name, qualified.get(id(function), ""))
+                for value in _message_mutations(function):
+                    if _value_is_owned(value, owned):
+                        continue
+                    offences.append(f"{name}:{value.lineno}: {ast.unparse(value)}")
+
+        assert not offences, (
+            "These write a message onto a row after it was built, without passing "
+            f"it through ``{WRAPPER}``:\n  " + "\n  ".join(offences)
+        )
+
     def test_a_message_nothing_built_here_comes_from_a_builder(self) -> None:
         """``message=mismatch`` is only safe because the builder is walked too."""
         offences: list[str] = []
@@ -700,8 +811,9 @@ class TestEveryRowIsHeldToTheSameRule:
             tree = _tree_of(name)
             module = _module_names(tree)
             constructors = _row_constructors(tree)
+            qualified = _qualified(tree)
             for function in _functions_that_matter(tree, constructors):
-                owned = _owned_for(function, module, name)
+                owned = _owned_for(function, module, name, qualified.get(id(function), ""))
                 for node in ast.walk(function):
                     if not _is_row_call(node, constructors):
                         continue
@@ -795,12 +907,73 @@ class TestEveryRowIsHeldToTheSameRule:
         """``replace(violation, message=…)`` writes a row without a constructor."""
         source = (
             "from dataclasses import replace\n"
+            "def held():\n"
+            "    return Violation('x', 'a sentence of ours')\n"
             "def leak(violation, model_text):\n"
             "    return replace(violation, message=f'said {model_text}')\n"
         )
 
         assert self._offences(source) == ["model_text"]
         assert _builds_a_row(ast.parse(source))
+
+    def test_it_reads_a_row_rewritten_by_a_splatted_mapping(self) -> None:
+        source = (
+            "from dataclasses import replace\n"
+            "def held():\n"
+            "    return Violation('x', 'a sentence of ours')\n"
+            "def leak(violation, model_text):\n"
+            "    return replace(violation, **{'message': model_text})\n"
+        )
+
+        assert self._message_offences(source) == ["{'message': model_text}"]
+
+    def test_it_reads_a_row_rewritten_by_model_copy(self) -> None:
+        source = (
+            "def held():\n"
+            "    return Violation('x', 'a sentence of ours')\n"
+            "def leak(violation, model_text):\n"
+            "    return violation.model_copy(update={'message': model_text})\n"
+        )
+
+        assert self._message_offences(source) == ["{'message': model_text}"]
+
+    def test_a_rewriter_in_a_module_that_holds_no_row_is_not_one(self) -> None:
+        """The boundary, stated: ``replace`` and ``model_copy`` are ordinary names.
+
+        Reading every one of them as a row call put six modules that have never
+        held a ``Violation`` into the walk. A module with no constructor call
+        has no row for a rewriter to rewrite.
+        """
+        source = (
+            "from dataclasses import replace\n"
+            "def held(config, model_text):\n"
+            "    return replace(config, message=model_text)\n"
+        )
+
+        assert not _builds_a_row(ast.parse(source))
+        assert self._message_offences(source) == []
+
+    def test_it_reads_a_message_written_straight_onto_a_row(self) -> None:
+        """``violation.message = model_text`` writes a row without any call."""
+        source = (
+            "def held():\n"
+            "    return Violation('x', 'a sentence of ours')\n"
+            "def leak(violation, model_text):\n"
+            "    violation.message = model_text\n"
+            "    return violation\n"
+        )
+
+        assert self._mutations(source) == ["model_text"]
+
+    def test_an_owned_message_written_straight_onto_a_row_is_not_an_offence(self) -> None:
+        source = (
+            "OWN = 'a sentence of ours'\n"
+            "def held(violation):\n"
+            "    violation.message = OWN\n"
+            "    return violation\n"
+        )
+
+        assert self._mutations(source) == []
 
     def test_a_replace_that_writes_no_message_is_left_alone(self) -> None:
         """``str.replace`` and a path-only rewrite are not row constructions."""
@@ -932,6 +1105,19 @@ class TestEveryRowIsHeldToTheSameRule:
                 found.append(ast.unparse(value))
         return found
 
+    def _mutations(self, source: str) -> list[str]:
+        """Every message written straight onto a row that the scan would refuse."""
+        tree, module, _constructors = self._scan(source)
+        found: list[str] = []
+        qualified = _qualified(tree)
+        for function in _every_function(tree):
+            owned = _owned_for(function, module, "", qualified.get(id(function), ""))
+            for value in _message_mutations(function):
+                if _value_is_owned(value, owned):
+                    continue
+                found.append(ast.unparse(value))
+        return found
+
     def _message_offences(self, source: str) -> list[str]:
         """Every whole message the scan would refuse in this source."""
         tree, module, constructors = self._scan(source)
@@ -977,6 +1163,16 @@ def _writes_to(tree: ast.AST, attribute: str) -> set[str]:
     Three shapes: ``x.attr.append(...)`` and its siblings, ``x.attr = ...``,
     and ``x.attr += ...``. Reading it is not writing it, and a local of the
     same name is not the attribute.
+
+    What it cannot see, written down so the next reader knows the boundary
+    rather than assuming there is none: ``setattr(agent, "…", rows)``, a local
+    alias (``rows = agent.validation_findings`` and then ``rows.append(r)``),
+    ``agent.__dict__["…"].append(r)``, ``list.append(agent.…, r)``,
+    ``operator.iadd``, a write at module level or in a class body, and a lambda
+    bound at module level. The alias is the one an author could reach by
+    accident; the rest are evasions no AST guard stops, and the runtime rule
+    they would have to get past is that the list is drained straight onto the
+    state channel and every row on it was built by walked source.
     """
     mutators = {"append", "extend", "insert", "clear", "pop", "remove", "__setitem__"}
     found: set[str] = set()
