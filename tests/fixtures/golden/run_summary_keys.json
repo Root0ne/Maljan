@@ -98,6 +98,7 @@
     "output_tokens": null,
     "total_tokens": null
   },
+  "tool_latency": null,
   "triage": {
     "duration_ms": null,
     "entries": null,

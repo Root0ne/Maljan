@@ -102,7 +102,7 @@ def validate_bootstrap(s: APISettings) -> BootstrapReport:
     # A grace-period signing secret with no end is a retired key this API
     # accepts for the life of the deployment, which is the thing rotating was
     # meant to remove. The end is written down or the secret is not set.
-    grace_secret = _secret_value(s.jwt_previous_secret_key).strip()
+    grace_secret = _secret_value(getattr(s, "jwt_previous_secret_key", "")).strip()
     if grace_secret:
         lapses = getattr(s, "jwt_previous_secret_not_after", None)
         if lapses is None:
