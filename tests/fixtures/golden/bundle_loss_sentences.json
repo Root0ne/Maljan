@@ -1,0 +1,100 @@
+{
+  "_note": "One reading of what the exported STIX bundle lost, pinned for both surfaces. The report builds this sentence in src/maljan/analysis/run_summary.py and the console in apps/web/src/lib/report-utils.ts; a line that printed integrity_objects_removed called the indicator cap's orphaned relationships repairs, and said 10 where the console said 4. Each case is the counts of one of the eight bundle shapes the reconciliation was measured on.",
+  "cases": [
+    {
+      "shape": "under the cap",
+      "counts": {
+        "integrity_objects_removed": 0,
+        "indicator_cap_removed": 0,
+        "integrity_refs_trimmed": 0,
+        "integrity_dropped": {}
+      },
+      "sentence": ""
+    },
+    {
+      "shape": "over the cap with twenty relationships and a note",
+      "counts": {
+        "integrity_objects_removed": 6,
+        "indicator_cap_removed": 6,
+        "integrity_refs_trimmed": 18,
+        "integrity_dropped": { "cap_orphan": 6 }
+      },
+      "sentence": "The exported STIX bundle is shorter than what the run produced: 6 indicators over the export's total cap, lowest priority first; 6 relationships left pointing at a capped indicator; 18 references trimmed from a report or a note."
+    },
+    {
+      "shape": "the same plus a Report SDO referencing everything",
+      "counts": {
+        "integrity_objects_removed": 6,
+        "indicator_cap_removed": 6,
+        "integrity_refs_trimmed": 30,
+        "integrity_dropped": { "cap_orphan": 6 }
+      },
+      "sentence": "The exported STIX bundle is shorter than what the run produced: 6 indicators over the export's total cap, lowest priority first; 6 relationships left pointing at a capped indicator; 30 references trimmed from a report or a note."
+    },
+    {
+      "shape": "a Benign verdict, capped, nothing repaired",
+      "counts": {
+        "integrity_objects_removed": 0,
+        "indicator_cap_removed": 6,
+        "integrity_refs_trimmed": 12,
+        "integrity_dropped": {}
+      },
+      "sentence": "The exported STIX bundle is shorter than what the run produced: 6 indicators over the export's total cap, lowest priority first; 12 references trimmed from a report or a note."
+    },
+    {
+      "shape": "malformed and truncated patterns declined",
+      "counts": {
+        "integrity_objects_removed": 1,
+        "indicator_cap_removed": 0,
+        "integrity_refs_trimmed": 2,
+        "integrity_dropped": { "empty_pattern": 1 }
+      },
+      "sentence": "The exported STIX bundle is shorter than what the run produced: 1 object repaired away as malformed or duplicated; 2 references trimmed from a report or a note."
+    },
+    {
+      "shape": "eight duplicate indicators",
+      "counts": {
+        "integrity_objects_removed": 7,
+        "indicator_cap_removed": 0,
+        "integrity_refs_trimmed": 0,
+        "integrity_dropped": { "duplicate_indicator": 7 }
+      },
+      "sentence": "The exported STIX bundle is shorter than what the run produced: 7 objects repaired away as malformed or duplicated."
+    },
+    {
+      "shape": "duplicate attack-patterns and a dangling relationship",
+      "counts": {
+        "integrity_objects_removed": 1,
+        "indicator_cap_removed": 0,
+        "integrity_refs_trimmed": 0,
+        "integrity_dropped": { "duplicate_attack_pattern": 1 }
+      },
+      "sentence": "The exported STIX bundle is shorter than what the run produced: 1 object repaired away as malformed or duplicated."
+    },
+    {
+      "shape": "everything at once",
+      "counts": {
+        "integrity_objects_removed": 10,
+        "indicator_cap_removed": 6,
+        "integrity_refs_trimmed": 27,
+        "integrity_dropped": {
+          "empty_pattern": 2,
+          "duplicate_indicator": 1,
+          "dangling_relationship": 1,
+          "cap_orphan": 6
+        }
+      },
+      "sentence": "The exported STIX bundle is shorter than what the run produced: 4 objects repaired away as malformed or duplicated; 6 indicators over the export's total cap, lowest priority first; 6 relationships left pointing at a capped indicator; 27 references trimmed from a report or a note."
+    },
+    {
+      "shape": "one of each, for the singular nouns",
+      "counts": {
+        "integrity_objects_removed": 2,
+        "indicator_cap_removed": 1,
+        "integrity_refs_trimmed": 1,
+        "integrity_dropped": { "cap_orphan": 1 }
+      },
+      "sentence": "The exported STIX bundle is shorter than what the run produced: 1 object repaired away as malformed or duplicated; 1 indicator over the export's total cap, lowest priority first; 1 relationship left pointing at a capped indicator; 1 reference trimmed from a report or a note."
+    }
+  ]
+}

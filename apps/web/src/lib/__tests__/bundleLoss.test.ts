@@ -1,6 +1,63 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
-import { bundleLossSentence } from "@/lib/report-utils";
+import { bundleLossSentence, partialGroundingSentence } from "@/lib/report-utils";
+
+/**
+ * The shared fixture the report builds the same sentence from. One reading,
+ * two surfaces: the report printed `integrity_objects_removed` as "repaired
+ * away" with the cap's orphaned relationships inside it and said 10 where this
+ * side said 4 about the same run. A change to either wording now fails on the
+ * side that was not changed.
+ */
+const FIXTURE = JSON.parse(
+  readFileSync(
+    join(__dirname, "../../../../../tests/fixtures/golden/bundle_loss_sentences.json"),
+    "utf-8",
+  ),
+) as {
+  cases: Array<{ shape: string; counts: Record<string, unknown>; sentence: string }>;
+};
+
+describe("the sentence both surfaces build", () => {
+  for (const testCase of FIXTURE.cases) {
+    it(`reads the same as the report on: ${testCase.shape}`, () => {
+      expect(bundleLossSentence(testCase.counts) ?? "").toBe(testCase.sentence);
+    });
+  }
+});
+
+describe("partialGroundingSentence", () => {
+  it("says nothing when the grounding searched the whole record", () => {
+    expect(partialGroundingSentence(null)).toBeNull();
+    expect(partialGroundingSentence({})).toBeNull();
+    expect(partialGroundingSentence({ evidence_corpus_missing_answers: 0 })).toBeNull();
+  });
+
+  it("names the reason, the count and the tools", () => {
+    const text = partialGroundingSentence({
+      evidence_corpus_partial_reason: "ceiling zero",
+      evidence_corpus_missing_answers: 3,
+      evidence_corpus_missing_tools: ["get_dns", "get_strings"],
+    });
+    expect(text).toContain("ceiling zero");
+    expect(text).toContain("3 answers not kept");
+    expect(text).toContain("from get_dns, get_strings");
+    expect(text).toContain("a note and drops nothing");
+  });
+
+  it("agrees its noun with the count and needs no tool names", () => {
+    const text = partialGroundingSentence({
+      evidence_corpus_partial_reason: "run resumed without its corpus",
+      evidence_corpus_missing_answers: 1,
+    });
+    expect(text).toContain("1 answer not kept.");
+  });
+});
+
+
 
 /**
  * The counts of the eight bundle shapes the reconciliation was measured on.
