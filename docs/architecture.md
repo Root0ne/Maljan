@@ -1732,6 +1732,16 @@ nothing drops its object for it. `drop_ungrounded_indicators` reads the flag,
 and a source guard fails any other consumer that decides a removal from an
 ungrounded row without asking.
 
+**And what it held.** Beside the loss, `run_summary.truncation` carries
+`evidence_corpus_answers`, `evidence_corpus_bytes_held` and
+`evidence_corpus_bytes_ceiling`, read off the corpus while the container still
+has one. The three are **absent** on a run that recorded none of them — a
+summary stored before they existed, a run resumed without its corpus — because
+zero would say the corpus held nothing. The report's Bounds Hit section and the
+console's "what the run spent" print them only where they tell a reader
+something: a corpus that went partial, or one past half its ceiling. Otherwise
+the record carries them and both surfaces stay quiet.
+
 Two rows that mean one path are one row. `reporting.dedupe.canonical_path`
 normalises the separators, collapses runs of them, drops a trailing one and
 folds the case of a Windows path — Windows filesystems are case-insensitive, a

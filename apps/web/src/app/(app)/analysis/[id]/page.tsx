@@ -7,6 +7,7 @@ import { useReport } from "./layout";
 import { api } from "@/lib/api";
 import {
   bundleLossSentence,
+  corpusHeldSentence,
   countLabel,
   partialGroundingSentence,
   downloadBlob,
@@ -470,6 +471,7 @@ function RunRecord({
   const retryMode = Object.entries(runSummary.nudge?.retry_mode ?? {});
   const bundleLoss = bundleLossSentence(runSummary.truncation ?? null);
   const partialGrounding = partialGroundingSentence(runSummary.truncation ?? null);
+  const corpusHeld = corpusHeldSentence(runSummary.truncation ?? null);
   const configRows = Object.entries(config ?? {}).filter(
     ([key]) => !SHOWN_IN_THE_HEADER.has(key),
   );
@@ -515,6 +517,7 @@ function RunRecord({
             </li>
             {bundleLoss && <li className="text-text-muted">{bundleLoss}</li>}
             {partialGrounding && <li className="text-text-muted">{partialGrounding}</li>}
+            {corpusHeld && <li className="text-text-muted">{corpusHeld}</li>}
             {(validation?.unresolved ?? []).map((item, i) => (
               <li key={i} className="text-status-orange">
                 {validationRowText(item)}

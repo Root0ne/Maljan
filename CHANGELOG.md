@@ -2928,6 +2928,19 @@ change landed on `main`.
   notice together stay inside the limit the answer was cut to. No code
   re-issues a call or edits an argument.
 
+- **The grounding corpus records what it held, not only what it missed.**
+  `run_summary.truncation` gains `evidence_corpus_answers`,
+  `evidence_corpus_bytes_held` and `evidence_corpus_bytes_ceiling`, read off
+  the corpus while the container still has one, so a reader can see how close
+  a run came to `core.reporting.evidence_corpus_bytes` rather than only that it
+  did not reach it. The report's Bounds Hit section and the console's "what the
+  run spent" print one sentence for them where it says something — a corpus
+  that went partial, or one past half its ceiling — and stay quiet otherwise.
+  **Upgrading:** the three keys are **absent**, not zero, on a summary stored
+  before they existed or on a run resumed without its corpus; a consumer must
+  read a missing key as "not recorded" rather than as a corpus that held
+  nothing.
+
 ### Removed
 
 - **The static analyst's case-prior hint and its settings.**

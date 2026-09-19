@@ -3,7 +3,11 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { bundleLossSentence, partialGroundingSentence } from "@/lib/report-utils";
+import {
+  bundleLossSentence,
+  corpusHeldSentence,
+  partialGroundingSentence,
+} from "@/lib/report-utils";
 
 /**
  * The shared fixture the report builds the same sentence from. One reading,
@@ -182,5 +186,44 @@ describe("bundleLossSentence", () => {
     expect(
       bundleLossSentence({ integrity_objects_removed: 1, integrity_dropped: { cap_orphan: 1 } }),
     ).toContain("1 relationship left pointing");
+  });
+});
+
+describe("corpusHeldSentence", () => {
+  it("says nothing for a run that recorded nothing about what it held", () => {
+    expect(corpusHeldSentence(null)).toBeNull();
+    expect(corpusHeldSentence({})).toBeNull();
+    expect(corpusHeldSentence({ evidence_corpus_answers: 12 })).toBeNull();
+  });
+
+  it("carries a corpus with room to spare silently", () => {
+    expect(
+      corpusHeldSentence({
+        evidence_corpus_answers: 12,
+        evidence_corpus_bytes_held: 1000,
+        evidence_corpus_bytes_ceiling: 16777216,
+      }),
+    ).toBeNull();
+  });
+
+  it("says what a corpus past half its ceiling held", () => {
+    expect(
+      corpusHeldSentence({
+        evidence_corpus_answers: 12,
+        evidence_corpus_bytes_held: 600,
+        evidence_corpus_bytes_ceiling: 1000,
+      }),
+    ).toBe("The grounding corpus held 12 answers, 600 of 1000 bytes.");
+  });
+
+  it("says what a partial corpus held, however small", () => {
+    expect(
+      corpusHeldSentence({
+        evidence_corpus_answers: 1,
+        evidence_corpus_bytes_held: 4,
+        evidence_corpus_bytes_ceiling: 1000,
+        evidence_corpus_partial_reason: "ceiling reached",
+      }),
+    ).toBe("The grounding corpus held 1 answer, 4 of 1000 bytes.");
   });
 });

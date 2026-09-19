@@ -153,6 +153,9 @@ interface TruncationCounts {
   evidence_corpus_missing_answers?: number;
   evidence_corpus_missing_tools?: string[];
   evidence_corpus_partial_reason?: string;
+  evidence_corpus_answers?: number;
+  evidence_corpus_bytes_held?: number;
+  evidence_corpus_bytes_ceiling?: number;
   integrity_objects_removed?: number;
   indicator_cap_removed?: number;
   integrity_refs_trimmed?: number;
@@ -200,6 +203,35 @@ export function bundleLossSentence(truncation: TruncationCounts | null): string 
  * Null when the grounding searched the whole record, and null for a run stored
  * before the counters existed.
  */
+/**
+ * Past this share of the ceiling the figures are printed unasked: a corpus
+ * holding more than half of what it may hold is one whose ceiling is a number
+ * the operator should know before the run that reaches it.
+ */
+const CORPUS_LOUD_SHARE = 0.5;
+
+/**
+ * What the run's grounding corpus held, as one sentence, or null.
+ *
+ * Printed only where it tells a reader something: a corpus that went partial,
+ * with the loss stated beside it, or one past half its ceiling. Null for a run
+ * that recorded nothing about what it held — which is not a corpus that held
+ * nothing — and null for one with room to spare, whose figures stay on the
+ * record unsaid.
+ *
+ * The report says the same thing in the same words
+ * (`analysis/run_summary.corpus_held_sentence`).
+ */
+export function corpusHeldSentence(truncation: TruncationCounts | null): string | null {
+  const answers = truncation?.evidence_corpus_answers;
+  const held = truncation?.evidence_corpus_bytes_held;
+  const ceiling = truncation?.evidence_corpus_bytes_ceiling;
+  if (answers == null || held == null || ceiling == null) return null;
+  const partial = (truncation?.evidence_corpus_partial_reason ?? "").trim() !== "";
+  if (!partial && !(ceiling > 0 && held > ceiling * CORPUS_LOUD_SHARE)) return null;
+  return `The grounding corpus held ${countLabel(answers, "answer")}, ${held} of ${ceiling} bytes.`;
+}
+
 export function partialGroundingSentence(truncation: TruncationCounts | null): string | null {
   const reason = (truncation?.evidence_corpus_partial_reason ?? "").trim();
   if (!reason) return null;

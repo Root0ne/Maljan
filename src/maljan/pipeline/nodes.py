@@ -3042,10 +3042,16 @@ def make_judge_node(
             # only place it appeared, so a run whose grounding went advisory
             # looked exactly like one whose grounding was whole.
             try:
+                from maljan.agents.run_evidence_corpus import held_by
+
                 container.get_truncation_ledger().record_evidence_corpus(
                     missing_answers=corpus_state.missing_answers,
                     missing_tools=corpus_state.missing_tools,
                     reason="" if corpus_state.complete else corpus_state.why,
+                    # Read while the container still has a corpus: after it
+                    # closes there is none to ask, and what it held would be
+                    # recorded as nothing.
+                    held=held_by(container.get_evidence_corpus()),
                 )
             except Exception as exc:  # noqa: BLE001 — telemetry never breaks a verdict
                 logger.debug("Evidence corpus state not recorded: %s", exc)

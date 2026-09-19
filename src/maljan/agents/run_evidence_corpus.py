@@ -67,6 +67,20 @@ class CorpusState:
         return not self.complete
 
 
+@dataclass(frozen=True)
+class CorpusHeld:
+    """What the corpus is holding, and the ceiling it is holding it under.
+
+    The state above is the loss; this is the stock. A run that never went
+    partial said nothing about how near the ceiling it came, so a reader could
+    not tell a run with room to spare from one that all but filled it.
+    """
+
+    answers: int = 0
+    bytes_held: int = 0
+    ceiling: int = 0
+
+
 # Why a corpus is partial. One of these reaches the run summary and the
 # degradation reason, so an operator reads a remedy rather than a symptom.
 CEILING_REACHED = "ceiling reached"
@@ -182,6 +196,18 @@ class RunEvidenceCorpus:
                 why=CEILING_ZERO if self._ceiling <= 0 else CEILING_REACHED,
             )
 
+    def held(self) -> CorpusHeld:
+        """How much of the run this corpus is holding, against its ceiling.
+
+        The state above says what was missed; this says what is there, which
+        is what a reader needs to see how close a run came to the ceiling
+        rather than only that it did not reach it.
+        """
+        with self._lock:
+            return CorpusHeld(
+                answers=len(self._texts), bytes_held=self._spent, ceiling=self._ceiling
+            )
+
     def __len__(self) -> int:
         with self._lock:
             return len(self._texts)
@@ -201,6 +227,21 @@ def state_of(corpus: object | None) -> CorpusState:
     except Exception:  # noqa: BLE001 — a missing corpus is a weaker claim, not a failure
         return NO_CORPUS
     return state if isinstance(state, CorpusState) else NO_CORPUS
+
+
+def held_by(corpus: object | None) -> CorpusHeld | None:
+    """``corpus.held()``, or ``None``. Never raises.
+
+    ``None`` rather than zeroes: a caller with no corpus does not know that
+    the corpus held nothing, and a record saying zero would claim it did.
+    """
+    if corpus is None:
+        return None
+    try:
+        found = corpus.held()  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001 — a missing figure is an absence, not a failure
+        return None
+    return found if isinstance(found, CorpusHeld) else None
 
 
 def parts_of(corpus: object | None) -> tuple[str, ...]:
