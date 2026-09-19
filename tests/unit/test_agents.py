@@ -365,6 +365,47 @@ class TestABudgetBelongsToTheAgentThatSpendsIt:
 
         assert self._limits(cfg, "lead") == (1800, 40)
 
+    def test_a_stored_budget_the_field_would_refuse_is_read_as_absent(self) -> None:
+        """A whole settings build must not fail over one agent's number.
+
+        The value can only get there from a store written before the field had
+        a bound — the two deprecated maps accept any integer — and a settings
+        build that raises is an API and a worker that cannot serve at all.
+        """
+        for bad in (0, -5, "lots", 1.5, True, None):
+            cfg = self._settings(
+                definitions={
+                    "scout": {"role": "generic", "prompt": "p", "max_steps": bad},
+                },
+            )
+            assert cfg.agents.definitions["scout"].max_steps is None, bad
+            assert self._limits(cfg, "scout")[1] == cfg.react_agent_max_steps, bad
+
+    def test_a_good_budget_beside_a_bad_one_is_kept(self) -> None:
+        cfg = self._settings(
+            definitions={
+                "scout": {
+                    "role": "generic",
+                    "prompt": "p",
+                    "max_steps": 0,
+                    "timeout_seconds": 900,
+                },
+            },
+        )
+
+        assert self._limits(cfg, "scout") == (900, cfg.react_agent_max_steps)
+
+    def test_the_deprecated_map_is_held_to_the_same_bound(self) -> None:
+        """The map has no per-value bound of its own, so the read applies one."""
+        cfg = self._settings(definitions={"scout": {"role": "generic", "prompt": "p"}})
+        cfg.react_agent_max_steps_overrides["scout"] = 0
+        cfg.react_agent_timeout_overrides["scout"] = -1
+
+        assert self._limits(cfg, "scout") == (
+            cfg.react_agent_timeout,
+            cfg.react_agent_max_steps,
+        )
+
 
 class TestForcedFinalSynthesis:
     """A tool-using ReAct loop that exhausts its step

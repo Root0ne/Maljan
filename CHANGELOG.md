@@ -480,8 +480,12 @@ change landed on `main`.
   and 1800 s move onto its definition, so a clone of a team arrives with the
   budget its agents need rather than with five specialists to ask and the
   default ten steps to ask them in. Alembic revision `20260927000000` moves a
-  stored override onto the definition it belongs to, and the save review names
-  a budget edit like any other field.
+  stored override onto the definition it belongs to — only a value the field
+  accepts, so a `0` or a negative left in an old override map stays there and
+  is named in the migration's log rather than making every later settings read
+  raise — and the save review names a budget edit like any other field. A
+  stored budget the field would refuse is read as absent, with the reason
+  logged, so one agent's number cannot take a deployment down.
 - **A JWT rotation's grace period can be given a written end.**
   `JWT_PREVIOUS_SECRET_NOT_AFTER` is optional; when it is set it is enforced,
   and past that moment a token signed with the previous secret is refused.

@@ -20,6 +20,7 @@ Heterogeneous Model Ensemble:
 """
 
 import contextvars
+import logging
 import re
 import sys
 from collections.abc import Iterable, Mapping
@@ -44,6 +45,11 @@ from maljan.agents.prompts import (
     TRIAGE_PROMPT,
 )
 from maljan.core import virustotal
+
+# The stdlib logger rather than ``maljan.core.logger``: this module is imported
+# by almost everything, including the logging setup itself, and it has exactly
+# one thing to say — a stored value it had to fall back from.
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Per-provider LLM configs
@@ -1046,6 +1052,15 @@ def _without_the_empty_builtin_tool_list(entry: dict[str, Any]) -> dict[str, Any
     return entry
 
 
+def _is_a_budget(value: Any) -> bool:
+    """Whether ``value`` is a step or time budget a definition may carry.
+
+    A whole number of at least one. ``True`` is an ``int`` to Python and is not
+    a budget to anybody, so it is refused by name.
+    """
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+
+
 class AgentDefinition(BaseModel):
     """One agent, as configuration rather than as a class.
 
@@ -2019,6 +2034,45 @@ class AgentsConfig(BaseModel):
     # most of it waiting for its own tool calls, and a lead with a long stage
     # timeout can still make several asks inside one loop.
     delegation_timeout_seconds: Annotated[int, Field(ge=1)] = 300
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_a_budget_the_field_would_refuse(cls, data: Any) -> Any:
+        """A stored budget outside the field's bound is read as absent.
+
+        The two deprecated override maps are plain ``dict[str, int]`` and
+        accept a zero or a negative through the settings PATCH, so a store
+        written before a budget belonged to a definition can hold one; the
+        migration that moves them leaves such a value where it is, and an
+        operator can still write one into the map by hand. Refusing the whole
+        document over it would take the API and the worker down for every
+        settings read — a build that raises is a deployment that cannot serve
+        — so the agent falls back to the deployment's budget and the reason
+        is logged once, where the fallback happens.
+        """
+        if not isinstance(data, dict):
+            return data
+        definitions = data.get("definitions")
+        if not isinstance(definitions, dict):
+            return data
+        cleaned: dict[Any, Any] = {}
+        for key, entry in definitions.items():
+            if not isinstance(entry, dict):
+                cleaned[key] = entry
+                continue
+            kept = dict(entry)
+            for field in ("max_steps", "timeout_seconds"):
+                if field in kept and kept[field] is not None and not _is_a_budget(kept[field]):
+                    logger.warning(
+                        "Agent %r has a stored %s of %r, which is not a whole number of at "
+                        "least one; the deployment's own budget is used instead.",
+                        key,
+                        field,
+                        kept[field],
+                    )
+                    kept[field] = None
+            cleaned[key] = kept
+        return {**data, "definitions": cleaned}
 
     @model_validator(mode="before")
     @classmethod

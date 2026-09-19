@@ -455,22 +455,36 @@ def hard_cap(timeout: float, ceiling: BudgetCeiling | None = None) -> float:
     return max(1.0, wall)
 
 
+def a_budget(value: Any) -> int | None:
+    """``value`` as a budget, or ``None`` when it is not one.
+
+    A whole number of at least one. ``True`` is an ``int`` to Python and is a
+    budget to nobody, so it is refused by name. Everything a budget is read
+    from goes through this: the definition's own fields, which the settings
+    model already holds to the same rule, and the two deprecated override
+    maps, which are plain ``dict[str, int]`` and hold anything an admin typed.
+    A loop given a zero or a negative recursion limit does not run at all, so
+    the fallback is the deployment's number rather than the stored one.
+    """
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        return None
+    return value
+
+
 def _definition_budget(cfg: Any, agent_name: str) -> tuple[int | None, int | None]:
     """``(timeout_seconds, max_steps)`` this agent's definition sets, if any.
 
-    Read defensively, and only a whole number is read: a settings stand-in may
-    carry no definition map at all, and a budget is not worth an exception on
-    the path that starts every loop.
+    Read defensively: a settings stand-in may carry no definition map at all,
+    and a budget is not worth an exception on the path that starts every loop.
     """
     definitions = getattr(getattr(cfg, "agents", None), "definitions", None)
     if not isinstance(definitions, dict):
         return None, None
     definition = definitions.get(agent_name)
-    values = []
-    for field in ("timeout_seconds", "max_steps"):
-        value = getattr(definition, field, None)
-        values.append(value if isinstance(value, int) and not isinstance(value, bool) else None)
-    return values[0], values[1]
+    return (
+        a_budget(getattr(definition, "timeout_seconds", None)),
+        a_budget(getattr(definition, "max_steps", None)),
+    )
 
 
 def slowest_call(entries: Any) -> str:
@@ -498,7 +512,8 @@ def loop_limits(agent_name: str, ceiling: BudgetCeiling | None = None) -> tuple[
     """``(timeout, max_steps)`` for one loop of ``agent_name``.
 
     The agent's own definition first, then the deprecated per-agent override
-    maps, then the deployment's defaults. A budget is a property of the agent
+    maps — each held to what a budget can be — then the deployment's defaults.
+    A budget is a property of the agent
     — an operator cloning a team gets the definition, and used to get none of
     its budget — so the definition wins over a map keyed by agent name
     somewhere else in the settings. A ceiling replaces both: an agent
@@ -507,16 +522,12 @@ def loop_limits(agent_name: str, ceiling: BudgetCeiling | None = None) -> tuple[
     a duck-typed analyst that borrows one method reads the same numbers.
     """
     cfg = get_settings()
-    definition = _definition_budget(cfg, agent_name)
+    own_timeout, own_steps = _definition_budget(cfg, agent_name)
     overrides = getattr(cfg, "react_agent_timeout_overrides", {}) or {}
-    timeout = int(
-        definition[0] if definition[0] else overrides.get(agent_name, cfg.react_agent_timeout)
-    )
     step_overrides = getattr(cfg, "react_agent_max_steps_overrides", {}) or {}
-    max_steps = int(
-        definition[1]
-        if definition[1]
-        else step_overrides.get(agent_name, cfg.react_agent_max_steps)
+    timeout = own_timeout or a_budget(overrides.get(agent_name)) or int(cfg.react_agent_timeout)
+    max_steps = (
+        own_steps or a_budget(step_overrides.get(agent_name)) or int(cfg.react_agent_max_steps)
     )
     if ceiling is not None:
         max_steps = max(2, int(ceiling.steps))
