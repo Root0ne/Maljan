@@ -71,6 +71,16 @@ class TestTheQuoteThatIsAKey:
             ("file:extensions['pe'].pe_imphash", digest)
         ]
 
+    def test_a_key_that_carries_a_bracket_is_read_to_its_own_quote(self) -> None:
+        pattern = "[file:extensions['a]b'].x = '127.0.0.1']"
+
+        assert _paths(pattern) == [("file:extensions['a]b'].x", "127.0.0.1")]
+
+    def test_a_key_that_carries_an_escaped_quote_is_read_to_its_own_quote(self) -> None:
+        pattern = r"[file:hashes.'MD\'5' = 'abc']"
+
+        assert _paths(pattern) == [("file:hashes.'md\\'5'", "abc")]
+
     def test_a_key_does_not_swallow_the_comparison_after_it(self) -> None:
         digest = "c" * 40
         pattern = f"[file:hashes.'SHA-1' = '{digest}' AND file:name = 'x.exe']"
@@ -152,6 +162,17 @@ class TestWhatItCannotReadItSaysSo:
 
 
 class TestTheCostOfReadingOne:
+    def test_chained_keys_cost_what_their_length_costs(self) -> None:
+        """The text outside the quotes used to be copied at every key."""
+        keys = "".join(f".'k{index}'" for index in range(2000))
+        pattern = f"[file:hashes{keys} = 'abc']"
+
+        started = time.monotonic()
+        comparisons = read_comparisons(pattern)
+
+        assert [c.literal for c in comparisons] == ["abc"]
+        assert time.monotonic() - started < 2.0
+
     def test_a_thousand_literals_are_read_in_one_pass(self) -> None:
         values = ", ".join(f"'10.0.{index // 256}.{index % 256}'" for index in range(1000))
         pattern = f"[ipv4-addr:value IN ({values})]"

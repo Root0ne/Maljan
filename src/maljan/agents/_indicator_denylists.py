@@ -190,11 +190,10 @@ HASH_HEX_LENGTHS: dict[str, int] = {
 
 HEX_RE = re.compile(r"^[0-9a-fA-F]+$")
 
-# ``file:hashes.'MD5' = '<literal>'`` and the unquoted spelling of the same.
-_HASH_EQUALITY_RE = re.compile(
-    r"file:hashes\.(?:'(?P<quoted>[^']+)'|(?P<bare>[A-Za-z0-9_-]+))\s*=\s*'(?P<value>[^']*)'",
-    re.IGNORECASE,
-)
+# The algorithm a ``file:hashes`` comparison names, read off the object path the
+# one reader gives back: ``hashes.'md5'`` quotes it as a key and ``hashes.md5``
+# writes it plainly.
+_HASH_ALGORITHM_RE = re.compile(r"^hashes\.(?:'(?P<quoted>.*)'|(?P<bare>[a-z0-9_-]+))$")
 
 
 def hash_literal_is_wellformed(algorithm: object, value: object) -> bool:
@@ -212,12 +211,24 @@ def hash_literal_is_wellformed(algorithm: object, value: object) -> bool:
 
 
 def malformed_hash_in(pattern: str) -> tuple[str, str] | None:
-    """The first ``(algorithm, literal)`` in ``pattern`` that is not that digest."""
-    for match in _HASH_EQUALITY_RE.finditer(pattern or ""):
-        algorithm = match.group("quoted") or match.group("bare") or ""
-        literal = match.group("value") or ""
-        if not hash_literal_is_wellformed(algorithm, literal):
-            return (str(algorithm).strip().upper(), literal)
+    """The first ``(algorithm, literal)`` in ``pattern`` that is not that digest.
+
+    Read through :func:`~maljan.schemas.stix_pattern.read_comparisons`, which is
+    the one reader of a pattern this repository has. A second regex over the
+    same syntax is how two readers come to disagree about what a pattern says,
+    and this one did not undo an escape either.
+    """
+    from maljan.schemas.stix_pattern import read_comparisons
+
+    for comparison in read_comparisons(pattern or ""):
+        if comparison.object_type != "file" or comparison.operator != "=":
+            continue
+        named = _HASH_ALGORITHM_RE.match(comparison.prop)
+        if named is None:
+            continue
+        algorithm = named.group("quoted") or named.group("bare") or ""
+        if not hash_literal_is_wellformed(algorithm, comparison.literal):
+            return (str(algorithm).strip().upper(), comparison.literal)
     return None
 
 

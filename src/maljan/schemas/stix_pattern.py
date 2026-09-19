@@ -46,7 +46,7 @@ from dataclasses import dataclass
 # meaning in a STIX object path and a judge writes ``[URL:value = …]`` often
 # enough that reading it as some other kind would be a hole.
 _OBJECT_PATH_RE = re.compile(
-    r"([a-z0-9-]+):([a-z0-9_]+(?:\.[a-z0-9_]+|\.'[^']*'|\[[^\]]*\])*)",
+    r"([a-z0-9-]+):([a-z0-9_]+(?:\.[a-z0-9_]+|\.'(?:\\.|[^'\\])*'|\['(?:\\.|[^'\\])*'\]|\[[^\]']*\])*)",
     re.IGNORECASE,
 )
 
@@ -56,9 +56,10 @@ _OBJECT_PATH_RE = re.compile(
 # backslash as an escape would eat the separators out of it.
 _ESCAPABLE = ("'", "\\")
 
-# A bracket that opens a step through a property, rather than the one that
-# opens an observation expression: a property name is written right before it.
-_INDEX_STEP_RE = re.compile(r"[A-Za-z0-9_]\[$")
+# What a name is written with, for the bracket question below: a bracket that
+# opens a step through a property has a property name right before it, while
+# the one that opens an observation expression has nothing.
+_NAME_CHARACTERS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_")
 
 
 @dataclass(frozen=True)
@@ -84,29 +85,34 @@ class Comparison:
 
 
 def read_comparisons(pattern: str) -> list[Comparison]:
-    """Every quoted value in ``pattern``, in the order it is written."""
+    """Every quoted value in ``pattern``, in the order it is written.
+
+    One pass: the text outside the quotes is never copied until a *value*
+    closes a comparison, and a key is answered from the few characters right
+    before it. A pattern that chains keys therefore costs what its length
+    costs, rather than the square of it.
+    """
     text = str(pattern or "")
     found: list[Comparison] = []
-    outside: list[str] = []
+    outside = 0
     object_type = ""
     prop = ""
     operator = ""
     observation_closed = False
     index = 0
     while index < len(text):
-        char = text[index]
-        if char != "'":
-            outside.append(char)
+        if text[index] != "'":
             index += 1
             continue
-        literal, index, closed = _read_quoted(text, index)
-        before = "".join(outside)
-        if closed and _opens_a_key(before):
+        literal, end, closed = _read_quoted(text, index)
+        if closed and _opens_a_key(text, outside, index):
             # A key continues the path rather than answering it, and the path
-            # regex above reads it back as one.
-            outside.append(f"'{literal}'")
+            # regex above reads it back out of the text it is written in.
+            index = end
             continue
-        outside = []
+        before = text[outside:index]
+        index = end
+        outside = end
         paths = list(_OBJECT_PATH_RE.finditer(before))
         if paths:
             object_type = paths[-1].group(1).lower()
@@ -132,15 +138,23 @@ def read_comparisons(pattern: str) -> list[Comparison]:
     return found
 
 
-def _opens_a_key(before: str) -> bool:
-    """Whether the quote about to open continues an object path.
+def _opens_a_key(text: str, start: int, quote: int) -> bool:
+    """Whether the quote at ``quote`` continues an object path.
 
     ``file:hashes.'MD5'`` and ``file:extensions['pe']`` step through a key; the
     ``[`` that opens an observation expression steps through nothing, so a
     bracket is a key's only when a property name is written right before it.
+    Read from the characters themselves rather than from a copy of everything
+    written since the last value, because a pattern may chain keys.
     """
-    text = before.rstrip()
-    return text.endswith(".") or _INDEX_STEP_RE.search(text) is not None
+    index = quote - 1
+    while index >= start and text[index].isspace():
+        index -= 1
+    if index < start:
+        return False
+    if text[index] == ".":
+        return True
+    return text[index] == "[" and index - 1 >= start and text[index - 1] in _NAME_CHARACTERS
 
 
 def _read_quoted(text: str, start: int) -> tuple[str, int, bool]:

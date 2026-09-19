@@ -80,11 +80,6 @@ _MITRE_LOOKUP: dict[str, tuple[str, str]] = {
     "T1547": ("Boot or Logon Autostart Execution", "https://attack.mitre.org/techniques/T1547/"),
 }
 
-# STIX pattern values are usually wrapped in single quotes inside square
-# brackets: ``[file:hashes.SHA-256 = 'abcd...']``. This regex pulls every
-# such quoted literal out so we can compare against the evidence corpus.
-_PATTERN_LITERAL_RE = re.compile(r"'([^']+)'")
-
 
 def _technique_display_name(tid: str) -> str | None:
     """Friendly ATT&CK technique name from the already-built index, else None.
