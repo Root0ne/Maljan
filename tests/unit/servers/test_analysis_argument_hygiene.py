@@ -493,7 +493,8 @@ class TestWhatCarvedPathMayName:
 
         answer = server.strings(path=str(sample), carved_path="never_written.bin", min_len=4)
 
-        assert "no such file" in str(answer["error"]["message"])
+        assert answer["error"]["code"] == "no_such_file"
+        assert "no carved file named 'never_written.bin'" in answer["error"]["message"]
 
 
 class TestTheSweepPrunesCarvedTrees:
@@ -552,3 +553,372 @@ class TestTheSweepPrunesCarvedTrees:
 
         assert server._prune_staging(base) == 0
         assert stale.exists()
+
+
+class TestTheSixSpellingsAModelWrote:
+    """``carved_path`` failed on its first live contact, six calls out of six.
+
+    ``carve_payloads`` answered with the path it had written, and the analyst
+    passed it back **wrapped in the double quotes it had read it between** — a
+    quoted path is not absolute, so it took the relative branch and missed. It
+    tried the bare tail, quoted. It tried the payload's display ``name``,
+    quoted. And each of the six refusals handed it the general file
+    remediation, which says to pass the sample path the prompt names: a
+    parameter the pinning had taken out of the schema, so the advice named a
+    field the model could not see.
+
+    The six values below are the ones that run really sent.
+    """
+
+    @staticmethod
+    def _carved(server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("MALJAN_STAGING_DIR", str(tmp_path / "staging"))
+        server._staging_dir()
+        sample = tmp_path / "dropper.exe"
+        sample.write_bytes(
+            b"DECOY\x00" + b"MZ\x90\x00" + b"\x00" * 2048 + b"CARVED-PAYLOAD-MARKER\x00"
+        )
+        answer = server.carve_payloads(str(sample))
+        assert answer["count"] >= 1, answer
+        return sample, answer["payloads"][0]
+
+    def test_all_six_read_the_payload(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sample, payload = self._carved(server, tmp_path, monkeypatch)
+        written = Path(payload["path"])
+        recorded = [
+            f'"{payload["path"]}"',
+            f'"{payload["path"]}"',
+            f'"{written.name}"',
+            f'"{payload["name"]}"',
+            f'"{payload["path"]}"',
+            f'"{payload["name"]}"',
+        ]
+
+        for index, asked in enumerate(recorded, start=1):
+            answer = server.strings(path=str(sample), carved_path=asked, min_len=6)
+            assert answer.get("read_path") == str(written), f"call {index}: {asked}"
+
+    def test_the_unquoted_spellings_still_work(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sample, payload = self._carved(server, tmp_path, monkeypatch)
+        written = Path(payload["path"])
+
+        for asked in (payload["path"], written.name, payload["name"], payload["carved_path"]):
+            answer = server.identify_file(path=str(sample), carved_path=asked)
+            assert answer.get("read_path") == str(written), asked
+
+
+class TestReadingTheQuotesOffAValue:
+    @staticmethod
+    def _unquoted(server: Any, value: str) -> str:
+        return str(server._unquoted(value))
+
+    def test_one_matching_pair_of_each_quote_comes_off(self, server: Any) -> None:
+        for wrapped in ('"/tmp/x"', "'/tmp/x'", "`/tmp/x`", '  "/tmp/x"  '):
+            assert self._unquoted(server, wrapped) == "/tmp/x", wrapped
+
+    def test_only_one_pair(self, server: Any) -> None:
+        assert self._unquoted(server, '""/tmp/x""') == '"/tmp/x"'
+
+    def test_an_unmatched_quote_stays(self, server: Any) -> None:
+        for kept in ('"/tmp/x', "/tmp/x'", "\"/tmp/x'"):
+            assert self._unquoted(server, kept) == kept, kept
+
+    def test_nothing_else_is_rewritten(self, server: Any) -> None:
+        """No unescaping, no globbing, no case folding."""
+        for kept in ("/tmp/A B/x", "/tmp/*.bin", "/tmp/it\\'s.bin", "/TMP/X"):
+            assert self._unquoted(server, kept) == kept, kept
+
+    def test_a_quoted_absence_word_is_an_absence(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("MALJAN_STAGING_DIR", str(tmp_path / "staging"))
+        server._staging_dir()
+        sample = tmp_path / "s.bin"
+        sample.write_bytes(b"SAMPLE-CONTENT\x00")
+
+        for absent in ('"null"', "'None'", '" "'):
+            answer = server.strings(path=str(sample), carved_path=absent, min_len=4)
+            assert [row["text"] for row in answer["strings"]] == ["SAMPLE-CONTENT"], absent
+            assert "read_path" not in answer, absent
+
+
+class TestWhatACarvedRefusalSays:
+    @staticmethod
+    def _carved(server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("MALJAN_STAGING_DIR", str(tmp_path / "staging"))
+        server._staging_dir()
+        sample = tmp_path / "dropper.exe"
+        sample.write_bytes(
+            b"DECOY\x00" + b"MZ\x90\x00" + b"\x00" * 2048 + b"CARVED-PAYLOAD-MARKER\x00"
+        )
+        return sample, server.carve_payloads(str(sample))["payloads"][0]
+
+    def test_a_name_this_run_did_not_carve_lists_the_ones_it_did(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sample, payload = self._carved(server, tmp_path, monkeypatch)
+
+        error = server.strings(path=str(sample), carved_path="body+0xdeadbeef", min_len=6)["error"]
+
+        assert error["code"] == "no_such_file"
+        assert Path(payload["path"]).name in error["message"]
+        assert error["remediation"] == server.CARVED_REMEDIATION
+
+    def test_the_listing_names_no_path(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A refusal travels into the ledger and onto the feed; tails only."""
+        sample, _payload = self._carved(server, tmp_path, monkeypatch)
+
+        error = server.strings(path=str(sample), carved_path="nothing_like_it", min_len=6)["error"]
+
+        assert str(tmp_path) not in error["message"]
+        assert "/" not in error["message"].split("this run carved:")[-1]
+
+    def test_no_carved_refusal_names_a_parameter_the_model_cannot_see(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sample, _payload = self._carved(server, tmp_path, monkeypatch)
+        asked = ("body+0xdeadbeef", "../../etc/passwd", "/etc/passwd")
+
+        for value in asked:
+            error = server.strings(path=str(sample), carved_path=value, min_len=6)["error"]
+            assert "sample path the prompt names" not in error["remediation"], value
+            assert error["remediation"] == server.CARVED_REMEDIATION, value
+
+    def test_a_call_that_named_no_carved_file_keeps_the_general_remedy(self, server: Any) -> None:
+        """The argument's own remediation is for the argument's own failures."""
+        from maljan.tools.errors import REMEDIATIONS
+
+        answer = server.identify_file(path="/nowhere/at/all.bin")
+
+        assert answer["error"]["remediation"] == REMEDIATIONS["path_outside_roots"]
+
+    def test_two_payloads_sharing_a_label_are_not_chosen_between(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sample, payload = self._carved(server, tmp_path, monkeypatch)
+        written = Path(payload["path"])
+        twin = written.with_name(f"{written.name[:-12]}ffffffffffff")
+        twin.write_bytes(b"A SECOND PAYLOAD UNDER THE SAME LABEL\x00")
+
+        error = server.strings(path=str(sample), carved_path=payload["name"], min_len=6)["error"]
+
+        assert error["code"] == "no_such_file"
+        assert twin.name in error["message"]
+
+
+class TestTheAnswerSaysWhichFieldToPassBack:
+    def test_each_payload_carries_the_argument_s_own_name(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("MALJAN_STAGING_DIR", str(tmp_path / "staging"))
+        server._staging_dir()
+        sample = tmp_path / "dropper.exe"
+        sample.write_bytes(
+            b"DECOY\x00" + b"MZ\x90\x00" + b"\x00" * 2048 + b"CARVED-PAYLOAD-MARKER\x00"
+        )
+
+        payload = server.carve_payloads(str(sample))["payloads"][0]
+
+        assert payload["carved_path"] == payload["path"]
+
+    def test_the_description_names_the_field(self, server: Any) -> None:
+        assert "carved_path`` value of an entry ``carve_payloads`` returned" in server.CARVED_NOTE
+        assert "no quotes around it" in server.CARVED_NOTE
+
+
+class TestEverySpellingDecidesConfinementTheSameWay:
+    """A link named like a payload was read by its label and refused by its path.
+
+    The label branch returned its match straight out of the tree walk, without
+    the resolution the other two spellings go through — and the walk used
+    ``rglob`` with ``is_file()``, both of which follow a symlink. So a link
+    called ``body_0x1000_aaaaaaaaaaaa`` pointing anywhere the sidecar's user
+    can read was matched by ``carved_path=body+0x1000`` and read, while the
+    same link by its tail and by its absolute path was refused — and the
+    answer's ``read_path`` then named the link rather than what had been read.
+    """
+
+    @staticmethod
+    def _run_with_a_planted_link(
+        server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> tuple[Path, Path, dict[str, Any]]:
+        monkeypatch.setenv("MALJAN_STAGING_DIR", str(tmp_path / "staging"))
+        server._staging_dir()
+        sample = tmp_path / "dropper.exe"
+        sample.write_bytes(
+            b"DECOY\x00" + b"MZ\x90\x00" + b"\x00" * 2048 + b"CARVED-PAYLOAD-MARKER\x00"
+        )
+        payload = server.carve_payloads(str(sample))["payloads"][0]
+        tree = Path(payload["path"]).parent
+        outside = tmp_path / "secret.txt"
+        outside.write_bytes(b"CONTENT-FROM-OUTSIDE-THE-TREE\x00")
+        link = tree / "leak_000000000000"
+        link.symlink_to(outside)
+        return sample, link, payload
+
+    def test_the_label_the_link_was_named_for_is_refused(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sample, link, _payload = self._run_with_a_planted_link(server, tmp_path, monkeypatch)
+
+        answer = server.strings(path=str(sample), carved_path="leak", min_len=6)
+
+        assert "read_path" not in answer
+        assert "CONTENT-FROM-OUTSIDE-THE-TREE" not in str(answer)
+        assert answer["error"]["code"] in ("path_outside_roots", "no_such_file")
+        assert link.exists()
+
+    def test_the_three_spellings_answer_alike(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sample, link, _payload = self._run_with_a_planted_link(server, tmp_path, monkeypatch)
+
+        for spelling in ("leak", link.name, str(link)):
+            answer = server.strings(path=str(sample), carved_path=spelling, min_len=6)
+            assert "read_path" not in answer, spelling
+            assert "error" in answer, spelling
+
+    def test_a_link_is_not_listed_as_a_carved_file(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sample, link, payload = self._run_with_a_planted_link(server, tmp_path, monkeypatch)
+
+        listing = server.strings(path=str(sample), carved_path="nothing_at_all", min_len=6)
+
+        assert link.name not in listing["error"]["message"]
+        assert Path(payload["path"]).name in listing["error"]["message"]
+
+    def test_the_real_payload_still_reads_by_every_spelling(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sample, _link, payload = self._run_with_a_planted_link(server, tmp_path, monkeypatch)
+        written = Path(payload["path"])
+
+        for spelling in (payload["path"], written.name, payload["name"]):
+            answer = server.strings(path=str(sample), carved_path=spelling, min_len=6)
+            assert answer["read_path"] == str(written), spelling
+
+    def test_read_path_records_the_resolved_file(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """What was read, not the spelling that asked for it."""
+        sample, _link, payload = self._run_with_a_planted_link(server, tmp_path, monkeypatch)
+
+        answer = server.strings(path=str(sample), carved_path=payload["name"], min_len=6)
+
+        assert answer["read_path"] == str(Path(payload["path"]).resolve())
+
+
+class TestTheCarveWriterDoesNotFollowALink:
+    """The upload path opens with ``O_CREAT|O_EXCL|O_NOFOLLOW`` and the carve
+    writer wrote with ``write_bytes``, which follows a link planted at the
+    destination — the same directory and the same prerequisite as the read
+    above."""
+
+    @staticmethod
+    def _sample_and_name(server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        import hashlib
+
+        from maljan.extractors.pe_extractor import carve_payloads as carve
+        from maljan.tools.binary import carved_file_name
+
+        monkeypatch.setenv("MALJAN_STAGING_DIR", str(tmp_path / "staging"))
+        server._staging_dir()
+        body = b"DECOY\x00" + b"MZ\x90\x00" + b"\x00" * 2048 + b"CARVED-PAYLOAD-MARKER\x00"
+        sample = tmp_path / "dropper.exe"
+        sample.write_bytes(body)
+        tree = server._carved_tree(hashlib.sha256(body).hexdigest())
+        tree.mkdir(parents=True, exist_ok=True)
+        label, blob = carve(body)[0]
+        return sample, tree / carved_file_name(label, hashlib.sha256(blob).hexdigest())
+
+    def test_a_planted_link_is_not_written_through(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sample, name = self._sample_and_name(server, tmp_path, monkeypatch)
+        victim = tmp_path / "victim.txt"
+        victim.write_bytes(b"NOT-A-PAYLOAD\x00")
+        name.symlink_to(victim)
+
+        answer = server.carve_payloads(str(sample))
+
+        assert victim.read_bytes() == b"NOT-A-PAYLOAD\x00"
+        assert "error" in answer["payloads"][0]
+        assert "already taken" in answer["payloads"][0]["error"]
+        assert "path" not in answer["payloads"][0]
+
+    def test_a_second_run_of_the_same_sample_reuses_its_own_payload(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sample, _name = self._sample_and_name(server, tmp_path, monkeypatch)
+
+        first = server.carve_payloads(str(sample))
+        second = server.carve_payloads(str(sample))
+
+        assert first["payloads"][0]["path"] == second["payloads"][0]["path"]
+        assert "error" not in second["payloads"][0]
+
+    def test_a_file_of_the_same_name_holding_other_bytes_is_refused(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sample, name = self._sample_and_name(server, tmp_path, monkeypatch)
+        name.write_bytes(b"SOMETHING ELSE ENTIRELY")
+
+        answer = server.carve_payloads(str(sample))
+
+        assert "already taken" in answer["payloads"][0]["error"]
+        assert name.read_bytes() == b"SOMETHING ELSE ENTIRELY"
+
+    def test_the_payload_is_written_private(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sample, name = self._sample_and_name(server, tmp_path, monkeypatch)
+
+        server.carve_payloads(str(sample))
+
+        assert name.stat().st_mode & 0o777 == 0o600
+
+
+class TestAValueTheFilesystemWouldRefuse:
+    @staticmethod
+    def _sample(server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        monkeypatch.setenv("MALJAN_STAGING_DIR", str(tmp_path / "staging"))
+        server._staging_dir()
+        sample = tmp_path / "s.bin"
+        sample.write_bytes(b"SAMPLE-CONTENT\x00")
+        return sample
+
+    def test_a_very_long_name_gets_the_carved_remediation(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sample = self._sample(server, tmp_path, monkeypatch)
+
+        error = server.strings(path=str(sample), carved_path="x" * 3000, min_len=4)["error"]
+
+        assert error["remediation"] == server.CARVED_REMEDIATION
+
+    def test_a_value_past_the_bound_is_refused_before_the_filesystem(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sample = self._sample(server, tmp_path, monkeypatch)
+
+        error = server.strings(path=str(sample), carved_path="x" * 5000, min_len=4)["error"]
+
+        assert error["code"] == "no_such_file"
+        assert "5000 characters" in error["message"]
+        assert error["remediation"] == server.CARVED_REMEDIATION
+
+    def test_a_refusal_does_not_echo_the_whole_value(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sample = self._sample(server, tmp_path, monkeypatch)
+
+        error = server.strings(path=str(sample), carved_path="y" * 3000, min_len=4)["error"]
+
+        assert len(error["message"]) < 400

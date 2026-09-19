@@ -1405,6 +1405,34 @@ bundle, a MITRE view, the extracted indicators, the detection signatures that
 fired and a timeline. Post-hoc enrichment fills VirusTotal, AbuseIPDB, WHOIS and
 GeoIP reputation into the indicator set after the verdict has shipped.
 
+**Every rendering is made on request from the stored report**, and nothing is
+kept beside it: there is one source of truth and no second copy to go stale.
+The report node renders its own markdown too — the CLI writes that one to a
+file — but it renders it from the same object, after the last field the
+renderer reads has been written, so the two agree at the moment the run ends.
+They are not promised to agree forever, and should not be: the enrichment job
+rewrites the stored report afterwards, the served rendering follows it because
+it is made on request, and the file the CLI wrote stays what the run itself
+produced. That ordering is the fix for a served report
+that printed `24 claimed, 24 published` over four published techniques, carried
+no section naming the twenty it did not publish, and gave 311.7 s as a 396.3 s
+run's elapsed time: the run summary's last four fields — the validation block,
+the corroboration's published marks, the stage rollup and the elapsed time —
+were written *after* both the render and the snapshot the worker stores, so the
+column the console reads was right and the report the API serves was a
+snapshot taken a minute earlier. A report stored before that ordering keeps the
+figures it was stored with; nothing is backfilled, and its run-summary column —
+which is what the console draws — was always the final one.
+
+`/reports/{id}/iocs` is a feed another system acts on, so by default it returns
+what **the publish rule would publish** — the same rule the STIX bundle is
+built with, asked of the same values, so a name only the sample's own byte
+image knows is not offered to something that would block on it. `include=all`
+returns everything and `include=unpublished` only the withheld rows. Every row
+carries its `source` and a `published` flag; `IOCEntry` declared neither, so
+FastAPI dropped the source the service had always attached and the distinction
+never reached a consumer.
+
 Every row in the network block — a domain, an address and a URL alike —
 records where it came from: `sandbox` for something the sample resolved,
 reached or requested, `analyst` for something an agent put in an artefact,

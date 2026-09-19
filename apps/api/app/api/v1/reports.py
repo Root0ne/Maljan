@@ -298,11 +298,21 @@ async def get_full_malware_report_iocs(
         default=None,
         description="Filter to one of: hash, domain, ip, url, user_agent, ja3, ja3s",
     ),
+    include: str = Query(
+        default="published",
+        pattern="^(published|unpublished|all)$",
+        description=(
+            "Which rows to return. 'published' (the default) is what the platform's "
+            "publish rule would publish, which is what another system should act on; "
+            "'unpublished' is only the rows it withholds, and 'all' is both. Every row "
+            "carries its source and a published flag."
+        ),
+    ),
     user: User = Depends(get_current_user),
     svc: ReportService = Depends(_get_service),
 ) -> IOCListResponse:
-    """Flat list of every IOC the report holds, optionally filtered by kind."""
-    items = await svc.get_malware_report_iocs(report_id, user, kind=kind)
+    """Flat list of the IOCs the report holds, filtered by kind and by publication."""
+    items = await svc.get_malware_report_iocs(report_id, user, kind=kind, include=include)
     if items is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
