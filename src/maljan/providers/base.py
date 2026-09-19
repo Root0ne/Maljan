@@ -55,6 +55,12 @@ class MirrorSpec:
 class StaticJobContext:
     host_sample_path: str | None = None
     mirror_sample_path: str | None = None  # today's state["static_sample_path"]
+    # The job this context belongs to, as the container knows it. A provider
+    # that starts a tool server passes this as the server's job identity, and
+    # that identity is what names the directory the server may stage in: with
+    # the sample's digest there instead, two jobs on one sample shared a
+    # directory and neither job's teardown could name it.
+    job_key: str = ""
     sha256: str = ""
     file_type: str = "unknown"
     platform: str = "unknown"

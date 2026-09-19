@@ -51,18 +51,43 @@ A tool server reached over HTTP does not share the worker's filesystem, so the
 sample is delivered to it rather than named. The worker writes each delivery
 into the staging directory (`MALJAN_STAGING_DIR`, a `maljan-analysis-mcp` directory under the
 system temp directory by default) and the sidecars sweep it on a TTL
-(`MALJAN_STAGING_TTL_HOURS`, 24 hours by default; `0` disables pruning). The
-payloads `carve_payloads` writes under `carved/<sha256>/` are swept on the same
-TTL, and an emptied tree goes with them; before that the sweep stepped over
-directories and nothing carved ever expired, so a long-lived host accumulated
-them — check that directory on an upgrade.
-Everything in it is live malware, on the same terms as `SAMPLES_DIR`: exclude
-it from on-access scanning and keep it off shared storage. One staging
-directory serves every job the server process handles, which is why a tool
-argument naming a carved file is held to the tree of the sample the call is
-pinned to rather than to the directory as a whole. A staging write that
+(`MALJAN_STAGING_TTL_HOURS`, 24 hours by default; `0` disables pruning).
+
+**Staging is per job.** The configured directory is the base, and each job gets
+one directory of its own inside it, `job-<the job's id>`: the sidecar's
+`put_sample` uploads land there, so does the `carved/<sha256>/` tree of
+everything that job carves, and so do the sandbox captures fetched for it, in a
+`captures/` child. The worker removes the whole directory when the run ends —
+on success, on failure and on an operator's cancel — and what a removal misses
+is taken by the same TTL, which prunes a job directory whole once the newest
+file in it is past the cutoff. So a nameable residue means a worker that was
+killed, and it goes on its own within the TTL.
+
+A run that lasts longer than the TTL without staging anything new keeps its
+directory: the job touches it while it refreshes its own owner heartbeat, which
+is how a sidecar sweeping a base two workers share can tell a long job from an
+abandoned one.
+
+**The sandbox capture.** A capture is the full record of a detonation, and the
+path to it is written by the model rather than by the platform — the network
+analyst is told where it is and passes it to `pcap_summary`. It used to be
+fetched into one directory under the system temp directory, shared by every job
+and every worker on the host, named as a readable directory for every sidecar
+started afterwards, and removed by nothing. It now lands in the job's own
+`captures/` directory, at 0600 inside a 0700 tree, is named as a readable
+directory for that job's sidecars only, and goes when the job does. Whatever an
+earlier release left in `maljan-cape-pcap` is swept on the same TTL; nothing
+writes there any more.
+
+Everything in it is live malware, on the same terms as `SAMPLES_DIR`: exclude it
+from on-access scanning and keep it off shared storage. A staging write that
 fails costs that server its tools for the run and is logged; it does not fail
 the job.
+
+*On upgrading:* the flat uploads and the single `carved/` tree of the previous
+release stay where they are and are swept by the same TTL. Nothing has to be
+migrated or moved; a host you want clean at once can have that directory
+emptied while no job is running.
 
 ## Audit trail
 

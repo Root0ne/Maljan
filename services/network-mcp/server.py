@@ -1,12 +1,11 @@
 import copy
 import json
-import os
-import tempfile
 from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from maljan.tools import staging
 from maljan.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, manifest, module
 from maljan.tools.errors import (
     MISSING_DEPENDENCY,
@@ -64,15 +63,16 @@ def _text_error(code: str, message: str, tool: str) -> str:
     return json.dumps(tool_error(code, message, tool=tool))
 
 
-def _staging_base() -> Path:
+def _staging_root() -> Path:
     """The delivery directory a capture may have been staged into.
 
-    The same ``MALJAN_STAGING_DIR`` the analysis sidecar writes uploads to: on
-    a host where both sidecars run, a capture delivered there is a capture
-    this server may read. Nothing here writes to it.
+    The same directory the analysis sidecar writes this job's uploads to: the
+    base ``MALJAN_STAGING_DIR`` names plus the job leaf the spawn composed, so
+    on a host where both sidecars run a capture delivered for this job is a
+    capture this server may read — and one delivered for another job is not.
+    Nothing here writes to it.
     """
-    configured = os.environ.get("MALJAN_STAGING_DIR", "").strip()
-    return Path(configured) if configured else Path(tempfile.gettempdir()) / "maljan-analysis-mcp"
+    return staging.staging_root()
 
 
 def _within(packet_limit: Any) -> int:
@@ -96,7 +96,8 @@ def _capture(pcap_path: str) -> Path:
     read whatever its author wrote there. Raises ``PathOutsideRoots`` for
     anything that resolves elsewhere; see ``maljan.tools.roots``.
     """
-    return resolve_under_roots(pcap_path, extra_roots=(_staging_base(),))
+    inside = resolve_under_roots(pcap_path, extra_roots=(_staging_root(),))
+    return staging.confined_to_this_job(inside)
 
 
 @mcp.tool(name=CAPABILITIES_TOOL)

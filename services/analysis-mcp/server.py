@@ -34,6 +34,7 @@ from maljan.core.paths import resolve_data
 from maljan.tools import binary as binary_tools
 from maljan.tools import identify as identify_tools
 from maljan.tools import rules as rule_tools
+from maljan.tools import staging
 from maljan.tools import strings as string_tools
 from maljan.tools.binary import carved_name_prefix
 from maljan.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, manifest, module
@@ -208,15 +209,15 @@ _PATH_ARGUMENTS = ("path", "pcap_path")
 CARVED_ARGUMENT = "carved_path"
 
 # What ``carved_path`` may reach: the carved tree of the file this call is
-# already reading, and that file itself. **Not** the whole staging base, which
-# every job on this host shares — a sample carrying another sample's digest in
-# its own bytes, and one instruction to read it, was enough to pull another
-# run's carved payload into this run's evidence, and another run's upload is
-# named by sixteen hex characters and the original file name. The digest is
-# the one thing this server can derive from what it was given, and it is
-# exactly the key ``carve_payloads`` writes under, so a run reaches everything
-# it produced and nothing any other run produced. Two runs of the same sample
-# share one tree, which is the same bytes read twice.
+# already reading, and that file itself. **Not** the whole staging base — a
+# sample carrying another sample's digest in its own bytes, and one instruction
+# to read it, was enough to pull another run's carved payload into this run's
+# evidence, and another run's upload is named by sixteen hex characters and the
+# original file name. The digest is the one thing this server can derive from
+# what it was given, and it is exactly the key ``carve_payloads`` writes under.
+#
+# The tree now lives inside the job's own directory, so two jobs on the same
+# sample carve into two trees and neither can name the other's by any spelling.
 CARVED_DIRECTORY = "carved"
 
 # What a caller is told when the argument resolves onto something that is not
@@ -392,8 +393,8 @@ def _digest_of(target: Path) -> str:
 
 
 def _carved_tree(digest: str) -> Path:
-    """Where everything carved out of one sample lands."""
-    return _staging_base() / CARVED_DIRECTORY / digest
+    """Where everything this job carved out of one sample lands."""
+    return _staging_root() / CARVED_DIRECTORY / digest
 
 
 # What every tool that takes it says about it, appended once so the fourteen
@@ -432,16 +433,18 @@ def _confined(kwargs: dict[str, Any]) -> dict[str, Any]:
     second time. A ruleset is checked where it stands: the tool resolves that
     one itself, against the roots it was checked against.
 
-    ``carved_path`` is resolved against the staging base alone and becomes the
-    ``path`` the tool is called with, then leaves: the implementations take one
-    file argument, and which file it is is decided here.
+    ``carved_path`` is resolved against this job's staging directory alone and
+    becomes the ``path`` the tool is called with, then leaves: the
+    implementations take one file argument, and which file it is is decided
+    here.
     """
     out = dict(kwargs)
     for name in _PATH_ARGUMENTS:
         value = out.get(name)
         if not isinstance(value, str) or not value.strip():
             continue
-        out[name] = str(resolve_under_roots(value, extra_roots=(_staging_base(),)))
+        inside = resolve_under_roots(value, extra_roots=(_staging_root(),))
+        out[name] = str(staging.confined_to_this_job(inside))
     # Read before the roots are consulted, because a model that writes "null"
     # for an optional argument it is not passing means the absence — and this
     # one is not a parameter of the implementation, so the general reading of
@@ -470,7 +473,8 @@ def _carved_file(asked: str, sample: Path | None) -> Path:
 
     Three spellings are understood, because all three are things a model
     writes: the absolute path ``carve_payloads`` handed back, the tail of it —
-    relative to the staging base or to the sample's own carved directory — and
+    relative to this job's staging directory or to the sample's own carved
+    directory — and
     the payload's display ``name``, which is the other field of the same entry.
     Any of them may arrive wrapped in the quotes the model read it between.
     Whichever it is, the resolved path has to land inside that directory or on
@@ -488,7 +492,7 @@ def _carved_file(asked: str, sample: Path | None) -> Path:
     tree = _carved_tree(_digest_of(sample))
     roots = (tree, sample)
     target = Path(asked)
-    candidates = [target] if target.is_absolute() else [tree / target, _staging_base() / target]
+    candidates = [target] if target.is_absolute() else [tree / target, _staging_root() / target]
     other: Path | None = None
     inside = False
     for candidate in candidates:
@@ -913,7 +917,7 @@ def capa(
 
 def _staging_ttl_seconds() -> float:
     """``MALJAN_STAGING_TTL_HOURS``, or a day. Zero or less disables pruning."""
-    raw = os.environ.get("MALJAN_STAGING_TTL_HOURS", "").strip()
+    raw = os.environ.get(staging.STAGING_TTL_ENV, "").strip()
     try:
         hours = float(raw) if raw else _DEFAULT_STAGING_TTL_HOURS
     except ValueError:
@@ -924,39 +928,47 @@ def _staging_ttl_seconds() -> float:
 def _staging_base() -> Path:
     """The staging path this server is configured for, created or not.
 
+    The *base*, shared by every job on this host: ``MALJAN_STAGING_DIR`` or the
+    default. Nothing is written here directly any more — see ``_staging_root``
+    — but the sweep walks it, because the job directories are its children.
+    """
+    return staging.staging_base()
+
+
+def _staging_root() -> Path:
+    """The directory this job may write and read, created or not.
+
+    ``<base>/<MALJAN_STAGING_JOB>`` when the process that spawned this server
+    named a job, and the base itself when nothing did — a server started by
+    hand or by a settings probe, which has no job to be confined to.
+
     Separate from ``_staging_dir`` because every read goes through the root
     check and a read must not create a directory, validate one or fail on a
     staging path that is wrong in a way only an upload would care about.
     """
-    configured = os.environ.get("MALJAN_STAGING_DIR", "").strip()
-    return Path(configured) if configured else Path(tempfile.gettempdir()) / "maljan-analysis-mcp"
+    return staging.staging_root()
+
+
+def _private_dir(path: Path) -> Path:
+    """``path`` as a directory only this user may enter, or an error.
+
+    The rule lives in ``maljan.tools.staging`` so the worker's capture
+    directory is opened under exactly the same checks this server opens its
+    own staging directory under.
+    """
+    return staging.private_dir(path)
 
 
 def _staging_dir() -> Path:
-    """Where uploaded samples land: ``MALJAN_STAGING_DIR`` or a private temp dir.
+    """Where this job's uploaded samples land, created private.
 
-    Created with ``mkdir(mode=0o700)`` rather than created-then-chmodded, and
-    refused if what is already there is a symlink or belongs to somebody else.
-    The default name is predictable and the system temp directory is shared, so
-    without those checks another local user could plant a directory or a link
-    at that path and receive live malware into a location of their choosing —
-    and the chmod would then be applied to their target.
+    The base is created and checked first and the job directory inside it
+    second, so a base somebody else owns is refused before anything of this
+    job's is written into it.
     """
-    base = _staging_base()
-    try:
-        base.mkdir(mode=0o700, parents=True, exist_ok=True)
-    except FileExistsError as exc:  # a non-directory already sits at that path
-        raise RuntimeError(f"staging path {base} is not a directory") from exc
-    if base.is_symlink():
-        raise RuntimeError(f"staging path {base} is a symlink")
-    info = base.lstat()
-    if not stat.S_ISDIR(info.st_mode):
-        raise RuntimeError(f"staging path {base} is not a directory")
-    if info.st_uid != os.getuid():
-        raise RuntimeError(f"staging path {base} is owned by another user")
-    if info.st_mode & 0o077:
-        base.chmod(0o700)
-    return base
+    base = _private_dir(_staging_base())
+    root = _staging_root()
+    return base if root == base else _private_dir(root)
 
 
 def _prune_staging(base: Path) -> int:
@@ -965,6 +977,10 @@ def _prune_staging(base: Path) -> int:
     Called from every ``put_sample*`` entry point rather than on a timer: this
     server has no scheduler, and the moment a sample arrives is exactly when
     the last one is most likely to be stale.
+
+    Three things live under the base: the job directories of this release, the
+    flat uploads of the one before it, and the carved tree those uploads went
+    with. All three are swept, so an upgrade leaves nothing to migrate.
     """
     ttl = _staging_ttl_seconds()
     if ttl <= 0:
@@ -975,6 +991,8 @@ def _prune_staging(base: Path) -> int:
         try:
             info = entry.lstat()
             if stat.S_ISDIR(info.st_mode):
+                if staging.is_job_directory_name(entry.name):
+                    removed += _prune_job_directory(entry, cutoff)
                 continue
             if info.st_mtime >= cutoff:
                 continue
@@ -982,7 +1000,90 @@ def _prune_staging(base: Path) -> int:
             removed += 1
         except OSError:  # a file another call already removed
             continue
-    return removed + _prune_carved(base / CARVED_DIRECTORY, cutoff)
+    removed += _prune_carved(base / CARVED_DIRECTORY, cutoff)
+    return removed + _prune_legacy_captures(cutoff)
+
+
+def _prune_legacy_captures(cutoff: float) -> int:
+    """Take away the sandbox captures the release before this left in the open.
+
+    Captures used to be fetched into one directory under the system temp
+    directory, shared by every job and every worker on the host, and nothing
+    ever removed them. They now live inside the job's own staging directory and
+    go with it; this reaches what is already on disk. The directory is this
+    project's own and its name is fixed, so there is nothing here an operator
+    configured and nothing to guess at.
+    """
+    root = Path(tempfile.gettempdir()) / staging.LEGACY_CAPTURE_DIR_NAME
+    if not root.is_dir() or root.is_symlink():
+        return 0
+    removed = 0
+    for entry in root.iterdir():
+        try:
+            info = entry.lstat()
+            if stat.S_ISDIR(info.st_mode):
+                continue
+            # A link is unlinked, never followed and never counted: whatever
+            # it points at is somebody else's, and leaving it would keep the
+            # directory alive for as long as the link was there.
+            if stat.S_ISLNK(info.st_mode):
+                entry.unlink()
+                continue
+            if info.st_mtime >= cutoff:
+                continue
+            entry.unlink()
+            removed += 1
+        except OSError:  # a file another sweep already removed
+            continue
+    with contextlib.suppress(OSError):  # only when the last capture has gone
+        root.rmdir()
+    return removed
+
+
+def _newest_mtime(root: Path) -> float:
+    """The most recent mtime in this tree, the directory itself included.
+
+    Read with ``lstat`` throughout: a symlink's own timestamp is what counts,
+    never the timestamp of whatever it points at, which may be a file somebody
+    else is still writing.
+    """
+    try:
+        newest = root.lstat().st_mtime
+    except OSError:
+        return 0.0
+    for entry in root.rglob("*"):
+        try:
+            newest = max(newest, entry.lstat().st_mtime)
+        except OSError:  # an entry another call removed while this walked
+            continue
+    return newest
+
+
+def _prune_job_directory(directory: Path, cutoff: float) -> int:
+    """Prune one job's directory: whole when it is stale, inside it when not.
+
+    A job directory is one unit — an upload, the tree carved out of it, and
+    nothing another job may name — so the age that decides it is the newest
+    mtime anywhere inside. A worker that removed its own directory on the way
+    out leaves nothing for this; what it reaches is what a killed worker left.
+
+    A directory still in use is swept the way the flat base always was, so a
+    long job does not keep every payload it ever carved.
+    """
+    if _newest_mtime(directory) < cutoff:
+        held = sum(1 for entry in directory.rglob("*") if not stat.S_ISDIR(entry.lstat().st_mode))
+        return held if staging.remove_tree(directory) else 0
+    removed = 0
+    for entry in directory.iterdir():
+        try:
+            info = entry.lstat()
+            if stat.S_ISDIR(info.st_mode) or info.st_mtime >= cutoff:
+                continue
+            entry.unlink()
+            removed += 1
+        except OSError:  # a file another call already removed
+            continue
+    return removed + _prune_carved(directory / CARVED_DIRECTORY, cutoff)
 
 
 def _prune_carved(root: Path, cutoff: float) -> int:
@@ -1033,12 +1134,15 @@ def _write_sample(filename: str, blob: bytes, sha256: str) -> dict[str, Any]:
     actual = hashlib.sha256(blob).hexdigest()
     if sha256 and actual != sha256.lower():
         return {"error": f"sha256 mismatch: expected {sha256}, received {actual}"}
-    base = _staging_dir()
-    _prune_staging(base)
+    root = _staging_dir()
+    # Swept from the base rather than from this job's own directory, because
+    # what expires is mostly other jobs': their directories are siblings of
+    # this one, and the flat files of the release before this are its parents'.
+    _prune_staging(_staging_base())
     # The caller's filename names the file, never the directory: a name
     # carrying ``..`` or an absolute prefix must not decide where this writes.
     safe = Path(filename or actual).name or actual
-    destination = base / f"{actual[:16]}_{safe}"
+    destination = root / f"{actual[:16]}_{safe}"
     flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW
     if not destination.exists():
         flags |= os.O_EXCL

@@ -29,6 +29,7 @@ Error handling:
 
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -378,14 +379,21 @@ class CAPEv2Client:
                         task_id,
                     )
                     return None
-                with open(out, "wb") as f:
+                # 0o600 from the first byte, with ``O_NOFOLLOW``: a capture
+                # is the whole of a detonation's traffic, and writing it at
+                # the process umask leaves it readable for as long as the
+                # download takes.
+                flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW
+                with os.fdopen(os.open(out, flags, 0o600), "wb") as f:
                     for chunk in resp.iter_bytes(65536):
                         f.write(chunk)
         except Exception as exc:
             logger.warning("CAPEv2Client: PCAP download failed for task %s: %s", task_id, exc)
+            out.unlink(missing_ok=True)
             return None
 
-        # libpcap/pcapng global header is 24 bytes; anything smaller is empty.
+        # libpcap/pcapng global header is 24 bytes; anything smaller is empty,
+        # and the bytes go with the answer rather than waiting for a sweep.
         size = out.stat().st_size if out.exists() else 0
         if size < 24:
             logger.info(
@@ -393,6 +401,7 @@ class CAPEv2Client:
                 task_id,
                 size,
             )
+            out.unlink(missing_ok=True)
             return None
         logger.info("CAPEv2Client: PCAP for task %s -> %s (%d bytes).", task_id, out, size)
         return str(out)

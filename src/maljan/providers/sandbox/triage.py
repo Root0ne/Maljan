@@ -535,11 +535,14 @@ class TriageSandboxProvider(SandboxProvider):
             # Never a hard failure: the network analyst falls back to the
             # structured ``network`` block alone, exactly as CAPEv2Client's
             # fetch_pcap already behaves for this project's other sandbox.
+            out.unlink(missing_ok=True)
             return None
 
-        # libpcap/pcapng global header is 24 bytes; anything smaller is empty.
+        # libpcap/pcapng global header is 24 bytes; anything smaller is empty,
+        # and what is left of a capture nobody will read goes with the answer.
         size = out.stat().st_size if out.exists() else 0
         if size < 24:
+            out.unlink(missing_ok=True)
             return None
         return str(out)
 

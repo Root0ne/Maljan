@@ -32,6 +32,7 @@ async def enumerate_r2_tools(command: str) -> list[str]:
     """
     from maljan.core.config import MCPServerConfig
     from maljan.providers.servers import ServerHandle
+    from maljan.tools import staging
 
     handle = ServerHandle("r2", MCPServerConfig(enabled=True, transport="stdio", command=command))
     try:
@@ -39,6 +40,9 @@ async def enumerate_r2_tools(command: str) -> list[str]:
         return handle.all_tool_names()
     finally:
         await handle.aclose()
+        # Not a job: whatever directory this call's identity named is this
+        # call's to take away.
+        staging.remove_job_staging("probe-r2")
 
 
 @register_static_provider("r2")

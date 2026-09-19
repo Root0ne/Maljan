@@ -172,4 +172,19 @@ class TestTheWarningNamesTheJob:
         from maljan.core.container import ServiceContainer
 
         assert ServiceContainer(Settings(), mock=True, job_id="job-9").job_key() == "job-9"
-        assert ServiceContainer(Settings(), mock=True).job_key() == "job"
+
+    def test_a_caller_with_no_job_id_gets_one_per_run(self) -> None:
+        """The key names a staging directory. A constant would have two
+        concurrent command-line runs writing into one, and a value derived from
+        the process alone would hand a recycled pid the last run's directory."""
+        import os
+
+        from maljan.core.config import Settings
+        from maljan.core.container import ServiceContainer
+
+        container = ServiceContainer(Settings(), mock=True)
+        key = container.job_key()
+
+        assert key.startswith(f"cli-{os.getpid()}-")
+        assert container.job_key() == key, "fixed for the life of one container"
+        assert ServiceContainer(Settings(), mock=True).job_key() != key, "and only that one"
