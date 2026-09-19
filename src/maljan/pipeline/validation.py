@@ -44,6 +44,7 @@ from maljan.pipeline.events import (
 )
 from maljan.schemas.evidence import entry_ids_in
 from maljan.schemas.judgement import SEVERITY_RATINGS, VERDICT_VALUES
+from maljan.schemas.stix_pattern import read_comparisons
 
 # How many alternatives a suggestion list carries. Three is what fits in one
 # line of feedback; a longer list reads as a menu and the model picks from the
@@ -62,9 +63,6 @@ ALIGNMENT_MARGIN = 0.20
 # as noise rather than as a correction.
 MAX_SCHEMA_VIOLATIONS = 6
 
-
-# The literals a STIX pattern quotes, e.g. ``[file:name = 'x.exe']`` -> ``x.exe``.
-_PATTERN_LITERAL_RE = re.compile(r"'([^']*)'")
 
 # The sentence the retry turn opens with. A constant because two call sites
 # send it and a test reads it.
@@ -1810,6 +1808,34 @@ def _runtime_paths(evidence_corpus: set[str] | None) -> set[str]:
     return found
 
 
+# The root a path on this machine is written from: a POSIX slash, a drive with
+# either separator, a UNC share, an environment variable, a home tilde, or a
+# registry hive — which ``directory:path`` carries about as often as the
+# registry's own object type does.
+_DIRECTORY_ROOT_RE = re.compile(
+    r"^(?:/"
+    r"|[A-Za-z]:[\\/]?"
+    r"|\\\\"
+    r"|%[A-Za-z_][A-Za-z0-9_]*%[\\/]?"
+    r"|\$(?:\{[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*)[\\/]?"
+    r"|~[\\/]?"
+    r"|(?:HKLM|HKCU|HKCR|HKU|HKCC|HKEY_[A-Z_]+)[\\/]"
+    r")",
+    re.IGNORECASE,
+)
+
+# A step that is a placeholder rather than a name. A strings table is full of
+# them — a format string the sample was compiled with, read out of the bytes as
+# though it were a path somebody visited.
+_PLACEHOLDER_STEP_RE = re.compile(r"^(?:%[-+ #0-9.]*[a-zA-Z]|%\d+|\{[^}]*\}|<[^>]*>|\$\d+)$")
+
+# What a step must carry to read as a name rather than as punctuation: two
+# characters somebody could have typed as part of one.
+_NAME_RUN_RE = re.compile(r"[A-Za-z0-9]{2}")
+
+# A character no path on any of these filesystems carries.
+_CONTROL_CHARACTERS = frozenset(chr(code) for code in range(0x20)) | {chr(0x7F)}
+
 # A run of hexadecimal on its own, and the lengths a digest this project can
 # name comes in. Anything else quoted in a pattern is asked the corpus question
 # as it always was.
@@ -1822,36 +1848,76 @@ _DIGEST_LENGTHS = frozenset({32, 40, 56, 64, 96, 128})
 _TOKEN_BOUNDARY_RE = re.compile(r"[0-9a-f]", re.IGNORECASE)
 
 
-# An object path in a pattern comparison, read outside the quotes: the type,
-# then the property. Case carries no meaning in a STIX object path.
-_COMPARISON_PATH_RE = re.compile(r"([a-z0-9-]+:[a-z_.]+)", re.IGNORECASE)
-
-
 def _comparisons(pattern: str) -> list[tuple[str, str]]:
     """Every ``(object path, quoted literal)`` the pattern compares, in order.
 
-    Split on the quotes rather than on the paths, because a literal is where a
-    URL lives and a URL carries anything that looks like an object path inside
-    it. Only what is written outside the quotes says what is being compared,
-    and each literal is credited to the path most recently written before it —
-    an ``IN ('a', 'b')`` list writes the path once and quotes twice.
+    :func:`~maljan.schemas.stix_pattern.read_comparisons` is the one reader of
+    a pattern this repository has; the STIX renderer asks it the same question
+    about the same syntax, and two readers of one pattern is how one of them
+    publishes what the other vetoes. What is kept here is this caller's own
+    filter: a value that is only whitespace is not a value to ask about.
     """
-    found: list[tuple[str, str]] = []
-    path = ""
-    inside_the_path = False
-    for index, chunk in enumerate(pattern.split("'")):
-        if index % 2 == 0:
-            paths = list(_COMPARISON_PATH_RE.finditer(chunk))
-            if paths:
-                path = paths[-1].group(1).lower()
-            # A quote that opens where the object path is still being written
-            # holds a key, not a value: ``file:hashes.'MD5'`` names the
-            # algorithm and ``file:extensions['pe']`` names the extension. The
-            # value is what follows the comparison operator.
-            inside_the_path = chunk.rstrip().endswith((".", "["))
-        elif chunk.strip() and not inside_the_path:
-            found.append((path, chunk.strip()))
-    return found
+    return [
+        (comparison.path, comparison.literal.strip())
+        for comparison in read_comparisons(pattern)
+        if comparison.literal.strip()
+    ]
+
+
+def reads_as_a_place(value: str) -> bool:
+    """Whether this literal is written the way a directory on a machine is.
+
+    The validity half of the directory question, and only that: it removes what
+    could not be a place, and says nothing about whether this run saw one. A
+    place has a root and at least one named step under it — ``/tmp`` is a
+    directory, ``/`` and ``C:\\`` are roots and nothing under them — and every
+    step is written the way a name is: not empty, not whitespace, no control
+    character, not a format specifier a sample was compiled with, and at least
+    one of them carrying two characters running that somebody could have typed.
+    A strings table produces ``/%s/%s`` and ``/ /`` by the dozen.
+    """
+    text = str(value or "")
+    root = _DIRECTORY_ROOT_RE.match(text)
+    if root is None:
+        return False
+    steps = [step for step in re.split(r"[\\/]", text[root.end() :]) if step != ""]
+    if not steps or text[root.end() :].startswith(("/", "\\")):
+        return False
+    for step in steps:
+        if not step.strip() or _PLACEHOLDER_STEP_RE.match(step):
+            return False
+        if any(character in _CONTROL_CHARACTERS for character in step):
+            return False
+    return any(_NAME_RUN_RE.search(step) for step in steps)
+
+
+def _place_in_the_evidence(
+    literal: str, haystack: str, runtime_paths: set[str], own: set[str]
+) -> bool:
+    """Whether the run recorded this place, however either side spelled it.
+
+    The grounding half. A path is written with whichever separator the writer's
+    platform uses and with a trailing one as often as without, so the literal is
+    asked under the spellings that mean the same location — the normalisation
+    the report's own path rows go through — and each is asked as a whole value
+    rather than as a substring.
+    """
+    from maljan.agents._indicator_denylists import whole_value_in
+    from maljan.reporting.dedupe import canonical_path
+
+    lowered = literal.lower()
+    spellings = {
+        lowered,
+        canonical_path(literal).lower(),
+        lowered.replace("\\", "/"),
+        lowered.replace("/", "\\"),
+    }
+    spellings |= {spelling.rstrip("/\\") for spelling in spellings if len(spelling) > 1}
+    return any(
+        spelling in own or spelling in runtime_paths or whole_value_in(spelling, haystack)
+        for spelling in spellings
+        if spelling
+    )
 
 
 def _whole_token_in(literal: str, haystack: str, own: set[str]) -> bool:
@@ -1903,7 +1969,8 @@ def _indicator_problem(
     # matched against, and a scrubbed path would answer a different question
     # from the one this check asks. The sentence they end up in is what the
     # caller wraps, because that is what is stored and shown.
-    literals = [str(v).strip() for v in _PATTERN_LITERAL_RE.findall(pattern) if str(v).strip()]
+    comparisons = _comparisons(pattern)
+    literals = [literal for _path, literal in comparisons]
     if not literals:
         return "the indicator pattern quotes no value."
     own = set(identity)
@@ -1935,7 +2002,7 @@ def _indicator_problem(
     # answered for the whole expression. What one comparison establishes is
     # that *it* raised no problem; the others are still asked.
     grounded = False
-    for path, literal in _comparisons(pattern):
+    for path, literal in comparisons:
         if path.startswith("file:hashes") or path.endswith("imphash"):
             if _HEX_TOKEN_RE.match(literal) and len(literal) in _DIGEST_LENGTHS:
                 if not _whole_token_in(literal, haystack, own):
@@ -1982,12 +2049,31 @@ def _indicator_problem(
                     "not a file on disk."
                 )
             lowered = literal.lower()
-            if not (
-                any(lowered.endswith(ext) for ext in IOC_FILE_EXTENSIONS)
-                or any(literal.startswith(prefix) for prefix in IOC_OS_RESOURCE_PREFIXES)
+            anchored = (
+                any(literal.startswith(prefix) for prefix in IOC_OS_RESOURCE_PREFIXES)
                 or lowered in runtime_paths
                 or lowered in own
-            ):
+            )
+            if path.startswith("directory:path"):
+                # Two questions, and a directory is asked both. A directory has
+                # no extension to answer the first with, and telling the judge
+                # its own row "has no file extension … so nothing says it is a
+                # real path" was untrue of the thing it had written.
+                if not reads_as_a_place(literal):
+                    return (
+                        f"{safe_finding_value(literal)!r} is not written as a directory: a "
+                        "path on this machine has a root — a drive, a share, a POSIX slash, "
+                        "an environment variable or a registry hive — and at least one named "
+                        "step under it."
+                    )
+                if not _place_in_the_evidence(literal, haystack, runtime_paths, own):
+                    return (
+                        f"{safe_finding_value(literal)!r} appears nowhere in the evidence "
+                        "this run collected as a value of its own."
+                    )
+                grounded = True
+                continue
+            if not (anchored or any(lowered.endswith(ext) for ext in IOC_FILE_EXTENSIONS)):
                 return (
                     f"{safe_finding_value(literal)!r} has no file extension, no filesystem "
                     "anchor and was not "

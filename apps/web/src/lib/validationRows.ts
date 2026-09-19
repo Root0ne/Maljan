@@ -19,11 +19,20 @@
  * Kept as an explicit list rather than a prefix rule on `stix.`: an ungrounded
  * indicator is also a `stix.` code and is genuinely something the judge was
  * asked about and did not fix.
+ *
+ * `stix.unpublishable_url` and `stix.unpublishable_domain` were one decision
+ * under two names — and the second of them covered addresses too, which is not
+ * what it is called. The pipeline writes `stix.unpublishable_endpoint` now and
+ * puts the kind in the sentence. A run stored before that keeps the row it
+ * recorded, so all three are read here as the same decision.
  */
 const EXPORT_DECIDED: ReadonlySet<string> = new Set([
   "stix.malware_object_under_benign",
+  "stix.unpublishable_endpoint",
   "stix.unpublishable_url",
   "stix.unpublishable_domain",
+  "stix.unpublishable_artefact",
+  "stix.malformed_hash",
   "stix.unlinked_technique",
 ]);
 

@@ -767,6 +767,30 @@ change landed on `main`.
   `GET /reports/{id}/iocs` must now ask for `include=all`, which returns
   exactly what the route returned before.
 
+- **One code for one export decision about an endpoint.** A URL, a name and an
+  address the host question refuses are one class of decline, and the run
+  summary recorded them under `stix.unpublishable_url` and
+  `stix.unpublishable_domain` — with the second of the two also covering
+  addresses, which is not what it is called. All three are now
+  `stix.unpublishable_endpoint`, and the sentence beside the row names the
+  kind. Nothing is migrated: a run stored before this keeps the code it wrote,
+  and the console reads all three as the export's own decision.
+  **Upgrading:** a consumer filtering `run_summary.validation` on
+  `stix.unpublishable_url` or `stix.unpublishable_domain` must also accept
+  `stix.unpublishable_endpoint` to keep seeing new runs.
+
+- **A `directory:path` indicator now needs the run's own evidence, not only a
+  filesystem anchor.** A directory whose literal began with one of the
+  OS-resource prefixes — `C:\`, `/data/`, `%TEMP%`, a registry hive — used to
+  be admitted on that alone, with no corpus question asked. Shape is not
+  evidence: the anchor now answers only whether the literal could be a place,
+  and the literal is then asked, as every other literal is, whether this run
+  recorded it. A judge that writes a real directory the run did not happen to
+  write down is told so and spends its one retry there.
+  **Upgrading:** a run whose evidence does not name a directory it claimed will
+  carry a `stix.ungrounded_indicator` row for it where it carried none before,
+  and the indicator is dropped after the retry rather than exported.
+
 ### Fixed
 
 - **Enrichment stopped taking the slot an analysis was waiting for.** The
@@ -2446,6 +2470,74 @@ change landed on `main`.
   request from the stored report, so there is no second copy to go stale; a
   report stored before this keeps the figures it was stored with, and its
   run-summary column — what the console draws — was always the final one.
+
+- **One reader of a STIX pattern, and it reads an escaped quote.** The
+  validator and the STIX renderer each split a pattern on its quotes, and
+  neither undid an escape: `[file:name = 'it\'s.exe']` was read as the value
+  `it\`, the judge was told its own row appears nowhere in the evidence, and
+  it spent its one retry on that. They had also drifted about what a quoted key
+  is — one decided it structurally, the other from the property name. Both now
+  ask `schemas.stix_pattern.read_comparisons`, which gives the object path, the
+  operator and the literal of every quoted value, keeps `file:hashes.'MD5'` and
+  `file:extensions['pe']` as keys, leaves a `START '…' STOP '…'` qualifier's
+  timestamps out of the comparison before it, and reports what it cannot read
+  as unreadable so it is declined rather than guessed at. The digest check
+  (`malformed_hash_in`) reads through it too, and the dead fourth reader in
+  `judge_postprocess` is gone, so the pattern really is read in one place. That
+  check also reads `IN (…)`: `[file:hashes.'MD5' IN ('deadbeef', …)]` asserts
+  every member is an MD5, and the length rule used to ask the `=` form alone.
+
+- **An endpoint written through a reference is asked the host question.** A
+  judge-written `[network-traffic:dst_ref.value = '127.0.0.1']` reached no
+  check at all, so loopback, private and documentation addresses in that
+  pattern shape were exported with nothing in the run summary saying so.
+  `network-traffic:src_ref.value`, `dst_ref.value` and the
+  `resolves_to_refs[*].value` shapes are now asked the same question as the
+  four direct kinds, and asked whichever of host or address fits the value.
+
+- **A directory is asked whether it is a place, and then whether this run saw
+  one.** The grounding check put `directory:path` in the `file:name` branch, so
+  the judge read *"has no file extension, no filesystem anchor … so nothing
+  says it is a real path"* about a directory it had written, retried on it and
+  lost the row. A directory is now asked two questions and told which one it
+  failed. Validity: it has a root — a POSIX slash, a drive with either
+  separator, a share, an environment variable, a home tilde, a registry hive —
+  and at least one named step under it, every step written the way a name is
+  rather than as whitespace or as a format specifier the sample was compiled
+  with. `/tmp` passes where it used to be refused; `/`, `C:\`, `/%s/%s` and
+  `/ /` do not. Grounding: the literal is then asked the corpus question every
+  other literal is asked, as a whole value and under the spellings that mean
+  the same location, so a shape alone no longer stands in for evidence.
+
+- **A value is found at its own boundaries in the evidence.**
+  `whole_value_in` read `/`, `\` and `:` as part of a label, so a host written
+  inside a URL, a host written before its port, a mailbox after `mailto:` and
+  an address at the end of a sentence were all reported as appearing nowhere
+  and the row was withheld from the bundle with a sentence saying nothing
+  corroborates it. Those three characters join the parts of a compound value
+  rather than extend a part, so each of them now bounds a part, and a `.` that
+  nothing continues is the sentence's full stop. A `.` that something
+  continues is still the value's, so `168.1.1` is still not found inside
+  `192.168.1.1` and `evil.com` is still not found inside `notevil.com`,
+  `sub.evil.com` or `evil.com.br`.
+
+- **What the indicator cap orphans is counted.** The integrity pass runs a
+  second time after the cap to sweep the relationships it left pointing at
+  nothing, and that run was given no truncation ledger, so the aggregate
+  under-reported what had left the bundle and a reader could not reconcile the
+  object count. It reports now, under `cap_orphan` — its own reason, because it
+  is the cap's loss rather than a defect of anybody's bundle.
+
+- **The finding-row guard looks at every place a row is built.** It read the
+  `message=` keyword in `validation.py` alone, so seven `Violation`
+  constructions in four other modules were never inspected, a row written as
+  `Violation(code, message)` was invisible, and a local spelled like a message
+  builder was trusted for its name. It now walks every module in the tree that
+  builds one, matches positional arguments, resolves the constructor under an
+  import alias (the resolution shared with the sibling guard that already did
+  it), revokes a module-level name the moment a function binds that spelling
+  itself, trusts a local only for the value it was given, and fails if a sixth
+  module starts building rows.
 
 ### Removed
 

@@ -30,6 +30,7 @@ from maljan.pipeline.nodes import (
     make_stage_agent_node,
 )
 from tests.stages import ANALYSIS_STAGE, paper_profile
+from tests.unit.pipeline._source_names import names_reaching
 
 # One string carrying both of the things a message must not put on the wire.
 SECRET = "sk-" + "L" * 32
@@ -125,15 +126,10 @@ class TestOnlyTheSafeHelperReachesAPublishSite:
         ``from ... import describe_exception as exception_detail``, so an
         import that renames the unsafe one is exactly the mistake most
         recently made here and the one a walk keyed on a single spelling would
-        miss.
+        miss. The resolution is shared with the finding-row guard beside this
+        one, which was told the same thing about ``Violation``.
         """
-        names = {self.UNSAFE}
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom | ast.Import):
-                for alias in node.names:
-                    if alias.name.rsplit(".", 1)[-1] == self.UNSAFE and alias.asname:
-                        names.add(alias.asname)
-        return names
+        return names_reaching(tree, self.UNSAFE)
 
     @staticmethod
     def _assigned(node: ast.AST) -> tuple[list[str], ast.AST | None]:

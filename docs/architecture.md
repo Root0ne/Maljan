@@ -1505,7 +1505,7 @@ sample resolved, while the URL carrying the same host survived and was refused
 at the export with a row beside it. Nothing a sandbox, an analyst or the judge
 observed is dropped at the projection now: the row keeps its place in the
 network block with the source that saw it, and the export records
-`stix.unpublishable_domain` — *a name that does not resolve outside the
+`stix.unpublishable_endpoint` — *a name that does not resolve outside the
 analysed network*. A name only the string sweep produced is unchanged, held
 back by `_is_emittable_domain` at the projection and silent, because a run of
 bytes ending in `.local` is not an observation of anything. The last label's
@@ -1602,21 +1602,51 @@ does. Asking it of URLs alone exported `[domain-name:value = 'localhost']` and
 in the tree refused the same two values. A pattern is not one comparison, so
 every value in it is asked — `[a] OR [b]`, an `AND` of two object paths, an
 `IN` list — and an indicator with one unpublishable endpoint in it is declined
-whole. The object type is read whatever case it is written in. A comparison
-whose right-hand side is not an endpoint at all — `MATCHES`, `LIKE`,
-`ISSUBSET` — is declined too, with the reason that is true of it: the pipeline
-could not read the pattern's endpoint, so it could not ask whether this export
-may carry it. A syntactically routable address the judge invented passes this
-question by design; whether any evidence holds it up is
-`stix.ungrounded_indicator`'s question, and that check is asked of every
+whole, and a value reached through a reference is one of them:
+`network-traffic:dst_ref.value` and `domain-name:resolves_to_refs[*].value`
+carry an endpoint and are asked whichever of the two questions fits what is
+written there. The object type is read whatever case it is written in. A
+comparison whose right-hand side is not an endpoint at all — `MATCHES`,
+`LIKE`, `ISSUBSET` — is declined too, with the reason that is true of it: the
+pipeline could not read the pattern's endpoint, so it could not ask whether
+this export may carry it, and a comparison the reader cannot read at all is
+declined with the same sentence rather than guessed at.
+
+One reader answers what a pattern says, for the export and for the grounding
+check both: `schemas.stix_pattern.read_comparisons`, which returns the object
+path, the operator and the literal of every quoted value in it. Two readers had
+already drifted — one decided a quoted key structurally, the other from the
+property name — and neither read an escaped quote, so `[file:name =
+'it\'s.exe']` was read as the value `it\` and the judge was told its own row
+appears nowhere in the evidence. A quote that opens where the object path is
+still being written is a key (`file:hashes.'MD5'`, `file:extensions['pe']`);
+a qualifier's own literal (`START '…' STOP '…'`) belongs to the qualifier and
+is not credited to the comparison before it. A syntactically routable address
+the judge invented passes this question by design; whether any evidence holds
+it up is `stix.ungrounded_indicator`'s question, and that check is asked of every
 indicator the judge writes.
 
 The same validity questions reach the judge's other kinds. An `email-addr`
 pattern is asked whether it is a mailbox at all and whether its domain part
 could exist; a `file:name` pattern is asked whether it names a file rather than
 a directory or a root — both declined as `stix.unpublishable_artefact` when
-they are not. A `file:hashes` comparison is asked whether the literal is a
-digest of the algorithm it is written under, by length and alphabet
+they are not. A `directory:path` comparison is asked two questions of its own,
+and told which one it failed. The first is validity — could this be a place on
+a machine: it has a root (a POSIX slash, a drive with either separator, a
+share, an environment variable, a home tilde, a registry hive) and at least one
+named step under it, and every step is written the way a name is, not empty,
+not whitespace, not a format specifier a sample was compiled with, with at
+least one of them carrying two characters running. `/tmp` is a directory; `/`
+and `C:\` are roots with nothing under them, and `/%s/%s` and `/ /` are what a
+strings table produces by the dozen. The second is grounding: the literal is
+asked the corpus question every other literal is asked, as a whole value and
+under the spellings that mean the same location (`reporting.dedupe`'s own path
+normalisation), because a path is written with whichever separator its writer's
+platform uses. A directory used to be refused with the file-name sentence,
+which told the judge its own directory row *has no file extension … so nothing
+says it is a real path*, and the judge spent its one retry on an untruth. A `file:hashes` comparison is
+asked whether the literal is a digest of the algorithm it is written under, by
+length and alphabet
 (`HASH_HEX_LENGTHS`), and declined as `stix.malformed_hash` when it is not: one
 run exported sixteen of the thirty-two characters of an MD5, a value a consumer
 matching on MD5 can never match. The grounding check asks the same question
@@ -1635,16 +1665,18 @@ carried the same directory twice, once with the trailing slash and once
 without.
 
 Whether an endpoint that *could* exist is published stays
-`corroboration_reason`'s decision. A URL or a name the host question refuses is
-recorded as `stix.unpublishable_url` or `stix.unpublishable_domain` when a
-sandbox, an analyst or the judge is the one that recorded it — the report's own
-network block and the judge's own bundle both left unchanged. An address the
-export holds back is recorded under the domain code, which is the code for an
-endpoint that is not a host anything outside the analysed network could answer
-for; the sentence beside it names the kind. A row held back
-only for want of a second source is the rule working and is not a finding, and
-neither is a string sweep's own cut-off: a report carries up to forty of them,
-and forty unresolved findings nobody can act on bury the ones somebody can.
+`corroboration_reason`'s decision. A URL, a name or an address the host
+question refuses is recorded as `stix.unpublishable_endpoint` when a sandbox,
+an analyst or the judge is the one that recorded it — the report's own network
+block and the judge's own bundle both left unchanged. One question, one code,
+and the sentence beside it names the kind: the same decision used to be filed
+under `stix.unpublishable_url` and `stix.unpublishable_domain`, with the second
+of them covering addresses too. A run stored before that keeps the row it
+wrote, and the console reads all three as the export's own decision. A row
+held back only for want of a second source is the rule working and is not a
+finding, and neither is a string sweep's own cut-off: a report carries up to
+forty of them, and forty unresolved findings nobody can act on bury the ones
+somebody can.
 
 Every model-written value on this path — a URL echoed into a decline, the
 judge's own verdict word, the category it invented, the type of an object the
@@ -1668,4 +1700,8 @@ the judge, then string-derived and corroborated), then the other hashes the
 judge carried, then the file names. A string-derived row never outranks the
 observed row it duplicates, and when they are the same indicator the queue
 order makes the observation the one that survives the dedupe. The renderer and
-the linter read the one constant.
+the linter read the one constant. The integrity pass then runs a second time,
+to sweep the relationships the cap left pointing at nothing, and what it takes
+out there is counted in the truncation ledger under `cap_orphan` — its own
+reason, because it is the cap's loss rather than a defect of anybody's bundle,
+and because that pass used to run with no ledger at all.

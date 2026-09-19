@@ -138,3 +138,75 @@ class TestWhatGetsReported:
         dropped = snap["integrity_dropped"]
         assert isinstance(dropped, dict)
         assert dropped["empty_pattern"] == 2
+
+
+class TestWhatTheIndicatorCapOrphans:
+    """The pass runs a third time, after the cap, and used to report nothing.
+
+    A relationship the cap leaves pointing at an indicator that is no longer in
+    the bundle is swept there. Nothing counted it, so the aggregate's
+    "objects removed" did not reconcile with the bundle a reader holds.
+    """
+
+    def test_it_is_counted_under_its_own_reason(self) -> None:
+        ledger = TruncationLedger()
+        objects = [
+            _indicator("indicator--1"),
+            _relationship("relationship--1", "indicator--1", "indicator--capped"),
+        ]
+
+        enforce_bundle_integrity(objects, ledger=ledger, dropped_as="cap_orphan")
+
+        dropped = ledger.snapshot()["integrity_dropped"]
+        assert isinstance(dropped, dict)
+        assert dropped["cap_orphan"] == 1
+        assert dropped["dangling_relationship"] == 0
+
+    def test_the_renderer_reports_what_the_cap_left_behind(self) -> None:
+        from maljan.core.truncation_ledger import TruncationLedger as Ledger
+        from maljan.reporting.builder import MalwareReportBuilder
+        from maljan.reporting.models import NetworkIOCs
+        from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
+        from maljan.schemas.stix_models import Bundle
+
+        report = MalwareReportBuilder(
+            file_hash="d" * 64,
+            file_name="sample.exe",
+            sample_path=None,
+            sandbox_report={},
+            reports={},
+            isr_reports={},
+            stix_output={"objects": []},
+            run_summary={},
+            discussion_history=[],
+            final_decision="Malware",
+            overall_confidence=0.6,
+            judge_assessment=None,
+            malware_category="loader",
+            sample_platform="windows",
+            sample_file_type="pe",
+            evidence_ledger=[],
+        ).build_deterministic()
+        report.network = NetworkIOCs()
+        # More indicators than the cap keeps, each with a relationship of its
+        # own, so the cap is bound to orphan some of them.
+        objects: list[dict[str, Any]] = []
+        for index in range(40):
+            oid = f"indicator--0f1e2d3c-4b5a-4968-8776-6554433322{index:02d}"
+            objects.append(_indicator(oid, pattern=f"[domain-name:value = 'h{index}.example.org']"))
+            objects.append(
+                _relationship(
+                    f"relationship--0f1e2d3c-4b5a-4968-8776-6554433322{index:02d}",
+                    oid,
+                    "indicator--0f1e2d3c-4b5a-4968-8776-655443332200",
+                )
+            )
+        ledger = Ledger()
+
+        ExtendedSTIXRenderer().render(
+            report, Bundle.model_validate({"objects": objects}), ledger=ledger
+        )
+
+        dropped = ledger.snapshot()["integrity_dropped"]
+        assert isinstance(dropped, dict)
+        assert dropped["cap_orphan"] > 0
