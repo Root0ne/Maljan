@@ -369,6 +369,7 @@ class ServiceContainer:
         )
 
         self._configure_langsmith()
+        self._announce_index_retry()
 
     @property
     def is_mock(self) -> bool:
@@ -1138,6 +1139,24 @@ class ServiceContainer:
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
+
+    def _announce_index_retry(self) -> None:
+        """Put ``validation.index_retry_seconds`` where every consumer can read it.
+
+        The knowledge sidecar is the process where an ATT&CK index build
+        actually happens, and it reads the setting out of its own environment
+        (``env_allow`` carries the name). This is the one place that puts it
+        there, beside the tracing values: the container is what builds the
+        sidecar registry, so a sidecar started from any entry point that has a
+        container — a script, a test harness, the API — reads the deployment's
+        number rather than the module default. It used to be announced from
+        ``MaljanApp.arun``, which is one entry point of several.
+        """
+        from maljan.tools import knowledge as knowledge_tools
+
+        seconds = int(getattr(getattr(self.config, "validation", None), "index_retry_seconds", 900))
+        os.environ[knowledge_tools.INDEX_RETRY_ENV] = str(seconds)
+        knowledge_tools.set_index_retry_after(seconds)
 
     def _configure_langsmith(self) -> None:
         """Propagate LangSmith tracing config into the OS environment."""

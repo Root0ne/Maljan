@@ -959,6 +959,18 @@ change landed on `main`.
   rather than refused: a settings build that raises is a deployment that
   cannot serve, and the agent falls back to the deployment's own budget, which
   is what the reader did with such a value anyway.
+- **Two import rules for one technique are two rows again.** `api_capability_hits`
+  keyed a row by technique id and name, and the catalogue's own name is on both
+  of the `T1685` rules, so they pooled: one rule's matched APIs counted toward
+  the other's `min_apis`, and a technique could be asserted on a combination no
+  single rule ever cleared. A row is a rule — the rule's own label is part of
+  the key and is on the row, and the report's import-technique table carries a
+  **Rule** column. Corroboration keys on the technique id and is unchanged.
+- **The ATT&CK index retry interval reaches a sidecar from any entry point.**
+  `MALJAN_INDEX_RETRY_SECONDS` was exported in `MaljanApp.arun` alone, so a
+  knowledge sidecar started from a container built anywhere else kept the
+  module default. It is announced by the container, beside the tracing values,
+  which is the one place a sidecar's environment is decided from settings.
 ### Fixed
 
 - **A process that has finished its work is not ended by its own watchdog.** The

@@ -61,7 +61,7 @@ class TestTheMarkdownReport:
     def test_the_rule_that_fired_is_a_row_with_its_source_and_entry(self) -> None:
         report, entry_id = _report()
         md = MarkdownRenderer().render(report)
-        assert f"| T1055 | Process Injection | api_capability ({entry_id}) |" in md
+        assert f"| T1055 | Process Injection | - | api_capability ({entry_id}) |" in md
 
 
 class TestTheNarrativePrompt:

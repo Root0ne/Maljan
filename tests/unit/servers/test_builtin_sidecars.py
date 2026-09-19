@@ -234,3 +234,52 @@ def test_a_sidecar_that_is_told_nothing_keeps_the_module_default() -> None:
     )
     assert done.returncode == 0, done.stderr[-2000:]
     assert json.loads(done.stdout.strip().splitlines()[-1]) == {"retry": 900.0}
+
+
+def test_the_container_is_the_one_place_that_announces_the_retry_interval() -> None:
+    """A sidecar started from any entry point reads the deployment's number.
+
+    It used to be announced from ``MaljanApp.arun``, which is one entry point
+    of several: a container built by a script, a test harness or the API
+    started its knowledge sidecar with the module default instead of the
+    configured interval. The container builds the sidecar registry, so it is
+    where the value is put into the environment ``child_env`` filters.
+    """
+    import ast
+    import os
+    import pathlib
+
+    from maljan.core.config import Settings
+    from maljan.core.container import ServiceContainer
+    from maljan.tools.knowledge import INDEX_RETRY_ENV
+
+    config = Settings(_env_file=None)
+    config.validation.index_retry_seconds = 1234
+    before = os.environ.get(INDEX_RETRY_ENV)
+    try:
+        ServiceContainer(config=config, mock=True)
+        assert os.environ[INDEX_RETRY_ENV] == "1234"
+    finally:
+        if before is None:
+            os.environ.pop(INDEX_RETRY_ENV, None)
+        else:
+            os.environ[INDEX_RETRY_ENV] = before
+
+    # And in one place only: nothing else in the tree writes the name.
+    writers: list[str] = []
+    root = pathlib.Path(__file__).resolve().parents[3] / "src" / "maljan"
+    for path in root.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Assign):
+                continue
+            for target in node.targets:
+                if (
+                    isinstance(target, ast.Subscript)
+                    and isinstance(target.value, ast.Attribute)
+                    and target.value.attr == "environ"
+                    and "INDEX_RETRY_ENV" in ast.unparse(target.slice)
+                ):
+                    writers.append(str(path.relative_to(root)))
+
+    assert writers == ["core/container.py"], writers
