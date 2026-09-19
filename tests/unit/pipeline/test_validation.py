@@ -17,6 +17,7 @@ from maljan.pipeline.validation import (
     drop_ungrounded_indicators,
     feedback_text,
     mark_invalid_technique_ids,
+    reads_as_a_place,
     retry_with_feedback,
     retry_with_feedback_sync,
     validate_isr,
@@ -293,6 +294,166 @@ class TestIndicatorAdmission:
 
         assert violation is not None
         assert "empty pattern" in violation.message
+
+    def test_a_toolchain_directory_is_still_reported_as_an_artefact(self):
+        ndk = "/buildbot/src/android/ndk-r25-release/toolchain/llvm-project"
+        violation = self._violation(f"[directory:path = '{ndk}']", {ndk.lower()})
+
+        assert violation is not None
+        assert "compiler or toolchain artefact" in violation.message
+
+    def test_a_name_with_an_escaped_quote_in_it_is_read_whole(self):
+        r"""``it\'s.exe`` used to be read as ``it\`` and refused for not being one."""
+        assert self._violation(r"[file:name = 'it\'s.exe']", {"it's.exe"}) is None
+
+
+# Every shape a ``directory:path`` literal is written in, and whether it reads
+# as a place on a machine at all. The first block is what a review enumerated
+# against the branch; the rest are the spellings around them — both separators,
+# a mixed-case drive, a trailing separator, a share, an environment anchor, a
+# home tilde, a registry hive, a URL path, a media type and a bare word.
+#
+# The question here is validity only: could this be a directory. Whether the
+# run saw one is the corpus question, asked after it and pinned below.
+DIRECTORY_SHAPES: list[tuple[str, bool]] = [
+    # A root and a named step under it.
+    ("/opt/stage", True),
+    ("/tmp", True),
+    ("/etc", True),
+    ("/var/lib/stage", True),
+    ("/Program Files", True),
+    ("C:\\Windows\\Temp", True),
+    ("C:/Windows", True),
+    ("c:\\users\\operator\\appdata", True),
+    ("D:\\data\\", True),
+    ("E:/payloads/", True),
+    ("\\\\server\\share", True),
+    ("\\\\server\\share\\stage", True),
+    ("%APPDATA%\\Roaming", True),
+    ("%TEMP%/stage", True),
+    ("%LOCALAPPDATA%\\Low\\x1", True),
+    ("$HOME/Downloads", True),
+    ("${HOME}/Downloads", True),
+    ("~/Downloads", True),
+    ("~/.config/systemd", True),
+    ("HKLM\\Software\\Run", True),
+    ("HKCU\\Software\\Microsoft", True),
+    ("HKEY_LOCAL_MACHINE\\System", True),
+    ("/data/local/tmp", True),
+    ("/sdcard/Download", True),
+    ("C:\\Windows\\Temp\\", True),
+    ("/usr/lib/systemd/", True),
+    # A root with nothing named under it.
+    ("/", False),
+    ("C:\\", False),
+    ("C:/", False),
+    ("\\\\", False),
+    ("~", False),
+    ("%TEMP%", False),
+    ("/x/", False),
+    ("/a\\b", False),
+    ("z:/q/", False),
+    ("/x", False),
+    # A step that is punctuation, whitespace or a format string, not a name.
+    ("/%s/%s", False),
+    ("/ /", False),
+    ("/\t/", False),
+    ("/\x01stage", False),
+    ("/{0}/x", False),
+    ("/{}/x", False),
+    ("/<name>/y", False),
+    ("/%1/%2", False),
+    ("/%d", False),
+    # No root at all.
+    ("stage", False),
+    ("a/b", False),
+    ("./rel/dir", False),
+    ("../up", False),
+    ("text/html", False),
+    ("application/json", False),
+    ("GET /index.html", False),
+    ("http://e.example/a/b", False),
+    ("https://e.example/share/", False),
+    ("//e.example/share", False),
+    ("evil.example/stage", False),
+]
+
+
+class TestWhatReadsAsADirectory:
+    """The two questions a ``directory:path`` literal is asked, one each.
+
+    The first is validity — could this be a place on a machine. It used to be
+    answered with the file rule, which demands an extension a directory does
+    not have, so the judge read *"has no file extension … so nothing says it is
+    a real path"* about a directory it had written. The replacement asked for a
+    root and two separators, which let ``/%s/%s`` and ``/ /`` through as
+    indicators and still refused ``/tmp``.
+    """
+
+    @staticmethod
+    def _violation(pattern: str, corpus: set[str]) -> Violation | None:
+        bundle = Bundle(objects=[Indicator(pattern=pattern)])  # type: ignore[list-item]
+        found = validate_verdict_bundle(bundle, corpus)
+        return found[0] if found else None
+
+    @staticmethod
+    def _quoted(literal: str) -> str:
+        """The literal as a pattern writes it, escapes and all."""
+        return literal.replace("\\", "\\\\").replace("'", "\\'")
+
+    @pytest.mark.parametrize(("literal", "is_a_place"), DIRECTORY_SHAPES)
+    def test_the_shape_question_and_what_the_run_is_told(
+        self, literal: str, is_a_place: bool
+    ) -> None:
+        assert reads_as_a_place(literal) is is_a_place
+
+        violation = self._violation(
+            f"[directory:path = '{self._quoted(literal)}']", {literal.lower()}
+        )
+
+        if is_a_place:
+            assert violation is None, literal
+            return
+        assert violation is not None, literal
+        assert "is not written as a directory" in violation.message, literal
+        assert "file extension" not in violation.message, literal
+
+    def test_a_place_nothing_recorded_is_told_that_and_not_the_other_thing(self) -> None:
+        """Shape is not evidence: a directory is asked the corpus question too."""
+        violation = self._violation("[directory:path = '/opt/stage']", {"unrelated"})
+
+        assert violation is not None
+        assert "appears nowhere in the evidence" in violation.message
+        assert "is not written as a directory" not in violation.message
+
+    def test_the_separator_the_evidence_used_is_not_the_one_it_must_use(self) -> None:
+        violation = self._violation(
+            "[directory:path = 'C:/Windows/Temp']", {"the dropper wrote c:\\windows\\temp"}
+        )
+
+        assert violation is None
+
+    def test_a_trailing_separator_is_the_same_place(self) -> None:
+        violation = self._violation(
+            "[directory:path = 'C:\\\\Windows\\\\Temp\\\\']",
+            {"the dropper wrote c:\\windows\\temp"},
+        )
+
+        assert violation is None
+
+    def test_nothing_at_all_is_not_a_place(self) -> None:
+        assert reads_as_a_place("") is False
+
+    def test_a_place_watched_at_runtime_is_grounded_by_that(self) -> None:
+        violation = self._violation("[directory:path = '/tmp/stage']", {"/tmp/stage"})
+
+        assert violation is None
+
+    def test_a_place_inside_a_longer_one_is_not_that_longer_one(self) -> None:
+        violation = self._violation("[directory:path = '/opt/sta']", {"/opt/stage"})
+
+        assert violation is not None
+        assert "appears nowhere in the evidence" in violation.message
 
 
 class TestDropUngroundedIndicators:
