@@ -862,6 +862,17 @@ change landed on `main`.
 
 ### Fixed
 
+- **A process that has finished its work is not ended by its own watchdog.** The
+  cancel watchdog is a daemon thread with a ten-second fuse: when a run ends
+  inside that fuse it woke afterwards, reaped the sidecars of the loop it was
+  retiring — two seconds of grace per handle — and logged. Writing to a stream
+  the process had already closed is an error `logging` prints and swallows, and
+  holding the stderr buffer lock while the interpreter finalises is a fatal
+  error and a non-zero exit on a run where everything had passed. Once
+  `sys.is_finalizing()` is true the watchdog retires nothing, reaps nothing and
+  says nothing, and nothing it does can leave its thread; the children it would
+  have killed are the operating system's to collect a moment later.
+
 - **Enrichment stopped taking the slot an analysis was waiting for.** The
   post-verdict reputation lookups were queued beside the analyses, where the
   worker's one-job-at-a-time rule — which exists so two analyses never share a

@@ -13,6 +13,7 @@ import contextlib
 import itertools
 import json
 import re
+import sys
 import threading
 import time
 from abc import ABC, abstractmethod
@@ -1374,6 +1375,22 @@ def _get_agent_loop() -> asyncio.AbstractEventLoop:
         return loop
 
 
+# Once the interpreter has begun finalising, a daemon thread has nothing
+# useful left to do and several harmful things it can still attempt. Logging is
+# the sharpest: the streams a handler writes to are closed by then, which
+# ``logging`` reports as an error and swallows, and holding the stderr buffer
+# lock while the runtime tears itself down is a ``Fatal Python error`` and a
+# non-zero exit on a process that had already finished its work. The children
+# this thread would reap are the operating system's to collect a moment later
+# in any case, so standing down costs nothing.
+def _the_interpreter_is_going() -> bool:
+    """True once this process has begun shutting down. Never raises."""
+    try:
+        return bool(sys.is_finalizing())
+    except Exception:  # noqa: BLE001 — a shutdown check may not fail a shutdown
+        return True
+
+
 def _retire_wedged_loop(loop: asyncio.AbstractEventLoop, what: str) -> None:
     """Stop ``loop``, verify it stopped, and let the next caller start a fresh one.
 
@@ -1401,6 +1418,8 @@ def _retire_wedged_loop(loop: asyncio.AbstractEventLoop, what: str) -> None:
     or async client created on this loop would only park on a future nobody
     will ever complete, which is what the invalidation exists to prevent.
     """
+    if _the_interpreter_is_going():
+        return
     global _AGENT_LOOP
     with _AGENT_LOOP_LOCK:
         if _AGENT_LOOP is loop:
@@ -1421,6 +1440,8 @@ def _retire_wedged_loop(loop: asyncio.AbstractEventLoop, what: str) -> None:
         if loop.is_closed() or not loop.is_running():
             return
         time.sleep(0.1)
+    if _the_interpreter_is_going():
+        return
     logger.error(
         "the retired agent loop did not stop within %.0fs either: thread %r is abandoned "
         "and keeps running whatever blocked it until this process exits. Everything that "
@@ -1496,7 +1517,11 @@ def _cancel_and_watch(
         while time.monotonic() < deadline:
             if running and running[0].done():
                 return
+            if _the_interpreter_is_going():
+                return
             time.sleep(0.05)
+        if _the_interpreter_is_going():
+            return
         if running:
             if not running[0].done():
                 _retire_wedged_loop(loop, what)
@@ -1504,7 +1529,23 @@ def _cancel_and_watch(
         if not servicing.is_set():
             _retire_wedged_loop(loop, f"{what} (never started: the loop is not running work)")
 
-    threading.Thread(target=_watch, name="maljan-agent-loop-watchdog", daemon=True).start()
+    def _watch_quietly() -> None:
+        """``_watch``, with nothing able to leave the thread.
+
+        A daemon thread has nobody to report to. An exception out of one is a
+        traceback printed at shutdown, on streams that may be gone, which is
+        the failure this whole guard exists to stop — and a watchdog that
+        cannot finish its own job has nothing to say that is worth ending a
+        finished process over.
+        """
+        try:
+            _watch()
+        except BaseException:  # noqa: BLE001 — a watchdog never becomes the failure
+            if not _the_interpreter_is_going():
+                with contextlib.suppress(Exception):
+                    logger.debug("the cancel watchdog stopped early.", exc_info=True)
+
+    threading.Thread(target=_watch_quietly, name="maljan-agent-loop-watchdog", daemon=True).start()
 
 
 def _run_coro_blocking(coro: Any, hard_timeout: float, label: str = "") -> Any:
