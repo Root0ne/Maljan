@@ -10,6 +10,7 @@ details.
   before the work is done.
 - Security problems go through
   [private vulnerability reporting](SECURITY.md), never a public issue.
+- Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).
 
 ## Workflow
 
