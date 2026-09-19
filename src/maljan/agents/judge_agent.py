@@ -39,6 +39,7 @@ from maljan.agents.base_agent import (
     BudgetMeter,
     LoopBudget,
     _turn_key,
+    loop_limits,
     retry_on_connection_error,
     run_on_agent_loop,
 )
@@ -525,9 +526,7 @@ class JudgeAgent(BudgetMeter):
             # Wrap the no-tools ainvoke in the
             # same hard timeout used by the tools path so a stalled / queued
             # llama-server cannot freeze the judge node.
-            no_tools_timeout = get_settings().react_agent_timeout_overrides.get(
-                "judge", get_settings().react_agent_timeout
-            )
+            no_tools_timeout = loop_limits("judge")[0]
             response = await asyncio.wait_for(
                 retry_on_connection_error(
                     lambda: self.llm.ainvoke(messages_pre),
@@ -988,15 +987,11 @@ class JudgeAgent(BudgetMeter):
             ),
         ]
 
-        # Resolve the judge-specific timeout via the same override mechanism
-        # the analyst agents use. ``react_agent_timeout_overrides`` ships
-        # with ``{"static": 600, "judge": 300}`` so local Qwen3.6-35B has
-        # enough headroom for the verdict round (the 2026-05-23 E2E run hit
-        # the previous hardcoded 180s ceiling). Falls back to the global
-        # ``react_agent_timeout`` when no override is configured.
-        _settings = get_settings()
-        _overrides = getattr(_settings, "react_agent_timeout_overrides", {}) or {}
-        timeout = float(_overrides.get("judge", _settings.react_agent_timeout))
+        # Resolved the same way an analyst's loop is: the judge definition's
+        # own ``timeout_seconds`` first, then the deprecated override map
+        # (which ships 600 for the judge, so a local Qwen3.6-35B has headroom
+        # for the verdict round), then the global ``react_agent_timeout``.
+        timeout = float(loop_limits("judge")[0])
         self.logger.info("JudgeAgent invoking verdict LLM (timeout=%ds)...", timeout)
 
         # Reset per call, not once: a first call that timed out and left the

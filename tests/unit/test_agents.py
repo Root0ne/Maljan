@@ -1,3 +1,4 @@
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -293,6 +294,76 @@ class TestPerAgentMaxStepsOverride:
         s = Settings()
         assert s.react_agent_max_steps == 10
         assert s.react_agent_max_steps_overrides.get("static") == 40
+
+
+class TestABudgetBelongsToTheAgentThatSpendsIt:
+    """The definition first, then the deprecated maps, then the defaults.
+
+    A budget used to live only in two maps keyed by agent name, away from the
+    definition an operator edits: a clone of the lead arrived with five
+    specialists to ask and the deployment's ten steps to ask them in, and
+    nothing on the card said why it starved.
+    """
+
+    @staticmethod
+    def _settings(**agents: Any):  # type: ignore[no-untyped-def]
+        from maljan.core.config import Settings
+
+        return Settings(_env_file=None, agents=agents) if agents else Settings(_env_file=None)
+
+    def _limits(self, cfg: Any, agent: str) -> tuple[int, int]:
+        from maljan.agents import base_agent
+
+        with patch.object(base_agent, "get_settings", lambda: cfg):
+            return base_agent.loop_limits(agent)
+
+    def test_a_definition_that_sets_none_falls_back_to_the_deployment(self) -> None:
+        cfg = self._settings(
+            definitions={"scout": {"role": "generic", "prompt": "p"}},
+        )
+
+        assert self._limits(cfg, "scout") == (
+            cfg.react_agent_timeout,
+            cfg.react_agent_max_steps,
+        )
+
+    def test_a_definition_that_sets_a_budget_is_what_the_loop_runs_on(self) -> None:
+        cfg = self._settings(
+            definitions={
+                "scout": {
+                    "role": "generic",
+                    "prompt": "p",
+                    "max_steps": 24,
+                    "timeout_seconds": 900,
+                }
+            },
+        )
+
+        assert self._limits(cfg, "scout") == (900, 24)
+
+    def test_a_definition_wins_over_the_deprecated_map(self) -> None:
+        cfg = self._settings(
+            definitions={
+                "scout": {"role": "generic", "prompt": "p", "max_steps": 24},
+            },
+        )
+        cfg.react_agent_max_steps_overrides["scout"] = 7
+
+        assert self._limits(cfg, "scout")[1] == 24
+
+    def test_the_deprecated_map_still_answers_for_a_definition_that_sets_nothing(self) -> None:
+        cfg = self._settings(
+            definitions={"scout": {"role": "generic", "prompt": "p"}},
+        )
+        cfg.react_agent_max_steps_overrides["scout"] = 7
+        cfg.react_agent_timeout_overrides["scout"] = 70
+
+        assert self._limits(cfg, "scout") == (70, 7)
+
+    def test_the_seeded_lead_carries_its_own(self) -> None:
+        cfg = self._settings()
+
+        assert self._limits(cfg, "lead") == (1800, 40)
 
 
 class TestForcedFinalSynthesis:

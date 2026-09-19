@@ -227,10 +227,10 @@ describe("describeChange: core.mcp.servers", () => {
 describe("describeChange: core.agents.definitions", () => {
   it("marks a cloned definition with its source", () => {
     const before = {
-      network: { role: "network", label: "Network", prompt: "p", tools: [], static_provider: null, enabled: true },
+      network: { role: "network", label: "Network", prompt: "p", tools: [], static_provider: null, enabled: true, max_steps: null, timeout_seconds: null },
     };
     const after = {
-      network: { role: "network", label: "Network", prompt: "p", tools: [], static_provider: null, enabled: true },
+      network: { role: "network", label: "Network", prompt: "p", tools: [], static_provider: null, enabled: true, max_steps: null, timeout_seconds: null },
       "network-2": {
         role: "network",
         label: "Network (copy)",
@@ -238,6 +238,8 @@ describe("describeChange: core.agents.definitions", () => {
         tools: [],
         static_provider: null,
         enabled: true,
+        max_steps: null,
+        timeout_seconds: null,
       },
     };
     const line = describeChange(definitionsEntry, before, after);
@@ -248,7 +250,7 @@ describe("describeChange: core.agents.definitions", () => {
   it("adds a definition plainly when it is not a clone", () => {
     const before = {};
     const after = {
-      fresh: { role: "generic", label: "Fresh", prompt: "p", tools: [], static_provider: null, enabled: true },
+      fresh: { role: "generic", label: "Fresh", prompt: "p", tools: [], static_provider: null, enabled: true, max_steps: null, timeout_seconds: null },
     };
     const line = describeChange(definitionsEntry, before, after);
     expect(line.detail).toEqual(["fresh: added"]);
@@ -256,11 +258,11 @@ describe("describeChange: core.agents.definitions", () => {
 
   it("reports removed and enabled/disabled toggles", () => {
     const before = {
-      gone: { role: "generic", label: "Gone", prompt: "p", tools: [], static_provider: null, enabled: true },
-      judge: { role: "judge", label: "Judge", prompt: "p", tools: [], static_provider: null, enabled: true },
+      gone: { role: "generic", label: "Gone", prompt: "p", tools: [], static_provider: null, enabled: true, max_steps: null, timeout_seconds: null },
+      judge: { role: "judge", label: "Judge", prompt: "p", tools: [], static_provider: null, enabled: true, max_steps: null, timeout_seconds: null },
     };
     const after = {
-      judge: { role: "judge", label: "Judge", prompt: "p", tools: [], static_provider: null, enabled: false },
+      judge: { role: "judge", label: "Judge", prompt: "p", tools: [], static_provider: null, enabled: false, max_steps: null, timeout_seconds: null },
     };
     const line = describeChange(definitionsEntry, before, after);
     expect(line.detail).toEqual(["gone: removed", "judge: disabled"]);
@@ -268,10 +270,10 @@ describe("describeChange: core.agents.definitions", () => {
 
   it("lists changed fields by their display names", () => {
     const before = {
-      a: { role: "generic", label: "A", prompt: "old", tools: [], static_provider: "openai", enabled: true },
+      a: { role: "generic", label: "A", prompt: "old", tools: [], static_provider: "openai", enabled: true, max_steps: null, timeout_seconds: null },
     };
     const after = {
-      a: { role: "static", label: "A2", prompt: "new", tools: [{ kind: "provider", server: null, name: null }], static_provider: "anthropic", enabled: true },
+      a: { role: "static", label: "A2", prompt: "new", tools: [{ kind: "provider", server: null, name: null }], static_provider: "anthropic", enabled: true, max_steps: null, timeout_seconds: null },
     };
     const line = describeChange(definitionsEntry, before, after);
     expect(line.detail).toEqual(["a: changed: prompt, tools, static provider, label, role"]);
@@ -279,10 +281,10 @@ describe("describeChange: core.agents.definitions", () => {
 
   it("keeps a disabled flip that happens alongside a prompt edit", () => {
     const before = {
-      a: { role: "generic", label: "A", prompt: "old", tools: [], static_provider: null, enabled: true },
+      a: { role: "generic", label: "A", prompt: "old", tools: [], static_provider: null, enabled: true, max_steps: null, timeout_seconds: null },
     };
     const after = {
-      a: { role: "generic", label: "A", prompt: "new", tools: [], static_provider: null, enabled: false },
+      a: { role: "generic", label: "A", prompt: "new", tools: [], static_provider: null, enabled: false, max_steps: null, timeout_seconds: null },
     };
     expect(describeChange(definitionsEntry, before, after).detail).toEqual([
       "a: changed: disabled, prompt",
@@ -291,10 +293,10 @@ describe("describeChange: core.agents.definitions", () => {
 
   it("keeps an enabled flip that happens alongside a prompt edit", () => {
     const before = {
-      a: { role: "generic", label: "A", prompt: "old", tools: [], static_provider: null, enabled: false },
+      a: { role: "generic", label: "A", prompt: "old", tools: [], static_provider: null, enabled: false, max_steps: null, timeout_seconds: null },
     };
     const after = {
-      a: { role: "generic", label: "A", prompt: "new", tools: [], static_provider: null, enabled: true },
+      a: { role: "generic", label: "A", prompt: "new", tools: [], static_provider: null, enabled: true, max_steps: null, timeout_seconds: null },
     };
     expect(describeChange(definitionsEntry, before, after).detail).toEqual([
       "a: changed: enabled, prompt",

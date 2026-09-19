@@ -98,6 +98,20 @@ const RESOLVE_INPUTS = new Set<keyof AgentDefinitionEntry>([
   "role", "prompt", "tools", "static_provider",
 ]);
 
+/**
+ * A whole number a budget box may hold, or `null` for "inherit".
+ *
+ * An empty box is the inherit case and clears the field. Anything that is not
+ * a whole number at least one is not staged at all, so a half-typed value
+ * leaves the last good one in place rather than staging `NaN` for the API to
+ * refuse.
+ */
+function wholeNumber(raw: string): number | null {
+  if (raw.trim() === "") return null;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed >= 1 ? parsed : null;
+}
+
 /** One field's validation message, under the field the API named. */
 function FieldError({ message }: { message?: string }) {
   if (!message) return null;
@@ -560,6 +574,41 @@ export function AgentDetail({
                 <FieldError message={fieldError("static_provider")} />
               </label>
             )}
+            {/* One loop's budget, on the card the agent is edited on rather
+                than in a map keyed by agent name elsewhere in the settings:
+                a lead that asks six specialists needs both raised, and a
+                clone of it used to arrive with the tools and the default
+                budget. Blank inherits the deployment's. */}
+            <label className="block">
+              <span className="text-text-muted">Steps per loop</span>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                className={input}
+                aria-label={`${agentKey} max steps`}
+                disabled={locked}
+                placeholder="inherit"
+                value={agent.max_steps === null ? "" : String(agent.max_steps)}
+                onChange={(e) => put(agentKey, { max_steps: wholeNumber(e.target.value) })}
+              />
+              <FieldError message={fieldError("max_steps")} />
+            </label>
+            <label className="block">
+              <span className="text-text-muted">Seconds per loop</span>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                className={input}
+                aria-label={`${agentKey} timeout seconds`}
+                disabled={locked}
+                placeholder="inherit"
+                value={agent.timeout_seconds === null ? "" : String(agent.timeout_seconds)}
+                onChange={(e) => put(agentKey, { timeout_seconds: wholeNumber(e.target.value) })}
+              />
+              <FieldError message={fieldError("timeout_seconds")} />
+            </label>
           </div>
         </fieldset>
       )}

@@ -1071,6 +1071,15 @@ class AgentDefinition(BaseModel):
     # pointed at the sandbox behaviour log without also becoming a dynamic
     # analyst. Naming the sources makes that a two-word edit.
     data_sources: list[str] = Field(default_factory=list)
+    # How long one loop of this agent may run and how many steps it may take.
+    # ``None`` means the deployment-wide ``react_agent_timeout`` /
+    # ``react_agent_max_steps``, by way of the deprecated per-agent override
+    # maps. A budget is a property of the agent, not of the deployment: an
+    # operator who clones the lead gets a definition that asks six specialists
+    # and, without this, the default ten steps to do it in — the clone starves
+    # and nothing in the card they edited said why.
+    max_steps: Annotated[int, Field(ge=1)] | None = None
+    timeout_seconds: Annotated[int, Field(ge=1)] | None = None
 
     @model_validator(mode="after")
     def _data_sources_are_known(self) -> "AgentDefinition":
@@ -1629,6 +1638,17 @@ def _builtin_definitions() -> dict[str, AgentDefinition]:
             role="lead",
             label="Lead analyst",
             prompt=LEAD_PROMPT,
+            # A lead spends its steps on asks and on reading what comes back,
+            # and each ask is two of them — the turn that calls the tool and
+            # the node that runs it. Six asks and the turns to weigh them is
+            # forty, and at the default 300 s per ask 1800 s fits those six
+            # with the lead's own turns around them; that is the number
+            # ``delegation._asks_that_fit`` computes and the number the
+            # ``ask_<key>`` tool's description gives the model. The
+            # specialists' own budgets are their own and do not come out of
+            # these.
+            max_steps=40,
+            timeout_seconds=1800,
             tools=[
                 ToolRef(kind="agent", agent="static"),
                 ToolRef(kind="agent", agent="dynamic"),
@@ -2728,6 +2748,10 @@ class Settings(BaseSettings):
     # ``REACT_AGENT_TOOL_CALL_BUDGET``.
     react_agent_tool_call_budget: Annotated[int, Field(ge=1)] = 20
 
+    # Deprecated: a budget belongs to the agent that spends it, so
+    # ``agents.definitions.<key>.timeout_seconds`` is where one is set now and
+    # a definition's own value wins. This map is still read, for one release,
+    # so a deployment that set a budget here keeps it.
     # Per-agent timeout overrides. The default ``react_agent_timeout`` is
     # tuned for the network/dynamic analysts (~1-3 tool calls). The
     # static analyst attaches the Ghidra MCP server with many tools, so
@@ -2764,14 +2788,6 @@ class Settings(BaseSettings):
             # safe_analyze_isr_chunked still tolerates a genuinely wedged chunk.
             # Override via ``REACT_AGENT_TIMEOUT_OVERRIDES__static=1500``.
             "static": 1500,
-            # A lead's stage has to hold several asks end to end. At the
-            # default 300 s per ask, 1800 fits six of them — which is the
-            # number ``delegation._asks_that_fit`` computes and the number the
-            # ``ask_<key>`` tool's description gives the model — with the
-            # lead's own turns around them; the per-ask timeout is what bounds
-            # any one specialist, and the refusal is what stops the last ask
-            # that would not fit.
-            "lead": 1800,
             # Judge budget bumped 300 → 600 for the same reason — the
             # final-verdict LLM call on Qwen 35B repeatedly bottlenecked
             # at 180-300s in the 2026-05-28 sequential live runs.
@@ -2786,6 +2802,10 @@ class Settings(BaseSettings):
         }
     )
 
+    # Deprecated, as ``react_agent_timeout_overrides`` is: set a step budget on
+    # the agent's own definition (``agents.definitions.<key>.max_steps``),
+    # which wins over this map. Read for one release so a deployment that set
+    # one here keeps it.
     # Per-agent ReAct recursion-step overrides. The default
     # ``react_agent_max_steps`` (10) suits the network/dynamic analysts (0-3
     # tool calls), but the static analyst runs a full Ghidra MCP ReAct loop
@@ -2829,12 +2849,6 @@ class Settings(BaseSettings):
         default_factory=lambda: {
             "static": 40,
             "network": 6,
-            # A lead spends its steps on asks and on reading what comes back,
-            # and each ask is two of them — the turn that calls the tool and
-            # the node that runs it. Six asks and the turns to weigh them is
-            # forty; the specialists' own steps are their own and do not come
-            # out of this.
-            "lead": 40,
         }
     )
 

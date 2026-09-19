@@ -11,6 +11,8 @@ function agent(over: Partial<AgentDefinitionEntry> = {}): AgentDefinitionEntry {
     tools: [],
     static_provider: null,
     enabled: true,
+    max_steps: null,
+    timeout_seconds: null,
     ...over,
   };
 }

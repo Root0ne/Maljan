@@ -120,6 +120,8 @@ export const EMPTY_DEFINITION: AgentDefinitionEntry = {
   tools: [],
   static_provider: null,
   enabled: true,
+  max_steps: null,
+  timeout_seconds: null,
 };
 
 /**

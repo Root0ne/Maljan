@@ -19,6 +19,7 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage
 
+from maljan.agents import base_agent
 from maljan.agents.delegation import tool_name
 from maljan.pipeline.nodes import promoted_asks
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
@@ -38,13 +39,19 @@ ASKS = 3
 AUDITED = ("helper", "helper", "third", "helper", "third", "helper")
 
 
+# Real technique ids, one per ask a specialist answers: an id the catalogue
+# does not have sends the validator looking for a suggestion, which builds the
+# whole corpus to answer a dictionary question.
+TECHNIQUES = ("T1090", "T1091", "T1092", "T1095")
+
+
 def _report_for(specialist: str, n: int) -> str:
     """One specialist's answer to its nth ask, distinguishable from the others."""
     return (
         f"CLAIM: {specialist} answered ask {n}\n"
         "EVIDENCE: ev_0001\n"
         f"CONFIDENCE: 0.{n + 1}\n"
-        f"TECHNIQUE: T109{n}\n"
+        f"TECHNIQUE: {TECHNIQUES[n]}\n"
     )
 
 
@@ -74,6 +81,12 @@ def _team(*, lead_answers: list[Any], asks: tuple[str, ...] | None = None) -> _C
                 "role": "lead",
                 "prompt": "You lead.",
                 "tools": [{"kind": "agent", "agent": key} for key in dict.fromkeys(roster)],
+                # The lead's own budget, on its definition the way the seeded
+                # lead carries one: each ask is two steps — the turn that
+                # calls the tool and the node that runs it — so a lead on the
+                # deployment default stops part-way through a long loop and
+                # the ordering this fixture is about is never reached.
+                "max_steps": 2 * len(roster) + 4,
             }
         }
     )
@@ -178,38 +191,46 @@ class TestWhenTheLeadCannotAnswerAtAll:
 class TestTheShapeTheAuditSaw:
     """Six answered asks across two specialists, and a lead with no report.
 
-    The class above drives the real delegation: three asks to one specialist,
-    a lead whose own turn dies, and the answers still on it afterwards. What
-    this adds is the shape the audited chunk had — six answers, two
-    specialists, interleaved — and what the stage makes of it, so the answers
-    are handed to the lead the way the delegation hands them over.
+    The class above drives three asks to one specialist. This is the shape the
+    audited chunk had — six asks, two specialists, interleaved — driven the
+    same way: the lead calls ``ask_<key>`` six times through the real
+    delegation, each specialist answers from its own script, the lead's own
+    turn then dies, and the stage promotes what is left on it. Nothing is
+    remembered by hand here, so what the ordering rests on is the machinery
+    rather than the fixture's idea of it.
+
+    The ordering matters at depth and only at depth: the promotion keys the
+    stage merges under are ``agent#n``, numbered per specialist in the order
+    that specialist was asked, and with one specialist asked three times the
+    counter and the sequence agree by accident.
     """
 
-    @staticmethod
-    def _answered() -> Any:
-        container = _team(lead_answers=[], asks=AUDITED)
-        boss = _lead(container)
-        counts: dict[str, int] = {}
-        for specialist in AUDITED:
-            counts[specialist] = counts.get(specialist, 0) + 1
-            boss.remember_answered_ask(
-                AgentISR(
-                    agent_id=specialist,
-                    domain=specialist,
-                    claims=[
-                        ClaimEvidence(
-                            claim=f"{specialist} answered ask {counts[specialist] - 1}",
-                            evidence_ref="[ev_0001] the entry it read",
-                            confidence=0.1 * counts[specialist],
-                            technique_id="T1095",
-                        )
-                    ],
-                )
-            )
-        return boss
+    @pytest.fixture(autouse=True)
+    def _installed(self, monkeypatch: pytest.MonkeyPatch) -> Any:
+        """The team, with the settings the loop reads its budgets from.
 
-    def test_no_completed_ask_is_lost(self) -> None:
-        promoted = promoted_asks(self._answered())
+        Six asks is twelve steps before the lead has weighed any of them, and
+        the deployment default is ten: a lead on that default stops part-way
+        and the ordering these tests are about is never reached. The budget is
+        on the lead's definition, which is where the seeded lead carries its
+        own, so what the loop has to be shown is this team's settings.
+        """
+        container = _team(
+            lead_answers=[TimeoutError("the loop exceeded its hard cap")], asks=AUDITED
+        )
+        monkeypatch.setattr(base_agent, "get_settings", lambda: container.config)
+        return container
+
+    def _answered(self, container: _Container) -> tuple[Any, AgentISR]:
+        """The lead after its six asks came back and its own turn died."""
+        boss = _lead(container)
+        return boss, boss.safe_analyze_isr("Lead this analysis.")
+
+    def test_no_completed_ask_is_lost(self, _installed) -> None:
+        boss, own = self._answered(_installed)
+
+        assert own.claims == [], "the lead wrote nothing, which is why the asks are promoted"
+        promoted = promoted_asks(boss, own)
 
         assert len(promoted) == len(AUDITED)
         assert list(promoted) == [
@@ -221,13 +242,17 @@ class TestTheShapeTheAuditSaw:
             "helper#4",
         ]
 
-    def test_the_order_is_the_order_the_lead_asked_in(self) -> None:
-        promoted = promoted_asks(self._answered())
+    def test_the_order_is_the_order_the_lead_asked_in(self, _installed) -> None:
+        boss, own = self._answered(_installed)
+
+        promoted = promoted_asks(boss, own)
 
         assert [isr.agent_id for isr in promoted.values()] == list(AUDITED)
 
-    def test_each_answer_keeps_the_claims_its_specialist_made(self) -> None:
-        promoted = promoted_asks(self._answered())
+    def test_each_answer_keeps_the_claims_its_specialist_made(self, _installed) -> None:
+        boss, own = self._answered(_installed)
+
+        promoted = promoted_asks(boss, own)
 
         assert [claim.claim for isr in promoted.values() for claim in isr.claims] == [
             "helper answered ask 0",
@@ -237,9 +262,18 @@ class TestTheShapeTheAuditSaw:
             "third answered ask 1",
             "helper answered ask 3",
         ]
+        # The specialist's own numbers, unedited, on the answer it gave.
+        assert [claim.confidence for isr in promoted.values() for claim in isr.claims] == [
+            0.1,
+            0.2,
+            0.1,
+            0.3,
+            0.2,
+            0.4,
+        ]
 
-    def test_the_salvage_turn_would_be_shown_all_of_them(self) -> None:
-        shown = self._answered().answered_asks()
+    def test_the_salvage_turn_would_be_shown_all_of_them(self, _installed) -> None:
+        shown = self._answered(_installed)[0].answered_asks()
 
         assert [isr.agent_id for isr in shown] == list(AUDITED)
 

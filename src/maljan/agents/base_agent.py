@@ -455,20 +455,48 @@ def hard_cap(timeout: float, ceiling: BudgetCeiling | None = None) -> float:
     return max(1.0, wall)
 
 
+def _definition_budget(cfg: Any, agent_name: str) -> tuple[int | None, int | None]:
+    """``(timeout_seconds, max_steps)`` this agent's definition sets, if any.
+
+    Read defensively, and only a whole number is read: a settings stand-in may
+    carry no definition map at all, and a budget is not worth an exception on
+    the path that starts every loop.
+    """
+    definitions = getattr(getattr(cfg, "agents", None), "definitions", None)
+    if not isinstance(definitions, dict):
+        return None, None
+    definition = definitions.get(agent_name)
+    values = []
+    for field in ("timeout_seconds", "max_steps"):
+        value = getattr(definition, field, None)
+        values.append(value if isinstance(value, int) and not isinstance(value, bool) else None)
+    return values[0], values[1]
+
+
 def loop_limits(agent_name: str, ceiling: BudgetCeiling | None = None) -> tuple[int, int]:
     """``(timeout, max_steps)`` for one loop of ``agent_name``.
 
-    The per-agent overrides for a loop of its own. A ceiling replaces both:
-    an agent answering an ask spends the delegation's budget, not its stage's
-    and not a leftover of its caller's. A module function rather than only a
-    method, so a duck-typed analyst that borrows one method reads the same
-    numbers.
+    The agent's own definition first, then the deprecated per-agent override
+    maps, then the deployment's defaults. A budget is a property of the agent
+    — an operator cloning a team gets the definition, and used to get none of
+    its budget — so the definition wins over a map keyed by agent name
+    somewhere else in the settings. A ceiling replaces both: an agent
+    answering an ask spends the delegation's budget, not its stage's and not a
+    leftover of its caller's. A module function rather than only a method, so
+    a duck-typed analyst that borrows one method reads the same numbers.
     """
     cfg = get_settings()
+    definition = _definition_budget(cfg, agent_name)
     overrides = getattr(cfg, "react_agent_timeout_overrides", {}) or {}
-    timeout = int(overrides.get(agent_name, cfg.react_agent_timeout))
+    timeout = int(
+        definition[0] if definition[0] else overrides.get(agent_name, cfg.react_agent_timeout)
+    )
     step_overrides = getattr(cfg, "react_agent_max_steps_overrides", {}) or {}
-    max_steps = int(step_overrides.get(agent_name, cfg.react_agent_max_steps))
+    max_steps = int(
+        definition[1]
+        if definition[1]
+        else step_overrides.get(agent_name, cfg.react_agent_max_steps)
+    )
     if ceiling is not None:
         max_steps = max(2, int(ceiling.steps))
         timeout = max(1, int(ceiling.seconds))

@@ -473,8 +473,24 @@ change landed on `main`.
   waiting and the setting it is waiting on, `api.enrichment_dedicated_worker`.
   Nothing is drawn where enrichment runs beside the analyses, where its worker
   is up, or against an API that does not answer with the field.
+- **An agent carries its own step and time budget.** `max_steps` and
+  `timeout_seconds` on an agent definition, drawn on its card in the console as
+  **Steps per loop** and **Seconds per loop**; blank inherits the deployment's
+  `react_agent_max_steps` / `react_agent_timeout`. The seeded lead's 40 steps
+  and 1800 s move onto its definition, so a clone of a team arrives with the
+  budget its agents need rather than with five specialists to ask and the
+  default ten steps to ask them in. Alembic revision `20260927000000` moves a
+  stored override onto the definition it belongs to.
 
 ### Changed
+
+- **Deprecated: `react_agent_max_steps_overrides` and
+  `react_agent_timeout_overrides`.** A budget belongs to the agent that spends
+  it, so it is set on the agent's definition now. Both maps are still read for
+  an agent whose definition sets neither, and a definition's own value wins
+  over them; move any budget you keep in them onto the agent's card, because a
+  later release drops them. The seeded entries for `lead` are already gone —
+  the lead's budget is on its definition.
 
 - **A run's watchers are no longer drawn as members of its team.** The
   mediator and the sycophancy detector publish as `pipeline` with

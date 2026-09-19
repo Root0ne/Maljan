@@ -133,6 +133,13 @@ export interface AgentDefinitionEntry {
   tools: ToolRefEntry[];
   static_provider: string | null;
   enabled: boolean;
+  /** How many ReAct steps one loop of this agent may take, and how long it may
+   *  run. `null` means the deployment-wide default. A lead that asks six
+   *  specialists needs both raised, and before they were fields of the
+   *  definition an operator cloning that team got the tools and none of the
+   *  budget to use them in. */
+  max_steps: number | null;
+  timeout_seconds: number | null;
 }
 
 /** How hard one debate stage argues before it hands over, mirroring
