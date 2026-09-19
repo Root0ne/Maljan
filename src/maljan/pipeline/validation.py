@@ -1814,8 +1814,16 @@ def _runtime_paths(evidence_corpus: set[str] | None) -> set[str]:
 # registry's own object type does.
 _DIRECTORY_ROOT_RE = re.compile(
     r"^(?:/"
-    r"|[A-Za-z]:[\\/]?"
-    r"|\\\\"
+    # The separator after a drive is required. ``C:Windows`` is drive-relative
+    # — it names whatever directory that drive is currently in, which is not a
+    # place on the analysed machine that anything could be checked against.
+    r"|[A-Za-z]:[\\/]"
+    # One backslash or two. Two are a UNC share; one is what a UNC share
+    # written the way a judge writes it becomes, because a STIX literal
+    # ``'\\server\share'`` is unescaped by the reader to ``\server\share``
+    # before any of this sees it. Refusing it told the judge its own valid
+    # path could not be a place.
+    r"|\\\\?"
     r"|%[A-Za-z_][A-Za-z0-9_]*%[\\/]?"
     r"|\$(?:\{[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*)[\\/]?"
     r"|~[\\/]?"
@@ -1826,8 +1834,10 @@ _DIRECTORY_ROOT_RE = re.compile(
 
 # A step that is a placeholder rather than a name. A strings table is full of
 # them — a format string the sample was compiled with, read out of the bytes as
-# though it were a path somebody visited.
-_PLACEHOLDER_STEP_RE = re.compile(r"^(?:%[-+ #0-9.]*[a-zA-Z]|%\d+|\{[^}]*\}|<[^>]*>|\$\d+)$")
+# though it were a path somebody visited. A step opening with ``#`` or ``?`` is
+# the last one too: it is a URL's fragment or query, and ``/#frag`` read as a
+# directory is a URL cut at its path.
+_PLACEHOLDER_STEP_RE = re.compile(r"^(?:%[-+ #0-9.]*[a-zA-Z]|%\d+|\{[^}]*\}|<[^>]*>|\$\d+|[#?].*)$")
 
 # What a step must carry to read as a name rather than as punctuation: two
 # characters somebody could have typed as part of one.

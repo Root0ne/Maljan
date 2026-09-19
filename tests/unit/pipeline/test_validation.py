@@ -376,6 +376,18 @@ DIRECTORY_SHAPES: list[tuple[str, bool]] = [
     ("https://e.example/share/", False),
     ("//e.example/share", False),
     ("evil.example/stage", False),
+    # A UNC share as a judge writes it: the reader undoes the STIX escape, so
+    # what reaches the check carries one backslash, not two.
+    ("\\server\\share", True),
+    ("\\\\server\\share\\drop", True),
+    # Drive-relative: it names whatever directory that drive is in, which is
+    # not a place on the analysed machine.
+    ("C:Windows", False),
+    ("C:Windows\\Temp", False),
+    # A URL's fragment or query read as a path.
+    ("/#frag", False),
+    ("/?q=1", False),
+    ("/opt/#frag", False),
 ]
 
 

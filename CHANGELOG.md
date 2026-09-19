@@ -935,6 +935,13 @@ change landed on `main`.
   characters every validator's own row is held to. The chain is cut instead,
   oldest step first and marked with an ellipsis; the finding's own sentence is
   never cut.
+- **A UNC share written the way a judge writes it reads as a place.** A STIX
+  literal `'\\server\share'` is unescaped by the pattern reader to
+  `\server\share`, and the directory check refused a single leading backslash,
+  so the judge was told its own valid path could not be a directory. One
+  backslash or two is a root now. In the other direction the check no longer
+  admits a drive-relative `C:Windows`, which names no place on the analysed
+  machine, nor a URL's fragment or query read as a step (`/#frag`, `/?q=1`).
 ### Fixed
 
 - **A process that has finished its work is not ended by its own watchdog.** The
