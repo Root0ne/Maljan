@@ -49,6 +49,7 @@ spent by its specialists' work — only by the wall clock it waits through.
 
 from __future__ import annotations
 
+import re
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -564,6 +565,68 @@ def _task_turn(caller_name: str, task: str, context: str, callee: Any) -> str:
     return "\n\n".join(parts)
 
 
+# How long a handed-over finding row may be. The rows a validator writes are
+# already held to this: ``safe_finding_value`` bounds the value each quotes at
+# two hundred characters, and the sentence around it brings the whole to under
+# eight hundred. A hand-over adds the callee's name in front of the sentence,
+# and a chain of them adds one name per level — nothing bounded that, so a
+# delegation five deep wrote a row the guard's own limit does not describe.
+HANDED_OVER_LIMIT = 800
+# What a chain that had to be cut begins with. Not a name, so it cannot be
+# read as one, and short enough that the bound survives it.
+ELIDED_CHAIN = "…: "
+# The shape of one step of the chain: an agent key an operator typed, and the
+# separator this module writes after it. Deliberately narrow — a sentence that
+# happens to contain a colon is not a step, and a step that does not match is
+# read as the start of the sentence, which costs room rather than truth.
+_CHAIN_STEP_RE = re.compile(r"^([A-Za-z0-9_][A-Za-z0-9_.\-]{0,63}): ")
+
+
+def prefixed_within_the_bound(message: str, name: str, limit: int = HANDED_OVER_LIMIT) -> str:
+    """``message`` with ``name`` in front of it, bounded by cutting the chain.
+
+    A row handed up N levels of delegation carries N names before the finding's
+    own sentence. The sentence is never cut: it is what the producer is being
+    told, and two hundred characters of it are already a wrapped value. What is
+    cut is the chain, oldest step first, because the step nearest the sentence
+    is the agent that actually found the thing and the outer ones are the route
+    it took. A cut chain says so with :data:`ELIDED_CHAIN`.
+
+    A sentence that is over the bound on its own comes back whole and
+    unprefixed: the bound is on what this function adds, and truncating a
+    finding to fit a name in front of it would lose the finding.
+    """
+    whole = f"{name}: {message}"
+    if len(whole) <= limit:
+        return whole
+
+    # Only now is the chain read, and only its own steps are moved: what is
+    # kept keeps its order, so the sentence reads as its writer wrote it.
+    steps: list[str] = [f"{name}: "]
+    # A chain cut once already carries the marker, and a second one beside it
+    # says nothing the first does not.
+    rest = message[len(ELIDED_CHAIN) :] if message.startswith(ELIDED_CHAIN) else message
+    while True:
+        match = _CHAIN_STEP_RE.match(rest)
+        if match is None:
+            break
+        steps.append(match.group(0))
+        rest = rest[match.end() :]
+
+    # The marker's own room is taken before any name's: a chain that was cut
+    # and does not say so is worse than one name fewer.
+    room = limit - len(rest) - len(ELIDED_CHAIN)
+    kept: list[str] = []
+    for step in reversed(steps):
+        if len(step) > room:
+            break
+        kept.insert(0, step)
+        room -= len(step)
+    if not kept:
+        return rest if len(rest) >= limit else f"{ELIDED_CHAIN}{rest}"
+    return f"{ELIDED_CHAIN}{''.join(kept)}{rest}"
+
+
 def _hand_over_the_record(caller: Any, callee: Any, *, still_running: bool = True) -> None:
     """Move what the callee recorded onto the caller, so one node writes it all.
 
@@ -612,7 +675,7 @@ def _hand_over_the_record(caller: Any, callee: Any, *, still_running: bool = Tru
         caller.validation_findings.append(
             Violation(
                 code=str(row.get("code", "")),
-                message=f"{callee.name}: {row.get('message', '')}",
+                message=prefixed_within_the_bound(str(row.get("message", "")), str(callee.name)),
                 path=str(row.get("path", "")),
             )
         )

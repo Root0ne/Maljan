@@ -929,6 +929,12 @@ change landed on `main`.
   (`indicator_cap_invocations`, `indicator_cap_removed`, `integrity_refs_trimmed`);
   a summary stored before this release has none of them and reads as zero.
 
+- **A finding row handed up a chain of delegations stays inside its limit.**
+  Each hand-over put the callee's name in front of the row, and nothing bounded
+  the result, so a row five levels deep was longer than the eight hundred
+  characters every validator's own row is held to. The chain is cut instead,
+  oldest step first and marked with an ellipsis; the finding's own sentence is
+  never cut.
 ### Fixed
 
 - **A process that has finished its work is not ended by its own watchdog.** The

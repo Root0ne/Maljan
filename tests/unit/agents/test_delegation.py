@@ -1058,3 +1058,70 @@ class TestTheNodeBriefsALeadLikeAStaticAgent:
         assert helper._analysis_file_path == "/mirror/none/s.bin"
         assert helper.call_chain == ("top", "boss")
         assert helper.current_round == 2 and helper.pipeline_stage == "lead"
+
+
+class TestAHandedOverRowStaysWithinTheBound:
+    """A chain of delegations prefixed a row once per level and bounded nothing.
+
+    The rows a validator writes are held to eight hundred characters by the
+    guard in ``tests/unit/pipeline``; a hand-over adds a name in front of one,
+    and five levels of it wrote a row that limit does not describe. What is cut
+    is the route, never the finding.
+    """
+
+    def test_one_level_reads_as_it_always_did(self) -> None:
+        from maljan.agents.delegation import prefixed_within_the_bound
+
+        assert prefixed_within_the_bound("the id cites no evidence", "scout") == (
+            "scout: the id cites no evidence"
+        )
+
+    def test_a_chain_stays_under_the_limit(self) -> None:
+        from maljan.agents.delegation import HANDED_OVER_LIMIT, prefixed_within_the_bound
+
+        message = "the technique id cites no evidence id from this run. " * 12
+        assert len(message) < HANDED_OVER_LIMIT
+        for level in range(40):
+            message = prefixed_within_the_bound(message, f"specialist_{level:02d}")
+            assert len(message) <= HANDED_OVER_LIMIT
+
+    def test_the_finding_s_own_sentence_survives_the_cut(self) -> None:
+        from maljan.agents.delegation import prefixed_within_the_bound
+
+        sentence = "the technique id cites no evidence id from this run. " * 12
+        message = sentence
+        for level in range(40):
+            message = prefixed_within_the_bound(message, f"specialist_{level:02d}")
+
+        assert message.endswith(sentence)
+
+    def test_the_innermost_names_are_the_ones_kept(self) -> None:
+        from maljan.agents.delegation import ELIDED_CHAIN, prefixed_within_the_bound
+
+        sentence = "x" * 770
+        message = sentence
+        for name in ("alpha", "bravo", "charlie", "delta", "echo", "foxtrot"):
+            message = prefixed_within_the_bound(message, name)
+
+        # ``alpha`` prefixed first, so it sits nearest the sentence and is the
+        # agent that found the thing; ``foxtrot`` is the outermost caller.
+        assert message.startswith(ELIDED_CHAIN)
+        assert "alpha: " in message
+        assert "foxtrot: " not in message
+
+    def test_a_sentence_over_the_bound_is_never_cut(self) -> None:
+        from maljan.agents.delegation import HANDED_OVER_LIMIT, prefixed_within_the_bound
+
+        sentence = "y" * (HANDED_OVER_LIMIT + 50)
+
+        assert prefixed_within_the_bound(sentence, "scout") == sentence
+
+    def test_a_sentence_that_begins_like_a_name_is_not_read_as_one(self) -> None:
+        from maljan.agents.delegation import prefixed_within_the_bound
+
+        # A colon inside the finding's own words: the step pattern matches it,
+        # which costs the chain room rather than cutting the sentence.
+        message = prefixed_within_the_bound("TECHNIQUE: not in the catalogue", "scout")
+
+        assert message.endswith("TECHNIQUE: not in the catalogue")
+        assert message.startswith("scout: ")
