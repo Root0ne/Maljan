@@ -10,14 +10,22 @@ missing model turning "we could not look" into "we looked and found nothing".
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 from maljan.tools import knowledge
+
+_ELF_IMPORTS: dict[str, dict[str, list[str]]] = json.loads(
+    (Path(__file__).resolve().parents[2] / "fixtures" / "elf_import_lists.json").read_text(
+        encoding="utf-8"
+    )
+)
 
 
 class TestApiCapability:
@@ -190,6 +198,53 @@ class TestAttckLookup:
 
     def test_a_lowercase_id_is_normalised_before_the_lookup(self) -> None:
         assert knowledge.attck_lookup("t1055")["technique_id"] == "T1055"
+
+
+class TestWhatTheLookupAnswersAboutAnId:
+    """The four fields the vendored table owns, pinned per domain.
+
+    The table itself is checked against the bundles elsewhere; this is the
+    tool's own output, which is what every consumer reads.
+    """
+
+    @pytest.mark.parametrize(
+        ("technique_id", "name", "domain", "tactic", "platform"),
+        [
+            ("T1055", "Process Injection", "enterprise", "privilege-escalation", "Windows"),
+            ("T1055.012", "Process Hollowing", "enterprise", "stealth", "Windows"),
+            ("T1583", "Acquire Infrastructure", "enterprise", "resource-development", "PRE"),
+            ("T1417", "Input Capture", "mobile", "credential-access", "Android"),
+            ("T1633", "Virtualization/Sandbox Evasion", "mobile", "defense-evasion", "iOS"),
+            ("T0800", "Activate Firmware Update Mode", "ics", "inhibit-response-function", None),
+        ],
+    )
+    def test_the_catalogue_entry_is_what_the_table_says(
+        self, technique_id: str, name: str, domain: str, tactic: str, platform: str | None
+    ) -> None:
+        answer = knowledge.attck_lookup(technique_id)
+        assert answer["valid"] is True
+        assert answer["name"] == name
+        assert answer["domain"] == domain
+        assert tactic in answer["tactics"]
+        assert answer["url"] == (
+            f"https://attack.mitre.org/techniques/{technique_id.replace('.', '/')}"
+        )
+        if platform is None:
+            assert answer["platforms"] == []
+        else:
+            assert platform in answer["platforms"]
+
+    def test_the_scope_the_two_tools_report_is_one_answer(self) -> None:
+        for technique_id in ("T1055", "T1417", "T0800", "T1583"):
+            lookup = knowledge.attck_lookup(technique_id)
+            scope = knowledge.attck_scope(technique_id)
+            assert (lookup["domain"], lookup["platforms"]) == (scope["domain"], scope["platforms"])
+
+    def test_a_retired_id_is_named_as_retired_and_carries_no_entry(self) -> None:
+        answer = knowledge.attck_lookup("T1562.001")
+        assert answer["valid"] is False
+        assert answer["retired_in"] == "19.2"
+        assert (answer["name"], answer["tactics"], answer["platforms"]) == ("", [], [])
 
 
 class TestAttckValidate:
@@ -479,53 +534,114 @@ class TestTheLinuxVocabulary:
         assert "T1055.008" in cited
 
     def test_a_windows_rule_cannot_fire_on_an_elf_s_symbols(self) -> None:
-        """``socket``, ``connect``, ``send`` and ``recv`` are in both blocks."""
+        """``socket``, ``connect``, ``send`` and ``recv`` are in both blocks.
+
+        The Windows half pins what that block does today rather than endorsing
+        it: the same four names clear its Non-Application Layer Protocol rule,
+        which the Linux block deliberately does not have. Raising that bar is
+        its own change, against Windows evidence this branch does not carry.
+        """
         names = ["socket", "connect", "send", "recv"]
         linux = knowledge.api_capability(names, platform="linux")
-        rules = {
-            (hit["technique_id"], hit["name"])
-            for row in linux["capabilities"]
-            for hit in row["techniques"]
+        assert [row["category"] for row in linux["capabilities"]] == ["network"] * 4
+        assert [hit for row in linux["capabilities"] for hit in row["techniques"]] == []
+        windows = knowledge.api_capability(names, platform="windows")
+        cleared = {
+            hit["technique_id"] for row in windows["capabilities"] for hit in row["techniques"]
         }
-        assert rules == {("T1095", "Non-Application Layer Protocol")}
+        assert "T1095" in cleared
 
-    def test_a_benign_coreutils_import_list_is_flagged_nothing(self) -> None:
-        """The catalogue must have nothing to say about an ordinary program."""
-        coreutils = [
+    def test_the_catalogue_says_nothing_about_ordinary_linux_tools(self) -> None:
+        """Real import lists, not a list picked to pass. Every one of these is
+        a program a Linux system ships and runs; the catalogue may describe
+        what they touch and may not label any of it."""
+        checked = 0
+        for tool, names in _ELF_IMPORTS["benign"].items():
+            result = knowledge.api_capability(names, platform="linux")
+            flagged = [row["api"] for row in result["capabilities"] if row["catalog_flags"]]
+            cleared = sorted(
+                {hit["technique_id"] for row in result["capabilities"] for hit in row["techniques"]}
+            )
+            assert flagged == [], f"{tool} carries {len(flagged)} labelled rows"
+            assert cleared == [], f"{tool} clears {cleared}"
+            checked += 1
+        assert checked >= 8
+
+    def test_an_ordinary_tool_still_gets_its_associations(self) -> None:
+        """Saying nothing is not the same as answering nothing: the rows are
+        there, they carry categories, and the ones that mean little alone name
+        what would give them weight."""
+        result = knowledge.api_capability(_ELF_IMPORTS["benign"]["su"], platform="linux")
+        rows = {row["api"]: row for row in result["capabilities"]}
+        assert rows["setuid"]["category"] == "privilege"
+        assert rows["setuid"]["catalog_flags"] == []
+        assert "ptrace" in rows["setuid"]["corroborated_by"]
+
+    def test_a_bot_shaped_import_list_still_produces_associations(self) -> None:
+        """The other half of the bar: a catalogue that says nothing about
+        anything is no catalogue. A Linux bot's own shape — a socket loop, a
+        shell, a self-trace and an anonymous executable — is described and its
+        distinctive pairs clear their rules."""
+        bot = [
             "__libc_start_main",
-            "abort",
-            "calloc",
             "close",
-            "error",
-            "exit",
-            "fclose",
-            "fflush",
-            "fopen",
-            "fprintf",
-            "free",
-            "fwrite",
-            "getenv",
-            "getopt_long",
-            "isatty",
-            "localtime",
-            "lstat",
-            "malloc",
+            "connect",
+            "execve",
+            "fexecve",
+            "fork",
+            "getpid",
+            "kill",
+            "memfd_create",
             "memcpy",
-            "opendir",
-            "printf",
+            "open",
+            "personality",
+            "prctl",
+            "ptrace",
             "read",
-            "readdir",
-            "realloc",
-            "setlocale",
-            "stat",
-            "strcmp",
+            "recv",
+            "select",
+            "send",
+            "setsid",
+            "socket",
             "strlen",
-            "textdomain",
+            "system",
+            "unlink",
             "write",
         ]
-        result = knowledge.api_capability(coreutils, platform="linux")
-        assert [row["api"] for row in result["capabilities"] if row["catalog_flags"]] == []
-        assert [row["api"] for row in result["capabilities"] if row["techniques"]] == []
+        result = knowledge.api_capability(bot, platform="linux")
+        rows = {row["api"]: row for row in result["capabilities"]}
+        assert {rows[n]["category"] for n in ("socket", "execve", "ptrace", "memfd_create")} == {
+            "network",
+            "execution",
+            "anti_debug",
+            "process_injection",
+        }
+        cleared = sorted(
+            {hit["technique_id"] for row in result["capabilities"] for hit in row["techniques"]}
+        )
+        assert cleared == ["T1620", "T1622"]
+
+    def test_the_label_waits_for_what_would_give_it_weight(self) -> None:
+        """An anonymous file on its own is ordinary in the graphics and service
+        stacks; the same call beside one that reaches into another process is
+        not, and only then does the catalogue label the row."""
+        alone = knowledge.api_capability(["memfd_create"], platform="linux")
+        (row,) = alone["capabilities"]
+        assert row["category"] == "process_injection"
+        assert row["catalog_flags"] == []
+        assert "ptrace" in row["flagged_with"]
+
+        beside = knowledge.api_capability(["memfd_create", "ptrace"], platform="linux")
+        labelled = {r["api"]: r["catalog_flags"] for r in beside["capabilities"]}
+        assert labelled["memfd_create"] == ["suspicious"]
+
+    def test_the_windows_block_is_labelled_by_its_tier_as_before(self) -> None:
+        """The gate is data the Windows block does not carry, so nothing there
+        waits for a second name."""
+        result = knowledge.api_capability(["WriteProcessMemory"], platform="windows")
+        (row,) = result["capabilities"]
+        assert row["catalog_flags"] == ["suspicious"]
+        assert "flagged_with" not in row
 
     def test_a_platform_the_catalogue_has_no_block_for_says_so(self) -> None:
         result = knowledge.api_capability(["open"], platform="plan9")

@@ -169,487 +169,656 @@
   "T0800": {
     "domain": "ics",
     "name": "Activate Firmware Update Mode",
-    "tactics": [],
+    "tactics": [
+      "inhibit-response-function"
+    ],
     "platforms": []
   },
   "T0801": {
     "domain": "ics",
     "name": "Monitor Process State",
-    "tactics": [],
+    "tactics": [
+      "collection"
+    ],
     "platforms": []
   },
   "T0802": {
     "domain": "ics",
     "name": "Automated Collection",
-    "tactics": [],
+    "tactics": [
+      "collection"
+    ],
     "platforms": []
   },
   "T0806": {
     "domain": "ics",
     "name": "Brute Force I/O",
-    "tactics": [],
+    "tactics": [
+      "impair-process-control"
+    ],
     "platforms": []
   },
   "T0807": {
     "domain": "ics",
     "name": "Command-Line Interface",
-    "tactics": [],
+    "tactics": [
+      "execution"
+    ],
     "platforms": []
   },
   "T0809": {
     "domain": "ics",
     "name": "Data Destruction",
-    "tactics": [],
+    "tactics": [
+      "inhibit-response-function"
+    ],
     "platforms": []
   },
   "T0811": {
     "domain": "ics",
     "name": "Data from Information Repositories",
-    "tactics": [],
+    "tactics": [
+      "collection"
+    ],
     "platforms": []
   },
   "T0813": {
     "domain": "ics",
     "name": "Denial of Control",
-    "tactics": [],
+    "tactics": [
+      "impact"
+    ],
     "platforms": []
   },
   "T0814": {
     "domain": "ics",
     "name": "Denial of Service",
-    "tactics": [],
+    "tactics": [
+      "inhibit-response-function"
+    ],
     "platforms": []
   },
   "T0815": {
     "domain": "ics",
     "name": "Denial of View",
-    "tactics": [],
+    "tactics": [
+      "impact"
+    ],
     "platforms": []
   },
   "T0816": {
     "domain": "ics",
     "name": "Device Restart/Shutdown",
-    "tactics": [],
+    "tactics": [
+      "inhibit-response-function"
+    ],
     "platforms": []
   },
   "T0817": {
     "domain": "ics",
     "name": "Drive-by Compromise",
-    "tactics": [],
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": []
   },
   "T0819": {
     "domain": "ics",
     "name": "Exploit Public-Facing Application",
-    "tactics": [],
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": []
   },
   "T0820": {
     "domain": "ics",
     "name": "Exploitation for Evasion",
-    "tactics": [],
+    "tactics": [
+      "evasion"
+    ],
     "platforms": []
   },
   "T0821": {
     "domain": "ics",
     "name": "Modify Controller Tasking",
-    "tactics": [],
+    "tactics": [
+      "execution"
+    ],
     "platforms": []
   },
   "T0822": {
     "domain": "ics",
     "name": "External Remote Services",
-    "tactics": [],
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": []
   },
   "T0823": {
     "domain": "ics",
     "name": "Graphical User Interface",
-    "tactics": [],
+    "tactics": [
+      "execution"
+    ],
     "platforms": []
   },
   "T0826": {
     "domain": "ics",
     "name": "Loss of Availability",
-    "tactics": [],
+    "tactics": [
+      "impact"
+    ],
     "platforms": []
   },
   "T0827": {
     "domain": "ics",
     "name": "Loss of Control",
-    "tactics": [],
+    "tactics": [
+      "impact"
+    ],
     "platforms": []
   },
   "T0828": {
     "domain": "ics",
     "name": "Loss of Productivity and Revenue",
-    "tactics": [],
+    "tactics": [
+      "impact"
+    ],
     "platforms": []
   },
   "T0829": {
     "domain": "ics",
     "name": "Loss of View",
-    "tactics": [],
+    "tactics": [
+      "impact"
+    ],
     "platforms": []
   },
   "T0830": {
     "domain": "ics",
     "name": "Adversary-in-the-Middle",
-    "tactics": [],
+    "tactics": [
+      "collection"
+    ],
     "platforms": []
   },
   "T0831": {
     "domain": "ics",
     "name": "Manipulation of Control",
-    "tactics": [],
+    "tactics": [
+      "impact"
+    ],
     "platforms": []
   },
   "T0832": {
     "domain": "ics",
     "name": "Manipulation of View",
-    "tactics": [],
+    "tactics": [
+      "impact"
+    ],
     "platforms": []
   },
   "T0834": {
     "domain": "ics",
     "name": "Native API",
-    "tactics": [],
+    "tactics": [
+      "execution"
+    ],
     "platforms": []
   },
   "T0835": {
     "domain": "ics",
     "name": "Manipulate I/O Image",
-    "tactics": [],
+    "tactics": [
+      "inhibit-response-function"
+    ],
     "platforms": []
   },
   "T0836": {
     "domain": "ics",
     "name": "Modify Parameter",
-    "tactics": [],
+    "tactics": [
+      "impair-process-control"
+    ],
     "platforms": []
   },
   "T0837": {
     "domain": "ics",
     "name": "Loss of Protection",
-    "tactics": [],
+    "tactics": [
+      "impact"
+    ],
     "platforms": []
   },
   "T0838": {
     "domain": "ics",
     "name": "Modify Alarm Settings",
-    "tactics": [],
+    "tactics": [
+      "inhibit-response-function"
+    ],
     "platforms": []
   },
   "T0840": {
     "domain": "ics",
     "name": "Network Connection Enumeration",
-    "tactics": [],
+    "tactics": [
+      "discovery"
+    ],
     "platforms": []
   },
   "T0842": {
     "domain": "ics",
     "name": "Network Sniffing",
-    "tactics": [],
+    "tactics": [
+      "discovery"
+    ],
     "platforms": []
   },
   "T0843": {
     "domain": "ics",
     "name": "Program Download",
-    "tactics": [],
+    "tactics": [
+      "lateral-movement"
+    ],
     "platforms": []
   },
   "T0843.001": {
     "domain": "ics",
     "name": "Download All",
-    "tactics": [],
+    "tactics": [
+      "lateral-movement"
+    ],
     "platforms": []
   },
   "T0843.002": {
     "domain": "ics",
     "name": "Online Edit",
-    "tactics": [],
+    "tactics": [
+      "lateral-movement"
+    ],
     "platforms": []
   },
   "T0843.003": {
     "domain": "ics",
     "name": "Program Append",
-    "tactics": [],
+    "tactics": [
+      "lateral-movement"
+    ],
     "platforms": []
   },
   "T0845": {
     "domain": "ics",
     "name": "Program Upload",
-    "tactics": [],
+    "tactics": [
+      "collection"
+    ],
     "platforms": []
   },
   "T0846": {
     "domain": "ics",
     "name": "Remote System Discovery",
-    "tactics": [],
+    "tactics": [
+      "discovery"
+    ],
     "platforms": []
   },
   "T0846.001": {
     "domain": "ics",
     "name": "Port Scan",
-    "tactics": [],
+    "tactics": [
+      "discovery"
+    ],
     "platforms": []
   },
   "T0846.002": {
     "domain": "ics",
     "name": "Broadcast Discovery",
-    "tactics": [],
+    "tactics": [
+      "discovery"
+    ],
     "platforms": []
   },
   "T0846.003": {
     "domain": "ics",
     "name": "Multicast Discovery",
-    "tactics": [],
+    "tactics": [
+      "discovery"
+    ],
     "platforms": []
   },
   "T0847": {
     "domain": "ics",
     "name": "Replication Through Removable Media",
-    "tactics": [],
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": []
   },
   "T0848": {
     "domain": "ics",
     "name": "Rogue Master",
-    "tactics": [],
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": []
   },
   "T0849": {
     "domain": "ics",
     "name": "Masquerading",
-    "tactics": [],
+    "tactics": [
+      "evasion"
+    ],
     "platforms": []
   },
   "T0851": {
     "domain": "ics",
     "name": "Rootkit",
-    "tactics": [],
+    "tactics": [
+      "evasion",
+      "inhibit-response-function"
+    ],
     "platforms": []
   },
   "T0852": {
     "domain": "ics",
     "name": "Screen Capture",
-    "tactics": [],
+    "tactics": [
+      "collection"
+    ],
     "platforms": []
   },
   "T0853": {
     "domain": "ics",
     "name": "Scripting",
-    "tactics": [],
+    "tactics": [
+      "execution"
+    ],
     "platforms": []
   },
   "T0858": {
     "domain": "ics",
     "name": "Change Operating Mode",
-    "tactics": [],
+    "tactics": [
+      "execution",
+      "evasion"
+    ],
     "platforms": []
   },
   "T0859": {
     "domain": "ics",
     "name": "Valid Accounts",
-    "tactics": [],
+    "tactics": [
+      "persistence",
+      "lateral-movement"
+    ],
     "platforms": []
   },
   "T0860": {
     "domain": "ics",
     "name": "Wireless Compromise",
-    "tactics": [],
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": []
   },
   "T0861": {
     "domain": "ics",
     "name": "Point & Tag Identification",
-    "tactics": [],
+    "tactics": [
+      "collection"
+    ],
     "platforms": []
   },
   "T0862": {
     "domain": "ics",
     "name": "Supply Chain Compromise",
-    "tactics": [],
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": []
   },
   "T0863": {
     "domain": "ics",
     "name": "User Execution",
-    "tactics": [],
+    "tactics": [
+      "execution"
+    ],
     "platforms": []
   },
   "T0864": {
     "domain": "ics",
     "name": "Transient Cyber Asset",
-    "tactics": [],
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": []
   },
   "T0865": {
     "domain": "ics",
     "name": "Spearphishing Attachment",
-    "tactics": [],
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": []
   },
   "T0866": {
     "domain": "ics",
     "name": "Exploitation of Remote Services",
-    "tactics": [],
+    "tactics": [
+      "initial-access",
+      "lateral-movement"
+    ],
     "platforms": []
   },
   "T0867": {
     "domain": "ics",
     "name": "Lateral Tool Transfer",
-    "tactics": [],
+    "tactics": [
+      "lateral-movement"
+    ],
     "platforms": []
   },
   "T0868": {
     "domain": "ics",
     "name": "Detect Operating Mode",
-    "tactics": [],
+    "tactics": [
+      "collection"
+    ],
     "platforms": []
   },
   "T0869": {
     "domain": "ics",
     "name": "Standard Application Layer Protocol",
-    "tactics": [],
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": []
   },
   "T0871": {
     "domain": "ics",
     "name": "Execution through API",
-    "tactics": [],
+    "tactics": [
+      "execution"
+    ],
     "platforms": []
   },
   "T0872": {
     "domain": "ics",
     "name": "Indicator Removal on Host",
-    "tactics": [],
+    "tactics": [
+      "evasion"
+    ],
     "platforms": []
   },
   "T0873": {
     "domain": "ics",
     "name": "Project File Infection",
-    "tactics": [],
+    "tactics": [
+      "persistence"
+    ],
     "platforms": []
   },
   "T0873.001": {
     "domain": "ics",
     "name": "Siemens Project File Format",
-    "tactics": [],
+    "tactics": [
+      "persistence"
+    ],
     "platforms": []
   },
   "T0874": {
     "domain": "ics",
     "name": "Hooking",
-    "tactics": [],
+    "tactics": [
+      "execution",
+      "privilege-escalation"
+    ],
     "platforms": []
   },
   "T0877": {
     "domain": "ics",
     "name": "I/O Image",
-    "tactics": [],
+    "tactics": [
+      "collection"
+    ],
     "platforms": []
   },
   "T0878": {
     "domain": "ics",
     "name": "Alarm Suppression",
-    "tactics": [],
+    "tactics": [
+      "inhibit-response-function"
+    ],
     "platforms": []
   },
   "T0879": {
     "domain": "ics",
     "name": "Damage to Property",
-    "tactics": [],
+    "tactics": [
+      "impact"
+    ],
     "platforms": []
   },
   "T0880": {
     "domain": "ics",
     "name": "Loss of Safety",
-    "tactics": [],
+    "tactics": [
+      "impact"
+    ],
     "platforms": []
   },
   "T0881": {
     "domain": "ics",
     "name": "Service Stop",
-    "tactics": [],
+    "tactics": [
+      "inhibit-response-function"
+    ],
     "platforms": []
   },
   "T0882": {
     "domain": "ics",
     "name": "Theft of Operational Information",
-    "tactics": [],
+    "tactics": [
+      "impact"
+    ],
     "platforms": []
   },
   "T0883": {
     "domain": "ics",
     "name": "Internet Accessible Device",
-    "tactics": [],
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": []
   },
   "T0884": {
     "domain": "ics",
     "name": "Connection Proxy",
-    "tactics": [],
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": []
   },
   "T0885": {
     "domain": "ics",
     "name": "Commonly Used Port",
-    "tactics": [],
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": []
   },
   "T0886": {
     "domain": "ics",
     "name": "Remote Services",
-    "tactics": [],
+    "tactics": [
+      "initial-access",
+      "lateral-movement"
+    ],
     "platforms": []
   },
   "T0887": {
     "domain": "ics",
     "name": "Wireless Sniffing",
-    "tactics": [],
+    "tactics": [
+      "discovery",
+      "collection"
+    ],
     "platforms": []
   },
   "T0888": {
     "domain": "ics",
     "name": "Remote System Information Discovery",
-    "tactics": [],
+    "tactics": [
+      "discovery"
+    ],
     "platforms": []
   },
   "T0889": {
     "domain": "ics",
     "name": "Modify Program",
-    "tactics": [],
+    "tactics": [
+      "persistence"
+    ],
     "platforms": []
   },
   "T0890": {
     "domain": "ics",
     "name": "Exploitation for Privilege Escalation",
-    "tactics": [],
+    "tactics": [
+      "privilege-escalation"
+    ],
     "platforms": []
   },
   "T0892": {
     "domain": "ics",
     "name": "Change Credential",
-    "tactics": [],
+    "tactics": [
+      "inhibit-response-function"
+    ],
     "platforms": []
   },
   "T0893": {
     "domain": "ics",
     "name": "Data from Local System",
-    "tactics": [],
+    "tactics": [
+      "collection"
+    ],
     "platforms": []
   },
   "T0894": {
     "domain": "ics",
     "name": "System Binary Proxy Execution",
-    "tactics": [],
+    "tactics": [
+      "evasion"
+    ],
     "platforms": []
   },
   "T0895": {
     "domain": "ics",
     "name": "Autorun Image",
-    "tactics": [],
+    "tactics": [
+      "execution"
+    ],
     "platforms": []
   },
   "T1001": {
@@ -4404,7 +4573,9 @@
   "T1398": {
     "domain": "mobile",
     "name": "Boot or Logon Initialization Scripts",
-    "tactics": [],
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4413,7 +4584,9 @@
   "T1404": {
     "domain": "mobile",
     "name": "Exploitation for Privilege Escalation",
-    "tactics": [],
+    "tactics": [
+      "privilege-escalation"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4422,7 +4595,9 @@
   "T1406": {
     "domain": "mobile",
     "name": "Obfuscated Files or Information",
-    "tactics": [],
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4431,7 +4606,9 @@
   "T1406.001": {
     "domain": "mobile",
     "name": "Steganography",
-    "tactics": [],
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android"
     ]
@@ -4439,7 +4616,9 @@
   "T1406.002": {
     "domain": "mobile",
     "name": "Software Packing",
-    "tactics": [],
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4448,7 +4627,9 @@
   "T1407": {
     "domain": "mobile",
     "name": "Download New Code at Runtime",
-    "tactics": [],
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4457,7 +4638,9 @@
   "T1409": {
     "domain": "mobile",
     "name": "Stored Application Data",
-    "tactics": [],
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4466,7 +4649,10 @@
   "T1414": {
     "domain": "mobile",
     "name": "Clipboard Data",
-    "tactics": [],
+    "tactics": [
+      "collection",
+      "credential-access"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4475,7 +4661,10 @@
   "T1417": {
     "domain": "mobile",
     "name": "Input Capture",
-    "tactics": [],
+    "tactics": [
+      "collection",
+      "credential-access"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4484,7 +4673,10 @@
   "T1417.001": {
     "domain": "mobile",
     "name": "Keylogging",
-    "tactics": [],
+    "tactics": [
+      "collection",
+      "credential-access"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4493,7 +4685,10 @@
   "T1417.002": {
     "domain": "mobile",
     "name": "GUI Input Capture",
-    "tactics": [],
+    "tactics": [
+      "credential-access",
+      "collection"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4502,7 +4697,9 @@
   "T1418": {
     "domain": "mobile",
     "name": "Software Discovery",
-    "tactics": [],
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4511,7 +4708,9 @@
   "T1418.001": {
     "domain": "mobile",
     "name": "Security Software Discovery",
-    "tactics": [],
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4520,7 +4719,9 @@
   "T1420": {
     "domain": "mobile",
     "name": "File and Directory Discovery",
-    "tactics": [],
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4529,7 +4730,9 @@
   "T1421": {
     "domain": "mobile",
     "name": "System Network Connections Discovery",
-    "tactics": [],
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Android"
     ]
@@ -4537,7 +4740,9 @@
   "T1422": {
     "domain": "mobile",
     "name": "System Network Configuration Discovery",
-    "tactics": [],
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4546,7 +4751,9 @@
   "T1422.001": {
     "domain": "mobile",
     "name": "Internet Connection Discovery",
-    "tactics": [],
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4555,7 +4762,9 @@
   "T1422.002": {
     "domain": "mobile",
     "name": "Wi-Fi Discovery",
-    "tactics": [],
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4564,7 +4773,9 @@
   "T1423": {
     "domain": "mobile",
     "name": "Network Service Scanning",
-    "tactics": [],
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4573,7 +4784,9 @@
   "T1424": {
     "domain": "mobile",
     "name": "Process Discovery",
-    "tactics": [],
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4582,7 +4795,9 @@
   "T1426": {
     "domain": "mobile",
     "name": "System Information Discovery",
-    "tactics": [],
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4591,7 +4806,9 @@
   "T1428": {
     "domain": "mobile",
     "name": "Exploitation of Remote Services",
-    "tactics": [],
+    "tactics": [
+      "lateral-movement"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4600,7 +4817,9 @@
   "T1429": {
     "domain": "mobile",
     "name": "Audio Capture",
-    "tactics": [],
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4609,7 +4828,10 @@
   "T1430": {
     "domain": "mobile",
     "name": "Location Tracking",
-    "tactics": [],
+    "tactics": [
+      "collection",
+      "discovery"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4618,7 +4840,10 @@
   "T1430.001": {
     "domain": "mobile",
     "name": "Remote Device Management Services",
-    "tactics": [],
+    "tactics": [
+      "collection",
+      "discovery"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4627,7 +4852,10 @@
   "T1430.002": {
     "domain": "mobile",
     "name": "Impersonate SS7 Nodes",
-    "tactics": [],
+    "tactics": [
+      "collection",
+      "discovery"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4636,7 +4864,9 @@
   "T1437": {
     "domain": "mobile",
     "name": "Application Layer Protocol",
-    "tactics": [],
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4645,7 +4875,9 @@
   "T1437.001": {
     "domain": "mobile",
     "name": "Web Protocols",
-    "tactics": [],
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4654,7 +4886,9 @@
   "T1451": {
     "domain": "mobile",
     "name": "SIM Card Swap",
-    "tactics": [],
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4663,7 +4897,10 @@
   "T1453": {
     "domain": "mobile",
     "name": "Abuse Accessibility Features",
-    "tactics": [],
+    "tactics": [
+      "collection",
+      "credential-access"
+    ],
     "platforms": [
       "Android"
     ]
@@ -4671,7 +4908,9 @@
   "T1456": {
     "domain": "mobile",
     "name": "Drive-By Compromise",
-    "tactics": [],
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4680,7 +4919,10 @@
   "T1458": {
     "domain": "mobile",
     "name": "Replication Through Removable Media",
-    "tactics": [],
+    "tactics": [
+      "initial-access",
+      "lateral-movement"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4689,7 +4931,9 @@
   "T1461": {
     "domain": "mobile",
     "name": "Lockscreen Bypass",
-    "tactics": [],
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4698,7 +4942,9 @@
   "T1464": {
     "domain": "mobile",
     "name": "Network Denial of Service",
-    "tactics": [],
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4707,7 +4953,9 @@
   "T1471": {
     "domain": "mobile",
     "name": "Data Encrypted for Impact",
-    "tactics": [],
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "Android"
     ]
@@ -4715,7 +4963,9 @@
   "T1474": {
     "domain": "mobile",
     "name": "Supply Chain Compromise",
-    "tactics": [],
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4724,7 +4974,9 @@
   "T1474.001": {
     "domain": "mobile",
     "name": "Compromise Software Dependencies and Development Tools",
-    "tactics": [],
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4733,7 +4985,9 @@
   "T1474.002": {
     "domain": "mobile",
     "name": "Compromise Hardware Supply Chain",
-    "tactics": [],
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4742,7 +4996,9 @@
   "T1474.003": {
     "domain": "mobile",
     "name": "Compromise Software Supply Chain",
-    "tactics": [],
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4788,7 +5044,9 @@
   "T1481": {
     "domain": "mobile",
     "name": "Web Service",
-    "tactics": [],
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4797,7 +5055,9 @@
   "T1481.001": {
     "domain": "mobile",
     "name": "Dead Drop Resolver",
-    "tactics": [],
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4806,7 +5066,9 @@
   "T1481.002": {
     "domain": "mobile",
     "name": "Bidirectional Communication",
-    "tactics": [],
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -4815,7 +5077,9 @@
   "T1481.003": {
     "domain": "mobile",
     "name": "One-Way Communication",
-    "tactics": [],
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -5290,7 +5554,9 @@
   "T1509": {
     "domain": "mobile",
     "name": "Non-Standard Port",
-    "tactics": [],
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -5299,7 +5565,9 @@
   "T1512": {
     "domain": "mobile",
     "name": "Video Capture",
-    "tactics": [],
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -5308,7 +5576,9 @@
   "T1513": {
     "domain": "mobile",
     "name": "Screen Capture",
-    "tactics": [],
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Android"
     ]
@@ -5316,7 +5586,10 @@
   "T1516": {
     "domain": "mobile",
     "name": "Input Injection",
-    "tactics": [],
+    "tactics": [
+      "defense-evasion",
+      "impact"
+    ],
     "platforms": [
       "Android"
     ]
@@ -5324,7 +5597,10 @@
   "T1517": {
     "domain": "mobile",
     "name": "Access Notifications",
-    "tactics": [],
+    "tactics": [
+      "collection",
+      "credential-access"
+    ],
     "platforms": [
       "Android"
     ]
@@ -5371,7 +5647,9 @@
   "T1521": {
     "domain": "mobile",
     "name": "Encrypted Channel",
-    "tactics": [],
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -5380,7 +5658,9 @@
   "T1521.001": {
     "domain": "mobile",
     "name": "Symmetric Cryptography",
-    "tactics": [],
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -5389,7 +5669,9 @@
   "T1521.002": {
     "domain": "mobile",
     "name": "Asymmetric Cryptography",
-    "tactics": [],
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -5398,7 +5680,9 @@
   "T1521.003": {
     "domain": "mobile",
     "name": "SSL Pinning",
-    "tactics": [],
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -5487,7 +5771,9 @@
   "T1532": {
     "domain": "mobile",
     "name": "Archive Collected Data",
-    "tactics": [],
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -5496,7 +5782,9 @@
   "T1533": {
     "domain": "mobile",
     "name": "Data from Local System",
-    "tactics": [],
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -5568,7 +5856,10 @@
   "T1541": {
     "domain": "mobile",
     "name": "Foreground Persistence",
-    "tactics": [],
+    "tactics": [
+      "defense-evasion",
+      "persistence"
+    ],
     "platforms": [
       "Android"
     ]
@@ -5718,7 +6009,9 @@
   "T1544": {
     "domain": "mobile",
     "name": "Ingress Tool Transfer",
-    "tactics": [],
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -7640,7 +7933,10 @@
   "T1575": {
     "domain": "mobile",
     "name": "Native API",
-    "tactics": [],
+    "tactics": [
+      "defense-evasion",
+      "execution"
+    ],
     "platforms": [
       "Android"
     ]
@@ -7648,7 +7944,9 @@
   "T1577": {
     "domain": "mobile",
     "name": "Compromise Application Executable",
-    "tactics": [],
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "Android"
     ]
@@ -7726,7 +8024,9 @@
   "T1582": {
     "domain": "mobile",
     "name": "SMS Control",
-    "tactics": [],
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "Android"
     ]
@@ -8674,7 +8974,10 @@
   "T1603": {
     "domain": "mobile",
     "name": "Scheduled Task/Job",
-    "tactics": [],
+    "tactics": [
+      "execution",
+      "persistence"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -8683,7 +8986,9 @@
   "T1604": {
     "domain": "mobile",
     "name": "Proxy Through Victim",
-    "tactics": [],
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android"
     ]
@@ -8893,7 +9198,11 @@
   "T1616": {
     "domain": "mobile",
     "name": "Call Control",
-    "tactics": [],
+    "tactics": [
+      "collection",
+      "impact",
+      "command-and-control"
+    ],
     "platforms": [
       "Android"
     ]
@@ -8901,7 +9210,9 @@
   "T1617": {
     "domain": "mobile",
     "name": "Hooking",
-    "tactics": [],
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android"
     ]
@@ -8960,7 +9271,9 @@
   "T1623": {
     "domain": "mobile",
     "name": "Command and Scripting Interpreter",
-    "tactics": [],
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -8969,7 +9282,9 @@
   "T1623.001": {
     "domain": "mobile",
     "name": "Unix Shell",
-    "tactics": [],
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -8978,7 +9293,9 @@
   "T1624": {
     "domain": "mobile",
     "name": "Event Triggered Execution",
-    "tactics": [],
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "Android"
     ]
@@ -8986,7 +9303,9 @@
   "T1624.001": {
     "domain": "mobile",
     "name": "Broadcast Receivers",
-    "tactics": [],
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "Android"
     ]
@@ -8994,7 +9313,9 @@
   "T1625": {
     "domain": "mobile",
     "name": "Hijack Execution Flow",
-    "tactics": [],
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "Android"
     ]
@@ -9002,7 +9323,9 @@
   "T1625.001": {
     "domain": "mobile",
     "name": "System Runtime API Hijacking",
-    "tactics": [],
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "Android"
     ]
@@ -9010,7 +9333,9 @@
   "T1626": {
     "domain": "mobile",
     "name": "Abuse Elevation Control Mechanism",
-    "tactics": [],
+    "tactics": [
+      "privilege-escalation"
+    ],
     "platforms": [
       "Android"
     ]
@@ -9018,7 +9343,9 @@
   "T1626.001": {
     "domain": "mobile",
     "name": "Device Administrator Permissions",
-    "tactics": [],
+    "tactics": [
+      "privilege-escalation"
+    ],
     "platforms": [
       "Android"
     ]
@@ -9026,7 +9353,9 @@
   "T1627": {
     "domain": "mobile",
     "name": "Execution Guardrails",
-    "tactics": [],
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -9035,7 +9364,9 @@
   "T1627.001": {
     "domain": "mobile",
     "name": "Geofencing",
-    "tactics": [],
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -9044,7 +9375,9 @@
   "T1628": {
     "domain": "mobile",
     "name": "Hide Artifacts",
-    "tactics": [],
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android"
     ]
@@ -9052,7 +9385,9 @@
   "T1628.001": {
     "domain": "mobile",
     "name": "Suppress Application Icon",
-    "tactics": [],
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android"
     ]
@@ -9060,7 +9395,9 @@
   "T1628.002": {
     "domain": "mobile",
     "name": "User Evasion",
-    "tactics": [],
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android"
     ]
@@ -9068,7 +9405,9 @@
   "T1628.003": {
     "domain": "mobile",
     "name": "Conceal Multimedia Files",
-    "tactics": [],
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android"
     ]
@@ -9076,7 +9415,9 @@
   "T1629": {
     "domain": "mobile",
     "name": "Impair Defenses",
-    "tactics": [],
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android"
     ]
@@ -9084,7 +9425,9 @@
   "T1629.001": {
     "domain": "mobile",
     "name": "Prevent Application Removal",
-    "tactics": [],
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android"
     ]
@@ -9092,7 +9435,9 @@
   "T1629.002": {
     "domain": "mobile",
     "name": "Device Lockout",
-    "tactics": [],
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android"
     ]
@@ -9100,7 +9445,9 @@
   "T1629.003": {
     "domain": "mobile",
     "name": "Disable or Modify Tools",
-    "tactics": [],
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android"
     ]
@@ -9108,7 +9455,9 @@
   "T1630": {
     "domain": "mobile",
     "name": "Indicator Removal on Host",
-    "tactics": [],
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -9117,7 +9466,9 @@
   "T1630.001": {
     "domain": "mobile",
     "name": "Uninstall Malicious Application",
-    "tactics": [],
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android"
     ]
@@ -9125,7 +9476,9 @@
   "T1630.002": {
     "domain": "mobile",
     "name": "File Deletion",
-    "tactics": [],
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android"
     ]
@@ -9133,7 +9486,9 @@
   "T1630.003": {
     "domain": "mobile",
     "name": "Disguise Root/Jailbreak Indicators",
-    "tactics": [],
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -9142,7 +9497,10 @@
   "T1631": {
     "domain": "mobile",
     "name": "Process Injection",
-    "tactics": [],
+    "tactics": [
+      "defense-evasion",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -9151,7 +9509,10 @@
   "T1631.001": {
     "domain": "mobile",
     "name": "Ptrace System Calls",
-    "tactics": [],
+    "tactics": [
+      "defense-evasion",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -9160,7 +9521,9 @@
   "T1632": {
     "domain": "mobile",
     "name": "Subvert Trust Controls",
-    "tactics": [],
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -9169,7 +9532,9 @@
   "T1632.001": {
     "domain": "mobile",
     "name": "Code Signing Policy Modification",
-    "tactics": [],
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -9178,7 +9543,9 @@
   "T1633": {
     "domain": "mobile",
     "name": "Virtualization/Sandbox Evasion",
-    "tactics": [],
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -9187,7 +9554,9 @@
   "T1633.001": {
     "domain": "mobile",
     "name": "System Checks",
-    "tactics": [],
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -9196,7 +9565,9 @@
   "T1634": {
     "domain": "mobile",
     "name": "Credentials from Password Store",
-    "tactics": [],
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "iOS"
     ]
@@ -9204,7 +9575,9 @@
   "T1634.001": {
     "domain": "mobile",
     "name": "Keychain",
-    "tactics": [],
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "iOS"
     ]
@@ -9212,7 +9585,9 @@
   "T1635": {
     "domain": "mobile",
     "name": "Steal Application Access Token",
-    "tactics": [],
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -9221,7 +9596,9 @@
   "T1635.001": {
     "domain": "mobile",
     "name": "URI Hijacking",
-    "tactics": [],
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -9230,7 +9607,9 @@
   "T1636": {
     "domain": "mobile",
     "name": "Protected User Data",
-    "tactics": [],
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -9239,7 +9618,9 @@
   "T1636.001": {
     "domain": "mobile",
     "name": "Calendar Entries",
-    "tactics": [],
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -9248,7 +9629,9 @@
   "T1636.002": {
     "domain": "mobile",
     "name": "Call Log",
-    "tactics": [],
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -9257,7 +9640,9 @@
   "T1636.003": {
     "domain": "mobile",
     "name": "Contact List",
-    "tactics": [],
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -9266,7 +9651,9 @@
   "T1636.004": {
     "domain": "mobile",
     "name": "SMS Messages",
-    "tactics": [],
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -9275,7 +9662,9 @@
   "T1636.005": {
     "domain": "mobile",
     "name": "Accounts",
-    "tactics": [],
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -9284,7 +9673,9 @@
   "T1637": {
     "domain": "mobile",
     "name": "Dynamic Resolution",
-    "tactics": [],
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -9293,7 +9684,9 @@
   "T1637.001": {
     "domain": "mobile",
     "name": "Domain Generation Algorithms",
-    "tactics": [],
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -9302,7 +9695,9 @@
   "T1638": {
     "domain": "mobile",
     "name": "Adversary-in-the-Middle",
-    "tactics": [],
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -9311,7 +9706,9 @@
   "T1639": {
     "domain": "mobile",
     "name": "Exfiltration Over Alternative Protocol",
-    "tactics": [],
+    "tactics": [
+      "exfiltration"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -9320,7 +9717,9 @@
   "T1639.001": {
     "domain": "mobile",
     "name": "Exfiltration Over Unencrypted Non-C2 Protocol",
-    "tactics": [],
+    "tactics": [
+      "exfiltration"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -9329,7 +9728,9 @@
   "T1640": {
     "domain": "mobile",
     "name": "Account Access Removal",
-    "tactics": [],
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "Android"
     ]
@@ -9337,7 +9738,9 @@
   "T1641": {
     "domain": "mobile",
     "name": "Data Manipulation",
-    "tactics": [],
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "Android"
     ]
@@ -9345,7 +9748,9 @@
   "T1641.001": {
     "domain": "mobile",
     "name": "Transmitted Data Manipulation",
-    "tactics": [],
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "Android"
     ]
@@ -9353,7 +9758,9 @@
   "T1642": {
     "domain": "mobile",
     "name": "Endpoint Denial of Service",
-    "tactics": [],
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -9362,7 +9769,9 @@
   "T1643": {
     "domain": "mobile",
     "name": "Generate Traffic from Victim",
-    "tactics": [],
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -9371,7 +9780,9 @@
   "T1644": {
     "domain": "mobile",
     "name": "Out of Band Data",
-    "tactics": [],
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -9380,7 +9791,9 @@
   "T1645": {
     "domain": "mobile",
     "name": "Compromise Client Software Binary",
-    "tactics": [],
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -9389,7 +9802,9 @@
   "T1646": {
     "domain": "mobile",
     "name": "Exfiltration Over C2 Channel",
-    "tactics": [],
+    "tactics": [
+      "exfiltration"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -9492,7 +9907,9 @@
   "T1655": {
     "domain": "mobile",
     "name": "Masquerading",
-    "tactics": [],
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -9501,7 +9918,9 @@
   "T1655.001": {
     "domain": "mobile",
     "name": "Match Legitimate Name or Location",
-    "tactics": [],
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -9524,7 +9943,9 @@
   "T1658": {
     "domain": "mobile",
     "name": "Exploitation for Client Execution",
-    "tactics": [],
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -9546,7 +9967,9 @@
   "T1660": {
     "domain": "mobile",
     "name": "Phishing",
-    "tactics": [],
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -9555,7 +9978,10 @@
   "T1661": {
     "domain": "mobile",
     "name": "Application Versioning",
-    "tactics": [],
+    "tactics": [
+      "initial-access",
+      "defense-evasion"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -9564,7 +9990,9 @@
   "T1662": {
     "domain": "mobile",
     "name": "Data Destruction",
-    "tactics": [],
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "Android"
     ]
@@ -9572,7 +10000,9 @@
   "T1663": {
     "domain": "mobile",
     "name": "Remote Access Software",
-    "tactics": [],
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -9581,7 +10011,9 @@
   "T1664": {
     "domain": "mobile",
     "name": "Exploitation for Initial Access",
-    "tactics": [],
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -9652,7 +10084,9 @@
   "T1670": {
     "domain": "mobile",
     "name": "Virtualization Solution",
-    "tactics": [],
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android"
     ]
@@ -9706,7 +10140,10 @@
   "T1676": {
     "domain": "mobile",
     "name": "Linked Devices",
-    "tactics": [],
+    "tactics": [
+      "collection",
+      "persistence"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -10028,97 +10465,141 @@
   "T1691": {
     "domain": "ics",
     "name": "Block Operational Technology Message",
-    "tactics": [],
+    "tactics": [
+      "inhibit-response-function"
+    ],
     "platforms": []
   },
   "T1691.001": {
     "domain": "ics",
     "name": "Command Message",
-    "tactics": [],
+    "tactics": [
+      "inhibit-response-function"
+    ],
     "platforms": []
   },
   "T1691.002": {
     "domain": "ics",
     "name": "Reporting Message",
-    "tactics": [],
+    "tactics": [
+      "inhibit-response-function"
+    ],
     "platforms": []
   },
   "T1692": {
     "domain": "ics",
     "name": "Unauthorized Message",
-    "tactics": [],
+    "tactics": [
+      "evasion",
+      "impair-process-control"
+    ],
     "platforms": []
   },
   "T1692.001": {
     "domain": "ics",
     "name": "Command Message",
-    "tactics": [],
+    "tactics": [
+      "evasion",
+      "impair-process-control"
+    ],
     "platforms": []
   },
   "T1692.002": {
     "domain": "ics",
     "name": "Reporting Message",
-    "tactics": [],
+    "tactics": [
+      "evasion",
+      "impair-process-control"
+    ],
     "platforms": []
   },
   "T1693": {
     "domain": "ics",
     "name": "Modify Firmware",
-    "tactics": [],
+    "tactics": [
+      "persistence",
+      "inhibit-response-function",
+      "impair-process-control"
+    ],
     "platforms": []
   },
   "T1693.001": {
     "domain": "ics",
     "name": "System Firmware",
-    "tactics": [],
+    "tactics": [
+      "persistence",
+      "inhibit-response-function",
+      "impair-process-control"
+    ],
     "platforms": []
   },
   "T1693.002": {
     "domain": "ics",
     "name": "Module Firmware",
-    "tactics": [],
+    "tactics": [
+      "persistence",
+      "inhibit-response-function",
+      "impair-process-control"
+    ],
     "platforms": []
   },
   "T1694": {
     "domain": "ics",
     "name": "Insecure Credentials",
-    "tactics": [],
+    "tactics": [
+      "persistence",
+      "lateral-movement"
+    ],
     "platforms": []
   },
   "T1694.001": {
     "domain": "ics",
     "name": "Default Credentials",
-    "tactics": [],
+    "tactics": [
+      "persistence",
+      "lateral-movement"
+    ],
     "platforms": []
   },
   "T1694.002": {
     "domain": "ics",
     "name": "Hardcoded Credentials",
-    "tactics": [],
+    "tactics": [
+      "persistence",
+      "lateral-movement"
+    ],
     "platforms": []
   },
   "T1695": {
     "domain": "ics",
     "name": "Block Communications",
-    "tactics": [],
+    "tactics": [
+      "inhibit-response-function"
+    ],
     "platforms": []
   },
   "T1695.001": {
     "domain": "ics",
     "name": "Serial COM",
-    "tactics": [],
+    "tactics": [
+      "inhibit-response-function"
+    ],
     "platforms": []
   },
   "T1695.002": {
     "domain": "ics",
     "name": "Ethernet",
-    "tactics": [],
+    "tactics": [
+      "inhibit-response-function"
+    ],
     "platforms": []
   },
   "T1695.003": {
     "domain": "ics",
     "name": "Wi-Fi",
-    "tactics": [],
+    "tactics": [
+      "inhibit-response-function"
+    ],
     "platforms": []
   }
 }

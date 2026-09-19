@@ -483,25 +483,36 @@ change landed on `main`.
   resolution all answer from it and build nothing; only `resolve_technique` and
   the alignment gate, which rank, still load the STIX bundles. A cold worker
   and a cold CI runner no longer fetch fifty-eight megabytes to answer a
-  dictionary question, and `tests/unit` needs no network at all.
+  dictionary question, and `tests/unit` needs no network at all. Mobile and ICS
+  rows carry their tactics, which the enterprise-only kill-chain filter had
+  always dropped.
   `data/attck_retired_ids.json` gains `revoked_by` per row where the bundle
   names a successor, which is what lets a data builder retarget a retired id
   mechanically.
 - **An ELF's symbols have a behaviour catalogue.**
   `data/api_behaviour_map_v1.json` gains a `linux` block of nine groups over
-  188 libc, syscall, OpenSSL and libcurl names, and `data/api_attck_map_v1.json`
-  nine Linux technique rules, each naming an id the vendored table declares for
-  Linux. The vocabulary is deliberately narrower than the Windows one:
-  `registry` has no counterpart, and `persistence`, `keylogging`,
-  `screen_capture`, `credential` and `evasion` are absent because their honest
-  Linux evidence is a path or an X11 call rather than a symbol name. The
-  catalogue is asked one platform at a time — `tools.knowledge.api_capability`
-  and the knowledge sidecar's tool take `platform`, and the triage pack passes
-  the routed format's — so a name in both blocks (`connect`, `send`, `system`)
-  is answered about the system the sample actually runs on.
+  182 libc, syscall, OpenSSL and libcurl names, and `data/api_attck_map_v1.json`
+  three Linux technique rules, each naming an id the vendored table declares
+  for Linux. Every tier and every rule was measured against the 1894 ELF
+  binaries with a dynamic symbol table on the machine it was written on: eight
+  of the nine groups are informational associations carrying `corroborated_by`,
+  the ninth is labelled only when a second name says the sample reaches into
+  another process (`flags_with`, a new key the Windows block does not use), and
+  the worst technique rule appears on 0.2% of those binaries. The vocabulary is
+  deliberately narrower than the Windows one: `registry` has no counterpart,
+  and `persistence`, `keylogging`, `screen_capture`, `credential` and `evasion`
+  are absent because their honest Linux evidence is a path or an X11 call
+  rather than a symbol name. The catalogue is asked one platform at a time —
+  `tools.knowledge.api_capability` and the knowledge sidecar's tool take
+  `platform`, and the triage pack passes the routed format's — so a name in
+  both blocks (`connect`, `send`, `system`) is answered about the system the
+  sample actually runs on, and a format with no block (Mach-O, an APK) is not
+  asked at all rather than asked about Win32.
   **Upgrading:** a caller of `api_capability`, `load_api_behaviour_db` or
   `load_api_attck_map` that wants ELF answers must pass `platform="linux"`;
-  the default stays Windows, so nothing that exists changes.
+  the default stays Windows, so nothing that exists changes. A technique rule
+  now carries `rule` beside `name`, and `name` is the ATT&CK name for the id:
+  the two `T1685` rules no longer print a name the catalogue does not use.
 - **The API capability builder regenerates its own data file.** Its curated
   source still named two ids ATT&CK 19.2 retired, and its own check refused
   them, so `data/api_attck_map_v1.json` had no working generator. A retired id
@@ -514,6 +525,9 @@ change landed on `main`.
   900; 0 never re-attempts, which is the previous behaviour). One unreachable
   moment used to leave every later job in that worker without the index, with
   nothing saying why. Concurrent lookups still start one build, not a storm.
+  The value reaches the knowledge sidecar — the process where the build
+  actually happens — as `MALJAN_INDEX_RETRY_SECONDS`, which that server is
+  allowed to read and applies once at start-up.
 
 ### Changed
 
@@ -2490,6 +2504,12 @@ change landed on `main`.
 
 ### Removed
 
+- **`data/attck_platforms.json`.** `data/attck_techniques.json` replaces it and
+  carries everything it did — per technique id, its domain and its MITRE
+  platforms — beside the name and the tactic slugs it did not, plus the tactic
+  catalogue per domain. Nothing in the tree reads the old path; a deployment or
+  a script of your own that reads it by name must be pointed at the new file,
+  whose rows are keyed the same way and carry the same two keys.
 - **The static analyst's case-prior hint and its settings.**
   `StaticAnalyst._compute_attck_case_hint`, `analysis.attck_case_rag` and the
   five `preprocessing.attck_case_*` settings; alembic revision
@@ -2606,6 +2626,17 @@ Configuration — or import a JSON export from another instance. Keep
 `SETTINGS_ENCRYPTION_KEY` stable: there is no re-encryption step, and a changed
 key makes every stored secret unreadable. See
 [docs/configuration.md](docs/configuration.md).
+
+`data/attck_platforms.json` is gone and `data/attck_techniques.json` stands in
+its place, with the same `{technique_id: {domain, platforms}}` rows plus `name`,
+`tactics` and a `_tactics` catalogue per domain. Regenerate it, the id
+catalogue and the retired set together with
+`uv run python scripts/knowledge/prepare_attck_malware_fixtures.py`. Nothing in
+this repository reads the old filename; only a deployment or a script of your
+own can be affected, and pointing it at the new file is the whole change.
+Mobile and ICS technique rows now carry their tactics, which they never did:
+a capability cell for one of those techniques shows its real matrix column
+instead of an empty one.
 
 A JSON export taken before the tool-selection modes were removed may carry
 `core.static.ghidra.tool_selection`, `core.static.r2.tool_selection` or the
