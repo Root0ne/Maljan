@@ -768,9 +768,12 @@ per ask. A budget is part of the definition, so a clone of a team carries the
 budget its agents need; the console draws the two as **Steps per loop** and
 **Seconds per loop** on the agent's card, and a blank box inherits the
 deployment's `react_agent_max_steps` / `react_agent_timeout`. The two
-`react_agent_*_overrides` maps are deprecated: they are still read for an
+`react_agent_*_overrides` maps are deprecated and are deleted in the release
+after the next promotion to main: until then they are still read for an
 agent whose definition sets neither, so a deployment that configured a budget
-there keeps it, and a definition's own value wins over them.
+there keeps it, and a definition's own value wins over them. A map entry that
+is not a whole number of at least one is dropped with a warning when the
+settings are built, the same bound the definition's own fields carry.
 The `ask_<key>` tool's description gives the model the same number,
 computed by `delegation._asks_that_fit` from the caller's own timeout rather
 than written down twice. See *Delegation* in [architecture.md](architecture.md) for

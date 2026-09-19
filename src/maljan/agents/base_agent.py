@@ -2019,6 +2019,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         # and truncation ledgers. None outside a job: the recorder then counts
         # within its own loop.
         self.evidence_counter: EvidenceCounter | None = None
+        # The run's record of what its tools answered, handed down by the
+        # container. ``None`` for an agent built outside a job.
+        self.evidence_corpus: Any = None
         # What the optional ``maljan-findings`` block carried, accumulated as
         # the loop answers and drained onto the ISR the analyst returns. A
         # buffer rather than a return value because the block arrives with the
@@ -2561,6 +2564,8 @@ class BaseAnalyst(BudgetMeter, ABC):
             # "analysis" every entry carried when there was only one.
             stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
             sink=self._event_sink(),
+            # What the run saw, before the byte budget trims what it keeps.
+            corpus=getattr(self, "evidence_corpus", None),
         )
         # The repeat guard is per loop, like the recorder: a second chunk is a
         # new conversation and the model has not seen the first one's answers.

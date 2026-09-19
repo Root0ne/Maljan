@@ -91,3 +91,55 @@ def test_public_snapshot_keeps_server_env_names_and_hides_their_values():
     assert snap["mcp.servers.probe_srv.env.UPSTREAM_API_TOKEN"] == "***"
     assert snap["mcp.servers.probe_srv.env.LOG_LEVEL"] == "***"
     assert "sk-not-a-real-token" not in str(snap)
+
+
+class TestADeprecatedOverrideMapCannotHoldANonBudget:
+    """``dict[str, int]`` accepted a zero, a negative and a boolean.
+
+    A loop given one of those does not run at all, and the reader fell back to
+    the deployment's own number — so the store held a value nothing would ever
+    use and nobody was told. The bound the definition's own budget fields carry
+    is on the maps now, and an entry that fails it is dropped rather than
+    refused: a settings build that raises is a deployment that cannot serve.
+
+    It runs **before** pydantic's coercion, which is where the shapes that
+    raise are: run after it, a ``2.5``, a ``"lots"`` and a nested dict never
+    reached it and the build raised on all three.
+    """
+
+    @pytest.mark.parametrize("budget", [0, -5, 2.5, "lots", {"a": 1}, [1], True, False, None])
+    def test_a_value_no_loop_can_run_on_is_dropped_and_nothing_raises(self, budget):
+        settings = Settings(react_agent_max_steps_overrides={"scout": budget, "static": 40})
+
+        assert settings.react_agent_max_steps_overrides == {"static": 40}
+
+    @pytest.mark.parametrize("budget", [1, 40, "40", " 40 "])
+    def test_a_value_a_loop_can_run_on_is_kept(self, budget):
+        """A deployment writes one as a string through the environment."""
+        settings = Settings(react_agent_timeout_overrides={"judge": budget})
+
+        assert settings.react_agent_timeout_overrides == {"judge": int(str(budget).strip())}
+
+    def test_a_good_map_is_untouched(self):
+        settings = Settings(react_agent_timeout_overrides={"static": 1500, "judge": 600})
+
+        assert settings.react_agent_timeout_overrides == {"static": 1500, "judge": 600}
+
+    def test_a_map_that_is_not_a_map_is_still_the_field_s_own_refusal(self):
+        """Stated rather than assumed: the bound is per value, not per field.
+
+        A whole field of the wrong type is pydantic refusing the annotation,
+        which is the behaviour every other setting has and is not what a
+        per-value bound is for.
+        """
+        with pytest.raises(ValidationError):
+            Settings(react_agent_max_steps_overrides="not a map")
+
+    def test_the_operator_is_told_which_entry_went(self, caplog):
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="maljan.core.config"):
+            Settings(react_agent_max_steps_overrides={"scout": "lots"})
+
+        assert "scout" in caplog.text
+        assert "whole number of at least one" in caplog.text

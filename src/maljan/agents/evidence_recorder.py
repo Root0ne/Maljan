@@ -200,6 +200,7 @@ class EvidenceRecorder:
         counter: EvidenceCounter | None = None,
         stage: str = "analysis",
         sink: EventSink | None = None,
+        corpus: Any = None,
     ) -> None:
         self.agent = agent
         self.stage = stage
@@ -211,6 +212,12 @@ class EvidenceRecorder:
         # ``None`` outside a job, which makes every emit a no-op, exactly as
         # it does everywhere else in the pipeline.
         self.sink = sink
+        # The run's own record of what its tools answered, kept in memory for
+        # the length of the job. ``None`` outside a job, as the sink is. It is
+        # written here rather than beside the stored entry because the byte
+        # budget blanks the entry later, after the model has read it, and a
+        # grounding check over what survived is a check over the wrong thing.
+        self.corpus = corpus
 
     def call_started(
         self, *, tool: str, args: dict[str, Any] | None = None, server: str | None = None
@@ -275,6 +282,14 @@ class EvidenceRecorder:
             args_raw=args_raw,
         )
         self.entries.append(entry)
+        # ``output``, the text the model was handed, and not ``entry.output``,
+        # which the ledger has already trimmed and the byte budget may blank
+        # to nothing. What the run saw is what a grounding check must search.
+        if self.corpus is not None:
+            try:
+                self.corpus.remember(entry.id, tool, output)
+            except Exception:  # noqa: BLE001 — a record is never worth a lost call
+                pass
         emit_tool_call_finished(
             self.sink,
             stage=self.stage,

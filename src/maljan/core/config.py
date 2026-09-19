@@ -588,8 +588,10 @@ class PreprocessingConfig(BaseModel):
 
     # Deterministic API→ATT&CK mapping, computed from the same resolved-import
     # set as the behaviour map above (one parse, two projections). It fills
-    # ``StaticAnalysis.api_technique_hits``: one row per technique with the
-    # exact imports that evidenced it, which an analyst reads and decides about.
+    # ``StaticAnalysis.api_technique_hits``: one row per *rule* with the exact
+    # imports that evidenced it, which an analyst reads and decides about. Two
+    # rules may name one technique by two mechanisms, and each carries its own
+    # ``rule`` label so the two rows are not read as a duplicate.
     # Each row carries the catalog's own confidence, deliberately modest — a
     # resolved import merely being present is weak — and each technique declares
     # a ``min_apis`` so one ubiquitous import cannot produce a row on its own.
@@ -1080,6 +1082,22 @@ def _without_the_empty_builtin_tool_list(entry: dict[str, Any]) -> dict[str, Any
     if entry.get("tools") == []:
         return {k: v for k, v in entry.items() if k != "tools"}
     return entry
+
+
+def _a_whole_number(value: Any) -> Any:
+    """``value`` as the integer it names, or ``value`` itself.
+
+    An environment variable and a JSON import both bring a number in as a
+    string, and a bound that runs before pydantic's coercion has to read one
+    the way pydantic would. Anything that is not a whole number comes back
+    unchanged, so the caller still refuses it.
+    """
+    if isinstance(value, str):
+        try:
+            return int(value.strip())
+        except ValueError:
+            return value
+    return value
 
 
 def _is_a_budget(value: Any) -> bool:
@@ -2646,6 +2664,26 @@ class ReportingConfig(BaseModel):
     # and stays well inside what a JSONB column and a context window tolerate.
     evidence_budget_bytes: Annotated[int, Field(ge=0)] = 524288
 
+    # How much of a run's tool output is kept in memory, for the length of the
+    # job, so a grounding check can ask what the run SAW rather than what the
+    # ledger kept. The budget above blanks an entry after the model has already
+    # read it, and a check that searched only what survived told a judge its
+    # own C2 "appears nowhere in the evidence". This corpus is never written to
+    # the graph state, never persisted and dropped when the job ends. Past it
+    # the corpus reports itself incomplete, and an absence measured against an
+    # incomplete corpus is advisory rather than a reason to drop anything.
+    #
+    # Sixteen megabytes, and the number is a measurement rather than a round
+    # one. A ceiling only bounds what it says it bounds if the text is not
+    # copied: at 400 answers of 6 000 characters the corpus holds 2.07 MB for
+    # 2.40 MB of text and one grounding check allocates 0.01 MB on top of it,
+    # so the process cost is the ceiling and not four times it. Every answer
+    # passes ``max_tool_output_chars`` (6 000), so 16 MB is about 2 700 of
+    # them, against the order-400 tool calls a whole team spends — several
+    # times the heaviest run measured, and still a bound a machine running a
+    # model beside the worker can afford.
+    evidence_corpus_bytes: Annotated[int, Field(ge=0)] = 16777216
+
 
 class TriageConfig(BaseModel):
     """The triage pack: the deterministic tools the pipeline runs before any analyst.
@@ -2839,8 +2877,9 @@ class Settings(BaseSettings):
 
     # Deprecated: a budget belongs to the agent that spends it, so
     # ``agents.definitions.<key>.timeout_seconds`` is where one is set now and
-    # a definition's own value wins. This map is still read, for one release,
-    # so a deployment that set a budget here keeps it.
+    # a definition's own value wins. This map is still read until the release
+    # after the next promotion to main, so a deployment that set a budget here
+    # keeps it.
     # Per-agent timeout overrides. The default ``react_agent_timeout`` is
     # tuned for the network/dynamic analysts (~1-3 tool calls). The
     # static analyst attaches the Ghidra MCP server with many tools, so
@@ -2893,8 +2932,8 @@ class Settings(BaseSettings):
 
     # Deprecated, as ``react_agent_timeout_overrides`` is: set a step budget on
     # the agent's own definition (``agents.definitions.<key>.max_steps``),
-    # which wins over this map. Read for one release so a deployment that set
-    # one here keeps it.
+    # which wins over this map. Read until the release after the next promotion
+    # to main, so a deployment that set one here keeps it.
     # Per-agent ReAct recursion-step overrides. The default
     # ``react_agent_max_steps`` (10) suits the network/dynamic analysts (0-3
     # tool calls), but the static analyst runs a full Ghidra MCP ReAct loop
@@ -2940,6 +2979,46 @@ class Settings(BaseSettings):
             "network": 6,
         }
     )
+
+    @field_validator(
+        "react_agent_timeout_overrides", "react_agent_max_steps_overrides", mode="before"
+    )
+    @classmethod
+    def _drop_a_budget_the_maps_cannot_hold(cls, value: Any) -> Any:
+        """The ``ge=1`` the definition's own budget fields carry, on the maps too.
+
+        ``dict[str, int]`` accepts a zero, a negative and a boolean through the
+        settings PATCH, and a loop given one of those does not run at all. The
+        entry is dropped and the reason logged rather than refused: a build
+        that raises is a deployment that cannot serve, and every one of these
+        maps is read on the path that starts every loop. What is dropped falls
+        through to the deployment's own budget, which is what the reader did
+        with it anyway — the difference is that the store no longer holds a
+        number nothing will ever use, and the operator is told.
+
+        **Before** the coercion, because that is where the shapes that raise
+        are. Run after it, this saw an ``int`` or nothing at all: a ``2.5``, a
+        ``"lots"`` and a nested dict never reached it and made the settings
+        build raise, which is the outcome it exists to prevent. What a
+        deployment legitimately writes still arrives — an environment variable
+        is a string, so a ``"40"`` that names a whole number is kept and
+        handed on for pydantic to coerce as it always did.
+        """
+        if not isinstance(value, dict):
+            return value
+        kept: dict[Any, Any] = {}
+        for agent, budget in value.items():
+            if _is_a_budget(_a_whole_number(budget)):
+                kept[agent] = budget
+                continue
+            logger.warning(
+                "Agent %r has a per-agent budget of %r in a deprecated override map, which "
+                "is not a whole number of at least one; it is ignored and the deployment's "
+                "own budget is used.",
+                agent,
+                budget,
+            )
+        return kept
 
     # LangChain / LangSmith Tracing
     # Enable with: LANGCHAIN_TRACING_V2=true, LANGCHAIN_API_KEY=ls_xxx

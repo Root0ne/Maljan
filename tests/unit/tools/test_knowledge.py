@@ -581,18 +581,92 @@ class TestTheLinuxVocabulary:
         assert rows["setuid"]["catalog_flags"] == []
         assert "ptrace" in rows["setuid"]["corroborated_by"]
 
+    # A canonical Mirai shape: sockets, a fork, a signal, a process rename, a
+    # walk of /proc, a file removed, an ioctl. No ``ptrace`` and no
+    # ``memfd_create``, because that family uses neither. Every symbol is one
+    # the ELF really imports; nothing here was chosen to clear a rule.
+    MIRAI_SHAPE = (
+        "__libc_start_main",
+        "atoi",
+        "chdir",
+        "close",
+        "closedir",
+        "connect",
+        "execve",
+        "fcntl",
+        "fork",
+        "getpid",
+        "ioctl",
+        "kill",
+        "memcpy",
+        "open",
+        "opendir",
+        "prctl",
+        "read",
+        "readdir",
+        "recv",
+        "select",
+        "send",
+        "setsid",
+        "setsockopt",
+        "signal",
+        "socket",
+        "strlen",
+        "system",
+        "unlink",
+        "write",
+    )
+
+    def test_a_canonical_bot_shape_produces_categories_and_no_technique_row(self) -> None:
+        """What the block does and does not say about a bot that traces nothing.
+
+        Written down as an assertion rather than as prose in the test beside
+        this one, which uses a list carrying the exact symbols the surviving
+        rules are written on. Measured on this machine, every combination of
+        behaviour groups a Mirai shape has appears on at least 6 % of an
+        ordinary system's binaries, and every narrower symbol combination it
+        has either does the same or is carried by ``coreutils`` in the benign
+        fixture — so no rule and no labelled combination for this shape clears
+        the block's own bar, and the honest answer is the categories alone.
+        """
+        result = knowledge.api_capability(list(self.MIRAI_SHAPE), platform="linux")
+        rows = result["capabilities"]
+
+        assert {row["category"] for row in rows if row["category"]} == {
+            "network",
+            "process",
+            "execution",
+            "filesystem",
+            "discovery",
+        }
+        assert [row["api"] for row in rows if row["catalog_flags"]] == []
+        assert [hit for row in rows for hit in row["techniques"]] == []
+
+    def test_every_linux_rule_says_what_it_is_and_who_else_does_it(self) -> None:
+        """A rule with no mechanism and no ordinary user reads as an accusation."""
+        from maljan.analysis.api_capability_db import load_api_attck_map
+        from maljan.tools.knowledge import DEFAULT_API_ATTCK_MAP, resolve_data
+
+        table = load_api_attck_map(str(resolve_data(DEFAULT_API_ATTCK_MAP)), "linux")
+
+        assert table is not None
+        assert table.techniques
+        for rule in table.techniques:
+            assert rule.rule, rule.technique_id
+            assert rule.ordinary_use, rule.technique_id
+
     def test_a_bot_shaped_import_list_still_produces_associations(self) -> None:
         """The other half of the bar: a catalogue that says nothing about
         anything is no catalogue.
 
         Read for what it is. The list carries the exact symbols the surviving
         rules are written on, so the rules clearing is arithmetic rather than
-        evidence that the block would catch an arbitrary bot — a canonical
-        Mirai shape, which traces nothing and executes no anonymous file,
-        produces associations and no technique row at all. What this pins is
-        that the categories still describe a sample's shape after the tiering
-        was taken almost entirely off, and that the two rules fire when their
-        own evidence is present.
+        evidence that the block would catch an arbitrary bot — the canonical
+        Mirai shape above, which traces nothing and executes no anonymous
+        file, produces associations and no technique row at all. What this
+        pins is that the categories still describe a sample's shape after the
+        tiering was taken almost entirely off, and that the two rules fire
+        when their own evidence is present.
         """
         bot = [
             "__libc_start_main",

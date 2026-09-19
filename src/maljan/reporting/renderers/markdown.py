@@ -324,22 +324,29 @@ class MarkdownRenderer:
                 "rows cite their ledger entry._"
             )
             lines.append("")
-            lines.append("| Technique | Name | Source | Imports |")
-            lines.append("|---|---|---|---|")
+            lines.append("| Technique | Name | Rule | Source | Imports |")
+            lines.append("|---|---|---|---|---|")
             # By source, then technique: a stated order, so a capa-heavy binary
             # cannot push the pack's rows off the end of the audit trail.
             ordered_hits = sorted(
                 static.api_technique_hits,
-                key=lambda h: (str(h.get("source") or ""), str(h.get("technique_id") or "")),
+                key=lambda h: (
+                    str(h.get("source") or ""),
+                    str(h.get("technique_id") or ""),
+                    str(h.get("rule") or ""),
+                ),
             )
             for hit in ordered_hits[:25]:
                 apis = ", ".join(f"`{a}`" for a in (hit.get("matched_apis") or [])[:6])
                 source = str(hit.get("source") or "-")
                 if hit.get("evidence_id"):
                     source = f"{source} ({hit['evidence_id']})"
+                # The rule's own label, because two rules can name one
+                # technique by two mechanisms and the catalogue's name is on
+                # both. A producer that has no such label leaves the cell bare.
                 lines.append(
                     f"| {hit.get('technique_id', '?')} | {hit.get('name', '-')} "
-                    f"| {source} | {apis} |"
+                    f"| {hit.get('rule') or '-'} | {source} | {apis} |"
                 )
             lines.append("")
 

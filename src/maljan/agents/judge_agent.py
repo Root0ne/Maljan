@@ -367,6 +367,9 @@ class JudgeAgent(BudgetMeter):
         # checkable the same way an analyst's claim is. Same counter as the
         # analysts, so the ids are one sequence across the whole job.
         self.evidence_counter: EvidenceCounter | None = None
+        # What the run saw, handed down by the container. ``None`` for a judge
+        # built outside a job.
+        self.evidence_corpus: Any = None
         # The name the meter and the console draw this agent under. Fixed:
         # there is one judge, and the ledger already stamps its entries with
         # this word.
@@ -563,6 +566,7 @@ class JudgeAgent(BudgetMeter):
             # an analyst that never made the call.
             stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
             sink=self._event_sink(),
+            corpus=getattr(self, "evidence_corpus", None),
         )
         messages = messages_pre
 
@@ -910,6 +914,9 @@ class JudgeAgent(BudgetMeter):
         degradation_note: str = "",
         memory_store: MemoryStore | None = None,
         evidence_corpus: set[str] | None = None,
+        shortened_tools: Sequence[str] = (),
+        searched: Sequence[str] = (),
+        corpus_state: Any = None,
         current_sample_id: str | None = None,
         sample: Any = None,
         ledger_ids: Sequence[str] | None = None,
@@ -1135,7 +1142,15 @@ class JudgeAgent(BudgetMeter):
                 # ``_parse``, and a retry for it would be a turn spent on a
                 # problem that no longer exists.
                 *(v for v in shape if v.code != ASSESSMENT_RELOCATED_CODE),
-                *validate_verdict_bundle(bundle, evidence_corpus, attck=_knowledge, sample=sample),
+                *validate_verdict_bundle(
+                    bundle,
+                    evidence_corpus,
+                    attck=_knowledge,
+                    sample=sample,
+                    shortened_tools=shortened_tools,
+                    searched=searched,
+                    corpus_state=corpus_state,
+                ),
                 *assessment_violations(bundle),
                 *assessment_conflict_violations(bundle),
                 *_verdict_checks(bundle),

@@ -49,6 +49,28 @@ C2_ADDRESS = "185.220.101.1"
 _ID = "indicator--0f1e2d3c-4b5a-4968-8776-6554433322{:02d}"
 
 
+def export_codes_in(tree: ast.AST) -> set[str]:
+    """Every ``stix.`` export code a module mints, wherever it mints it.
+
+    The whole tree, not its top level: a code is as much a code for being a
+    class attribute or a constant a function keeps, and a scan that read only
+    the top level would not have followed one there — which is an ordinary
+    refactor, and would have taken the code off the console's list with the
+    suite green.
+    """
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Constant):
+            continue
+        value = node.value.value
+        if not isinstance(value, str) or not value.startswith("stix."):
+            continue
+        for target in node.targets:
+            if isinstance(target, ast.Name) and target.id.endswith("_CODE"):
+                found.add(value)
+    return found
+
+
 def _judge_bundle(*patterns: str) -> Bundle:
     return Bundle.model_validate(
         {
@@ -426,15 +448,8 @@ class TestTheConsoleReadsTheseCodesAsTheExportsOwn:
         found: dict[str, str] = {}
         for path in sorted(cls.SRC.rglob("*.py")):
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-            for node in tree.body:
-                if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Constant):
-                    continue
-                value = node.value.value
-                if not isinstance(value, str) or not value.startswith("stix."):
-                    continue
-                for target in node.targets:
-                    if isinstance(target, ast.Name) and target.id.endswith("_CODE"):
-                        found[value] = str(path.relative_to(cls.SRC))
+            for code in export_codes_in(tree):
+                found[code] = str(path.relative_to(cls.SRC))
         return found
 
     def test_the_scan_reads_more_than_one_module(self) -> None:
@@ -474,3 +489,27 @@ class TestTheConsoleReadsTheseCodesAsTheExportsOwn:
 
         assert "stix.unpublishable_endpoint" in body
         assert "EXPORT_DECIDED" not in body
+
+
+class TestTheDriftScanReadsAWholeModule:
+    """A code defined inside a class or a function used to be invisible.
+
+    ``_minted`` read a module's top level alone, so moving a constant onto the
+    class that mints it would have taken it out of the scan with the suite
+    green.
+    """
+
+    def test_a_code_on_a_class_is_found(self) -> None:
+        source = 'class Renderer:\n    SOME_CODE = "stix.a_new_decline"\n'
+
+        assert export_codes_in(ast.parse(source)) == {"stix.a_new_decline"}
+
+    def test_a_code_inside_a_function_is_found(self) -> None:
+        source = 'def mint():\n    SOME_CODE = "stix.another_decline"\n    return SOME_CODE\n'
+
+        assert export_codes_in(ast.parse(source)) == {"stix.another_decline"}
+
+    def test_a_name_that_is_not_a_code_is_not_found(self) -> None:
+        source = 'PREFIX = "stix.not_a_code"\nclass R:\n    OTHER = "stix.nor_this"\n'
+
+        assert export_codes_in(ast.parse(source)) == set()

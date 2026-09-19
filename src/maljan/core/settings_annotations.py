@@ -1121,6 +1121,22 @@ ANNOTATIONS: dict[str, Annotation] = {
         "subgroup": "Report content",
         "advanced": True,
     },
+    "reporting.evidence_corpus_bytes": {
+        "title": "Grounding corpus per run (bytes)",
+        "description": (
+            "How much of a run's tool output is held in memory, for the length of the job, "
+            "so a grounding check asks what the run saw rather than what the evidence "
+            "budget kept. This is what the process spends: the text is held once and a "
+            "check searches it where it lies, measured at 0.01 MB of working memory over "
+            "a 2.4 MB corpus. The default holds about 2,700 tool answers, against the few "
+            "hundred a whole team makes. Past the ceiling the corpus reports itself "
+            "incomplete, and an absence measured against an incomplete corpus is written "
+            "as a note and drops nothing rather than removing a model's object. Zero keeps "
+            "no corpus, which makes every absence a note."
+        ),
+        "subgroup": "Report content",
+        "advanced": True,
+    },
     "reporting.html_export_enabled": {
         "title": "HTML export enabled",
         "description": ("Enables server-side HTML-to-PDF export of the generated report."),

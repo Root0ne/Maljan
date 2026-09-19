@@ -939,7 +939,138 @@ change landed on `main`.
   **Upgrading:** a run whose evidence does not name a directory it claimed will
   carry a `stix.ungrounded_indicator` row for it where it carried none before,
   and the indicator is dropped after the retry rather than exported.
+- **Everything the exported STIX bundle loses now leaves under a name.** The
+  total indicator cap removed indicators with a log line and nothing else, and
+  the integrity pass trimmed a report's or a note's `object_refs` without
+  recording it, so what the **export** removed could not be totalled. Both are
+  counted: `truncation.indicator_cap_removed` and
+  `truncation.integrity_refs_trimmed` on the run summary, two rows in the
+  report's Bounds Hit table, and one sentence in the console's run record
+  naming each reason with its own count. What reconciles is the export's own
+  figures: the objects the assembled bundle lost equal
+  `integrity_objects_removed` plus `indicator_cap_removed`. The judge path runs
+  the same pass once per verdict *attempt*, discarded retries included, so its
+  removals are counted apart under `judge_integrity_*` and are not part of that
+  total.
+  **Upgrading:** `run_summary.truncation` carries six new keys
+  (`indicator_cap_invocations`, `indicator_cap_removed`, `integrity_refs_trimmed`,
+  `judge_integrity_invocations`, `judge_integrity_objects_removed`,
+  `judge_integrity_dropped`); a summary stored before this release has none of
+  them and reads as zero. `integrity_objects_removed` no longer counts the judge
+  path's own passes, so on a run with a judge retry it is smaller than before.
 
+- **A finding row handed up a chain of delegations stays inside its limit.**
+  Each hand-over put the callee's name in front of the row, and nothing bounded
+  the result, so a row five levels deep was longer than the eight hundred
+  characters every validator's own row is held to. The chain is cut instead,
+  oldest step first and marked with an ellipsis; the finding's own sentence is
+  never cut. The route and the sentence are carried as two values, so the bound
+  can only ever shorten the route.
+- **A UNC share written the way a judge writes it reads as a place.** A STIX
+  literal `'\\server\share'` is unescaped by the pattern reader to
+  `\server\share`, and the directory check refused a single leading backslash,
+  so the judge was told its own valid path could not be a directory. One
+  backslash or two is a root now. In the other direction the check no longer
+  admits a drive-relative `C:Windows`, which names no place on the analysed
+  machine, nor a URL's fragment or query read as a step (`/#frag`, `/?q=1`).
+- **An absence over evidence the run knows is partial says so.** The output
+  shortener hands one string to the model and to the ledger, so a value in
+  neither is a value the model never saw and the grounding rule is unchanged.
+  What changes is the feedback: when an entry the grounding check searched came
+  back shortened, the `stix.ungrounded_indicator` row names the tools whose
+  answers were handed over with rows missing, so the judge can narrow one and
+  ask again instead of guessing.
+- **The two deprecated per-agent budget maps name the release they go in, and
+  cannot hold a budget nothing can use.** `react_agent_timeout_overrides` and
+  `react_agent_max_steps_overrides` are deleted in the release after the next
+  promotion to main, said identically in the two source comments and in
+  `docs/configuration.md`. A map entry that is not a whole number of at least
+  one — the bound a definition's own budget fields already carry — is dropped
+  when the settings are built, with the agent and the value logged. Dropped
+  rather than refused: a settings build that raises is a deployment that
+  cannot serve, and the agent falls back to the deployment's own budget, which
+  is what the reader did with such a value anyway. The bound runs before
+  pydantic's coercion, so a `2.5`, a `"lots"` and a nested dict are dropped too
+  rather than raising, while a `"40"` written through the environment is kept.
+- **Two import rules for one technique are two rows again.** `api_capability_hits`
+  keyed a row by technique id and name, and the catalogue's own name is on both
+  of the `T1685` rules, so they pooled: one rule's matched APIs counted toward
+  the other's `min_apis`, and a technique could be asserted on a combination no
+  single rule ever cleared. A row is a rule — the rule's own label is part of
+  the key and is on the row, and the report's import-technique table carries a
+  **Rule** column, as does the console's ATT&CK-from-imports table.
+  Corroboration keys on the technique id and is unchanged, and so is every
+  count of techniques: the console's heading, the narrative's prompt and the
+  report's facts count distinct technique ids rather than rows.
+- **The ATT&CK index retry interval reaches a sidecar from any entry point.**
+  `MALJAN_INDEX_RETRY_SECONDS` was exported in `MaljanApp.arun` alone, so a
+  knowledge sidecar started from a container built anywhere else kept the
+  module default. It is announced by the container, beside the tracing values,
+  which is the one place a sidecar's environment is decided from settings.
+- **A grounding check searches what the run saw, not what the ledger kept.**
+  `reporting.evidence_budget_bytes` blanks an entry's output after the model has
+  read it, so the judge could be told that a C2 a tool really returned "appears
+  nowhere in the evidence this run collected" — and the indicator was dropped
+  from the exported bundle over it. The container now keeps every tool answer as
+  the model received it, in memory, for the length of the job, bounded by the new
+  `reporting.evidence_corpus_bytes` (64 MB); the judge's grounding corpus and the
+  export's second-source test read that.
+  **Upgrading:** nothing to do. The corpus is never persisted and never enters
+  the graph state; set `reporting.evidence_corpus_bytes` lower to cap the memory,
+  and to zero to keep none — which makes every absence advisory, below.
+- **The platform does not assert an absence over evidence it knows is partial.**
+  When the corpus hit its ceiling, when there is no corpus (a report rebuilt
+  later, a run resumed in another process), or when the stored entries fell back
+  on include one the byte budget blanked, a `stix.ungrounded_indicator` row is
+  **advisory**: it says how many answers were not searched and from which tools,
+  it is fed back once like any finding, and the judge's object is not dropped for
+  it. `Violation` carries the flag and `drop_ungrounded_indicators` honours it.
+- **A grounding corpus that kept nothing is still the corpus.** Asking it only
+  when it held something threw away the verdict of one that kept nothing —
+  which is exactly what `reporting.evidence_corpus_bytes = 0` produces — and
+  the check fell back to the stored ledger, was told the evidence was whole,
+  and dropped the judge's object, the opposite of what the setting says. The
+  corpus is consulted whenever it has anything to say, and how whole the
+  searched evidence is, is the conjunction of the sources searched: a fallback
+  to stored entries inherits the state of the corpus it fell back from and
+  never launders it into "complete".
+- **A run whose grounding went advisory says so where an operator looks.**
+  `run_summary.truncation` carries `evidence_corpus_missing_answers`,
+  `evidence_corpus_missing_tools` and `evidence_corpus_partial_reason`; a
+  degradation reason names which of the three reasons it was; the report prints
+  it under Bounds Hit and the console draws it in the run record beside the
+  degraded banner. `advisory` survives `record_unresolved`, so a row the
+  platform declined to act on is no longer stored and drawn as a producer's
+  unfixed finding.
+- **The report and the console describe a bundle's losses in one wording.** The
+  report's Bounds Hit line printed `integrity_objects_removed` as "objects
+  repaired away" with the indicator cap's orphaned relationships inside it, and
+  said 10 where the console said 4 about the same run. Both build the sentence
+  the same way now, pinned on both sides against one fixture of the eight
+  measured bundle shapes.
+- **The grounding corpus costs what its ceiling says.** The run's record was
+  copied three more times on the way to a check — a joined cache, a token-set
+  element, and the string the check searched — so one check over 400 answers of
+  6,000 characters allocated 6.01 MB on top of a 2.4 MB corpus. The text is held
+  once, lower-cased at the moment it is recorded, and a check searches each
+  answer where it lies: the same check now allocates **0.01 MB**.
+  **Upgrading:** `reporting.evidence_corpus_bytes` defaults to **16 MB** rather
+  than 64, which is about 2,700 tool answers at the output cap against the few
+  hundred a whole team makes — the ceiling now bounds the process cost rather
+  than a quarter of it.
+- **The grounding check runs on whichever record the run has.** It was gated on
+  the sandbox token corpus alone, and the run's own tool answers had moved
+  beside that corpus rather than into it — so on every run with no sandbox
+  network block (mock mode, a static-only team, a failed submission, a sample
+  that made no network call) the `stix.ungrounded_indicator` check did not run
+  at all and an invented indicator was exported with nothing said about it. It
+  runs on either source now. With **neither** — no sandbox block and no tool
+  answers — nothing was searched, and a check that searched nothing may not
+  conclude from it: the row is written, it is advisory, and the judge keeps its
+  object, which is the same answer a partial corpus gets.
+  **Upgrading:** a run with no evidence at all now spends one correction turn
+  on an indicator it used to export unquestioned, and carries an advisory row
+  for it in `run_summary.validation.unresolved`. Nothing is dropped for it.
 ### Fixed
 
 - **A sandbox capture belongs to the job it was fetched for.** The capture was

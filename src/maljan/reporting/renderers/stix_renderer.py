@@ -220,8 +220,23 @@ def _network_rank(source: Any) -> int:
     return _NETWORK_SOURCE_RANK.get(name, _UNRECORDED_SOURCE_RANK)
 
 
+def _record_indicator_cap(ledger: Any | None, *, removed: int) -> None:
+    """Tell the truncation ledger what the cap spent. Never raises.
+
+    The cap is the one place a bundle loses objects that the integrity pass
+    does not account for, so without this the ledger's reasons stop short of
+    the bundle.
+    """
+    if ledger is None:
+        return
+    try:
+        ledger.record_indicator_cap(removed=removed)
+    except Exception:  # noqa: BLE001 — telemetry must never break an export
+        return
+
+
 def _within_the_indicator_cap(
-    objects: list[Any], order: dict[str, tuple[int, int, int]]
+    objects: list[Any], order: dict[str, tuple[int, int, int]], ledger: Any | None = None
 ) -> list[Any]:
     """``objects`` with the lowest-priority indicators removed, or ``objects`` itself.
 
@@ -235,10 +250,12 @@ def _within_the_indicator_cap(
     """
     indicators = [obj for obj in objects if getattr(obj, "type", "") == "indicator"]
     if len(indicators) <= MAX_TOTAL_INDICATORS:
+        _record_indicator_cap(ledger, removed=0)
         return objects
     last = (_BAND_FILE_NAME + 1, 0, len(order))
     ranked = sorted(indicators, key=lambda obj: order.get(obj.id, last))
     kept = {obj.id for obj in ranked[:MAX_TOTAL_INDICATORS]}
+    _record_indicator_cap(ledger, removed=len(indicators) - MAX_TOTAL_INDICATORS)
     logger.warning(
         "stix_renderer: total indicator cap (%d) exceeded by %d; the lowest-priority "
         "indicator(s) are not exported.",
@@ -497,6 +514,7 @@ class ExtendedSTIXRenderer:
         base_bundle: Bundle | None = None,
         *,
         ledger: Any | None = None,
+        corpus: Any = None,
     ) -> Bundle:
         """Render the extended bundle.
 
@@ -715,7 +733,7 @@ class ExtendedSTIXRenderer:
         # the network block's own answer for a name, and everything some other
         # producer in this run wrote down for every other kind.
         publishable_domains = _publishable_domains(report)
-        corroborating = _corroborating_values(report)
+        corroborating = _corroborating_values(report, corpus)
 
         # Apply the same acceptance-based filter
         # used by the judge bundle postprocess so deterministic
@@ -841,14 +859,16 @@ class ExtendedSTIXRenderer:
         from maljan.agents.judge_postprocess import enforce_bundle_integrity
 
         objects = enforce_bundle_integrity(objects, ledger=ledger)
-        capped = _within_the_indicator_cap(objects, order)
+        capped = _within_the_indicator_cap(objects, order, ledger=ledger)
         if capped is objects:
             return Bundle(objects=objects)
         # Only what the cap orphaned is left to sweep, and it is the cap's
         # doing rather than a defect of anybody's bundle — so it is counted
         # under a reason of its own. Counted it must be: the pass used to run
         # here with no ledger at all, so this sweep's losses appeared in no
-        # total. The cap's own removals still appear in none.
+        # total. The cap's own removals are counted beside them, under
+        # ``indicator_cap_removed``, so every object that left this bundle
+        # left under a name.
         return Bundle(
             objects=enforce_bundle_integrity(capped, ledger=ledger, dropped_as=CAP_ORPHAN_REASON)
         )
@@ -1297,7 +1317,7 @@ def _section_text(section: Any) -> list[str]:
     return parts
 
 
-def _corroborating_values(report: Any) -> str:
+def _corroborating_values(report: Any, corpus: Any = None) -> str:
     """Everything a second source in this run recorded, lowercased, built once.
 
     One haystack per render, searched for whole values rather than by
@@ -1335,6 +1355,9 @@ def _corroborating_values(report: Any) -> str:
 
     sections = list(getattr(report, "sections", None) or [])
     cited: set[str] = set()
+    # The cited entries a section already contributed text for, so the corpus
+    # is read only where the stored record has nothing left.
+    drawn: set[str] = set()
     for section in sections:
         origin = str(getattr(section, "source", "") or "").strip().lower()
         if origin.startswith(_ANALYST_SECTION_SOURCES):
@@ -1347,7 +1370,23 @@ def _corroborating_values(report: Any) -> str:
             continue
         if not cited.intersection(str(eid) for eid in (section.evidence_ids or [])):
             continue
+        drawn.update(str(eid) for eid in (section.evidence_ids or []))
         parts.extend(_section_text(section))
+
+    # What the run saw, for the cited entries whose stored output is gone. The
+    # evidence byte budget blanks an entry after the model has read it, so an
+    # answer an analyst cited can leave no section at all and a value a tool
+    # really returned stops corroborating anything. The narrowing is unchanged
+    # — an analyst has to have cited it, and the string sweep's own entries are
+    # still not a second source — only the place the text is read from.
+    if corpus is not None:
+        for entry_id in sorted(cited - drawn):
+            try:
+                if str(corpus.tool_of(entry_id) or "") in _STRING_SWEEP_TOOLS:
+                    continue
+                parts.append(str(corpus.text_for(entry_id) or ""))
+            except Exception:  # noqa: BLE001 — a weaker haystack, never a failed render
+                continue
     return " ".join(part for part in parts if part).lower()
 
 

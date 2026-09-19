@@ -209,12 +209,31 @@ class TestUngroundedIndicators:
         assert "invented.example" in verdict.violations[0].message
 
     @pytest.mark.asyncio
-    async def test_without_a_corpus_no_indicator_is_questioned(self) -> None:
-        judge, llm = _judge(_bundle_json(indicators=["anything.example"]))
+    async def test_with_nothing_to_search_the_judge_is_told_and_keeps_its_object(self) -> None:
+        """A run with no evidence at all searched nothing, and says so.
+
+        The check used to be skipped outright when there was no corpus, which
+        is mock mode, a static-only team, a failed submission and any sample
+        that made no network call — and an invented indicator reached the
+        exported bundle with nothing said about it. Searching nothing is not a
+        licence to conclude nothing: the judge is asked once, as it is for any
+        finding, and if it keeps the value the row is advisory and the object
+        stays, because an absence measured over no evidence is not a reason to
+        remove anything.
+        """
+        stubborn = _bundle_json(indicators=["anything.example"])
+        judge, llm = _judge(stubborn, stubborn)
 
         verdict = await judge.give_verdict(reports=REPORTS, history=[])
 
-        assert (verdict.retries, verdict.violations, len(llm.calls)) == (0, [], 1)
+        assert (verdict.retries, len(llm.calls)) == (1, 2)
+        assert [v.code for v in verdict.violations] == ["stix.ungrounded_indicator"]
+        assert verdict.violations[0].advisory is True
+        assert "no evidence was searched" in verdict.violations[0].message
+        # Kept: nothing was searched, so nothing was established about it.
+        assert any(
+            "anything.example" in str(getattr(o, "pattern", "")) for o in verdict.bundle.objects
+        )
 
 
 class TestFamilyAttribution:

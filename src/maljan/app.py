@@ -13,7 +13,6 @@ The run() method returns a result dict containing:
 from __future__ import annotations
 
 import asyncio
-import os
 import time
 from pathlib import Path
 from typing import Any
@@ -281,14 +280,6 @@ class MaljanApp:
             logger.error("Sandbox submission failed: %s", exc)
             return None
 
-    def _announce_index_retry(self) -> None:
-        """Put ``validation.index_retry_seconds`` where every consumer can read it."""
-        from maljan.tools import knowledge as knowledge_tools
-
-        seconds = int(getattr(getattr(self.config, "validation", None), "index_retry_seconds", 900))
-        os.environ[knowledge_tools.INDEX_RETRY_ENV] = str(seconds)
-        knowledge_tools.set_index_retry_after(seconds)
-
     async def arun(
         self,
         file_hash: str,
@@ -352,7 +343,6 @@ class MaljanApp:
         # sidecar is the process where that build actually happens and it
         # reads its environment rather than the settings store. The in-process
         # module is told directly, for the lookups this worker makes itself.
-        self._announce_index_retry()
 
         # Submit to sandbox if sample_path is provided
         sandbox_report = await self._submit_to_sandbox(sample_path)

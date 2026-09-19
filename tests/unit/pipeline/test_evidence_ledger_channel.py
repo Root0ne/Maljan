@@ -268,10 +268,19 @@ class _JudgeContainer:
     event_sink = None
 
     def __init__(self, counter: EvidenceCounter) -> None:
+        from maljan.agents.run_evidence_corpus import RunEvidenceCorpus
+
         self._lock = threading.Lock()
         self._judge_agent_cache: dict[str, Any] = {}
         self._counter = counter
         self.config = MagicMock()
+        # A real container has one, and a grounding check that cannot find a
+        # corpus is a run that says every absence is a note — which is right
+        # in production and would make every node test here degraded.
+        self._evidence_corpus = RunEvidenceCorpus(1 << 20)
+
+    def get_evidence_corpus(self) -> Any:
+        return self._evidence_corpus
 
     def analyst_keys(self) -> list[str]:
         return ["static"]

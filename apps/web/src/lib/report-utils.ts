@@ -133,3 +133,82 @@ export function countLabel(
 ): string {
   return `${count} ${count === 1 ? singular : plural}`;
 }
+
+/**
+ * What the exported STIX bundle lost, as one sentence, or null.
+ *
+ * Built from the reasons, never from the total. `integrity_objects_removed`
+ * counts both integrity passes, and the second one runs after the indicator
+ * cap and removes nothing but relationships the cap orphaned — so on the very
+ * shape this sentence exists for, "6 objects repaired away as malformed or
+ * duplicated" was six relationships that were neither. Each reason is named
+ * with its own count: what the pass repaired, what the cap orphaned, what the
+ * cap removed, and the references a report or a note lost without any object
+ * leaving.
+ *
+ * Null when nothing was removed, so a clean run says nothing rather than
+ * saying zero, and null for a stored run written before the counters existed.
+ */
+interface TruncationCounts {
+  evidence_corpus_missing_answers?: number;
+  evidence_corpus_missing_tools?: string[];
+  evidence_corpus_partial_reason?: string;
+  integrity_objects_removed?: number;
+  indicator_cap_removed?: number;
+  integrity_refs_trimmed?: number;
+  integrity_dropped?: Record<string, number>;
+}
+
+export function bundleLossSentence(truncation: TruncationCounts | null): string | null {
+  const dropped = truncation?.integrity_dropped ?? {};
+  const count = (value: unknown) => Math.max(0, Number(value ?? 0) || 0);
+
+  // The pass's own repairs: everything it removed except what it swept up
+  // after the cap, which is the cap's loss and is named as such below.
+  const orphaned = count(dropped.cap_orphan);
+  const repaired = Math.max(0, count(truncation?.integrity_objects_removed) - orphaned);
+  const capped = count(truncation?.indicator_cap_removed);
+  const refs = count(truncation?.integrity_refs_trimmed);
+
+  const parts: string[] = [];
+  if (repaired > 0) {
+    parts.push(`${countLabel(repaired, "object")} repaired away as malformed or duplicated`);
+  }
+  if (capped > 0) {
+    parts.push(
+      `${countLabel(capped, "indicator")} over the export's total cap, lowest priority first`,
+    );
+  }
+  if (orphaned > 0) {
+    parts.push(`${countLabel(orphaned, "relationship")} left pointing at a capped indicator`);
+  }
+  if (refs > 0) {
+    parts.push(`${countLabel(refs, "reference")} trimmed from a report or a note`);
+  }
+  if (parts.length === 0) return null;
+  return `The exported STIX bundle is shorter than what the run produced: ${parts.join("; ")}.`;
+}
+
+/**
+ * What the run's grounding could not search, as one sentence, or null.
+ *
+ * A run whose corpus could not hold everything states every absence as a note
+ * and drops nothing for it. Said here because the alternative is an operator
+ * reading it inside one finding's message, and because such a run otherwise
+ * looks exactly like one whose grounding was whole.
+ *
+ * Null when the grounding searched the whole record, and null for a run stored
+ * before the counters existed.
+ */
+export function partialGroundingSentence(truncation: TruncationCounts | null): string | null {
+  const reason = (truncation?.evidence_corpus_partial_reason ?? "").trim();
+  if (!reason) return null;
+  const missing = Math.max(0, Number(truncation?.evidence_corpus_missing_answers ?? 0) || 0);
+  const tools = (truncation?.evidence_corpus_missing_tools ?? []).filter(Boolean);
+  const named = tools.length > 0 ? `, from ${tools.join(", ")}` : "";
+  return (
+    `Grounding searched less than the run produced — ${reason}: ` +
+    `${countLabel(missing, "answer")} not kept${named}. ` +
+    `An absence measured against it is a note and drops nothing.`
+  );
+}
