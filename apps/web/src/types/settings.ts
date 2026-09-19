@@ -64,8 +64,11 @@ export interface CatalogEntry {
    *  the API always passes it whatever the stored registry says
    *  (`REQUIRED_ENV_ALLOW`). Resolved by the API as it serialises the catalog,
    *  the way `choices` is, so the editor draws the rule the save enforces
-   *  rather than a copy of it. Null on every other entry. */
-  required_env: Record<string, readonly string[]> | null;
+   *  rather than a copy of it. Null on every other entry, and absent from an
+   *  API older than the field — which the editor reads as "no fixed names",
+   *  so a server card from such an API offers every name as removable rather
+   *  than failing to draw. */
+  required_env?: Record<string, readonly string[]> | null;
 }
 
 /**

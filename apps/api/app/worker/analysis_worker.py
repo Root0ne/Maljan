@@ -467,6 +467,13 @@ async def seed_seq_from_the_table(
     Callers do not have to remember this: ``_next_seq`` runs it for every job
     whose feed is being persisted, before it hands out that job's first number
     in this process. This is the body it runs.
+
+    One window this does not close: a counter that expires between the
+    ``EXISTS`` here and the ``INCR`` that follows numbers from 1 again. The key
+    lives 24 hours and every ``INCR`` refreshes it, so the window is the few
+    microseconds between two Redis calls on a job whose counter was about to
+    expire anyway; the row that collides is dropped by a feed that never fails
+    a run, as it was before any of this.
     """
     key = _seq_key(job_id)
     try:
