@@ -26,7 +26,13 @@ from maljan.agents.judge_agent import (
     VERDICT_TIMEOUT_CODE,
     VERDICT_TIMEOUT_REASON,
 )
-from maljan.agents.run_evidence_corpus import NO_CORPUS, CorpusState, haystack_of, state_of
+from maljan.agents.run_evidence_corpus import (
+    NO_CORPUS,
+    CorpusState,
+    both_searched,
+    parts_of,
+    state_of,
+)
 from maljan.analysis.corroboration import corroboration_row
 from maljan.analysis.run_summary import RunSummaryBuilder
 from maljan.core.config import BUILTIN_AGENTS, JUDGE_AGENT_KEY, PROMPT_ROLES, ReportingConfig
@@ -82,6 +88,7 @@ from maljan.pipeline.validation import (
     corroboration,
     corroboration_sources,
     not_run_sentence,
+    partial_grounding_reason,
     technique_check_note,
     ungrounded_technique_note,
     validation_metrics,
@@ -317,28 +324,39 @@ def _what_the_run_saw(container: Any, ledger: Any) -> tuple[list[str], CorpusSta
 
     The run's own in-memory corpus first: it holds every answer as the model
     received it, which is the only record that can answer "did a tool in this
-    run produce this value". The stored entries are the fallback — a report
-    rebuilt later, a run resumed in another process — and a fallback is never
-    whole enough to assert an absence over, because any of those entries may
-    have been blanked by the byte budget after the model read it. An entry
-    that was says so on ``truncated``, and that is what the fallback counts.
+    run produce this value". It is consulted whenever it exists and has
+    anything to say — either it kept something, or it says it kept less than
+    the run produced. Asking it only when it held something threw away the
+    verdict of a corpus that kept *nothing*, which is precisely what an
+    operator gets by setting the ceiling to zero, and the check then fell back
+    to the stored ledger and was told the evidence was whole.
+
+    The stored entries are the fallback — a report rebuilt later, a run resumed
+    in another process — and a fallback is never whole on its own: any of those
+    entries may have been blanked by the byte budget after the model read it,
+    and there is no record of what a corpus that is gone would have held. So
+    what the check is told is the **conjunction** of the sources it searched:
+    the fallback's own count of blanked entries, and the state of the corpus it
+    fell back from, which for a corpus that does not exist is partial by
+    construction.
     """
     corpus = None
     try:
         corpus = container.get_evidence_corpus()
     except Exception:  # noqa: BLE001 — a container without one is the fallback
         corpus = None
-    if corpus is not None and len(corpus):
-        return [haystack_of(corpus)], state_of(corpus)
+    corpus_state = state_of(corpus) if corpus is not None else NO_CORPUS
+    if corpus is not None and (len(corpus) or corpus_state.partial):
+        return list(parts_of(corpus)), corpus_state
 
     entries = list(ledger or [])
     blanked = [e for e in entries if getattr(e, "truncated", False) and not e.output]
-    state = CorpusState(
+    stored = CorpusState(
         complete=not blanked,
         missing_answers=len(blanked),
         missing_tools=tuple(sorted({str(getattr(e, "tool", "") or "") for e in blanked} - {""})),
     )
-    return [e.output for e in entries if e.output], state
+    return [e.output for e in entries if e.output], both_searched(corpus_state, stored)
 
 
 def _violations_from_rows(rows: Any) -> list[Violation]:
@@ -3001,10 +3019,12 @@ def make_judge_node(
                 # from the raw sandbox report and what the run's tools said.
                 sandbox_report = state.get("sandbox_report") or {}
                 seen, corpus_state = _what_the_run_saw(container, _ledger)
+                # The run's own answers travel beside the token corpus rather
+                # than inside it: added as set elements they were copied once
+                # more, and joined into one string to be searched a third time.
                 evidence_corpus = build_evidence_corpus(
                     interesting_strings=None,
                     sandbox_report=sandbox_report if isinstance(sandbox_report, dict) else None,
-                    extra=seen,
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.debug("Evidence corpus build skipped: %s", exc)
@@ -3016,6 +3036,19 @@ def make_judge_node(
             # in with rows missing are named, so the judge can ask one of them
             # again with a narrower argument.
             shortened_tools = sorted(_tools_that_were_shortened(_ledger))
+
+            # How whole the evidence the grounding checks searched was, on the
+            # run's own record. A phrase inside one feedback message was the
+            # only place it appeared, so a run whose grounding went advisory
+            # looked exactly like one whose grounding was whole.
+            try:
+                container.get_truncation_ledger().record_evidence_corpus(
+                    missing_answers=corpus_state.missing_answers,
+                    missing_tools=corpus_state.missing_tools,
+                    reason="" if corpus_state.complete else corpus_state.why,
+                )
+            except Exception as exc:  # noqa: BLE001 — telemetry never breaks a verdict
+                logger.debug("Evidence corpus state not recorded: %s", exc)
 
             # Failure signals, computed before the verdict rather than after
             # it: the judge is told why the run is thin so it can weigh its own
@@ -3169,6 +3202,17 @@ def make_judge_node(
             _ungrounded_note = ungrounded_technique_note(state.get("validation_findings"))
             if _ungrounded_note:
                 _degradation_reasons.append(_ungrounded_note)
+            # A run whose grounding could not search its own whole record says
+            # so as a run fact. Every absence it stated is a note, and an
+            # operator reading the verdict should know that before reading the
+            # indicators.
+            # Only when there was something to ground against: a run whose
+            # ledger is empty grounded nothing, and saying its corpus was
+            # partial would be a reason about a check that never ran.
+            if _ledger or corpus_state.missing_answers:
+                _corpus_note = partial_grounding_reason(corpus_state)
+                if _corpus_note:
+                    _degradation_reasons.append(_corpus_note)
             # A check that could not run is a fact about the run, not a
             # finding about the sample: it is said here and listed under
             # ``validation.not_run``.
@@ -3226,9 +3270,10 @@ def make_judge_node(
                 # The judge is not told a different rule, it is told which call
                 # to narrow before it withdraws a value.
                 shortened_tools=shortened_tools,
-                # Whether the evidence the grounding checks searched is this
-                # run's whole record. When it is not, an absence is a note and
-                # nothing is dropped for it.
+                # What the run's tools answered, as the answers they are, and
+                # whether that is this run's whole record. When it is not, an
+                # absence is a note and nothing is dropped for it.
+                searched=seen,
                 corpus_state=corpus_state,
                 current_sample_id=state.get("file_hash"),
                 sample=_sample_identity(state),

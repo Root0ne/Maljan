@@ -56,16 +56,45 @@ class CorpusState:
     # very row the value was withheld from.
     missing_answers: int = 0
     missing_tools: tuple[str, ...] = ()
+    # Why it is partial, in one word an operator can act on: the ceiling was
+    # reached, the ceiling is zero, or the run has no corpus at all. Carried
+    # rather than inferred, because the three are one setting apart and the
+    # remedy differs.
+    why: str = ""
 
     @property
     def partial(self) -> bool:
         return not self.complete
 
 
+# Why a corpus is partial. One of these reaches the run summary and the
+# degradation reason, so an operator reads a remedy rather than a symptom.
+CEILING_REACHED = "ceiling reached"
+CEILING_ZERO = "ceiling zero"
+CORPUS_ABSENT = "run resumed without its corpus"
+
+
+def both_searched(first: CorpusState, second: CorpusState) -> CorpusState:
+    """What a check may say when what it searched came from two sources.
+
+    Completeness is a **conjunction**. A search that read one whole source and
+    one partial one searched something partial, and a fallback that reports
+    itself whole must never launder the state of the source it fell back from:
+    a run with no corpus whose stored entries all survived the byte budget is
+    still a run nobody can say "this value is in no tool output" about.
+    """
+    return CorpusState(
+        complete=first.complete and second.complete,
+        missing_answers=first.missing_answers + second.missing_answers,
+        missing_tools=tuple(sorted(set(first.missing_tools) | set(second.missing_tools))),
+        why=first.why or second.why,
+    )
+
+
 # What a corpus that does not exist says about itself. A report rebuilt from
 # stored entries, a run resumed in another process: the checks still run, and
 # what they may conclude is bounded by this.
-NO_CORPUS = CorpusState(complete=False)
+NO_CORPUS = CorpusState(complete=False, why=CORPUS_ABSENT)
 
 
 class RunEvidenceCorpus:
@@ -79,7 +108,6 @@ class RunEvidenceCorpus:
         self._spent = 0
         self._missing_answers = 0
         self._missing_tools: list[str] = []
-        self._haystack: str | None = None
 
     def remember(self, entry_id: str, tool: str, text: str) -> None:
         """Keep one answer's text. Never raises.
@@ -88,12 +116,17 @@ class RunEvidenceCorpus:
         is kept and what was read are the same characters. An answer that does
         not fit the ceiling is not kept and is counted instead, which is what
         makes the corpus able to say it is incomplete.
+
+        Kept **lower-cased**, once, here. Every reader of it compares
+        lower-cased — that is the corpus's own rule — and folding the case at
+        each read copied the whole record again per check.
         """
         key = str(entry_id or "").strip()
         body = str(text or "")
         if not key or not body:
             return
         name = str(tool or "").strip() or "a tool"
+        body = body.lower()
         size = len(body.encode("utf-8", errors="ignore"))
         with self._lock:
             if key in self._texts:
@@ -108,10 +141,9 @@ class RunEvidenceCorpus:
             self._texts[key] = body
             self._tools[key] = name
             self._spent += size
-            self._haystack = None
 
     def text_for(self, entry_id: str) -> str:
-        """One answer's text, or ``""`` when the corpus never held it."""
+        """One answer's text, lower-cased, or ``""`` when the corpus never held it."""
         with self._lock:
             return self._texts.get(str(entry_id or "").strip(), "")
 
@@ -125,25 +157,29 @@ class RunEvidenceCorpus:
         with self._lock:
             return self._tools.get(str(entry_id or "").strip(), "")
 
-    def haystack(self) -> str:
-        """Every answer, lowercased and joined, built once per addition.
+    def parts(self) -> tuple[str, ...]:
+        """Every answer, lower-cased, as the answers they are.
 
-        One string because that is what the grounding checks search, and
-        rebuilding it per indicator would make a bundle of fifteen indicators
-        fifteen passes over the run's whole output.
+        Not one joined string. A value never spans two answers — the join put a
+        space between them, and a space bounds a value — so searching each
+        answer is exactly the search a joined one performed, and joining copied
+        the whole record on the way in, again into the token set, and a third
+        time into the string that was finally searched. Measured on 400 answers
+        of 6 000 characters, those three copies cost 8 MB of the check's 42.
         """
         with self._lock:
-            if self._haystack is None:
-                self._haystack = " ".join(self._texts.values()).lower()
-            return self._haystack
+            return tuple(self._texts.values())
 
     def state(self) -> CorpusState:
         """What a check that searched this corpus may say about what it searched."""
         with self._lock:
+            if not self._missing_answers:
+                return CorpusState()
             return CorpusState(
-                complete=self._missing_answers == 0,
+                complete=False,
                 missing_answers=self._missing_answers,
                 missing_tools=tuple(sorted(self._missing_tools)),
+                why=CEILING_ZERO if self._ceiling <= 0 else CEILING_REACHED,
             )
 
     def __len__(self) -> int:
@@ -167,12 +203,12 @@ def state_of(corpus: object | None) -> CorpusState:
     return state if isinstance(state, CorpusState) else NO_CORPUS
 
 
-def haystack_of(corpus: object | None) -> str:
-    """``corpus.haystack()``, or ``""``. Never raises."""
+def parts_of(corpus: object | None) -> tuple[str, ...]:
+    """``corpus.parts()``, or ``()``. Never raises."""
     if corpus is None:
-        return ""
+        return ()
     try:
-        text = corpus.haystack()  # type: ignore[attr-defined]
+        found = corpus.parts()  # type: ignore[attr-defined]
     except Exception:  # noqa: BLE001
-        return ""
-    return text if isinstance(text, str) else ""
+        return ()
+    return tuple(found) if isinstance(found, tuple | list) else ()

@@ -19,6 +19,8 @@ not searched, and nothing is dropped for it.
 
 from __future__ import annotations
 
+import ast
+import pathlib
 from typing import Any
 
 import pytest
@@ -34,6 +36,7 @@ from maljan.pipeline.validation import (
 )
 from maljan.schemas.evidence import apply_budget
 from maljan.schemas.stix_models import Bundle, Indicator
+from tests.unit.pipeline._source_names import names_bound_to, names_imported_from
 
 # A name no reserved TLD rule refuses and no denylist carries, so what decides
 # the row is the evidence question and nothing else.
@@ -75,7 +78,7 @@ class TestTheBudgetBlanksWhatTheModelRead:
 
         apply_budget(entries, 1000)
 
-        assert C2 in corpus.haystack()
+        assert any(C2 in part for part in corpus.parts())
         assert corpus.state() == CorpusState(complete=True)
 
 
@@ -198,7 +201,10 @@ class TestTheCeilingIsHonest:
         assert corpus.text_for("ev_0001") == "a" * 50
         assert corpus.text_for("ev_0002") == ""
         assert corpus.state() == CorpusState(
-            complete=False, missing_answers=1, missing_tools=("get_dns",)
+            complete=False,
+            missing_answers=1,
+            missing_tools=("get_dns",),
+            why="ceiling reached",
         )
 
     def test_a_zero_ceiling_keeps_nothing_and_says_so(self) -> None:
@@ -209,13 +215,26 @@ class TestTheCeilingIsHonest:
         assert len(corpus) == 0
         assert corpus.state().partial
 
-    def test_the_haystack_follows_what_was_kept(self) -> None:
+    def test_what_is_kept_is_kept_lower_cased_once(self) -> None:
+        """Every reader compares lower-cased, so the fold happens here.
+
+        Folding it at each read copied the whole record per check, which is the
+        cost this shape exists to remove.
+        """
         corpus = RunEvidenceCorpus(1 << 20)
         corpus.remember("ev_0001", "get_dns", f"resolved {C2}")
-
-        assert C2 in corpus.haystack()
         corpus.remember("ev_0002", "strings", "MiXeD Case Value")
-        assert "mixed case value" in corpus.haystack()
+
+        assert corpus.text_for("ev_0002") == "mixed case value"
+        assert any(C2 in part for part in corpus.parts())
+        assert any("mixed case value" in part for part in corpus.parts())
+
+    def test_the_parts_are_the_answers_and_not_one_string(self) -> None:
+        corpus = RunEvidenceCorpus(1 << 20)
+        corpus.remember("ev_0001", "get_dns", "first answer")
+        corpus.remember("ev_0002", "strings", "second answer")
+
+        assert corpus.parts() == ("first answer", "second answer")
 
     def test_one_entry_is_remembered_once(self) -> None:
         corpus = RunEvidenceCorpus(1 << 20)
@@ -225,35 +244,131 @@ class TestTheCeilingIsHonest:
         assert corpus.text_for("ev_0001") == "first"
 
 
+# The code an advisory row carries, and the shortest prefix a ``startswith``
+# test can single it out by. A guard that looked for the bare literal alone was
+# blind to a module-level constant, which is how every other code in this
+# repository is written.
+UNGROUNDED_CODE = "stix.ungrounded_indicator"
+_CODE_PREFIX = "stix.ungrounded"
+_SRC = pathlib.Path(__file__).resolve().parents[3] / "src" / "maljan"
+
+
+def _needles(tree: ast.AST, defined_elsewhere: set[str]) -> set[str]:
+    """Every way this module can write the ungrounded code."""
+    bound = names_bound_to(tree, UNGROUNDED_CODE)
+    return {UNGROUNDED_CODE} | bound | names_imported_from(tree, defined_elsewhere | bound)
+
+
+def _names_the_code(statements: list[ast.stmt], needles: set[str]) -> bool:
+    """Whether this run of code singles the ungrounded row out, however written.
+
+    The literal, a name bound to it here or imported from wherever it is
+    defined, or a prefix of it in a ``startswith`` — which is the same decision
+    written as a test rather than as an equality.
+    """
+    for statement in statements:
+        for node in ast.walk(statement):
+            if isinstance(node, ast.Name) and node.id in needles:
+                return True
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                if node.value in needles or (
+                    node.value.startswith(_CODE_PREFIX) and UNGROUNDED_CODE.startswith(node.value)
+                ):
+                    return True
+    return False
+
+
+def _asks(statements: list[ast.stmt]) -> bool:
+    """Whether this run of code reads ``advisory`` at all."""
+    return any(
+        (isinstance(node, ast.Attribute) and node.attr == "advisory")
+        or (isinstance(node, ast.Name) and node.id == "advisory")
+        or (isinstance(node, ast.Constant) and node.value == "advisory")
+        # The writer's side of the same word: ``Violation(advisory=…)`` reads
+        # what an absence may claim just as a consumer's ``row.advisory`` does.
+        or (isinstance(node, ast.keyword) and node.arg == "advisory")
+        for statement in statements
+        for node in ast.walk(statement)
+    )
+
+
+def _decides_without_asking_in(sources: dict[str, str]) -> list[str]:
+    """The scan, over sources given by name, so a probe drives the real rule."""
+    trees = {name: ast.parse(text, filename=name) for name, text in sources.items()}
+    # Wherever the code is defined, under whatever name, so an importer of it
+    # is resolved rather than missed.
+    defined: set[str] = set()
+    for tree in trees.values():
+        defined |= names_bound_to(tree, UNGROUNDED_CODE)
+
+    offenders: list[str] = []
+    for name, tree in sorted(trees.items()):
+        needles = _needles(tree, defined)
+        for where, statements in _runs_of_code(tree):
+            if not _names_the_code(statements, needles):
+                continue
+            if _asks(statements):
+                continue
+            offenders.append(f"{name}: {where}")
+    return offenders
+
+
+def _is_a_definition(statement: ast.stmt) -> bool:
+    """Whether this statement binds a name rather than acting on a row."""
+    if isinstance(statement, ast.Import | ast.ImportFrom):
+        return True
+    if isinstance(statement, ast.Assign) and isinstance(statement.value, ast.Constant):
+        return all(isinstance(target, ast.Name) for target in statement.targets)
+    if isinstance(statement, ast.AnnAssign) and isinstance(statement.value, ast.Constant):
+        return isinstance(statement.target, ast.Name)
+    return False
+
+
+def _runs_of_code(tree: ast.AST) -> list[tuple[str, list[ast.stmt]]]:
+    """Every function body, and the module's own top level beside them.
+
+    A decision taken at module level is a decision, and a scan that read only
+    functions never saw one. A function's docstring is left out: naming a code
+    in prose is not acting on it.
+    """
+    found: list[tuple[str, list[ast.stmt]]] = []
+    inside: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        statements = list(node.body)
+        if ast.get_docstring(node) is not None:
+            statements = statements[1:]
+        found.append((node.name, statements))
+        inside.update(id(child) for statement in statements for child in ast.walk(statement))
+    top = [
+        statement
+        for statement in getattr(tree, "body", [])
+        if not isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+        and id(statement) not in inside
+        # Defining the code, and importing it, are not deciding anything with
+        # it — they are what the resolution above reads.
+        and not _is_a_definition(statement)
+    ]
+    if top:
+        found.append(("module-level code with no function at all", top))
+    return found
+
+
+def _decides_without_asking(root: pathlib.Path) -> list[str]:
+    """The scan over the tree, with the code resolved through every module."""
+    sources = {
+        str(path.relative_to(root)): path.read_text(encoding="utf-8")
+        for path in sorted(root.rglob("*.py"))
+    }
+    return _decides_without_asking_in(sources)
+
+
 class TestNothingDropsAnObjectOverPartialEvidence:
     """The guard the ruling asks for, over the source rather than one path."""
 
     def test_no_consumer_removes_an_object_on_an_absence_it_cannot_assert(self) -> None:
-        import ast
-        import pathlib
-
-        src = pathlib.Path(__file__).resolve().parents[3] / "src" / "maljan"
-        # Every function that reads a violation's code to decide what to remove
-        # must also read ``advisory``. The scan is over the whole tree so a
-        # second consumer written later is caught rather than assumed absent.
-        offenders: list[str] = []
-        for path in src.rglob("*.py"):
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-                    continue
-                # The docstring is prose: ``_judge_indicator_problem`` names
-                # the code to say whose question it is *not*, and naming a
-                # thing is not acting on it.
-                statements = list(node.body)
-                if ast.get_docstring(node) is not None:
-                    statements = statements[1:]
-                body = "\n".join(ast.unparse(statement) for statement in statements)
-                if "stix.ungrounded_indicator" not in body:
-                    continue
-                if "advisory" in body:
-                    continue
-                offenders.append(f"{path.relative_to(src)}: {node.name}")
+        offenders = _decides_without_asking(_SRC)
 
         assert not offenders, (
             "These decide something from an ungrounded-indicator row without asking "
@@ -261,6 +376,92 @@ class TestNothingDropsAnObjectOverPartialEvidence:
             "evidence the run knows is partial and is not a reason to remove "
             "anything:\n  " + "\n  ".join(offenders)
         )
+
+    @pytest.mark.parametrize(
+        ("where", "source"),
+        [
+            (
+                "act",
+                "def act(rows):\n"
+                "    return [r for r in rows if r.code != 'stix.ungrounded_indicator']\n",
+            ),
+            (
+                "act",
+                "UNGROUNDED = 'stix.ungrounded_indicator'\n"
+                "def act(rows):\n"
+                "    return [r for r in rows if r.code != UNGROUNDED]\n",
+            ),
+            (
+                "act",
+                "UNGROUNDED_INDICATOR_CODE = 'stix.ungrounded_indicator'\n"
+                "def act(rows):\n"
+                "    return [r for r in rows if r.code != UNGROUNDED_INDICATOR_CODE]\n",
+            ),
+            (
+                "act",
+                "def act(rows):\n"
+                "    return [r for r in rows if not r.code.startswith('stix.ungrounded')]\n",
+            ),
+            (
+                "act",
+                "def act(rows):\n"
+                "    return list(filter(lambda r: r.code != 'stix.ungrounded_indicator', rows))\n",
+            ),
+            (
+                "module-level code with no function at all",
+                "KEPT = [r for r in ROWS if r.code != 'stix.ungrounded_indicator']\n",
+            ),
+        ],
+    )
+    def test_the_guard_catches_each_way_the_code_can_be_named(
+        self, where: str, source: str
+    ) -> None:
+        """The scan passes trivially if it is broken, so prove it is not.
+
+        Every shape the review measured as missed: a module-level constant, one
+        in this repository's own ``*_CODE`` idiom, a ``startswith`` test, and a
+        decision taken at module level with no function to find it in.
+        """
+        assert _decides_without_asking_in({"probe.py": source}) == [f"probe.py: {where}"]
+
+    def test_an_imported_constant_is_resolved_across_modules(self) -> None:
+        sources = {
+            "codes.py": "UNGROUNDED_INDICATOR_CODE = 'stix.ungrounded_indicator'\n",
+            "consumer.py": (
+                "from maljan.codes import UNGROUNDED_INDICATOR_CODE as GONE\n"
+                "def act(rows):\n"
+                "    return [r for r in rows if r.code != GONE]\n"
+            ),
+        }
+
+        assert _decides_without_asking_in(sources) == ["consumer.py: act"]
+
+    def test_a_consumer_that_asks_is_left_alone(self) -> None:
+        sources = {
+            "consumer.py": (
+                "UNGROUNDED_INDICATOR_CODE = 'stix.ungrounded_indicator'\n"
+                "def act(rows):\n"
+                "    return [\n"
+                "        r for r in rows\n"
+                "        if r.code != UNGROUNDED_INDICATOR_CODE or r.advisory\n"
+                "    ]\n"
+            ),
+        }
+
+        assert _decides_without_asking_in(sources) == []
+
+    def test_naming_the_code_in_prose_is_not_acting_on_it(self) -> None:
+        """``_judge_indicator_problem`` says whose question it is *not*."""
+        sources = {
+            "renderer.py": (
+                "def problem(indicator):\n"
+                '    """Whether any evidence holds this up is '
+                'stix.ungrounded_indicator\'s question."""\n'
+                "    return None\n"
+            ),
+        }
+
+        assert _decides_without_asking_in(sources) == []
 
     @pytest.mark.parametrize("advisory", [True, False])
     def test_the_drop_is_decided_by_the_flag_and_nothing_else(self, advisory: bool) -> None:
@@ -273,3 +474,260 @@ class TestNothingDropsAnObjectOverPartialEvidence:
         )
 
         assert drop_ungrounded_indicators(bundle, [row]) == (0 if advisory else 1)
+
+
+class TestACorpusThatKeptNothingIsStillTheCorpus:
+    """The ceiling is an operator's control and it said the opposite of the truth.
+
+    Asking the corpus only when it *held* something threw away the verdict of
+    one that kept nothing — which is exactly what ``evidence_corpus_bytes = 0``
+    produces — and the check fell back to the stored ledger, was told the
+    evidence was whole, and dropped the judge's object. Four surfaces said a
+    zero ceiling makes every absence a note.
+
+    Driven end to end here rather than against the corpus object's own verdict,
+    which is what the first round's test asserted and why it passed.
+    """
+
+    class _Container:
+        def __init__(self, corpus: RunEvidenceCorpus | None) -> None:
+            self._corpus = corpus
+
+        def get_evidence_corpus(self) -> RunEvidenceCorpus | None:
+            return self._corpus
+
+    @staticmethod
+    def _answers() -> list[tuple[str, str]]:
+        """Three answers, one of them carrying the C2 the judge will cite."""
+        return [
+            ("get_strings", "a" * 300),
+            ("get_dns", f"resolved {C2}"),
+            ("pe_info", "b" * 300),
+        ]
+
+    def _run(self, corpus: RunEvidenceCorpus | None) -> tuple[list[Violation], int, CorpusState]:
+        from maljan.agents.judge_postprocess import build_evidence_corpus
+
+        entries = _recorded(corpus, self._answers())
+        # Nothing here overruns the byte budget, so the stored ledger looks
+        # whole — which is what let the fallback claim completeness.
+        seen, state = _what_the_run_saw(self._Container(corpus), entries)
+        bundle = Bundle(objects=[Indicator(pattern=PATTERN)])  # type: ignore[list-item]
+        violations = validate_verdict_bundle(
+            bundle, build_evidence_corpus(extra=seen), corpus_state=state
+        )
+        return violations, drop_ungrounded_indicators(bundle, violations), state
+
+    def test_a_zero_ceiling_makes_the_absence_a_note_and_keeps_the_object(self) -> None:
+        violations, dropped, state = self._run(RunEvidenceCorpus(0))
+
+        assert state.partial
+        assert state.missing_answers == 3
+        assert [v.advisory for v in violations] == [True]
+        assert dropped == 0
+        assert "3 answers from" in violations[0].message
+        assert "nothing is dropped for it" in violations[0].message
+
+    def test_a_ceiling_too_small_for_any_answer_does_the_same(self) -> None:
+        # Ten bytes: shorter than the shortest of the three answers.
+        violations, dropped, state = self._run(RunEvidenceCorpus(10))
+
+        assert state.partial
+        assert state.missing_answers == 3
+        assert [v.advisory for v in violations] == [True]
+        assert dropped == 0
+
+    def test_a_ceiling_that_fits_one_answer_is_partial_too(self) -> None:
+        """The first answer fits and the one carrying the C2 does not."""
+        violations, dropped, state = self._run(RunEvidenceCorpus(300))
+
+        assert state.partial
+        assert state.missing_answers == 2
+        assert state.missing_tools == ("get_dns", "pe_info")
+        assert [v.advisory for v in violations] == [True]
+        assert dropped == 0
+
+    def test_a_whole_corpus_still_drops_the_invented_value(self) -> None:
+        """The rule is unchanged where the platform may state it."""
+        violations, dropped, state = self._run(RunEvidenceCorpus(1 << 20))
+
+        assert state.complete
+        # The C2 really was answered, so nothing is wrong with the indicator.
+        assert violations == []
+        assert dropped == 0
+
+    def test_a_resumed_run_with_no_corpus_never_asserts_an_absence(self) -> None:
+        """No corpus and stored entries that all survived the byte budget.
+
+        The fallback reported itself whole and laundered the missing corpus
+        into a statement nobody could make. Completeness is the conjunction of
+        what was searched, and a corpus that is gone is partial by
+        construction.
+        """
+        entries = _recorded(None, [("get_strings", "a" * 300)])
+        assert all(not e.truncated for e in entries)
+
+        seen, state = _what_the_run_saw(self._Container(None), entries)
+        bundle = Bundle(objects=[Indicator(pattern=PATTERN)])  # type: ignore[list-item]
+        violations = validate_verdict_bundle(bundle, set(seen), corpus_state=state)
+
+        assert state.partial
+        assert [v.advisory for v in violations] == [True]
+        assert drop_ungrounded_indicators(bundle, violations) == 0
+
+    def test_a_resumed_run_counts_the_entries_the_budget_blanked_too(self) -> None:
+        entries = _recorded(None, [("get_strings", "a" * 900), ("get_dns", "b" * 500)])
+        apply_budget(entries, 1000)
+
+        _seen, state = _what_the_run_saw(self._Container(None), entries)
+
+        assert state.partial
+        assert state.missing_answers == 1
+        assert state.missing_tools == ("get_dns",)
+
+    def test_the_conjunction_never_launders_a_partial_source(self) -> None:
+        from maljan.agents.run_evidence_corpus import both_searched
+
+        whole = CorpusState()
+        partial = CorpusState(complete=False, missing_answers=2, missing_tools=("get_dns",))
+
+        assert both_searched(whole, whole).complete
+        assert not both_searched(whole, partial).complete
+        assert not both_searched(partial, whole).complete
+        assert both_searched(partial, partial) == CorpusState(
+            complete=False, missing_answers=4, missing_tools=("get_dns",)
+        )
+
+
+class TestTheCeilingBoundsWhatTheProcessSpends:
+    """A ceiling only bounds what it says if the text is not copied.
+
+    The run's record used to be copied three more times on the way to a check:
+    into the corpus's joined cache, into the token set as one element, and into
+    the string the check finally searched. One check over 400 answers of 6 000
+    characters allocated 6 MB on top of a 2.4 MB corpus, so the setting's
+    number was a quarter of what the process spent.
+    """
+
+    ANSWERS = 120
+    SIZE = 6_000
+
+    def _corpus(self) -> RunEvidenceCorpus:
+        corpus = RunEvidenceCorpus(1 << 30)
+        for index in range(self.ANSWERS):
+            corpus.remember(
+                f"ev_{index:04d}", "get_strings", (f"answer {index} " + "Xy7Z " * 2000)[: self.SIZE]
+            )
+        return corpus
+
+    def test_a_check_copies_nothing_of_the_record_it_searches(self) -> None:
+        import tracemalloc
+
+        from maljan.agents.judge_postprocess import build_evidence_corpus
+
+        corpus = self._corpus()
+        parts = list(corpus.parts())
+        text = self.ANSWERS * self.SIZE
+        # Warm every path, so what is measured is the search and not an import.
+        validate_verdict_bundle(
+            Bundle(objects=[Indicator(pattern=PATTERN)]),  # type: ignore[list-item]
+            build_evidence_corpus(extra=["warm"]),
+            searched=["warm"],
+        )
+
+        tracemalloc.start()
+        before = tracemalloc.get_traced_memory()[0]
+        validate_verdict_bundle(
+            Bundle(objects=[Indicator(pattern=PATTERN)]),  # type: ignore[list-item]
+            build_evidence_corpus(),
+            searched=parts,
+        )
+        _current, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+
+        # A tenth of the record would already mean a copy of part of it; the
+        # measured figure is a hundredth of one per cent.
+        assert peak - before < text // 10, f"{(peak - before) / 1e6:.2f} MB over {text} characters"
+
+    def test_the_corpus_holds_the_text_once(self) -> None:
+        import tracemalloc
+
+        text = self.ANSWERS * self.SIZE
+        tracemalloc.start()
+        before = tracemalloc.get_traced_memory()[0]
+        corpus = self._corpus()
+        current, _peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+
+        assert len(corpus) == self.ANSWERS
+        # Once, with room for the bookkeeping beside it — never the four times
+        # the joined shape cost.
+        assert current - before < text * 2
+
+
+_ORDINARY = Violation(code="isr.confidence_range", message="a confidence outside 0..1")
+
+
+class TestTheFlagSurvivesEveryPlaceARowIsRebuilt:
+    """A row the platform declined to act on must not be stored as an unfixed one.
+
+    ``record_unresolved`` rebuilt its row as ``{agent, code, message}``, so the
+    run summary, the report and the console showed an advisory absence as a
+    producer's own unfixed finding — and an operator had to read inside the
+    message to learn that nothing had been dropped for it.
+    """
+
+    @staticmethod
+    def _row() -> Violation:
+        return Violation(
+            code="stix.ungrounded_indicator",
+            message="a value appears nowhere in the evidence this run collected.",
+            path="objects[0]",
+            advisory=True,
+        )
+
+    def test_the_violation_serialises_it(self) -> None:
+        assert self._row().to_dict()["advisory"] == "true"
+        assert Violation(code="x", message="y").to_dict()["advisory"] == ""
+
+    def test_the_state_channel_carries_it_back(self) -> None:
+        from maljan.pipeline.nodes import _violations_from_rows
+
+        (rebuilt,) = _violations_from_rows([self._row().to_dict()])
+
+        assert rebuilt.advisory is True
+
+    def test_the_tally_keeps_it_on_the_stored_row(self) -> None:
+        from maljan.pipeline.validation import ValidationTally
+
+        tally = ValidationTally()
+        tally.record_unresolved("judge", [self._row(), Violation(code="x", message="y")])
+
+        advisory, ordinary = tally.unresolved
+        assert advisory["advisory"] == "true"
+        assert "advisory" not in ordinary
+
+    def test_the_run_summary_carries_it_to_the_console(self) -> None:
+        from maljan.analysis.run_summary import RunSummaryBuilder
+        from maljan.pipeline.validation import validation_metrics
+
+        builder = RunSummaryBuilder(start_time=0.0)
+        builder.set_sample("d" * 64, "sample.exe")
+        summary = builder.set_validation(
+            validation_metrics(0, [("judge", self._row()), ("static", _ORDINARY)])
+        ).build()
+
+        advisory, ordinary = summary.to_dict()["validation"]["unresolved"]
+        assert advisory["advisory"] == "true"
+        assert "advisory" not in ordinary
+
+    def test_the_cli_read_back_keeps_it(self) -> None:
+        """The one other place a stored row is rebuilt into a metrics object."""
+        import inspect
+
+        from maljan import cli
+
+        source = inspect.getsource(cli)
+        # ``dict(row)`` rather than three named keys, which is what keeps a
+        # field nobody edited here from being dropped on the way back.
+        assert 'unresolved=[dict(row) for row in v_data.get("unresolved") or []]' in source
