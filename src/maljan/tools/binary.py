@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import stat
 import tarfile
 import zipfile
 from pathlib import Path
@@ -674,6 +676,43 @@ def carved_file_name(label: str, digest: str) -> str:
     return f"{carved_name_prefix(label)}{digest[:12]}"
 
 
+def _write_carved(child: Path, blob: bytes) -> str | None:
+    """Write one carved payload, or say why it was not written.
+
+    ``O_CREAT|O_EXCL|O_NOFOLLOW`` at 0o600, the same discipline the upload path
+    uses and for the same reason: the plain write followed a symlink planted at
+    the destination, and the two-step create-then-chmod leaves the file
+    readable at the process umask for as long as the write takes.
+
+    Exclusive means a second run of the same sample finds its own payload
+    already there. That is the common case and not a failure: the name carries
+    the digest of the bytes, so a regular file of the same size holding the
+    same content is the payload this call would have written, and it is reused.
+    Anything else at that name — a link, a directory, a file whose bytes differ
+    — is refused, because this call did not put it there.
+    """
+    try:
+        fd = os.open(child, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    except FileExistsError:
+        try:
+            info = child.lstat()
+            if stat.S_ISREG(info.st_mode) and info.st_size == len(blob):
+                if child.read_bytes() == blob:
+                    return None
+        except OSError as exc:
+            return f"cannot read what is already at {child.name}: {type(exc).__name__}"
+        return f"{child.name} is already taken by something this run did not write"
+    except OSError as exc:
+        return f"cannot write {child.name}: {type(exc).__name__}"
+    try:
+        os.write(fd, blob)
+    except OSError as exc:
+        return f"cannot write {child.name}: {type(exc).__name__}"
+    finally:
+        os.close(fd)
+    return None
+
+
 def _carve_into(path: str, destination: str | Path) -> dict[str, Any]:
     """Write each embedded payload found in the file under ``destination``.
 
@@ -688,6 +727,10 @@ def _carve_into(path: str, destination: str | Path) -> dict[str, Any]:
     from the sample's hash under its own staging directory. A live run passed
     a model-chosen directory through here and live malware was written to the
     sidecar's cwd; nothing a model writes reaches this argument any more.
+
+    One payload that cannot be written is that payload's error and not the
+    call's: the others are still carved, and the entry says what happened to
+    the one that was not.
     """
     target = Path(path)
     if not target.is_file():
@@ -704,14 +747,18 @@ def _carve_into(path: str, destination: str | Path) -> dict[str, Any]:
     for label, blob in _carve(target.read_bytes()):
         digest = hashlib.sha256(blob).hexdigest()
         child = where / carved_file_name(label, digest)
-        child.write_bytes(blob)
-        child.chmod(0o600)
+        written = _write_carved(child, blob)
         offset = 0
         if "+0x" in label:
             try:
                 offset = int(label.split("+0x", 1)[1], 16)
             except ValueError:
                 offset = 0
+        if written is not None:
+            # The name is taken; the payload is reported with the reason
+            # rather than silently missing from the list.
+            payloads.append({"name": label, "offset": offset, "sha256": digest, "error": written})
+            continue
         payloads.append(
             {
                 "name": label,

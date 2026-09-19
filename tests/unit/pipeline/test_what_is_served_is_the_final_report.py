@@ -134,8 +134,12 @@ async def _run(container: Any) -> tuple[dict[str, Any], dict[str, Any]]:
     def _build(self: MalwareReportBuilder) -> MalwareReport:
         return _published_and_marked(deterministic(self))
 
+    # The node is given the profile's own report stage, so the rollup it
+    # finishes has stages in it and the mirroring below is really exercised.
+    stage = next(step for step in container.active_profile().stages if step.kind == "report")
     with patch.object(MalwareReportBuilder, "build_deterministic", _build):
-        result = await make_report_node(container)(_state())  # type: ignore[arg-type]
+        node = make_report_node(container, stage=stage, announces=False)
+        result = await node(_state())  # type: ignore[arg-type]
     return result, result.get("run_summary") or {}
 
 
@@ -160,11 +164,34 @@ class TestTheStoredReportIsTheFinalOne:
         assert stored["elapsed_seconds"] == column["elapsed_seconds"]
 
     async def test_the_snapshot_carries_the_finished_stage_rollup(self, container: Any) -> None:
+        """Both sides hold the same rollup, and it is a rollup with stages in it.
+
+        The mirroring is the point: the rollup reached the state's column and
+        not the report's own summary, so a markdown rendered from the stored
+        report named four stages of five. An assertion over two empty values
+        would pass with the mirroring deleted.
+        """
         result, column = await _run(container)
 
         stored = (result["malware_report"] or {}).get("run_summary") or {}
 
-        assert stored.get("stages") == column.get("stages")
+        assert stored.get("stages"), "the harness must run a profile that has stages"
+        assert stored["stages"] == column["stages"]
+        assert {row["key"] for row in stored["stages"]} == {
+            "triage_pack",
+            "analysis",
+            "debate",
+            "verdict",
+            "report",
+        }
+        assert [row for row in stored["stages"] if row["key"] == "report"][0]["ran"] is True
+
+    async def test_the_served_markdown_names_the_stages(self, container: Any) -> None:
+        result, _column = await _run(container)
+
+        assert "Per stage:" in MarkdownRenderer().render(
+            MalwareReport.model_validate(result["malware_report"])
+        )
 
 
 @pytest.mark.asyncio
@@ -193,8 +220,16 @@ class TestWhatIsServedFromIt:
         assert f"Elapsed: {stored['elapsed_seconds']:.1f}s" in served
         assert "Elapsed: 11.5s" not in served
 
-    async def test_the_node_s_own_copy_is_the_same_rendering(self, container: Any) -> None:
-        """One renderer, one source: the CLI's copy cannot differ from the served one."""
+    async def test_the_node_s_own_copy_is_the_same_rendering_at_write_time(
+        self, container: Any
+    ) -> None:
+        """One renderer, one source, at the moment the run ends.
+
+        Not an invariant afterwards, and it should not be: the enrichment job
+        rewrites the stored report later, and every rendering is made on
+        request from that, so the served document follows the enrichment while
+        the copy the CLI wrote to a file stays what the run produced.
+        """
         result, _column = await _run(container)
 
         assert result["malware_report_markdown"] == self._served(result)

@@ -753,6 +753,19 @@ change landed on `main`.
   design record — the former `docs/plans`, `docs/specs` and `docs/superpowers`
   trees — is read from git history instead of the working tree
   ([#38](https://github.com/Root0ne/Maljan/pull/38)).
+- **`/reports/{id}/iocs` says where each row came from, and what it may
+  publish.** The service attached a `source` to every domain row and `IOCEntry`
+  did not declare it, so `response_model` dropped it and an uncorroborated
+  string-derived name shipped looking exactly like one the sandbox had watched.
+  The field is declared, along with a `published` flag, and mirrored in the
+  console's client with its shape assertion. The feed is one other systems act
+  on, so it now returns what the publish rule would publish by default;
+  `include=all` returns everything and `include=unpublished` only the withheld
+  rows. The console's IOC export asks for `all`, because an operator reading
+  them wants the distinction rather than a shorter list.
+  **Upgrading:** a consumer that expects every row from
+  `GET /reports/{id}/iocs` must now ask for `include=all`, which returns
+  exactly what the route returned before.
 
 ### Fixed
 
@@ -2433,16 +2446,6 @@ change landed on `main`.
   request from the stored report, so there is no second copy to go stale; a
   report stored before this keeps the figures it was stored with, and its
   run-summary column — what the console draws — was always the final one.
-- **`/reports/{id}/iocs` says where each row came from, and what it may
-  publish.** The service attached a `source` to every domain row and `IOCEntry`
-  did not declare it, so `response_model` dropped it and an uncorroborated
-  string-derived name shipped looking exactly like one the sandbox had watched.
-  The field is declared, along with a `published` flag, and mirrored in the
-  console's client with its shape assertion. The feed is one other systems act
-  on, so it now returns what the publish rule would publish by default;
-  `include=all` returns everything and `include=unpublished` only the withheld
-  rows. The console's IOC export asks for `all`, because an operator reading
-  them wants the distinction rather than a shorter list.
 
 ### Removed
 

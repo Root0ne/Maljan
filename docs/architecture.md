@@ -1409,7 +1409,11 @@ GeoIP reputation into the indicator set after the verdict has shipped.
 kept beside it: there is one source of truth and no second copy to go stale.
 The report node renders its own markdown too — the CLI writes that one to a
 file — but it renders it from the same object, after the last field the
-renderer reads has been written. That ordering is the fix for a served report
+renderer reads has been written, so the two agree at the moment the run ends.
+They are not promised to agree forever, and should not be: the enrichment job
+rewrites the stored report afterwards, the served rendering follows it because
+it is made on request, and the file the CLI wrote stays what the run itself
+produced. That ordering is the fix for a served report
 that printed `24 claimed, 24 published` over four published techniques, carried
 no section naming the twenty it did not publish, and gave 311.7 s as a 396.3 s
 run's elapsed time: the run summary's last four fields — the validation block,

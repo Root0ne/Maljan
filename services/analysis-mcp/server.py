@@ -240,6 +240,18 @@ CARVED_REMEDIATION = (
 # enough to read; the names are the tails this run wrote and nothing else.
 _LISTED_CARVED_FILES = 12
 
+# The longest value this argument takes, which is the longest path a
+# filesystem takes. A carved path is a staging directory, a sha256 and a name
+# the writer composed, so anything past this was never going to name a file and
+# is answered here rather than by the kernel.
+_MAX_CARVED_LENGTH = 4096
+
+# How much of a value a refusal echoes back. The message travels to the ledger
+# and, through the remediation, to the event feed, and a caller that sent three
+# thousand characters does not need all three thousand back to see what it
+# sent.
+_ECHOED_VALUE_CHARS = 80
+
 # The quote characters a model wraps a value in when it copies it out of the
 # JSON it read. One matching pair is removed and nothing else is: no
 # unescaping, no globbing, no case folding, because anything more would be
@@ -281,10 +293,25 @@ def _unquoted(value: str) -> str:
 
 
 def _carved_files(tree: Path) -> list[Path]:
-    """Every file this run carved, in a stable order."""
+    """Every file this run carved, in a stable order.
+
+    Read with ``lstat``, so a symlink is not one. A link is not something this
+    server wrote — ``carve_payloads`` is the only writer under this tree — and
+    treating one as a carved file is how a name-shaped link came to be listed
+    as a payload and matched by name. It is neither listed in a refusal's tails
+    nor found by the label branch, and the confinement check below refuses it
+    wherever it points.
+    """
     if not tree.is_dir():
         return []
-    return sorted((entry for entry in tree.rglob("*") if entry.is_file()), key=lambda e: e.name)
+    found: list[Path] = []
+    for entry in tree.rglob("*"):
+        try:
+            if stat.S_ISREG(entry.lstat().st_mode):
+                found.append(entry)
+        except OSError:  # an entry another call removed while this walked
+            continue
+    return sorted(found, key=lambda e: e.name)
 
 
 def _by_display_name(tree: Path, asked: str) -> Path | None:
@@ -302,6 +329,21 @@ def _by_display_name(tree: Path, asked: str) -> Path | None:
     return matched[0] if len(matched) == 1 else None
 
 
+def _inside(candidate: Path, roots: tuple[Path, ...]) -> Path:
+    """``candidate`` resolved inside ``roots`` and readable as a file, or refused.
+
+    The one place confinement is decided, so every spelling of the argument is
+    decided the same way. A branch that returned its own answer skipped this:
+    a symlink named like a payload was matched by its label and read, while the
+    same file named by its tail and by its absolute path was refused, and the
+    answer then recorded the in-tree name rather than what had been read.
+    """
+    resolved = resolve_under(candidate, roots)
+    if not resolved.is_file():
+        raise NotARegularFile()
+    return resolved
+
+
 def _carved_miss(tree: Path, asked: str) -> CarvedFileNotFound:
     """The refusal for a name this run did not carve, listing what it did.
 
@@ -310,7 +352,14 @@ def _carved_miss(tree: Path, asked: str) -> CarvedFileNotFound:
     """
     names = [entry.name for entry in _carved_files(tree)][:_LISTED_CARVED_FILES]
     listed = ", ".join(names) if names else "this run carved nothing"
-    return CarvedFileNotFound(f"no carved file named {asked!r}; this run carved: {listed}")
+    return CarvedFileNotFound(f"no carved file named {_echoed(asked)}; this run carved: {listed}")
+
+
+def _echoed(value: str) -> str:
+    """One value as a refusal quotes it back, bounded."""
+    text = str(value or "")
+    shown = text if len(text) <= _ECHOED_VALUE_CHARS else f"{text[:_ECHOED_VALUE_CHARS]}…"
+    return repr(shown)
 
 
 def _digest_of(target: Path) -> str:
@@ -431,6 +480,11 @@ def _carved_file(asked: str, sample: Path | None) -> Path:
     """
     if sample is None:
         raise PathOutsideRoots()
+    if len(asked) > _MAX_CARVED_LENGTH:
+        raise CarvedFileNotFound(
+            f"the carved_path argument is {len(asked)} characters; no file this run wrote "
+            f"has a name that long"
+        )
     tree = _carved_tree(_digest_of(sample))
     roots = (tree, sample)
     target = Path(asked)
@@ -452,10 +506,11 @@ def _carved_file(asked: str, sample: Path | None) -> Path:
         if resolved.exists():
             other = other or resolved
     # The display label of a payload this run carved names its file through the
-    # writer's own rule.
+    # writer's own rule — and then answers the same confinement question the
+    # other two spellings answer, on the path it resolves to.
     by_name = _by_display_name(tree, asked)
     if by_name is not None:
-        return by_name
+        return _inside(by_name, roots)
     # A directory, a FIFO, a device or a socket is not a file to read, and a
     # reader that opened a FIFO with no writer would wait for one forever.
     if other is not None:
@@ -511,7 +566,17 @@ def _guard(tool: str, call: Any, **kwargs: Any) -> dict[str, Any]:
     except NotARegularFile as refusal:
         return tool_error(BAD_ARGUMENT, str(refusal), tool=tool, remediation=CARVED_REMEDIATION)
     except Exception as exc:  # noqa: BLE001 — a tool server answers, it does not raise
-        return tool_error(code_for_exception(exc), f"{type(exc).__name__}: {exc}", tool=tool)
+        # A call that named a carved file is answered in that argument's words
+        # however it failed. Anything the filesystem itself refuses — a name
+        # the kernel will not take, a read that goes wrong mid-way — lands
+        # here, and the catch-all remedy would send the caller back to a
+        # manifest that has nothing to say about this argument.
+        return tool_error(
+            code_for_exception(exc),
+            f"{type(exc).__name__}: {exc}",
+            tool=tool,
+            remediation=CARVED_REMEDIATION if _asked_for_a_carved_file(kwargs) else None,
+        )
 
 
 @mcp.tool(name=CAPABILITIES_TOOL)

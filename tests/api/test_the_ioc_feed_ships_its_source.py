@@ -170,3 +170,70 @@ class TestTheWiderModes:
         for mode in ("published", "unpublished", "all"):
             rows = _rows(client, f"?include={mode}&kind=ip")
             assert {row["kind"] for row in rows} <= {"ip"}, mode
+
+
+class TestThePublishRuleFailsClosed:
+    """A feed another system blocks on does not widen itself in silence.
+
+    The guard around the rule used to answer "published" for anything it could
+    not decide, and the import around it did the same — which for a hard
+    dependency of this application could only ever hide a bug, and would hide
+    it by quietly restoring the wider feed the default exists to replace. The
+    import is at module scope now, and the one guard that remains withholds the
+    row and says so at error level.
+    """
+
+    def test_a_rule_that_raises_withholds_the_row(self, monkeypatch: Any) -> None:
+        from app.services import report_service
+
+        def _raises(*_args: Any, **_kwargs: Any) -> Any:
+            raise RuntimeError("the renderer is broken")
+
+        monkeypatch.setattr(report_service, "indicator_publish_reason", _raises)
+
+        assert report_service._publishable("domain", "c2.example.com", "sandbox", None) is False
+
+    def test_it_says_so_at_error_level(self, monkeypatch: Any, caplog: Any) -> None:
+        import logging
+
+        from app.services import report_service
+
+        def _raises(*_args: Any, **_kwargs: Any) -> Any:
+            raise RuntimeError("the renderer is broken")
+
+        monkeypatch.setattr(report_service, "indicator_publish_reason", _raises)
+        with caplog.at_level(logging.ERROR):
+            report_service._publishable("domain", "c2.example.com", "sandbox", None)
+
+        assert any(record.levelno >= logging.ERROR for record in caplog.records)
+
+    def test_the_default_feed_is_then_empty_of_network_rows(
+        self, client: TestClient, monkeypatch: Any
+    ) -> None:
+        from app.services import report_service
+
+        def _raises(*_args: Any, **_kwargs: Any) -> Any:
+            raise RuntimeError("the renderer is broken")
+
+        monkeypatch.setattr(report_service, "indicator_publish_reason", _raises)
+
+        kinds = {row["kind"] for row in _rows(client)}
+
+        assert "domain" not in kinds and "ip" not in kinds and "url" not in kinds
+        # The sample's own identity and the sandbox's own observations never
+        # asked the rule, so they are unaffected.
+        assert "hash" in kinds
+
+    def test_the_rule_is_imported_at_module_scope(self) -> None:
+        """A hard dependency is imported like one, so a broken tree fails loudly."""
+        import ast
+        import inspect
+        import textwrap
+
+        from app.services import report_service
+
+        assert hasattr(report_service, "indicator_publish_reason")
+        body = ast.parse(textwrap.dedent(inspect.getsource(report_service._publishable)))
+        assert not [
+            node for node in ast.walk(body) if isinstance(node, ast.Import | ast.ImportFrom)
+        ], "the rule is imported once, at module scope, not per call"

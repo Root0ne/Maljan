@@ -7,6 +7,7 @@ import uuid
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from arq import ArqRedis
+from maljan.reporting.renderers.stix_renderer import indicator_publish_reason
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -77,18 +78,28 @@ def _publishable(kind: str, value: Any, source: Any, reputation: Any) -> bool:
 
     The one rule, asked from a second place rather than copied into it: the
     STIX bundle and this feed cannot come to disagree about whether a name only
-    the sample's bytes know is infrastructure. A rule that cannot be reached —
-    a deployment without the core package — answers yes, which is what this
-    feed did for every row before it asked at all.
+    the sample's bytes know is infrastructure.
+
+    Imported at module scope, like every other core import in this application:
+    ``maljan`` is a hard dependency of the API, so a guard around the import
+    could only ever hide a bug — a circular import, a broken renderer — and it
+    would hide it by quietly restoring the wider feed this default exists to
+    replace. The one guard that remains is around the call, and it fails
+    **closed**: a feed another system blocks on must not widen itself in
+    silence, and a withheld row with an error in the log is a condition an
+    operator notices and can work around with ``include=all``.
     """
     try:
-        from maljan.reporting.renderers.stix_renderer import indicator_publish_reason
-    except Exception:  # noqa: BLE001 — a feed is never worth an import error
-        return True
-    try:
         return indicator_publish_reason(kind, str(value or ""), source, reputation) is not None
-    except Exception:  # noqa: BLE001 — an unanswerable row is not a withheld one
-        return True
+    except Exception as exc:  # noqa: BLE001 — a feed answers, and says what broke
+        logger.error(
+            "the publish rule could not answer for a %s row; it is withheld from the "
+            "default feed (%s: %s)",
+            log_safe(kind),
+            type(exc).__name__,
+            log_safe(exc),
+        )
+        return False
 
 
 def _url_host(raw: Any) -> str:
