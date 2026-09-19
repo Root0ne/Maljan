@@ -2650,7 +2650,17 @@ class ReportingConfig(BaseModel):
     # the graph state, never persisted and dropped when the job ends. Past it
     # the corpus reports itself incomplete, and an absence measured against an
     # incomplete corpus is advisory rather than a reason to drop anything.
-    evidence_corpus_bytes: Annotated[int, Field(ge=0)] = 67108864
+    #
+    # Sixteen megabytes, and the number is a measurement rather than a round
+    # one. A ceiling only bounds what it says it bounds if the text is not
+    # copied: at 400 answers of 6 000 characters the corpus holds 2.07 MB for
+    # 2.40 MB of text and one grounding check allocates 0.01 MB on top of it,
+    # so the process cost is the ceiling and not four times it. Every answer
+    # passes ``max_tool_output_chars`` (6 000), so 16 MB is about 2 700 of
+    # them, against the order-400 tool calls a whole team spends — several
+    # times the heaviest run measured, and still a bound a machine running a
+    # model beside the worker can afford.
+    evidence_corpus_bytes: Annotated[int, Field(ge=0)] = 16777216
 
 
 class TriageConfig(BaseModel):
