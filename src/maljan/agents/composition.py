@@ -243,7 +243,17 @@ def _provider_tools(container: Any, definition: AgentDefinition, provider_id: st
     if not provider.capabilities.provides_tools:
         logger.info("Static provider '%s' exposes no tools.", provider.id)
         return []
-    provider.open(StaticJobContext(job_key=container.job_key()))
+    # The job's ledger and the job's tool-output limit travel with the attach,
+    # as they do for a built-in role's own provider: a toolkit opened without
+    # them records nowhere and cuts at the signature's default rather than at
+    # the number the operator set.
+    provider.open(
+        StaticJobContext(
+            job_key=container.job_key(),
+            max_output_chars=int(container.config.preprocessing.max_tool_output_chars),
+            truncation_ledger=container.get_truncation_ledger(),
+        )
+    )
     return list(provider.get_tools())
 
 

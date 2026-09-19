@@ -98,6 +98,9 @@ class _Container:
         self._provider = over.get("provider", _Provider())
         self._registry = over.get("registry", _Registry({}, {}))
         self.llm = object()
+        from maljan.core.truncation_ledger import TruncationLedger
+
+        self._truncation_ledger = TruncationLedger()
 
     def get_agent_llm(self, name: str) -> Any:
         return self.llm
@@ -108,6 +111,10 @@ class _Container:
 
     def get_static_provider(self, provider_id: str | None = None) -> Any:
         return self._provider
+
+    def get_truncation_ledger(self) -> Any:
+        """The job's own bound-hit ledger, which every attach carries."""
+        return self._truncation_ledger
 
     def get_server_registry(self) -> Any:
         return self._registry

@@ -616,12 +616,17 @@ class ServiceContainer:
         server's subprocess lives for exactly one analysis and is closed by
         ``aclose`` at the end of it — the same lifetime the static and sandbox
         providers already have.
+
+        It carries this job's truncation ledger, so every toolkit it opens
+        records its guardrail decisions where the run summary reads them.
         """
         with self._lock:
             if self._server_registry_cache is None:
                 from maljan.providers.servers import ServerRegistry
 
-                self._server_registry_cache = ServerRegistry(self.config)
+                self._server_registry_cache = ServerRegistry(
+                    self.config, truncation_ledger=self._truncation_ledger
+                )
                 logger.info(
                     "Tool servers: %s.",
                     ", ".join(sorted(self.config.mcp.servers)) or "(none)",

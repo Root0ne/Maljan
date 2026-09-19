@@ -592,6 +592,10 @@ class RunSummary:
                 f"| Judge bundles repaired | {trunc.judge_integrity_objects_removed}"
                 f" over {trunc.judge_integrity_invocations} attempt(s) |",
                 "",
+                "Tool output calls are the answers a tool server returned through the "
+                "guardrail. The per-call latency table counts every recorded call, so it "
+                "also holds the ones answered in process, which no guardrail sees.",
+                "",
             ]
             if trunc.evidence_corpus_partial_reason:
                 lines += [

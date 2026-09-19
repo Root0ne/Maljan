@@ -901,7 +901,7 @@ class TestAHandleOpensUnderTheJobsIdentity:
         from maljan.agents import composition
 
         source = inspect.getsource(composition._provider_tools)
-        assert "StaticJobContext(job_key=container.job_key())" in source
+        assert "job_key=container.job_key()" in source
 
 
 class TestALiveJobKeepsItsDirectory:

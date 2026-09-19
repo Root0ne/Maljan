@@ -1067,10 +1067,17 @@ class ServerHandle:
 class ServerRegistry:
     """The tool servers one job may attach, built from ``cfg.mcp.servers``."""
 
-    def __init__(self, cfg: Settings) -> None:
+    def __init__(self, cfg: Settings, *, truncation_ledger: Any | None = None) -> None:
         self._handles = {
             name: ServerHandle(name, config) for name, config in cfg.mcp.servers.items()
         }
+        # The job's own bound-hit ledger and the job's own tool-output limit,
+        # put on every toolkit this registry opens. Both used to be left to the
+        # caller: every attach but the static provider's passed neither, so the
+        # guardrail on a tool server's answer counted on nothing and cut at the
+        # signature's own 8000 rather than at the number the operator set.
+        self._truncation_ledger = truncation_ledger
+        self._max_output_chars = int(getattr(cfg.preprocessing, "max_tool_output_chars", 0) or 0)
         # A handle is bound to the loop that opened it, so a caller on another
         # running loop cannot be handed it — see ``_handle_for``. These are
         # the extra handles that answer for those callers, keyed by server and
@@ -1085,6 +1092,27 @@ class ServerRegistry:
         # ``degradation_reasons`` so the run summary says which server was
         # missing, rather than the report simply being thinner than the last.
         self.degradation_reasons: list[str] = []
+
+    def _attach(self, context: dict[str, Any]) -> dict[str, Any]:
+        """The attach context, with this job's ledger and limit in it.
+
+        One ledger per job: the registry's is the job's, so a toolkit it opens
+        records where the run summary reads, whatever the caller thought to
+        pass. A caller naming a different ledger is told, because a second
+        ledger is a count that reaches no reader.
+        """
+        out = dict(context)
+        if self._truncation_ledger is not None:
+            named = out.get("truncation_ledger")
+            if named is not None and named is not self._truncation_ledger:
+                logger.warning(
+                    "a tool server was asked to record on a ledger other than the job's; "
+                    "the job's ledger is used."
+                )
+            out["truncation_ledger"] = self._truncation_ledger
+        if self._max_output_chars > 0:
+            out.setdefault("max_output_chars", self._max_output_chars)
+        return out
 
     def _handle_for(self, handle: ServerHandle, loop: asyncio.AbstractEventLoop) -> ServerHandle:
         """The handle ``loop`` may use for this server, its own if need be.
@@ -1246,6 +1274,7 @@ class ServerRegistry:
         tools: list[BaseTool] = []
         reasons: list[str] = []
         seen = {} if seen is None else seen
+        context = self._attach(context)
         from maljan.agents.base_agent import _get_agent_loop
 
         # ``open`` hands ``initialize`` to the shared agent loop, so that is
@@ -1296,6 +1325,7 @@ class ServerRegistry:
         tools: list[BaseTool] = []
         reasons: list[str] = []
         seen = {} if seen is None else seen
+        context = self._attach(context)
         loop = asyncio.get_running_loop()
         for bound in self.for_agent(role, exclude=exclude):
             handle = self._handle_for(bound, loop)
@@ -1357,6 +1387,7 @@ class ServerRegistry:
         """
         from maljan.agents.base_agent import _get_agent_loop
 
+        context = self._attach(context)
         try:
             handle = self._handle_for(self.get(str(ref.server)), _get_agent_loop())
         except ProviderConfigurationError:
@@ -1389,6 +1420,7 @@ class ServerRegistry:
         self, ref: Any, job_id: str, *, seen: dict[str, str] | None = None, **context: Any
     ) -> tuple[list[BaseTool], list[str]]:
         """``tools_for_ref``, awaited on the caller's own loop."""
+        context = self._attach(context)
         loop = asyncio.get_running_loop()
         try:
             handle = self._handle_for(self.get(str(ref.server)), loop)

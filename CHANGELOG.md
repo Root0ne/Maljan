@@ -2900,6 +2900,23 @@ change landed on `main`.
   itself, trusts a local only for the value it was given, and fails if a sixth
   module starts building rows.
 
+- **A run that shortens an answer says so.** Every attach but the static
+  provider's opened its toolkit with no truncation ledger and no tool-output
+  limit, so the guardrail on a tool server's answer counted on nothing and cut
+  at the signature's own 8000 characters rather than at
+  `core.preprocessing.max_tool_output_chars`. A run whose analysts met six
+  shortened answers reported `tool_output_shortened = 0` and
+  `any_bound_hit = false`, and the Bounds Hit table, the console's "what the
+  run spent" and the `truncation_rate` aggregate were all built from those
+  zeros. The server registry now carries the job's ledger and the job's limit
+  onto every toolkit it opens, and an agent's own static provider is attached
+  the same way. The Bounds Hit section says in words what its call count
+  counts, because the per-call latency table also holds calls answered in
+  process, which no guardrail sees.
+  **Upgrading:** a tool server's answer is now cut at
+  `core.preprocessing.max_tool_output_chars` (6000 by default) rather than at
+  8000, so an operator who relied on the wider cut should raise the setting.
+
 ### Removed
 
 - **The static analyst's case-prior hint and its settings.**
