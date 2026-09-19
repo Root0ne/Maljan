@@ -1129,8 +1129,18 @@ for, which arrives as plain text, nothing changed. Deciding what to drop is
 arithmetic over sizes measured in one walk, it runs on a thread rather than the
 event loop, and a monotonic wall backstops it; a document the shortening cannot
 help (its keys alone over the limit) is recognised by one subtraction and takes
-the character cut at once. `run_summary.truncation` counts the three outcomes
-apart, and the wall firing among them.
+the character cut at once. Two things bound it: a size ceiling, because the
+wall cannot pre-empt the one parse everything depends on, and past the parse a
+monotonic wall checked at every phase. An answer this system has already
+shortened is not shortened again — a second map would count against a baseline
+the first one moved. `run_summary.truncation` counts the three outcomes apart,
+and the wall firing among them.
+
+The sentence a reader sees is drawn above the section's table, not as a row in
+it: the bookkeeping is this system's account of its own handling, and a
+key-value table is a table of facts about the sample. The map's every path
+resolves in the answer that carries it, and for each one what it says was kept
+is what is there.
 
 Two bounds keep the ledger from becoming the thing it records. Each output is
 trimmed on the way in, and each agent gets a byte budget

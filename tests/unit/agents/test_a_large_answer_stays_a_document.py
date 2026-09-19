@@ -68,6 +68,34 @@ def _keyed_map(entries: int) -> str:
     )
 
 
+def _resolve(document: Any, path: str) -> Any:
+    """The value a JSON-pointer-like path names, or ``None``."""
+    node = document
+    for raw in path.split("/")[1:]:
+        segment = raw.replace("~1", "/").replace("~0", "~")
+        if isinstance(node, list):
+            if not segment.isdigit() or int(segment) >= len(node):
+                return None
+            node = node[int(segment)]
+        elif isinstance(node, dict):
+            if segment not in node:
+                return None
+            node = node[segment]
+        else:
+            return None
+    return node
+
+
+def _resolves(document: Any, path: str) -> bool:
+    return _resolve(document, path) is not None
+
+
+def _kept_and_omitted(row: dict[str, int]) -> tuple[int, int]:
+    if "kept" in row:
+        return row["kept"], row["omitted"]
+    return row["kept_chars"], row["omitted_chars"]
+
+
 def _took(text: str, limit: int) -> tuple[Any, float]:
     """How long the work takes, with the backstop out of the way.
 
@@ -210,6 +238,99 @@ class TestTheBookkeepingIsInOnePlaceAndIsOurs:
         ours = [key for key in parsed if key.startswith(BOOKKEEPING_KEY) and key != BOOKKEEPING_KEY]
         assert len(ours) == 1
         assert "/rows" in parsed[ours[0]]
+
+    def test_every_path_it_names_is_in_the_document_it_returns(self) -> None:
+        """A row for a value an ancestor\'s cut already removed is a lie.
+
+        The floor probe used to sum a nested list\'s cost inside its
+        ancestor\'s as well, so the walk went past the point where cutting the
+        ancestor had already decided everything under it, and the loop then
+        cut and recorded an orphan: ``funcs: []`` beside a row saying five of
+        twenty blocks were kept in ``/funcs/0/blocks``.
+        """
+        answer = json.dumps(
+            {
+                "note": "p" * 200,
+                "funcs": [
+                    {"name": f"FUN_{index:08x}", "blocks": list(range(20))} for index in range(6)
+                ],
+            }
+        )
+
+        parsed = json.loads(shorten_json_document(answer, 420).text)
+
+        for path in parsed[BOOKKEEPING_KEY]:
+            if path == "others":
+                continue
+            assert _resolves(parsed, path), f"{path} names nothing in the answer"
+
+    def test_what_it_says_was_kept_is_what_is_there(self) -> None:
+        answer = json.dumps(
+            {
+                "note": "p" * 200,
+                "funcs": [
+                    {"name": f"FUN_{index:08x}", "blocks": list(range(20))} for index in range(6)
+                ],
+            }
+        )
+        whole = json.loads(answer)
+
+        parsed = json.loads(shorten_json_document(answer, 420).text)
+
+        for path, row in parsed[BOOKKEEPING_KEY].items():
+            if path == "others":
+                continue
+            kept, omitted = _kept_and_omitted(row)
+            assert len(_resolve(parsed, path)) == kept, path
+            assert kept + omitted == len(_resolve(whole, path)), path
+
+    def test_the_fallback_name_is_explained_everywhere_the_first_one_is(self) -> None:
+        """A tool that owns the name must not leave our map unexplained.
+
+        The map moved aside correctly and then nothing said so: the model\'s
+        notice and the report\'s sentence both looked for the first name only,
+        and the key-value table did not filter the second, so the answer
+        carried a block of arithmetic nobody had introduced.
+        """
+        from maljan.agents.evidence_recorder import shortened_notice
+        from maljan.reporting.ledger_report import shortened_sentence
+
+        answer = json.dumps(
+            {
+                BOOKKEEPING_KEY: {"the tool's own": 1},
+                "rows": [{"n": index} for index in range(400)],
+            }
+        )
+
+        parsed = shorten_json_document(answer, 2000).text
+        ours = next(
+            key
+            for key in json.loads(parsed)
+            if key.startswith(BOOKKEEPING_KEY) and key != BOOKKEEPING_KEY
+        )
+
+        notice = shortened_notice(parsed, tool="strings", unused_args=["pattern"])
+        assert f"`{ours}`" in notice
+        assert shortened_sentence(json.loads(parsed))
+        assert "/rows" in shortened_sentence(json.loads(parsed))
+
+    def test_a_tool_that_owns_the_name_keeps_it_out_of_the_fact_table(self) -> None:
+        """Both names are filtered: the tool's, and the one ours moved to."""
+        from maljan.reporting.ledger_report import our_own_words
+
+        answer = json.dumps(
+            {
+                BOOKKEEPING_KEY: {"the tool's own": 1},
+                "rows": [{"n": index} for index in range(400)],
+            }
+        )
+        parsed = json.loads(shorten_json_document(answer, 2000).text)
+
+        filtered = our_own_words(parsed)
+
+        assert BOOKKEEPING_KEY in filtered
+        assert f"{BOOKKEEPING_KEY}_2" in filtered
+        assert "truncated" in filtered
 
     def test_the_bookkeeping_itself_cannot_grow_without_bound(self) -> None:
         """Ten thousand shortened lists must not become ten thousand rows."""
@@ -454,6 +575,51 @@ class TestItRefusesWhatItCannotHelpAtOnce:
         assert 0 < SHORTENING_BUDGET_SECONDS <= 1.0
 
 
+class TestTheOddInputsNobodyMeantToSend:
+    def test_a_deeply_nested_answer_is_handed_back_rather_than_raising(self) -> None:
+        """A recursion error here loses the whole answer to a tool_error marker.
+
+        Both call sites wrap this in ``except Exception``, so an escape means
+        the model gets a marker instead of the prefix a character cut would
+        have given it.
+        """
+        answer = "[" * 40_000 + "]" * 40_000
+
+        result = shorten_json_document(answer, 100)
+
+        assert (result.text, result.shortened) == (answer, False)
+
+    def test_a_deeply_nested_object_is_handed_back_too(self) -> None:
+        depth = 40_000
+        answer = '{"a":' * depth + "1" + "}" * depth
+
+        result = shorten_json_document(answer, 100)
+
+        assert result.shortened is False
+
+    def test_an_answer_past_the_size_ceiling_is_refused_before_it_is_read(self) -> None:
+        """The wall cannot pre-empt the parse, so the parse is what is bounded."""
+        from maljan.agents.output_shortening import MAX_SHORTENABLE_CHARS
+
+        answer = '{"rows": [' + ",".join(["1"] * (MAX_SHORTENABLE_CHARS // 2)) + "]}"
+        assert len(answer) > MAX_SHORTENABLE_CHARS
+
+        result, elapsed = _took(answer, 6000)
+
+        assert result.shortened is False
+        assert elapsed < A_LOT_OF_TIME, f"took {elapsed:.1f}s"
+
+    def test_an_answer_this_module_already_shortened_is_left_alone(self) -> None:
+        """Two maps on two baselines would be two accounts of one answer."""
+        once = shorten_json_document(_strings_answer(300), 4000)
+        assert once.shortened
+
+        again = shorten_json_document(once.text, 200)
+
+        assert again.shortened is False
+        assert again.text == once.text
+
+
 class TestOverManyShapesAtOnce:
     """A property sweep: whatever comes back parses, fits, and drops no key."""
 
@@ -466,7 +632,7 @@ class TestOverManyShapesAtOnce:
         for _ in range(60):
             document: dict[str, Any] = {"read_path": "/staging/x"}
             for index in range(random.randint(1, 6)):
-                shape = random.choice(("list", "string", "nested", "scalar"))
+                shape = random.choice(("list", "string", "nested", "listed", "scalar"))
                 if shape == "list":
                     document[f"list{index}"] = [
                         f"value {step}" for step in range(random.randint(0, 400))
@@ -478,6 +644,18 @@ class TestOverManyShapesAtOnce:
                         f"inner{step}": {"rows": list(range(random.randint(0, 60)))}
                         for step in range(random.randint(1, 8))
                     }
+                elif shape == "listed":
+                    # A list of objects each holding a list of its own: the
+                    # shape where cutting the outer one takes the inner ones
+                    # with it.
+                    document[f"objects{index}"] = [
+                        {
+                            "name": f"FUN_{step:08x}",
+                            "blocks": list(range(random.randint(0, 30))),
+                            "notes": [f"note {n}" for n in range(random.randint(0, 10))],
+                        }
+                        for step in range(random.randint(1, 12))
+                    ]
                 else:
                     document[f"n{index}"] = random.randint(0, 10**6)
             out.append(json.dumps(document))
@@ -494,6 +672,15 @@ class TestOverManyShapesAtOnce:
                 assert len(result.text) <= limit, (limit, len(result.text))
                 assert set(json.loads(answer)) <= set(parsed), "a key was dropped"
                 assert parsed["read_path"] == "/staging/x"
+                whole = json.loads(answer)
+                for path, row in parsed[BOOKKEEPING_KEY].items():
+                    if path == "others":
+                        continue
+                    here = _resolve(parsed, path)
+                    assert here is not None, f"{path} names nothing in the answer"
+                    kept, omitted = _kept_and_omitted(row)
+                    assert len(here) == kept, path
+                    assert kept + omitted == len(_resolve(whole, path)), path
 
 
 class TestTheGuardrailUsesIt:
@@ -646,12 +833,22 @@ class TestWhatTheRecordThenHolds:
                 assert BOOKKEEPING_KEY not in str(row[0]).lower().replace(" ", ""), row
                 assert "truncated" not in str(row[0]).lower(), row
 
-    def test_the_section_says_in_a_sentence_that_the_answer_was_shortened(self) -> None:
+    def test_the_report_a_reader_opens_says_the_answer_was_shortened(self) -> None:
+        """Rendered, not the attribute: the body used to stop at the rows."""
         from maljan.reporting.ledger_report import build_sections
+        from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
+        from maljan.reporting.renderers.html import HtmlRenderer
+        from maljan.reporting.renderers.markdown import MarkdownRenderer
 
-        text = " ".join((section.text or "") for section in build_sections([self._entry()])).lower()
+        report = MalwareReport(
+            identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),
+            sections=build_sections([self._entry()]),
+        )
 
-        assert "shortened" in text
+        markdown = MarkdownRenderer().render(report)
+        assert "was shortened to fit" in markdown
+        assert "/strings" in markdown
+        assert "was shortened to fit" in HtmlRenderer().render(report)
 
     def test_the_model_is_told_the_answer_was_shortened_and_what_to_do(self) -> None:
         from maljan.agents.evidence_recorder import shortened_notice

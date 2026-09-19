@@ -533,7 +533,9 @@ change landed on `main`.
   longer reaches the summariser, because its answer is prose and prose is what
   leaves the record with nothing structured in it. The run summary's truncation
   block counts the new outcome as `tool_output_shortened`, and a shortening that
-  ran past its wall as `tool_output_shortening_timeouts`.
+  ran past its wall as `tool_output_shortening_timeouts`. The report says in a
+  sentence above the section's table, rather than as a row in it, that an
+  answer was shortened and by how much.
 
 - **Deprecated: `react_agent_max_steps_overrides` and
   `react_agent_timeout_overrides`.** A budget belongs to the agent that spends

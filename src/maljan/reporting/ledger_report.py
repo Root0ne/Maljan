@@ -31,7 +31,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from maljan.agents.output_shortening import BOOKKEEPING_KEY
+from maljan.agents.output_shortening import BOOKKEEPING_KEY, our_key_in
 from maljan.analysis.technique_ids import sigma_technique_ids
 from maljan.reporting.dedupe import (
     MergeTally,
@@ -212,15 +212,21 @@ def _text(value: Any) -> str:
 # ---------------------------------------------------------------------------
 
 
-# What this system said about its own handling of an answer, rather than what
-# the tool said about the sample. A key-value table is a table of facts about
-# the sample, and a row reading "shortened | {'/strings': …}" is neither a fact
-# about the sample nor something a reader of this report can act on; the
-# sentence below the table says it in words instead.
-_OUR_OWN_WORDS = frozenset({BOOKKEEPING_KEY, "truncated"})
+def our_own_words(data: Any) -> frozenset[str]:
+    """The keys of ``data`` that are this system talking, not the tool.
+
+    A key-value table is a table of facts about the sample, and a row reading
+    "shortened | {\'/strings\': …}" is neither a fact about the sample nor
+    something a reader of this report can act on; the sentence below the table
+    says it in words instead. The bookkeeping key is whichever one it ended up
+    under, so a tool that owns the ordinary name does not leave the fallback
+    printed as a field.
+    """
+    ours = our_key_in(data)
+    return frozenset({BOOKKEEPING_KEY, "truncated"} | ({ours} if ours else set()))
 
 
-def _shortened_sentence(data: dict[str, Any]) -> str:
+def shortened_sentence(data: dict[str, Any]) -> str:
     """One sentence for an answer this system had to shorten, or ``""``.
 
     The tool answered in full and the guardrail kept what fits, so the table
@@ -228,7 +234,7 @@ def _shortened_sentence(data: dict[str, Any]) -> str:
     because the reader of a report needs to know a list is partial far more
     than they need the arithmetic.
     """
-    book = data.get(BOOKKEEPING_KEY)
+    book = data.get(our_key_in(data))
     if not isinstance(book, dict) or not book:
         return ""
     named = []
@@ -253,15 +259,16 @@ def note_if_shortened(section: Any, data: Any) -> None:
     """
     if not isinstance(data, dict):
         return
-    said = _shortened_sentence(data)
+    said = shortened_sentence(data)
     if said and said not in (section.text or ""):
         section.text = f"{section.text}\n\n{said}".strip() if section.text else said
 
 
 def _identity(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
     section = acc.get("identity", "Sample identity", "kv", columns=["Field", "Value"])
+    ours = our_own_words(data)
     for key, value in data.items():
-        if key in {"error", "tool"} or key in _OUR_OWN_WORDS or value in (None, "", [], {}):
+        if key in {"error", "tool"} or key in ours or value in (None, "", [], {}):
             continue
         acc.add_row(section, [key.replace("_", " "), _text(value)])
     acc.credit(section, entry)
@@ -819,8 +826,9 @@ def _generic_kv(
         "kv",
         columns=["Field", "Value"],
     )
+    ours = our_own_words(data)
     for name, value in data.items():
-        if name in {"tool"} or name in _OUR_OWN_WORDS or value in (None, "", [], {}):
+        if name in {"tool"} or name in ours or value in (None, "", [], {}):
             continue
         if isinstance(value, list) and value and all(isinstance(v, dict) for v in value):
             _generic_table(

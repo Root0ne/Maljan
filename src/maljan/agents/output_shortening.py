@@ -29,8 +29,13 @@ and every string, and prefix sums say what a given cut saves. The document is
 serialised once at the start, once at the end, and at most twice more to
 correct an estimate. A document the shortening cannot help — its keys alone
 over the limit — is recognised by one subtraction before any of that work, so
-the hopeless case costs a parse rather than minutes of re-serialising. A
-monotonic deadline backstops the lot.
+the hopeless case costs a parse rather than minutes of re-serialising.
+
+Two things bound the whole: a size ceiling, because the deadline below cannot
+pre-empt the one ``json.loads`` everything depends on and an answer large
+enough makes that parse the cost; and, past the parse, a monotonic deadline
+checked at every phase and inside the cut loop. The deadline bounds the
+deciding, the ceiling bounds the reading.
 
 One document, one reader. The string this returns is what the model reads and
 what the recorder stores, with no second shortening in between: a model that
@@ -48,8 +53,10 @@ from typing import Any, NamedTuple
 
 __all__ = [
     "BOOKKEEPING_KEY",
+    "MAX_SHORTENABLE_CHARS",
     "SHORTENING_BUDGET_SECONDS",
     "Shortening",
+    "our_key_in",
     "shorten_json_document",
 ]
 
@@ -85,6 +92,14 @@ _MIN_SHORTENABLE_STRING = 512
 # refuses the largest legitimate answers would turn this into the regression it
 # was written to remove. It runs on a thread, not the event loop.
 SHORTENING_BUDGET_SECONDS = 1.0
+
+# Above this an answer is handed straight back. The wall above cannot pre-empt
+# the one ``json.loads`` everything else depends on, so what bounds the parse is
+# the size of what is parsed: eighteen megabytes of JSON is a second before the
+# clock is consulted at all. Well above every answer measured — the largest was
+# under eight megabytes — and far enough below the shapes that cost a second
+# that the two together are a real bound rather than a stated one.
+MAX_SHORTENABLE_CHARS = 12_000_000
 
 # A subtree under this key is never touched. A returned error is the one answer
 # whose every field is load-bearing — the code a caller branches on, the
@@ -195,6 +210,12 @@ def _parsed(text: str) -> tuple[Any, bool]:
         document = json.loads(text, object_pairs_hook=pairs, parse_constant=constant)
     except (ValueError, TypeError):
         return None, False
+    except RecursionError:
+        # A deeply nested answer. Raising here would reach the tool wrapper\'s
+        # own catch-all and the model would get a failure marker instead of
+        # the prefix the character cut gives it, which is a worse answer than
+        # the one this module was written to stop producing.
+        return None, False
     return document, faithful
 
 
@@ -289,9 +310,87 @@ def _walk(document: dict[str, Any], separators: tuple[str, str] | None) -> list[
     return found
 
 
+def _topmost(candidates: list[_Candidate]) -> list[_Candidate]:
+    """The candidates no other candidate contains.
+
+    Giving a list entirely gives everything under it, so a floor computed by
+    summing every candidate counts a nested list twice — once inside its
+    ancestor and once on its own — and reads as though the document could
+    shrink further than it can. The walk is depth-first in declaration order,
+    so a candidate is nested exactly when another candidate\'s path is a
+    prefix of its own.
+    """
+    out: list[_Candidate] = []
+    covered = ""
+    for candidate in sorted(candidates, key=lambda c: c.path):
+        if covered and candidate.path.startswith(covered):
+            continue
+        out.append(candidate)
+        covered = f"{candidate.path}/"
+    return out
+
+
+def _still_there(document: Any, path: str) -> Any:
+    """What ``path`` names in ``document`` now, or ``None``.
+
+    Asked after the cutting, because an ancestor that gave everything took its
+    descendants with it: a row describing a value the answer no longer holds
+    is a row a reader cannot check, and the whole point of the reserved key is
+    that its numbers account for the difference between what came in and what
+    goes out.
+    """
+    node = document
+    for raw in path.split("/")[1:]:
+        segment = raw.replace("~1", "/").replace("~0", "~")
+        if isinstance(node, list):
+            if not segment.isdigit() or int(segment) >= len(node):
+                return None
+            node = node[int(segment)]
+        elif isinstance(node, dict):
+            if segment not in node:
+                return None
+            node = node[segment]
+        else:
+            return None
+    return node
+
+
 def _escaped(name: str) -> str:
     """A path segment in the JSON-pointer spelling, so a key with a slash reads."""
     return name.replace("~", "~0").replace("/", "~1")
+
+
+def our_key_in(document: Any) -> str:
+    """The key this module\'s bookkeeping is under in ``document``, or ``""``.
+
+    The reserved name, or the one it moved aside to when a tool already owned
+    it. Everything that has to introduce the map — the sentence the model
+    reads, the sentence the report draws, the fields a report must not print
+    as facts — asks here, so a fallback name is explained wherever the first
+    one is rather than sitting in the answer unannounced.
+    """
+    if not isinstance(document, dict):
+        return ""
+    for key, value in document.items():
+        if not isinstance(key, str):
+            continue
+        if key != BOOKKEEPING_KEY and not key.startswith(f"{BOOKKEEPING_KEY}_"):
+            continue
+        if _is_our_map(value):
+            return key
+    return ""
+
+
+# The shape of one row, which is how a map this module wrote is told from a
+# tool's own key of the same name: the name can collide, the vocabulary does
+# not.
+_ROW_WORDS = frozenset({"kept", "omitted", "kept_chars", "omitted_chars", "paths"})
+
+
+def _is_our_map(value: Any) -> bool:
+    if not isinstance(value, dict) or not value:
+        return False
+    return all(isinstance(row, dict) and row and set(row) <= _ROW_WORDS for row in value.values())
 
 
 def _our_key(document: dict[str, Any]) -> str:
@@ -338,15 +437,20 @@ def _bookkeeping(rows: list[tuple[_Candidate, int]]) -> dict[str, Any]:
     return out
 
 
-def _widest_bookkeeping(candidates: list[_Candidate], separators: tuple[str, str] | None) -> int:
-    """An upper bound on what the bookkeeping and the flag will cost.
+def _room_for_bookkeeping(candidates: list[_Candidate], separators: tuple[str, str] | None) -> int:
+    """What the bookkeeping and the flag are expected to cost, as an estimate.
 
-    Computed before anything is decided, so the room they need is room the
-    arithmetic has already accounted for. Every number is at its widest — the
-    whole unit count, which has at least as many digits as any real value —
-    and the map is the bounded one, so this cannot be an underestimate.
+    Priced before anything is decided, so the room they need is room the
+    arithmetic has already accounted for, and priced over the top-most
+    candidates because those are the ones a cut reaches first and the ones a
+    descendant\'s row is folded into when its ancestor gives everything.
+    Normally an over-estimate — every number is at its widest — and sometimes a
+    small under-estimate, when a partial cut of an ancestor leaves room for
+    descendants to be recorded as well. Either way the three correction passes
+    below absorb it: this decides how much to cut, and the dump decides whether
+    that was enough.
     """
-    rows = [(candidate, candidate.units) for candidate in candidates]
+    rows = [(candidate, candidate.units) for candidate in _topmost(candidates)]
     block = _bookkeeping(rows)
     # The map, its key, the quotes and separators around it, and the flag.
     return _cost_of(block, separators) + len(BOOKKEEPING_KEY) + 8 + len(_TRUNCATED) + 10
@@ -402,13 +506,20 @@ def shorten_json_document(
     deadline = time.monotonic() + (
         SHORTENING_BUDGET_SECONDS if budget_seconds is None else budget_seconds
     )
-    if limit <= 0 or len(text) <= limit:
+    if limit <= 0 or len(text) <= limit or len(text) > MAX_SHORTENABLE_CHARS:
         return Shortening(text, False)
     if time.monotonic() >= deadline:
         return Shortening(text, False, True)
 
     document, faithful = _parsed(text)
     if not faithful or not isinstance(document, dict):
+        return Shortening(text, False)
+    # An answer this module has already shortened is left alone: a second map
+    # would count against a baseline the first one already moved, so the two
+    # would be two accounts of one answer and neither would reconcile. Not
+    # reachable through a guardrail, which runs once per call, and cheap to be
+    # sure of.
+    if our_key_in(document):
         return Shortening(text, False)
 
     separators = _separators(text, document)
@@ -425,11 +536,14 @@ def shorten_json_document(
         if separators is not None
         else len(json.dumps(document, ensure_ascii=False, separators=separators))
     )
-    room = _widest_bookkeeping(candidates, separators)
+    room = _room_for_bookkeeping(candidates, separators)
     # Everything that could give, given entirely, against what the document
     # would still weigh: one subtraction, before a single unit is measured.
-    # This is the shape that used to run to the end of every list.
-    if base - sum(candidate.whole for candidate in candidates) + room > limit:
+    # This is the shape that used to run to the end of every list. Only the
+    # top-most candidates are summed — a nested list\'s cost is already inside
+    # its ancestor\'s, and counting it twice says the document can shrink
+    # further than it can.
+    if base - sum(candidate.whole for candidate in _topmost(candidates)) + room > limit:
         return Shortening(text, False)
 
     # Lists before strings, largest first inside each: a list has units the
@@ -452,6 +566,13 @@ def shorten_json_document(
         must_save -= candidate.saving_from(kept, separators)
         cut.append((candidate, kept))
 
+    # A candidate an ancestor\'s cut removed is not something this answer can
+    # be asked about, so it is not something the answer claims to have.
+    cut = [
+        (candidate, kept)
+        for candidate, kept in cut
+        if _still_there(document, candidate.path) is not None
+    ]
     if not cut:
         return Shortening(text, False)
 

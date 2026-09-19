@@ -439,21 +439,18 @@ def shortened_notice(text: str, *, tool: str, unused_args: Sequence[str] = ()) -
     same words the repeat notice uses to name the arguments this tool can be
     narrowed with.
     """
-    from maljan.agents.output_shortening import BOOKKEEPING_KEY
+    from maljan.agents.output_shortening import BOOKKEEPING_KEY, our_key_in
 
     if BOOKKEEPING_KEY not in text:
         return ""
     try:
         parsed = json.loads(text)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, RecursionError):
         return ""
-    if not isinstance(parsed, dict):
-        return ""
-    ours = next(
-        (key for key in parsed if key == BOOKKEEPING_KEY or key.startswith(f"{BOOKKEEPING_KEY}_")),
-        "",
-    )
-    if not ours or not isinstance(parsed.get(ours), dict) or not parsed[ours]:
+    # Whichever key the map ended up under: a tool that owns the ordinary name
+    # keeps it, and the sentence has to name the one the model will find.
+    ours = our_key_in(parsed)
+    if not ours:
         return ""
     return (
         f"\n\nThis answer did not fit and was shortened; `{ours}` says which parts "
