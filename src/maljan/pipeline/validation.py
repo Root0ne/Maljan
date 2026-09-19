@@ -1354,6 +1354,65 @@ def sample_identity_values(sample: Any) -> set[str]:
     return {value for value in values if value}
 
 
+INDICATOR_TYPE_CONTRADICTS_VERDICT_CODE = "stix.indicator_type_contradicts_verdict"
+
+# The word this export will not let a Benign verdict publish unasked, and the
+# rest of the STIX indicator-type vocabulary the judge may reach for instead.
+_MALICIOUS_ACTIVITY = "malicious-activity"
+_MILDER_INDICATOR_TYPES = ("benign", "anomalous-activity", "unknown")
+
+
+def _is_the_samples_own_indicator(pattern: str, identity: set[str]) -> bool:
+    """Whether this indicator names the sample rather than something it touched.
+
+    The export mints one indicator for the sample's own hash and types it with
+    the verdict, so an indicator quoting an identity value is that statement
+    and not a claim about a third party.
+    """
+    return any(literal.lower() in identity for _path, literal in _comparisons(pattern))
+
+
+def indicator_type_contradicts_verdict(
+    obj: Any, *, verdict: str | None, identity: set[str], path: str
+) -> list[Violation]:
+    """A judge-written indicator that says the opposite of the judge's verdict.
+
+    The type is the judge's to give: nothing rewrites it and nothing drops the
+    object. On a Benign verdict an indicator typed ``malicious-activity``
+    publishes the sample's own vendor domain to a blocklist as malicious
+    activity, so the judge is asked about it once, with the vocabulary's milder
+    words named and its own answer published whichever way it goes.
+
+    One direction only. A Malware verdict beside an indicator typed ``benign``
+    is not the same statement: an indicator is a claim about the value it
+    names, and a malicious sample may well touch something harmless.
+    """
+    if verdict != "Benign":
+        return []
+    types = [str(t).strip().lower() for t in (getattr(obj, "indicator_types", None) or [])]
+    if _MALICIOUS_ACTIVITY not in types:
+        return []
+    pattern = str(getattr(obj, "pattern", "") or "")
+    if _is_the_samples_own_indicator(pattern, identity):
+        return []
+    named = str(getattr(obj, "name", "") or "").strip() or pattern
+    return [
+        Violation(
+            code=INDICATOR_TYPE_CONTRADICTS_VERDICT_CODE,
+            message=(
+                f"the indicator {safe_finding_value(named)!r} is typed "
+                f"{_MALICIOUS_ACTIVITY!r} while the verdict you stated is Benign, so this "
+                "bundle publishes the value as malicious activity to whoever consumes it. "
+                f"The indicator-type vocabulary also has {', '.join(_MILDER_INDICATOR_TYPES)}. "
+                "Retype it, or restate the verdict, or keep the type as it is — whichever "
+                "you answer is what this run publishes, and a type you keep is recorded "
+                "beside the bundle as raised and kept."
+            ),
+            path=path,
+        )
+    ]
+
+
 def validate_verdict_bundle(
     bundle: Any,
     evidence_corpus: set[str] | None = None,
@@ -1410,6 +1469,12 @@ def validate_verdict_bundle(
         ]
     )
     identity = {value.lower() for value in sample_identity_values(sample)}
+    # The verdict as the judge stated it, read the one way every reader of a
+    # verdict reads it, so an indicator is weighed against the word that will
+    # be published rather than against the object set.
+    from maljan.pipeline.outcome import read_stated_verdict
+
+    stated_verdict = read_stated_verdict(bundle).recognised
     runtime_paths = _runtime_paths(evidence_corpus)
     partial = shortened_evidence_note(shortened_tools)
     how_whole = corpus_state or CorpusState()
@@ -1428,6 +1493,14 @@ def validate_verdict_bundle(
         kind = str(getattr(obj, "type", "") or "")
         if kind == "indicator":
             pattern = str(getattr(obj, "pattern", "") or "")
+            violations.extend(
+                indicator_type_contradicts_verdict(
+                    obj,
+                    verdict=stated_verdict,
+                    identity=identity,
+                    path=f"objects[{index}]",
+                )
+            )
             problem = _indicator_problem(pattern, haystack, runtime_paths, identity)
             if problem:
                 absent = _is_an_absence(problem)

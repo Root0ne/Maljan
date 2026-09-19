@@ -472,7 +472,22 @@ Four rules follow from the statement:
   is marked suspicious, `anomalous-activity` otherwise, and
   `anomalous-activity` for a `file:name` out of the string scan); a Benign run
   can carry them, because a benign sample still talks to hosts, and they are
-  exported as they are. A summary
+  exported as they are. A judge-written indicator keeps the type the judge
+  gave it, and on one shape the judge is asked about it first: a Benign verdict
+  beside an indicator the judge typed `malicious-activity` publishes a value as
+  malicious activity under a verdict that says the opposite — on a recorded run
+  it was the analysed vendor's own project domain. `stix.indicator_type_contradicts_verdict`
+  puts that to the judge once, through the same single retry the other verdict
+  checks share, naming the indicator, the verdict's own word and the
+  vocabulary's `benign` / `anomalous-activity` / `unknown`, and saying the type
+  may be kept. Whatever comes back is published: nothing retypes an indicator
+  and nothing drops one. A type the judge keeps stays in
+  `run_summary.validation.unresolved` and is printed with the other unresolved
+  findings, so a consumer reading the bundle beside the report sees the
+  contradiction was raised and kept. The mirror — a Malware verdict beside an
+  indicator typed `benign` — is not a contradiction and is not asked about: an
+  indicator is a claim about the value it names, and a malicious sample may
+  touch something harmless. A summary
   note then has no malware object to be about, so it refers to the indicator
   carrying the sample's own hash, which the cap keeps in a band of its own; a
   bundle holding nothing the note could truthfully refer to emits no note, and

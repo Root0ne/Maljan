@@ -2941,6 +2941,25 @@ change landed on `main`.
   read a missing key as "not recorded" rather than as a corpus that held
   nothing.
 
+- **A Benign verdict is asked about an indicator typed `malicious-activity`.**
+  On a run that concluded Benign for a signed vendor utility the judge typed
+  the vendor's own project domain `malicious-activity`, and the export — which
+  keeps a judge-written type by design — published it, so the domain reached a
+  consumer as malicious activity under a verdict saying the opposite. The new
+  validator `stix.indicator_type_contradicts_verdict` puts that to the judge
+  once, through the single retry the other verdict checks already share,
+  naming the indicator, the verdict's own word and the vocabulary's `benign`,
+  `anomalous-activity` and `unknown`, and saying the type may be kept. Whatever
+  the judge answers is published: nothing retypes an indicator and nothing
+  drops one. A type that is kept stays in `run_summary.validation.unresolved`
+  and is printed with the other unresolved findings. The mirror case — a
+  Malware verdict beside an indicator typed `benign` — is not a contradiction
+  and is not asked about.
+  **Upgrading:** a Benign run carrying such an indicator now spends its one
+  verdict correction turn on it and may carry a new code in
+  `run_summary.validation.unresolved`; a consumer that partitions on validation
+  codes should know the name.
+
 ### Removed
 
 - **The static analyst's case-prior hint and its settings.**
