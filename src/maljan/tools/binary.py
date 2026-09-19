@@ -659,6 +659,21 @@ def _apk_dex_strings(apk: Any, limit: int) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+# How a carved payload's display label becomes the name of the file it is
+# written under. Named once, here, because two readers depend on it: this
+# writer, and the sidecar's ``carved_path``, which has to find the file again
+# from the ``name`` a model read off the answer. A model that passes the label
+# back instead of the path is not wrong about which payload it means.
+def carved_name_prefix(label: str) -> str:
+    """The part of a carved file's name that its display label decides."""
+    return f"{str(label).replace('+', '_').replace(':', '_')}_"
+
+
+def carved_file_name(label: str, digest: str) -> str:
+    """The file name one carved payload is written under."""
+    return f"{carved_name_prefix(label)}{digest[:12]}"
+
+
 def _carve_into(path: str, destination: str | Path) -> dict[str, Any]:
     """Write each embedded payload found in the file under ``destination``.
 
@@ -688,8 +703,7 @@ def _carve_into(path: str, destination: str | Path) -> dict[str, Any]:
     payloads: list[dict[str, Any]] = []
     for label, blob in _carve(target.read_bytes()):
         digest = hashlib.sha256(blob).hexdigest()
-        name = f"{label.replace('+', '_').replace(':', '_')}_{digest[:12]}"
-        child = where / name
+        child = where / carved_file_name(label, digest)
         child.write_bytes(blob)
         child.chmod(0o600)
         offset = 0
@@ -705,6 +719,12 @@ def _carve_into(path: str, destination: str | Path) -> dict[str, Any]:
                 "sha256": digest,
                 "size": len(blob),
                 "path": str(child),
+                # The same value under the name of the argument that reads it,
+                # so a caller copying the field whose name matches the argument
+                # is right by construction. A live model passed ``name`` back,
+                # and passed ``path`` back wrapped in the quotes it had read it
+                # between.
+                "carved_path": str(child),
             }
         )
     return {"payloads": payloads, "count": len(payloads)}

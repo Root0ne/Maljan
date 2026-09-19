@@ -293,6 +293,17 @@ class IOCEntry(BaseModel):
     value: str
     is_suspicious: bool = False
     notes: str | None = None
+    # Where the row came from: ``sandbox`` for something the sample resolved,
+    # reached or requested, ``analyst`` for something an agent put in an
+    # artefact, ``strings`` for a run of bytes in the file that has the shape
+    # of one. The service has always attached it and this model did not declare
+    # it, so ``response_model`` dropped it and a name only the sample's own
+    # bytes knew shipped looking exactly like one the sandbox watched.
+    source: str | None = None
+    # Whether the publish rule would publish this row — the same rule the STIX
+    # bundle is built with. A feed another system consumes returns only these
+    # by default; ``include`` widens it.
+    published: bool = True
 
 
 class IOCListResponse(BaseModel):

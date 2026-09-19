@@ -72,6 +72,35 @@ def _shorten_hash_like(stem: str) -> str:
     return f"{short}.{ext}" if ext else short
 
 
+def _publishable(kind: str, value: Any, source: Any, reputation: Any) -> bool:
+    """Whether the platform's own publish rule would publish this row.
+
+    The one rule, asked from a second place rather than copied into it: the
+    STIX bundle and this feed cannot come to disagree about whether a name only
+    the sample's bytes know is infrastructure. A rule that cannot be reached —
+    a deployment without the core package — answers yes, which is what this
+    feed did for every row before it asked at all.
+    """
+    try:
+        from maljan.reporting.renderers.stix_renderer import indicator_publish_reason
+    except Exception:  # noqa: BLE001 — a feed is never worth an import error
+        return True
+    try:
+        return indicator_publish_reason(kind, str(value or ""), source, reputation) is not None
+    except Exception:  # noqa: BLE001 — an unanswerable row is not a withheld one
+        return True
+
+
+def _url_host(raw: Any) -> str:
+    """The host of a URL, lowercased, for the reputation the network block kept."""
+    from urllib.parse import urlparse
+
+    try:
+        return (urlparse(str(raw or "")).hostname or "").strip().lower().rstrip(".")
+    except (ValueError, TypeError):
+        return ""
+
+
 class ReportService:
     """Handles report retrieval, STIX export, and MITRE mapping."""
 
@@ -337,23 +366,40 @@ class ReportService:
         report_id: uuid.UUID,
         user: User,
         kind: str | None = None,
+        include: str = "published",
     ) -> list[dict] | None:
         """Flatten the typed IOC collections into a single list.
 
         ``kind`` filter accepts ``domain`` / ``ip`` / ``url`` / ``user_agent`` /
         ``ja3`` / ``ja3s`` / ``hash``. None returns every kind.
+
+        ``include`` decides what a consumer gets. This is a feed another system
+        acts on, so the default is what the platform would *publish*: the same
+        rule the STIX bundle is built with, asked of the same values. A name
+        only the sample's own byte image knows is not an observation of
+        infrastructure and is not offered to something that would block on it.
+        ``all`` returns every row and ``unpublished`` only the withheld ones,
+        each carrying its ``source`` and its ``published`` flag, for a reader
+        who is triaging rather than acting.
         """
         mr = await self.get_malware_report(report_id, user)
         if not mr:
             return None
+        network = mr.get("network") or {}
+        reputations = {
+            str(dom.get("fqdn") or "").strip().lower().rstrip("."): dom.get("reputation")
+            for dom in (network.get("domains") or [])
+            if isinstance(dom, dict)
+        }
         out: list[dict] = []
         identity = mr.get("identity") or {}
         hashes = identity.get("hashes") or {}
         for algo, value in hashes.items():
             if not value or (kind and kind != "hash"):
                 continue
-            out.append({"kind": "hash", "value": f"{algo}:{value}"})
-        network = mr.get("network") or {}
+            # The sample's own identity, established by the router rather than
+            # read out of the bytes: always published.
+            out.append({"kind": "hash", "value": f"{algo}:{value}", "source": "identity"})
         if not kind or kind == "domain":
             for dom in network.get("domains") or []:
                 out.append(
@@ -366,6 +412,9 @@ class ReportService:
                         # like a hostname are not the same claim, and this feed
                         # presented them identically.
                         "source": dom.get("source"),
+                        "published": _publishable(
+                            "domain", dom.get("fqdn"), dom.get("source"), dom.get("reputation")
+                        ),
                     }
                 )
         if not kind or kind == "ip":
@@ -375,21 +424,50 @@ class ReportService:
                         "kind": "ip",
                         "value": ip.get("address", ""),
                         "is_suspicious": bool(ip.get("is_suspicious")),
+                        "source": ip.get("source"),
+                        "published": _publishable(
+                            "ip", ip.get("address"), ip.get("source"), ip.get("reputation")
+                        ),
                     }
                 )
         if not kind or kind == "url":
             for url in network.get("urls") or []:
-                out.append({"kind": "url", "value": url.get("url", "")})
-        if not kind or kind == "user_agent":
-            for ua in network.get("user_agents") or []:
-                out.append({"kind": "user_agent", "value": ua})
-        if not kind or kind == "ja3":
-            for ja3 in network.get("ja3_fingerprints") or []:
-                out.append({"kind": "ja3", "value": ja3})
-        if not kind or kind == "ja3s":
-            for ja3s in network.get("ja3s_fingerprints") or []:
-                out.append({"kind": "ja3s", "value": ja3s})
-        return [row for row in out if row.get("value")]
+                host = _url_host(url.get("url"))
+                out.append(
+                    {
+                        "kind": "url",
+                        "value": url.get("url", ""),
+                        "source": url.get("source"),
+                        # ``or "strings"`` exactly as the renderer reads it: a
+                        # URL row that records no source at all is the weakest
+                        # claim there is, and two readings of "unrecorded" is
+                        # how one surface publishes what the other withholds.
+                        "published": _publishable(
+                            "url",
+                            url.get("url"),
+                            url.get("source") or "strings",
+                            reputations.get(host),
+                        ),
+                    }
+                )
+        # A fingerprint and a user agent are the sandbox's own observations of
+        # the traffic; there is no string sweep that produces one, so there is
+        # nothing for the publish rule to withhold.
+        for field, row_kind in (
+            ("user_agents", "user_agent"),
+            ("ja3_fingerprints", "ja3"),
+            ("ja3s_fingerprints", "ja3s"),
+        ):
+            if kind and kind != row_kind:
+                continue
+            for value in network.get(field) or []:
+                out.append({"kind": row_kind, "value": value, "source": "sandbox"})
+        rows = [row for row in out if row.get("value")]
+        wanted = str(include or "published").strip().lower()
+        if wanted == "all":
+            return rows
+        keep = wanted != "unpublished"
+        return [row for row in rows if bool(row.get("published", True)) is keep]
 
     async def get_malware_report_signature(
         self,

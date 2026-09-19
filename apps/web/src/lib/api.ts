@@ -277,6 +277,37 @@ const _JOB_SCHEMA: Record<string, ExpectedShape> = {
   error_message: "string?",
 };
 
+/** One row of the `/iocs` feed. `source` says where the value came from —
+ *  `sandbox` for something the sample resolved, reached or requested,
+ *  `analyst` for something an agent put in an artefact, `strings` for a run of
+ *  bytes in the file that has the shape of one — and `published` says whether
+ *  the platform's publish rule would offer it to a consumer that blocks on it.
+ *  The API declared neither, so `response_model` dropped the source the
+ *  service had attached and a name only the sample's bytes knew shipped
+ *  looking exactly like one the sandbox watched. */
+export interface IOCRow {
+  kind: string;
+  value: string;
+  is_suspicious?: boolean;
+  notes?: string | null;
+  source?: string | null;
+  published?: boolean;
+}
+
+export interface IOCListResponse {
+  items: IOCRow[];
+  total: number;
+}
+
+const _IOC_ROW_SCHEMA: Record<string, ExpectedShape> = {
+  kind: "string",
+  value: "string",
+  is_suspicious: "boolean?",
+  notes: "string?",
+  source: "string?",
+  published: "boolean?",
+};
+
 const _SYSTEM_STATUS_SCHEMA: Record<string, ExpectedShape> = {
   app_name: "string",
   app_version: "string",
@@ -800,11 +831,24 @@ class ApiClient {
   }
 
   /** Every IOC the report holds, flat. The endpoint existed long before
-   *  anything in the UI reached it. */
-  getReportIOCs(reportId: string) {
-    return this.request<Record<string, unknown>>(
-      `/api/v1/reports/${reportId}/iocs`
+   *  anything in the UI reached it.
+   *
+   *  `include` defaults to `all` here and not to the route's own default: an
+   *  operator exporting the IOCs is reading them rather than feeding them to
+   *  something that blocks, and a download that silently dropped the withheld
+   *  rows would hide the very distinction the `source` column exists to show.
+   *  Each row carries its `source` and its `published` flag. */
+  async getReportIOCs(
+    reportId: string,
+    include: "published" | "unpublished" | "all" = "all"
+  ) {
+    const data = await this.request<IOCListResponse>(
+      `/api/v1/reports/${reportId}/iocs?include=${include}`
     );
+    for (const row of data?.items ?? []) {
+      assertShape("getReportIOCs.item", row, _IOC_ROW_SCHEMA);
+    }
+    return data;
   }
 
   getReportMitre(reportId: string) {

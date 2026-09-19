@@ -3988,13 +3988,6 @@ def make_report_node(
 
             report.stix_bundle_extended = extended_dump
 
-        # The markdown is rendered last of everything that writes to the
-        # report, so it carries what the export declined as well as what the
-        # run's producers were told: the declines are written into
-        # ``run_summary.validation`` above, and ``report.md`` prints that
-        # block. Rendered before them, it named neither.
-        markdown = MarkdownRenderer().render(report)
-
         # Post-pipeline FP linter. Run after every other
         # mutation has happened (narrative + detection sigs + STIX dump)
         # so the linter sees the exact payload a downstream consumer
@@ -4018,16 +4011,6 @@ def make_report_node(
             run_summary_dict["fp_warnings"] = fp_warnings
             report.run_summary = run_summary_dict
 
-        logger.info(
-            "report_node: built MalwareReport (verdict=%s, severity=%s, "
-            "markdown_chars=%d, extended_objects=%d, fp_warnings=%d).",
-            report.verdict,
-            report.severity.rating if report.severity else "not assessed",
-            len(markdown),
-            len(extended_dump.get("objects", [])) if extended_dump else 0,
-            len(fp_warnings),
-        )
-
         # Surface ``fp_warnings`` into the
         # pipeline state's ``run_summary`` so the worker writes them to the
         # ``reports.run_summary`` JSONB column. Without this the warnings
@@ -4041,20 +4024,6 @@ def make_report_node(
         # add — leaving it untouched preserves the mock-mode contract
         # (state.run_summary remains None when the judge node skipped
         # RunSummaryBuilder, exercised by test_run_summary_is_none_in_mock_mode).
-        result: dict[str, Any] = {
-            "malware_report": report.model_dump(mode="json"),
-            "malware_report_markdown": markdown,
-            "stix_bundle_extended": extended_dump,
-        }
-        if _capa_entries:
-            # ``evidence_ledger`` is append-only, so this adds the provider's
-            # entries to the run's rather than replacing it.
-            result["evidence_ledger"] = [e.model_dump(mode="json") for e in _capa_entries]
-        # ``run_summary`` on the state is what the API's own column carries, so
-        # anything a reader is meant to see outside the full report has to be
-        # added here too. Only written when there is something to add — an
-        # untouched value keeps the mock-mode contract, where the judge node
-        # skipped the RunSummaryBuilder and the column is legitimately null.
         _state_summary: dict[str, Any] = {}
         # The block the report carries is the base, because it already holds
         # the ``verdict.fallback`` note when the judge never answered. What is
@@ -4100,6 +4069,10 @@ def make_report_node(
         own = _verdict_record(stage, started, ran=True).get("stage_results")
         if stage is not None and state.get("run_summary"):
             _state_summary["stages"] = stage_rollup(container, state, own)
+            _rolled_up = dict(report.run_summary or {})
+            if _rolled_up:
+                _rolled_up["stages"] = _state_summary["stages"]
+                report.run_summary = _rolled_up
         # The run's elapsed time, closed here for the same reason the rollup
         # is: the judge's clock stops before the report is composed, and the
         # figure a reader compares against the job's own duration is the whole
@@ -4112,6 +4085,40 @@ def make_report_node(
             if _closed_summary:
                 _closed_summary["elapsed_seconds"] = _elapsed
                 report.run_summary = _closed_summary
+        # The markdown is rendered once every field it reads is final: the
+        # validation block, the corroboration's published marks, the stage
+        # rollup and the elapsed time are all written above this line, and so
+        # is the report's own snapshot below it. Rendered before them — and
+        # snapshotted before them — a served report printed "24 claimed, 24
+        # published" over four published techniques, carried no section
+        # naming the twenty it did not publish, and gave the judge stage's
+        # clock as the run's.
+        markdown = MarkdownRenderer().render(report)
+
+        logger.info(
+            "report_node: built MalwareReport (verdict=%s, severity=%s, "
+            "markdown_chars=%d, extended_objects=%d, fp_warnings=%d).",
+            report.verdict,
+            report.severity.rating if report.severity else "not assessed",
+            len(markdown),
+            len(extended_dump.get("objects", [])) if extended_dump else 0,
+            len(fp_warnings),
+        )
+
+        result: dict[str, Any] = {
+            "malware_report": report.model_dump(mode="json"),
+            "malware_report_markdown": markdown,
+            "stix_bundle_extended": extended_dump,
+        }
+        if _capa_entries:
+            # ``evidence_ledger`` is append-only, so this adds the provider's
+            # entries to the run's rather than replacing it.
+            result["evidence_ledger"] = [e.model_dump(mode="json") for e in _capa_entries]
+        # ``run_summary`` on the state is what the API's own column carries, so
+        # anything a reader is meant to see outside the full report has to be
+        # added here too. Only written when there is something to add — an
+        # untouched value keeps the mock-mode contract, where the judge node
+        # skipped the RunSummaryBuilder and the column is legitimately null.
         if _state_summary:
             result["run_summary"] = {**(state.get("run_summary") or {}), **_state_summary}
         if own:

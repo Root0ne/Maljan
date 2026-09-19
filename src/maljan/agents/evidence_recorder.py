@@ -282,14 +282,23 @@ class EvidenceRecorder:
             tool=tool,
             server=server,
             evidence_id=entry.id,
-            ok=ok,
+            # The entry's answer, not the caller's. Whether a call succeeded is
+            # decided once, in ``build_entry``, which is the only place that
+            # reads a *returned* structured error and turns it into a failure —
+            # a caller that did not raise hands ``ok=True`` down and always
+            # did. Reading the argument here published a green tick beside six
+            # failed calls whose ledger rows said they had failed, and a reader
+            # of the conversation could not see that anything had gone wrong.
+            ok=entry.ok,
             duration_ms=duration_ms,
             # The entry's own output, which the ledger has already trimmed,
             # rather than the text the model reads: what goes to the console
             # is a headline, and the whole result is one ledger lookup away.
             # A failure travels as the remediation the tool offered and not as
             # its error text, which is the half that names hosts and paths.
-            summary=summarize_result(entry.output, ok=ok, remediation=remediation or ""),
+            summary=summarize_result(
+                entry.output, ok=entry.ok, remediation=entry.remediation or ""
+            ),
         )
         return entry
 

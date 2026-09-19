@@ -2392,6 +2392,57 @@ change landed on `main`.
   `core.llm.ollama.disable_thinking` and what it does; the Ollama setup guide
   says the same, and `docs/getting-started.md` documents `gemma4:12b` with that
   setting as a measured low-memory option.
+- **`carved_path` reads the value a model actually writes back.** On its first
+  live contact an analyst failed six calls out of six: it passed the path
+  `carve_payloads` had returned wrapped in the double quotes it had read it
+  between, which is not absolute, so it took the relative branch and missed;
+  once it passed the payload's display `name` instead. One matching pair of
+  surrounding quotes — double, single or backtick — and surrounding whitespace
+  now come off before the argument is resolved, and nothing else is rewritten:
+  no unescaping, no globbing, no case folding, and the confinement question is
+  asked of the result exactly as before. A quoted absence word is an absence. A
+  payload's display `name` is accepted when it names exactly one file in this
+  sample's carved tree, through the writer's own naming rule, and two payloads
+  sharing a label are refused rather than chosen between. Every entry
+  `carve_payloads` returns now carries a `carved_path` field holding the value
+  to pass back, and the tool descriptions say so.
+- **A failed tool call no longer asks for a parameter that does not exist.**
+  The `no_such_file` and `path_outside_roots` remediations said to "pass the
+  absolute sample path the prompt names" — a parameter the path pinning had
+  taken out of the schema, so a live analyst was sent after a field it could
+  not see on all six of its failures. Both now name a path a tool in this run
+  handed back, and every `carved_path` failure carries that argument's own
+  remediation, listing the file names this run did carve when the miss is
+  inside the tree.
+- **The conversation no longer shows a green tick for a failed tool call.**
+  Whether a call succeeded is decided in one place — `build_entry`, which is
+  the only thing that reads a *returned* structured error and turns it into a
+  failure — and the recorder published its event from the `ok` it had been
+  handed instead, which for a returned error is always true. Six live calls
+  read "succeeded" beside an error payload while their ledger rows said they
+  had failed. The event and its summary are now taken from the entry.
+- **What is served is rendered from the final report.** The run summary's last
+  fields — the validation block, which of the named techniques were published,
+  the stage rollup and the run's elapsed time — were written after the report
+  node had already rendered its markdown and taken the snapshot the worker
+  stores, so a served report printed `24 claimed, 24 published` over four
+  published techniques, carried no section naming the twenty it did not
+  publish, and gave 311.7 s as a 396.3 s run's elapsed time. Both now happen
+  after every field they read is final, and the stage rollup reaches the
+  report's own summary as well as the state's column. Renderings are made on
+  request from the stored report, so there is no second copy to go stale; a
+  report stored before this keeps the figures it was stored with, and its
+  run-summary column — what the console draws — was always the final one.
+- **`/reports/{id}/iocs` says where each row came from, and what it may
+  publish.** The service attached a `source` to every domain row and `IOCEntry`
+  did not declare it, so `response_model` dropped it and an uncorroborated
+  string-derived name shipped looking exactly like one the sandbox had watched.
+  The field is declared, along with a `published` flag, and mirrored in the
+  console's client with its shape assertion. The feed is one other systems act
+  on, so it now returns what the publish rule would publish by default;
+  `include=all` returns everything and `include=unpublished` only the withheld
+  rows. The console's IOC export asks for `all`, because an operator reading
+  them wants the distinction rather than a shorter list.
 
 ### Removed
 

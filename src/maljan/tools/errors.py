@@ -51,13 +51,18 @@ REMEDIATIONS: dict[str, str] = {
     BAD_ARGUMENT: (
         "check the argument names and types against the tool's manifest and call it again"
     ),
+    # Neither of these names the sample's own path any more. A model is not
+    # offered that parameter — the platform supplies it — so telling one to
+    # "pass the absolute sample path the prompt names" sent a live analyst
+    # after a field it could not see, six calls in a row.
     NO_SUCH_FILE: (
-        "pass the absolute sample path the prompt names; a bare file name resolves "
-        "against the server's own working directory"
+        "the file this call named is not there; pass a path a tool in this run handed "
+        "back, exactly as it was returned and with no quotes around it, or leave the "
+        "argument out to read the file this call was given"
     ),
     PATH_OUTSIDE_ROOTS: (
-        "pass the sample path the prompt names, or a path this server handed back from "
-        "put_sample; this server reads only the directories its operator gave it"
+        "this server reads the file it was given and the files it wrote for this run; "
+        "pass a path a tool in this run handed back, or leave the argument out"
     ),
     UNSUPPORTED_FORMAT: (
         "this tool reads another format; call identify_file and use the tool for the "
