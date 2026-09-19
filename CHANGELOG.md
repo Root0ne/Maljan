@@ -1003,6 +1003,39 @@ change landed on `main`.
   **advisory**: it says how many answers were not searched and from which tools,
   it is fed back once like any finding, and the judge's object is not dropped for
   it. `Violation` carries the flag and `drop_ungrounded_indicators` honours it.
+- **A grounding corpus that kept nothing is still the corpus.** Asking it only
+  when it held something threw away the verdict of one that kept nothing —
+  which is exactly what `reporting.evidence_corpus_bytes = 0` produces — and
+  the check fell back to the stored ledger, was told the evidence was whole,
+  and dropped the judge's object, the opposite of what the setting says. The
+  corpus is consulted whenever it has anything to say, and how whole the
+  searched evidence is, is the conjunction of the sources searched: a fallback
+  to stored entries inherits the state of the corpus it fell back from and
+  never launders it into "complete".
+- **A run whose grounding went advisory says so where an operator looks.**
+  `run_summary.truncation` carries `evidence_corpus_missing_answers`,
+  `evidence_corpus_missing_tools` and `evidence_corpus_partial_reason`; a
+  degradation reason names which of the three reasons it was; the report prints
+  it under Bounds Hit and the console draws it in the run record beside the
+  degraded banner. `advisory` survives `record_unresolved`, so a row the
+  platform declined to act on is no longer stored and drawn as a producer's
+  unfixed finding.
+- **The report and the console describe a bundle's losses in one wording.** The
+  report's Bounds Hit line printed `integrity_objects_removed` as "objects
+  repaired away" with the indicator cap's orphaned relationships inside it, and
+  said 10 where the console said 4 about the same run. Both build the sentence
+  the same way now, pinned on both sides against one fixture of the eight
+  measured bundle shapes.
+- **The grounding corpus costs what its ceiling says.** The run's record was
+  copied three more times on the way to a check — a joined cache, a token-set
+  element, and the string the check searched — so one check over 400 answers of
+  6,000 characters allocated 6.01 MB on top of a 2.4 MB corpus. The text is held
+  once, lower-cased at the moment it is recorded, and a check searches each
+  answer where it lies: the same check now allocates **0.01 MB**.
+  **Upgrading:** `reporting.evidence_corpus_bytes` defaults to **16 MB** rather
+  than 64, which is about 2,700 tool answers at the output cap against the few
+  hundred a whole team makes — the ceiling now bounds the process cost rather
+  than a quarter of it.
 ### Fixed
 
 - **A process that has finished its work is not ended by its own watchdog.** The
