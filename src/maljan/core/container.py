@@ -972,6 +972,15 @@ class ServiceContainer:
         except Exception as exc:  # noqa: BLE001 — teardown never propagates
             logger.warning("Removing this run's staging failed (non-fatal): %s", exc)
 
+        # And what this run saw, which is the other thing it held that outlives
+        # nothing. Dropping the container already frees it; this drops it here
+        # so a caller that keeps the container object alive after closing it —
+        # a test harness, a script reading a result off it — does not keep a
+        # run's whole tool output with it. Every reader of the corpus runs
+        # before teardown: the run summary is built in the judge node and the
+        # export's second-source test in the report node, both inside the run.
+        self._evidence_corpus = RunEvidenceCorpus(0)
+
     def get_narrative_agent(self) -> Any | None:
         """Return the singleton NarrativeAgent or ``None`` in mock mode.
 
