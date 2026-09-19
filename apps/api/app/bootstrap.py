@@ -106,7 +106,10 @@ def validate_bootstrap(s: APISettings) -> BootstrapReport:
     # halfway through a rotation when the setting arrived has no end written
     # down, and neither refusing to start nor refusing the old secret is
     # something an upgrade may do to it.
-    grace_secret = _secret_value(getattr(s, "jwt_previous_secret_key", "")).strip()
+    # A bool, not the value: everything below builds a sentence, and a
+    # sentence built in a scope holding a secret is a flow somebody has to
+    # read to the end before they can say it holds nothing.
+    grace_secret = bool(_secret_value(getattr(s, "jwt_previous_secret_key", "")).strip())
     written = str(getattr(s, "jwt_previous_secret_not_after", "") or "").strip()
     lapses = read_moment(written)
     # A moment that does not read is a typo an operator can fix in a second,

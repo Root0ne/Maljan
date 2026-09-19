@@ -59,6 +59,21 @@ def grace_secret_not_after() -> datetime | None:
     return read_moment(getattr(settings, "jwt_previous_secret_not_after", None))
 
 
+def grace_secret_configured() -> bool:
+    """Whether a previous signing secret is set at all.
+
+    The one place that looks at its value, and only to ask whether there is
+    one: a bool is what leaves here, and a bool is what every sentence about a
+    rotation is built from. Anything that read the secret for itself and then
+    handed out a dict would make every field of that dict something a reader —
+    or a scanner following the flow — has to trace back to the box before it
+    can say nothing escaped.
+    """
+    raw = getattr(settings, "jwt_previous_secret_key", None)
+    secret = raw.get_secret_value() if isinstance(raw, SecretStr) else str(raw or "")
+    return bool(secret)
+
+
 def grace_secret_is_live(now: datetime | None = None) -> bool:
     """Whether a grace secret is configured and still accepted.
 
@@ -72,9 +87,7 @@ def grace_secret_is_live(now: datetime | None = None) -> bool:
 
     Strictly before the moment, so a token is refused at it as well as after.
     """
-    raw = getattr(settings, "jwt_previous_secret_key", None)
-    secret = raw.get_secret_value() if isinstance(raw, SecretStr) else str(raw or "")
-    if not secret:
+    if not grace_secret_configured():
         return False
     # A moment that did not read is no moment. It is a bootstrap problem, so
     # the operator is told; it is not a reason to stop honouring a secret they

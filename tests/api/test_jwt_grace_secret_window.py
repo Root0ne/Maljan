@@ -10,6 +10,7 @@ status endpoint and the startup log say when it is.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from unittest.mock import MagicMock
 
 import jwt as pyjwt
@@ -18,6 +19,7 @@ from pydantic import SecretStr
 
 from app.auth import jwt as auth_jwt
 from app.config import settings
+from app.main import log_jwt_rotation
 from tests.credential_shapes import lowercase_base64_blob
 
 NEW_SECRET = "new-" + lowercase_base64_blob()
@@ -223,6 +225,126 @@ class TestAMomentThatDoesNotRead:
         monkeypatch.setattr(settings, "jwt_previous_secret_not_after", "not-a-date")
 
         assert auth_jwt.decode_token(_token_signed_with(OLD_SECRET)) is not None
+
+
+class TestTheLineAtEveryStart:
+    """What the startup line says, and what it is built from.
+
+    Nothing in it comes from a function that reads the previous secret\'s
+    value. The key id is not in it at all: an operator who wants it reads it
+    from ``/system/status``, which answers an authenticated admin rather than
+    writing to a log file. What is left is the moment, which is a setting of
+    its own, and two words chosen by a bool.
+    """
+
+    @staticmethod
+    def _said(caplog) -> list[Any]:
+        import logging
+
+        caplog.clear()
+        with caplog.at_level(logging.INFO):
+            log_jwt_rotation()
+        return list(caplog.records)
+
+    def test_a_rotation_with_no_end_is_a_warning_that_says_what_to_set(
+        self, rotating, caplog
+    ) -> None:
+        rotating(None)
+
+        records = self._said(caplog)
+
+        assert len(records) == 1
+        assert records[0].levelname == "WARNING"
+        assert "JWT_PREVIOUS_SECRET_NOT_AFTER" in records[0].getMessage()
+        assert "no end" in records[0].getMessage()
+
+    def test_a_rotation_with_an_end_says_when_it_lapses(self, rotating, caplog) -> None:
+        lapses = datetime.now(UTC) + timedelta(days=1)
+        rotating(lapses)
+
+        records = self._said(caplog)
+
+        assert len(records) == 1
+        assert records[0].levelname == "INFO"
+        said = records[0].getMessage()
+        assert lapses.isoformat() in said
+        assert "accepted" in said and "lapses" in said
+
+    def test_a_lapsed_window_says_so_in_the_past(self, rotating, caplog) -> None:
+        lapsed = datetime.now(UTC) - timedelta(days=1)
+        rotating(lapsed)
+
+        said = self._said(caplog)[0].getMessage()
+
+        assert "no longer accepted" in said
+        assert "lapsed" in said
+
+    def test_the_key_id_is_not_written_to_a_log(self, rotating, caplog) -> None:
+        """It is on the status for an admin to read, not in a file on disk."""
+        rotating(datetime.now(UTC) + timedelta(days=1))
+
+        said = self._said(caplog)[0].getMessage()
+
+        assert "v0" not in said
+        assert "kid" not in said
+
+    def test_nothing_is_said_when_no_rotation_is_in_progress(self, monkeypatch, caplog) -> None:
+        monkeypatch.setattr(settings, "jwt_previous_secret_key", SecretStr(""))
+
+        assert self._said(caplog) == []
+
+    def test_the_secret_never_reaches_a_log_line(self, rotating, caplog) -> None:
+        rotating(datetime.now(UTC) + timedelta(days=1))
+
+        said = " ".join(record.getMessage() for record in self._said(caplog))
+
+        assert OLD_SECRET not in said
+        assert NEW_SECRET not in said
+
+
+class TestOnlyOnePlaceLooksAtTheSecret:
+    """Everything that asks whether a rotation is on asks the same question.
+
+    Three sentences used to be built from a dict a function returned after
+    reading the secret out of its box, which is a flow a reader — human or
+    scanner — has to follow to the end before it can say nothing leaked. The
+    bool is the flow now.
+    """
+
+    def test_the_bool_says_whether_one_is_configured(self, rotating, monkeypatch) -> None:
+        rotating(None)
+        assert auth_jwt.grace_secret_configured() is True
+
+        monkeypatch.setattr(settings, "jwt_previous_secret_key", SecretStr(""))
+        assert auth_jwt.grace_secret_configured() is False
+
+    def test_nothing_else_opens_the_box_to_ask_a_yes_or_no(self) -> None:
+        import ast
+        import inspect
+
+        from app import main
+        from app.api.v1 import system
+        from app.auth import jwt as jwt_module
+
+        for module in (jwt_module, system, main):
+            tree = ast.parse(inspect.getsource(module))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                    continue
+                body = ast.dump(node)
+                # Only the functions that are about this secret; the modules
+                # hold others that open boxes of their own.
+                if "jwt_previous_secret_key" not in body:
+                    continue
+                opens = any(
+                    isinstance(call.func, ast.Attribute) and call.func.attr == "get_secret_value"
+                    for call in ast.walk(node)
+                    if isinstance(call, ast.Call)
+                )
+                if opens:
+                    assert node.name in {"grace_secret_configured", "_previous_secret"}, (
+                        f"{module.__name__}.{node.name} reads the secret's value"
+                    )
 
 
 class TestWhatAnOperatorIsShown:

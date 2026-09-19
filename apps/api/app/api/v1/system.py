@@ -12,7 +12,7 @@ from typing import Any
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException, status
 from maljan.core.settings_overrides import redact_url
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import observability
@@ -136,12 +136,19 @@ def _grace_secret_state() -> dict[str, object] | None:
     bootstrap file, that the deployment is still carrying a retired key and
     when it stops carrying it — or that nobody said when, which is the state
     ``bounded`` exists to tell apart from a window that has run out.
-    """
-    from app.auth.jwt import grace_secret_is_live, grace_secret_not_after
 
-    raw = getattr(settings, "jwt_previous_secret_key", None)
-    secret = raw.get_secret_value() if isinstance(raw, SecretStr) else str(raw or "")
-    if not secret:
+    The key id is here and in no log line: this answers an authenticated admin
+    on request, which is not the same as writing an operator\'s label into a
+    file on disk. Nothing here opens the secret\'s box — ``grace_secret_configured``
+    is the one place that does, and it answers yes or no.
+    """
+    from app.auth.jwt import (
+        grace_secret_configured,
+        grace_secret_is_live,
+        grace_secret_not_after,
+    )
+
+    if not grace_secret_configured():
         return None
     not_after = grace_secret_not_after()
     return {
