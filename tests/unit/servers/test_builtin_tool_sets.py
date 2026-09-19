@@ -106,10 +106,16 @@ def test_the_built_in_child_env_is_byte_for_byte_the_pre_branch_child_env(name, 
     ``ServerHandle._build_toolkit`` must reproduce that for the two built-ins
     exactly -- no ``setdefault`` widening the child's environment -- even
     though it does apply that default for an operator-added server.
+
+    The one addition since is the staging leaf, which is composed rather than
+    inherited: it names the job's own directory under whatever base the
+    operator set, and a sidecar that reads a staging directory is the only kind
+    of server that gets it.
     """
     from maljan.agents.subprocess_env import child_env
     from maljan.core.config import Settings
     from maljan.providers.servers import ServerRegistry
+    from maljan.tools.staging import STAGING_JOB_ENV, job_directory_name
 
     monkeypatch.delenv("PYTHONIOENCODING", raising=False)
 
@@ -132,6 +138,8 @@ def test_the_built_in_child_env_is_byte_for_byte_the_pre_branch_child_env(name, 
     handle.open("test-job")
     try:
         expected = child_env(allow=tuple(handle.config.env_allow))
+        if handle._stages_per_job():
+            expected[STAGING_JOB_ENV] = job_directory_name("test-job")
         assert captured["env"] == expected
         assert "PYTHONIOENCODING" not in captured["env"]
     finally:

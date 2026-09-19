@@ -7,7 +7,8 @@ pipeline, so there is one implementation and no copy to drift.
 Launched by `maljan.core.config._builtin_servers()` as the `analysis` server —
 `sys.executable services/analysis-mcp/server.py`, cwd `services/analysis-mcp`,
 with only `MALJAN_STAGING_DIR`, `MALJAN_STAGING_TTL_HOURS` and
-`MALJAN_SAMPLE_ROOTS` passed through.
+`MALJAN_SAMPLE_ROOTS` passed through, plus the one directory name the spawn
+composes for the job it is starting this server for (`MALJAN_STAGING_JOB`).
 It is registered with `agents: []` and reaches the static analyst solely
 through the `ToolRef`s in the built-in agent definitions, so a definition that
 drops the reference really runs without these tools.
@@ -69,27 +70,34 @@ behind an HTTP transport. See the "Tool servers on another host" section of
 
 | variable | default | meaning |
 | --- | --- | --- |
-| `MALJAN_STAGING_DIR` | a `maljan-analysis-mcp` directory under the system temp dir | where uploads land |
+| `MALJAN_STAGING_DIR` | a `maljan-analysis-mcp` directory under the system temp dir | the base uploads land under |
+| `MALJAN_STAGING_JOB` | empty | the one directory name inside that base this job writes in; composed by the spawn, never set by hand |
 | `MALJAN_STAGING_TTL_HOURS` | `24` | how long a staged sample is kept; `0` disables pruning |
 | `MALJAN_SAMPLE_ROOTS` | empty | the other directories a path argument may name, separated by `:` |
 
+Staging is per job: uploads and carved payloads land in `<base>/job-<id>/`,
+the job's owner removes that directory when the run ends, and the TTL sweep
+prunes a job directory whole once the newest file in it is past the cutoff. A
+server started without `MALJAN_STAGING_JOB` — by hand, or by a settings probe —
+writes in the base itself.
+
 Every `path` argument is resolved (symlinks followed) and refused unless it
-lands inside the staging directory or one of `MALJAN_SAMPLE_ROOTS`; `ruleset`
-is held the same way to the `data` tree and to `MALJAN_YARA_RULES_DIR` /
-`MALJAN_SIGMA_RULES_DIR`.
+lands inside *this job's* staging directory or one of `MALJAN_SAMPLE_ROOTS` —
+another job's staged bytes are refused even where a sample root contains the
+base; `ruleset` is held the same way to the `data` tree and to
+`MALJAN_YARA_RULES_DIR` / `MALJAN_SIGMA_RULES_DIR`.
 
 `carved_path` is the one file argument a model chooses, and it is held to
-`<staging>/carved/<sha256 of the file the call is pinned to>/` plus that file
-itself — **not** the staging directory, and not `MALJAN_SAMPLE_ROOTS`. One
-staging directory serves every job on the host, so a base-wide bound let a run
-read another run's carved payload or another run's `put_sample` upload; the
-digest is what `carve_payloads` writes under and what this server can derive
-from the bytes it was handed, so a run reaches everything it produced and
-nothing any other run produced. Two runs of the same sample share one tree,
-which is the same bytes read twice.
+`<staging>/job-<id>/carved/<sha256 of the file the call is pinned to>/` plus
+that file itself — **not** the staging base, and not `MALJAN_SAMPLE_ROOTS`. A
+base-wide bound let a run read another run's carved payload or another run's
+`put_sample` upload; the digest is what `carve_payloads` writes under and what
+this server can derive from the bytes it was handed, so a run reaches
+everything it produced and nothing any other run produced. Two jobs on the same
+sample carve into two directories and neither can name the other's.
 
 The absolute path `carve_payloads` returned works, and so does the tail of it
-relative to the staging directory or to the tree. The resolved path must be a
+relative to this job's staging directory or to the tree. The resolved path must be a
 **regular file** inside that tree: a directory, a FIFO, a device or a socket is
 refused as `bad_argument` with its own sentence. Give it and that file is read
 in place of `path`, and the answer carries `read_path` saying which file it was;

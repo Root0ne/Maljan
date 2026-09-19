@@ -14,15 +14,17 @@ default and the ceiling are both 5000 packets (`read_pcap_summary` defaults to
 
 Launched by `maljan.core.config._builtin_servers()` as the `network` server —
 `sys.executable services/network-mcp/server.py`, cwd `services/network-mcp`,
-with `MALJAN_STAGING_DIR` and `MALJAN_SAMPLE_ROOTS` passed through — and its
-tools are bound to the `network` analyst.
+with `MALJAN_STAGING_DIR` and `MALJAN_SAMPLE_ROOTS` passed through, plus the
+one directory name the spawn composes for the job (`MALJAN_STAGING_JOB`) — and
+its tools are bound to the `network` analyst.
 
 ## Which captures it may read
 
 Every `pcap_path` is resolved (symlinks followed) and refused unless it lands
-inside the staging directory `MALJAN_STAGING_DIR` names or one of the
-directories listed in `MALJAN_SAMPLE_ROOTS` (separated by `:`, empty by
-default). The capture a sandbox run produced is in one of them because the
+inside this job's staging directory — `MALJAN_STAGING_DIR` plus the job leaf,
+the same directory the analysis sidecar writes this job's uploads into — or one
+of the directories listed in `MALJAN_SAMPLE_ROOTS` (separated by `:`, empty by
+default). A capture staged for another job is refused; nothing here writes. The capture a sandbox run produced is in one of them because the
 worker exports the directory it fetched it to. A refusal is `{"error":
 {"code": "path_outside_roots", ...}}` and names no host path; see "Which
 directories a sidecar may read" in `docs/configuration.md`.

@@ -51,18 +51,26 @@ A tool server reached over HTTP does not share the worker's filesystem, so the
 sample is delivered to it rather than named. The worker writes each delivery
 into the staging directory (`MALJAN_STAGING_DIR`, a `maljan-analysis-mcp` directory under the
 system temp directory by default) and the sidecars sweep it on a TTL
-(`MALJAN_STAGING_TTL_HOURS`, 24 hours by default; `0` disables pruning). The
-payloads `carve_payloads` writes under `carved/<sha256>/` are swept on the same
-TTL, and an emptied tree goes with them; before that the sweep stepped over
-directories and nothing carved ever expired, so a long-lived host accumulated
-them — check that directory on an upgrade.
-Everything in it is live malware, on the same terms as `SAMPLES_DIR`: exclude
-it from on-access scanning and keep it off shared storage. One staging
-directory serves every job the server process handles, which is why a tool
-argument naming a carved file is held to the tree of the sample the call is
-pinned to rather than to the directory as a whole. A staging write that
+(`MALJAN_STAGING_TTL_HOURS`, 24 hours by default; `0` disables pruning).
+
+**Staging is per job.** The configured directory is the base, and each job gets
+one directory of its own inside it, `job-<the job's id>`: the sidecar's
+`put_sample` uploads land there and so does the `carved/<sha256>/` tree of
+everything that job carves. The worker removes the whole directory when the run
+ends — on success, on failure and on an operator's cancel — and what a removal
+misses is taken by the same TTL, which prunes a job directory whole once the
+newest file in it is past the cutoff. So a nameable residue means a worker that
+was killed, and it goes on its own within the TTL.
+
+Everything in it is live malware, on the same terms as `SAMPLES_DIR`: exclude it
+from on-access scanning and keep it off shared storage. A staging write that
 fails costs that server its tools for the run and is logged; it does not fail
 the job.
+
+*On upgrading:* the flat uploads and the single `carved/` tree of the previous
+release stay where they are and are swept by the same TTL. Nothing has to be
+migrated or moved; a host you want clean at once can have that directory
+emptied while no job is running.
 
 ## Audit trail
 

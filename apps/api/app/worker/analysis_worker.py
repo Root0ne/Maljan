@@ -1017,6 +1017,51 @@ async def release_job(redis_conn: Any, job_id: str) -> None:
         )
 
 
+def remove_job_staging(job_id: str) -> list[Path]:
+    """Take away what this job's sidecars staged and carved. Never raises.
+
+    Staging is one directory per job, named by the same rule on both sides
+    (``maljan.tools.staging``), so this removes exactly what this process
+    pointed its sidecars at and nothing a concurrent job owns. Removal never
+    follows a symlink: the tree holds live malware, and a link planted in it is
+    the one way a cleanup becomes a delete somewhere else.
+
+    A directory that cannot be removed is said once and left to the sidecar's
+    own TTL sweep, which prunes a job directory whole by the newest mtime
+    inside it. The cached upload paths go with it, because a path into a
+    directory that is gone is not a cache, it is an error every tool call after
+    it would answer with.
+    """
+    from maljan.agents import sample_staging
+    from maljan.tools import staging
+
+    wanted = staging.job_directories(job_id)
+    sample_staging.forget_job(job_id)
+    try:
+        removed = staging.remove_job_staging(job_id)
+    except Exception as exc:  # noqa: BLE001 — a cleanup never fails a finished job
+        logger.warning(
+            "Could not remove the staging directory of job %s (%s); the sidecar's TTL "
+            "sweep prunes it.",
+            job_id,
+            type(exc).__name__,
+            extra={"job_id": job_id, "component": "worker.lifecycle"},
+        )
+        return []
+    left = [path for path in wanted if path not in removed]
+    if left:
+        logger.warning(
+            "The staging directory of job %s was not fully removed (%s); the sidecar's "
+            "TTL sweep prunes it.",
+            job_id,
+            ", ".join(str(path) for path in left),
+            extra={"job_id": job_id, "component": "worker.lifecycle"},
+        )
+    for path in removed:
+        logger.debug("Removed the staging directory %s", path, extra={"job_id": job_id})
+    return removed
+
+
 async def hold_job_owner(redis_conn: Any, job_id: str) -> None:
     """Refresh this job's claim until the task running this is cancelled.
 
@@ -2353,6 +2398,16 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             gc.collect()
             reclaimed = memprobe.malloc_trim()
             memprobe.probe("job:end", job_id=job_id, trim_reclaimed_mb=reclaimed)
+
+        # What the sidecars staged and carved for this job, which is one
+        # directory per job and therefore one removal rather than a search.
+        # It goes with the owner heartbeat and the sample copies above — on
+        # success, failure, an operator's cancel and every early return —
+        # but *after* the teardown rather than beside the release: the bytes
+        # in it are live malware, and a child still finishing a cancelled tool
+        # call would write the directory back the moment it was taken away.
+        # Once the teardown has returned there is nobody left to recreate it.
+        remove_job_staging(job_id)
 
 
 # ── Helpers ──────────────────────────────────────────────────────

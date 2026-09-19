@@ -506,6 +506,28 @@ change landed on `main`.
 
 ### Changed
 
+- **Staging is per job.** The sidecars' staging directory held every job the
+  server process ever ran: `put_sample` uploads landed flat in it under
+  sixteen hex characters and the original file name, every sample's carved tree
+  sat beside every other's, and two runs of the same sample shared one tree, so
+  the only thing keeping one run out of another's files was the shape of the
+  carved tree rather than the directory. `MALJAN_STAGING_DIR` is now the
+  **base**, and each job writes into `job-<its id>` inside it: its uploads, its
+  `carved/<sha256>/` trees, and nothing another job can name by any spelling.
+  The spawn composes that one directory name and passes it to the child as
+  `MALJAN_STAGING_JOB` — a leaf, not a path, so an operator's configured base
+  stays the base; the sidecar joins the two. A path argument resolving into
+  another job's directory is refused even where a sample root contains the
+  base. The job's owner removes the directory on success, on failure and on an
+  operator's cancel, and the `MALJAN_STAGING_TTL_HOURS` sweep now prunes a job
+  directory whole — by the newest mtime inside it, following no link — as well
+  as the files inside a directory still in use. **What an operator does:**
+  nothing. The flat uploads and the single `carved/` tree of the previous
+  release are swept by the same TTL where they lie; a host you want clean at
+  once can have that directory emptied while no job is running. A sidecar
+  started by hand or by a settings probe gets no leaf and writes in the base
+  exactly as before.
+
 - **A tool answer too big for the prompt is shortened, not cut in half.** A
   JSON result over `preprocessing.max_tool_output_chars` was cut as text, which
   ended the document mid-array: the model got a prefix with none of the

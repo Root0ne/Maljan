@@ -285,6 +285,38 @@ class ServerHandle:
             )
         return str(resolved)
 
+    def _stages_per_job(self) -> bool:
+        """Whether this server writes or reads a staging directory at all.
+
+        A built-in that is required to see ``MALJAN_STAGING_DIR`` does, and so
+        does a server an operator configured with that name — the same sidecar
+        under a key of their own. Every other server is told nothing: a job id
+        is not a fact a third-party tool server needs.
+        """
+        from maljan.core.config import REQUIRED_ENV_ALLOW
+        from maljan.tools.staging import STAGING_DIR_ENV
+
+        if STAGING_DIR_ENV in REQUIRED_ENV_ALLOW.get(self.name, ()):
+            return True
+        return STAGING_DIR_ENV in self.config.env_allow or STAGING_DIR_ENV in self.config.env
+
+    def _name_the_job_staging(self, env: dict[str, str]) -> None:
+        """Give the child the one directory name this job may stage under.
+
+        Written after ``child_env`` rather than into it, and as a leaf rather
+        than as a path: the operator's ``MALJAN_STAGING_DIR`` is applied last by
+        ``child_env`` and stays the base, and the sidecar joins the two itself.
+        The name is recorded so this job's teardown can remove exactly what it
+        pointed its sidecars at.
+        """
+        from maljan.tools import staging
+
+        if not self._job_id or not self._stages_per_job():
+            return
+        leaf = staging.job_directory_name(self._job_id)
+        env[staging.STAGING_JOB_ENV] = leaf
+        staging.note_job_directory(self._job_id, staging.staging_base(env) / leaf)
+
     def _build_toolkit(
         self,
         output_guardrail: Callable[[str], str] | None,
@@ -309,6 +341,7 @@ class ServerHandle:
             from maljan.core.paths import resolve_mcp_args
 
             env = child_env(self.config.env, allow=tuple(self.config.env_allow))
+            self._name_the_job_staging(env)
             if self.name not in BUILTIN_SERVER_KEYS:
                 # Byte-for-byte with the pre-branch built-ins (spec S3.2): the
                 # in-repo network/threatintel sidecars were launched with a
