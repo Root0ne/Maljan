@@ -779,6 +779,18 @@ change landed on `main`.
   `stix.unpublishable_url` or `stix.unpublishable_domain` must also accept
   `stix.unpublishable_endpoint` to keep seeing new runs.
 
+- **A `directory:path` indicator now needs the run's own evidence, not only a
+  filesystem anchor.** A directory whose literal began with one of the
+  OS-resource prefixes — `C:\`, `/data/`, `%TEMP%`, a registry hive — used to
+  be admitted on that alone, with no corpus question asked. Shape is not
+  evidence: the anchor now answers only whether the literal could be a place,
+  and the literal is then asked, as every other literal is, whether this run
+  recorded it. A judge that writes a real directory the run did not happen to
+  write down is told so and spends its one retry there.
+  **Upgrading:** a run whose evidence does not name a directory it claimed will
+  carry a `stix.ungrounded_indicator` row for it where it carried none before,
+  and the indicator is dropped after the retry rather than exported.
+
 ### Fixed
 
 - **Enrichment stopped taking the slot an analysis was waiting for.** The
@@ -2471,7 +2483,9 @@ change landed on `main`.
   timestamps out of the comparison before it, and reports what it cannot read
   as unreadable so it is declined rather than guessed at. The digest check
   (`malformed_hash_in`) reads through it too, and the dead fourth reader in
-  `judge_postprocess` is gone, so the pattern really is read in one place.
+  `judge_postprocess` is gone, so the pattern really is read in one place. That
+  check also reads `IN (…)`: `[file:hashes.'MD5' IN ('deadbeef', …)]` asserts
+  every member is an MD5, and the length rule used to ask the `=` form alone.
 
 - **An endpoint written through a reference is asked the host question.** A
   judge-written `[network-traffic:dst_ref.value = '127.0.0.1']` reached no
