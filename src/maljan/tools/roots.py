@@ -111,8 +111,23 @@ def resolve_under_roots(path: str | Path, *, extra_roots: Iterable[str | Path] =
     Raises:
         PathOutsideRoots: when the resolved path is in none of them.
     """
+    return resolve_under(path, (*extra_roots, *configured_roots()))
+
+
+def resolve_under(path: str | Path, roots: Iterable[str | Path]) -> Path:
+    """``path`` resolved, if it lands inside one of exactly ``roots``.
+
+    The deployment's sample directories are deliberately *not* added. An
+    argument that names a file a tool in this run produced — a carved payload —
+    is confined to the directory those files are written to and to nothing
+    else: the sample roots hold whatever the deployment put there, and an
+    argument a model chose has no business reaching them.
+
+    Raises:
+        PathOutsideRoots: when the resolved path is in none of them.
+    """
     resolved = Path(os.path.realpath(str(path)))
-    for root in (*extra_roots, *configured_roots()):
+    for root in roots:
         try:
             base = Path(os.path.realpath(str(root)))
         except OSError:  # pragma: no cover - a root that cannot be resolved is not one

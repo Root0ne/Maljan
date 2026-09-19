@@ -846,7 +846,37 @@ def _artifact_sections(acc: _Sections, isrs: dict[str, Any]) -> None:
                 acc.cite(section, str(entry_id))
 
 
-def _findings_section(acc: _Sections, isrs: dict[str, Any]) -> None:
+# What the Techniques column writes beside an id this run did not publish. The
+# reason itself is under the ATT&CK matrix, where every unpublished id is named
+# with the check's own sentence; here there is room for the fact only, and
+# printing the fact in words is the point — a run that published none of the
+# three enterprise-only ids it printed said nothing at all.
+NOT_PUBLISHED_MARKER = "claimed, not published"
+
+
+def _technique_cell(technique_ids: Any, published: frozenset[str] | None) -> str:
+    """The Techniques cell for one finding, marking what is not published.
+
+    ``None`` is a caller with no published list to compare against, which is
+    not a claim either way and marks nothing. An empty set is a run that
+    published no technique at all, and every id it printed is marked — which is
+    the run this exists for.
+    """
+    written: list[str] = []
+    for raw in technique_ids or []:
+        tid = str(raw or "").strip()
+        if not tid:
+            continue
+        if published is None or tid.upper() in published:
+            written.append(tid)
+        else:
+            written.append(f"{tid} ({NOT_PUBLISHED_MARKER})")
+    return ", ".join(written)
+
+
+def _findings_section(
+    acc: _Sections, isrs: dict[str, Any], published: frozenset[str] | None = None
+) -> None:
     """Every analyst finding in one table, with what each was drawn from."""
     section: EvidenceSection | None = None
     for agent, isr in (isrs or {}).items():
@@ -873,7 +903,7 @@ def _findings_section(acc: _Sections, isrs: dict[str, Any]) -> None:
                 [
                     str(agent),
                     _text(getattr(finding, "title", "")),
-                    _text(getattr(finding, "technique_ids", []) or []),
+                    _technique_cell(getattr(finding, "technique_ids", []) or [], published),
                     f"{float(getattr(finding, 'confidence', 0.0) or 0.0):.2f}",
                     _text(getattr(finding, "evidence_ids", []) or []),
                 ],
@@ -895,6 +925,7 @@ def build_sections(
     file_type: str = "unknown",
     platform: str = "unknown",
     merges: MergeTally | None = None,
+    published_techniques: frozenset[str] | None = None,
 ) -> list[EvidenceSection]:
     """Every section this run's evidence supports, in the order it was gathered.
 
@@ -902,6 +933,12 @@ def build_sections(
     that identified nothing still says what it was working on rather than
     opening with an empty identity block. ``merges`` is filled in with what
     the indicator and finding tables folded, for the run summary to state.
+
+    ``published_techniques`` is the validated ``ttp_mappings``, so the Findings
+    table can say which of the ids it prints this run did not publish. ``None``
+    is a caller with no such list to compare against, which is not a claim
+    either way and marks nothing; an empty set is a run that published no
+    technique at all, and every id it prints is marked.
     """
     acc = _Sections(merges)
 
@@ -930,5 +967,5 @@ def build_sections(
         _fallback(acc, entry)
 
     _artifact_sections(acc, isrs or {})
-    _findings_section(acc, isrs or {})
+    _findings_section(acc, isrs or {}, published_techniques)
     return acc.result()

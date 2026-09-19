@@ -14,7 +14,12 @@ from typing import Any
 import pytest
 
 from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.models import MalwareReport, StaticAnalysis, StringIOC
+from maljan.reporting.models import (
+    MalwareReport,
+    PersistenceMechanism,
+    StaticAnalysis,
+    StringIOC,
+)
 from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
 from maljan.schemas.stix_models import (
     AttackPattern,
@@ -56,12 +61,28 @@ def _types(bundle: Bundle) -> list[str]:
 
 
 class TestIndicatorTypes:
-    def test_file_name_anomalous_hash_malicious(self) -> None:
+    def test_an_uncorroborated_file_name_is_not_published_at_all(self) -> None:
         report = _build()
         if report.static is None:
             report.static = StaticAnalysis()
         report.static.interesting_strings = [
             StringIOC(kind="path", value="/data/local/tmp/payload.so")
+        ]
+        bundle = ExtendedSTIXRenderer().render(report, base_bundle=None)
+        inds = [o for o in bundle.objects if isinstance(o, Indicator)]
+        assert not [i for i in inds if i.pattern.lstrip().startswith("[file:name")]
+
+    def test_a_corroborated_file_name_is_anomalous_and_the_hash_is_malicious(self) -> None:
+        report = _build()
+        if report.static is None:
+            report.static = StaticAnalysis()
+        report.static.interesting_strings = [
+            StringIOC(kind="path", value="/data/local/tmp/payload.so")
+        ]
+        report.persistence = [
+            PersistenceMechanism(
+                kind="service", target="/data/local/tmp/payload.so", payload="", technique_id=None
+            )
         ]
         bundle = ExtendedSTIXRenderer().render(report, base_bundle=None)
         inds = [o for o in bundle.objects if isinstance(o, Indicator)]

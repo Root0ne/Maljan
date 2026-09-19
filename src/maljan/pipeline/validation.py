@@ -1810,6 +1810,67 @@ def _runtime_paths(evidence_corpus: set[str] | None) -> set[str]:
     return found
 
 
+# A run of hexadecimal on its own, and the lengths a digest this project can
+# name comes in. Anything else quoted in a pattern is asked the corpus question
+# as it always was.
+_HEX_TOKEN_RE = re.compile(r"^[0-9a-fA-F]+$")
+_DIGEST_LENGTHS = frozenset({32, 40, 56, 64, 96, 128})
+
+# What separates one token from the next in the evidence corpus. A digest is
+# found when it stands alone between two of them, never when it is the first
+# half of a longer one.
+_TOKEN_BOUNDARY_RE = re.compile(r"[0-9a-f]", re.IGNORECASE)
+
+
+# An object path in a pattern comparison, read outside the quotes: the type,
+# then the property. Case carries no meaning in a STIX object path.
+_COMPARISON_PATH_RE = re.compile(r"([a-z0-9-]+:[a-z_.]+)", re.IGNORECASE)
+
+
+def _comparisons(pattern: str) -> list[tuple[str, str]]:
+    """Every ``(object path, quoted literal)`` the pattern compares, in order.
+
+    Split on the quotes rather than on the paths, because a literal is where a
+    URL lives and a URL carries anything that looks like an object path inside
+    it. Only what is written outside the quotes says what is being compared,
+    and each literal is credited to the path most recently written before it —
+    an ``IN ('a', 'b')`` list writes the path once and quotes twice.
+    """
+    found: list[tuple[str, str]] = []
+    path = ""
+    inside_the_path = False
+    for index, chunk in enumerate(pattern.split("'")):
+        if index % 2 == 0:
+            paths = list(_COMPARISON_PATH_RE.finditer(chunk))
+            if paths:
+                path = paths[-1].group(1).lower()
+            # A quote that opens where the object path is still being written
+            # holds a key, not a value: ``file:hashes.'MD5'`` names the
+            # algorithm and ``file:extensions['pe']`` names the extension. The
+            # value is what follows the comparison operator.
+            inside_the_path = chunk.rstrip().endswith((".", "["))
+        elif chunk.strip() and not inside_the_path:
+            found.append((path, chunk.strip()))
+    return found
+
+
+def _whole_token_in(literal: str, haystack: str, own: set[str]) -> bool:
+    """Whether ``literal`` appears in the corpus as a value rather than a prefix."""
+    lowered = literal.lower()
+    if lowered in own:
+        return True
+    start = haystack.find(lowered)
+    while start != -1:
+        before = haystack[start - 1] if start else ""
+        after = haystack[start + len(lowered) : start + len(lowered) + 1]
+        if not _TOKEN_BOUNDARY_RE.match(before or " ") and not _TOKEN_BOUNDARY_RE.match(
+            after or " "
+        ):
+            return True
+        start = haystack.find(lowered, start + 1)
+    return False
+
+
 def _indicator_problem(
     pattern: str, haystack: str, runtime_paths: set[str], identity: Iterable[str] = ()
 ) -> str:
@@ -1829,9 +1890,11 @@ def _indicator_problem(
     from maljan.agents._indicator_denylists import (
         COMPILE_ARTIFACT_RE,
         FOREIGN_CLASS_REF_RE,
+        HASH_HEX_LENGTHS,
         IOC_FILE_EXTENSIONS,
         IOC_OS_RESOURCE_PREFIXES,
         URL_DENY_HOSTS,
+        malformed_hash_in,
     )
 
     if not pattern.strip():
@@ -1848,25 +1911,66 @@ def _indicator_problem(
     def _found(literal: str) -> bool:
         return literal.lower() in haystack or literal.lower() in own
 
-    stripped = pattern.lstrip()
+    # A hash literal answers to its algorithm before it answers to the corpus.
+    # Sixteen of the thirty-two characters of an MD5 are a prefix of one, and a
+    # substring search over the evidence finds a prefix every time — one run
+    # exported ``32066ff6369a7bd7`` as an indicator no consumer matching on MD5
+    # can ever match. The length question is asked first because a truncated
+    # digest is not "present in the evidence" whatever the haystack says.
+    malformed = malformed_hash_in(pattern)
+    if malformed is not None:
+        algorithm, literal = malformed
+        named = safe_finding_value(algorithm)
+        expected = HASH_HEX_LENGTHS.get(algorithm)
+        return (
+            f"{safe_finding_value(literal)!r} is not a {named} digest: "
+            f"{named} is {expected} hexadecimal characters."
+        )
 
-    if stripped.startswith("[url:value"):
-        for literal in literals:
+    # Every comparison in the pattern, asked in turn, and each check below is a
+    # veto rather than an acceptance. A pattern is not one comparison —
+    # ``[a] AND [b]``, an ``IN`` list, a compound the judge writes — and these
+    # branches used to key on what the *pattern* started with, so a URL beside
+    # a hash was never asked the denylist question and a grounded digest
+    # answered for the whole expression. What one comparison establishes is
+    # that *it* raised no problem; the others are still asked.
+    grounded = False
+    for path, literal in _comparisons(pattern):
+        if path.startswith("file:hashes") or path.endswith("imphash"):
+            if _HEX_TOKEN_RE.match(literal) and len(literal) in _DIGEST_LENGTHS:
+                if not _whole_token_in(literal, haystack, own):
+                    return (
+                        f"the indicator pattern names {safe_finding_value(literal)}, which "
+                        "appears nowhere in the evidence this run collected as a value of its "
+                        "own."
+                    )
+                grounded = True
+                continue
+            # A fuzzy hash is not a run of hex and has no length this code
+            # knows — an ssdeep carries block sizes and slashes, a TLSH opens
+            # with its version — so the prefix question the whole-token rule
+            # answers does not arise for it. It is asked the corpus question
+            # every other value is asked, and skipping it told a judge that the
+            # ssdeep the ``hashes`` tool had just reported "appears nowhere in
+            # the evidence", spent the one retry on that and dropped the
+            # object.
+            grounded = grounded or _found(literal)
+            continue
+        if path.startswith("url:"):
             host = _url_host(literal)
             if host and any(host.endswith(d) or d in host for d in URL_DENY_HOSTS):
                 return (
                     f"the URL host in {safe_finding_value(literal)!r} is documentation or "
                     "vendor infrastructure."
                 )
-        if not any(_found(literal) for literal in literals):
-            return (
-                f"the URL {safe_finding_value(literals[0])!r} appears nowhere in this run's "
-                "evidence."
-            )
-        return ""
-
-    if stripped.startswith("[file:name"):
-        for literal in literals:
+            if not _found(literal):
+                return (
+                    f"the URL {safe_finding_value(literal)!r} appears nowhere in this run's "
+                    "evidence."
+                )
+            grounded = True
+            continue
+        if path.startswith("file:name") or path.startswith("directory:path"):
             if COMPILE_ARTIFACT_RE.search(literal):
                 return (
                     f"{safe_finding_value(literal)!r} is a compiler or toolchain artefact, "
@@ -1877,26 +1981,37 @@ def _indicator_problem(
                     f"{safe_finding_value(literal)!r} is a class reference from a library, "
                     "not a file on disk."
                 )
-        for literal in literals:
             lowered = literal.lower()
-            if (
+            if not (
                 any(lowered.endswith(ext) for ext in IOC_FILE_EXTENSIONS)
                 or any(literal.startswith(prefix) for prefix in IOC_OS_RESOURCE_PREFIXES)
                 or lowered in runtime_paths
                 or lowered in own
             ):
-                return ""
-        return (
-            f"{safe_finding_value(literals[0])!r} has no file extension, no filesystem anchor "
-            "and was not "
-            "observed at runtime, so nothing says it is a real path."
-        )
+                return (
+                    f"{safe_finding_value(literal)!r} has no file extension, no filesystem "
+                    "anchor and was not "
+                    "observed at runtime, so nothing says it is a real path."
+                )
+            grounded = True
+            continue
+        # A digest-shaped literal under a path this does not model is still a
+        # digest: it is asked as a whole token wherever it is written.
+        if _HEX_TOKEN_RE.match(literal) and len(literal) in _DIGEST_LENGTHS:
+            if not _whole_token_in(literal, haystack, own):
+                return (
+                    f"the indicator pattern names {safe_finding_value(literal)}, which appears "
+                    "nowhere in the evidence this run collected as a value of its own."
+                )
+            grounded = True
+            continue
+        grounded = grounded or _found(literal)
 
-    # One literal is enough. A pattern like ``[file:hashes.'SHA-256' = '<hex>']``
-    # quotes the hash algorithm as well as the hash, and requiring every quoted
-    # string to appear in the corpus would reject the digest for the company it
-    # keeps.
-    if any(_found(literal) for literal in literals):
+    # One comparison is enough to ground the pattern. ``[file:hashes.'SHA-256'
+    # = '<hex>']`` quotes the hash algorithm as well as the hash, and requiring
+    # every quoted string to appear in the corpus would reject the digest for
+    # the company it keeps.
+    if grounded:
         return ""
     return (
         f"the indicator pattern names {safe_finding_value(', '.join(literals))}, which "

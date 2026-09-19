@@ -216,6 +216,9 @@ CODE_OWNED: frozenset[str] = frozenset(
         "techniques",
         "keys",
         "grounding",
+        # How many hexadecimal characters a digest of a named algorithm has,
+        # read out of this codebase's own table.
+        "expected",
     }
 )
 

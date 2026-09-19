@@ -31,6 +31,7 @@ from typing import Any
 from maljan.analysis.corroboration import (
     corroboration_row,
     corroboration_sources,
+    published_count,
     technique_label,
 )
 
@@ -164,6 +165,25 @@ class TruncationMetrics:
         )
 
 
+def stage_duration_lines(stages: Any) -> list[str]:
+    """How long each stage that ran took, as the lines beside the elapsed time.
+
+    Read from the stage rollup, which is the same list the console's stage
+    headers are drawn from, so the two cannot disagree about where a run spent
+    its time. A stage that did not run contributes nothing: an absent row and a
+    zero are different facts, and the rollup's own ``reason`` says which.
+    """
+    rows = [
+        (str(row.get("key") or ""), float(row.get("duration_ms") or 0.0))
+        for row in (stages or [])
+        if isinstance(row, dict) and row.get("ran") and float(row.get("duration_ms") or 0.0) > 0
+    ]
+    if not rows:
+        return []
+    spent = ", ".join(f"{key} {ms / 1000.0:.1f}s" for key, ms in rows if key)
+    return [f"**Per stage**: {spent}  "] if spent else []
+
+
 def _attribution_layers() -> list[str]:
     """The layer order the per-layer breakdown renders, profile first.
 
@@ -285,6 +305,7 @@ class RunSummary:
             f"**Verdict**: {self.final_decision}  ",
             f"**STIX objects**: {self.stix_object_count}  ",
             f"**Elapsed**: {self.elapsed_seconds:.1f}s  ",
+            *stage_duration_lines(self.stages),
             "",
         ]
 
@@ -345,12 +366,16 @@ class RunSummary:
 
         # Corroboration
         if self.corroboration:
+            published = published_count(self.corroboration)
             lines += [
                 "## Corroboration",
                 "",
                 "Which sources named each technique: the deterministic sources that carry",
                 "their own ATT&CK ids, and the agents. Two lists, not a combined confidence:",
-                "nothing here multiplies one layer's number by another's.",
+                "nothing here multiplies one layer's number by another's. A row that names",
+                "a technique this run did not publish says so, with the reason.",
+                "",
+                f"**{len(self.corroboration)} claimed, {published} published.**",
                 "",
                 "| Technique | Asserted by | Claimed by | Catalogue |",
                 "|---|---|---|---|",

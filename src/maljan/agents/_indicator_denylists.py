@@ -165,3 +165,86 @@ MAX_FILE_NAME_INDICATORS: int = 10
 # tractability assertion. Applied by the STIX renderer with priority
 # order: hashes (sha256 always) -> network IOCs -> file:name.
 MAX_TOTAL_INDICATORS: int = 15
+
+
+# How many hexadecimal characters a digest of each algorithm STIX names has.
+# A literal of any other length is not that digest: a consumer matching on MD5
+# will never match sixteen of the thirty-two characters of one, and the run
+# that exported ``32066ff6369a7bd7`` offered a value nothing can act on. Here
+# rather than beside either of its two callers — the grounding check and the
+# export's own decline — so the two cannot come to disagree about what a hash
+# is.
+HASH_HEX_LENGTHS: dict[str, int] = {
+    "MD5": 32,
+    "SHA-1": 40,
+    "SHA1": 40,
+    "SHA-224": 56,
+    "SHA-256": 64,
+    "SHA256": 64,
+    "SHA-384": 96,
+    "SHA-512": 128,
+    "SHA512": 128,
+    "SHA3-256": 64,
+    "SHA3-512": 128,
+}
+
+HEX_RE = re.compile(r"^[0-9a-fA-F]+$")
+
+# ``file:hashes.'MD5' = '<literal>'`` and the unquoted spelling of the same.
+_HASH_EQUALITY_RE = re.compile(
+    r"file:hashes\.(?:'(?P<quoted>[^']+)'|(?P<bare>[A-Za-z0-9_-]+))\s*=\s*'(?P<value>[^']*)'",
+    re.IGNORECASE,
+)
+
+
+def hash_literal_is_wellformed(algorithm: object, value: object) -> bool:
+    """Whether ``value`` is a digest of ``algorithm``, by length and alphabet.
+
+    An algorithm this does not know is left alone: STIX allows a bundle to name
+    a digest this table has never heard of, and refusing one would be code
+    deciding a question it cannot answer.
+    """
+    expected = HASH_HEX_LENGTHS.get(str(algorithm or "").strip().upper())
+    if expected is None:
+        return True
+    literal = str(value or "").strip()
+    return len(literal) == expected and HEX_RE.match(literal) is not None
+
+
+def malformed_hash_in(pattern: str) -> tuple[str, str] | None:
+    """The first ``(algorithm, literal)`` in ``pattern`` that is not that digest."""
+    for match in _HASH_EQUALITY_RE.finditer(pattern or ""):
+        algorithm = match.group("quoted") or match.group("bare") or ""
+        literal = match.group("value") or ""
+        if not hash_literal_is_wellformed(algorithm, literal):
+            return (str(algorithm).strip().upper(), literal)
+    return None
+
+
+# What can be part of one indicator value: the characters a host name, a path,
+# a mailbox, a digest or a registry key is written with. A value found in the
+# evidence between two of anything else is that value; one flanked by these is
+# a slice of a longer value and is not.
+_VALUE_CHARACTER_RE = re.compile(r"[A-Za-z0-9._\-@:/\\+%~]")
+
+
+def whole_value_in(literal: str, haystack: str) -> bool:
+    """Whether ``literal`` appears in ``haystack`` as a value of its own.
+
+    Containment by substring says a truncated MD5 is present whenever the whole
+    digest is, and says a short mutex name is present whenever some longer
+    token happens to spell it. Both are the same mistake: the run recorded
+    something else that this value is a slice of. Both arguments are compared
+    lowercased, because the corpus is.
+    """
+    lowered = str(literal or "").lower()
+    if not lowered:
+        return False
+    start = haystack.find(lowered)
+    while start != -1:
+        before = haystack[start - 1] if start else " "
+        after = haystack[start + len(lowered) : start + len(lowered) + 1] or " "
+        if not _VALUE_CHARACTER_RE.match(before) and not _VALUE_CHARACTER_RE.match(after):
+            return True
+        start = haystack.find(lowered, start + 1)
+    return False

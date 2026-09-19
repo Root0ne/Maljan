@@ -399,7 +399,8 @@ def _is_wellformed_pattern(indicator: Any) -> bool:
 
     Returns True only when the pattern is a bracketed comparison expression
     (``[ <path> <op> '<value>' ]``). Keeps all patterns Maljan emits; rejects
-    empty/whitespace and truncated/garbage LLM output (e.g. ``[file:name = 'x``).
+    empty/whitespace and truncated/garbage LLM output — a ``[file:name``
+    comparison cut off before its closing bracket, say.
     """
     pat = str(_oget(indicator, "pattern", "") or "").strip()
     return pat.startswith("[") and pat.endswith("]") and "=" in pat

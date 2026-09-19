@@ -14,6 +14,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from maljan.analysis.run_summary import stage_duration_lines
 from maljan.core.logger import logger
 from maljan.reporting.models import (
     DefensiveRecommendation,
@@ -920,7 +921,9 @@ class MarkdownRenderer:
 
         elapsed = run_summary.get("elapsed_seconds")
         if elapsed is not None:
-            lines.append(f"- Elapsed: {float(elapsed):.1f}s")
+            lines.append(f"- Elapsed: {float(elapsed):.1f}s (the whole run, to this report)")
+        for line in stage_duration_lines(run_summary.get("stages")):
+            lines.append(f"- {line.replace('**', '').rstrip()}")
         verdict = run_summary.get("final_decision")
         if verdict:
             lines.append(f"- Verdict: {verdict}")
@@ -950,7 +953,11 @@ class MarkdownRenderer:
             lines.append(f"- Report sections with no evidence: {ungrounded}")
         corroboration = run_summary.get("corroboration") or {}
         if corroboration:
-            from maljan.analysis.corroboration import corroboration_sources, technique_label
+            from maljan.analysis.corroboration import (
+                corroboration_sources,
+                published_count,
+                technique_label,
+            )
 
             multi = sum(1 for row in corroboration.values() if len(corroboration_sources(row)) > 1)
             asserted = sum(
@@ -958,8 +965,11 @@ class MarkdownRenderer:
                 for row in corroboration.values()
                 if isinstance(row, dict) and row.get("asserted_by")
             )
+            # What each number counts, because "3 named" over a run that
+            # published none of the three reads as three findings.
             lines.append(
-                f"- TTPs: {len(corroboration)} named, {multi} by more than one source, "
+                f"- TTPs: {len(corroboration)} claimed, {published_count(corroboration)} "
+                f"published, {multi} claimed by more than one source, "
                 f"{asserted} asserted by a deterministic source"
             )
         validation = run_summary.get("validation") or {}

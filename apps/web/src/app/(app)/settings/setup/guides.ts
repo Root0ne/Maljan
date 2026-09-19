@@ -221,7 +221,13 @@ const LLM_GUIDE: GuideDef = {
       {
         id: "test",
         title: "Test the connection",
-        intro: "This also fetches the list of models the next step offers.",
+        intro:
+          provider === "ollama"
+            ? "This also fetches the list of models the next step offers. A reasoning " +
+              "model answers in its thinking channel and leaves the answer empty, so " +
+              "the test reports that it answered nothing: turn on " +
+              "core.llm.ollama.disable_thinking above and test again."
+            : "This also fetches the list of models the next step offers.",
         probe: "llm",
         canContinue: (c) => (c.probeOk("llm") ? null : "run the connection test first"),
       },

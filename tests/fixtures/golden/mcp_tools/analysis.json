@@ -1,6 +1,7 @@
 {
   "arguments": {
     "apk_info": [
+      "carved_path",
       "certs",
       "components",
       "dex_strings",
@@ -11,31 +12,39 @@
       "permissions"
     ],
     "archive_list": [
+      "carved_path",
       "limit",
       "path"
     ],
     "capa": [
       "backend",
+      "carved_path",
       "path",
       "timeout_s"
     ],
     "capabilities": [],
     "carve_payloads": [
+      "carved_path",
       "path"
     ],
     "document_info": [
+      "carved_path",
       "path"
     ],
     "elf_info": [
+      "carved_path",
       "path"
     ],
     "hashes": [
+      "carved_path",
       "path"
     ],
     "identify_file": [
+      "carved_path",
       "path"
     ],
     "iocs_from_file": [
+      "carved_path",
       "kinds",
       "path"
     ],
@@ -44,9 +53,11 @@
       "text"
     ],
     "macho_info": [
+      "carved_path",
       "path"
     ],
     "pe_info": [
+      "carved_path",
       "exports",
       "imports",
       "overlay",
@@ -82,10 +93,12 @@
       "ruleset"
     ],
     "signing_info": [
+      "carved_path",
       "file_type",
       "path"
     ],
     "strings": [
+      "carved_path",
       "encodings",
       "end",
       "limit",
@@ -96,6 +109,7 @@
       "start"
     ],
     "yara_scan": [
+      "carved_path",
       "path",
       "ruleset",
       "text",

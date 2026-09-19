@@ -13,6 +13,7 @@ import {
   isCorroborated,
   orderedTactics,
   parseTechniques,
+  tacticHeaderCount,
 } from "@/components/analysis/capabilityHeatmap";
 
 const SOURCE_COLORS: Record<string, string> = {
@@ -31,9 +32,18 @@ export default function AttackTab() {
   // rendered as "no techniques mapped", which is a different claim entirely.
   const [fetchError, setFetchError] = useState<string | null>(null);
 
-  // Prefer ttp_mappings from the cached MalwareReport; fall back to the /mitre
-  // endpoint only for legacy rows that predate the rich report payload.
+  // Prefer the capability matrix from the cached MalwareReport: it carries a
+  // cell for every technique a producer named, published or not, and a
+  // technique the run declined to publish has to be visible as that rather
+  // than absent. `ttp_mappings` is the published subset and is the fallback
+  // for a report stored before the matrix carried the reason; the /mitre
+  // endpoint is the fallback for one stored before either.
   useEffect(() => {
+    const cells = report?.malware_report?.capability_matrix;
+    if (cells && cells.length > 0) {
+      setMitreData(cells as unknown[]);
+      return;
+    }
     const cached = report?.malware_report?.ttp_mappings;
     if (cached && cached.length > 0) {
       setMitreData(cached as unknown[]);
@@ -52,7 +62,11 @@ export default function AttackTab() {
           ),
         );
     }
-  }, [report?.id, report?.malware_report?.ttp_mappings]);
+  }, [
+    report?.id,
+    report?.malware_report?.capability_matrix,
+    report?.malware_report?.ttp_mappings,
+  ]);
 
   if (loading) {
     return <div className="p-4 text-sm text-text-secondary">Loading...</div>;
@@ -134,8 +148,7 @@ export default function AttackTab() {
                     {tactic.name}
                   </h3>
                   <p className="text-[11px] text-text-muted mt-0.5 font-mono">
-                    {tactic.id} &middot; {tactic.techniques.length} technique
-                    {tactic.techniques.length === 1 ? "" : "s"}
+                    {tactic.id} &middot; {tacticHeaderCount(tactic.techniques)}
                   </p>
                 </div>
 
@@ -158,6 +171,19 @@ export default function AttackTab() {
                           >
                             not in catalog
                           </span>
+                        )}
+                        {/* In words, not colour alone: the card says the
+                            technique was claimed and not published, and the
+                            check's own sentence is printed under it. */}
+                        {tech.notPublished && (
+                          <div className="mb-1">
+                            <span className="inline-block text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-dashed border-status-orange text-status-orange">
+                              claimed, not published
+                            </span>
+                            <p className="mt-0.5 text-[11px] text-text-muted leading-snug">
+                              {tech.notPublished}
+                            </p>
+                          </div>
                         )}
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-1">

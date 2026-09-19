@@ -101,14 +101,68 @@ _CASE_BLIND = frozenset(
 )
 
 
+# The kinds whose value is a place on a filesystem. A path is written several
+# ways that mean one place — with and without a trailing separator, with the
+# separators doubled, and on Windows in any case at all — and comparing the
+# literals kept one live bundle carrying the same Pylance directory twice, once
+# with the slash and once without.
+_PATH_LIKE = frozenset(
+    {
+        "path",
+        "file",
+        "file-name",
+        "file_name",
+        "filename",
+        "directory",
+        "registry",
+        "registry_key",
+        "windows-registry-key",
+    }
+)
+
+# A path whose separators and case are Windows': a drive letter, or a UNC root.
+_WINDOWS_PATH_RE = re.compile(r"[A-Za-z]:[\\/]|\\\\[^\\/]")
+_RUNS_OF_SEPARATOR_RE = re.compile(r"/{2,}")
+# One literal a STIX pattern quotes.
+_QUOTED_RE = re.compile(r"'([^']*)'")
+
+
 def folds_case(kind: Any) -> bool:
     """Whether two spellings of this kind that differ only in case are one thing."""
     return str(kind or "").strip().lower() in _CASE_BLIND
 
 
+def canonical_path(value: Any) -> str:
+    """One path in the spelling two writers of it share.
+
+    Separators written one way, runs of them collapsed, no trailing separator,
+    and a Windows path folded to one case — Windows filesystems are
+    case-insensitive, so ``c:\\users\\x`` and ``C:\\Users\\X`` are one file. A
+    POSIX path keeps its case, because two POSIX paths differing in case are
+    two files and folding them would remove one from the report with nothing
+    saying it happened.
+
+    A UNC path keeps the two separators it opens with. Collapsing them and
+    folding the case rewrote ``\\\\SRV\\Share\\F`` into ``/srv/share/f``, which is
+    also what the POSIX path ``/srv/share/f`` canonicalises to — two locations
+    that cannot be the same file merging into one indicator row.
+    """
+    text = canonical_value(value, fold_case=False)
+    unc = text.startswith("\\\\") or text.startswith("//")
+    windows = unc or bool(_WINDOWS_PATH_RE.search(text)) or ("\\" in text and "/" not in text)
+    text = text.replace("\\", "/")
+    if windows:
+        text = text.lower()
+    text = _RUNS_OF_SEPARATOR_RE.sub("/", text)
+    text = text.rstrip("/") if len(text) > 1 else text
+    return f"/{text}" if unc else text
+
+
 def indicator_fingerprint(kind: Any, value: Any) -> tuple[str, str]:
     """What makes two indicator rows the same indicator."""
     name = str(kind or "").strip().lower()
+    if name in _PATH_LIKE:
+        return (name, canonical_path(value))
     return (name, canonical_value(value, fold_case=folds_case(name)))
 
 
@@ -116,6 +170,9 @@ def indicator_fingerprint(kind: Any, value: Any) -> tuple[str, str]:
 # ``folds_case`` knows. A pattern this cannot read keeps its case.
 _STIX_PATHS: tuple[tuple[str, str], ...] = (
     ("file:hashes", "hash"),
+    ("file:name", "path"),
+    ("directory:path", "path"),
+    ("windows-registry-key:key", "registry"),
     ("domain-name:value", "domain"),
     ("ipv4-addr:value", "ipv4"),
     ("ipv6-addr:value", "ipv6"),
@@ -127,17 +184,20 @@ def pattern_fingerprint(pattern_type: Any, pattern: Any) -> tuple[str, str]:
     """What makes two STIX indicators the same indicator.
 
     The same rule the report's table uses, read off the pattern itself: a
-    pattern over a digest or a host name folds its case, a pattern over a URL,
-    a file name or anything this cannot read does not. Defanging is undone
-    either way, because ``[.]`` never meant anything but ``.``.
+    pattern over a digest or a host name folds its case, a pattern over a path
+    is normalised the way a path is, and a pattern over a URL or anything this
+    cannot read keeps what it was written with. Defanging is undone either way,
+    because ``[.]`` never meant anything but ``.``.
     """
     text = str(pattern or "")
     lowered = text.lower()
     kind = next((name for path, name in _STIX_PATHS if path in lowered), "")
-    return (
-        str(pattern_type or "stix").strip().lower(),
-        canonical_value(text, fold_case=folds_case(kind)),
-    )
+    family = str(pattern_type or "stix").strip().lower()
+    if kind in _PATH_LIKE:
+        # Each quoted literal on its own: a trailing separator sits inside the
+        # quotes, where normalising the whole pattern string cannot reach it.
+        return (family, _QUOTED_RE.sub(lambda hit: f"'{canonical_path(hit.group(1))}'", text))
+    return (family, canonical_value(text, fold_case=folds_case(kind)))
 
 
 def normalised_title(title: Any) -> str:

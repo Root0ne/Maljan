@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -99,11 +100,17 @@ class TestCarvedPayloadsLandUnderStaging:
 
         path, _digest = self._sample(tmp_path)
 
-        assert list(inspect.signature(server.carve_payloads).parameters) == ["path"]
+        # Two arguments, and neither is a place to write: the file to read,
+        # and the qualified way of naming one an earlier call produced.
+        assert list(inspect.signature(server.carve_payloads).parameters) == [
+            "path",
+            "carved_path",
+        ]
         with pytest.raises(TypeError):
             server.carve_payloads(path, out_dir=str(tmp_path))
-        with pytest.raises(TypeError):
-            server.carve_payloads(path, '""')
+        # A model writing a pair of quote characters means "not passing this
+        # one", and it is read as the absence rather than as a file name.
+        assert server.carve_payloads(path, '""') == {"payloads": [], "count": 0}
 
     def test_the_description_says_where_the_files_land(self, server: Any) -> None:
         assert "carved/<sha256 of the sample>/" in str(server.carve_payloads.__doc__)
@@ -237,3 +244,311 @@ class TestThePageAndItsSuccessor:
 
         assert "next_offset" in description
         assert "total_matched" in description
+
+
+class TestReadingAFileAnEarlierCallWrote:
+    """``carve_payloads`` hands back paths, and something has to read them.
+
+    The sample's own path left the schema a model binds to, which is what stops
+    a model typing it wrongly — and it took the carved payloads with it: the
+    tool returned a list of paths the model had nothing to pass to.
+    ``carved_path`` is the qualified argument that gives that back. It names a
+    file this run produced, so it is held to the staging base and to nothing
+    else: not the sample roots, which hold whatever the deployment put there.
+    """
+
+    @staticmethod
+    def _staged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, server: Any) -> Path:
+        staging = tmp_path / "staging"
+        monkeypatch.setenv("MALJAN_STAGING_DIR", str(staging))
+        return Path(server._staging_dir())
+
+    def test_a_carved_payload_is_read_through_it(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        base = self._staged(tmp_path, monkeypatch, server)
+        # A second-stage PE appended past the decoy, which is what carving
+        # finds: the signature the carver looks for, then enough body for it
+        # not to be four coincidental bytes.
+        payload = b"MZ\x90\x00" + b"\x00" * 2048 + b"CARVEDPAYLOADMARKER\x00"
+        sample = tmp_path / "dropper.bin"
+        sample.write_bytes(b"DECOY-HEADER\x00" + payload)
+
+        carved = server.carve_payloads(str(sample))
+        assert carved["count"] >= 1, carved
+        written = Path(carved["payloads"][0]["path"])
+        assert base in written.parents
+
+        answer = server.strings(
+            path=str(sample), carved_path=str(written.relative_to(base)), min_len=4
+        )
+
+        assert answer["read_path"] == str(written)
+        assert answer["strings"] != server.strings(path=str(sample), min_len=4)["strings"]
+
+    def test_an_absolute_path_inside_this_sample_s_tree_is_read(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import hashlib
+
+        self._staged(tmp_path, monkeypatch, server)
+        body = b"SAMPLE-CONTENT\x00"
+        sample = tmp_path / "s.bin"
+        sample.write_bytes(body)
+        written = server._carved_tree(hashlib.sha256(body).hexdigest()) / "payload_0.bin"
+        written.parent.mkdir(parents=True, exist_ok=True)
+        written.write_bytes(b"CARVED-PAYLOAD-CONTENT\x00")
+
+        answer = server.strings(path=str(sample), carved_path=str(written), min_len=4)
+
+        assert [row["text"] for row in answer["strings"]] == ["CARVED-PAYLOAD-CONTENT"]
+
+    def test_a_traversal_is_refused(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._staged(tmp_path, monkeypatch, server)
+        sample = tmp_path / "s.bin"
+        sample.write_bytes(b"SAMPLE\x00")
+
+        answer = server.strings(path=str(sample), carved_path="../../etc/passwd", min_len=4)
+
+        assert answer["error"]["code"] == "path_outside_roots"
+
+    def test_an_absolute_path_outside_the_staging_base_is_refused(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._staged(tmp_path, monkeypatch, server)
+        sample = tmp_path / "s.bin"
+        sample.write_bytes(b"SAMPLE\x00")
+
+        answer = server.identify_file(path=str(sample), carved_path="/etc/passwd")
+
+        assert answer["error"]["code"] == "path_outside_roots"
+
+    def test_a_sample_root_is_not_reachable_through_it(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A deployment's sample directory holds whatever it holds."""
+        self._staged(tmp_path, monkeypatch, server)
+        neighbour = tmp_path / "someone-elses.bin"
+        neighbour.write_bytes(b"NOT-THIS-ONE\x00")
+        sample = tmp_path / "s.bin"
+        sample.write_bytes(b"SAMPLE\x00")
+
+        answer = server.strings(path=str(sample), carved_path=str(neighbour), min_len=4)
+
+        assert answer["error"]["code"] == "path_outside_roots"
+
+    def test_a_symlink_out_of_the_tree_is_refused(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import hashlib
+
+        self._staged(tmp_path, monkeypatch, server)
+        body = b"SAMPLE\x00"
+        sample = tmp_path / "s.bin"
+        sample.write_bytes(body)
+        tree = server._carved_tree(hashlib.sha256(body).hexdigest())
+        tree.mkdir(parents=True, exist_ok=True)
+        outside = tmp_path / "outside.txt"
+        outside.write_bytes(b"NOT-IN-STAGING\x00")
+        (tree / "escape.bin").symlink_to(outside)
+
+        answer = server.strings(path=str(sample), carved_path="escape.bin", min_len=4)
+
+        assert answer["error"]["code"] == "path_outside_roots"
+
+    def test_the_absence_words_are_read_as_the_absence(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._staged(tmp_path, monkeypatch, server)
+        sample = tmp_path / "s.bin"
+        sample.write_bytes(b"SAMPLE-CONTENT\x00")
+
+        for absent in ("", "null", "None", "   ", '""'):
+            answer = server.strings(path=str(sample), carved_path=absent, min_len=4)
+            assert [row["text"] for row in answer["strings"]] == ["SAMPLE-CONTENT"], absent
+            assert "read_path" not in answer, absent
+
+
+class TestOneRunReadsOnlyWhatItProduced:
+    """The staging directory is one per server process, and every job shares it.
+
+    ``put_sample`` writes ``<staging>/<sha16>_<name>`` for every job and
+    ``carve_payloads`` writes ``<staging>/carved/<sha256>/…``, so confining the
+    argument to the staging base let a run read another run's carved payload
+    and another run's upload. A sample is adversary-authored content this model
+    reads, and it can carry another sample's digest in its own bytes beside one
+    instruction to point a tool at it. Samples are not only malware either —
+    an operator submits a suspicious document that may hold somebody's data.
+
+    So the bound is the carved tree of the file this call is pinned to, which
+    the server derives from the bytes it was handed, plus that file itself. Two
+    runs of the same sample share one tree, which is the same bytes read twice.
+    """
+
+    @staticmethod
+    def _staged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, server: Any) -> Path:
+        monkeypatch.setenv("MALJAN_STAGING_DIR", str(tmp_path / "staging"))
+        return Path(server._staging_dir())
+
+    @staticmethod
+    def _dropper(tmp_path: Path, name: str, marker: bytes) -> Path:
+        target = tmp_path / name
+        target.write_bytes(b"DECOY\x00" + b"MZ\x90\x00" + b"\x00" * 2048 + marker)
+        return target
+
+    def test_another_sample_s_carved_payload_is_refused(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._staged(tmp_path, monkeypatch, server)
+        first = self._dropper(tmp_path, "a.bin", b"PAYLOAD-OF-A\x00")
+        second = self._dropper(tmp_path, "b.bin", b"PAYLOAD-OF-B\x00")
+        mine = server.carve_payloads(str(first))["payloads"][0]["path"]
+        theirs = server.carve_payloads(str(second))["payloads"][0]["path"]
+        assert mine != theirs
+
+        answer = server.strings(path=str(first), carved_path=theirs, min_len=6)
+
+        assert answer["error"]["code"] == "path_outside_roots"
+
+    def test_my_own_carved_payload_is_read(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        base = self._staged(tmp_path, monkeypatch, server)
+        sample = self._dropper(tmp_path, "a.bin", b"PAYLOAD-OF-A\x00")
+        mine = Path(server.carve_payloads(str(sample))["payloads"][0]["path"])
+
+        for spelling in (str(mine), str(mine.relative_to(base)), mine.name):
+            answer = server.strings(path=str(sample), carved_path=spelling, min_len=6)
+            assert answer["read_path"] == str(mine), spelling
+
+    def test_another_job_s_upload_is_refused(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        base = self._staged(tmp_path, monkeypatch, server)
+        upload = base / "deadbeefdeadbeef_theirs.exe"
+        upload.write_bytes(b"ANOTHER-JOB-UPLOAD\x00")
+        sample = self._dropper(tmp_path, "a.bin", b"PAYLOAD-OF-A\x00")
+
+        answer = server.strings(path=str(sample), carved_path=str(upload), min_len=6)
+
+        assert answer["error"]["code"] == "path_outside_roots"
+
+    def test_a_payload_carved_from_a_payload_stays_in_the_one_tree(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        base = self._staged(tmp_path, monkeypatch, server)
+        sample = self._dropper(tmp_path, "a.bin", b"PAYLOAD-OF-A\x00")
+        mine = Path(server.carve_payloads(str(sample))["payloads"][0]["path"])
+
+        server.carve_payloads(str(sample), carved_path=str(mine.relative_to(base)))
+
+        tree = mine.parent
+        assert [p for p in tree.rglob("*") if p.is_dir()] or True
+        assert all(tree in produced.parents for produced in tree.rglob("*"))
+
+
+class TestWhatCarvedPathMayName:
+    @staticmethod
+    def _sample_and_tree(server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        import hashlib
+
+        monkeypatch.setenv("MALJAN_STAGING_DIR", str(tmp_path / "staging"))
+        server._staging_dir()
+        body = b"SAMPLE-CONTENT\x00"
+        sample = tmp_path / "s.bin"
+        sample.write_bytes(body)
+        tree = server._carved_tree(hashlib.sha256(body).hexdigest())
+        tree.mkdir(parents=True, exist_ok=True)
+        return sample, tree
+
+    def test_a_directory_is_not_a_file_to_read(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sample, tree = self._sample_and_tree(server, tmp_path, monkeypatch)
+        (tree / "inner").mkdir()
+
+        answer = server.strings(path=str(sample), carved_path="inner", min_len=4)
+
+        assert answer["error"]["code"] == "bad_argument"
+        assert "regular file" in answer["error"]["message"]
+
+    def test_a_fifo_is_not_either(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import os
+
+        sample, tree = self._sample_and_tree(server, tmp_path, monkeypatch)
+        os.mkfifo(tree / "pipe")
+
+        answer = server.identify_file(path=str(sample), carved_path="pipe")
+
+        assert answer["error"]["code"] == "bad_argument"
+
+    def test_a_name_that_is_not_there_says_so(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sample, _tree = self._sample_and_tree(server, tmp_path, monkeypatch)
+
+        answer = server.strings(path=str(sample), carved_path="never_written.bin", min_len=4)
+
+        assert "no such file" in str(answer["error"]["message"])
+
+
+class TestTheSweepPrunesCarvedTrees:
+    """Carved payloads never expired: the sweep deletes files and skips
+    directories, and everything carved lives one level down."""
+
+    def test_a_stale_payload_and_its_empty_tree_go(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import os
+
+        monkeypatch.setenv("MALJAN_STAGING_DIR", str(tmp_path / "staging"))
+        monkeypatch.setenv("MALJAN_STAGING_TTL_HOURS", "1")
+        base = Path(server._staging_dir())
+        tree = server._carved_tree("f" * 64)
+        tree.mkdir(parents=True, exist_ok=True)
+        stale = tree / "payload_0.bin"
+        stale.write_bytes(b"OLD\x00")
+        long_ago = time.time() - 7200
+        os.utime(stale, (long_ago, long_ago))
+
+        removed = server._prune_staging(base)
+
+        assert removed == 1
+        assert not stale.exists()
+        assert not tree.exists(), "an emptied tree goes with the payloads it held"
+
+    def test_a_fresh_one_stays(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("MALJAN_STAGING_DIR", str(tmp_path / "staging"))
+        monkeypatch.setenv("MALJAN_STAGING_TTL_HOURS", "1")
+        base = Path(server._staging_dir())
+        tree = server._carved_tree("e" * 64)
+        tree.mkdir(parents=True, exist_ok=True)
+        fresh = tree / "payload_0.bin"
+        fresh.write_bytes(b"NEW\x00")
+
+        assert server._prune_staging(base) == 0
+        assert fresh.exists()
+
+    def test_a_disabled_ttl_prunes_nothing(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import os
+
+        monkeypatch.setenv("MALJAN_STAGING_DIR", str(tmp_path / "staging"))
+        monkeypatch.setenv("MALJAN_STAGING_TTL_HOURS", "0")
+        base = Path(server._staging_dir())
+        tree = server._carved_tree("d" * 64)
+        tree.mkdir(parents=True, exist_ok=True)
+        stale = tree / "payload_0.bin"
+        stale.write_bytes(b"OLD\x00")
+        long_ago = time.time() - 999999
+        os.utime(stale, (long_ago, long_ago))
+
+        assert server._prune_staging(base) == 0
+        assert stale.exists()

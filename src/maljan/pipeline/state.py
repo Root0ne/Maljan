@@ -120,6 +120,13 @@ class AnalysisState(TypedDict):
     sample_path: str | None
     sandbox_report: dict[str, Any] | None
 
+    # When this run began, as a Unix timestamp. The worker's own clock when it
+    # has one, the pipeline's entry otherwise, and it is what the report's
+    # elapsed time is measured from: the summary used to start its clock inside
+    # the judge node and print the verdict stage's duration as the run's, which
+    # on a 473 s job read 66 s.
+    run_started_at: float
+
     # file_type + canonical platform inferred at pipeline bootstrap. Read by
     # the report's identity block and the FP linter's platform checks.
     # Optional because legacy state dicts persisted earlier don't carry them.

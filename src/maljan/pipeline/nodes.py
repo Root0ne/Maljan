@@ -1432,6 +1432,30 @@ def _with_upstream(chunks: list, block: str) -> list:
     return [replace(head, content=content, char_count=len(content)), *chunks[1:]]
 
 
+def _corroboration_with_publication(report: Any, state: AnalysisState) -> dict[str, Any] | None:
+    """The corroboration rows, each saying whether this run published the id.
+
+    ``None`` when there is nothing to amend — no summary, or no technique named
+    — so an untouched column stays untouched.
+    """
+    from maljan.analysis.corroboration import mark_unpublished
+
+    stored = (state.get("run_summary") or {}).get("corroboration") or {}
+    rows = (report.run_summary or {}).get("corroboration") or stored
+    if not rows:
+        return None
+    published = {
+        str(mapping.technique_id or "").strip().upper()
+        for mapping in (getattr(report, "ttp_mappings", None) or [])
+    }
+    reasons = {
+        str(cell.technique_id or "").strip().upper(): cell.not_published
+        for cell in (getattr(report, "capability_matrix", None) or [])
+        if cell.not_published
+    }
+    return mark_unpublished(rows, published, reasons)
+
+
 def _amended_validation(validation: Any, tally: ValidationTally) -> dict[str, Any] | None:
     """A ``validation`` block plus what the report round cost.
 
@@ -2881,7 +2905,11 @@ def make_judge_node(
                     f"{evidence_summary}\n\n{_check_note}" if evidence_summary else _check_note
                 )
 
-            start_time = time.time()
+            # When this run began. The state carries the caller's own clock;
+            # a graph assembled without it falls back to here, which is the
+            # reading the summary used to publish for every run and which made
+            # a 473 s job print 66 s.
+            start_time = float(state.get("run_started_at") or 0.0) or time.time()
 
             memory_store: MemoryStore | None = None
             try:
@@ -4050,6 +4078,19 @@ def make_report_node(
         if _ledger:
             _state_summary["evidence"] = _summary["evidence"]
             _state_summary["sections_without_evidence"] = _summary["sections_without_evidence"]
+        # Which of the techniques the run named it actually published, said
+        # here because this is the first node that holds both lists. The
+        # corroboration metric counts every id any producer named, including
+        # the ones that reach it through a finding rather than a claim, and a
+        # run whose report printed three enterprise-only ids on an Android
+        # sample said nothing about their not being published anywhere.
+        _published_summary = _corroboration_with_publication(report, state)
+        if _published_summary is not None:
+            _state_summary["corroboration"] = _published_summary
+            _with_publication = dict(report.run_summary or {})
+            if _with_publication:
+                _with_publication["corroboration"] = _published_summary
+                report.run_summary = _with_publication
         # The stage rollup is finished here rather than in the judge: the
         # judge cannot know how long the report took or whether it ran, and a
         # run summary whose own report stage is missing is the one row a reader
@@ -4059,6 +4100,18 @@ def make_report_node(
         own = _verdict_record(stage, started, ran=True).get("stage_results")
         if stage is not None and state.get("run_summary"):
             _state_summary["stages"] = stage_rollup(container, state, own)
+        # The run's elapsed time, closed here for the same reason the rollup
+        # is: the judge's clock stops before the report is composed, and the
+        # figure a reader compares against the job's own duration is the whole
+        # run. Measured from the instant the caller started counting.
+        _run_started_at = float(state.get("run_started_at") or 0.0)
+        if _run_started_at and state.get("run_summary"):
+            _elapsed = round(max(0.0, time.time() - _run_started_at), 3)
+            _state_summary["elapsed_seconds"] = _elapsed
+            _closed_summary = dict(report.run_summary or {})
+            if _closed_summary:
+                _closed_summary["elapsed_seconds"] = _elapsed
+                report.run_summary = _closed_summary
         if _state_summary:
             result["run_summary"] = {**(state.get("run_summary") or {}), **_state_summary}
         if own:

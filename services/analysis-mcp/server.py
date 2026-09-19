@@ -17,6 +17,7 @@ and gets back the path to pass to every other tool here.
 from __future__ import annotations
 
 import base64
+import contextlib
 import copy
 import hashlib
 import os
@@ -42,7 +43,7 @@ from maljan.tools.errors import (
     normalise_error,
     tool_error,
 )
-from maljan.tools.roots import PathOutsideRoots, resolve_under_roots
+from maljan.tools.roots import PathOutsideRoots, resolve_under, resolve_under_roots
 from maljan.tools.strings import DEFAULT_STRINGS_LIMIT
 
 mcp = FastMCP("AnalysisMCP")
@@ -191,6 +192,94 @@ def _read_absent_words(call: Any, kwargs: dict[str, Any]) -> dict[str, Any]:
 # having gone through the guard every tool here already goes through.
 _PATH_ARGUMENTS = ("path", "pcap_path")
 
+# The file a previous call in this run produced, rather than the sample. It is
+# the model's to name — which of the payloads ``carve_payloads`` wrote is worth
+# reading is an analysis decision — and the sample's own path is not, so this
+# argument is qualified for what it holds and the sample's is hidden from the
+# model entirely (``agents.tool_pinning``).
+#
+# Held to the staging base alone rather than to the sample roots: everything a
+# tool here writes lands there, and nothing else the model could name should be
+# reachable through an argument the model chose. A relative value is read as a
+# name inside the staging area, which is how a model that pastes back the tail
+# of a returned path is understood rather than refused.
+CARVED_ARGUMENT = "carved_path"
+
+# What ``carved_path`` may reach: the carved tree of the file this call is
+# already reading, and that file itself. **Not** the whole staging base, which
+# every job on this host shares — a sample carrying another sample's digest in
+# its own bytes, and one instruction to read it, was enough to pull another
+# run's carved payload into this run's evidence, and another run's upload is
+# named by sixteen hex characters and the original file name. The digest is
+# the one thing this server can derive from what it was given, and it is
+# exactly the key ``carve_payloads`` writes under, so a run reaches everything
+# it produced and nothing any other run produced. Two runs of the same sample
+# share one tree, which is the same bytes read twice.
+CARVED_DIRECTORY = "carved"
+
+# What a caller is told when the argument resolves onto something that is not
+# a file to read. Its own sentence rather than the roots one, which would be
+# untrue of a directory that really is inside the staging area.
+NOT_A_REGULAR_FILE_MESSAGE = (
+    "the carved_path argument does not name a regular file; pass one of the paths "
+    "carve_payloads returned"
+)
+
+# How many sample digests are remembered at once. One per sample a long-lived
+# server sees, and a digest is sixty-four characters: the bound is against a
+# process that runs for weeks, not against a run.
+_MAX_REMEMBERED_DIGESTS = 64
+_DIGESTS: dict[tuple[str, int, int], str] = {}
+
+
+class NotARegularFile(Exception):
+    """A path argument resolved onto something that cannot be read as a file."""
+
+    def __init__(self, message: str = NOT_A_REGULAR_FILE_MESSAGE) -> None:
+        super().__init__(message)
+
+
+def _digest_of(target: Path) -> str:
+    """The sha256 of a file, remembered while its size and mtime are unchanged.
+
+    Read in pieces, because this runs on live samples and the upload ceiling
+    admits two gigabytes of them, and remembered because every tool call on the
+    same sample would otherwise hash it again.
+    """
+    try:
+        info = target.stat()
+    except OSError:
+        return ""
+    key = (str(target), info.st_size, info.st_mtime_ns)
+    remembered = _DIGESTS.get(key)
+    if remembered is not None:
+        return remembered
+    hasher = hashlib.sha256()
+    try:
+        with target.open("rb") as handle:
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                hasher.update(block)
+    except OSError:
+        return ""
+    digest = hasher.hexdigest()
+    if len(_DIGESTS) >= _MAX_REMEMBERED_DIGESTS:
+        _DIGESTS.clear()
+    _DIGESTS[key] = digest
+    return digest
+
+
+def _carved_tree(digest: str) -> Path:
+    """Where everything carved out of one sample lands."""
+    return _staging_base() / CARVED_DIRECTORY / digest
+
+
+# What every tool that takes it says about it, appended once so the fourteen
+# descriptions cannot come to disagree.
+CARVED_NOTE = (
+    "Give ``carved_path`` to read a file an earlier call in this run wrote — a payload "
+    "``carve_payloads`` returned — instead of the sample. Leave it out and the sample is read."
+)
+
 # The argument that names a rule corpus rather than a sample. It is a path
 # too, and it is chosen by the same model, but the directories it may name are
 # the rule directories rather than the sample ones — so it is held to
@@ -200,6 +289,17 @@ _CORPUS_ARGUMENT = "ruleset"
 _CORPUS_WORDS = ("", "default")
 
 
+def reads_a_carved_file(fn: Any) -> Any:
+    """Say once, in this tool's own description, what ``carved_path`` is for.
+
+    Applied under ``@mcp.tool()`` so the decorator that publishes the
+    description reads the amended one. The sentence is written in a single
+    place because fourteen copies of it would drift.
+    """
+    fn.__doc__ = f"{(fn.__doc__ or '').rstrip()}\n\n{CARVED_NOTE}"
+    return fn
+
+
 def _confined(kwargs: dict[str, Any]) -> dict[str, Any]:
     """``kwargs`` with every path argument resolved inside the allowed roots.
 
@@ -207,6 +307,10 @@ def _confined(kwargs: dict[str, Any]) -> dict[str, Any]:
     the file the check was made about rather than resolving the argument a
     second time. A ruleset is checked where it stands: the tool resolves that
     one itself, against the roots it was checked against.
+
+    ``carved_path`` is resolved against the staging base alone and becomes the
+    ``path`` the tool is called with, then leaves: the implementations take one
+    file argument, and which file it is is decided here.
     """
     out = dict(kwargs)
     for name in _PATH_ARGUMENTS:
@@ -214,10 +318,68 @@ def _confined(kwargs: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(value, str) or not value.strip():
             continue
         out[name] = str(resolve_under_roots(value, extra_roots=(_staging_base(),)))
+    # Read before the roots are consulted, because a model that writes "null"
+    # for an optional argument it is not passing means the absence — and this
+    # one is not a parameter of the implementation, so the general reading of
+    # those words above never sees it.
+    carved = out.pop(CARVED_ARGUMENT, None)
+    sample = Path(out["path"]) if isinstance(out.get("path"), str) and out["path"] else None
+    # ``carve_payloads`` writes under the sample's own tree whatever file it
+    # was pointed at, so a payload carved out of a payload stays inside the
+    # one directory this run may read.
+    if "sample_digest" in out:
+        out["sample_digest"] = _digest_of(sample) if sample is not None else ""
+    if isinstance(carved, str) and not _means_absent(carved):
+        out["path"] = str(_carved_file(carved.strip(), sample))
     corpus = out.get(_CORPUS_ARGUMENT)
     if isinstance(corpus, str) and corpus not in _CORPUS_WORDS:
         resolve_under_roots(resolve_data(corpus), extra_roots=rule_tools.corpus_roots())
     return out
+
+
+def _carved_file(asked: str, sample: Path | None) -> Path:
+    """The file ``carved_path`` names, held to what this sample produced.
+
+    Two spellings are understood, because both are things a model writes: the
+    absolute path ``carve_payloads`` handed back, and the tail of it — relative
+    to the staging base or to the sample's own carved directory. Whichever it
+    is, the resolved path has to land inside that directory or on the sample
+    itself; symlinks are followed on both sides first, so a link planted under
+    staging and a climb out of it land where they really point and are refused
+    there.
+    """
+    if sample is None:
+        raise PathOutsideRoots()
+    tree = _carved_tree(_digest_of(sample))
+    roots = (tree, sample)
+    target = Path(asked)
+    candidates = [target] if target.is_absolute() else [tree / target, _staging_base() / target]
+    missing: Path | None = None
+    other: Path | None = None
+    for candidate in candidates:
+        try:
+            resolved = resolve_under(candidate, roots)
+        except PathOutsideRoots:
+            continue
+        # A spelling that lands inside the tree but names nothing is not the
+        # one the caller meant: the other spelling is tried before the answer
+        # is decided, so a tail written against the staging base is not read
+        # as a tail against the tree that happens to be inside it too.
+        if resolved.is_file():
+            return resolved
+        if resolved.exists():
+            other = other or resolved
+        else:
+            missing = missing or resolved
+    # A directory, a FIFO, a device or a socket is not a file to read, and a
+    # reader that opened a FIFO with no writer would wait for one forever.
+    if other is not None:
+        raise NotARegularFile()
+    if missing is not None:
+        # Inside the tree and not there: the tool's own "no such file" is the
+        # true answer, and inventing a refusal would say something else.
+        return missing
+    raise PathOutsideRoots()
 
 
 def _guard(tool: str, call: Any, **kwargs: Any) -> dict[str, Any]:
@@ -237,9 +399,20 @@ def _guard(tool: str, call: Any, **kwargs: Any) -> dict[str, Any]:
     may have been written by the sample's author.
     """
     try:
-        return dict(normalise_error(dict(call(**_confined(_read_absent_words(call, kwargs))))))
+        asked = _confined(_read_absent_words(call, kwargs))
+        answer = dict(normalise_error(dict(call(**asked))))
+        # Which file was read, when it was not the sample. The ledger stores
+        # the answer, so a run that analysed a carved payload says which one
+        # rather than leaving a reader to infer it from the arguments.
+        if isinstance(kwargs.get(CARVED_ARGUMENT), str) and not _means_absent(
+            kwargs[CARVED_ARGUMENT]
+        ):
+            answer.setdefault("read_path", asked.get("path", ""))
+        return answer
     except PathOutsideRoots as refusal:
         return tool_error(PATH_OUTSIDE_ROOTS, str(refusal), tool=tool)
+    except NotARegularFile as refusal:
+        return tool_error(BAD_ARGUMENT, str(refusal), tool=tool)
     except Exception as exc:  # noqa: BLE001 — a tool server answers, it does not raise
         return tool_error(code_for_exception(exc), f"{type(exc).__name__}: {exc}", tool=tool)
 
@@ -261,19 +434,22 @@ def capabilities() -> dict[str, Any]:
 
 
 @mcp.tool()
-def identify_file(path: str) -> dict[str, Any]:
+@reads_a_carved_file
+def identify_file(path: str, carved_path: str = "") -> dict[str, Any]:
     """Detect a file's format, platform, mime type, size and magic bytes."""
-    return _guard("identify_file", identify_tools.identify_file, path=path)
+    return _guard("identify_file", identify_tools.identify_file, path=path, carved_path=carved_path)
 
 
 @mcp.tool()
-def hashes(path: str) -> dict[str, Any]:
+@reads_a_carved_file
+def hashes(path: str, carved_path: str = "") -> dict[str, Any]:
     """Compute md5, sha1, sha256 and any available fuzzy or import hash."""
-    return _guard("hashes", identify_tools.hashes, path=path)
+    return _guard("hashes", identify_tools.hashes, path=path, carved_path=carved_path)
 
 
 @mcp.tool()
-def signing_info(path: str, file_type: str = "") -> dict[str, Any]:
+@reads_a_carved_file
+def signing_info(path: str, file_type: str = "", carved_path: str = "") -> dict[str, Any]:
     """Report whether the file carries a code signature, for one format.
 
     ``file_type`` is the format the sample was routed as ("pe", "apk",
@@ -281,7 +457,11 @@ def signing_info(path: str, file_type: str = "") -> dict[str, Any]:
     that format alone — a PE is asked about Authenticode and nothing else.
     """
     return _guard(
-        "signing_info", identify_tools.signing_info, path=path, file_type=file_type or None
+        "signing_info",
+        identify_tools.signing_info,
+        path=path,
+        carved_path=carved_path,
+        file_type=file_type or None,
     )
 
 
@@ -291,8 +471,10 @@ def signing_info(path: str, file_type: str = "") -> dict[str, Any]:
 
 
 @mcp.tool()
+@reads_a_carved_file
 def strings(
     path: str,
+    carved_path: str = "",
     min_len: int = 6,
     encodings: list[str] | None = None,
     limit: int = DEFAULT_STRINGS_LIMIT,
@@ -318,6 +500,7 @@ def strings(
         "strings",
         string_tools.strings,
         path=path,
+        carved_path=carved_path,
         min_len=min_len,
         encodings=tuple(encodings or ("ascii", "utf16le")),
         limit=limit,
@@ -335,9 +518,18 @@ def iocs_from_text(text: str, kinds: list[str] | None = None) -> dict[str, Any]:
 
 
 @mcp.tool()
-def iocs_from_file(path: str, kinds: list[str] | None = None) -> dict[str, Any]:
+@reads_a_carved_file
+def iocs_from_file(
+    path: str, kinds: list[str] | None = None, carved_path: str = ""
+) -> dict[str, Any]:
     """Extract typed indicators from a file's ASCII and wide strings."""
-    return _guard("iocs_from_file", string_tools.iocs_from_file, path=path, kinds=kinds)
+    return _guard(
+        "iocs_from_file",
+        string_tools.iocs_from_file,
+        path=path,
+        carved_path=carved_path,
+        kinds=kinds,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -346,8 +538,10 @@ def iocs_from_file(path: str, kinds: list[str] | None = None) -> dict[str, Any]:
 
 
 @mcp.tool()
+@reads_a_carved_file
 def pe_info(
     path: str,
+    carved_path: str = "",
     sections: bool = True,
     imports: bool = True,
     exports: bool = True,
@@ -365,6 +559,7 @@ def pe_info(
         "pe_info",
         binary_tools.pe_info,
         path=path,
+        carved_path=carved_path,
         sections=sections,
         imports=imports,
         exports=exports,
@@ -375,21 +570,25 @@ def pe_info(
 
 
 @mcp.tool()
-def elf_info(path: str) -> dict[str, Any]:
+@reads_a_carved_file
+def elf_info(path: str, carved_path: str = "") -> dict[str, Any]:
     """Parse an ELF: sections, imports (listed without interpretation), exports, segments,
     interpreter, DT_NEEDED."""
-    return _guard("elf_info", binary_tools.elf_info, path=path)
+    return _guard("elf_info", binary_tools.elf_info, path=path, carved_path=carved_path)
 
 
 @mcp.tool()
-def macho_info(path: str) -> dict[str, Any]:
+@reads_a_carved_file
+def macho_info(path: str, carved_path: str = "") -> dict[str, Any]:
     """Parse a Mach-O: headers, load commands, dylibs, code-signature presence."""
-    return _guard("macho_info", binary_tools.macho_info, path=path)
+    return _guard("macho_info", binary_tools.macho_info, path=path, carved_path=carved_path)
 
 
 @mcp.tool()
+@reads_a_carved_file
 def apk_info(
     path: str,
+    carved_path: str = "",
     manifest: bool = True,
     permissions: bool = True,
     certs: bool = True,
@@ -403,6 +602,7 @@ def apk_info(
         "apk_info",
         binary_tools.apk_info,
         path=path,
+        carved_path=carved_path,
         manifest=manifest,
         permissions=permissions,
         certs=certs,
@@ -414,50 +614,69 @@ def apk_info(
 
 
 @mcp.tool()
-def carve_payloads(path: str) -> dict[str, Any]:
+@reads_a_carved_file
+def carve_payloads(path: str, carved_path: str = "") -> dict[str, Any]:
     """Write each embedded payload found in the file out as its own file.
 
     The carved files land under the sidecar's private staging directory, in
     carved/<sha256 of the sample>/, and the returned paths point there; the
     destination is not an argument.
     """
-    return _guard("carve_payloads", _carve_under_staging, path=path)
+    return _guard(
+        "carve_payloads",
+        _carve_under_staging,
+        path=path,
+        carved_path=carved_path,
+        sample_digest="",
+    )
 
 
-def _carve_under_staging(path: str) -> dict[str, Any]:
+def _carve_under_staging(path: str, sample_digest: str = "") -> dict[str, Any]:
     """Carve into ``<staging>/carved/<sha256>/``, created private like the staging dir.
 
     A model-chosen destination let a tool write live malware anywhere the
     sidecar could write, and one live run wrote a carved PE body into the
     sidecar's own cwd. The sample's hash names the directory, so two samples
     never share one and a re-run lands in the same place.
+
+    ``sample_digest`` is the digest of the file this call was *pinned* to,
+    which is the sample; the guard fills it. A payload carved out of a carved
+    payload nests under the sample's own directory rather than opening a
+    directory of its own, so everything one run produces is one tree — the
+    tree that run may read back, and the tree the sweep prunes.
     """
     target = Path(path)
     if not target.is_file():
         return {"error": f"no such file: {path}", "tool": "carve_payloads"}
-    # Read in pieces rather than whole: this runs on live samples, and the
-    # upload ceiling above admits 2 GiB of them.
-    hasher = hashlib.sha256()
-    with target.open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            hasher.update(block)
-    digest = hasher.hexdigest()
-    destination = _staging_dir() / "carved"
-    for directory in (destination, destination / digest):
-        directory.mkdir(mode=0o700, exist_ok=True)
-    return binary_tools._carve_into(path, destination / digest)
+    digest = _digest_of(target)
+    anchor = sample_digest or digest
+    destination = _carved_tree(anchor)
+    if digest != anchor:
+        destination = destination / digest
+    _staging_dir()
+    for directory in (destination.parent, destination):
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return binary_tools._carve_into(path, destination)
 
 
 @mcp.tool()
-def archive_list(path: str, limit: int = 500) -> dict[str, Any]:
+@reads_a_carved_file
+def archive_list(path: str, limit: int = 500, carved_path: str = "") -> dict[str, Any]:
     """List a zip, 7z, tar or gzip archive's members without extracting them."""
-    return _guard("archive_list", binary_tools.archive_list, path=path, limit=limit)
+    return _guard(
+        "archive_list",
+        binary_tools.archive_list,
+        path=path,
+        carved_path=carved_path,
+        limit=limit,
+    )
 
 
 @mcp.tool()
-def document_info(path: str) -> dict[str, Any]:
+@reads_a_carved_file
+def document_info(path: str, carved_path: str = "") -> dict[str, Any]:
     """Inspect an OLE2, OOXML or PDF document for macros, parts and action markers."""
-    return _guard("document_info", binary_tools.document_info, path=path)
+    return _guard("document_info", binary_tools.document_info, path=path, carved_path=carved_path)
 
 
 # ---------------------------------------------------------------------------
@@ -466,8 +685,10 @@ def document_info(path: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+@reads_a_carved_file
 def yara_scan(
     path: str = "",
+    carved_path: str = "",
     text: str = "",
     ruleset: str = "default",
     timeout_s: int = YARA_TIMEOUT_S,
@@ -477,6 +698,7 @@ def yara_scan(
         "yara_scan",
         rule_tools.yara_scan,
         path=path or None,
+        carved_path=carved_path,
         text=text or None,
         ruleset=ruleset,
         timeout_s=_within(timeout_s, YARA_TIMEOUT_S),
@@ -498,12 +720,16 @@ def sigma_match_sandbox(report: dict[str, Any], ruleset: str = "default") -> dic
 
 
 @mcp.tool()
-def capa(path: str, timeout_s: int = CAPA_TIMEOUT_S, backend: str = "auto") -> dict[str, Any]:
+@reads_a_carved_file
+def capa(
+    path: str, timeout_s: int = CAPA_TIMEOUT_S, backend: str = "auto", carved_path: str = ""
+) -> dict[str, Any]:
     """Run capa and report the capabilities it finds, with ATT&CK and MBC metadata."""
     return _guard(
         "capa",
         rule_tools.capa,
         path=path,
+        carved_path=carved_path,
         timeout_s=_within(timeout_s, CAPA_TIMEOUT_S),
         backend=backend,
     )
@@ -577,11 +803,41 @@ def _prune_staging(base: Path) -> int:
     for entry in base.iterdir():
         try:
             info = entry.lstat()
-            if stat.S_ISDIR(info.st_mode) or info.st_mtime >= cutoff:
+            if stat.S_ISDIR(info.st_mode):
+                continue
+            if info.st_mtime >= cutoff:
                 continue
             entry.unlink()
             removed += 1
         except OSError:  # a file another call already removed
+            continue
+    return removed + _prune_carved(base / CARVED_DIRECTORY, cutoff)
+
+
+def _prune_carved(root: Path, cutoff: float) -> int:
+    """Delete carved payloads past their TTL, and the trees left empty by it.
+
+    The sweep above skips directories, which is right for the staging base —
+    nothing else there is one — and meant the carved trees never expired at
+    all: every run that carved anything left its payloads on disk for the life
+    of the host. Only files this server wrote are unlinked; a symlink is left
+    exactly where it is rather than followed.
+    """
+    removed = 0
+    if not root.is_dir():
+        return 0
+    for tree in sorted(root.rglob("*"), key=lambda entry: len(entry.parts), reverse=True):
+        try:
+            info = tree.lstat()
+            if stat.S_ISDIR(info.st_mode):
+                with contextlib.suppress(OSError):  # a tree still holding payloads
+                    tree.rmdir()
+                continue
+            if stat.S_ISLNK(info.st_mode) or info.st_mtime >= cutoff:
+                continue
+            tree.unlink()
+            removed += 1
+        except OSError:  # an entry another call already removed
             continue
     return removed
 

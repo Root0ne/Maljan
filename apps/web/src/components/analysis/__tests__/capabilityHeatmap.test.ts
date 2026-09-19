@@ -7,6 +7,7 @@ import {
   isCorroborated,
   orderedTactics,
   parseTechniques,
+  tacticHeaderCount,
   tacticOrder,
 } from "../capabilityHeatmap";
 
@@ -158,5 +159,47 @@ describe("a technique the catalogue only associates", () => {
     expect(associatedBy({ T1055: { asserted_by: ["capa"], claimed_by: [] } }, "T1055")).toEqual([]);
     expect(associatedBy({}, "T1113")).toEqual([]);
     expect(associatedBy(null, "T1113")).toEqual([]);
+  });
+});
+
+describe("a technique the run did not publish", () => {
+  it("carries the reason the check gave", () => {
+    const tech = only([
+      row({
+        not_published:
+          "TECHNIQUE T1055 belongs to the ATT&CK enterprise domain (platforms Linux, " +
+          "Windows, macOS); this sample is mobile-domain, Android.",
+      }),
+    ]);
+    expect(tech.notPublished).toContain("mobile-domain, Android");
+  });
+
+  it("is empty for a published mapping, which carries no such key", () => {
+    expect(only([row()]).notPublished).toBe("");
+  });
+
+  it("keeps the reason when the same id arrives twice", () => {
+    const tech = only([row(), row({ not_published: "outside the sample's ATT&CK domain" })]);
+    expect(tech.notPublished).toBe("outside the sample's ATT&CK domain");
+  });
+});
+
+describe("a tactic column's header", () => {
+  it("counts the techniques the run published", () => {
+    const [tactic] = parseTechniques([row(), row({ technique_id: "T1027" })]);
+    expect(tacticHeaderCount(tactic.techniques)).toBe("2 techniques");
+  });
+
+  it("says how many it claimed and did not publish", () => {
+    const [tactic] = parseTechniques([
+      row(),
+      row({ technique_id: "T1027", not_published: "outside the domain" }),
+    ]);
+    expect(tacticHeaderCount(tactic.techniques)).toBe("1 technique · 1 claimed, not published");
+  });
+
+  it("counts none published when the run published none", () => {
+    const [tactic] = parseTechniques([row({ not_published: "outside the domain" })]);
+    expect(tacticHeaderCount(tactic.techniques)).toBe("0 techniques · 1 claimed, not published");
   });
 });

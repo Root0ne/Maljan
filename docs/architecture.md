@@ -392,6 +392,17 @@ container for the object type in STIX, but the assessment confirms it is
 benign"*. The contradiction was detected, fed back once, survived — and the
 shape-derived verdict was published over the judge's own words.
 
+The judge is shown the whole answer as a skeleton, with
+`x_maljan_assessment` beside `objects` and the three accepted words written
+where the verdict is asked for. It used to be asked for in a bullet among ten
+others, with the STIX bundle framing around it and *"Return ONLY a valid JSON
+STIX 2.1 Bundle"* last — and a bundle is `{type, id, objects}`, so a model that
+had read the spec left the extension out. The default model omitted the block
+entirely on its first attempt in three runs of three and supplied it on the
+retry; a smaller model wrote it inside `objects[0]` in three of three, which
+costs no retry because a misplaced block is moved. Prompt text only: nothing in
+this pipeline writes a verdict.
+
 The statement is read three ways, not two, and `pipeline.outcome.StatedVerdict`
 carries the difference: the judge wrote a word this pipeline knows, it wrote a
 word this pipeline does not, or it wrote nothing. Only the third is a question
@@ -852,6 +863,13 @@ depended on the sample could not be drawn, compared or reasoned about before
 the sample arrived. What each stage did lands in `state["stage_results"]` and
 reaches the reader as `run_summary.stages`.
 
+`run_summary.elapsed_seconds` is the whole run: the worker's own clock reaches
+the pipeline as `state["run_started_at"]`, and the report node closes the
+figure when the report is composed, so it is the same span the job row's
+`duration_seconds` measures. The report prints the per-stage durations from
+`run_summary.stages` beside it — the list the console's stage headers are drawn
+from — so the two surfaces cannot disagree about where a run spent its time.
+
 Each stage also announces itself live, once: `stage_started` from its first
 node, `stage_skipped` from that node instead when the condition is false, and
 `stage_finished` from the one node that runs after everything in it is done.
@@ -929,6 +947,76 @@ A tool server reached over HTTP does not share the worker's filesystem, so it
 is handed the sample rather than a path to it; a stdio sidecar is handed the
 path. See the remote-delivery section of
 [configuration.md](configuration.md).
+
+**The sample's path is not the model's to give.** On the three built-in
+sidecars, an argument whose name means the file under analysis — `path`,
+`file`, `file_path`, `binary`, `sample`, `target`, `program` and the rest of
+`tool_pinning.SAMPLE_ARG_NAMES` — is taken out of the schema the model binds to
+and filled by `pin_paths` with the path that server can open. The sidecar's own
+signature is unchanged; only the model-facing copy is narrowed, and the
+platform's own calls still pass the argument. A *qualified* path argument —
+`pcap_path` for a capture, a rule file, a member inside an archive or an APK —
+names something other than the sample, which is a choice, and stays where it
+is. A server an operator added is theirs: this project does not narrow what its
+tools advertise.
+
+The correction that preceded it is still there for those arguments, and it was
+never enough on its own: it recognises the spellings the model was shown and
+the sample's own basename under a directory that holds no such file, and a live
+static analyst typed a sample path with three characters missing from the
+sha256 in its name, which matches none of them. It then spent its whole step
+budget guessing directories — `/`, `.`, `samples`, `staging`, `carved`,
+`uploads`, `private` — and nineteen of that run's thirty-five tool calls failed.
+An argument the model cannot see is an argument it cannot mistype.
+
+`put_sample`, `put_sample_begin`, `put_sample_chunk` and `put_sample_finish`
+are the platform's delivery primitive and never an analysis step, so they are
+not in the toolbox the model is shown. The same run called `put_sample` with
+`{"sha256": "null", "content_b64": ""}` and was told, correctly, that the empty
+string's digest is not the sample's.
+
+**A file an earlier call produced is still the model's to name.** Hiding the
+sample's path would otherwise have taken the carved payloads with it:
+`carve_payloads` writes each embedded payload under the staging directory and
+returns the paths, and with `path` gone there was nothing left to pass one to.
+`carved_path` is the qualified argument that gives that back, on the fourteen
+analysis tools that read a file — `identify_file`, `hashes`, `signing_info`,
+`strings`, `iocs_from_file`, `pe_info`, `elf_info`, `macho_info`, `apk_info`,
+`carve_payloads`, `archive_list`, `document_info`, `yara_scan` and `capa`. It
+is held to **the carved tree of the file this call is pinned to, and that file
+itself** — `<staging>/carved/<the sample's sha256>/`, which is exactly the key
+`carve_payloads` writes under and which the sidecar derives from the bytes it
+was handed. Not the staging base: one staging directory serves every job on the
+host, `put_sample` writes `<staging>/<sha16>_<name>` into it and every sample's
+carved tree sits beside every other's, so a base-wide bound let a run read
+another run's payload and another run's upload. A sample is adversary-authored
+content this model reads, and it can carry another sample's digest in its own
+bytes beside one instruction to point a tool at it; samples are not only
+malware, either, since an operator submits a suspicious document that may hold
+somebody's data. Two runs of the same sample share one tree, which is the same
+bytes read twice.
+
+Both spellings a model writes are understood — the absolute path
+`carve_payloads` returned, and the tail of it relative to the staging base or
+to the tree — and whichever it is, the resolved path must land inside the tree
+or on the sample. Symlinks are followed on both sides first, so a link planted
+under staging and a climb out of it land where they really point and meet the
+existing remediation-bearing refusal. The value must resolve onto a **regular
+file**: a directory, a FIFO, a device or a socket is refused with its own
+sentence, because a reader that opened a FIFO with no writer would wait for one
+forever. Given, the file is read in place of the sample and the answer carries
+`read_path` saying which; left out, the sample is read.
+
+`pin_paths` needs no rule for it — a qualified name is not in
+`SAMPLE_ARG_NAMES`, which is what the naming rule was built for. A payload
+carved out of a carved payload nests under the sample's own tree rather than
+opening one of its own, so everything a run produces is the one tree it may
+read back and the one tree the staging sweep prunes — which it now does: the
+sweep deleted files and skipped directories, and everything carved lives a
+level down, so carved payloads never expired at all. No tool extracts an
+archive member anywhere today, so a member stays the business of the tools that
+already take a member name; when one does, it writes into the same tree and the
+same argument serves it.
 
 ## Providers
 
@@ -1213,7 +1301,16 @@ is assembled from what the run gathered rather than recomputed beside it:
 * The capability matrix is a projection of the judge's technique list and the
   analysts' claims, carrying each source's own confidence unadjusted. It is
   where an id the ATT&CK check rejected stays on the record, marked
-  `technique_id_valid=False` and spelled as the producer wrote it.
+  `technique_id_valid=False` and spelled as the producer wrote it. **Every id
+  that reaches the report is collected into it**, from all three carriers: the
+  judge's attack-patterns, `claims[].technique_id`, and
+  `findings[].technique_ids` — the second place an ISR keeps technique ids, and
+  the one no check ever saw. A recorded Android run's final ISR carried one
+  claim with no id at all, so no domain check fired anywhere, and the report's
+  Findings and Corroboration tables printed three enterprise-only ids with
+  nothing saying they were not published. Every id still standing is asked the
+  catalogue question here as well as the domain one, so an id that arrived on a
+  finding gets the same answer an analyst's claim got in its own loop.
 * `ttp_mappings` is the *published* technique list, and every other technique
   surface is built from it: the report's ATT&CK section, its References, the
   `attack-pattern` objects of the STIX bundle — minted with ids derived from
@@ -1251,6 +1348,20 @@ is assembled from what the run gathered rather than recomputed beside it:
   bundle; three attack-patterns with no ATT&CK reference and ids copied out of
   the STIX documentation against an empty `ttp_mappings`; a rejected id
   published in all three.
+* **Every surface that prints a technique id says whether the run published
+  it.** The markdown's ATT&CK section names the unpublished ones under *Claims
+  that were not published as techniques*; the Findings table writes
+  `T1027 (claimed, not published)` in its Techniques column; each
+  `run_summary.corroboration` row carries `not_published`, written by the
+  report node from the capability matrix's own reasons, and the tables print it
+  through `technique_label`; the run summary's own line counts both — *"3
+  claimed, 0 published"*, because "3 named" over a run that published none of
+  them reads as three findings. An id in neither the published list nor the
+  matrix's reasons — dropped by its analyst in revision, so no check was ever
+  asked about it — says exactly that. The console's ATT&CK tab draws from
+  `capability_matrix` rather than from `ttp_mappings`, so a claimed-and-unpublished
+  technique appears there too, with the words *claimed, not published* and the
+  check's sentence under them rather than a colour.
 * An attack-pattern with a name and no technique id is asked for one
   (`attck.missing_id`) — before this it skipped every ATT&CK check, because all
   of them key on the id, which is why the Mobile-domain check never ran on an
@@ -1260,7 +1371,25 @@ is assembled from what the run gathered rather than recomputed beside it:
 * `run_summary.evidence` counts the calls and `run_summary.sections_without_
   evidence` counts the sections that can name neither an entry nor a finding —
   the number that says whether the report is standing on anything.
-* The section-wise composer keeps the fields a section's schema declares and
+* The section-wise composer shows each section **the exact JSON object it has
+  to answer with**, built from the section's own schema so the prompt and the
+  validator cannot drift. This is the manual-parse path, which is the *primary*
+  path on a local server — structured output is skipped there — and on it the
+  prompt's own rule said "conform to the provided JSON schema" with no schema
+  provided: the only key name a model ever saw was the bundle's opening line,
+  and that line read `SECTION: <name>`. Two unrelated models answered six runs
+  out of six with `SECTION`/`content` or with the section's own name as the key,
+  and every one of those runs authored zero sections. The heading is a sentence
+  now.
+* One shape the models produce is accepted as a *move* rather than a guess:
+  `{"<section name>": "the prose"}`, where the key is this section's own name
+  and the value is a string, is put into the field that holds the section's
+  prose — `text` when the schema declares one, otherwise its single
+  string-typed field. A schema with several (a ransom note, an encryption
+  scheme) or none (a channel list) has no such field and is left alone; so is a
+  renamed key, a second key, or a value that is not a string. Anything not
+  accepted is dropped and named, as before.
+* The composer keeps the fields a section's schema declares and
   drops the ones it does not, rather than refusing the whole section over an
   invented key — which is how two runs shipped with no conclusion. What it
   dropped, and any section it lost outright (still off-schema after its retry,
@@ -1359,18 +1488,77 @@ university host was dropped from the export with nothing said about it. Four of
 the five above fail this question; `fs01n5.sends` passes it and is held back by
 the corroboration rule instead, which is the true reason and the one recorded.
 
-One function writes a STIX pattern for a network endpoint —
-`stix_renderer.network_pattern` — and one answers whether this run may publish
-one: `network_publish_reason`, which dispatches to the domain, address or URL
-rule. Every minting path asks it: the network block's own rows and the string
-rows that reach the bundle through `static.interesting_strings`. It was three
-rules on four paths, and the fourth — a
-`StringIOC` of kind `ip`, which the deterministic IOC extractor produces on
+One function writes a STIX pattern for anything this platform mints —
+`stix_renderer.indicator_pattern` — and one answers whether this run may
+publish it: `indicator_publish_reason`. Every minting path asks it: the network
+block's own rows and the string rows that reach the bundle through
+`static.interesting_strings`. It was three rules on four paths, and the fourth
+— a `StringIOC` of kind `ip`, which the deterministic IOC extractor produces on
 every sample — asked none of them, so `6.0.0.0` was refused by the network block
 and exported by the string scan two sections later, typed `malicious-activity`.
+
+**The rule answers for every kind the sweep produces**, not only the three
+network ones: `url`, `domain`, `ip`, `email`, `path`, `registry`, `mutex`,
+`command`, `secret`, `crypto_wallet` and `other` — the set `STRING_IOC_KINDS`
+names, which mirrors `StringIOC.kind`. The other kinds used to fall past the
+predicate into the cap's file-name band and be exported with nothing asked, so
+a run that concluded a signed PuTTY is Benign published ten SSH algorithm
+identifiers as `malicious-activity` e-mail indicators, and a PE run published a
+third party's address lifted out of embedded library source. Two halves, in
+this order:
+
+* **Could it be the thing it claims to be.** A host that could exist
+  (`host_is_public`); a mailbox whose syntax is an address and whose domain part
+  passes that same host rule (`email_is_publishable`); a path that names a file
+  rather than a directory or a root (`path_names_a_file`). `secret` and
+  `crypto_wallet` have no STIX object and so no pattern; they stay in the
+  consolidated IOC table.
+* **Does anything but the sample's own byte image know it.** A `domain` asks the
+  network block's own answer; every other kind asks the run's corroborating
+  record — what a sandbox watched (the process tree, the registry
+  modifications, the file operations, the notable APIs), what a persistence
+  mechanism names, and what an analyst established in an artefact or a finding
+  section. The report's own tool sections are deliberately not in it: they are
+  the string sweep arriving under another heading, and a haystack holding them
+  would answer yes to everything.
+
+**Validity removes what cannot be the thing; corroboration decides the rest.**
+For a string-derived value the second question is the one that carries the
+weight, and it is meant to. The validity questions are deliberately shallow —
+could anything answer for this host, is this syntax a mailbox, does this name a
+file — because a string sweep produces values nothing can tell apart from the
+real thing by looking. `z@d.setdefault` is a fragment of Python written
+entirely in lower case, and there is no honest rule that separates it from a
+mailbox at a two-label name: the last-label test is a shape rather than a list
+of TLDs for the reason given above, and a list of language keywords or method
+names would be a guess dressed as a check, wrong for every language nobody
+wrote down and wrong the day one of them names a real host. So it is not
+written. Such a value is published only when a second source records it, and a
+reader who finds one in the report's own string table and not in the bundle is
+looking at the rule working.
+
+**What a minted indicator claims** is one function, `minted_indicator_type`,
+for every kind. The sample's own hash indicator is the verdict's word exactly
+(`indicator_type_for`); everything else is `anomalous-activity` unless the row
+itself was flagged suspicious *and* the run's verdict is Malware, in which case
+it is `malicious-activity`. `benign` is the sample's own word and is not lent
+to anything else — a host a benign sample talked to is not thereby a benign
+host. So a corroborated string-derived artefact is `anomalous-activity` under
+Malware, under Suspicious and under Benign alike. Nothing is
+`malicious-activity` by default; a URL used to be, whatever the run concluded.
+
+**An address a person owns never leaves the report.** A string-derived e-mail
+row that nothing corroborates is in the report's own indicator-strings table
+and in the consolidated IOC table, and in nothing else: not the STIX bundle,
+not `/reports/{id}/iocs` (which serves the hashes and the network block), not
+an enrichment lookup (which reads the network block's domains and addresses),
+and not an event — a string sweep's row is declined silently, because a report
+carrying forty unresolved findings nobody can act on buries the ones somebody
+can.
+
 `tests/unit/reporting/test_one_network_publish_rule.py` walks the tree for a
-literal that *builds* one of the four patterns and fails if a second place
-starts doing it.
+literal that *builds* any of those patterns and fails if a second place starts
+doing it.
 
 The judge does not mint patterns, it writes them, and its own indicator
 objects are asked the host question and not the corroboration one. The judge's
@@ -1394,6 +1582,29 @@ may carry it. A syntactically routable address the judge invented passes this
 question by design; whether any evidence holds it up is
 `stix.ungrounded_indicator`'s question, and that check is asked of every
 indicator the judge writes.
+
+The same validity questions reach the judge's other kinds. An `email-addr`
+pattern is asked whether it is a mailbox at all and whether its domain part
+could exist; a `file:name` pattern is asked whether it names a file rather than
+a directory or a root — both declined as `stix.unpublishable_artefact` when
+they are not. A `file:hashes` comparison is asked whether the literal is a
+digest of the algorithm it is written under, by length and alphabet
+(`HASH_HEX_LENGTHS`), and declined as `stix.malformed_hash` when it is not: one
+run exported sixteen of the thirty-two characters of an MD5, a value a consumer
+matching on MD5 can never match. The grounding check asks the same question
+first and then matches a digest as a *whole token*, never as the prefix of a
+longer run of hexadecimal, because a truncated digest is not "present in the
+evidence" however the substring search answers. An algorithm the table does not
+name is left alone.
+
+Two rows that mean one path are one row. `reporting.dedupe.canonical_path`
+normalises the separators, collapses runs of them, drops a trailing one and
+folds the case of a Windows path — Windows filesystems are case-insensitive, a
+POSIX one is not — and `pattern_fingerprint` uses it for `file:name`,
+`directory:path` and `windows-registry-key:key`. The first row is kept with the
+union of the sources, as every merge in this project works. One recorded bundle
+carried the same directory twice, once with the trailing slash and once
+without.
 
 Whether an endpoint that *could* exist is published stays
 `corroboration_reason`'s decision. A URL or a name the host question refuses is

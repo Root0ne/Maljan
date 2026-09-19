@@ -129,6 +129,35 @@ Connection tests are available on the settings that have a probe. An instance
 that is already configured can be reproduced with a JSON export instead; see
 [configuration.md](configuration.md).
 
+### A smaller model, when the machine has less memory
+
+The default model is unchanged and is what every number in the paper rests on.
+For a machine that cannot hold it, `gemma4:12b` behind Ollama is a documented
+option, with one setting it requires:
+
+```
+core.llm.provider                   = ollama
+core.llm.ollama.expert_model        = gemma4:12b
+core.llm.ollama.judge_model         = gemma4:12b
+core.llm.ollama.disable_thinking    = true
+core.llm.ollama.num_ctx             = 32768
+```
+
+`disable_thinking` is not optional for it. At the shipped default the
+connection test reports that the model *answered nothing* — the reasoning went
+into the thinking channel and the answer came back empty — and with
+`core.llm.require_probe` on, the API refuses every job until the setting is
+turned on. With it on, the same test passes in a quarter of a second.
+
+What was measured, on a 30 GB laptop with an 8 GB card, one sample at a time:
+three samples, the same verdicts as the default model on the two that matter
+(Benign for a signed utility, Malware for a PE loader) and one step milder on
+the third; about **13.6 GB of memory still free at the worst moment**, against
+**8.4 GB** for the default model on the same three; roughly a fifth faster over
+the set; and **fewer techniques named** — two in total against seven, which is
+the cost. Three samples are not a benchmark, and this does not change the
+default.
+
 ## First analysis, with the default team
 
 Upload a sample from the console and start an analysis, or drive the API:

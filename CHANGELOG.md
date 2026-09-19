@@ -2246,6 +2246,152 @@ change landed on `main`.
   participant that has said nothing now takes its state from its own stages:
   running is working, finished is done, and anything else leaves it where the
   feed put it.
+- **The report's own elapsed time is the run, not the verdict stage.** The run
+  summary started its clock inside the judge node, so a 473 s job published
+  `Elapsed: 66.0s` and a reader quoting the report got a wall clock five to
+  seven times short. The worker's own start now reaches the pipeline as
+  `state["run_started_at"]` and the report node closes the figure when the
+  report is composed, so it measures the same span the job row does; the
+  per-stage durations are printed beside it from `run_summary.stages`, the
+  list the console's stage headers are drawn from. Stored reports keep the
+  figure they were written with.
+- **One publish rule for every indicator the platform mints, not only the
+  network ones.** The predicate covered `url`, `domain` and `ip`; every other
+  kind the string sweep produces fell past it into the cap's file-name band and
+  was exported with nothing asked. A run that concluded a signed PuTTY is
+  Benign published ten SSH algorithm identifiers (`aes128-gcm@openssh.com` and
+  its kind) as `malicious-activity` e-mail indicators, and a PE run published a
+  third party's address lifted out of embedded library source.
+  `indicator_publish_reason` now answers for every kind in `STRING_IOC_KINDS`:
+  the value has to be the thing it claims to be — a host that could exist, a
+  mailbox whose domain part passes the host rule, a path that names a file
+  rather than a directory — and something other than the sample's own bytes has
+  to know it: a sandbox observation, a persistence mechanism, a reputation
+  record, or a ledger entry that is **not** the string sweep's and that an
+  analyst cited in an artefact or a finding — quoting the sweep's own table
+  back is one source said twice, and one analyst sentence carrying a parse
+  artefact out of embedded source would otherwise have published it. What
+  counts as present is a whole value, never a slice of a longer one. A mailbox
+  the sweep read out of a file answers one question more than one the judge
+  asserted: whether its domain part reads as a host at all, which is what tells
+  `openssh.com` from `D.setdefault` and `r.Regsvr`. `indicator_pattern` is the
+  one place any of those patterns is written, and the guard test fails on a
+  second.
+  An uncorroborated address a person owns stays in the report and reaches
+  neither the bundle, nor `/reports/{id}/iocs`, nor an enrichment lookup, nor
+  an event.
+- **Nothing the platform mints is `malicious-activity` by default.** One
+  function, `minted_indicator_type`, decides for every kind: the sample's own
+  hash indicator is the verdict's word, and every other row is
+  `anomalous-activity` unless it was flagged suspicious under a Malware
+  verdict. A URL used to claim malicious activity whatever the run concluded.
+- **A digest is its algorithm's length, a file name names a file, and one path
+  is one row.** A run exported `[file:hashes.'MD5' = '32066ff6369a7bd7']`,
+  sixteen of thirty-two characters, because the grounding check found the
+  truncated prefix inside the real digest; it now matches a digest as a whole
+  token and asks the length question first, and the export declines a
+  malformed one as `stix.malformed_hash`. Every check in that function is a
+  veto rather than an acceptance, asked of every comparison in the pattern
+  rather than of whichever one the pattern started with — a grounded digest
+  beside `[url:value = …]` used to turn off the URL denylist and the file-name
+  anchor rule for the whole expression. A hash the algorithm table gives no
+  length for — an ssdeep, a TLSH — is asked the corpus question rather than
+  skipped: skipping it told a judge that the ssdeep the `hashes` tool had just
+  reported "appears nowhere in the evidence", which spent the one retry and
+  then dropped the object. A `file:name` naming a directory or
+  a root (`/Users/`) is declined as `stix.unpublishable_artefact`, as is an
+  `email-addr` that is not a mailbox. The judge's own objects are declined and
+  recorded, never rewritten; the platform mints none of them. Dedupe compares
+  normalised paths — separators, runs of them, a trailing one, and the case of
+  a Windows path — so the same directory written twice is one indicator.
+- **A technique the report prints is published, or the report says it is not.**
+  An ISR carries technique ids in two places, and only one of them was ever
+  questioned: `claims[].technique_id`, which the validator and the capability
+  matrix read, and `findings[].technique_ids`, which the report's Findings
+  table and the corroboration metric are built from. An Android run whose final
+  claims carried no id at all fired no domain check anywhere and printed
+  `T1027`, `T1055` and `T1071` — enterprise-only — in two tables and a count,
+  with nothing saying they were not published. The findings' ids are now
+  collected into the capability matrix with every other one and asked the
+  domain and catalogue questions there; each `run_summary.corroboration` row
+  carries `not_published` with the check's own sentence; the Findings table
+  writes `claimed, not published` beside such an id; the summary counts "N
+  claimed, M published"; and the console's ATT&CK tab draws from the capability
+  matrix so the claim is visible there, in words, with the reason under it,
+  and its tactic columns count what was published with the rest named beside
+  it. An id that arrived on a finding and on no claim is printed everywhere and
+  **published nowhere**: a claim is questioned in its analyst's own loop and a
+  finding is not, so a finding citing no evidence and carrying no confidence
+  would otherwise have put a technique into `/mitre`, the STIX attack-patterns
+  and the report's ATT&CK section. The same id on a claim is judged as the
+  claim's.
+- **The sample's path is not the model's to give.** A static analyst typed it
+  by hand, dropped three characters out of the sha256 in it, then spent its
+  whole step budget guessing directories; nineteen of that run's thirty-five
+  tool calls failed. The correction that existed recognises the spellings the
+  model was shown and the sample's own basename in the wrong directory, and a
+  mistyped name is neither. On the three built-in sidecars, an argument whose
+  name means the file under analysis is now taken out of the schema the model
+  binds to and filled by `pin_paths` with the path that server can open — the
+  sidecar's own signature unchanged, only the model-facing copy narrowed. A
+  qualified path argument (`pcap_path`, a rule file, a member inside an
+  archive) names something other than the sample and stays the model's. The
+  delivery primitives `put_sample`, `put_sample_begin`, `put_sample_chunk` and
+  `put_sample_finish` are not offered to the model at all.
+- **A file an earlier call produced can still be analysed.** Hiding the
+  sample's path would have taken the carved payloads with it: `carve_payloads`
+  writes each embedded payload under the staging directory and returns the
+  paths, and nothing was left to pass one to. `carved_path` is a new optional
+  argument on the fourteen analysis tools that read a file — `identify_file`,
+  `hashes`, `signing_info`, `strings`, `iocs_from_file`, `pe_info`, `elf_info`,
+  `macho_info`, `apk_info`, `carve_payloads`, `archive_list`, `document_info`,
+  `yara_scan`, `capa`. It is confined to `<staging>/carved/<sha256 of the file
+  the call is pinned to>/` and to that file itself — not the staging base,
+  which one server process shares across every job it handles, and not
+  `MALJAN_SAMPLE_ROOTS`. A run therefore reaches the payloads it carved and
+  nothing another run carved or uploaded; two runs of the same sample share
+  one tree, which is the same bytes read twice. The absolute path
+  `carve_payloads` returned and the tail of it both work; a traversal, a path
+  outside the tree or a symlink out of it meets the existing
+  `path_outside_roots` refusal, and a value that resolves onto a directory, a
+  FIFO, a device or a socket is refused as `bad_argument` rather than opened.
+  Given, that file is read in place of the sample and the answer carries
+  `read_path`; left out, the sample is read. It is qualified, so the path
+  pinning leaves it alone. A payload carved out of a carved payload nests
+  under the sample's own tree rather than opening one of its own.
+- **Carved payloads expire.** The analysis sidecar's TTL sweep deleted files
+  under the staging directory and stepped over directories, and everything
+  `carve_payloads` writes lives a level down in `carved/<sha256>/` — so no
+  carved payload ever expired and a long-lived host accumulated them
+  indefinitely. The sweep now prunes those trees on the same
+  `MALJAN_STAGING_TTL_HOURS`, removes a tree the pruning leaves empty, and
+  never follows a symlink.
+- **The report composer shows each section the object it has to answer with.**
+  Six runs on two unrelated models authored zero professional sections between
+  them, answering every section with renamed or superset keys. On the
+  manual-parse path — the primary path on a local server, because structured
+  output is skipped there — the prompt said "conform to the provided JSON
+  schema" and provided none, and the only key name a model ever saw was the
+  bundle's opening line, `SECTION: <name>`. The exact object is now built from
+  the section's own schema and printed in the prompt, and the heading is a
+  sentence. One shape is accepted as a move: `{"<section name>": "the prose"}`
+  goes into the field that holds the section's prose; anything that needs
+  interpreting is still dropped and named.
+- **The judge is shown the answer's whole shape.** `x_maljan_assessment` was
+  asked for in a bullet among ten, with "Return ONLY a valid JSON STIX 2.1
+  Bundle" last — and a STIX bundle is `{type, id, objects}`. The default model
+  omitted the block on its first attempt in three runs of three and spent its
+  one verdict retry on it every time. The prompt now ends with the skeleton,
+  `x_maljan_assessment` beside `objects`, with the three accepted verdict words
+  written where the verdict is asked for. Prompt text only.
+- **A reasoning model on Ollama is told which setting to turn on.** It fails
+  the connection test at the shipped default — the answer goes into the
+  thinking channel and the probe reports that it answered nothing — and with
+  `core.llm.require_probe` on, the API then refuses every job. The default is
+  unchanged, and the failure and the timeout now carry a sentence naming
+  `core.llm.ollama.disable_thinking` and what it does; the Ollama setup guide
+  says the same, and `docs/getting-started.md` documents `gemma4:12b` with that
+  setting as a measured low-memory option.
 
 ### Removed
 
