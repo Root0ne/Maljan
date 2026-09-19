@@ -245,16 +245,16 @@ class TestMergeChunkISRsDissent:
 
 
 class TestSafeAnalyzeISRChunked:
-    @pytest.fixture(autouse=True)
-    def _the_shared_attck_index(self, real_attck_index: None) -> None:
-        """Building a capability matrix resolves technique names and tactics.
-
-        It does that through ``ATTCKValidator.get_instance()``, which builds
-        the shared ATT&CK index from the corpus. The unit tree holds that
-        build shut; this class asks for it by name.
-        """
-
     """Test safe_analyze_isr_chunked() on a concrete minimal BaseAnalyst subclass."""
+
+    @pytest.fixture(autouse=True)
+    def _no_suggestions(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """An id the catalogue rejects is offered ranked alternatives, and the
+        ranking is the one thing here that builds the ATT&CK index. These tests
+        are about chunk merging."""
+        from maljan.tools import knowledge
+
+        monkeypatch.setattr(knowledge, "resolve_technique", lambda *a, **k: {"candidates": []})
 
     class _ConcreteAnalyst:
         """Minimal concrete implementation (avoids importing real agents)."""

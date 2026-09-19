@@ -59,14 +59,16 @@ ATTCK_CACHE_FILE = ATTCK_CACHE_FILES["enterprise"]
 # New shape: one sorted id list per domain. The former flat list (and the
 # ``{"count", "technique_ids"}`` wrapper it grew) is still read, as enterprise.
 VALID_IDS_FILE = Path(__file__).resolve().parents[3] / "data" / "attck_valid_ids.json"
-# The vendored platform map, written by the same script from the same bundles:
-# per technique id, its domain and MITRE platforms. It is what makes the
-# platform half of the technique check answerable with no network and no
+# The vendored technique table, written by the same script from the same
+# bundles: per technique id, its domain, its name, its tactic slugs and its
+# MITRE platforms, plus the tactic catalogue per domain. It is what makes every
+# dictionary question about a technique answerable with no network and no
 # bundle load; the cached bundles are consulted only for an id it lacks.
-PLATFORMS_FILE = Path(__file__).resolve().parents[3] / "data" / "attck_platforms.json"
+TECHNIQUES_FILE = Path(__file__).resolve().parents[3] / "data" / "attck_techniques.json"
 # Ids a previous vendored catalogue had and the current release does not, with
-# the release they went in, written by the same script. What lets a stored
-# report or a prompt that still names T1562.001 read as retired, not invented.
+# the release they went in and the id that revoked them where the bundle names
+# one, written by the same script. What lets a stored report or a prompt that
+# still names T1562.001 read as retired, not invented.
 RETIRED_IDS_FILE = Path(__file__).resolve().parents[3] / "data" / "attck_retired_ids.json"
 
 # Our platform vocabulary translated into MITRE's ``x_mitre_platforms`` strings.
@@ -477,40 +479,110 @@ def domain_of(technique_id: str) -> str | None:
     return None
 
 
-def _read_platform_map_file(path: Path) -> dict[str, tuple[str, ...]]:
-    """``{technique_id: (platforms,)}`` from the vendored map; empty when unreadable."""
+@dataclass(frozen=True)
+class VendoredTechnique:
+    """One row of the vendored technique table.
+
+    The dictionary answer about a technique id: what it is called, which
+    tactics it sits under, which domain owns it and which platforms it
+    declares. Everything a name, tactic, domain or platform question needs,
+    and nothing a ranking question needs — no description, no detection text —
+    which is what keeps the file small enough to commit and to read on every
+    lookup.
+    """
+
+    technique_id: str
+    domain: str
+    name: str
+    tactics: tuple[str, ...]
+    platforms: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class VendoredTactic:
+    """One matrix column as the vendored table carries it."""
+
+    tactic_id: str
+    shortname: str
+    name: str
+
+
+def _read_technique_table(
+    path: Path,
+) -> tuple[dict[str, VendoredTechnique], dict[str, dict[str, VendoredTactic]]]:
+    """The vendored table and its tactic catalogue; both empty when unreadable."""
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        logger.warning("Could not read the ATT&CK platform map at %s: %s", path, exc)
-        return {}
+        logger.warning("Could not read the ATT&CK technique table at %s: %s", path, exc)
+        return {}, {}
     if not isinstance(raw, dict):
-        logger.warning("The ATT&CK platform map at %s is in no shape this loader reads.", path)
-        return {}
-    out: dict[str, tuple[str, ...]] = {}
+        logger.warning("The ATT&CK technique table at %s is in no shape this loader reads.", path)
+        return {}, {}
+    techniques: dict[str, VendoredTechnique] = {}
     for tid, row in raw.items():
-        if str(tid).startswith("_"):  # the file's own metadata, not a technique
+        if str(tid).startswith("_") or not isinstance(row, dict):
+            continue  # the file's own metadata, not a technique
+        key = str(tid).upper()
+        techniques[key] = VendoredTechnique(
+            technique_id=key,
+            domain=str(row.get("domain") or ""),
+            name=str(row.get("name") or ""),
+            tactics=tuple(str(t) for t in (row.get("tactics") or []) if str(t).strip()),
+            platforms=tuple(str(p) for p in (row.get("platforms") or []) if str(p).strip()),
+        )
+    tactics: dict[str, dict[str, VendoredTactic]] = {}
+    for domain, rows in (raw.get("_tactics") or {}).items():
+        if not isinstance(rows, dict):
             continue
-        platforms = row.get("platforms") if isinstance(row, dict) else None
-        out[str(tid).upper()] = tuple(str(p) for p in (platforms or []) if str(p).strip())
-    return out
+        tactics[str(domain)] = {
+            str(slug): VendoredTactic(
+                tactic_id=str(row.get("id") or ""),
+                shortname=str(slug),
+                name=str(row.get("name") or ""),
+            )
+            for slug, row in rows.items()
+            if isinstance(row, dict)
+        }
+    return techniques, tactics
 
 
-_platform_map_cache: dict[str, tuple[str, ...]] | None = None
+_technique_table_cache: tuple[
+    dict[str, VendoredTechnique], dict[str, dict[str, VendoredTactic]]
+] | (None) = None
 
 
-def _vendored_platforms() -> dict[str, tuple[str, ...]]:
-    global _platform_map_cache
-    if _platform_map_cache is None:
-        _platform_map_cache = _read_platform_map_file(PLATFORMS_FILE)
-    return _platform_map_cache
+def _technique_table() -> tuple[dict[str, VendoredTechnique], dict[str, dict[str, VendoredTactic]]]:
+    global _technique_table_cache
+    if _technique_table_cache is None:
+        _technique_table_cache = _read_technique_table(TECHNIQUES_FILE)
+    return _technique_table_cache
 
 
-_retired_cache: dict[str, str] | None = None
+def technique_entry(technique_id: str) -> VendoredTechnique | None:
+    """The vendored row for an id, or ``None`` when the table has no such id."""
+    tid = (technique_id or "").strip().upper()
+    return _technique_table()[0].get(tid) if tid else None
 
 
-def retired_ids() -> dict[str, str]:
-    """``{technique_id: release it was retired in}`` from the vendored file."""
+def tactic_entry(domain: str | None, shortname: str) -> VendoredTactic | None:
+    """The matrix column a kill-chain slug names in a domain, or ``None``.
+
+    Enterprise answers for a caller that has no domain: it is the matrix the
+    capabilities view draws, and the one whose slugs a report is written in.
+    """
+    slug = (shortname or "").strip()
+    if not slug:
+        return None
+    by_domain = _technique_table()[1]
+    wanted = (domain or "enterprise").strip().lower() or "enterprise"
+    return by_domain.get(wanted, {}).get(slug) or by_domain.get("enterprise", {}).get(slug)
+
+
+_retired_cache: dict[str, dict[str, str]] | None = None
+
+
+def _retired_rows() -> dict[str, dict[str, str]]:
     global _retired_cache
     if _retired_cache is None:
         try:
@@ -518,16 +590,32 @@ def retired_ids() -> dict[str, str]:
         except (OSError, ValueError):
             raw = {}
         _retired_cache = {
-            str(tid).upper(): str((row or {}).get("retired_in") or "unknown")
+            str(tid).upper(): {str(k): str(v) for k, v in row.items()}
             for tid, row in (raw.items() if isinstance(raw, dict) else [])
             if isinstance(row, dict) and not str(tid).startswith("_")
         }
     return _retired_cache
 
 
+def retired_ids() -> dict[str, str]:
+    """``{technique_id: release it was retired in}`` from the vendored file."""
+    return {tid: row.get("retired_in") or "unknown" for tid, row in _retired_rows().items()}
+
+
 def retired_in(technique_id: str) -> str | None:
     """The release that retired the id; ``None`` when no catalogue we shipped had it."""
     return retired_ids().get((technique_id or "").strip().upper())
+
+
+def revoked_by(technique_id: str) -> str | None:
+    """The id ATT&CK says replaced a retired one, or ``None`` when it names none.
+
+    Only the bundle's own ``revoked-by`` relationship puts a value here. A
+    retired id with no successor answers ``None``, and a caller retargeting
+    data drops the entry rather than choosing a replacement for MITRE.
+    """
+    row = _retired_rows().get((technique_id or "").strip().upper()) or {}
+    return row.get("revoked_by") or None
 
 
 _platform_cache: dict[str, tuple[str, ...]] | None = None
@@ -561,31 +649,31 @@ def _platform_catalog() -> dict[str, tuple[str, ...]]:
 def platforms_for(technique_id: str) -> tuple[str, ...]:
     """The MITRE platforms a technique declares; empty when it is not catalogued.
 
-    The vendored map answers first. A real id the map lacks — a checkout whose
-    id catalogue is newer than its map — is looked up in the cached bundles;
-    an id that is not a technique at all is not, so an invented id never
-    starts a bundle load.
+    The vendored table answers first. A real id the table lacks — a checkout
+    whose id catalogue is newer than its table — is looked up in the cached
+    bundles; an id that is not a technique at all is not, so an invented id
+    never starts a bundle load.
     """
     tid = (technique_id or "").strip().upper()
     if not tid:
         return ()
-    vendored = _vendored_platforms()
-    if tid in vendored:
-        return vendored[tid]
+    vendored = technique_entry(tid)
+    if vendored is not None:
+        return vendored.platforms
     if tid not in valid_ids():
         return ()
     return _platform_catalog().get(tid, ())
 
 
 def reset_caches() -> None:
-    """Drop the vendored-id, platform-map and bundle-platform caches.
+    """Drop the vendored-id, technique-table and bundle-platform caches.
 
     For tests and the refresh CLI.
     """
-    global _valid_ids_cache, _platform_cache, _platform_map_cache, _retired_cache
+    global _valid_ids_cache, _platform_cache, _technique_table_cache, _retired_cache
     _valid_ids_cache = None
     _platform_cache = None
-    _platform_map_cache = None
+    _technique_table_cache = None
     _retired_cache = None
 
 

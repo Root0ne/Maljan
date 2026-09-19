@@ -340,22 +340,30 @@ Each sandbox is asked for the options its format needs:
 
 The technique universe spans all three ATT&CK domains. `data/attck_valid_ids.json`
 carries one sorted id list per domain (`enterprise`, `mobile`, `ics`), and
-`data/attck_platforms.json` carries, per technique id, its domain and MITRE
-platforms. The two files come from the same bundles and the same script, so
-they never disagree about which domain an id belongs to. Between them they
-answer the validity and the domain-and-platform halves of the technique check
-with no network and no bundle load (`tools.knowledge.attck_scope`).
+`data/attck_techniques.json` carries, per technique id, its domain, its name,
+its tactic slugs and its MITRE platforms, plus the tactic catalogue (slug to
+TA-id and display name) per domain. The two files come from the same bundles
+and the same script, so they never disagree about which domain an id belongs
+to. Between them they answer every dictionary question the pipeline asks about
+a technique — validity, name, tactics, domain, platforms — with no network and
+no bundle load: `tools.knowledge.attck_lookup`, `attck_scope`, `attck_validate`
+and the capability matrix all read them and build nothing.
 `data/attck_retired_ids.json`, written by the same script from the catalogue it
-overwrites, names the ids a previous release had and the release that retired
-them, so an older report's `T1562.001` is reported as retired rather than as an
-invented id;
+overwrites, names the ids a previous release had, the release that retired them
+and, where the bundle states one, the id that revoked them — so an older
+report's `T1562.001` is reported as retired rather than as an invented id, and
+the data builders can retarget it mechanically.
 `src/maljan/memory/attck_loader.py` downloads and caches each domain's STIX
-bundle under `~/.cache/maljan/attck/` (or `MALJAN_ATTCK_CACHE`) for the names,
-the tactics and the index, and consults it for platforms only when a real id is
-missing from the vendored map. Enterprise is required; Mobile and ICS are
-additive, and a box that can reach neither keeps working with a narrower
-catalog. Regenerate both files with
-`uv run python scripts/knowledge/prepare_attck_malware_fixtures.py`.
+bundle under `~/.cache/maljan/attck/` (or `MALJAN_ATTCK_CACHE`) for the ranked
+index alone — `tools.knowledge.resolve_technique` and the alignment gate — and
+consults it for platforms only when a real id is missing from the vendored
+table. Enterprise is required; Mobile and ICS are additive, and a box that can
+reach neither keeps working with a narrower catalog. Regenerate all three files
+with `uv run python scripts/knowledge/prepare_attck_malware_fixtures.py`.
+
+A failed index build is remembered for `validation.index_retry_seconds`
+(default 900) and then attempted again, so one unreachable moment does not cost
+a worker its index for the life of the process; 0 never re-attempts.
 
 ### Rule corpora
 

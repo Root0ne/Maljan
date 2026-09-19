@@ -659,9 +659,6 @@ class TestTheMatrixCarriesTheCatalogueScope:
         monkeypatch.setattr(
             "maljan.extractors.capability_matrix._unknown_to_the_catalogue", lambda ids: set()
         )
-        # The matrix names tactics through the ATT&CK index, and the configured
-        # backend is the hybrid one; a test must never pay for that build.
-        monkeypatch.setattr("maljan.extractors.capability_matrix._load_attck_index", lambda: None)
         isrs = {"static": _isr(_claim("T1417"), _claim("T1547.001"))}
         cells, _mappings = build_capability_matrix(stix_output=None, isr_reports=isrs)
         by_id = {cell.technique_id: cell for cell in cells}
@@ -753,7 +750,6 @@ class TestThePlatformCheckLoadsNoCatalogue:
 
         attck_loader.reset_caches()
         monkeypatch.setattr(attck_loader, "load_all_domains", _no_load)
-        monkeypatch.setattr(knowledge, "_catalog", _no_load)
         isr = _isr(_claim("T1055"), _claim("T1633"))
         violations = validate_isr(isr, attck=knowledge, sample=PE)
         assert _codes(violations) == [PLATFORM_MISMATCH_CODE]
@@ -824,13 +820,10 @@ class TestARetiredId:
     not as invented."""
 
     @pytest.fixture(autouse=True)
-    def _no_suggestions(self, monkeypatch: pytest.MonkeyPatch, real_attck_index: None):
+    def _no_suggestions(self, monkeypatch: pytest.MonkeyPatch):
         """The retired note comes from the vendored id universe; the suggestions
         beside it come from the ranked index, which is a corpus build this suite
-        does not take. These tests are about the note.
-
-        The catalogue itself is still asked for: the lookup reads a technique's
-        name and description, and the vendored scope files carry neither."""
+        does not take. These tests are about the note."""
         from maljan.tools import knowledge
 
         monkeypatch.setattr(knowledge, "resolve_technique", lambda *a, **k: {"candidates": []})

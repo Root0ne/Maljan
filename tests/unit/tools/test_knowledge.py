@@ -10,6 +10,9 @@ missing model turning "we could not look" into "we looked and found nothing".
 
 from __future__ import annotations
 
+import threading
+import time
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
@@ -168,17 +171,6 @@ class TestLolbinLookup:
 
 
 class TestAttckLookup:
-    @pytest.fixture(autouse=True)
-    def _real_catalogue(self, real_attck_index: None) -> None:
-        """This asks the real ATT&CK catalogue for names and descriptions.
-
-        The unit tree holds the corpus download shut, and these are the tests
-        that want what is behind it. They read the loader's own disk cache when
-        one is there and fetch when it is not, which is what they did before
-        the door existed; the opt-out is here so the list of tests that pay
-        that cost is a list somebody can read.
-        """
-
     def test_a_real_technique_is_valid_and_carries_its_domain_and_platforms(self) -> None:
         result = knowledge.attck_lookup("T1055")
         assert result["valid"] is True
@@ -201,17 +193,6 @@ class TestAttckLookup:
 
 
 class TestAttckValidate:
-    @pytest.fixture(autouse=True)
-    def _real_catalogue(self, real_attck_index: None) -> None:
-        """This asks the real ATT&CK catalogue for names and descriptions.
-
-        The unit tree holds the corpus download shut, and these are the tests
-        that want what is behind it. They read the loader's own disk cache when
-        one is there and fetch when it is not, which is what they did before
-        the door existed; the opt-out is here so the list of tests that pay
-        that cost is a list somebody can read.
-        """
-
     def test_only_the_invalid_ids_come_back(self) -> None:
         result = knowledge.attck_validate(["T1055", "T9999.001", "T1547.001"])
         assert [row["id"] for row in result["invalid"]] == ["T9999.001"]
@@ -264,7 +245,10 @@ class TestDegradation:
     def test_an_unreachable_attck_index_leaves_resolve_technique_empty_with_a_reason(
         self, monkeypatch
     ) -> None:
+        import time
+
         monkeypatch.setattr(knowledge, "_HYBRID_FAILED", "the ATT&CK index is unavailable: offline")
+        monkeypatch.setattr(knowledge, "_HYBRID_FAILED_AT", time.monotonic())
         result = knowledge.resolve_technique("process injection")
         assert result["candidates"] == []
         assert "unavailable" in result["reason"]
@@ -288,6 +272,137 @@ class TestDegradation:
             knowledge.resolve_technique("process injection")
 
         assert len(attempts) == 1
+
+
+class TestAFailedIndexBuildIsRetried:
+    """One network blip used to cost a worker its index for the life of the
+    process: every later job in it ran without the hybrid index, and nothing
+    said why. The failure is now believed for an interval and no longer."""
+
+    @pytest.fixture(autouse=True)
+    def _cold(self) -> Iterator[None]:
+        knowledge.reset_indices()
+        knowledge.set_index_retry_after(900)
+        yield
+        knowledge.reset_indices()
+        knowledge.set_index_retry_after(900)
+
+    @staticmethod
+    def _broken(attempts: list[int]) -> Any:
+        class _Broken:
+            @classmethod
+            def from_loader(cls) -> Any:
+                attempts.append(1)
+                raise RuntimeError("offline")
+
+        return _Broken
+
+    def test_the_next_lookup_after_the_interval_attempts_another_build(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        attempts: list[int] = []
+        monkeypatch.setattr(
+            "maljan.memory.hybrid_attck_index.HybridATTCKIndex", self._broken(attempts)
+        )
+        knowledge.set_index_retry_after(60)
+
+        knowledge.resolve_technique("process injection")
+        knowledge.resolve_technique("process injection")
+        assert len(attempts) == 1
+
+        # The clock, not the lookup count, is what opens the door.
+        monkeypatch.setattr(knowledge, "_HYBRID_FAILED_AT", time.monotonic() - 61)
+        answer = knowledge.resolve_technique("process injection")
+        assert len(attempts) == 2
+        assert "unavailable" in answer["reason"]
+
+    def test_a_retry_that_succeeds_clears_the_reason(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        attempts: list[int] = []
+        monkeypatch.setattr(
+            "maljan.memory.hybrid_attck_index.HybridATTCKIndex", self._broken(attempts)
+        )
+        knowledge.set_index_retry_after(60)
+        knowledge.resolve_technique("process injection")
+        assert not knowledge.index_is_warm()
+
+        class _Working:
+            @classmethod
+            def from_loader(cls) -> Any:
+                return _Working()
+
+            @staticmethod
+            def search(_text: str, top_k: int = 5) -> list[Any]:
+                return []
+
+        monkeypatch.setattr("maljan.memory.hybrid_attck_index.HybridATTCKIndex", _Working)
+        monkeypatch.setattr(knowledge, "_HYBRID_FAILED_AT", time.monotonic() - 61)
+        assert knowledge.resolve_technique("process injection") == {"candidates": []}
+        assert knowledge.index_is_warm()
+
+    def test_an_interval_of_zero_is_the_old_behaviour(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        attempts: list[int] = []
+        monkeypatch.setattr(
+            "maljan.memory.hybrid_attck_index.HybridATTCKIndex", self._broken(attempts)
+        )
+        knowledge.set_index_retry_after(0)
+        knowledge.resolve_technique("process injection")
+        monkeypatch.setattr(knowledge, "_HYBRID_FAILED_AT", time.monotonic() - 86400)
+        knowledge.resolve_technique("process injection")
+        assert len(attempts) == 1
+
+    def test_lookups_arriving_together_start_one_build(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No retry storm: the attempt is claimed under the lock, so the
+        callers that arrive while a slow build runs are answered the standing
+        reason rather than starting builds of their own."""
+        attempts: list[int] = []
+        started = threading.Barrier(4)
+
+        class _Slow:
+            @classmethod
+            def from_loader(cls) -> Any:
+                attempts.append(1)
+                time.sleep(0.2)
+                raise RuntimeError("offline")
+
+        monkeypatch.setattr("maljan.memory.hybrid_attck_index.HybridATTCKIndex", _Slow)
+        knowledge.set_index_retry_after(60)
+        knowledge.resolve_technique("process injection")
+        assert len(attempts) == 1
+        monkeypatch.setattr(knowledge, "_HYBRID_FAILED_AT", time.monotonic() - 61)
+
+        def _ask() -> None:
+            started.wait(timeout=5)
+            knowledge.resolve_technique("process injection")
+
+        threads = [threading.Thread(target=_ask) for _ in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+        assert len(attempts) == 2
+
+    def test_the_background_warmer_arms_again_once_the_failure_is_stale(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        attempts: list[int] = []
+        monkeypatch.setattr(
+            "maljan.memory.hybrid_attck_index.HybridATTCKIndex", self._broken(attempts)
+        )
+        knowledge.set_index_retry_after(60)
+        assert knowledge.warm_index_in_background() is True
+        for _ in range(200):
+            if knowledge._HYBRID_FAILED:
+                break
+            time.sleep(0.02)
+        assert attempts == [1]
+        assert knowledge.warm_index_in_background() is False
+
+        monkeypatch.setattr(knowledge, "_HYBRID_FAILED_AT", time.monotonic() - 61)
+        assert knowledge.warm_index_in_background() is True
 
     def test_a_qdrant_free_box_reports_the_missing_client_rather_than_no_matches(
         self, monkeypatch

@@ -2607,10 +2607,15 @@ class ValidationConfig(BaseModel):
     sets. With it on, a claim is questioned when its id scores under
     ``alignment_threshold`` — the paper's gate — and an in-scope candidate from
     another tactic beats that score by ``alignment_margin``.
+
+    ``index_retry_seconds`` is how long a failed index build is believed before
+    another is attempted. A worker used to remember one network blip for its
+    whole life, so every later job in it ran without the index; 0 restores that.
     """
 
     alignment_gate: Literal["auto", "off"] = "auto"
     alignment_gate_build: bool = False
+    index_retry_seconds: Annotated[int, Field(ge=0)] = 900
     alignment_threshold: Annotated[float, Field(ge=0.0, le=1.0)] = 0.05
     alignment_margin: Annotated[float, Field(ge=0.0, le=1.0)] = 0.20
     weak_alignment: bool = False

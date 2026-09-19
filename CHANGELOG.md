@@ -473,6 +473,25 @@ change landed on `main`.
   waiting and the setting it is waiting on, `api.enrichment_dedicated_worker`.
   Nothing is drawn where enrichment runs beside the analyses, where its worker
   is up, or against an API that does not answer with the field.
+- **A technique's name, tactics, domain and platforms are a file read.**
+  `data/attck_techniques.json` ships beside the id catalogue, written from the
+  same three bundles by
+  `scripts/knowledge/prepare_attck_malware_fixtures.py`: per active technique
+  id its domain, its name, its tactic slugs and its MITRE platforms, plus the
+  tactic catalogue per domain. `tools.knowledge.attck_lookup`,
+  `attck_validate`, `attck_scope` and the capability matrix's name and tactic
+  resolution all answer from it and build nothing; only `resolve_technique` and
+  the alignment gate, which rank, still load the STIX bundles. A cold worker
+  and a cold CI runner no longer fetch fifty-eight megabytes to answer a
+  dictionary question, and `tests/unit` needs no network at all.
+  `data/attck_retired_ids.json` gains `revoked_by` per row where the bundle
+  names a successor, which is what lets a data builder retarget a retired id
+  mechanically.
+- **A failed ATT&CK index build is retried.** It is remembered with the moment
+  it happened and re-attempted after `validation.index_retry_seconds` (default
+  900; 0 never re-attempts, which is the previous behaviour). One unreachable
+  moment used to leave every later job in that worker without the index, with
+  nothing saying why. Concurrent lookups still start one build, not a storm.
 
 ### Changed
 

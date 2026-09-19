@@ -1714,7 +1714,17 @@ def alignment_gate(knowledge: Any, cfg_validation: Any, log: Any, name: str) -> 
     pays for the build. ``off`` never runs it. A knowledge module without the
     question — a stub — has no gate. A function rather than a method so a
     duck-typed analyst that borrows ``_validate_isr`` alone still gets it.
+
+    The retry interval for a failed index build is handed over here too: the
+    knowledge module reads no settings of its own, and this is where the
+    validation settings and the knowledge module meet.
     """
+    retry = getattr(knowledge, "set_index_retry_after", None)
+    if callable(retry):
+        try:
+            retry(int(getattr(cfg_validation, "index_retry_seconds", 900) or 0))
+        except Exception as exc:  # noqa: BLE001 — a setting that will not apply is not a gate
+            log.debug("%s: the index retry interval did not apply (%s).", name, exc)
     mode = str(getattr(cfg_validation, "alignment_gate", "auto") or "auto")
     if mode != "auto":
         return None

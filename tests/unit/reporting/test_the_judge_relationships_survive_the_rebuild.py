@@ -16,8 +16,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
-
 from maljan.agents.judge_postprocess import enforce_bundle_integrity
 from maljan.reporting.builder import MalwareReportBuilder
 from maljan.reporting.models import MalwareReport
@@ -28,18 +26,6 @@ from maljan.schemas.stix_models import Bundle, ConfidenceAnnotatedRelationship
 KNOWN = "T1055"
 INVENTED = "T1063"
 MALWARE_ID = "malware--0f1e2d3c-4b5a-4968-8776-655443332211"
-
-
-@pytest.fixture(autouse=True)
-def _the_shared_attck_index(real_attck_index: None) -> None:
-    """Building a capability matrix resolves technique names and tactics.
-
-    It does that through ``ATTCKValidator.get_instance()``, which builds the
-    shared ATT&CK index from the corpus — so a report assembled here reaches
-    the catalogue whatever the test is about. The unit tree holds that build
-    shut; these ask for it by name so the list of tests that pay for it is a
-    list somebody can read.
-    """
 
 
 def _judge_bundle(*technique_ids: str) -> dict[str, Any]:

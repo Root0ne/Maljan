@@ -17,6 +17,7 @@ never a failed job.
 from __future__ import annotations
 
 import threading
+import time
 from typing import Any
 
 from maljan.core.logger import logger
@@ -33,65 +34,71 @@ DEFAULT_CASE_CORPUS = "data/attck_case_corpus_v1.json"
 _INDEX_LOCK = threading.Lock()
 _HYBRID_INDEX: Any = None
 _HYBRID_FAILED: str = ""
-_CATALOG: dict[str, Any] | None = None
+_HYBRID_FAILED_AT: float = 0.0
+
+# How long a failed index build is believed before another is attempted. A
+# network blip used to cost the worker its index for the life of the process,
+# so every later job in it ran without the hybrid index and nothing said why.
+# 0 means never re-attempt, which is that behaviour. Set from
+# ``validation.index_retry_seconds``; this module reads no settings itself.
+_RETRY_AFTER_SECONDS: float = 900.0
+
+
+def set_index_retry_after(seconds: float) -> None:
+    """How long to wait after a failed index build before attempting another."""
+    global _RETRY_AFTER_SECONDS
+    with _INDEX_LOCK:
+        _RETRY_AFTER_SECONDS = max(0.0, float(seconds))
 
 
 def reset_indices() -> None:
-    """Drop the warm index and catalog. For tests and for a refresh.
+    """Drop the warm index. For tests and for a refresh.
 
-    The attempt is dropped with them. ``_WARM_STARTED`` is the memory of a
-    build having been started, and it is sticky precisely so a failed one is
-    not retried; a caller that has just thrown the index away is asking for
-    the cold state, and leaving the flag set would disarm the background
-    warmer for the rest of the process with nothing able to arm it again.
+    The attempt is dropped with it, so the next lookup builds rather than
+    waiting out the retry interval. ``_WARM_STARTED`` goes too: it is the
+    memory of a build having been started, and a caller that has just thrown
+    the index away is asking for the cold state — leaving the flag set would
+    disarm the background warmer for the rest of the process with nothing able
+    to arm it again.
     """
-    global _HYBRID_INDEX, _HYBRID_FAILED, _CATALOG, _WARM_STARTED
+    global _HYBRID_INDEX, _HYBRID_FAILED, _HYBRID_FAILED_AT, _WARM_STARTED
     with _INDEX_LOCK:
         _HYBRID_INDEX = None
         _HYBRID_FAILED = ""
-        _CATALOG = None
+        _HYBRID_FAILED_AT = 0.0
         _WARM_STARTED = False
-
-
-def _catalog() -> dict[str, Any]:
-    """``{technique_id: ATTCKTechnique}`` across every domain, or ``{}``.
-
-    Deliberately *not* the vector index. Looking up a technique by its id needs
-    the catalogue and nothing else, and routing that through the hybrid index
-    would load an embedding model — seconds and hundreds of megabytes — to
-    answer a dictionary lookup. ``resolve_technique`` is the one function here
-    that genuinely ranks, and it is the only one that pays for the index.
-    """
-    global _CATALOG
-    with _INDEX_LOCK:
-        if _CATALOG is not None:
-            return _CATALOG
-    catalog: dict[str, Any] = {}
-    try:
-        from maljan.memory.attck_loader import load_all_domains
-
-        for data in load_all_domains().values():
-            for technique in data.techniques:
-                catalog.setdefault(technique.technique_id, technique)
-    except Exception as exc:  # noqa: BLE001 — a knowledge lookup degrades, never raises
-        logger.warning("knowledge: the ATT&CK catalogue is unavailable (%s).", exc)
-    with _INDEX_LOCK:
-        _CATALOG = catalog
-    return catalog
 
 
 def _hybrid_index() -> tuple[Any, str]:
     """The hybrid ATT&CK index, or ``(None, reason)`` when it cannot be built.
 
-    A failure is remembered as well as a success: a box that cannot reach MITRE
-    would otherwise retry a fifty-megabyte download on every single lookup.
+    A failure is remembered with the moment it happened: a box that cannot
+    reach MITRE would otherwise retry a fifty-megabyte download on every single
+    lookup. It is remembered for ``_RETRY_AFTER_SECONDS`` and no longer, so a
+    blip costs one interval rather than the worker's whole life; with the
+    interval at zero it is remembered for good.
+
+    The build runs outside the lock — it is seconds long and every other
+    lookup would queue behind it — and the decision to start one is taken
+    inside it, with the failure's timestamp moved forward before the attempt.
+    Two lookups arriving together therefore start one build, not two, and the
+    second is answered the standing reason rather than waiting.
     """
-    global _HYBRID_INDEX, _HYBRID_FAILED
+    global _HYBRID_INDEX, _HYBRID_FAILED, _HYBRID_FAILED_AT
     with _INDEX_LOCK:
         if _HYBRID_INDEX is not None:
             return _HYBRID_INDEX, ""
         if _HYBRID_FAILED:
-            return None, _HYBRID_FAILED
+            waited = time.monotonic() - _HYBRID_FAILED_AT
+            if _RETRY_AFTER_SECONDS <= 0.0 or waited < _RETRY_AFTER_SECONDS:
+                return None, _HYBRID_FAILED
+            # Claim the attempt here, so the lookups arriving while it runs are
+            # answered the standing reason instead of starting builds of their own.
+            _HYBRID_FAILED_AT = time.monotonic()
+            logger.info(
+                "knowledge: re-attempting the ATT&CK index build, %.0f s after the last failure.",
+                waited,
+            )
     try:
         from maljan.memory.hybrid_attck_index import HybridATTCKIndex
 
@@ -101,9 +108,11 @@ def _hybrid_index() -> tuple[Any, str]:
         logger.warning("knowledge: %s", reason)
         with _INDEX_LOCK:
             _HYBRID_FAILED = reason
+            _HYBRID_FAILED_AT = time.monotonic()
         return None, reason
     with _INDEX_LOCK:
         _HYBRID_INDEX = index
+        _HYBRID_FAILED = ""
     return index, ""
 
 
@@ -113,9 +122,9 @@ def index_is_warm() -> bool:
         return _HYBRID_INDEX is not None
 
 
-# Set under ``_INDEX_LOCK`` by the one call that starts the background build,
-# and never cleared: a build that failed is remembered as attempted, so no
-# later run starts another and every later caller is answered ``False``.
+# Set under ``_INDEX_LOCK`` by the call that starts a background build. A
+# build that failed is remembered as attempted, so no later run starts another
+# while the failure still stands and every later caller is answered ``False``.
 _WARM_STARTED = False
 
 
@@ -124,13 +133,22 @@ def warm_index_in_background() -> bool:
 
     For the caller that may not wait: the alignment gate on a worker that has
     not built the index yet. ``True`` when a build was started by this call,
-    ``False`` when one was already started in this process — running,
-    finished or failed — or the index is already there. Check and set happen
-    under one lock, so two analysts in parallel start one build, not two.
+    ``False`` when one was already started in this process — running or
+    finished — or the index is already there. Check and set happen under one
+    lock, so two analysts in parallel start one build, not two.
+
+    A build whose failure the retry interval has outlived is started again:
+    the flag is the memory of an attempt, and an attempt the module is willing
+    to repeat should not be the thing that stops the repeat.
     """
     global _WARM_STARTED
     with _INDEX_LOCK:
-        if _HYBRID_INDEX is not None or _WARM_STARTED:
+        if _HYBRID_INDEX is not None:
+            return False
+        stale = bool(_HYBRID_FAILED) and 0.0 < _RETRY_AFTER_SECONDS <= (
+            time.monotonic() - _HYBRID_FAILED_AT
+        )
+        if _WARM_STARTED and not stale:
             return False
         _WARM_STARTED = True
 
@@ -225,22 +243,27 @@ def resolve_technique(text: str, k: int = 5, domain: str | None = None) -> dict[
 
 
 def attck_lookup(technique_id: str) -> dict[str, Any]:
-    """One technique's catalogue entry, and whether it exists at all."""
-    from maljan.memory.attck_loader import domain_of, platforms_for, retired_in, valid_ids
+    """One technique's catalogue entry, and whether it exists at all.
+
+    Answered from the vendored technique table, which carries the name, the
+    tactics, the domain and the platforms for every id in the catalogue. A
+    dictionary question costs a file read: the fifty-megabyte STIX bundle is
+    what ``resolve_technique`` ranks over, and nothing else here loads it.
+    """
+    from maljan.memory.attck_loader import domain_of, retired_in, technique_entry, valid_ids
 
     tid = (technique_id or "").strip().upper()
     if not tid:
         return {"valid": False, "technique_id": "", "reason": "no technique id given"}
-    technique = _catalog().get(tid)
+    technique = technique_entry(tid)
     out: dict[str, Any] = {
         "valid": tid in valid_ids(),
         "technique_id": tid,
         "name": technique.name if technique else "",
-        "domain": domain_of(tid),
-        "platforms": list(platforms_for(tid)),
-        "tactics": list(technique.tactic_phases) if technique else [],
-        "url": (technique.url if technique and technique.url else None)
-        or f"https://attack.mitre.org/techniques/{tid.replace('.', '/')}/",
+        "domain": (technique.domain if technique else None) or domain_of(tid),
+        "platforms": list(technique.platforms) if technique else [],
+        "tactics": list(technique.tactics) if technique else [],
+        "url": f"https://attack.mitre.org/techniques/{tid.replace('.', '/')}/",
     }
     if technique is None:
         retired = retired_in(tid)
@@ -281,11 +304,9 @@ def attck_validate(ids: list[str]) -> dict[str, Any]:
     Only the invalid ones come back. A validator that echoed every id would
     make the caller diff two lists to find the one that matters.
 
-    ``valid_ids`` is the vendored id universe and costs a file read; the
-    catalogue behind the suggestions is the fifty-megabyte bundle. So the
-    catalogue is only consulted once an id has actually failed — a run whose
-    every id is real never loads it, which is what makes this cheap enough to
-    call inside an analyst's own loop.
+    Both the check and the suggestions come out of the vendored id universe,
+    which costs a file read. Nothing here loads a STIX bundle, so this is
+    cheap enough to call inside an analyst's own loop.
     """
     from maljan.memory.attck_loader import retired_in, valid_ids
 
@@ -293,7 +314,6 @@ def attck_validate(ids: list[str]) -> dict[str, Any]:
     unknown = [t for t in (str(raw).strip().upper() for raw in ids or []) if t and t not in known]
     if not unknown:
         return {"invalid": [], "checked": len(ids or [])}
-    catalog = _catalog()
     invalid: list[dict[str, Any]] = []
     for tid in unknown:
         row: dict[str, Any] = {"id": tid, "suggestions": []}
@@ -313,11 +333,11 @@ def attck_validate(ids: list[str]) -> dict[str, Any]:
         row["suggestions"].extend(
             sorted(
                 other
-                for other in catalog
+                for other in known
                 if other.startswith(f"{parent}.") and other not in row["suggestions"]
             )[:3]
         )
-        if not catalog:
+        if not known:
             row["reason"] = "the ATT&CK catalogue is unavailable"
         invalid.append(row)
     return {"invalid": invalid, "checked": len(ids or [])}
