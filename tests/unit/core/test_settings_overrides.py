@@ -101,40 +101,45 @@ class TestADeprecatedOverrideMapCannotHoldANonBudget:
     use and nobody was told. The bound the definition's own budget fields carry
     is on the maps now, and an entry that fails it is dropped rather than
     refused: a settings build that raises is a deployment that cannot serve.
+
+    It runs **before** pydantic's coercion, which is where the shapes that
+    raise are: run after it, a ``2.5``, a ``"lots"`` and a nested dict never
+    reached it and the build raised on all three.
     """
 
-    def test_a_zero_is_dropped_and_nothing_raises(self):
-        settings = Settings(react_agent_max_steps_overrides={"scout": 0, "static": 40})
+    @pytest.mark.parametrize("budget", [0, -5, 2.5, "lots", {"a": 1}, [1], True, False, None])
+    def test_a_value_no_loop_can_run_on_is_dropped_and_nothing_raises(self, budget):
+        settings = Settings(react_agent_max_steps_overrides={"scout": budget, "static": 40})
 
         assert settings.react_agent_max_steps_overrides == {"static": 40}
 
-    def test_a_negative_is_dropped(self):
-        settings = Settings(react_agent_timeout_overrides={"scout": -5, "judge": 600})
+    @pytest.mark.parametrize("budget", [1, 40, "40", " 40 "])
+    def test_a_value_a_loop_can_run_on_is_kept(self, budget):
+        """A deployment writes one as a string through the environment."""
+        settings = Settings(react_agent_timeout_overrides={"judge": budget})
 
-        assert settings.react_agent_timeout_overrides == {"judge": 600}
-
-    def test_a_boolean_arrives_as_the_number_pydantic_read_it_as(self):
-        """Stated rather than assumed: the bound runs after the coercion.
-
-        The field is ``dict[str, int]``, so pydantic has already made a
-        ``True`` into a 1 by the time this bound sees it, and 1 is a budget a
-        loop can run. ``a_budget`` still refuses a bare ``True`` where it reads
-        a map pydantic did not build.
-        """
-        settings = Settings(react_agent_max_steps_overrides={"scout": True})
-
-        assert settings.react_agent_max_steps_overrides == {"scout": 1}
+        assert settings.react_agent_timeout_overrides == {"judge": int(str(budget).strip())}
 
     def test_a_good_map_is_untouched(self):
         settings = Settings(react_agent_timeout_overrides={"static": 1500, "judge": 600})
 
         assert settings.react_agent_timeout_overrides == {"static": 1500, "judge": 600}
 
+    def test_a_map_that_is_not_a_map_is_still_the_field_s_own_refusal(self):
+        """Stated rather than assumed: the bound is per value, not per field.
+
+        A whole field of the wrong type is pydantic refusing the annotation,
+        which is the behaviour every other setting has and is not what a
+        per-value bound is for.
+        """
+        with pytest.raises(ValidationError):
+            Settings(react_agent_max_steps_overrides="not a map")
+
     def test_the_operator_is_told_which_entry_went(self, caplog):
         import logging
 
         with caplog.at_level(logging.WARNING, logger="maljan.core.config"):
-            Settings(react_agent_max_steps_overrides={"scout": 0})
+            Settings(react_agent_max_steps_overrides={"scout": "lots"})
 
         assert "scout" in caplog.text
         assert "whole number of at least one" in caplog.text

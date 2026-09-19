@@ -588,8 +588,10 @@ class PreprocessingConfig(BaseModel):
 
     # Deterministic API→ATT&CK mapping, computed from the same resolved-import
     # set as the behaviour map above (one parse, two projections). It fills
-    # ``StaticAnalysis.api_technique_hits``: one row per technique with the
-    # exact imports that evidenced it, which an analyst reads and decides about.
+    # ``StaticAnalysis.api_technique_hits``: one row per *rule* with the exact
+    # imports that evidenced it, which an analyst reads and decides about. Two
+    # rules may name one technique by two mechanisms, and each carries its own
+    # ``rule`` label so the two rows are not read as a duplicate.
     # Each row carries the catalog's own confidence, deliberately modest — a
     # resolved import merely being present is weak — and each technique declares
     # a ``min_apis`` so one ubiquitous import cannot produce a row on its own.
@@ -1058,6 +1060,22 @@ def _without_the_empty_builtin_tool_list(entry: dict[str, Any]) -> dict[str, Any
     if entry.get("tools") == []:
         return {k: v for k, v in entry.items() if k != "tools"}
     return entry
+
+
+def _a_whole_number(value: Any) -> Any:
+    """``value`` as the integer it names, or ``value`` itself.
+
+    An environment variable and a JSON import both bring a number in as a
+    string, and a bound that runs before pydantic's coercion has to read one
+    the way pydantic would. Anything that is not a whole number comes back
+    unchanged, so the caller still refuses it.
+    """
+    if isinstance(value, str):
+        try:
+            return int(value.strip())
+        except ValueError:
+            return value
+    return value
 
 
 def _is_a_budget(value: Any) -> bool:
@@ -2930,9 +2948,11 @@ class Settings(BaseSettings):
         }
     )
 
-    @field_validator("react_agent_timeout_overrides", "react_agent_max_steps_overrides")
+    @field_validator(
+        "react_agent_timeout_overrides", "react_agent_max_steps_overrides", mode="before"
+    )
     @classmethod
-    def _drop_a_budget_the_maps_cannot_hold(cls, value: dict[str, int]) -> dict[str, int]:
+    def _drop_a_budget_the_maps_cannot_hold(cls, value: Any) -> Any:
         """The ``ge=1`` the definition's own budget fields carry, on the maps too.
 
         ``dict[str, int]`` accepts a zero, a negative and a boolean through the
@@ -2943,12 +2963,20 @@ class Settings(BaseSettings):
         through to the deployment's own budget, which is what the reader did
         with it anyway — the difference is that the store no longer holds a
         number nothing will ever use, and the operator is told.
+
+        **Before** the coercion, because that is where the shapes that raise
+        are. Run after it, this saw an ``int`` or nothing at all: a ``2.5``, a
+        ``"lots"`` and a nested dict never reached it and made the settings
+        build raise, which is the outcome it exists to prevent. What a
+        deployment legitimately writes still arrives — an environment variable
+        is a string, so a ``"40"`` that names a whole number is kept and
+        handed on for pydantic to coerce as it always did.
         """
         if not isinstance(value, dict):
             return value
-        kept: dict[str, int] = {}
+        kept: dict[Any, Any] = {}
         for agent, budget in value.items():
-            if _is_a_budget(budget):
+            if _is_a_budget(_a_whole_number(budget)):
                 kept[agent] = budget
                 continue
             logger.warning(
