@@ -20,6 +20,7 @@ added is never the evidence the run was measured on.
 from __future__ import annotations
 
 import asyncio
+import sys
 import threading
 import weakref
 from collections.abc import Callable
@@ -179,8 +180,12 @@ def _abandon_handles_on(loop: asyncio.AbstractEventLoop) -> None:
     future the retired loop will never complete.
 
     Runs on the watchdog thread. The reap is the only slow part and is bounded
-    by ``CHILD_TERM_GRACE``.
+    by ``CHILD_TERM_GRACE`` — per handle, so a loop carrying many of them costs
+    that many graces, which is why a process already shutting down is left to
+    the operating system instead.
     """
+    if sys.is_finalizing():
+        return
     for handle in list(_LIVE_HANDLES):
         if handle._owner_loop is not loop:
             continue
@@ -686,9 +691,17 @@ class ServerHandle:
         )
 
     def _kill_survivors(self, pids: list[int]) -> None:
-        """SIGKILL whichever of ``pids`` sat through the SIGTERM."""
+        """SIGKILL whichever of ``pids`` sat through the SIGTERM.
+
+        Not once the interpreter is finalising: this is reached from a daemon
+        thread after a grace period long enough for a process to have decided
+        to exit inside it, and the line it logs would be written to a stream
+        that is already closed.
+        """
         import signal
 
+        if sys.is_finalizing():
+            return
         survivors = [pid for pid in pids if pid in _own_child_pids()]
         if not survivors:
             return
@@ -717,10 +730,18 @@ class ServerHandle:
         self._kill_survivors(pids)
 
     def _reap_children(self) -> None:
-        """``_areap_children`` for the synchronous close path."""
+        """``_areap_children`` for the synchronous close path.
+
+        Reached from the retirement hook on a daemon thread, so it stands down
+        once the interpreter is going: the child is the operating system's to
+        collect by then, and what this would otherwise do is sleep through the
+        grace and log into a closed stream.
+        """
         import signal
         import time
 
+        if sys.is_finalizing():
+            return
         pids = self._live_children()
         if not pids:
             return
