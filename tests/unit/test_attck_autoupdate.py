@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from maljan.extractors.capability_matrix import _TACTIC_BY_SLUG, _resolve_tactic
+from maljan.memory import attck_loader
 from maljan.memory.attck_index import ATTCKIndex
 from maljan.memory.attck_loader import _load_raw_bundle, _parse_tactics
 
@@ -191,33 +192,39 @@ class TestCacheTTL:
             _load_raw_bundle("http://x", cache, force_refresh=False, max_age_days=30)
 
 
-class _FakeIndex:
-    """Minimal stand-in exposing get_tactic_by_slug for _resolve_tactic."""
+@pytest.fixture
+def _vendored_v19(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The vendored tactic catalogue, standing in for the shipped file."""
+    tactics = {
+        t.shortname: attck_loader.VendoredTactic(t.tactic_id, t.shortname, t.name)
+        for t in _parse_tactics(V19_BUNDLE)
+    }
+    monkeypatch.setattr(attck_loader, "_technique_table_cache", ({}, {"enterprise": tactics}))
 
-    def __init__(self, tactics: list) -> None:
-        self._by_slug = {t.shortname: t for t in tactics}
 
-    def get_tactic_by_slug(self, slug: str):
-        return self._by_slug.get(slug)
+@pytest.fixture
+def _no_vendored_catalogue(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(attck_loader, "_technique_table_cache", ({}, {}))
 
 
 class TestResolveTactic:
-    def test_dynamic_resolution_wins(self) -> None:
-        idx = _FakeIndex(_parse_tactics(V19_BUNDLE))
+    def test_the_vendored_catalogue_wins(self, _vendored_v19: None) -> None:
         # A NEW v19 tactic not in the canonical table resolves straight from the
-        # bundle (tid + live name both come from the catalogue).
-        assert _resolve_tactic(idx, "defense-impairment") == ("TA0112", "Defense Impairment")
+        # vendored catalogue (tid + live name both come from it).
+        assert _resolve_tactic("defense-impairment") == ("TA0112", "Defense Impairment")
         # For a KNOWN Enterprise tactic the canonical
-        # display name is pinned, so a v19+ bundle relabelling TA0005 to
+        # display name is pinned, so a v19+ release relabelling TA0005 to
         # "Stealth" no longer leaks into exports — it stays "Defense Evasion".
-        assert _resolve_tactic(idx, "stealth") == ("TA0005", "Defense Evasion")
+        assert _resolve_tactic("stealth") == ("TA0005", "Defense Evasion")
 
-    def test_fallback_to_hardcoded_without_index(self) -> None:
-        assert _resolve_tactic(None, "defense-evasion") == _TACTIC_BY_SLUG["defense-evasion"]
+    def test_fallback_to_hardcoded_without_the_catalogue(
+        self, _no_vendored_catalogue: None
+    ) -> None:
+        assert _resolve_tactic("defense-evasion") == _TACTIC_BY_SLUG["defense-evasion"]
 
-    def test_unknown_slug_without_index(self) -> None:
+    def test_unknown_slug_without_the_catalogue(self, _no_vendored_catalogue: None) -> None:
         # Unknown slug with no catalogue echoes the slug back with an empty id.
-        assert _resolve_tactic(None, "made-up") == ("", "made-up")
+        assert _resolve_tactic("made-up") == ("", "made-up")
 
     def test_empty_slug(self) -> None:
-        assert _resolve_tactic(None, "") == ("", "")
+        assert _resolve_tactic("") == ("", "")

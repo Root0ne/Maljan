@@ -2,332 +2,831 @@
   "_meta": {
     "attck_version": "19.2"
   },
+  "_tactics": {
+    "enterprise": {
+      "collection": {
+        "id": "TA0009",
+        "name": "Collection"
+      },
+      "command-and-control": {
+        "id": "TA0011",
+        "name": "Command and Control"
+      },
+      "credential-access": {
+        "id": "TA0006",
+        "name": "Credential Access"
+      },
+      "defense-impairment": {
+        "id": "TA0112",
+        "name": "Defense Impairment"
+      },
+      "discovery": {
+        "id": "TA0007",
+        "name": "Discovery"
+      },
+      "execution": {
+        "id": "TA0002",
+        "name": "Execution"
+      },
+      "exfiltration": {
+        "id": "TA0010",
+        "name": "Exfiltration"
+      },
+      "impact": {
+        "id": "TA0040",
+        "name": "Impact"
+      },
+      "initial-access": {
+        "id": "TA0001",
+        "name": "Initial Access"
+      },
+      "lateral-movement": {
+        "id": "TA0008",
+        "name": "Lateral Movement"
+      },
+      "persistence": {
+        "id": "TA0003",
+        "name": "Persistence"
+      },
+      "privilege-escalation": {
+        "id": "TA0004",
+        "name": "Privilege Escalation"
+      },
+      "reconnaissance": {
+        "id": "TA0043",
+        "name": "Reconnaissance"
+      },
+      "resource-development": {
+        "id": "TA0042",
+        "name": "Resource Development"
+      },
+      "stealth": {
+        "id": "TA0005",
+        "name": "Stealth"
+      }
+    },
+    "mobile": {
+      "collection": {
+        "id": "TA0035",
+        "name": "Collection"
+      },
+      "command-and-control": {
+        "id": "TA0037",
+        "name": "Command and Control"
+      },
+      "credential-access": {
+        "id": "TA0031",
+        "name": "Credential Access"
+      },
+      "defense-evasion": {
+        "id": "TA0030",
+        "name": "Defense Evasion"
+      },
+      "discovery": {
+        "id": "TA0032",
+        "name": "Discovery"
+      },
+      "execution": {
+        "id": "TA0041",
+        "name": "Execution"
+      },
+      "exfiltration": {
+        "id": "TA0036",
+        "name": "Exfiltration"
+      },
+      "impact": {
+        "id": "TA0034",
+        "name": "Impact"
+      },
+      "initial-access": {
+        "id": "TA0027",
+        "name": "Initial Access"
+      },
+      "lateral-movement": {
+        "id": "TA0033",
+        "name": "Lateral Movement"
+      },
+      "persistence": {
+        "id": "TA0028",
+        "name": "Persistence"
+      },
+      "privilege-escalation": {
+        "id": "TA0029",
+        "name": "Privilege Escalation"
+      }
+    },
+    "ics": {
+      "collection": {
+        "id": "TA0100",
+        "name": "Collection"
+      },
+      "command-and-control": {
+        "id": "TA0101",
+        "name": "Command and Control"
+      },
+      "discovery": {
+        "id": "TA0102",
+        "name": "Discovery"
+      },
+      "evasion": {
+        "id": "TA0103",
+        "name": "Evasion"
+      },
+      "execution": {
+        "id": "TA0104",
+        "name": "Execution"
+      },
+      "impact": {
+        "id": "TA0105",
+        "name": "Impact"
+      },
+      "impair-process-control": {
+        "id": "TA0106",
+        "name": "Impair Process Control"
+      },
+      "inhibit-response-function": {
+        "id": "TA0107",
+        "name": "Inhibit Response Function"
+      },
+      "initial-access": {
+        "id": "TA0108",
+        "name": "Initial Access"
+      },
+      "lateral-movement": {
+        "id": "TA0109",
+        "name": "Lateral Movement"
+      },
+      "persistence": {
+        "id": "TA0110",
+        "name": "Persistence"
+      },
+      "privilege-escalation": {
+        "id": "TA0111",
+        "name": "Privilege Escalation"
+      }
+    }
+  },
   "T0800": {
     "domain": "ics",
+    "name": "Activate Firmware Update Mode",
+    "tactics": [
+      "inhibit-response-function"
+    ],
     "platforms": []
   },
   "T0801": {
     "domain": "ics",
+    "name": "Monitor Process State",
+    "tactics": [
+      "collection"
+    ],
     "platforms": []
   },
   "T0802": {
     "domain": "ics",
+    "name": "Automated Collection",
+    "tactics": [
+      "collection"
+    ],
     "platforms": []
   },
   "T0806": {
     "domain": "ics",
+    "name": "Brute Force I/O",
+    "tactics": [
+      "impair-process-control"
+    ],
     "platforms": []
   },
   "T0807": {
     "domain": "ics",
+    "name": "Command-Line Interface",
+    "tactics": [
+      "execution"
+    ],
     "platforms": []
   },
   "T0809": {
     "domain": "ics",
+    "name": "Data Destruction",
+    "tactics": [
+      "inhibit-response-function"
+    ],
     "platforms": []
   },
   "T0811": {
     "domain": "ics",
+    "name": "Data from Information Repositories",
+    "tactics": [
+      "collection"
+    ],
     "platforms": []
   },
   "T0813": {
     "domain": "ics",
+    "name": "Denial of Control",
+    "tactics": [
+      "impact"
+    ],
     "platforms": []
   },
   "T0814": {
     "domain": "ics",
+    "name": "Denial of Service",
+    "tactics": [
+      "inhibit-response-function"
+    ],
     "platforms": []
   },
   "T0815": {
     "domain": "ics",
+    "name": "Denial of View",
+    "tactics": [
+      "impact"
+    ],
     "platforms": []
   },
   "T0816": {
     "domain": "ics",
+    "name": "Device Restart/Shutdown",
+    "tactics": [
+      "inhibit-response-function"
+    ],
     "platforms": []
   },
   "T0817": {
     "domain": "ics",
+    "name": "Drive-by Compromise",
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": []
   },
   "T0819": {
     "domain": "ics",
+    "name": "Exploit Public-Facing Application",
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": []
   },
   "T0820": {
     "domain": "ics",
+    "name": "Exploitation for Evasion",
+    "tactics": [
+      "evasion"
+    ],
     "platforms": []
   },
   "T0821": {
     "domain": "ics",
+    "name": "Modify Controller Tasking",
+    "tactics": [
+      "execution"
+    ],
     "platforms": []
   },
   "T0822": {
     "domain": "ics",
+    "name": "External Remote Services",
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": []
   },
   "T0823": {
     "domain": "ics",
+    "name": "Graphical User Interface",
+    "tactics": [
+      "execution"
+    ],
     "platforms": []
   },
   "T0826": {
     "domain": "ics",
+    "name": "Loss of Availability",
+    "tactics": [
+      "impact"
+    ],
     "platforms": []
   },
   "T0827": {
     "domain": "ics",
+    "name": "Loss of Control",
+    "tactics": [
+      "impact"
+    ],
     "platforms": []
   },
   "T0828": {
     "domain": "ics",
+    "name": "Loss of Productivity and Revenue",
+    "tactics": [
+      "impact"
+    ],
     "platforms": []
   },
   "T0829": {
     "domain": "ics",
+    "name": "Loss of View",
+    "tactics": [
+      "impact"
+    ],
     "platforms": []
   },
   "T0830": {
     "domain": "ics",
+    "name": "Adversary-in-the-Middle",
+    "tactics": [
+      "collection"
+    ],
     "platforms": []
   },
   "T0831": {
     "domain": "ics",
+    "name": "Manipulation of Control",
+    "tactics": [
+      "impact"
+    ],
     "platforms": []
   },
   "T0832": {
     "domain": "ics",
+    "name": "Manipulation of View",
+    "tactics": [
+      "impact"
+    ],
     "platforms": []
   },
   "T0834": {
     "domain": "ics",
+    "name": "Native API",
+    "tactics": [
+      "execution"
+    ],
     "platforms": []
   },
   "T0835": {
     "domain": "ics",
+    "name": "Manipulate I/O Image",
+    "tactics": [
+      "inhibit-response-function"
+    ],
     "platforms": []
   },
   "T0836": {
     "domain": "ics",
+    "name": "Modify Parameter",
+    "tactics": [
+      "impair-process-control"
+    ],
     "platforms": []
   },
   "T0837": {
     "domain": "ics",
+    "name": "Loss of Protection",
+    "tactics": [
+      "impact"
+    ],
     "platforms": []
   },
   "T0838": {
     "domain": "ics",
+    "name": "Modify Alarm Settings",
+    "tactics": [
+      "inhibit-response-function"
+    ],
     "platforms": []
   },
   "T0840": {
     "domain": "ics",
+    "name": "Network Connection Enumeration",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": []
   },
   "T0842": {
     "domain": "ics",
+    "name": "Network Sniffing",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": []
   },
   "T0843": {
     "domain": "ics",
+    "name": "Program Download",
+    "tactics": [
+      "lateral-movement"
+    ],
     "platforms": []
   },
   "T0843.001": {
     "domain": "ics",
+    "name": "Download All",
+    "tactics": [
+      "lateral-movement"
+    ],
     "platforms": []
   },
   "T0843.002": {
     "domain": "ics",
+    "name": "Online Edit",
+    "tactics": [
+      "lateral-movement"
+    ],
     "platforms": []
   },
   "T0843.003": {
     "domain": "ics",
+    "name": "Program Append",
+    "tactics": [
+      "lateral-movement"
+    ],
     "platforms": []
   },
   "T0845": {
     "domain": "ics",
+    "name": "Program Upload",
+    "tactics": [
+      "collection"
+    ],
     "platforms": []
   },
   "T0846": {
     "domain": "ics",
+    "name": "Remote System Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": []
   },
   "T0846.001": {
     "domain": "ics",
+    "name": "Port Scan",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": []
   },
   "T0846.002": {
     "domain": "ics",
+    "name": "Broadcast Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": []
   },
   "T0846.003": {
     "domain": "ics",
+    "name": "Multicast Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": []
   },
   "T0847": {
     "domain": "ics",
+    "name": "Replication Through Removable Media",
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": []
   },
   "T0848": {
     "domain": "ics",
+    "name": "Rogue Master",
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": []
   },
   "T0849": {
     "domain": "ics",
+    "name": "Masquerading",
+    "tactics": [
+      "evasion"
+    ],
     "platforms": []
   },
   "T0851": {
     "domain": "ics",
+    "name": "Rootkit",
+    "tactics": [
+      "evasion",
+      "inhibit-response-function"
+    ],
     "platforms": []
   },
   "T0852": {
     "domain": "ics",
+    "name": "Screen Capture",
+    "tactics": [
+      "collection"
+    ],
     "platforms": []
   },
   "T0853": {
     "domain": "ics",
+    "name": "Scripting",
+    "tactics": [
+      "execution"
+    ],
     "platforms": []
   },
   "T0858": {
     "domain": "ics",
+    "name": "Change Operating Mode",
+    "tactics": [
+      "execution",
+      "evasion"
+    ],
     "platforms": []
   },
   "T0859": {
     "domain": "ics",
+    "name": "Valid Accounts",
+    "tactics": [
+      "persistence",
+      "lateral-movement"
+    ],
     "platforms": []
   },
   "T0860": {
     "domain": "ics",
+    "name": "Wireless Compromise",
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": []
   },
   "T0861": {
     "domain": "ics",
+    "name": "Point & Tag Identification",
+    "tactics": [
+      "collection"
+    ],
     "platforms": []
   },
   "T0862": {
     "domain": "ics",
+    "name": "Supply Chain Compromise",
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": []
   },
   "T0863": {
     "domain": "ics",
+    "name": "User Execution",
+    "tactics": [
+      "execution"
+    ],
     "platforms": []
   },
   "T0864": {
     "domain": "ics",
+    "name": "Transient Cyber Asset",
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": []
   },
   "T0865": {
     "domain": "ics",
+    "name": "Spearphishing Attachment",
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": []
   },
   "T0866": {
     "domain": "ics",
+    "name": "Exploitation of Remote Services",
+    "tactics": [
+      "initial-access",
+      "lateral-movement"
+    ],
     "platforms": []
   },
   "T0867": {
     "domain": "ics",
+    "name": "Lateral Tool Transfer",
+    "tactics": [
+      "lateral-movement"
+    ],
     "platforms": []
   },
   "T0868": {
     "domain": "ics",
+    "name": "Detect Operating Mode",
+    "tactics": [
+      "collection"
+    ],
     "platforms": []
   },
   "T0869": {
     "domain": "ics",
+    "name": "Standard Application Layer Protocol",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": []
   },
   "T0871": {
     "domain": "ics",
+    "name": "Execution through API",
+    "tactics": [
+      "execution"
+    ],
     "platforms": []
   },
   "T0872": {
     "domain": "ics",
+    "name": "Indicator Removal on Host",
+    "tactics": [
+      "evasion"
+    ],
     "platforms": []
   },
   "T0873": {
     "domain": "ics",
+    "name": "Project File Infection",
+    "tactics": [
+      "persistence"
+    ],
     "platforms": []
   },
   "T0873.001": {
     "domain": "ics",
+    "name": "Siemens Project File Format",
+    "tactics": [
+      "persistence"
+    ],
     "platforms": []
   },
   "T0874": {
     "domain": "ics",
+    "name": "Hooking",
+    "tactics": [
+      "execution",
+      "privilege-escalation"
+    ],
     "platforms": []
   },
   "T0877": {
     "domain": "ics",
+    "name": "I/O Image",
+    "tactics": [
+      "collection"
+    ],
     "platforms": []
   },
   "T0878": {
     "domain": "ics",
+    "name": "Alarm Suppression",
+    "tactics": [
+      "inhibit-response-function"
+    ],
     "platforms": []
   },
   "T0879": {
     "domain": "ics",
+    "name": "Damage to Property",
+    "tactics": [
+      "impact"
+    ],
     "platforms": []
   },
   "T0880": {
     "domain": "ics",
+    "name": "Loss of Safety",
+    "tactics": [
+      "impact"
+    ],
     "platforms": []
   },
   "T0881": {
     "domain": "ics",
+    "name": "Service Stop",
+    "tactics": [
+      "inhibit-response-function"
+    ],
     "platforms": []
   },
   "T0882": {
     "domain": "ics",
+    "name": "Theft of Operational Information",
+    "tactics": [
+      "impact"
+    ],
     "platforms": []
   },
   "T0883": {
     "domain": "ics",
+    "name": "Internet Accessible Device",
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": []
   },
   "T0884": {
     "domain": "ics",
+    "name": "Connection Proxy",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": []
   },
   "T0885": {
     "domain": "ics",
+    "name": "Commonly Used Port",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": []
   },
   "T0886": {
     "domain": "ics",
+    "name": "Remote Services",
+    "tactics": [
+      "initial-access",
+      "lateral-movement"
+    ],
     "platforms": []
   },
   "T0887": {
     "domain": "ics",
+    "name": "Wireless Sniffing",
+    "tactics": [
+      "discovery",
+      "collection"
+    ],
     "platforms": []
   },
   "T0888": {
     "domain": "ics",
+    "name": "Remote System Information Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": []
   },
   "T0889": {
     "domain": "ics",
+    "name": "Modify Program",
+    "tactics": [
+      "persistence"
+    ],
     "platforms": []
   },
   "T0890": {
     "domain": "ics",
+    "name": "Exploitation for Privilege Escalation",
+    "tactics": [
+      "privilege-escalation"
+    ],
     "platforms": []
   },
   "T0892": {
     "domain": "ics",
+    "name": "Change Credential",
+    "tactics": [
+      "inhibit-response-function"
+    ],
     "platforms": []
   },
   "T0893": {
     "domain": "ics",
+    "name": "Data from Local System",
+    "tactics": [
+      "collection"
+    ],
     "platforms": []
   },
   "T0894": {
     "domain": "ics",
+    "name": "System Binary Proxy Execution",
+    "tactics": [
+      "evasion"
+    ],
     "platforms": []
   },
   "T0895": {
     "domain": "ics",
+    "name": "Autorun Image",
+    "tactics": [
+      "execution"
+    ],
     "platforms": []
   },
   "T1001": {
     "domain": "enterprise",
+    "name": "Data Obfuscation",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -337,6 +836,10 @@
   },
   "T1001.001": {
     "domain": "enterprise",
+    "name": "Junk Data",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -346,6 +849,10 @@
   },
   "T1001.002": {
     "domain": "enterprise",
+    "name": "Steganography",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -355,6 +862,10 @@
   },
   "T1001.003": {
     "domain": "enterprise",
+    "name": "Protocol or Service Impersonation",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -364,6 +875,10 @@
   },
   "T1003": {
     "domain": "enterprise",
+    "name": "OS Credential Dumping",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -372,30 +887,50 @@
   },
   "T1003.001": {
     "domain": "enterprise",
+    "name": "LSASS Memory",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1003.002": {
     "domain": "enterprise",
+    "name": "Security Account Manager",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1003.003": {
     "domain": "enterprise",
+    "name": "NTDS",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1003.004": {
     "domain": "enterprise",
+    "name": "LSA Secrets",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1003.005": {
     "domain": "enterprise",
+    "name": "Cached Domain Credentials",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Linux",
       "Windows"
@@ -403,24 +938,40 @@
   },
   "T1003.006": {
     "domain": "enterprise",
+    "name": "DCSync",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1003.007": {
     "domain": "enterprise",
+    "name": "Proc Filesystem",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Linux"
     ]
   },
   "T1003.008": {
     "domain": "enterprise",
+    "name": "/etc/passwd and /etc/shadow",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Linux"
     ]
   },
   "T1005": {
     "domain": "enterprise",
+    "name": "Data from Local System",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -431,6 +982,10 @@
   },
   "T1006": {
     "domain": "enterprise",
+    "name": "Direct Volume Access",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Network Devices",
       "Windows"
@@ -438,6 +993,10 @@
   },
   "T1007": {
     "domain": "enterprise",
+    "name": "System Service Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -446,6 +1005,10 @@
   },
   "T1008": {
     "domain": "enterprise",
+    "name": "Fallback Channels",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -455,6 +1018,10 @@
   },
   "T1010": {
     "domain": "enterprise",
+    "name": "Application Window Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -463,6 +1030,10 @@
   },
   "T1011": {
     "domain": "enterprise",
+    "name": "Exfiltration Over Other Network Medium",
+    "tactics": [
+      "exfiltration"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -471,6 +1042,10 @@
   },
   "T1011.001": {
     "domain": "enterprise",
+    "name": "Exfiltration Over Bluetooth",
+    "tactics": [
+      "exfiltration"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -479,12 +1054,20 @@
   },
   "T1012": {
     "domain": "enterprise",
+    "name": "Query Registry",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1014": {
     "domain": "enterprise",
+    "name": "Rootkit",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -493,6 +1076,10 @@
   },
   "T1016": {
     "domain": "enterprise",
+    "name": "System Network Configuration Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -503,6 +1090,10 @@
   },
   "T1016.001": {
     "domain": "enterprise",
+    "name": "Internet Connection Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -512,6 +1103,10 @@
   },
   "T1016.002": {
     "domain": "enterprise",
+    "name": "Wi-Fi Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -520,6 +1115,10 @@
   },
   "T1018": {
     "domain": "enterprise",
+    "name": "Remote System Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -530,6 +1129,10 @@
   },
   "T1020": {
     "domain": "enterprise",
+    "name": "Automated Exfiltration",
+    "tactics": [
+      "exfiltration"
+    ],
     "platforms": [
       "Linux",
       "Network Devices",
@@ -539,6 +1142,10 @@
   },
   "T1020.001": {
     "domain": "enterprise",
+    "name": "Traffic Duplication",
+    "tactics": [
+      "exfiltration"
+    ],
     "platforms": [
       "IaaS",
       "Network Devices"
@@ -546,6 +1153,10 @@
   },
   "T1021": {
     "domain": "enterprise",
+    "name": "Remote Services",
+    "tactics": [
+      "lateral-movement"
+    ],
     "platforms": [
       "ESXi",
       "IaaS",
@@ -556,24 +1167,40 @@
   },
   "T1021.001": {
     "domain": "enterprise",
+    "name": "Remote Desktop Protocol",
+    "tactics": [
+      "lateral-movement"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1021.002": {
     "domain": "enterprise",
+    "name": "SMB/Windows Admin Shares",
+    "tactics": [
+      "lateral-movement"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1021.003": {
     "domain": "enterprise",
+    "name": "Distributed Component Object Model",
+    "tactics": [
+      "lateral-movement"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1021.004": {
     "domain": "enterprise",
+    "name": "SSH",
+    "tactics": [
+      "lateral-movement"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -582,6 +1209,10 @@
   },
   "T1021.005": {
     "domain": "enterprise",
+    "name": "VNC",
+    "tactics": [
+      "lateral-movement"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -590,12 +1221,20 @@
   },
   "T1021.006": {
     "domain": "enterprise",
+    "name": "Windows Remote Management",
+    "tactics": [
+      "lateral-movement"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1021.007": {
     "domain": "enterprise",
+    "name": "Cloud Services",
+    "tactics": [
+      "lateral-movement"
+    ],
     "platforms": [
       "IaaS",
       "Identity Provider",
@@ -605,12 +1244,20 @@
   },
   "T1021.008": {
     "domain": "enterprise",
+    "name": "Direct Cloud VM Connections",
+    "tactics": [
+      "lateral-movement"
+    ],
     "platforms": [
       "IaaS"
     ]
   },
   "T1025": {
     "domain": "enterprise",
+    "name": "Data from Removable Media",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -619,6 +1266,10 @@
   },
   "T1027": {
     "domain": "enterprise",
+    "name": "Obfuscated Files or Information",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -629,6 +1280,10 @@
   },
   "T1027.001": {
     "domain": "enterprise",
+    "name": "Binary Padding",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -637,6 +1292,10 @@
   },
   "T1027.002": {
     "domain": "enterprise",
+    "name": "Software Packing",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -645,6 +1304,10 @@
   },
   "T1027.003": {
     "domain": "enterprise",
+    "name": "Steganography",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -653,6 +1316,10 @@
   },
   "T1027.004": {
     "domain": "enterprise",
+    "name": "Compile After Delivery",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -661,6 +1328,10 @@
   },
   "T1027.005": {
     "domain": "enterprise",
+    "name": "Indicator Removal from Tools",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -669,6 +1340,10 @@
   },
   "T1027.006": {
     "domain": "enterprise",
+    "name": "HTML Smuggling",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -677,12 +1352,20 @@
   },
   "T1027.007": {
     "domain": "enterprise",
+    "name": "Dynamic API Resolution",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1027.008": {
     "domain": "enterprise",
+    "name": "Stripped Payloads",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Network Devices",
@@ -692,6 +1375,10 @@
   },
   "T1027.009": {
     "domain": "enterprise",
+    "name": "Embedded Payloads",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -700,6 +1387,10 @@
   },
   "T1027.010": {
     "domain": "enterprise",
+    "name": "Command Obfuscation",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -708,6 +1399,10 @@
   },
   "T1027.011": {
     "domain": "enterprise",
+    "name": "Fileless Storage",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Windows"
@@ -715,12 +1410,20 @@
   },
   "T1027.012": {
     "domain": "enterprise",
+    "name": "LNK Icon Smuggling",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1027.013": {
     "domain": "enterprise",
+    "name": "Encrypted/Encoded File",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -729,6 +1432,10 @@
   },
   "T1027.014": {
     "domain": "enterprise",
+    "name": "Polymorphic Code",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -737,6 +1444,10 @@
   },
   "T1027.015": {
     "domain": "enterprise",
+    "name": "Compression",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -745,6 +1456,10 @@
   },
   "T1027.016": {
     "domain": "enterprise",
+    "name": "Junk Code Insertion",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -753,6 +1468,10 @@
   },
   "T1027.017": {
     "domain": "enterprise",
+    "name": "SVG Smuggling",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -761,6 +1480,10 @@
   },
   "T1027.018": {
     "domain": "enterprise",
+    "name": "Invisible Unicode",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -769,6 +1492,10 @@
   },
   "T1029": {
     "domain": "enterprise",
+    "name": "Scheduled Transfer",
+    "tactics": [
+      "exfiltration"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -777,6 +1504,10 @@
   },
   "T1030": {
     "domain": "enterprise",
+    "name": "Data Transfer Size Limits",
+    "tactics": [
+      "exfiltration"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -786,6 +1517,10 @@
   },
   "T1033": {
     "domain": "enterprise",
+    "name": "System Owner/User Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Linux",
       "Network Devices",
@@ -795,6 +1530,10 @@
   },
   "T1036": {
     "domain": "enterprise",
+    "name": "Masquerading",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Containers",
       "ESXi",
@@ -805,6 +1544,10 @@
   },
   "T1036.001": {
     "domain": "enterprise",
+    "name": "Invalid Code Signature",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Windows",
       "macOS"
@@ -812,6 +1555,10 @@
   },
   "T1036.002": {
     "domain": "enterprise",
+    "name": "Right-to-Left Override",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -820,6 +1567,10 @@
   },
   "T1036.003": {
     "domain": "enterprise",
+    "name": "Rename Legitimate Utilities",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -828,6 +1579,10 @@
   },
   "T1036.004": {
     "domain": "enterprise",
+    "name": "Masquerade Task or Service",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -836,6 +1591,10 @@
   },
   "T1036.005": {
     "domain": "enterprise",
+    "name": "Match Legitimate Resource Name or Location",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Containers",
       "ESXi",
@@ -846,6 +1605,10 @@
   },
   "T1036.006": {
     "domain": "enterprise",
+    "name": "Space after Filename",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "macOS"
@@ -853,12 +1616,20 @@
   },
   "T1036.007": {
     "domain": "enterprise",
+    "name": "Double File Extension",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1036.008": {
     "domain": "enterprise",
+    "name": "Masquerade File Type",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -867,6 +1638,10 @@
   },
   "T1036.009": {
     "domain": "enterprise",
+    "name": "Break Process Trees",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "macOS"
@@ -874,6 +1649,10 @@
   },
   "T1036.010": {
     "domain": "enterprise",
+    "name": "Masquerade Account Name",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Containers",
       "IaaS",
@@ -887,12 +1666,20 @@
   },
   "T1036.011": {
     "domain": "enterprise",
+    "name": "Overwrite Process Arguments",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux"
     ]
   },
   "T1036.012": {
     "domain": "enterprise",
+    "name": "Browser Fingerprint",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -901,6 +1688,11 @@
   },
   "T1037": {
     "domain": "enterprise",
+    "name": "Boot or Logon Initialization Scripts",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -911,24 +1703,44 @@
   },
   "T1037.001": {
     "domain": "enterprise",
+    "name": "Logon Script (Windows)",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1037.002": {
     "domain": "enterprise",
+    "name": "Login Hook",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "macOS"
     ]
   },
   "T1037.003": {
     "domain": "enterprise",
+    "name": "Network Logon Script",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1037.004": {
     "domain": "enterprise",
+    "name": "RC Scripts",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -938,12 +1750,21 @@
   },
   "T1037.005": {
     "domain": "enterprise",
+    "name": "Startup Items",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "macOS"
     ]
   },
   "T1039": {
     "domain": "enterprise",
+    "name": "Data from Network Shared Drive",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -952,6 +1773,11 @@
   },
   "T1040": {
     "domain": "enterprise",
+    "name": "Network Sniffing",
+    "tactics": [
+      "credential-access",
+      "discovery"
+    ],
     "platforms": [
       "IaaS",
       "Linux",
@@ -962,6 +1788,10 @@
   },
   "T1041": {
     "domain": "enterprise",
+    "name": "Exfiltration Over C2 Channel",
+    "tactics": [
+      "exfiltration"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -971,6 +1801,10 @@
   },
   "T1046": {
     "domain": "enterprise",
+    "name": "Network Service Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Containers",
       "IaaS",
@@ -982,12 +1816,20 @@
   },
   "T1047": {
     "domain": "enterprise",
+    "name": "Windows Management Instrumentation",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1048": {
     "domain": "enterprise",
+    "name": "Exfiltration Over Alternative Protocol",
+    "tactics": [
+      "exfiltration"
+    ],
     "platforms": [
       "ESXi",
       "IaaS",
@@ -1001,6 +1843,10 @@
   },
   "T1048.001": {
     "domain": "enterprise",
+    "name": "Exfiltration Over Symmetric Encrypted Non-C2 Protocol",
+    "tactics": [
+      "exfiltration"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -1010,6 +1856,10 @@
   },
   "T1048.002": {
     "domain": "enterprise",
+    "name": "Exfiltration Over Asymmetric Encrypted Non-C2 Protocol",
+    "tactics": [
+      "exfiltration"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -1019,6 +1869,10 @@
   },
   "T1048.003": {
     "domain": "enterprise",
+    "name": "Exfiltration Over Unencrypted Non-C2 Protocol",
+    "tactics": [
+      "exfiltration"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -1029,6 +1883,10 @@
   },
   "T1049": {
     "domain": "enterprise",
+    "name": "System Network Connections Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "ESXi",
       "IaaS",
@@ -1040,6 +1898,10 @@
   },
   "T1052": {
     "domain": "enterprise",
+    "name": "Exfiltration Over Physical Medium",
+    "tactics": [
+      "exfiltration"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -1048,6 +1910,10 @@
   },
   "T1052.001": {
     "domain": "enterprise",
+    "name": "Exfiltration over USB",
+    "tactics": [
+      "exfiltration"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -1056,6 +1922,12 @@
   },
   "T1053": {
     "domain": "enterprise",
+    "name": "Scheduled Task/Job",
+    "tactics": [
+      "execution",
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Containers",
       "ESXi",
@@ -1067,6 +1939,12 @@
   },
   "T1053.002": {
     "domain": "enterprise",
+    "name": "At",
+    "tactics": [
+      "execution",
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -1075,6 +1953,12 @@
   },
   "T1053.003": {
     "domain": "enterprise",
+    "name": "Cron",
+    "tactics": [
+      "execution",
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -1083,24 +1967,47 @@
   },
   "T1053.005": {
     "domain": "enterprise",
+    "name": "Scheduled Task",
+    "tactics": [
+      "execution",
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1053.006": {
     "domain": "enterprise",
+    "name": "Systemd Timers",
+    "tactics": [
+      "execution",
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Linux"
     ]
   },
   "T1053.007": {
     "domain": "enterprise",
+    "name": "Container Orchestration Job",
+    "tactics": [
+      "execution",
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Containers"
     ]
   },
   "T1055": {
     "domain": "enterprise",
+    "name": "Process Injection",
+    "tactics": [
+      "stealth",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -1109,78 +2016,143 @@
   },
   "T1055.001": {
     "domain": "enterprise",
+    "name": "Dynamic-link Library Injection",
+    "tactics": [
+      "stealth",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1055.002": {
     "domain": "enterprise",
+    "name": "Portable Executable Injection",
+    "tactics": [
+      "stealth",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1055.003": {
     "domain": "enterprise",
+    "name": "Thread Execution Hijacking",
+    "tactics": [
+      "stealth",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1055.004": {
     "domain": "enterprise",
+    "name": "Asynchronous Procedure Call",
+    "tactics": [
+      "stealth",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1055.005": {
     "domain": "enterprise",
+    "name": "Thread Local Storage",
+    "tactics": [
+      "stealth",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1055.008": {
     "domain": "enterprise",
+    "name": "Ptrace System Calls",
+    "tactics": [
+      "stealth",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Linux"
     ]
   },
   "T1055.009": {
     "domain": "enterprise",
+    "name": "Proc Memory",
+    "tactics": [
+      "stealth",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Linux"
     ]
   },
   "T1055.011": {
     "domain": "enterprise",
+    "name": "Extra Window Memory Injection",
+    "tactics": [
+      "stealth",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1055.012": {
     "domain": "enterprise",
+    "name": "Process Hollowing",
+    "tactics": [
+      "stealth",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1055.013": {
     "domain": "enterprise",
+    "name": "Process Doppelgänging",
+    "tactics": [
+      "stealth",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1055.014": {
     "domain": "enterprise",
+    "name": "VDSO Hijacking",
+    "tactics": [
+      "stealth",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Linux"
     ]
   },
   "T1055.015": {
     "domain": "enterprise",
+    "name": "ListPlanting",
+    "tactics": [
+      "stealth",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1056": {
     "domain": "enterprise",
+    "name": "Input Capture",
+    "tactics": [
+      "collection",
+      "credential-access"
+    ],
     "platforms": [
       "Linux",
       "Network Devices",
@@ -1190,6 +2162,11 @@
   },
   "T1056.001": {
     "domain": "enterprise",
+    "name": "Keylogging",
+    "tactics": [
+      "collection",
+      "credential-access"
+    ],
     "platforms": [
       "Linux",
       "Network Devices",
@@ -1199,6 +2176,11 @@
   },
   "T1056.002": {
     "domain": "enterprise",
+    "name": "GUI Input Capture",
+    "tactics": [
+      "collection",
+      "credential-access"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -1207,6 +2189,11 @@
   },
   "T1056.003": {
     "domain": "enterprise",
+    "name": "Web Portal Capture",
+    "tactics": [
+      "collection",
+      "credential-access"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -1215,6 +2202,11 @@
   },
   "T1056.004": {
     "domain": "enterprise",
+    "name": "Credential API Hooking",
+    "tactics": [
+      "collection",
+      "credential-access"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -1223,6 +2215,10 @@
   },
   "T1057": {
     "domain": "enterprise",
+    "name": "Process Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -1233,6 +2229,10 @@
   },
   "T1059": {
     "domain": "enterprise",
+    "name": "Command and Scripting Interpreter",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "Containers",
       "ESXi",
@@ -1248,24 +2248,40 @@
   },
   "T1059.001": {
     "domain": "enterprise",
+    "name": "PowerShell",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1059.002": {
     "domain": "enterprise",
+    "name": "AppleScript",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "macOS"
     ]
   },
   "T1059.003": {
     "domain": "enterprise",
+    "name": "Windows Command Shell",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1059.004": {
     "domain": "enterprise",
+    "name": "Unix Shell",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -1275,6 +2291,10 @@
   },
   "T1059.005": {
     "domain": "enterprise",
+    "name": "Visual Basic",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -1283,6 +2303,10 @@
   },
   "T1059.006": {
     "domain": "enterprise",
+    "name": "Python",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -1292,6 +2316,10 @@
   },
   "T1059.007": {
     "domain": "enterprise",
+    "name": "JavaScript",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -1300,12 +2328,20 @@
   },
   "T1059.008": {
     "domain": "enterprise",
+    "name": "Network Device CLI",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "Network Devices"
     ]
   },
   "T1059.009": {
     "domain": "enterprise",
+    "name": "Cloud API",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "IaaS",
       "Identity Provider",
@@ -1315,12 +2351,20 @@
   },
   "T1059.010": {
     "domain": "enterprise",
+    "name": "AutoHotKey & AutoIT",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1059.011": {
     "domain": "enterprise",
+    "name": "Lua",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "Linux",
       "Network Devices",
@@ -1330,18 +2374,30 @@
   },
   "T1059.012": {
     "domain": "enterprise",
+    "name": "Hypervisor CLI",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "ESXi"
     ]
   },
   "T1059.013": {
     "domain": "enterprise",
+    "name": "Container CLI/API",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "Containers"
     ]
   },
   "T1068": {
     "domain": "enterprise",
+    "name": "Exploitation for Privilege Escalation",
+    "tactics": [
+      "privilege-escalation"
+    ],
     "platforms": [
       "Containers",
       "Linux",
@@ -1351,6 +2407,10 @@
   },
   "T1069": {
     "domain": "enterprise",
+    "name": "Permission Groups Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Containers",
       "IaaS",
@@ -1364,6 +2424,10 @@
   },
   "T1069.001": {
     "domain": "enterprise",
+    "name": "Local Groups",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -1372,6 +2436,10 @@
   },
   "T1069.002": {
     "domain": "enterprise",
+    "name": "Domain Groups",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -1380,6 +2448,10 @@
   },
   "T1069.003": {
     "domain": "enterprise",
+    "name": "Cloud Groups",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "IaaS",
       "Identity Provider",
@@ -1389,6 +2461,10 @@
   },
   "T1070": {
     "domain": "enterprise",
+    "name": "Indicator Removal",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Containers",
       "ESXi",
@@ -1401,6 +2477,10 @@
   },
   "T1070.003": {
     "domain": "enterprise",
+    "name": "Clear Command History",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -1411,6 +2491,10 @@
   },
   "T1070.004": {
     "domain": "enterprise",
+    "name": "File Deletion",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -1420,12 +2504,20 @@
   },
   "T1070.005": {
     "domain": "enterprise",
+    "name": "Network Share Connection Removal",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1070.006": {
     "domain": "enterprise",
+    "name": "Timestomp",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -1435,6 +2527,10 @@
   },
   "T1070.007": {
     "domain": "enterprise",
+    "name": "Clear Network Connection History and Configurations",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Network Devices",
@@ -1444,6 +2540,10 @@
   },
   "T1070.008": {
     "domain": "enterprise",
+    "name": "Clear Mailbox Data",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Office Suite",
@@ -1453,6 +2553,10 @@
   },
   "T1070.009": {
     "domain": "enterprise",
+    "name": "Clear Persistence",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -1462,6 +2566,10 @@
   },
   "T1070.010": {
     "domain": "enterprise",
+    "name": "Relocate Malware",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Network Devices",
@@ -1471,6 +2579,10 @@
   },
   "T1071": {
     "domain": "enterprise",
+    "name": "Application Layer Protocol",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -1481,6 +2593,10 @@
   },
   "T1071.001": {
     "domain": "enterprise",
+    "name": "Web Protocols",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -1491,6 +2607,10 @@
   },
   "T1071.002": {
     "domain": "enterprise",
+    "name": "File Transfer Protocols",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -1501,6 +2621,10 @@
   },
   "T1071.003": {
     "domain": "enterprise",
+    "name": "Mail Protocols",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Linux",
       "Network Devices",
@@ -1510,6 +2634,10 @@
   },
   "T1071.004": {
     "domain": "enterprise",
+    "name": "DNS",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -1520,6 +2648,10 @@
   },
   "T1071.005": {
     "domain": "enterprise",
+    "name": "Publish/Subscribe Protocols",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Linux",
       "Network Devices",
@@ -1529,6 +2661,11 @@
   },
   "T1072": {
     "domain": "enterprise",
+    "name": "Software Deployment Tools",
+    "tactics": [
+      "execution",
+      "lateral-movement"
+    ],
     "platforms": [
       "Linux",
       "Network Devices",
@@ -1539,6 +2676,10 @@
   },
   "T1074": {
     "domain": "enterprise",
+    "name": "Data Staged",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "ESXi",
       "IaaS",
@@ -1549,6 +2690,10 @@
   },
   "T1074.001": {
     "domain": "enterprise",
+    "name": "Local Data Staging",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -1558,6 +2703,10 @@
   },
   "T1074.002": {
     "domain": "enterprise",
+    "name": "Remote Data Staging",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "ESXi",
       "IaaS",
@@ -1568,6 +2717,13 @@
   },
   "T1078": {
     "domain": "enterprise",
+    "name": "Valid Accounts",
+    "tactics": [
+      "stealth",
+      "persistence",
+      "privilege-escalation",
+      "initial-access"
+    ],
     "platforms": [
       "Containers",
       "ESXi",
@@ -1583,6 +2739,13 @@
   },
   "T1078.001": {
     "domain": "enterprise",
+    "name": "Default Accounts",
+    "tactics": [
+      "stealth",
+      "persistence",
+      "privilege-escalation",
+      "initial-access"
+    ],
     "platforms": [
       "Containers",
       "ESXi",
@@ -1598,6 +2761,13 @@
   },
   "T1078.002": {
     "domain": "enterprise",
+    "name": "Domain Accounts",
+    "tactics": [
+      "stealth",
+      "persistence",
+      "privilege-escalation",
+      "initial-access"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -1607,6 +2777,13 @@
   },
   "T1078.003": {
     "domain": "enterprise",
+    "name": "Local Accounts",
+    "tactics": [
+      "stealth",
+      "persistence",
+      "privilege-escalation",
+      "initial-access"
+    ],
     "platforms": [
       "Containers",
       "ESXi",
@@ -1618,6 +2795,13 @@
   },
   "T1078.004": {
     "domain": "enterprise",
+    "name": "Cloud Accounts",
+    "tactics": [
+      "stealth",
+      "persistence",
+      "privilege-escalation",
+      "initial-access"
+    ],
     "platforms": [
       "IaaS",
       "Identity Provider",
@@ -1627,6 +2811,10 @@
   },
   "T1080": {
     "domain": "enterprise",
+    "name": "Taint Shared Content",
+    "tactics": [
+      "lateral-movement"
+    ],
     "platforms": [
       "Linux",
       "Office Suite",
@@ -1637,6 +2825,10 @@
   },
   "T1082": {
     "domain": "enterprise",
+    "name": "System Information Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "ESXi",
       "IaaS",
@@ -1648,6 +2840,10 @@
   },
   "T1083": {
     "domain": "enterprise",
+    "name": "File and Directory Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -1658,6 +2854,10 @@
   },
   "T1087": {
     "domain": "enterprise",
+    "name": "Account Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "ESXi",
       "IaaS",
@@ -1671,6 +2871,10 @@
   },
   "T1087.001": {
     "domain": "enterprise",
+    "name": "Local Account",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -1680,6 +2884,10 @@
   },
   "T1087.002": {
     "domain": "enterprise",
+    "name": "Domain Account",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -1688,6 +2896,10 @@
   },
   "T1087.003": {
     "domain": "enterprise",
+    "name": "Email Account",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Office Suite",
       "Windows"
@@ -1695,6 +2907,10 @@
   },
   "T1087.004": {
     "domain": "enterprise",
+    "name": "Cloud Account",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "IaaS",
       "Identity Provider",
@@ -1704,6 +2920,10 @@
   },
   "T1090": {
     "domain": "enterprise",
+    "name": "Proxy",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -1714,6 +2934,10 @@
   },
   "T1090.001": {
     "domain": "enterprise",
+    "name": "Internal Proxy",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -1724,6 +2948,10 @@
   },
   "T1090.002": {
     "domain": "enterprise",
+    "name": "External Proxy",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -1734,6 +2962,10 @@
   },
   "T1090.003": {
     "domain": "enterprise",
+    "name": "Multi-hop Proxy",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -1744,6 +2976,10 @@
   },
   "T1090.004": {
     "domain": "enterprise",
+    "name": "Domain Fronting",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -1753,12 +2989,21 @@
   },
   "T1091": {
     "domain": "enterprise",
+    "name": "Replication Through Removable Media",
+    "tactics": [
+      "lateral-movement",
+      "initial-access"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1092": {
     "domain": "enterprise",
+    "name": "Communication Through Removable Media",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -1767,6 +3012,10 @@
   },
   "T1095": {
     "domain": "enterprise",
+    "name": "Non-Application Layer Protocol",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -1777,6 +3026,11 @@
   },
   "T1098": {
     "domain": "enterprise",
+    "name": "Account Manipulation",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Containers",
       "ESXi",
@@ -1792,6 +3046,11 @@
   },
   "T1098.001": {
     "domain": "enterprise",
+    "name": "Additional Cloud Credentials",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "IaaS",
       "Identity Provider",
@@ -1800,6 +3059,11 @@
   },
   "T1098.002": {
     "domain": "enterprise",
+    "name": "Additional Email Delegate Permissions",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Office Suite",
       "Windows"
@@ -1807,6 +3071,11 @@
   },
   "T1098.003": {
     "domain": "enterprise",
+    "name": "Additional Cloud Roles",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "IaaS",
       "Identity Provider",
@@ -1816,6 +3085,11 @@
   },
   "T1098.004": {
     "domain": "enterprise",
+    "name": "SSH Authorized Keys",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "ESXi",
       "IaaS",
@@ -1826,6 +3100,11 @@
   },
   "T1098.005": {
     "domain": "enterprise",
+    "name": "Device Registration",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Identity Provider",
       "Windows"
@@ -1833,12 +3112,22 @@
   },
   "T1098.006": {
     "domain": "enterprise",
+    "name": "Additional Container Cluster Roles",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Containers"
     ]
   },
   "T1098.007": {
     "domain": "enterprise",
+    "name": "Additional Local or Domain Groups",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -1847,6 +3136,10 @@
   },
   "T1102": {
     "domain": "enterprise",
+    "name": "Web Service",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -1856,6 +3149,10 @@
   },
   "T1102.001": {
     "domain": "enterprise",
+    "name": "Dead Drop Resolver",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -1865,6 +3162,10 @@
   },
   "T1102.002": {
     "domain": "enterprise",
+    "name": "Bidirectional Communication",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -1874,6 +3175,10 @@
   },
   "T1102.003": {
     "domain": "enterprise",
+    "name": "One-Way Communication",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -1883,6 +3188,10 @@
   },
   "T1104": {
     "domain": "enterprise",
+    "name": "Multi-Stage Channels",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -1892,6 +3201,10 @@
   },
   "T1105": {
     "domain": "enterprise",
+    "name": "Ingress Tool Transfer",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -1902,6 +3215,10 @@
   },
   "T1106": {
     "domain": "enterprise",
+    "name": "Native API",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -1910,6 +3227,10 @@
   },
   "T1110": {
     "domain": "enterprise",
+    "name": "Brute Force",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Containers",
       "ESXi",
@@ -1925,6 +3246,10 @@
   },
   "T1110.001": {
     "domain": "enterprise",
+    "name": "Password Guessing",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Containers",
       "ESXi",
@@ -1940,6 +3265,10 @@
   },
   "T1110.002": {
     "domain": "enterprise",
+    "name": "Password Cracking",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Identity Provider",
       "Linux",
@@ -1951,6 +3280,10 @@
   },
   "T1110.003": {
     "domain": "enterprise",
+    "name": "Password Spraying",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Containers",
       "ESXi",
@@ -1966,6 +3299,10 @@
   },
   "T1110.004": {
     "domain": "enterprise",
+    "name": "Credential Stuffing",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Containers",
       "ESXi",
@@ -1981,6 +3318,10 @@
   },
   "T1111": {
     "domain": "enterprise",
+    "name": "Multi-Factor Authentication Interception",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -1989,12 +3330,21 @@
   },
   "T1112": {
     "domain": "enterprise",
+    "name": "Modify Registry",
+    "tactics": [
+      "defense-impairment",
+      "persistence"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1113": {
     "domain": "enterprise",
+    "name": "Screen Capture",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -2003,6 +3353,10 @@
   },
   "T1114": {
     "domain": "enterprise",
+    "name": "Email Collection",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Linux",
       "Office Suite",
@@ -2012,12 +3366,20 @@
   },
   "T1114.001": {
     "domain": "enterprise",
+    "name": "Local Email Collection",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1114.002": {
     "domain": "enterprise",
+    "name": "Remote Email Collection",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Office Suite",
       "Windows"
@@ -2025,6 +3387,10 @@
   },
   "T1114.003": {
     "domain": "enterprise",
+    "name": "Email Forwarding Rule",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Linux",
       "Office Suite",
@@ -2034,6 +3400,10 @@
   },
   "T1115": {
     "domain": "enterprise",
+    "name": "Clipboard Data",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -2042,6 +3412,10 @@
   },
   "T1119": {
     "domain": "enterprise",
+    "name": "Automated Collection",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "IaaS",
       "Linux",
@@ -2053,6 +3427,10 @@
   },
   "T1120": {
     "domain": "enterprise",
+    "name": "Peripheral Device Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -2061,6 +3439,10 @@
   },
   "T1123": {
     "domain": "enterprise",
+    "name": "Audio Capture",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -2069,6 +3451,10 @@
   },
   "T1124": {
     "domain": "enterprise",
+    "name": "System Time Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -2079,6 +3465,10 @@
   },
   "T1125": {
     "domain": "enterprise",
+    "name": "Video Capture",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -2087,30 +3477,54 @@
   },
   "T1127": {
     "domain": "enterprise",
+    "name": "Trusted Developer Utilities Proxy Execution",
+    "tactics": [
+      "stealth",
+      "execution"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1127.001": {
     "domain": "enterprise",
+    "name": "MSBuild",
+    "tactics": [
+      "stealth",
+      "execution"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1127.002": {
     "domain": "enterprise",
+    "name": "ClickOnce",
+    "tactics": [
+      "stealth",
+      "execution"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1127.003": {
     "domain": "enterprise",
+    "name": "JamPlus",
+    "tactics": [
+      "stealth",
+      "execution"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1129": {
     "domain": "enterprise",
+    "name": "Shared Modules",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -2119,6 +3533,10 @@
   },
   "T1132": {
     "domain": "enterprise",
+    "name": "Data Encoding",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -2128,6 +3546,10 @@
   },
   "T1132.001": {
     "domain": "enterprise",
+    "name": "Standard Encoding",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -2137,6 +3559,10 @@
   },
   "T1132.002": {
     "domain": "enterprise",
+    "name": "Non-Standard Encoding",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -2146,6 +3572,11 @@
   },
   "T1133": {
     "domain": "enterprise",
+    "name": "External Remote Services",
+    "tactics": [
+      "persistence",
+      "initial-access"
+    ],
     "platforms": [
       "Containers",
       "Linux",
@@ -2155,42 +3586,76 @@
   },
   "T1134": {
     "domain": "enterprise",
+    "name": "Access Token Manipulation",
+    "tactics": [
+      "stealth",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1134.001": {
     "domain": "enterprise",
+    "name": "Token Impersonation/Theft",
+    "tactics": [
+      "stealth",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1134.002": {
     "domain": "enterprise",
+    "name": "Create Process with Token",
+    "tactics": [
+      "stealth",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1134.003": {
     "domain": "enterprise",
+    "name": "Make and Impersonate Token",
+    "tactics": [
+      "stealth",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1134.004": {
     "domain": "enterprise",
+    "name": "Parent PID Spoofing",
+    "tactics": [
+      "stealth",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1134.005": {
     "domain": "enterprise",
+    "name": "SID-History Injection",
+    "tactics": [
+      "stealth",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1135": {
     "domain": "enterprise",
+    "name": "Network Share Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -2199,6 +3664,10 @@
   },
   "T1136": {
     "domain": "enterprise",
+    "name": "Create Account",
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "Containers",
       "ESXi",
@@ -2214,6 +3683,10 @@
   },
   "T1136.001": {
     "domain": "enterprise",
+    "name": "Local Account",
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "Containers",
       "ESXi",
@@ -2225,6 +3698,10 @@
   },
   "T1136.002": {
     "domain": "enterprise",
+    "name": "Domain Account",
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -2233,6 +3710,10 @@
   },
   "T1136.003": {
     "domain": "enterprise",
+    "name": "Cloud Account",
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "IaaS",
       "Identity Provider",
@@ -2242,6 +3723,10 @@
   },
   "T1137": {
     "domain": "enterprise",
+    "name": "Office Application Startup",
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "Office Suite",
       "Windows"
@@ -2249,6 +3734,10 @@
   },
   "T1137.001": {
     "domain": "enterprise",
+    "name": "Office Template Macros",
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "Office Suite",
       "Windows"
@@ -2256,6 +3745,10 @@
   },
   "T1137.002": {
     "domain": "enterprise",
+    "name": "Office Test",
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "Office Suite",
       "Windows"
@@ -2263,6 +3756,10 @@
   },
   "T1137.003": {
     "domain": "enterprise",
+    "name": "Outlook Forms",
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "Office Suite",
       "Windows"
@@ -2270,6 +3767,10 @@
   },
   "T1137.004": {
     "domain": "enterprise",
+    "name": "Outlook Home Page",
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "Office Suite",
       "Windows"
@@ -2277,6 +3778,10 @@
   },
   "T1137.005": {
     "domain": "enterprise",
+    "name": "Outlook Rules",
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "Office Suite",
       "Windows"
@@ -2284,6 +3789,10 @@
   },
   "T1137.006": {
     "domain": "enterprise",
+    "name": "Add-ins",
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "Office Suite",
       "Windows"
@@ -2291,6 +3800,10 @@
   },
   "T1140": {
     "domain": "enterprise",
+    "name": "Deobfuscate/Decode Files or Information",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -2300,6 +3813,10 @@
   },
   "T1176": {
     "domain": "enterprise",
+    "name": "Software Extensions",
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -2308,6 +3825,10 @@
   },
   "T1176.001": {
     "domain": "enterprise",
+    "name": "Browser Extensions",
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -2316,6 +3837,10 @@
   },
   "T1176.002": {
     "domain": "enterprise",
+    "name": "IDE Extensions",
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -2324,18 +3849,30 @@
   },
   "T1185": {
     "domain": "enterprise",
+    "name": "Browser Session Hijacking",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1187": {
     "domain": "enterprise",
+    "name": "Forced Authentication",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1189": {
     "domain": "enterprise",
+    "name": "Drive-by Compromise",
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": [
       "Identity Provider",
       "Linux",
@@ -2345,6 +3882,10 @@
   },
   "T1190": {
     "domain": "enterprise",
+    "name": "Exploit Public-Facing Application",
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": [
       "Containers",
       "ESXi",
@@ -2357,6 +3898,10 @@
   },
   "T1195": {
     "domain": "enterprise",
+    "name": "Supply Chain Compromise",
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": [
       "Linux",
       "SaaS",
@@ -2366,6 +3911,10 @@
   },
   "T1195.001": {
     "domain": "enterprise",
+    "name": "Compromise Software Dependencies and Development Tools",
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -2374,6 +3923,10 @@
   },
   "T1195.002": {
     "domain": "enterprise",
+    "name": "Compromise Software Supply Chain",
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -2382,6 +3935,10 @@
   },
   "T1195.003": {
     "domain": "enterprise",
+    "name": "Compromise Hardware Supply Chain",
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -2390,12 +3947,22 @@
   },
   "T1197": {
     "domain": "enterprise",
+    "name": "BITS Jobs",
+    "tactics": [
+      "stealth",
+      "persistence",
+      "execution"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1199": {
     "domain": "enterprise",
+    "name": "Trusted Relationship",
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": [
       "IaaS",
       "Identity Provider",
@@ -2408,6 +3975,10 @@
   },
   "T1200": {
     "domain": "enterprise",
+    "name": "Hardware Additions",
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -2416,6 +3987,10 @@
   },
   "T1201": {
     "domain": "enterprise",
+    "name": "Password Policy Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "IaaS",
       "Identity Provider",
@@ -2429,12 +4004,20 @@
   },
   "T1202": {
     "domain": "enterprise",
+    "name": "Indirect Command Execution",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1203": {
     "domain": "enterprise",
+    "name": "Exploitation for Client Execution",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -2443,6 +4026,10 @@
   },
   "T1204": {
     "domain": "enterprise",
+    "name": "User Execution",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "Containers",
       "IaaS",
@@ -2453,6 +4040,10 @@
   },
   "T1204.001": {
     "domain": "enterprise",
+    "name": "Malicious Link",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -2461,6 +4052,10 @@
   },
   "T1204.002": {
     "domain": "enterprise",
+    "name": "Malicious File",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -2469,6 +4064,10 @@
   },
   "T1204.003": {
     "domain": "enterprise",
+    "name": "Malicious Image",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "Containers",
       "IaaS"
@@ -2476,6 +4075,10 @@
   },
   "T1204.004": {
     "domain": "enterprise",
+    "name": "Malicious Copy and Paste",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -2484,6 +4087,10 @@
   },
   "T1204.005": {
     "domain": "enterprise",
+    "name": "Malicious Library",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -2492,6 +4099,12 @@
   },
   "T1205": {
     "domain": "enterprise",
+    "name": "Traffic Signaling",
+    "tactics": [
+      "stealth",
+      "persistence",
+      "command-and-control"
+    ],
     "platforms": [
       "Linux",
       "Network Devices",
@@ -2501,6 +4114,12 @@
   },
   "T1205.001": {
     "domain": "enterprise",
+    "name": "Port Knocking",
+    "tactics": [
+      "stealth",
+      "persistence",
+      "command-and-control"
+    ],
     "platforms": [
       "Linux",
       "Network Devices",
@@ -2510,6 +4129,12 @@
   },
   "T1205.002": {
     "domain": "enterprise",
+    "name": "Socket Filters",
+    "tactics": [
+      "stealth",
+      "persistence",
+      "command-and-control"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -2518,12 +4143,20 @@
   },
   "T1207": {
     "domain": "enterprise",
+    "name": "Rogue Domain Controller",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1210": {
     "domain": "enterprise",
+    "name": "Exploitation of Remote Services",
+    "tactics": [
+      "lateral-movement"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -2533,6 +4166,10 @@
   },
   "T1211": {
     "domain": "enterprise",
+    "name": "Exploitation for Stealth",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "IaaS",
       "Linux",
@@ -2543,6 +4180,10 @@
   },
   "T1212": {
     "domain": "enterprise",
+    "name": "Exploitation for Credential Access",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Identity Provider",
       "Linux",
@@ -2552,6 +4193,10 @@
   },
   "T1213": {
     "domain": "enterprise",
+    "name": "Data from Information Repositories",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "IaaS",
       "Linux",
@@ -2563,12 +4208,20 @@
   },
   "T1213.001": {
     "domain": "enterprise",
+    "name": "Confluence",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "SaaS"
     ]
   },
   "T1213.002": {
     "domain": "enterprise",
+    "name": "Sharepoint",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Office Suite",
       "Windows"
@@ -2576,18 +4229,30 @@
   },
   "T1213.003": {
     "domain": "enterprise",
+    "name": "Code Repositories",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "SaaS"
     ]
   },
   "T1213.004": {
     "domain": "enterprise",
+    "name": "Customer Relationship Management Software",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "SaaS"
     ]
   },
   "T1213.005": {
     "domain": "enterprise",
+    "name": "Messaging Applications",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Office Suite",
       "SaaS"
@@ -2595,6 +4260,10 @@
   },
   "T1213.006": {
     "domain": "enterprise",
+    "name": "Databases",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "IaaS",
       "Linux",
@@ -2605,24 +4274,40 @@
   },
   "T1216": {
     "domain": "enterprise",
+    "name": "System Script Proxy Execution",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1216.001": {
     "domain": "enterprise",
+    "name": "PubPrn",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1216.002": {
     "domain": "enterprise",
+    "name": "SyncAppvPublishingServer",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1217": {
     "domain": "enterprise",
+    "name": "Browser Information Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -2631,6 +4316,10 @@
   },
   "T1218": {
     "domain": "enterprise",
+    "name": "System Binary Proxy Execution",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -2639,84 +4328,140 @@
   },
   "T1218.001": {
     "domain": "enterprise",
+    "name": "Compiled HTML File",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1218.002": {
     "domain": "enterprise",
+    "name": "Control Panel",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1218.003": {
     "domain": "enterprise",
+    "name": "CMSTP",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1218.004": {
     "domain": "enterprise",
+    "name": "InstallUtil",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1218.005": {
     "domain": "enterprise",
+    "name": "Mshta",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1218.007": {
     "domain": "enterprise",
+    "name": "Msiexec",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1218.008": {
     "domain": "enterprise",
+    "name": "Odbcconf",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1218.009": {
     "domain": "enterprise",
+    "name": "Regsvcs/Regasm",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1218.010": {
     "domain": "enterprise",
+    "name": "Regsvr32",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1218.011": {
     "domain": "enterprise",
+    "name": "Rundll32",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1218.012": {
     "domain": "enterprise",
+    "name": "Verclsid",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1218.013": {
     "domain": "enterprise",
+    "name": "Mavinject",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1218.014": {
     "domain": "enterprise",
+    "name": "MMC",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1218.015": {
     "domain": "enterprise",
+    "name": "Electron Applications",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -2725,6 +4470,10 @@
   },
   "T1219": {
     "domain": "enterprise",
+    "name": "Remote Access Tools",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -2733,6 +4482,10 @@
   },
   "T1219.001": {
     "domain": "enterprise",
+    "name": "IDE Tunneling",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -2741,6 +4494,10 @@
   },
   "T1219.002": {
     "domain": "enterprise",
+    "name": "Remote Desktop Software",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -2749,6 +4506,10 @@
   },
   "T1219.003": {
     "domain": "enterprise",
+    "name": "Remote Access Hardware",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -2757,18 +4518,30 @@
   },
   "T1220": {
     "domain": "enterprise",
+    "name": "XSL Script Processing",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1221": {
     "domain": "enterprise",
+    "name": "Template Injection",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1222": {
     "domain": "enterprise",
+    "name": "File and Directory Permissions Modification",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -2778,12 +4551,20 @@
   },
   "T1222.001": {
     "domain": "enterprise",
+    "name": "Windows Permissions",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1222.002": {
     "domain": "enterprise",
+    "name": "Linux and Mac Permissions",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "Linux",
       "macOS"
@@ -2791,6 +4572,10 @@
   },
   "T1398": {
     "domain": "mobile",
+    "name": "Boot or Logon Initialization Scripts",
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -2798,6 +4583,10 @@
   },
   "T1404": {
     "domain": "mobile",
+    "name": "Exploitation for Privilege Escalation",
+    "tactics": [
+      "privilege-escalation"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -2805,6 +4594,10 @@
   },
   "T1406": {
     "domain": "mobile",
+    "name": "Obfuscated Files or Information",
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -2812,12 +4605,20 @@
   },
   "T1406.001": {
     "domain": "mobile",
+    "name": "Steganography",
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android"
     ]
   },
   "T1406.002": {
     "domain": "mobile",
+    "name": "Software Packing",
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -2825,6 +4626,10 @@
   },
   "T1407": {
     "domain": "mobile",
+    "name": "Download New Code at Runtime",
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -2832,6 +4637,10 @@
   },
   "T1409": {
     "domain": "mobile",
+    "name": "Stored Application Data",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -2839,6 +4648,11 @@
   },
   "T1414": {
     "domain": "mobile",
+    "name": "Clipboard Data",
+    "tactics": [
+      "collection",
+      "credential-access"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -2846,6 +4660,11 @@
   },
   "T1417": {
     "domain": "mobile",
+    "name": "Input Capture",
+    "tactics": [
+      "collection",
+      "credential-access"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -2853,6 +4672,11 @@
   },
   "T1417.001": {
     "domain": "mobile",
+    "name": "Keylogging",
+    "tactics": [
+      "collection",
+      "credential-access"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -2860,6 +4684,11 @@
   },
   "T1417.002": {
     "domain": "mobile",
+    "name": "GUI Input Capture",
+    "tactics": [
+      "credential-access",
+      "collection"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -2867,6 +4696,10 @@
   },
   "T1418": {
     "domain": "mobile",
+    "name": "Software Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -2874,6 +4707,10 @@
   },
   "T1418.001": {
     "domain": "mobile",
+    "name": "Security Software Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -2881,6 +4718,10 @@
   },
   "T1420": {
     "domain": "mobile",
+    "name": "File and Directory Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -2888,12 +4729,20 @@
   },
   "T1421": {
     "domain": "mobile",
+    "name": "System Network Connections Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Android"
     ]
   },
   "T1422": {
     "domain": "mobile",
+    "name": "System Network Configuration Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -2901,6 +4750,10 @@
   },
   "T1422.001": {
     "domain": "mobile",
+    "name": "Internet Connection Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -2908,6 +4761,10 @@
   },
   "T1422.002": {
     "domain": "mobile",
+    "name": "Wi-Fi Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -2915,6 +4772,10 @@
   },
   "T1423": {
     "domain": "mobile",
+    "name": "Network Service Scanning",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -2922,6 +4783,10 @@
   },
   "T1424": {
     "domain": "mobile",
+    "name": "Process Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -2929,6 +4794,10 @@
   },
   "T1426": {
     "domain": "mobile",
+    "name": "System Information Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -2936,6 +4805,10 @@
   },
   "T1428": {
     "domain": "mobile",
+    "name": "Exploitation of Remote Services",
+    "tactics": [
+      "lateral-movement"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -2943,6 +4816,10 @@
   },
   "T1429": {
     "domain": "mobile",
+    "name": "Audio Capture",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -2950,6 +4827,11 @@
   },
   "T1430": {
     "domain": "mobile",
+    "name": "Location Tracking",
+    "tactics": [
+      "collection",
+      "discovery"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -2957,6 +4839,11 @@
   },
   "T1430.001": {
     "domain": "mobile",
+    "name": "Remote Device Management Services",
+    "tactics": [
+      "collection",
+      "discovery"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -2964,6 +4851,11 @@
   },
   "T1430.002": {
     "domain": "mobile",
+    "name": "Impersonate SS7 Nodes",
+    "tactics": [
+      "collection",
+      "discovery"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -2971,6 +4863,10 @@
   },
   "T1437": {
     "domain": "mobile",
+    "name": "Application Layer Protocol",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -2978,6 +4874,10 @@
   },
   "T1437.001": {
     "domain": "mobile",
+    "name": "Web Protocols",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -2985,6 +4885,10 @@
   },
   "T1451": {
     "domain": "mobile",
+    "name": "SIM Card Swap",
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -2992,12 +4896,21 @@
   },
   "T1453": {
     "domain": "mobile",
+    "name": "Abuse Accessibility Features",
+    "tactics": [
+      "collection",
+      "credential-access"
+    ],
     "platforms": [
       "Android"
     ]
   },
   "T1456": {
     "domain": "mobile",
+    "name": "Drive-By Compromise",
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -3005,6 +4918,11 @@
   },
   "T1458": {
     "domain": "mobile",
+    "name": "Replication Through Removable Media",
+    "tactics": [
+      "initial-access",
+      "lateral-movement"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -3012,6 +4930,10 @@
   },
   "T1461": {
     "domain": "mobile",
+    "name": "Lockscreen Bypass",
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -3019,6 +4941,10 @@
   },
   "T1464": {
     "domain": "mobile",
+    "name": "Network Denial of Service",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -3026,12 +4952,20 @@
   },
   "T1471": {
     "domain": "mobile",
+    "name": "Data Encrypted for Impact",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "Android"
     ]
   },
   "T1474": {
     "domain": "mobile",
+    "name": "Supply Chain Compromise",
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -3039,6 +4973,10 @@
   },
   "T1474.001": {
     "domain": "mobile",
+    "name": "Compromise Software Dependencies and Development Tools",
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -3046,6 +4984,10 @@
   },
   "T1474.002": {
     "domain": "mobile",
+    "name": "Compromise Hardware Supply Chain",
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -3053,6 +4995,10 @@
   },
   "T1474.003": {
     "domain": "mobile",
+    "name": "Compromise Software Supply Chain",
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -3060,6 +5006,10 @@
   },
   "T1480": {
     "domain": "enterprise",
+    "name": "Execution Guardrails",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -3069,6 +5019,10 @@
   },
   "T1480.001": {
     "domain": "enterprise",
+    "name": "Environmental Keying",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -3077,6 +5031,10 @@
   },
   "T1480.002": {
     "domain": "enterprise",
+    "name": "Mutual Exclusion",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -3085,6 +5043,10 @@
   },
   "T1481": {
     "domain": "mobile",
+    "name": "Web Service",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -3092,6 +5054,10 @@
   },
   "T1481.001": {
     "domain": "mobile",
+    "name": "Dead Drop Resolver",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -3099,6 +5065,10 @@
   },
   "T1481.002": {
     "domain": "mobile",
+    "name": "Bidirectional Communication",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -3106,6 +5076,10 @@
   },
   "T1481.003": {
     "domain": "mobile",
+    "name": "One-Way Communication",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -3113,12 +5087,21 @@
   },
   "T1482": {
     "domain": "enterprise",
+    "name": "Domain Trust Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1484": {
     "domain": "enterprise",
+    "name": "Domain or Tenant Policy Modification",
+    "tactics": [
+      "defense-impairment",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Identity Provider",
       "Windows"
@@ -3126,12 +5109,22 @@
   },
   "T1484.001": {
     "domain": "enterprise",
+    "name": "Group Policy Modification",
+    "tactics": [
+      "defense-impairment",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1484.002": {
     "domain": "enterprise",
+    "name": "Trust Modification",
+    "tactics": [
+      "defense-impairment",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Identity Provider",
       "Windows"
@@ -3139,6 +5132,10 @@
   },
   "T1485": {
     "domain": "enterprise",
+    "name": "Data Destruction",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "Containers",
       "ESXi",
@@ -3150,12 +5147,20 @@
   },
   "T1485.001": {
     "domain": "enterprise",
+    "name": "Lifecycle-Triggered Deletion",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "IaaS"
     ]
   },
   "T1486": {
     "domain": "enterprise",
+    "name": "Data Encrypted for Impact",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "ESXi",
       "IaaS",
@@ -3166,6 +5171,10 @@
   },
   "T1489": {
     "domain": "enterprise",
+    "name": "Service Stop",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "ESXi",
       "IaaS",
@@ -3176,6 +5185,10 @@
   },
   "T1490": {
     "domain": "enterprise",
+    "name": "Inhibit System Recovery",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "Containers",
       "ESXi",
@@ -3188,6 +5201,10 @@
   },
   "T1491": {
     "domain": "enterprise",
+    "name": "Defacement",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "ESXi",
       "IaaS",
@@ -3198,6 +5215,10 @@
   },
   "T1491.001": {
     "domain": "enterprise",
+    "name": "Internal Defacement",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -3207,6 +5228,10 @@
   },
   "T1491.002": {
     "domain": "enterprise",
+    "name": "External Defacement",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "IaaS",
       "Linux",
@@ -3216,6 +5241,10 @@
   },
   "T1495": {
     "domain": "enterprise",
+    "name": "Firmware Corruption",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "Linux",
       "Network Devices",
@@ -3225,6 +5254,10 @@
   },
   "T1496": {
     "domain": "enterprise",
+    "name": "Resource Hijacking",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "Containers",
       "IaaS",
@@ -3236,6 +5269,10 @@
   },
   "T1496.001": {
     "domain": "enterprise",
+    "name": "Compute Hijacking",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "Containers",
       "IaaS",
@@ -3246,6 +5283,10 @@
   },
   "T1496.002": {
     "domain": "enterprise",
+    "name": "Bandwidth Hijacking",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "Containers",
       "IaaS",
@@ -3256,18 +5297,31 @@
   },
   "T1496.003": {
     "domain": "enterprise",
+    "name": "SMS Pumping",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "SaaS"
     ]
   },
   "T1496.004": {
     "domain": "enterprise",
+    "name": "Cloud Service Hijacking",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "SaaS"
     ]
   },
   "T1497": {
     "domain": "enterprise",
+    "name": "Virtualization/Sandbox Evasion",
+    "tactics": [
+      "stealth",
+      "discovery"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -3276,6 +5330,11 @@
   },
   "T1497.001": {
     "domain": "enterprise",
+    "name": "System Checks",
+    "tactics": [
+      "stealth",
+      "discovery"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -3284,6 +5343,11 @@
   },
   "T1497.002": {
     "domain": "enterprise",
+    "name": "User Activity Based Checks",
+    "tactics": [
+      "stealth",
+      "discovery"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -3292,6 +5356,11 @@
   },
   "T1497.003": {
     "domain": "enterprise",
+    "name": "Time Based Checks",
+    "tactics": [
+      "stealth",
+      "discovery"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -3300,6 +5369,10 @@
   },
   "T1498": {
     "domain": "enterprise",
+    "name": "Network Denial of Service",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "Containers",
       "IaaS",
@@ -3310,6 +5383,10 @@
   },
   "T1498.001": {
     "domain": "enterprise",
+    "name": "Direct Network Flood",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "IaaS",
       "Linux",
@@ -3319,6 +5396,10 @@
   },
   "T1498.002": {
     "domain": "enterprise",
+    "name": "Reflection Amplification",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "IaaS",
       "Linux",
@@ -3328,6 +5409,10 @@
   },
   "T1499": {
     "domain": "enterprise",
+    "name": "Endpoint Denial of Service",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "Containers",
       "IaaS",
@@ -3338,6 +5423,10 @@
   },
   "T1499.001": {
     "domain": "enterprise",
+    "name": "OS Exhaustion Flood",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -3346,6 +5435,10 @@
   },
   "T1499.002": {
     "domain": "enterprise",
+    "name": "Service Exhaustion Flood",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "IaaS",
       "Linux",
@@ -3355,6 +5448,10 @@
   },
   "T1499.003": {
     "domain": "enterprise",
+    "name": "Application Exhaustion Flood",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "IaaS",
       "Linux",
@@ -3364,6 +5461,10 @@
   },
   "T1499.004": {
     "domain": "enterprise",
+    "name": "Application or System Exploitation",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "IaaS",
       "Linux",
@@ -3373,6 +5474,10 @@
   },
   "T1505": {
     "domain": "enterprise",
+    "name": "Server Software Component",
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -3383,6 +5488,10 @@
   },
   "T1505.001": {
     "domain": "enterprise",
+    "name": "SQL Stored Procedures",
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "Linux",
       "Windows"
@@ -3390,6 +5499,10 @@
   },
   "T1505.002": {
     "domain": "enterprise",
+    "name": "Transport Agent",
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "Linux",
       "Windows"
@@ -3397,6 +5510,10 @@
   },
   "T1505.003": {
     "domain": "enterprise",
+    "name": "Web Shell",
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "Linux",
       "Network Devices",
@@ -3406,24 +5523,40 @@
   },
   "T1505.004": {
     "domain": "enterprise",
+    "name": "IIS Components",
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1505.005": {
     "domain": "enterprise",
+    "name": "Terminal Services DLL",
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1505.006": {
     "domain": "enterprise",
+    "name": "vSphere Installation Bundles",
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "ESXi"
     ]
   },
   "T1509": {
     "domain": "mobile",
+    "name": "Non-Standard Port",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -3431,6 +5564,10 @@
   },
   "T1512": {
     "domain": "mobile",
+    "name": "Video Capture",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -3438,24 +5575,42 @@
   },
   "T1513": {
     "domain": "mobile",
+    "name": "Screen Capture",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Android"
     ]
   },
   "T1516": {
     "domain": "mobile",
+    "name": "Input Injection",
+    "tactics": [
+      "defense-evasion",
+      "impact"
+    ],
     "platforms": [
       "Android"
     ]
   },
   "T1517": {
     "domain": "mobile",
+    "name": "Access Notifications",
+    "tactics": [
+      "collection",
+      "credential-access"
+    ],
     "platforms": [
       "Android"
     ]
   },
   "T1518": {
     "domain": "enterprise",
+    "name": "Software Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "ESXi",
       "IaaS",
@@ -3466,6 +5621,10 @@
   },
   "T1518.001": {
     "domain": "enterprise",
+    "name": "Security Software Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "IaaS",
       "Linux",
@@ -3475,6 +5634,10 @@
   },
   "T1518.002": {
     "domain": "enterprise",
+    "name": "Backup Software Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -3483,6 +5646,10 @@
   },
   "T1521": {
     "domain": "mobile",
+    "name": "Encrypted Channel",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -3490,6 +5657,10 @@
   },
   "T1521.001": {
     "domain": "mobile",
+    "name": "Symmetric Cryptography",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -3497,6 +5668,10 @@
   },
   "T1521.002": {
     "domain": "mobile",
+    "name": "Asymmetric Cryptography",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -3504,6 +5679,10 @@
   },
   "T1521.003": {
     "domain": "mobile",
+    "name": "SSL Pinning",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -3511,6 +5690,10 @@
   },
   "T1525": {
     "domain": "enterprise",
+    "name": "Implant Internal Image",
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "Containers",
       "IaaS"
@@ -3518,6 +5701,10 @@
   },
   "T1526": {
     "domain": "enterprise",
+    "name": "Cloud Service Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "IaaS",
       "Identity Provider",
@@ -3527,6 +5714,10 @@
   },
   "T1528": {
     "domain": "enterprise",
+    "name": "Steal Application Access Token",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Containers",
       "IaaS",
@@ -3537,6 +5728,10 @@
   },
   "T1529": {
     "domain": "enterprise",
+    "name": "System Shutdown/Reboot",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -3547,6 +5742,10 @@
   },
   "T1530": {
     "domain": "enterprise",
+    "name": "Data from Cloud Storage",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "IaaS",
       "Office Suite",
@@ -3555,6 +5754,10 @@
   },
   "T1531": {
     "domain": "enterprise",
+    "name": "Account Access Removal",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "ESXi",
       "IaaS",
@@ -3567,6 +5770,10 @@
   },
   "T1532": {
     "domain": "mobile",
+    "name": "Archive Collected Data",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -3574,6 +5781,10 @@
   },
   "T1533": {
     "domain": "mobile",
+    "name": "Data from Local System",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -3581,6 +5792,10 @@
   },
   "T1534": {
     "domain": "enterprise",
+    "name": "Internal Spearphishing",
+    "tactics": [
+      "lateral-movement"
+    ],
     "platforms": [
       "Linux",
       "Office Suite",
@@ -3591,12 +5806,20 @@
   },
   "T1535": {
     "domain": "enterprise",
+    "name": "Unused/Unsupported Cloud Regions",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "IaaS"
     ]
   },
   "T1537": {
     "domain": "enterprise",
+    "name": "Transfer Data to Cloud Account",
+    "tactics": [
+      "exfiltration"
+    ],
     "platforms": [
       "IaaS",
       "Office Suite",
@@ -3605,6 +5828,10 @@
   },
   "T1538": {
     "domain": "enterprise",
+    "name": "Cloud Service Dashboard",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "IaaS",
       "Identity Provider",
@@ -3614,6 +5841,10 @@
   },
   "T1539": {
     "domain": "enterprise",
+    "name": "Steal Web Session Cookie",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Linux",
       "Office Suite",
@@ -3624,12 +5855,22 @@
   },
   "T1541": {
     "domain": "mobile",
+    "name": "Foreground Persistence",
+    "tactics": [
+      "defense-evasion",
+      "persistence"
+    ],
     "platforms": [
       "Android"
     ]
   },
   "T1542": {
     "domain": "enterprise",
+    "name": "Pre-OS Boot",
+    "tactics": [
+      "stealth",
+      "persistence"
+    ],
     "platforms": [
       "Linux",
       "Network Devices",
@@ -3639,6 +5880,11 @@
   },
   "T1542.001": {
     "domain": "enterprise",
+    "name": "System Firmware",
+    "tactics": [
+      "stealth",
+      "persistence"
+    ],
     "platforms": [
       "Network Devices",
       "Windows"
@@ -3646,6 +5892,11 @@
   },
   "T1542.002": {
     "domain": "enterprise",
+    "name": "Component Firmware",
+    "tactics": [
+      "stealth",
+      "persistence"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -3654,6 +5905,11 @@
   },
   "T1542.003": {
     "domain": "enterprise",
+    "name": "Bootkit",
+    "tactics": [
+      "stealth",
+      "persistence"
+    ],
     "platforms": [
       "Linux",
       "Windows"
@@ -3661,18 +5917,33 @@
   },
   "T1542.004": {
     "domain": "enterprise",
+    "name": "ROMMONkit",
+    "tactics": [
+      "stealth",
+      "persistence"
+    ],
     "platforms": [
       "Network Devices"
     ]
   },
   "T1542.005": {
     "domain": "enterprise",
+    "name": "TFTP Boot",
+    "tactics": [
+      "stealth",
+      "persistence"
+    ],
     "platforms": [
       "Network Devices"
     ]
   },
   "T1543": {
     "domain": "enterprise",
+    "name": "Create or Modify System Process",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Containers",
       "Linux",
@@ -3682,36 +5953,65 @@
   },
   "T1543.001": {
     "domain": "enterprise",
+    "name": "Launch Agent",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "macOS"
     ]
   },
   "T1543.002": {
     "domain": "enterprise",
+    "name": "Systemd Service",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Linux"
     ]
   },
   "T1543.003": {
     "domain": "enterprise",
+    "name": "Windows Service",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1543.004": {
     "domain": "enterprise",
+    "name": "Launch Daemon",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "macOS"
     ]
   },
   "T1543.005": {
     "domain": "enterprise",
+    "name": "Container Service",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Containers"
     ]
   },
   "T1544": {
     "domain": "mobile",
+    "name": "Ingress Tool Transfer",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -3719,6 +6019,11 @@
   },
   "T1546": {
     "domain": "enterprise",
+    "name": "Event Triggered Execution",
+    "tactics": [
+      "privilege-escalation",
+      "persistence"
+    ],
     "platforms": [
       "IaaS",
       "Linux",
@@ -3730,24 +6035,44 @@
   },
   "T1546.001": {
     "domain": "enterprise",
+    "name": "Change Default File Association",
+    "tactics": [
+      "privilege-escalation",
+      "persistence"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1546.002": {
     "domain": "enterprise",
+    "name": "Screensaver",
+    "tactics": [
+      "privilege-escalation",
+      "persistence"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1546.003": {
     "domain": "enterprise",
+    "name": "Windows Management Instrumentation Event Subscription",
+    "tactics": [
+      "privilege-escalation",
+      "persistence"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1546.004": {
     "domain": "enterprise",
+    "name": "Unix Shell Configuration Modification",
+    "tactics": [
+      "privilege-escalation",
+      "persistence"
+    ],
     "platforms": [
       "Linux",
       "macOS"
@@ -3755,6 +6080,11 @@
   },
   "T1546.005": {
     "domain": "enterprise",
+    "name": "Trap",
+    "tactics": [
+      "privilege-escalation",
+      "persistence"
+    ],
     "platforms": [
       "Linux",
       "macOS"
@@ -3762,66 +6092,121 @@
   },
   "T1546.006": {
     "domain": "enterprise",
+    "name": "LC_LOAD_DYLIB Addition",
+    "tactics": [
+      "privilege-escalation",
+      "persistence"
+    ],
     "platforms": [
       "macOS"
     ]
   },
   "T1546.007": {
     "domain": "enterprise",
+    "name": "Netsh Helper DLL",
+    "tactics": [
+      "privilege-escalation",
+      "persistence"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1546.008": {
     "domain": "enterprise",
+    "name": "Accessibility Features",
+    "tactics": [
+      "privilege-escalation",
+      "persistence"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1546.009": {
     "domain": "enterprise",
+    "name": "AppCert DLLs",
+    "tactics": [
+      "privilege-escalation",
+      "persistence"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1546.010": {
     "domain": "enterprise",
+    "name": "AppInit DLLs",
+    "tactics": [
+      "privilege-escalation",
+      "persistence"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1546.011": {
     "domain": "enterprise",
+    "name": "Application Shimming",
+    "tactics": [
+      "privilege-escalation",
+      "persistence"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1546.012": {
     "domain": "enterprise",
+    "name": "Image File Execution Options Injection",
+    "tactics": [
+      "privilege-escalation",
+      "persistence"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1546.013": {
     "domain": "enterprise",
+    "name": "PowerShell Profile",
+    "tactics": [
+      "privilege-escalation",
+      "persistence"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1546.014": {
     "domain": "enterprise",
+    "name": "Emond",
+    "tactics": [
+      "privilege-escalation",
+      "persistence"
+    ],
     "platforms": [
       "macOS"
     ]
   },
   "T1546.015": {
     "domain": "enterprise",
+    "name": "Component Object Model Hijacking",
+    "tactics": [
+      "privilege-escalation",
+      "persistence"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1546.016": {
     "domain": "enterprise",
+    "name": "Installer Packages",
+    "tactics": [
+      "privilege-escalation",
+      "persistence"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -3830,12 +6215,22 @@
   },
   "T1546.017": {
     "domain": "enterprise",
+    "name": "Udev Rules",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Linux"
     ]
   },
   "T1546.018": {
     "domain": "enterprise",
+    "name": "Python Startup Hooks",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -3844,6 +6239,11 @@
   },
   "T1547": {
     "domain": "enterprise",
+    "name": "Boot or Logon Autostart Execution",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Linux",
       "Network Devices",
@@ -3853,36 +6253,66 @@
   },
   "T1547.001": {
     "domain": "enterprise",
+    "name": "Registry Run Keys / Startup Folder",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1547.002": {
     "domain": "enterprise",
+    "name": "Authentication Package",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1547.003": {
     "domain": "enterprise",
+    "name": "Time Providers",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1547.004": {
     "domain": "enterprise",
+    "name": "Winlogon Helper DLL",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1547.005": {
     "domain": "enterprise",
+    "name": "Security Support Provider",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1547.006": {
     "domain": "enterprise",
+    "name": "Kernel Modules and Extensions",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Linux",
       "macOS"
@@ -3890,54 +6320,98 @@
   },
   "T1547.007": {
     "domain": "enterprise",
+    "name": "Re-opened Applications",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "macOS"
     ]
   },
   "T1547.008": {
     "domain": "enterprise",
+    "name": "LSASS Driver",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1547.009": {
     "domain": "enterprise",
+    "name": "Shortcut Modification",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1547.010": {
     "domain": "enterprise",
+    "name": "Port Monitors",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1547.012": {
     "domain": "enterprise",
+    "name": "Print Processors",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1547.013": {
     "domain": "enterprise",
+    "name": "XDG Autostart Entries",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Linux"
     ]
   },
   "T1547.014": {
     "domain": "enterprise",
+    "name": "Active Setup",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1547.015": {
     "domain": "enterprise",
+    "name": "Login Items",
+    "tactics": [
+      "persistence",
+      "privilege-escalation"
+    ],
     "platforms": [
       "macOS"
     ]
   },
   "T1548": {
     "domain": "enterprise",
+    "name": "Abuse Elevation Control Mechanism",
+    "tactics": [
+      "privilege-escalation"
+    ],
     "platforms": [
       "IaaS",
       "Identity Provider",
@@ -3949,6 +6423,10 @@
   },
   "T1548.001": {
     "domain": "enterprise",
+    "name": "Setuid and Setgid",
+    "tactics": [
+      "privilege-escalation"
+    ],
     "platforms": [
       "Linux",
       "macOS"
@@ -3956,12 +6434,20 @@
   },
   "T1548.002": {
     "domain": "enterprise",
+    "name": "Bypass User Account Control",
+    "tactics": [
+      "privilege-escalation"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1548.003": {
     "domain": "enterprise",
+    "name": "Sudo and Sudo Caching",
+    "tactics": [
+      "privilege-escalation"
+    ],
     "platforms": [
       "Linux",
       "macOS"
@@ -3969,12 +6455,20 @@
   },
   "T1548.004": {
     "domain": "enterprise",
+    "name": "Elevated Execution with Prompt",
+    "tactics": [
+      "privilege-escalation"
+    ],
     "platforms": [
       "macOS"
     ]
   },
   "T1548.005": {
     "domain": "enterprise",
+    "name": "Temporary Elevated Cloud Access",
+    "tactics": [
+      "privilege-escalation"
+    ],
     "platforms": [
       "IaaS",
       "Identity Provider",
@@ -3983,12 +6477,20 @@
   },
   "T1548.006": {
     "domain": "enterprise",
+    "name": "TCC Manipulation",
+    "tactics": [
+      "privilege-escalation"
+    ],
     "platforms": [
       "macOS"
     ]
   },
   "T1550": {
     "domain": "enterprise",
+    "name": "Use Alternate Authentication Material",
+    "tactics": [
+      "lateral-movement"
+    ],
     "platforms": [
       "Containers",
       "IaaS",
@@ -4001,6 +6503,10 @@
   },
   "T1550.001": {
     "domain": "enterprise",
+    "name": "Application Access Token",
+    "tactics": [
+      "lateral-movement"
+    ],
     "platforms": [
       "Containers",
       "IaaS",
@@ -4011,18 +6517,30 @@
   },
   "T1550.002": {
     "domain": "enterprise",
+    "name": "Pass the Hash",
+    "tactics": [
+      "lateral-movement"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1550.003": {
     "domain": "enterprise",
+    "name": "Pass the Ticket",
+    "tactics": [
+      "lateral-movement"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1550.004": {
     "domain": "enterprise",
+    "name": "Web Session Cookie",
+    "tactics": [
+      "lateral-movement"
+    ],
     "platforms": [
       "IaaS",
       "Office Suite",
@@ -4031,6 +6549,10 @@
   },
   "T1552": {
     "domain": "enterprise",
+    "name": "Unsecured Credentials",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Containers",
       "IaaS",
@@ -4045,6 +6567,10 @@
   },
   "T1552.001": {
     "domain": "enterprise",
+    "name": "Credentials In Files",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Containers",
       "IaaS",
@@ -4055,12 +6581,20 @@
   },
   "T1552.002": {
     "domain": "enterprise",
+    "name": "Credentials in Registry",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1552.003": {
     "domain": "enterprise",
+    "name": "Shell History",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -4069,6 +6603,10 @@
   },
   "T1552.004": {
     "domain": "enterprise",
+    "name": "Private Keys",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Linux",
       "Network Devices",
@@ -4078,24 +6616,40 @@
   },
   "T1552.005": {
     "domain": "enterprise",
+    "name": "Cloud Instance Metadata API",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "IaaS"
     ]
   },
   "T1552.006": {
     "domain": "enterprise",
+    "name": "Group Policy Preferences",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1552.007": {
     "domain": "enterprise",
+    "name": "Container API",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Containers"
     ]
   },
   "T1552.008": {
     "domain": "enterprise",
+    "name": "Chat Messages",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Office Suite",
       "SaaS"
@@ -4103,6 +6657,10 @@
   },
   "T1553": {
     "domain": "enterprise",
+    "name": "Subvert Trust Controls",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -4111,12 +6669,20 @@
   },
   "T1553.001": {
     "domain": "enterprise",
+    "name": "Gatekeeper Bypass",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "macOS"
     ]
   },
   "T1553.002": {
     "domain": "enterprise",
+    "name": "Code Signing",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "Windows",
       "macOS"
@@ -4124,12 +6690,20 @@
   },
   "T1553.003": {
     "domain": "enterprise",
+    "name": "SIP and Trust Provider Hijacking",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1553.004": {
     "domain": "enterprise",
+    "name": "Install Root Certificate",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -4138,12 +6712,20 @@
   },
   "T1553.005": {
     "domain": "enterprise",
+    "name": "Mark-of-the-Web Bypass",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1553.006": {
     "domain": "enterprise",
+    "name": "Code Signing Policy Modification",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "Windows",
       "macOS"
@@ -4151,6 +6733,10 @@
   },
   "T1554": {
     "domain": "enterprise",
+    "name": "Compromise Host Software Binary",
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -4160,6 +6746,10 @@
   },
   "T1555": {
     "domain": "enterprise",
+    "name": "Credentials from Password Stores",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "IaaS",
       "Linux",
@@ -4169,12 +6759,20 @@
   },
   "T1555.001": {
     "domain": "enterprise",
+    "name": "Keychain",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "macOS"
     ]
   },
   "T1555.002": {
     "domain": "enterprise",
+    "name": "Securityd Memory",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Linux",
       "macOS"
@@ -4182,6 +6780,10 @@
   },
   "T1555.003": {
     "domain": "enterprise",
+    "name": "Credentials from Web Browsers",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -4190,12 +6792,20 @@
   },
   "T1555.004": {
     "domain": "enterprise",
+    "name": "Windows Credential Manager",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1555.005": {
     "domain": "enterprise",
+    "name": "Password Managers",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -4204,12 +6814,22 @@
   },
   "T1555.006": {
     "domain": "enterprise",
+    "name": "Cloud Secrets Management Stores",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "IaaS"
     ]
   },
   "T1556": {
     "domain": "enterprise",
+    "name": "Modify Authentication Process",
+    "tactics": [
+      "defense-impairment",
+      "persistence",
+      "credential-access"
+    ],
     "platforms": [
       "IaaS",
       "Identity Provider",
@@ -4223,18 +6843,36 @@
   },
   "T1556.001": {
     "domain": "enterprise",
+    "name": "Domain Controller Authentication",
+    "tactics": [
+      "defense-impairment",
+      "persistence",
+      "credential-access"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1556.002": {
     "domain": "enterprise",
+    "name": "Password Filter DLL",
+    "tactics": [
+      "defense-impairment",
+      "persistence",
+      "credential-access"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1556.003": {
     "domain": "enterprise",
+    "name": "Pluggable Authentication Modules",
+    "tactics": [
+      "defense-impairment",
+      "persistence",
+      "credential-access"
+    ],
     "platforms": [
       "Linux",
       "macOS"
@@ -4242,18 +6880,36 @@
   },
   "T1556.004": {
     "domain": "enterprise",
+    "name": "Network Device Authentication",
+    "tactics": [
+      "defense-impairment",
+      "persistence",
+      "credential-access"
+    ],
     "platforms": [
       "Network Devices"
     ]
   },
   "T1556.005": {
     "domain": "enterprise",
+    "name": "Reversible Encryption",
+    "tactics": [
+      "defense-impairment",
+      "persistence",
+      "credential-access"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1556.006": {
     "domain": "enterprise",
+    "name": "Multi-Factor Authentication",
+    "tactics": [
+      "defense-impairment",
+      "persistence",
+      "credential-access"
+    ],
     "platforms": [
       "IaaS",
       "Identity Provider",
@@ -4266,6 +6922,12 @@
   },
   "T1556.007": {
     "domain": "enterprise",
+    "name": "Hybrid Identity",
+    "tactics": [
+      "defense-impairment",
+      "persistence",
+      "credential-access"
+    ],
     "platforms": [
       "IaaS",
       "Identity Provider",
@@ -4276,12 +6938,24 @@
   },
   "T1556.008": {
     "domain": "enterprise",
+    "name": "Network Provider DLL",
+    "tactics": [
+      "defense-impairment",
+      "persistence",
+      "credential-access"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1556.009": {
     "domain": "enterprise",
+    "name": "Conditional Access Policies",
+    "tactics": [
+      "defense-impairment",
+      "persistence",
+      "credential-access"
+    ],
     "platforms": [
       "IaaS",
       "Identity Provider"
@@ -4289,6 +6963,11 @@
   },
   "T1557": {
     "domain": "enterprise",
+    "name": "Adversary-in-the-Middle",
+    "tactics": [
+      "credential-access",
+      "collection"
+    ],
     "platforms": [
       "Linux",
       "Network Devices",
@@ -4298,12 +6977,22 @@
   },
   "T1557.001": {
     "domain": "enterprise",
+    "name": "Name Resolution Poisoning and SMB Relay",
+    "tactics": [
+      "credential-access",
+      "collection"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1557.002": {
     "domain": "enterprise",
+    "name": "ARP Cache Poisoning",
+    "tactics": [
+      "credential-access",
+      "collection"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -4312,6 +7001,11 @@
   },
   "T1557.003": {
     "domain": "enterprise",
+    "name": "DHCP Spoofing",
+    "tactics": [
+      "credential-access",
+      "collection"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -4320,12 +7014,21 @@
   },
   "T1557.004": {
     "domain": "enterprise",
+    "name": "Evil Twin",
+    "tactics": [
+      "credential-access",
+      "collection"
+    ],
     "platforms": [
       "Network Devices"
     ]
   },
   "T1558": {
     "domain": "enterprise",
+    "name": "Steal or Forge Kerberos Tickets",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -4334,30 +7037,50 @@
   },
   "T1558.001": {
     "domain": "enterprise",
+    "name": "Golden Ticket",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1558.002": {
     "domain": "enterprise",
+    "name": "Silver Ticket",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1558.003": {
     "domain": "enterprise",
+    "name": "Kerberoasting",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1558.004": {
     "domain": "enterprise",
+    "name": "AS-REP Roasting",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1558.005": {
     "domain": "enterprise",
+    "name": "Ccache Files",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Linux",
       "macOS"
@@ -4365,6 +7088,10 @@
   },
   "T1559": {
     "domain": "enterprise",
+    "name": "Inter-Process Communication",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -4373,24 +7100,40 @@
   },
   "T1559.001": {
     "domain": "enterprise",
+    "name": "Component Object Model",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1559.002": {
     "domain": "enterprise",
+    "name": "Dynamic Data Exchange",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1559.003": {
     "domain": "enterprise",
+    "name": "XPC Services",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "macOS"
     ]
   },
   "T1560": {
     "domain": "enterprise",
+    "name": "Archive Collected Data",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -4399,6 +7142,10 @@
   },
   "T1560.001": {
     "domain": "enterprise",
+    "name": "Archive via Utility",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -4407,6 +7154,10 @@
   },
   "T1560.002": {
     "domain": "enterprise",
+    "name": "Archive via Library",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -4415,6 +7166,10 @@
   },
   "T1560.003": {
     "domain": "enterprise",
+    "name": "Archive via Custom Method",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -4423,6 +7178,10 @@
   },
   "T1561": {
     "domain": "enterprise",
+    "name": "Disk Wipe",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "Linux",
       "Network Devices",
@@ -4432,6 +7191,10 @@
   },
   "T1561.001": {
     "domain": "enterprise",
+    "name": "Disk Content Wipe",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "Linux",
       "Network Devices",
@@ -4441,6 +7204,10 @@
   },
   "T1561.002": {
     "domain": "enterprise",
+    "name": "Disk Structure Wipe",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "Linux",
       "Network Devices",
@@ -4450,6 +7217,10 @@
   },
   "T1563": {
     "domain": "enterprise",
+    "name": "Remote Service Session Hijacking",
+    "tactics": [
+      "lateral-movement"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -4458,6 +7229,10 @@
   },
   "T1563.001": {
     "domain": "enterprise",
+    "name": "SSH Hijacking",
+    "tactics": [
+      "lateral-movement"
+    ],
     "platforms": [
       "Linux",
       "macOS"
@@ -4465,12 +7240,20 @@
   },
   "T1563.002": {
     "domain": "enterprise",
+    "name": "RDP Hijacking",
+    "tactics": [
+      "lateral-movement"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1564": {
     "domain": "enterprise",
+    "name": "Hide Artifacts",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -4481,6 +7264,10 @@
   },
   "T1564.001": {
     "domain": "enterprise",
+    "name": "Hidden Files and Directories",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -4489,6 +7276,10 @@
   },
   "T1564.002": {
     "domain": "enterprise",
+    "name": "Hidden Users",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -4497,6 +7288,10 @@
   },
   "T1564.003": {
     "domain": "enterprise",
+    "name": "Hidden Window",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -4505,12 +7300,20 @@
   },
   "T1564.004": {
     "domain": "enterprise",
+    "name": "NTFS File Attributes",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1564.005": {
     "domain": "enterprise",
+    "name": "Hidden File System",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -4519,6 +7322,10 @@
   },
   "T1564.006": {
     "domain": "enterprise",
+    "name": "Run Virtual Instance",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -4528,6 +7335,10 @@
   },
   "T1564.007": {
     "domain": "enterprise",
+    "name": "VBA Stomping",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -4536,6 +7347,10 @@
   },
   "T1564.008": {
     "domain": "enterprise",
+    "name": "Email Hiding Rules",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Office Suite",
@@ -4545,18 +7360,30 @@
   },
   "T1564.009": {
     "domain": "enterprise",
+    "name": "Resource Forking",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "macOS"
     ]
   },
   "T1564.010": {
     "domain": "enterprise",
+    "name": "Process Argument Spoofing",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1564.011": {
     "domain": "enterprise",
+    "name": "Ignore Process Interrupts",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -4565,6 +7392,10 @@
   },
   "T1564.012": {
     "domain": "enterprise",
+    "name": "File/Path Exclusions",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -4573,12 +7404,20 @@
   },
   "T1564.013": {
     "domain": "enterprise",
+    "name": "Bind Mounts",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux"
     ]
   },
   "T1564.014": {
     "domain": "enterprise",
+    "name": "Extended Attributes",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "macOS"
@@ -4586,6 +7425,10 @@
   },
   "T1565": {
     "domain": "enterprise",
+    "name": "Data Manipulation",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -4594,6 +7437,10 @@
   },
   "T1565.001": {
     "domain": "enterprise",
+    "name": "Stored Data Manipulation",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -4602,6 +7449,10 @@
   },
   "T1565.002": {
     "domain": "enterprise",
+    "name": "Transmitted Data Manipulation",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -4610,6 +7461,10 @@
   },
   "T1565.003": {
     "domain": "enterprise",
+    "name": "Runtime Data Manipulation",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -4618,6 +7473,10 @@
   },
   "T1566": {
     "domain": "enterprise",
+    "name": "Phishing",
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": [
       "Identity Provider",
       "Linux",
@@ -4629,6 +7488,10 @@
   },
   "T1566.001": {
     "domain": "enterprise",
+    "name": "Spearphishing Attachment",
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -4637,6 +7500,10 @@
   },
   "T1566.002": {
     "domain": "enterprise",
+    "name": "Spearphishing Link",
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": [
       "Identity Provider",
       "Linux",
@@ -4648,6 +7515,10 @@
   },
   "T1566.003": {
     "domain": "enterprise",
+    "name": "Spearphishing via Service",
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -4656,6 +7527,10 @@
   },
   "T1566.004": {
     "domain": "enterprise",
+    "name": "Spearphishing Voice",
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": [
       "Identity Provider",
       "Linux",
@@ -4665,6 +7540,10 @@
   },
   "T1567": {
     "domain": "enterprise",
+    "name": "Exfiltration Over Web Service",
+    "tactics": [
+      "exfiltration"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -4676,6 +7555,10 @@
   },
   "T1567.001": {
     "domain": "enterprise",
+    "name": "Exfiltration to Code Repository",
+    "tactics": [
+      "exfiltration"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -4685,6 +7568,10 @@
   },
   "T1567.002": {
     "domain": "enterprise",
+    "name": "Exfiltration to Cloud Storage",
+    "tactics": [
+      "exfiltration"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -4694,6 +7581,10 @@
   },
   "T1567.003": {
     "domain": "enterprise",
+    "name": "Exfiltration to Text Storage Sites",
+    "tactics": [
+      "exfiltration"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -4703,6 +7594,10 @@
   },
   "T1567.004": {
     "domain": "enterprise",
+    "name": "Exfiltration Over Webhook",
+    "tactics": [
+      "exfiltration"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -4714,6 +7609,10 @@
   },
   "T1568": {
     "domain": "enterprise",
+    "name": "Dynamic Resolution",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -4723,6 +7622,10 @@
   },
   "T1568.001": {
     "domain": "enterprise",
+    "name": "Fast Flux DNS",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -4732,6 +7635,10 @@
   },
   "T1568.002": {
     "domain": "enterprise",
+    "name": "Domain Generation Algorithms",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -4741,6 +7648,10 @@
   },
   "T1568.003": {
     "domain": "enterprise",
+    "name": "DNS Calculation",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -4750,6 +7661,10 @@
   },
   "T1569": {
     "domain": "enterprise",
+    "name": "System Services",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -4758,24 +7673,40 @@
   },
   "T1569.001": {
     "domain": "enterprise",
+    "name": "Launchctl",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "macOS"
     ]
   },
   "T1569.002": {
     "domain": "enterprise",
+    "name": "Service Execution",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1569.003": {
     "domain": "enterprise",
+    "name": "Systemctl",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "Linux"
     ]
   },
   "T1570": {
     "domain": "enterprise",
+    "name": "Lateral Tool Transfer",
+    "tactics": [
+      "lateral-movement"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -4785,6 +7716,10 @@
   },
   "T1571": {
     "domain": "enterprise",
+    "name": "Non-Standard Port",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -4794,6 +7729,10 @@
   },
   "T1572": {
     "domain": "enterprise",
+    "name": "Protocol Tunneling",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -4803,6 +7742,10 @@
   },
   "T1573": {
     "domain": "enterprise",
+    "name": "Encrypted Channel",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -4813,6 +7756,10 @@
   },
   "T1573.001": {
     "domain": "enterprise",
+    "name": "Symmetric Cryptography",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -4823,6 +7770,10 @@
   },
   "T1573.002": {
     "domain": "enterprise",
+    "name": "Asymmetric Cryptography",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -4833,6 +7784,11 @@
   },
   "T1574": {
     "domain": "enterprise",
+    "name": "Hijack Execution Flow",
+    "tactics": [
+      "stealth",
+      "execution"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -4841,24 +7797,44 @@
   },
   "T1574.001": {
     "domain": "enterprise",
+    "name": "DLL",
+    "tactics": [
+      "stealth",
+      "execution"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1574.004": {
     "domain": "enterprise",
+    "name": "Dylib Hijacking",
+    "tactics": [
+      "stealth",
+      "execution"
+    ],
     "platforms": [
       "macOS"
     ]
   },
   "T1574.005": {
     "domain": "enterprise",
+    "name": "Executable Installer File Permissions Weakness",
+    "tactics": [
+      "stealth",
+      "execution"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1574.006": {
     "domain": "enterprise",
+    "name": "Dynamic Linker Hijacking",
+    "tactics": [
+      "stealth",
+      "execution"
+    ],
     "platforms": [
       "Linux",
       "macOS"
@@ -4866,6 +7842,11 @@
   },
   "T1574.007": {
     "domain": "enterprise",
+    "name": "Path Interception by PATH Environment Variable",
+    "tactics": [
+      "stealth",
+      "execution"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -4874,672 +7855,1129 @@
   },
   "T1574.008": {
     "domain": "enterprise",
+    "name": "Path Interception by Search Order Hijacking",
+    "tactics": [
+      "stealth",
+      "execution"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1574.009": {
     "domain": "enterprise",
+    "name": "Path Interception by Unquoted Path",
+    "tactics": [
+      "stealth",
+      "execution"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1574.010": {
     "domain": "enterprise",
+    "name": "Services File Permissions Weakness",
+    "tactics": [
+      "stealth",
+      "execution"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1574.011": {
     "domain": "enterprise",
+    "name": "Services Registry Permissions Weakness",
+    "tactics": [
+      "stealth",
+      "execution"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1574.012": {
     "domain": "enterprise",
+    "name": "COR_PROFILER",
+    "tactics": [
+      "stealth",
+      "execution"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1574.013": {
     "domain": "enterprise",
+    "name": "KernelCallbackTable",
+    "tactics": [
+      "stealth",
+      "execution"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1574.014": {
     "domain": "enterprise",
+    "name": "AppDomainManager",
+    "tactics": [
+      "stealth",
+      "execution"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1575": {
     "domain": "mobile",
+    "name": "Native API",
+    "tactics": [
+      "defense-evasion",
+      "execution"
+    ],
     "platforms": [
       "Android"
     ]
   },
   "T1577": {
     "domain": "mobile",
+    "name": "Compromise Application Executable",
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "Android"
     ]
   },
   "T1578": {
     "domain": "enterprise",
+    "name": "Modify Cloud Compute Infrastructure",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "IaaS"
     ]
   },
   "T1578.001": {
     "domain": "enterprise",
+    "name": "Create Snapshot",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "IaaS"
     ]
   },
   "T1578.002": {
     "domain": "enterprise",
+    "name": "Create Cloud Instance",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "IaaS"
     ]
   },
   "T1578.003": {
     "domain": "enterprise",
+    "name": "Delete Cloud Instance",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "IaaS"
     ]
   },
   "T1578.004": {
     "domain": "enterprise",
+    "name": "Revert Cloud Instance",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "IaaS"
     ]
   },
   "T1578.005": {
     "domain": "enterprise",
+    "name": "Modify Cloud Compute Configurations",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "IaaS"
     ]
   },
   "T1580": {
     "domain": "enterprise",
+    "name": "Cloud Infrastructure Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "IaaS"
     ]
   },
   "T1582": {
     "domain": "mobile",
+    "name": "SMS Control",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "Android"
     ]
   },
   "T1583": {
     "domain": "enterprise",
+    "name": "Acquire Infrastructure",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1583.001": {
     "domain": "enterprise",
+    "name": "Domains",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1583.002": {
     "domain": "enterprise",
+    "name": "DNS Server",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1583.003": {
     "domain": "enterprise",
+    "name": "Virtual Private Server",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1583.004": {
     "domain": "enterprise",
+    "name": "Server",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1583.005": {
     "domain": "enterprise",
+    "name": "Botnet",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1583.006": {
     "domain": "enterprise",
+    "name": "Web Services",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1583.007": {
     "domain": "enterprise",
+    "name": "Serverless",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1583.008": {
     "domain": "enterprise",
+    "name": "Malvertising",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1584": {
     "domain": "enterprise",
+    "name": "Compromise Infrastructure",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1584.001": {
     "domain": "enterprise",
+    "name": "Domains",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1584.002": {
     "domain": "enterprise",
+    "name": "DNS Server",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1584.003": {
     "domain": "enterprise",
+    "name": "Virtual Private Server",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1584.004": {
     "domain": "enterprise",
+    "name": "Server",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1584.005": {
     "domain": "enterprise",
+    "name": "Botnet",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1584.006": {
     "domain": "enterprise",
+    "name": "Web Services",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1584.007": {
     "domain": "enterprise",
+    "name": "Serverless",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1584.008": {
     "domain": "enterprise",
+    "name": "Network Devices",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1585": {
     "domain": "enterprise",
+    "name": "Establish Accounts",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1585.001": {
     "domain": "enterprise",
+    "name": "Social Media Accounts",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1585.002": {
     "domain": "enterprise",
+    "name": "Email Accounts",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1585.003": {
     "domain": "enterprise",
+    "name": "Cloud Accounts",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1586": {
     "domain": "enterprise",
+    "name": "Compromise Accounts",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1586.001": {
     "domain": "enterprise",
+    "name": "Social Media Accounts",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1586.002": {
     "domain": "enterprise",
+    "name": "Email Accounts",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1586.003": {
     "domain": "enterprise",
+    "name": "Cloud Accounts",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1587": {
     "domain": "enterprise",
+    "name": "Develop Capabilities",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1587.001": {
     "domain": "enterprise",
+    "name": "Malware",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1587.002": {
     "domain": "enterprise",
+    "name": "Code Signing Certificates",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1587.003": {
     "domain": "enterprise",
+    "name": "Digital Certificates",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1587.004": {
     "domain": "enterprise",
+    "name": "Exploits",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1588": {
     "domain": "enterprise",
+    "name": "Obtain Capabilities",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1588.001": {
     "domain": "enterprise",
+    "name": "Malware",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1588.002": {
     "domain": "enterprise",
+    "name": "Tool",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1588.003": {
     "domain": "enterprise",
+    "name": "Code Signing Certificates",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1588.004": {
     "domain": "enterprise",
+    "name": "Digital Certificates",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1588.005": {
     "domain": "enterprise",
+    "name": "Exploits",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1588.006": {
     "domain": "enterprise",
+    "name": "Vulnerabilities",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1588.007": {
     "domain": "enterprise",
+    "name": "Artificial Intelligence",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1589": {
     "domain": "enterprise",
+    "name": "Gather Victim Identity Information",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1589.001": {
     "domain": "enterprise",
+    "name": "Credentials",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1589.002": {
     "domain": "enterprise",
+    "name": "Email Addresses",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1589.003": {
     "domain": "enterprise",
+    "name": "Employee Names",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1590": {
     "domain": "enterprise",
+    "name": "Gather Victim Network Information",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1590.001": {
     "domain": "enterprise",
+    "name": "Domain Properties",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1590.002": {
     "domain": "enterprise",
+    "name": "DNS",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1590.003": {
     "domain": "enterprise",
+    "name": "Network Trust Dependencies",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1590.004": {
     "domain": "enterprise",
+    "name": "Network Topology",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1590.005": {
     "domain": "enterprise",
+    "name": "IP Addresses",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1590.006": {
     "domain": "enterprise",
+    "name": "Network Security Appliances",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1591": {
     "domain": "enterprise",
+    "name": "Gather Victim Org Information",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1591.001": {
     "domain": "enterprise",
+    "name": "Determine Physical Locations",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1591.002": {
     "domain": "enterprise",
+    "name": "Business Relationships",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1591.003": {
     "domain": "enterprise",
+    "name": "Identify Business Tempo",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1591.004": {
     "domain": "enterprise",
+    "name": "Identify Roles",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1592": {
     "domain": "enterprise",
+    "name": "Gather Victim Host Information",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1592.001": {
     "domain": "enterprise",
+    "name": "Hardware",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1592.002": {
     "domain": "enterprise",
+    "name": "Software",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1592.003": {
     "domain": "enterprise",
+    "name": "Firmware",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1592.004": {
     "domain": "enterprise",
+    "name": "Client Configurations",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1593": {
     "domain": "enterprise",
+    "name": "Search Open Websites/Domains",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1593.001": {
     "domain": "enterprise",
+    "name": "Social Media",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1593.002": {
     "domain": "enterprise",
+    "name": "Search Engines",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1593.003": {
     "domain": "enterprise",
+    "name": "Code Repositories",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1594": {
     "domain": "enterprise",
+    "name": "Search Victim-Owned Websites",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1595": {
     "domain": "enterprise",
+    "name": "Active Scanning",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1595.001": {
     "domain": "enterprise",
+    "name": "Scanning IP Blocks",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1595.002": {
     "domain": "enterprise",
+    "name": "Vulnerability Scanning",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1595.003": {
     "domain": "enterprise",
+    "name": "Wordlist Scanning",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1596": {
     "domain": "enterprise",
+    "name": "Search Open Technical Databases",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1596.001": {
     "domain": "enterprise",
+    "name": "DNS/Passive DNS",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1596.002": {
     "domain": "enterprise",
+    "name": "WHOIS",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1596.003": {
     "domain": "enterprise",
+    "name": "Digital Certificates",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1596.004": {
     "domain": "enterprise",
+    "name": "CDNs",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1596.005": {
     "domain": "enterprise",
+    "name": "Scan Databases",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1597": {
     "domain": "enterprise",
+    "name": "Search Closed Sources",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1597.001": {
     "domain": "enterprise",
+    "name": "Threat Intel Vendors",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1597.002": {
     "domain": "enterprise",
+    "name": "Purchase Technical Data",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1598": {
     "domain": "enterprise",
+    "name": "Phishing for Information",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1598.001": {
     "domain": "enterprise",
+    "name": "Spearphishing Service",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1598.002": {
     "domain": "enterprise",
+    "name": "Spearphishing Attachment",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1598.003": {
     "domain": "enterprise",
+    "name": "Spearphishing Link",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1598.004": {
     "domain": "enterprise",
+    "name": "Spearphishing Voice",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1599": {
     "domain": "enterprise",
+    "name": "Network Boundary Bridging",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "Network Devices"
     ]
   },
   "T1599.001": {
     "domain": "enterprise",
+    "name": "Network Address Translation Traversal",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "Network Devices"
     ]
   },
   "T1600": {
     "domain": "enterprise",
+    "name": "Weaken Encryption",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "Network Devices"
     ]
   },
   "T1600.001": {
     "domain": "enterprise",
+    "name": "Reduce Key Space",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "Network Devices"
     ]
   },
   "T1600.002": {
     "domain": "enterprise",
+    "name": "Disable Crypto Hardware",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "Network Devices"
     ]
   },
   "T1601": {
     "domain": "enterprise",
+    "name": "Modify System Image",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "Network Devices"
     ]
   },
   "T1601.001": {
     "domain": "enterprise",
+    "name": "Patch System Image",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "Network Devices"
     ]
   },
   "T1601.002": {
     "domain": "enterprise",
+    "name": "Downgrade System Image",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "Network Devices"
     ]
   },
   "T1602": {
     "domain": "enterprise",
+    "name": "Data from Configuration Repository",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Network Devices"
     ]
   },
   "T1602.001": {
     "domain": "enterprise",
+    "name": "SNMP (MIB Dump)",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Network Devices"
     ]
   },
   "T1602.002": {
     "domain": "enterprise",
+    "name": "Network Device Configuration Dump",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Network Devices"
     ]
   },
   "T1603": {
     "domain": "mobile",
+    "name": "Scheduled Task/Job",
+    "tactics": [
+      "execution",
+      "persistence"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -5547,12 +8985,20 @@
   },
   "T1604": {
     "domain": "mobile",
+    "name": "Proxy Through Victim",
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android"
     ]
   },
   "T1606": {
     "domain": "enterprise",
+    "name": "Forge Web Credentials",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "IaaS",
       "Identity Provider",
@@ -5565,6 +9011,10 @@
   },
   "T1606.001": {
     "domain": "enterprise",
+    "name": "Web Cookies",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "IaaS",
       "Linux",
@@ -5575,6 +9025,10 @@
   },
   "T1606.002": {
     "domain": "enterprise",
+    "name": "SAML Tokens",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "IaaS",
       "Identity Provider",
@@ -5585,60 +9039,100 @@
   },
   "T1608": {
     "domain": "enterprise",
+    "name": "Stage Capabilities",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1608.001": {
     "domain": "enterprise",
+    "name": "Upload Malware",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1608.002": {
     "domain": "enterprise",
+    "name": "Upload Tool",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1608.003": {
     "domain": "enterprise",
+    "name": "Install Digital Certificate",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1608.004": {
     "domain": "enterprise",
+    "name": "Drive-by Target",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1608.005": {
     "domain": "enterprise",
+    "name": "Link Target",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1608.006": {
     "domain": "enterprise",
+    "name": "SEO Poisoning",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1609": {
     "domain": "enterprise",
+    "name": "Container Administration Command",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "Containers"
     ]
   },
   "T1610": {
     "domain": "enterprise",
+    "name": "Deploy Container",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "Containers"
     ]
   },
   "T1611": {
     "domain": "enterprise",
+    "name": "Escape to Host",
+    "tactics": [
+      "privilege-escalation"
+    ],
     "platforms": [
       "Containers",
       "ESXi",
@@ -5648,18 +9142,30 @@
   },
   "T1612": {
     "domain": "enterprise",
+    "name": "Build Image on Host",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Containers"
     ]
   },
   "T1613": {
     "domain": "enterprise",
+    "name": "Container and Resource Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Containers"
     ]
   },
   "T1614": {
     "domain": "enterprise",
+    "name": "System Location Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "IaaS",
       "Linux",
@@ -5669,6 +9175,10 @@
   },
   "T1614.001": {
     "domain": "enterprise",
+    "name": "System Language Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -5677,30 +9187,52 @@
   },
   "T1615": {
     "domain": "enterprise",
+    "name": "Group Policy Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1616": {
     "domain": "mobile",
+    "name": "Call Control",
+    "tactics": [
+      "collection",
+      "impact",
+      "command-and-control"
+    ],
     "platforms": [
       "Android"
     ]
   },
   "T1617": {
     "domain": "mobile",
+    "name": "Hooking",
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android"
     ]
   },
   "T1619": {
     "domain": "enterprise",
+    "name": "Cloud Storage Object Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "IaaS"
     ]
   },
   "T1620": {
     "domain": "enterprise",
+    "name": "Reflective Code Loading",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -5709,6 +9241,10 @@
   },
   "T1621": {
     "domain": "enterprise",
+    "name": "Multi-Factor Authentication Request Generation",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "IaaS",
       "Identity Provider",
@@ -5721,6 +9257,11 @@
   },
   "T1622": {
     "domain": "enterprise",
+    "name": "Debugger Evasion",
+    "tactics": [
+      "stealth",
+      "discovery"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -5729,6 +9270,10 @@
   },
   "T1623": {
     "domain": "mobile",
+    "name": "Command and Scripting Interpreter",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -5736,6 +9281,10 @@
   },
   "T1623.001": {
     "domain": "mobile",
+    "name": "Unix Shell",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -5743,42 +9292,70 @@
   },
   "T1624": {
     "domain": "mobile",
+    "name": "Event Triggered Execution",
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "Android"
     ]
   },
   "T1624.001": {
     "domain": "mobile",
+    "name": "Broadcast Receivers",
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "Android"
     ]
   },
   "T1625": {
     "domain": "mobile",
+    "name": "Hijack Execution Flow",
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "Android"
     ]
   },
   "T1625.001": {
     "domain": "mobile",
+    "name": "System Runtime API Hijacking",
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "Android"
     ]
   },
   "T1626": {
     "domain": "mobile",
+    "name": "Abuse Elevation Control Mechanism",
+    "tactics": [
+      "privilege-escalation"
+    ],
     "platforms": [
       "Android"
     ]
   },
   "T1626.001": {
     "domain": "mobile",
+    "name": "Device Administrator Permissions",
+    "tactics": [
+      "privilege-escalation"
+    ],
     "platforms": [
       "Android"
     ]
   },
   "T1627": {
     "domain": "mobile",
+    "name": "Execution Guardrails",
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -5786,6 +9363,10 @@
   },
   "T1627.001": {
     "domain": "mobile",
+    "name": "Geofencing",
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -5793,54 +9374,90 @@
   },
   "T1628": {
     "domain": "mobile",
+    "name": "Hide Artifacts",
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android"
     ]
   },
   "T1628.001": {
     "domain": "mobile",
+    "name": "Suppress Application Icon",
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android"
     ]
   },
   "T1628.002": {
     "domain": "mobile",
+    "name": "User Evasion",
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android"
     ]
   },
   "T1628.003": {
     "domain": "mobile",
+    "name": "Conceal Multimedia Files",
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android"
     ]
   },
   "T1629": {
     "domain": "mobile",
+    "name": "Impair Defenses",
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android"
     ]
   },
   "T1629.001": {
     "domain": "mobile",
+    "name": "Prevent Application Removal",
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android"
     ]
   },
   "T1629.002": {
     "domain": "mobile",
+    "name": "Device Lockout",
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android"
     ]
   },
   "T1629.003": {
     "domain": "mobile",
+    "name": "Disable or Modify Tools",
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android"
     ]
   },
   "T1630": {
     "domain": "mobile",
+    "name": "Indicator Removal on Host",
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -5848,18 +9465,30 @@
   },
   "T1630.001": {
     "domain": "mobile",
+    "name": "Uninstall Malicious Application",
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android"
     ]
   },
   "T1630.002": {
     "domain": "mobile",
+    "name": "File Deletion",
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android"
     ]
   },
   "T1630.003": {
     "domain": "mobile",
+    "name": "Disguise Root/Jailbreak Indicators",
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -5867,6 +9496,11 @@
   },
   "T1631": {
     "domain": "mobile",
+    "name": "Process Injection",
+    "tactics": [
+      "defense-evasion",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -5874,6 +9508,11 @@
   },
   "T1631.001": {
     "domain": "mobile",
+    "name": "Ptrace System Calls",
+    "tactics": [
+      "defense-evasion",
+      "privilege-escalation"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -5881,6 +9520,10 @@
   },
   "T1632": {
     "domain": "mobile",
+    "name": "Subvert Trust Controls",
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -5888,6 +9531,10 @@
   },
   "T1632.001": {
     "domain": "mobile",
+    "name": "Code Signing Policy Modification",
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -5895,6 +9542,10 @@
   },
   "T1633": {
     "domain": "mobile",
+    "name": "Virtualization/Sandbox Evasion",
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -5902,6 +9553,10 @@
   },
   "T1633.001": {
     "domain": "mobile",
+    "name": "System Checks",
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -5909,18 +9564,30 @@
   },
   "T1634": {
     "domain": "mobile",
+    "name": "Credentials from Password Store",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "iOS"
     ]
   },
   "T1634.001": {
     "domain": "mobile",
+    "name": "Keychain",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "iOS"
     ]
   },
   "T1635": {
     "domain": "mobile",
+    "name": "Steal Application Access Token",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -5928,6 +9595,10 @@
   },
   "T1635.001": {
     "domain": "mobile",
+    "name": "URI Hijacking",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -5935,6 +9606,10 @@
   },
   "T1636": {
     "domain": "mobile",
+    "name": "Protected User Data",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -5942,6 +9617,10 @@
   },
   "T1636.001": {
     "domain": "mobile",
+    "name": "Calendar Entries",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -5949,6 +9628,10 @@
   },
   "T1636.002": {
     "domain": "mobile",
+    "name": "Call Log",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -5956,6 +9639,10 @@
   },
   "T1636.003": {
     "domain": "mobile",
+    "name": "Contact List",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -5963,6 +9650,10 @@
   },
   "T1636.004": {
     "domain": "mobile",
+    "name": "SMS Messages",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -5970,6 +9661,10 @@
   },
   "T1636.005": {
     "domain": "mobile",
+    "name": "Accounts",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -5977,6 +9672,10 @@
   },
   "T1637": {
     "domain": "mobile",
+    "name": "Dynamic Resolution",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -5984,6 +9683,10 @@
   },
   "T1637.001": {
     "domain": "mobile",
+    "name": "Domain Generation Algorithms",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -5991,6 +9694,10 @@
   },
   "T1638": {
     "domain": "mobile",
+    "name": "Adversary-in-the-Middle",
+    "tactics": [
+      "collection"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -5998,6 +9705,10 @@
   },
   "T1639": {
     "domain": "mobile",
+    "name": "Exfiltration Over Alternative Protocol",
+    "tactics": [
+      "exfiltration"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -6005,6 +9716,10 @@
   },
   "T1639.001": {
     "domain": "mobile",
+    "name": "Exfiltration Over Unencrypted Non-C2 Protocol",
+    "tactics": [
+      "exfiltration"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -6012,24 +9727,40 @@
   },
   "T1640": {
     "domain": "mobile",
+    "name": "Account Access Removal",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "Android"
     ]
   },
   "T1641": {
     "domain": "mobile",
+    "name": "Data Manipulation",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "Android"
     ]
   },
   "T1641.001": {
     "domain": "mobile",
+    "name": "Transmitted Data Manipulation",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "Android"
     ]
   },
   "T1642": {
     "domain": "mobile",
+    "name": "Endpoint Denial of Service",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -6037,6 +9768,10 @@
   },
   "T1643": {
     "domain": "mobile",
+    "name": "Generate Traffic from Victim",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -6044,6 +9779,10 @@
   },
   "T1644": {
     "domain": "mobile",
+    "name": "Out of Band Data",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -6051,6 +9790,10 @@
   },
   "T1645": {
     "domain": "mobile",
+    "name": "Compromise Client Software Binary",
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -6058,6 +9801,10 @@
   },
   "T1646": {
     "domain": "mobile",
+    "name": "Exfiltration Over C2 Channel",
+    "tactics": [
+      "exfiltration"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -6065,12 +9812,20 @@
   },
   "T1647": {
     "domain": "enterprise",
+    "name": "Plist File Modification",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "macOS"
     ]
   },
   "T1648": {
     "domain": "enterprise",
+    "name": "Serverless Execution",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "IaaS",
       "Office Suite",
@@ -6079,6 +9834,10 @@
   },
   "T1649": {
     "domain": "enterprise",
+    "name": "Steal or Forge Authentication Certificates",
+    "tactics": [
+      "credential-access"
+    ],
     "platforms": [
       "Identity Provider",
       "Linux",
@@ -6088,18 +9847,30 @@
   },
   "T1650": {
     "domain": "enterprise",
+    "name": "Acquire Access",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1651": {
     "domain": "enterprise",
+    "name": "Cloud Administration Command",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "IaaS"
     ]
   },
   "T1652": {
     "domain": "enterprise",
+    "name": "Device Driver Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -6108,6 +9879,10 @@
   },
   "T1653": {
     "domain": "enterprise",
+    "name": "Power Settings",
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "Linux",
       "Network Devices",
@@ -6117,6 +9892,10 @@
   },
   "T1654": {
     "domain": "enterprise",
+    "name": "Log Enumeration",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "ESXi",
       "IaaS",
@@ -6127,6 +9906,10 @@
   },
   "T1655": {
     "domain": "mobile",
+    "name": "Masquerading",
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -6134,6 +9917,10 @@
   },
   "T1655.001": {
     "domain": "mobile",
+    "name": "Match Legitimate Name or Location",
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -6141,6 +9928,10 @@
   },
   "T1657": {
     "domain": "enterprise",
+    "name": "Financial Theft",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "Linux",
       "Office Suite",
@@ -6151,6 +9942,10 @@
   },
   "T1658": {
     "domain": "mobile",
+    "name": "Exploitation for Client Execution",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -6158,6 +9953,11 @@
   },
   "T1659": {
     "domain": "enterprise",
+    "name": "Content Injection",
+    "tactics": [
+      "initial-access",
+      "command-and-control"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -6166,6 +9966,10 @@
   },
   "T1660": {
     "domain": "mobile",
+    "name": "Phishing",
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -6173,6 +9977,11 @@
   },
   "T1661": {
     "domain": "mobile",
+    "name": "Application Versioning",
+    "tactics": [
+      "initial-access",
+      "defense-evasion"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -6180,12 +9989,20 @@
   },
   "T1662": {
     "domain": "mobile",
+    "name": "Data Destruction",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "Android"
     ]
   },
   "T1663": {
     "domain": "mobile",
+    "name": "Remote Access Software",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -6193,6 +10010,10 @@
   },
   "T1664": {
     "domain": "mobile",
+    "name": "Exploitation for Initial Access",
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -6200,6 +10021,10 @@
   },
   "T1665": {
     "domain": "enterprise",
+    "name": "Hide Infrastructure",
+    "tactics": [
+      "command-and-control"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -6210,12 +10035,20 @@
   },
   "T1666": {
     "domain": "enterprise",
+    "name": "Modify Cloud Resource Hierarchy",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "IaaS"
     ]
   },
   "T1667": {
     "domain": "enterprise",
+    "name": "Email Bombing",
+    "tactics": [
+      "impact"
+    ],
     "platforms": [
       "Linux",
       "Office Suite",
@@ -6225,6 +10058,10 @@
   },
   "T1668": {
     "domain": "enterprise",
+    "name": "Exclusive Control",
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -6233,6 +10070,10 @@
   },
   "T1669": {
     "domain": "enterprise",
+    "name": "Wi-Fi Networks",
+    "tactics": [
+      "initial-access"
+    ],
     "platforms": [
       "Linux",
       "Network Devices",
@@ -6242,12 +10083,20 @@
   },
   "T1670": {
     "domain": "mobile",
+    "name": "Virtualization Solution",
+    "tactics": [
+      "defense-evasion"
+    ],
     "platforms": [
       "Android"
     ]
   },
   "T1671": {
     "domain": "enterprise",
+    "name": "Cloud Application Integration",
+    "tactics": [
+      "persistence"
+    ],
     "platforms": [
       "Office Suite",
       "SaaS"
@@ -6255,6 +10104,10 @@
   },
   "T1673": {
     "domain": "enterprise",
+    "name": "Virtual Machine Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -6264,6 +10117,10 @@
   },
   "T1674": {
     "domain": "enterprise",
+    "name": "Input Injection",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -6272,12 +10129,21 @@
   },
   "T1675": {
     "domain": "enterprise",
+    "name": "ESXi Administration Command",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "ESXi"
     ]
   },
   "T1676": {
     "domain": "mobile",
+    "name": "Linked Devices",
+    "tactics": [
+      "collection",
+      "persistence"
+    ],
     "platforms": [
       "Android",
       "iOS"
@@ -6285,12 +10151,20 @@
   },
   "T1677": {
     "domain": "enterprise",
+    "name": "Poisoned Pipeline Execution",
+    "tactics": [
+      "execution"
+    ],
     "platforms": [
       "SaaS"
     ]
   },
   "T1678": {
     "domain": "enterprise",
+    "name": "Delay Execution",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -6299,12 +10173,20 @@
   },
   "T1679": {
     "domain": "enterprise",
+    "name": "Selective Exclusion",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1680": {
     "domain": "enterprise",
+    "name": "Local Storage Discovery",
+    "tactics": [
+      "discovery"
+    ],
     "platforms": [
       "ESXi",
       "IaaS",
@@ -6315,36 +10197,60 @@
   },
   "T1681": {
     "domain": "enterprise",
+    "name": "Search Threat Vendor Data",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1682": {
     "domain": "enterprise",
+    "name": "Query Public AI Services",
+    "tactics": [
+      "reconnaissance"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1683": {
     "domain": "enterprise",
+    "name": "Generate Content",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1683.001": {
     "domain": "enterprise",
+    "name": "Written Content",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1683.002": {
     "domain": "enterprise",
+    "name": "Audio-Visual Content",
+    "tactics": [
+      "resource-development"
+    ],
     "platforms": [
       "PRE"
     ]
   },
   "T1684": {
     "domain": "enterprise",
+    "name": "Social Engineering",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Office Suite",
@@ -6355,6 +10261,10 @@
   },
   "T1684.001": {
     "domain": "enterprise",
+    "name": "Impersonation",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Office Suite",
@@ -6365,6 +10275,10 @@
   },
   "T1684.002": {
     "domain": "enterprise",
+    "name": "Email Spoofing",
+    "tactics": [
+      "stealth"
+    ],
     "platforms": [
       "Linux",
       "Office Suite",
@@ -6374,6 +10288,10 @@
   },
   "T1685": {
     "domain": "enterprise",
+    "name": "Disable or Modify Tools",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "Containers",
       "ESXi",
@@ -6386,12 +10304,20 @@
   },
   "T1685.001": {
     "domain": "enterprise",
+    "name": "Disable or Modify Windows Event Log",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1685.002": {
     "domain": "enterprise",
+    "name": "Disable or Modify Cloud Log",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "IaaS",
       "Identity Provider",
@@ -6401,6 +10327,10 @@
   },
   "T1685.003": {
     "domain": "enterprise",
+    "name": "Modify or Spoof Tool UI",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -6409,18 +10339,30 @@
   },
   "T1685.004": {
     "domain": "enterprise",
+    "name": "Disable or Modify Linux Audit System Log",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "Linux"
     ]
   },
   "T1685.005": {
     "domain": "enterprise",
+    "name": "Clear Windows Event Logs",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1685.006": {
     "domain": "enterprise",
+    "name": "Clear Linux or Mac System Logs",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "Linux",
       "macOS"
@@ -6428,6 +10370,10 @@
   },
   "T1686": {
     "domain": "enterprise",
+    "name": "Disable or Modify System Firewall",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -6438,24 +10384,40 @@
   },
   "T1686.001": {
     "domain": "enterprise",
+    "name": "Cloud Firewall",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "IaaS"
     ]
   },
   "T1686.002": {
     "domain": "enterprise",
+    "name": "Network Device Firewall",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "Network Devices"
     ]
   },
   "T1686.003": {
     "domain": "enterprise",
+    "name": "Windows Host Firewall",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1687": {
     "domain": "enterprise",
+    "name": "Exploitation for Defense Impairment",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "IaaS",
       "Linux",
@@ -6466,12 +10428,20 @@
   },
   "T1688": {
     "domain": "enterprise",
+    "name": "Safe Mode Boot",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "Windows"
     ]
   },
   "T1689": {
     "domain": "enterprise",
+    "name": "Downgrade Attack",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "Linux",
       "Windows",
@@ -6480,6 +10450,10 @@
   },
   "T1690": {
     "domain": "enterprise",
+    "name": "Prevent Command History Logging",
+    "tactics": [
+      "defense-impairment"
+    ],
     "platforms": [
       "ESXi",
       "Linux",
@@ -6490,66 +10464,142 @@
   },
   "T1691": {
     "domain": "ics",
+    "name": "Block Operational Technology Message",
+    "tactics": [
+      "inhibit-response-function"
+    ],
     "platforms": []
   },
   "T1691.001": {
     "domain": "ics",
+    "name": "Command Message",
+    "tactics": [
+      "inhibit-response-function"
+    ],
     "platforms": []
   },
   "T1691.002": {
     "domain": "ics",
+    "name": "Reporting Message",
+    "tactics": [
+      "inhibit-response-function"
+    ],
     "platforms": []
   },
   "T1692": {
     "domain": "ics",
+    "name": "Unauthorized Message",
+    "tactics": [
+      "evasion",
+      "impair-process-control"
+    ],
     "platforms": []
   },
   "T1692.001": {
     "domain": "ics",
+    "name": "Command Message",
+    "tactics": [
+      "evasion",
+      "impair-process-control"
+    ],
     "platforms": []
   },
   "T1692.002": {
     "domain": "ics",
+    "name": "Reporting Message",
+    "tactics": [
+      "evasion",
+      "impair-process-control"
+    ],
     "platforms": []
   },
   "T1693": {
     "domain": "ics",
+    "name": "Modify Firmware",
+    "tactics": [
+      "persistence",
+      "inhibit-response-function",
+      "impair-process-control"
+    ],
     "platforms": []
   },
   "T1693.001": {
     "domain": "ics",
+    "name": "System Firmware",
+    "tactics": [
+      "persistence",
+      "inhibit-response-function",
+      "impair-process-control"
+    ],
     "platforms": []
   },
   "T1693.002": {
     "domain": "ics",
+    "name": "Module Firmware",
+    "tactics": [
+      "persistence",
+      "inhibit-response-function",
+      "impair-process-control"
+    ],
     "platforms": []
   },
   "T1694": {
     "domain": "ics",
+    "name": "Insecure Credentials",
+    "tactics": [
+      "persistence",
+      "lateral-movement"
+    ],
     "platforms": []
   },
   "T1694.001": {
     "domain": "ics",
+    "name": "Default Credentials",
+    "tactics": [
+      "persistence",
+      "lateral-movement"
+    ],
     "platforms": []
   },
   "T1694.002": {
     "domain": "ics",
+    "name": "Hardcoded Credentials",
+    "tactics": [
+      "persistence",
+      "lateral-movement"
+    ],
     "platforms": []
   },
   "T1695": {
     "domain": "ics",
+    "name": "Block Communications",
+    "tactics": [
+      "inhibit-response-function"
+    ],
     "platforms": []
   },
   "T1695.001": {
     "domain": "ics",
+    "name": "Serial COM",
+    "tactics": [
+      "inhibit-response-function"
+    ],
     "platforms": []
   },
   "T1695.002": {
     "domain": "ics",
+    "name": "Ethernet",
+    "tactics": [
+      "inhibit-response-function"
+    ],
     "platforms": []
   },
   "T1695.003": {
     "domain": "ics",
+    "name": "Wi-Fi",
+    "tactics": [
+      "inhibit-response-function"
+    ],
     "platforms": []
   }
 }

@@ -33,6 +33,8 @@ _ROOT = Path(__file__).resolve().parents[2]
 _BEHAVIOUR_OUT = _ROOT / "data" / "api_behaviour_map_v1.json"
 _ATTCK_OUT = _ROOT / "data" / "api_attck_map_v1.json"
 _VALID_IDS = _ROOT / "data" / "attck_valid_ids.json"
+_RETIRED_IDS = _ROOT / "data" / "attck_retired_ids.json"
+_TECHNIQUES = _ROOT / "data" / "attck_techniques.json"
 
 # ---------------------------------------------------------------------------
 # Tiers
@@ -198,6 +200,7 @@ WINDOWS_CATEGORIES: dict[str, tuple[str, list[str]]] = {
             "recvfrom",
             "bind",
             "listen",
+            "ntohs",
             "accept",
             "closesocket",
             "shutdown",
@@ -205,14 +208,13 @@ WINDOWS_CATEGORIES: dict[str, tuple[str, list[str]]] = {
             "ioctlsocket",
             "gethostbyname",
             "gethostname",
+            "htons",
             "getaddrinfo",
             "GetAddrInfoW",
             "freeaddrinfo",
             "inet_addr",
             "inet_ntoa",
             "inet_pton",
-            "htons",
-            "ntohs",
             "InternetOpenA",
             "InternetOpenW",
             "InternetOpenUrlA",
@@ -1012,6 +1014,326 @@ WINDOWS_CATEGORIES: dict[str, tuple[str, list[str]]] = {
 # deterministic import signal corroborates other layers without solo-driving a
 # verdict. That ceiling is enforced again in the loader.
 
+# ---------------------------------------------------------------------------
+# Linux / ELF behaviour categories
+# ---------------------------------------------------------------------------
+# The same discipline as the Windows block above, and the same sentence a
+# reader should keep in mind: a row is an association, not a verdict. An ELF's
+# dynamic symbol table is much smaller and much more ordinary than a PE's
+# import table — every C program in existence calls ``read`` and ``malloc`` —
+# so the bar for a name to appear here at all is that its presence says
+# something a reader could not have assumed, and the bar for a high or medium
+# tier is that the name is unusual in ordinary software.
+#
+# What is deliberately absent, rather than guessed at:
+#   - ``registry``, which has no Linux counterpart;
+#   - ``persistence``, because Linux persistence is a path — a unit file, a
+#     crontab, a shell profile — and not a libc call, so any symbol list here
+#     would be a guess dressed as data;
+#   - ``keylogging``, ``screen_capture`` and ``credential``, whose honest
+#     vocabularies are X11, /dev/input and file paths rather than libc;
+#   - ``evasion``, which on Linux is overwhelmingly about what a process does
+#     with ordinary calls rather than which calls it imports.
+# The mapping is deliberately smaller than Windows's, and a category that would
+# fire on every coreutils binary is worse than no category.
+#
+# Tiers here were measured, not judged. Every group was run against the 1894
+# ELF binaries with a dynamic symbol table under this machine's own /usr/bin,
+# /usr/sbin and systemd directories, and a group whose bare presence labels
+# more than one in a hundred of them is an informational association with
+# ``corroborated_by`` rather than a tier the catalogue calls suspicious. Only
+# reading or writing another process's memory survived that bar, and even it
+# carries ``flags_with``: the flag appears when the symbol set actually reaches
+# into another process, not when a program merely creates an anonymous file.
+
+LINUX_CATEGORIES: dict[str, tuple[str, list[str]]] = {
+    # Reading or writing another process's memory, and running code that was
+    # never a file. ``ptrace`` is the obvious omission here: it is a debugger
+    # call before it is an injection call, so it sits under anti_debug and the
+    # injection technique rule names it there.
+    "process_injection": (
+        HIGH,
+        [
+            "process_vm_readv",
+            "process_vm_writev",
+            "memfd_create",
+            "fexecve",
+        ],
+    ),
+    # ``personality`` is how a process turns ASLR off for itself and ``ptrace``
+    # is how it attaches to another. A debugger, ``strace`` and ``setarch`` are
+    # the ordinary users of both, so the group says what it is and names what
+    # would give it weight instead of carrying a tier of its own.
+    "anti_debug": (
+        INFO,
+        [
+            "ptrace",
+            "personality",
+        ],
+    ),
+    "network": (
+        INFO,
+        [
+            "accept",
+            "accept4",
+            "bind",
+            "connect",
+            "curl_easy_cleanup",
+            "curl_easy_init",
+            "curl_easy_perform",
+            "curl_easy_setopt",
+            "curl_global_init",
+            "freeaddrinfo",
+            "getaddrinfo",
+            "gethostbyname",
+            "getnameinfo",
+            "getpeername",
+            "getsockname",
+            "getsockopt",
+            "inet_addr",
+            "inet_ntoa",
+            "inet_ntop",
+            "inet_pton",
+            "listen",
+            "recv",
+            "recvfrom",
+            "recvmsg",
+            "res_query",
+            "res_search",
+            "send",
+            "sendmsg",
+            "sendto",
+            "setsockopt",
+            "shutdown",
+            "socket",
+        ],
+    ),
+    "crypto": (
+        INFO,
+        [
+            "AES_cbc_encrypt",
+            "AES_set_encrypt_key",
+            "EVP_CIPHER_CTX_free",
+            "EVP_CIPHER_CTX_new",
+            "EVP_DecryptFinal_ex",
+            "EVP_DecryptInit_ex",
+            "EVP_DecryptUpdate",
+            "EVP_DigestFinal_ex",
+            "EVP_DigestInit_ex",
+            "EVP_DigestUpdate",
+            "EVP_EncryptFinal_ex",
+            "EVP_EncryptInit_ex",
+            "EVP_EncryptUpdate",
+            "EVP_aes_128_cbc",
+            "EVP_aes_256_cbc",
+            "EVP_aes_256_gcm",
+            "EVP_sha256",
+            "MD5_Final",
+            "MD5_Init",
+            "MD5_Update",
+            "RAND_bytes",
+            "RSA_private_decrypt",
+            "RSA_public_encrypt",
+            "SHA256_Final",
+            "SHA256_Init",
+            "SHA256_Update",
+            "SSL_CTX_new",
+            "SSL_connect",
+            "SSL_new",
+            "SSL_read",
+            "SSL_write",
+            "gcry_cipher_decrypt",
+            "gcry_cipher_encrypt",
+            "gcry_cipher_open",
+            "gcry_cipher_setkey",
+        ],
+    ),
+    "filesystem": (
+        INFO,
+        [
+            "access",
+            "chdir",
+            "chmod",
+            "chown",
+            "close",
+            "closedir",
+            "creat",
+            "faccessat",
+            "fchmod",
+            "fchown",
+            "fclose",
+            "fopen",
+            "fopen64",
+            "fread",
+            "fseek",
+            "fstat",
+            "ftell",
+            "ftruncate",
+            "fwrite",
+            "getcwd",
+            "link",
+            "lstat",
+            "mkdir",
+            "mkdirat",
+            "open",
+            "open64",
+            "openat",
+            "opendir",
+            "pread",
+            "pwrite",
+            "read",
+            "readdir",
+            "readdir64",
+            "readlink",
+            "realpath",
+            "remove",
+            "rename",
+            "renameat",
+            "rmdir",
+            "stat",
+            "stat64",
+            "symlink",
+            "truncate",
+            "unlink",
+            "unlinkat",
+            "utimes",
+            "write",
+        ],
+    ),
+    "discovery": (
+        INFO,
+        [
+            "get_nprocs",
+            "getegid",
+            "getenv",
+            "geteuid",
+            "getgid",
+            "getgrgid",
+            "getgrnam",
+            "getifaddrs",
+            "getuid",
+            "getlogin",
+            "getpgid",
+            "getpid",
+            "getppid",
+            "getpwnam",
+            "getpwuid",
+            "gethostname",
+            "isatty",
+            "sched_getaffinity",
+            "secure_getenv",
+            "sysconf",
+            "sysinfo",
+            "ttyname",
+            "uname",
+        ],
+    ),
+    # Dropping or assuming another identity. The setuid family is what every
+    # daemon and every legitimate privileged helper uses to *drop* privilege —
+    # 7.8% of the measured binaries import one — so the group is an
+    # association with corroborators and the catalogue says nothing about it
+    # on its own.
+    "privilege": (
+        INFO,
+        [
+            "cap_set_flag",
+            "cap_set_proc",
+            "capset",
+            "chroot",
+            "initgroups",
+            "setegid",
+            "seteuid",
+            "setfsgid",
+            "setfsuid",
+            "setgid",
+            "setgroups",
+            "setregid",
+            "setresgid",
+            "setresuid",
+            "setreuid",
+            "setuid",
+        ],
+    ),
+    # Handing a string to a shell, replacing the process image, or resolving a
+    # symbol at run time. Ordinary in 22% of the measured binaries, which is
+    # what an association looks like rather than a finding.
+    "execution": (
+        INFO,
+        [
+            "dlopen",
+            "dlsym",
+            "execl",
+            "execle",
+            "execlp",
+            "execv",
+            "execve",
+            "execvp",
+            "execvpe",
+            "popen",
+            "posix_spawn",
+            "posix_spawnp",
+            "system",
+        ],
+    ),
+    # Making, reaping and detaching processes: the vocabulary of a daemon as
+    # much as of a dropper, which is why it is informational.
+    "process": (
+        INFO,
+        [
+            "clone",
+            "daemon",
+            "fork",
+            "kill",
+            "nice",
+            "setpgid",
+            "setsid",
+            "vfork",
+            "wait4",
+            "waitpid",
+        ],
+    ),
+}
+
+
+CATEGORIES_BY_PLATFORM: dict[str, dict[str, tuple[str, list[str]]]] = {
+    "windows": WINDOWS_CATEGORIES,
+    "linux": LINUX_CATEGORIES,
+}
+
+# The Linux counterpart of ``WINDOWS_CORROBORATORS``, and the reason the block
+# tiers almost nothing: an ELF's dynamic symbol table is small and ordinary,
+# and a group that means little alone should say what would give it weight
+# rather than carry a label a reader cannot act on.
+LINUX_CORROBORATORS: dict[str, list[str]] = {
+    "anti_debug": ["memfd_create", "process_vm_readv", "process_vm_writev"],
+    "privilege": ["chroot", "memfd_create", "process_vm_writev", "ptrace"],
+    "network": ["EVP_EncryptInit_ex", "SSL_connect", "curl_easy_perform", "popen", "system"],
+    "execution": ["connect", "memfd_create", "ptrace", "socket"],
+    "crypto": ["connect", "readdir", "rename", "socket", "unlink"],
+    "process": ["memfd_create", "ptrace", "setsid", "system"],
+}
+
+# Per category, the names whose presence beside it turns the catalogue's own
+# ``suspicious`` label on. A category with no entry here is labelled by its
+# tier alone, which is every Windows category and how the flag has always
+# worked. ``process_injection`` has one because ``memfd_create`` by itself is
+# ordinary in the graphics and service stacks, while the same symbol beside a
+# call that reaches into another process is not.
+LINUX_FLAG_GATES: dict[str, list[str]] = {
+    "process_injection": ["process_vm_readv", "process_vm_writev", "ptrace"],
+}
+
+CORROBORATORS_BY_PLATFORM: dict[str, dict[str, list[str]]] = {
+    "windows": WINDOWS_CORROBORATORS,
+    "linux": LINUX_CORROBORATORS,
+}
+
+FLAG_GATES_BY_PLATFORM: dict[str, dict[str, list[str]]] = {
+    "windows": {},
+    "linux": LINUX_FLAG_GATES,
+}
+
+
 ATTCK_TECHNIQUES: list[dict[str, Any]] = [
     # ---------------------------------------------------------------- Discovery
     {
@@ -1444,8 +1766,16 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
         ],
     },
     {
+        # ATT&CK 19.2 folded this and Indicator Blocking below into T1685, and
+        # the builder follows the vendored set's revoked-by to it. The id here
+        # is the one the rule was curated against; ``name`` is the catalogue's
+        # own name for the id it ends up on, and ``rule`` is what distinguishes
+        # two rules that evidence the same technique from different imports. A
+        # surface printing the id beside the name must print a name the
+        # catalogue agrees with.
         "technique_id": "T1562.001",
-        "name": "Impair Defenses: Disable or Modify Tools",
+        "name": "Disable or Modify Tools",
+        "rule": "scanning and tracing provider calls",
         "min_apis": 2,
         "confidence_base": 0.50,
         "confidence_max": 0.65,
@@ -1461,7 +1791,8 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
     },
     {
         "technique_id": "T1562.006",
-        "name": "Impair Defenses: Indicator Blocking",
+        "name": "Disable or Modify Tools",
+        "rule": "tracing provider calls and the event log",
         "min_apis": 2,
         "confidence_base": 0.46,
         "confidence_max": 0.62,
@@ -1782,33 +2113,172 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
     # information. What *is* suspicious is that pair in a binary with almost no
     # other imports — dynamic API resolution — and that is already detected, as
     # an obfuscation indicator, by ``_pe_obfuscation_indicators``.
+    # ------------------------------------------------------------------ Linux
+    # Only where the mapping is uncontroversial: the symbols are the technique's
+    # own mechanism rather than one plausible use of them. Every id here is
+    # valid in the vendored catalogue and declares Linux, which a test checks,
+    # and every one was measured against this machine's own ELF binaries before
+    # it was kept — a rule that fires on more than one in a hundred ordinary
+    # programs is not evidence of anything and was dropped.
+    #
+    # Four rules were written and removed on that measurement, and the reasons
+    # are worth keeping so they are not written again:
+    #   - Setuid and Setgid on the ``setuid``/``setgid`` family. The technique
+    #     is abuse of the setuid *bit on a file*; calling ``setuid`` is how
+    #     every daemon and every legitimate setuid helper drops privilege, and
+    #     a symbol table cannot tell the two apart. It cleared on 6.3% of them,
+    #     ``su`` and ``bash`` included, and the direction of the error is the
+    #     dangerous one: a privilege drop published as an escalation.
+    #   - Non-Application Layer Protocol on the BSD socket calls. Those calls
+    #     evidence "it talks over a network" and nothing narrower; 5.8%,
+    #     ``ping`` included.
+    #   - System Owner/User Discovery (``getuid`` and friends) at 12.9% and
+    #     System Information Discovery (``uname`` and friends) at 4.6%. Every
+    #     program that prints a prompt asks who it is running as.
+    #   - Web Protocols on the libcurl session calls and Encrypted Channel on
+    #     the OpenSSL client session. Both are one plausible use of a library
+    #     among many: linking libcurl evidences "it makes HTTP requests" and
+    #     linking libssl "it speaks TLS", and the techniques are about a
+    #     command channel. ``curl`` and ``openssl`` themselves cleared them.
+    #
+    # What is left is three rules whose symbols are the technique's own
+    # mechanism and nothing else, the worst of which appears on 0.2% of the
+    # measured binaries.
+    #
+    # Each of the two carries the sentence a reader needs beside it. The rule
+    # states a mechanism, and the same mechanism is the ordinary working of
+    # software that is not a sample; a row that does not say so reads as an
+    # accusation, which is not what a reference lookup may be.
+    {
+        "technique_id": "T1055.008",
+        "name": "Ptrace System Calls",
+        "rule": "attaching to another process and reading or writing its memory",
+        "ordinary_use": (
+            "a debugger, a tracer and a crash reporter reach into another process "
+            "with exactly this pair"
+        ),
+        "platforms": ["linux"],
+        "min_apis": 2,
+        "confidence_base": 0.50,
+        "confidence_max": 0.65,
+        "apis": ["ptrace", "process_vm_readv", "process_vm_writev"],
+    },
+    {
+        "technique_id": "T1620",
+        "name": "Reflective Code Loading",
+        "rule": "executing an anonymous file that was never written to disk",
+        "ordinary_use": (
+            "a language runtime, a just-in-time compiler and a sandbox launcher "
+            "execute anonymous memory the same way"
+        ),
+        "platforms": ["linux"],
+        "min_apis": 2,
+        "confidence_base": 0.50,
+        "confidence_max": 0.65,
+        "apis": ["memfd_create", "fexecve"],
+    },
+    # Debugger Evasion was written here on ``ptrace`` and ``personality`` and
+    # is gone. The technique is a process tracing *itself* so that no debugger
+    # can attach, and turning address randomisation off for its own image; an
+    # import list shows that a program can call ptrace and cannot show what it
+    # calls it on. Measured, the rule named four binaries and every one was a
+    # debugger — the population whose ordinary working the symbols are, rather
+    # than the one the technique describes. A deterministic fact the platform
+    # states is right or absent, and this one could not be made right.
 ]
 
 _CONFIDENCE_CEILING = 0.65
 
 
-def _validate() -> list[str]:
+def _vendored_ids() -> set[str]:
+    """Every active technique id the vendored catalogue carries."""
+    try:
+        raw = json.loads(_VALID_IDS.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    if isinstance(raw, list):
+        return {str(tid) for tid in raw}
+    if "technique_ids" in raw:
+        return {str(tid) for tid in raw["technique_ids"]}
+    # One id list per ATT&CK domain.
+    return {str(tid) for ids in raw.values() if isinstance(ids, list) for tid in ids}
+
+
+def _vendored_replacements() -> dict[str, str]:
+    """``{retired id: the id ATT&CK says replaced it}`` from the vendored set.
+
+    The bundle's own ``revoked-by`` relationship is the only authority. A
+    retired id it names no successor for is not in this map, and the entry
+    keyed on it is dropped rather than pointed somewhere plausible.
+    """
+    try:
+        raw = json.loads(_RETIRED_IDS.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {
+        str(tid): str(row["revoked_by"])
+        for tid, row in raw.items()
+        if isinstance(row, dict) and not str(tid).startswith("_") and row.get("revoked_by")
+    }
+
+
+def _vendored_platforms(technique_id: str) -> tuple[str, ...]:
+    """The platforms the vendored table declares for an id, lowercased."""
+    try:
+        raw = json.loads(_TECHNIQUES.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ()
+    row = raw.get(technique_id)
+    return tuple(str(p).lower() for p in (row or {}).get("platforms") or ())
+
+
+def _retargeted(
+    techniques: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[tuple[str, str]], list[str]]:
+    """The technique rules against the current release, plus what moved and what went.
+
+    A curated id the release retired is followed to its replacement where the
+    vendored set names one; where it does not, the rule is dropped. Neither is
+    a judgement call this file gets to make, which is the point: the source
+    keeps the id it was written against and the catalogue decides what that id
+    is called now.
+    """
+    valid = _vendored_ids()
+    replacements = _vendored_replacements()
+    kept: list[dict[str, Any]] = []
+    moved: list[tuple[str, str]] = []
+    dropped: list[str] = []
+    for tech in techniques:
+        tid = str(tech["technique_id"])
+        if not valid or tid in valid:
+            kept.append(tech)
+            continue
+        replacement = replacements.get(tid)
+        if replacement and replacement in valid:
+            kept.append({**tech, "technique_id": replacement})
+            moved.append((tid, replacement))
+        else:
+            dropped.append(tid)
+    return kept, moved, dropped
+
+
+def _validate(techniques: list[dict[str, Any]]) -> list[str]:
     """Return a list of problems; empty means the tables are internally sound."""
     problems: list[str] = []
 
     # Every ATT&CK id must exist in the vendored catalog.
-    try:
-        valid_raw = json.loads(_VALID_IDS.read_text(encoding="utf-8"))
-        if isinstance(valid_raw, list):
-            valid_ids = set(valid_raw)
-        elif "technique_ids" in valid_raw:
-            valid_ids = set(valid_raw["technique_ids"])
-        else:
-            # One id list per ATT&CK domain.
-            valid_ids = {tid for ids in valid_raw.values() for tid in ids}
-    except (OSError, ValueError) as exc:
-        problems.append(f"cannot read {_VALID_IDS}: {exc}")
-        valid_ids = set()
+    valid_ids = _vendored_ids()
+    if not valid_ids:
+        problems.append(f"cannot read {_VALID_IDS}")
 
-    known_apis = {api for _tier, apis in WINDOWS_CATEGORIES.values() for api in apis}
+    known_apis = {
+        platform: {api for _tier, apis in categories.values() for api in apis}
+        for platform, categories in CATEGORIES_BY_PLATFORM.items()
+    }
 
-    for tech in ATTCK_TECHNIQUES:
+    for tech in techniques:
         tid = tech["technique_id"]
+        platforms = [str(p) for p in tech.get("platforms") or ["windows"]]
         if valid_ids and tid not in valid_ids:
             problems.append(f"{tid} is not in attck_valid_ids.json")
         if tech["confidence_max"] > _CONFIDENCE_CEILING:
@@ -1820,15 +2290,51 @@ def _validate() -> list[str]:
         # An ATT&CK entry naming an API the behaviour table has never heard of is
         # almost always a typo, and a typo here is silent: the technique simply
         # never fires.
-        for api in tech["apis"]:
-            if api not in known_apis:
-                problems.append(f"{tid} references unknown API {api!r}")
+        for platform in platforms:
+            if platform not in known_apis:
+                problems.append(f"{tid} names the platform {platform!r}, which has no categories")
+                continue
+            for api in tech["apis"]:
+                if api not in known_apis[platform]:
+                    problems.append(f"{tid} references unknown {platform} API {api!r}")
+        # A technique rule must apply to the platform it is filed under: the
+        # id's own platforms in the vendored table say where it can.
+        declared = _vendored_platforms(tid)
+        for platform in platforms:
+            if declared and platform not in {p.lower() for p in declared}:
+                problems.append(
+                    f"{tid} is filed under {platform} and the catalogue does not list it"
+                )
+        # A Linux rule states a mechanism, and every mechanism here is also the
+        # ordinary working of software that is not a sample. A rule with no
+        # label and no sentence naming that software reads as an accusation.
+        if "linux" in platforms:
+            if not str(tech.get("rule") or "").strip():
+                problems.append(f"{tid} has no rule label")
+            if not str(tech.get("ordinary_use") or "").strip():
+                problems.append(f"{tid} names no ordinary user of the same symbols")
 
-    seen: set[str] = set()
-    for tid in (t["technique_id"] for t in ATTCK_TECHNIQUES):
-        if tid in seen:
-            problems.append(f"duplicate technique {tid}")
-        seen.add(tid)
+    # Two rules on one id are allowed and one rule twice is not: a release that
+    # folds two sub-techniques into one technique — 19.2 folded Disable or
+    # Modify Tools and Indicator Blocking into T1685 — leaves two distinct
+    # evidence rules pointing at the same id, and each keeps its own APIs, its
+    # own min_apis, its own confidence and its own ``rule`` label. The same
+    # technique evidenced on two platforms is two rules as well, from two
+    # vocabularies. A repeated (platform, id, name, rule) is the copy the
+    # duplicate check exists to catch.
+    seen: set[tuple[str, str, str, str]] = set()
+    for tech in techniques:
+        for platform in (str(p) for p in tech.get("platforms") or ["windows"]):
+            rule = (
+                platform,
+                str(tech["technique_id"]),
+                str(tech["name"]),
+                str(tech.get("rule") or ""),
+            )
+            if rule in seen:
+                label = f" {rule[3]!r}" if rule[3] else ""
+                problems.append(f"duplicate {rule[0]} technique {rule[1]} {rule[2]!r}{label}")
+            seen.add(rule)
 
     # An API in two categories has no defined tier. The consumer is a reverse
     # index — one dict, one entry per name — so whichever category is built last
@@ -1837,30 +2343,41 @@ def _validate() -> list[str]:
     # and `discovery` (informational, therefore not), which meant the import's
     # suspicion depended on dict ordering rather than on anything about the
     # import. Ambiguity here is not a style problem, it is nondeterminism.
-    owners: dict[str, list[str]] = {}
-    for category, (_tier, apis) in WINDOWS_CATEGORIES.items():
-        for api in apis:
-            owners.setdefault(api.lower(), []).append(category)
-    for api, cats in sorted(owners.items()):
-        if len(cats) > 1:
-            problems.append(f"{api!r} claimed by more than one category: {sorted(cats)}")
+    for platform, categories in CATEGORIES_BY_PLATFORM.items():
+        owners: dict[str, list[str]] = {}
+        for category, (_tier, apis) in categories.items():
+            for api in apis:
+                owners.setdefault(api.lower(), []).append(category)
+        for api, cats in sorted(owners.items()):
+            if len(cats) > 1:
+                problems.append(
+                    f"{platform} {api!r} claimed by more than one category: {sorted(cats)}"
+                )
 
     return problems
 
 
-def _block(category: str) -> dict[str, object]:
+def _block(platform: str, category: str) -> dict[str, object]:
     """One category as the catalog carries it, corroborators included."""
-    tier, apis = WINDOWS_CATEGORIES[category]
+    tier, apis = CATEGORIES_BY_PLATFORM[platform][category]
     block: dict[str, object] = {"tier": tier}
-    corroborators = WINDOWS_CORROBORATORS.get(category)
+    corroborators = CORROBORATORS_BY_PLATFORM.get(platform, {}).get(category)
     if corroborators:
         block["corroborated_by"] = sorted(set(corroborators))
+    gate = FLAG_GATES_BY_PLATFORM.get(platform, {}).get(category)
+    if gate:
+        block["flags_with"] = sorted(set(gate))
     block["apis"] = sorted(set(apis))
     return block
 
 
 def main() -> int:
-    problems = _validate()
+    techniques, moved, dropped = _retargeted(ATTCK_TECHNIQUES)
+    for old, new in moved:
+        print(f"retargeted {old} -> {new} (the vendored set names it as the replacement)")
+    for old in dropped:
+        print(f"dropped {old}: the release retired it and names no replacement")
+    problems = _validate(techniques)
     if problems:
         for p in problems:
             print(f"ERROR: {p}", file=sys.stderr)
@@ -1869,26 +2386,30 @@ def main() -> int:
     behaviour = {
         "schema": "maljan-api-behaviour/v1",
         "version": "1.0",
-        "platforms": {"windows": {cat: _block(cat) for cat in WINDOWS_CATEGORIES}},
+        "platforms": {
+            platform: {cat: _block(platform, cat) for cat in categories}
+            for platform, categories in CATEGORIES_BY_PLATFORM.items()
+        },
     }
     attck = {
         "schema": "maljan-api-attck/v1",
         "version": "1.0",
         "techniques": [
-            {**t, "platforms": ["windows"], "apis": sorted(set(t["apis"]))}
-            for t in ATTCK_TECHNIQUES
+            {**t, "platforms": t.get("platforms") or ["windows"], "apis": sorted(set(t["apis"]))}
+            for t in techniques
         ],
     }
 
     _BEHAVIOUR_OUT.write_text(json.dumps(behaviour, indent=2) + "\n", encoding="utf-8")
     _ATTCK_OUT.write_text(json.dumps(attck, indent=2) + "\n", encoding="utf-8")
 
-    total_apis = sum(len(set(apis)) for _tier, apis in WINDOWS_CATEGORIES.values())
-    print(
-        f"wrote {_BEHAVIOUR_OUT.relative_to(_ROOT)}: "
-        f"{len(WINDOWS_CATEGORIES)} categories, {total_apis} APIs"
-    )
-    print(f"wrote {_ATTCK_OUT.relative_to(_ROOT)}: {len(ATTCK_TECHNIQUES)} techniques")
+    for platform, categories in CATEGORIES_BY_PLATFORM.items():
+        total_apis = sum(len(set(apis)) for _tier, apis in categories.values())
+        print(
+            f"wrote {_BEHAVIOUR_OUT.relative_to(_ROOT)}: "
+            f"{platform}, {len(categories)} categories, {total_apis} APIs"
+        )
+    print(f"wrote {_ATTCK_OUT.relative_to(_ROOT)}: {len(techniques)} techniques")
     return 0
 
 

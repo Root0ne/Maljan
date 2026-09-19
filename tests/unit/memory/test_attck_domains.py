@@ -111,7 +111,7 @@ class TestThePlatformMap:
     ) -> None:
         # With no vendored row, a real id is answered from the bundle cache and
         # an invented one from nowhere.
-        monkeypatch.setattr(attck_loader, "_platform_map_cache", {})
+        monkeypatch.setattr(attck_loader, "_technique_table_cache", ({}, {}))
         monkeypatch.setattr(attck_loader, "_platform_cache", {"T1055": ("Windows",)})
         assert attck_loader.platforms_for("T1055") == ("Windows",)
         assert attck_loader.platforms_for("T9999") == ()
@@ -134,37 +134,78 @@ class TestOptionalDomains:
             attck_loader.load_domain_data("cloud")
 
 
-class TestTheVendoredPlatformMap:
-    """The platform half of the technique check answers from data/, not from
-    a bundle load: the map ships beside the id catalogue, from the same
+class TestTheVendoredTechniqueTable:
+    """Every dictionary question about a technique answers from data/, not from
+    a bundle load: the table ships beside the id catalogue, from the same
     script and the same bundles."""
 
-    def test_the_shipped_map_carries_domain_and_platforms_per_id(self) -> None:
-        raw = json.loads(attck_loader.PLATFORMS_FILE.read_text(encoding="utf-8"))
+    def test_the_shipped_table_carries_name_tactics_domain_and_platforms_per_id(self) -> None:
+        raw = json.loads(attck_loader.TECHNIQUES_FILE.read_text(encoding="utf-8"))
         assert raw["T1055"]["domain"] == "enterprise"
+        assert raw["T1055"]["name"] == "Process Injection"
+        assert "privilege-escalation" in raw["T1055"]["tactics"]
         assert "Windows" in raw["T1055"]["platforms"]
         assert raw["T1633"]["domain"] == "mobile"
         assert set(raw["T1633"]["platforms"]) == {"Android", "iOS"}
-        # Every id in the map is in the id catalogue, and in the same domain.
+        # Every id in the table is in the id catalogue, and in the same domain.
         ids = json.loads(attck_loader.VALID_IDS_FILE.read_text(encoding="utf-8"))
-        for tid, row in [(t, r) for t, r in raw.items() if not t.startswith("_")][:200]:
+        rows = [(t, r) for t, r in raw.items() if not t.startswith("_")]
+        assert len(rows) == sum(len(v) for v in ids.values() if isinstance(v, list))
+        for tid, row in rows[:200]:
             assert tid in ids[row["domain"]], tid
+
+    def test_every_tactic_a_technique_names_is_in_the_vendored_catalogue(self) -> None:
+        raw = json.loads(attck_loader.TECHNIQUES_FILE.read_text(encoding="utf-8"))
+        for tid, row in raw.items():
+            if tid.startswith("_"):
+                continue
+            for slug in row["tactics"]:
+                assert raw["_tactics"][row["domain"]].get(slug), f"{tid} names {slug}"
+
+    def test_the_entry_answers_the_name_and_the_tactics(self) -> None:
+        attck_loader.reset_caches()
+        entry = attck_loader.technique_entry("t1055")
+        assert entry is not None
+        assert (entry.technique_id, entry.name, entry.domain) == (
+            "T1055",
+            "Process Injection",
+            "enterprise",
+        )
+        assert "privilege-escalation" in entry.tactics
+        assert attck_loader.technique_entry("T9999") is None
+        assert attck_loader.technique_entry("") is None
+
+    def test_a_kill_chain_slug_resolves_in_its_own_domain_and_falls_back_to_enterprise(
+        self,
+    ) -> None:
+        attck_loader.reset_caches()
+        enterprise = attck_loader.tactic_entry("enterprise", "persistence")
+        mobile = attck_loader.tactic_entry("mobile", "persistence")
+        assert enterprise is not None and mobile is not None
+        assert enterprise.tactic_id != mobile.tactic_id
+        # A caller with no domain gets the matrix the capabilities view draws.
+        assert attck_loader.tactic_entry(None, "persistence") == enterprise
+        # A slug a domain does not have falls back rather than answering nothing.
+        assert attck_loader.tactic_entry("ics", "resource-development") is not None
+        assert attck_loader.tactic_entry("enterprise", "not-a-tactic") is None
+        assert attck_loader.tactic_entry("enterprise", "") is None
 
     def test_the_three_vendored_files_say_which_release_they_came_from(self) -> None:
         versions = set()
         for path in (
             attck_loader.VALID_IDS_FILE,
-            attck_loader.PLATFORMS_FILE,
+            attck_loader.TECHNIQUES_FILE,
             attck_loader.RETIRED_IDS_FILE,
         ):
             raw = json.loads(path.read_text(encoding="utf-8"))
             versions.add(raw["_meta"]["attck_version"])
         assert versions == {"19.2"}
-        # The metadata key is not a technique.
+        # The metadata keys are not techniques.
         assert attck_loader.platforms_for("_META") == ()
+        assert attck_loader.technique_entry("_TACTICS") is None
         assert "_META" not in attck_loader.retired_ids()
 
-    def test_platforms_come_from_the_map_and_nothing_is_loaded(
+    def test_platforms_come_from_the_table_and_nothing_is_loaded(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         def _no_load(*_args: object, **_kwargs: object) -> object:
@@ -186,15 +227,15 @@ class TestTheVendoredPlatformMap:
         monkeypatch.setattr(attck_loader, "load_all_domains", _no_load)
         assert attck_loader.platforms_for("T9999") == ()
 
-    def test_a_real_id_the_map_lacks_falls_back_to_the_bundles(
+    def test_a_real_id_the_table_lacks_falls_back_to_the_bundles(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        short_map = tmp_path / "attck_platforms.json"
+        short_map = tmp_path / "attck_techniques.json"
         short_map.write_text(
             json.dumps({"T1055": {"domain": "enterprise", "platforms": ["Windows"]}}),
             encoding="utf-8",
         )
-        monkeypatch.setattr(attck_loader, "PLATFORMS_FILE", short_map)
+        monkeypatch.setattr(attck_loader, "TECHNIQUES_FILE", short_map)
         attck_loader.reset_caches()
         loads: list[int] = []
 
@@ -215,10 +256,10 @@ class TestTheVendoredPlatformMap:
         assert attck_loader.platforms_for("T1059") == ("Linux", "Windows")
         assert loads == [1]
 
-    def test_an_unreadable_map_is_empty_rather_than_fatal(
+    def test_an_unreadable_table_is_empty_rather_than_fatal(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(attck_loader, "PLATFORMS_FILE", tmp_path / "absent.json")
+        monkeypatch.setattr(attck_loader, "TECHNIQUES_FILE", tmp_path / "absent.json")
         monkeypatch.setattr(attck_loader, "_platform_cache", {})
         attck_loader.reset_caches()
         monkeypatch.setattr(attck_loader, "_platform_cache", {})
@@ -235,6 +276,14 @@ class TestRetiredIds:
     def test_an_id_no_catalogue_had_is_not_retired(self) -> None:
         assert attck_loader.retired_in("T9999") is None
         assert attck_loader.retired_in("T1055") is None
+
+    def test_the_replacement_is_the_one_the_bundle_named(self) -> None:
+        attck_loader.reset_caches()
+        assert attck_loader.revoked_by("T1562.001") == "T1685"
+        assert attck_loader.revoked_by("t1070.001") == "T1685.005"
+        # A live id was never revoked, and an invented one names no successor.
+        assert attck_loader.revoked_by("T1055") is None
+        assert attck_loader.revoked_by("T9999") is None
 
     def test_a_missing_file_is_an_empty_set(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

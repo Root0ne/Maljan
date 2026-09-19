@@ -30,6 +30,58 @@ def _elf(machine: int = 0x3E) -> bytes:
     return ident + struct.pack("<HHI", 2, machine, 1) + b"\x00" * 512
 
 
+def _elf_with_imports(*functions: str) -> bytes:
+    """A 64-bit ELF whose ``.dynsym`` names the given functions as undefined.
+
+    Hand-assembled for the same reason the damaged PE above is: a parser that
+    is handed a bare header proves nothing about a tool that reads symbols,
+    and a checked-in binary is a fixture nobody can read in a diff. Four
+    sections — the null one, ``.dynstr``, ``.dynsym`` and ``.shstrtab`` — which
+    is the least a reader of imports needs.
+    """
+    names = ["", *functions]
+    dynstr = b"\x00".join(n.encode() for n in names) + b"\x00"
+    offsets: dict[str, int] = {}
+    cursor = 0
+    for name in names:
+        offsets[name] = cursor
+        cursor += len(name) + 1
+
+    # Elf64_Sym: name, info, other, shndx, value, size. STT_FUNC and SHN_UNDEF
+    # are what make a symbol an import rather than an export.
+    dynsym = b"".join(
+        struct.pack("<IBBHQQ", offsets[n], 0x02 if n else 0, 0, 0, 0, 0) for n in names
+    )
+    shstrtab = b"\x00.dynstr\x00.dynsym\x00.shstrtab\x00"
+    sh_names = {".dynstr": 1, ".dynsym": 9, ".shstrtab": 17}
+
+    header_size, entry_size = 64, 64
+    dynstr_off = header_size
+    dynsym_off = dynstr_off + len(dynstr)
+    shstr_off = dynsym_off + len(dynsym)
+    sh_off = shstr_off + len(shstrtab)
+
+    def section(name: int, kind: int, offset: int, size: int, link: int, entsize: int) -> bytes:
+        return struct.pack("<IIQQQQIIQQ", name, kind, 0, 0, offset, size, link, 0, 1, entsize)
+
+    sections = b"".join(
+        (
+            section(0, 0, 0, 0, 0, 0),
+            section(sh_names[".dynstr"], 3, dynstr_off, len(dynstr), 0, 0),
+            section(sh_names[".dynsym"], 11, dynsym_off, len(dynsym), 1, 24),
+            section(sh_names[".shstrtab"], 3, shstr_off, len(shstrtab), 0, 0),
+        )
+    )
+    ehdr = (
+        b"\x7fELF\x02\x01\x01"
+        + b"\x00" * 9
+        + struct.pack(
+            "<HHIQQQIHHHHHH", 3, 0x3E, 1, 0, 0, sh_off, 0, header_size, 56, 0, entry_size, 4, 3
+        )
+    )
+    return ehdr + dynstr + dynsym + shstrtab + sections
+
+
 def _pe(import_rva: int = 0x1000, delay: bool = True, delay_rva: int = 0x2000) -> bytes:
     """A 32-bit PE with one real import and, optionally, one delay-load import.
 

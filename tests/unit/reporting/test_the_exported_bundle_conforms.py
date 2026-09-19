@@ -22,8 +22,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
-
 from maljan.reporting.builder import MalwareReportBuilder
 from maljan.reporting.models import (
     MalwareReport,
@@ -44,18 +42,6 @@ _REF_LIST_FIELDS = ("object_refs",)
 
 # The types whose reference list is required and may not be empty.
 _REFS_REQUIRED = ("note", "report")
-
-
-@pytest.fixture(autouse=True)
-def _the_shared_attck_index(real_attck_index: None) -> None:
-    """Building a capability matrix resolves technique names and tactics.
-
-    It does that through ``ATTCKValidator.get_instance()``, which builds the
-    shared ATT&CK index from the corpus — so a report assembled here reaches
-    the catalogue whatever the test is about. The unit tree holds that build
-    shut; these ask for it by name so the list of tests that pay for it is a
-    list somebody can read.
-    """
 
 
 def assert_conforms(bundle: Bundle) -> None:

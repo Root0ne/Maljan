@@ -343,22 +343,87 @@ Each sandbox is asked for the options its format needs:
 
 The technique universe spans all three ATT&CK domains. `data/attck_valid_ids.json`
 carries one sorted id list per domain (`enterprise`, `mobile`, `ics`), and
-`data/attck_platforms.json` carries, per technique id, its domain and MITRE
-platforms. The two files come from the same bundles and the same script, so
-they never disagree about which domain an id belongs to. Between them they
-answer the validity and the domain-and-platform halves of the technique check
-with no network and no bundle load (`tools.knowledge.attck_scope`).
+`data/attck_techniques.json` carries, per technique id, its domain, its name,
+its tactic slugs and its MITRE platforms, plus the tactic catalogue (slug to
+TA-id and display name) per domain. The two files come from the same bundles
+and the same script, so they never disagree about which domain an id belongs
+to. Mobile and ICS techniques carry their own matrices' tactics: each bundle
+files its kill-chain phases under its own name, and the extractor reads all
+three. Between them they answer every dictionary question the pipeline asks about
+a technique — validity, name, tactics, domain, platforms — with no network and
+no bundle load: `tools.knowledge.attck_lookup`, `attck_scope`, `attck_validate`
+and the capability matrix all read them and build nothing.
 `data/attck_retired_ids.json`, written by the same script from the catalogue it
-overwrites, names the ids a previous release had and the release that retired
-them, so an older report's `T1562.001` is reported as retired rather than as an
-invented id;
+overwrites, names the ids a previous release had, the release that retired them
+and, where the bundle states one, the id that revoked them — so an older
+report's `T1562.001` is reported as retired rather than as an invented id, and
+the data builders can retarget it mechanically.
 `src/maljan/memory/attck_loader.py` downloads and caches each domain's STIX
-bundle under `~/.cache/maljan/attck/` (or `MALJAN_ATTCK_CACHE`) for the names,
-the tactics and the index, and consults it for platforms only when a real id is
-missing from the vendored map. Enterprise is required; Mobile and ICS are
-additive, and a box that can reach neither keeps working with a narrower
-catalog. Regenerate both files with
-`uv run python scripts/knowledge/prepare_attck_malware_fixtures.py`.
+bundle under `~/.cache/maljan/attck/` (or `MALJAN_ATTCK_CACHE`) for the ranked
+index alone — `tools.knowledge.resolve_technique` and the alignment gate — and
+consults it for platforms only when a real id is missing from the vendored
+table. Enterprise is required; Mobile and ICS are additive, and a box that can
+reach neither keeps working with a narrower catalog. Regenerate all three files
+with `uv run python scripts/knowledge/prepare_attck_malware_fixtures.py`.
+
+A failed index build is remembered for `validation.index_retry_seconds`
+(default 900) and then attempted again, so one unreachable moment does not cost
+a worker its index for the life of the process; 0 never re-attempts. The value
+travels to the knowledge tool server — the process where the build happens — as
+`MALJAN_INDEX_RETRY_SECONDS`, which is on that server's `env_allow` and cannot
+be taken off it.
+
+### The API catalogue
+
+`data/api_behaviour_map_v1.json` and `data/api_attck_map_v1.json` are written
+by `scripts/knowledge/build_api_capability_db.py` (`make prepare-api-db`) from
+the curated tables in its source; no hand edits. Both carry one block per
+platform — `windows` for a PE's imports, `linux` for an ELF's dynamic symbols —
+and a caller asks one at a time, because the two vocabularies share names
+(`connect`, `send`, `system`). `tools.knowledge.api_capability` takes
+`platform` and the triage pack passes the routed format's, so an ELF's symbols
+are never given Win32 categories. A routed format with no block — a Mach-O, an
+APK — is not asked at all: the catalogue answering about the wrong system is
+worse than it saying nothing, and the import table is in the format entry
+either way.
+
+The Linux block is narrower on purpose: there is no registry, and persistence,
+keylogging, screen capture and credential access have no unambiguous libc
+vocabulary to author from. Its tiers were measured rather than judged. A group
+whose bare presence would label more than one in a hundred of an ordinary
+Linux system's own binaries is an informational association carrying
+`corroborated_by` — the names that would give it weight — instead of a tier the
+catalogue calls suspicious; only `process_injection` is tiered, and it carries
+`flags_with`, so the label waits until a second name says the sample reaches
+into another process. A technique rule is kept only where the symbols are the
+technique's own mechanism, which left three; the rules that rested on
+privilege dropping, on ordinary sockets or on asking who the process runs as
+were removed because they fired on ordinary software.
+
+A technique id in either block is retargeted, or dropped and listed, against
+the vendored catalogue's `revoked_by` when a release retires it. A rule carries
+`name` — the catalogue's name for the id — a `rule` label saying which of two
+rules on one technique matched, and, in the Linux block, `ordinary_use`: one
+sentence naming the software that is not a sample and imports the same symbols,
+because a mechanism with ordinary users that does not say so reads as an
+accusation.
+
+Rerun the measurement after an ATT&CK refresh, after adding a group or a rule,
+or on a distribution whose software is not the one the block was written
+against:
+
+```
+uv run python scripts/knowledge/measure_api_behaviour_block.py \
+    --fail-over 1 /usr/bin /usr/sbin /usr/lib/systemd
+```
+
+It reads the dynamic symbol imports of the ELF files under those directories,
+prints per group and per rule how many binaries each appears on and labels, and
+names the ones carrying a label or a technique row so a reader can judge
+whether that population is the one the technique describes. `--fail-over` exits
+non-zero when anything is above that share. It needs `pyelftools`, reaches no
+network, and no test runs it: a test that read a host's binaries would answer
+differently on every machine.
 
 ### Rule corpora
 
