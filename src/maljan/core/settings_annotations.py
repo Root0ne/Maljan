@@ -968,6 +968,15 @@ ANNOTATIONS: dict[str, Annotation] = {
         ),
         "subgroup": "Technique check",
     },
+    "validation.index_retry_seconds": {
+        "title": "Retry the ATT&CK index build after",
+        "description": (
+            "How many seconds a failed ATT&CK index build is believed before another is "
+            "attempted in the same worker. One unreachable network moment otherwise leaves "
+            "every later job in that worker without the index. 0 never re-attempts."
+        ),
+        "subgroup": "Technique check",
+    },
     "validation.alignment_threshold": {
         "title": "Alignment gate threshold",
         "description": (

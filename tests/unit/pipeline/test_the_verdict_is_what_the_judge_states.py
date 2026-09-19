@@ -28,8 +28,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
-
 from maljan.pipeline.outcome import (
     INCONCLUSIVE_VERDICT,
     decide_from_bundle,
@@ -676,17 +674,6 @@ class TestABundleThatStatesNothing:
 
 
 class TestTheReportNamesWhatTheExportLeftOut:
-    @pytest.fixture(autouse=True)
-    def _real_catalogue(self, real_attck_index: None) -> None:
-        """This asks the real ATT&CK catalogue for names and descriptions.
-
-        The unit tree holds the corpus download shut, and these are the tests
-        that want what is behind it. They read the loader's own disk cache when
-        one is there and fetch when it is not, which is what they did before
-        the door existed; the opt-out is here so the list of tests that pay
-        that cost is a list somebody can read.
-        """
-
     """``report.md`` says what is not in the bundle, not only the stored JSON.
 
     The markdown prints ``run_summary.validation.unresolved``, and it used to be

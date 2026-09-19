@@ -1214,3 +1214,35 @@ class TestNoJobCanNameAnotherJobsCapture:
 
         assert _error(stolen).get("code") == "path_outside_roots"
         assert _error(own) == {}
+
+
+class TestTheSidecarThatStagesNothingIsUnaffected:
+    """The knowledge sidecar is long-lived by design and takes no path
+    argument, so it gets no job directory — and it now has an environment name
+    of its own, which must not be read as a reason to give it one."""
+
+    def test_its_required_name_is_not_a_staging_one(self) -> None:
+        from maljan.core.config import REQUIRED_ENV_ALLOW, Settings
+        from maljan.providers.servers import ServerHandle
+
+        settings = Settings(_env_file=None)
+        handle = ServerHandle("knowledge", settings.mcp.servers["knowledge"])
+
+        assert REQUIRED_ENV_ALLOW.get("knowledge")
+        assert staging.STAGING_DIR_ENV not in REQUIRED_ENV_ALLOW["knowledge"]
+        assert handle._stages_per_job() is False
+
+    def test_what_it_does_need_still_reaches_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from maljan.agents.subprocess_env import child_env
+        from maljan.core.config import Settings
+        from maljan.providers.servers import ServerHandle
+
+        monkeypatch.setenv("MALJAN_INDEX_RETRY_SECONDS", "900")
+        handle = ServerHandle("knowledge", Settings(_env_file=None).mcp.servers["knowledge"])
+        handle._job_id = "job-x"
+        env = child_env(handle.config.env, allow=tuple(handle.config.env_allow))
+
+        handle._name_the_job_staging(env)
+
+        assert env["MALJAN_INDEX_RETRY_SECONDS"] == "900"
+        assert staging.STAGING_JOB_ENV not in env

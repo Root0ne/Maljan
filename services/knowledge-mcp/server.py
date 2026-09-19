@@ -14,6 +14,7 @@ reason this is a long-lived server and not a script.
 from __future__ import annotations
 
 import copy
+import os
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -23,6 +24,27 @@ from maljan.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, manifest, mo
 from maljan.tools.errors import code_for_exception, normalise_error, tool_error
 
 mcp = FastMCP("KnowledgeMCP")
+
+
+def _apply_index_retry() -> None:
+    """How long a failed ATT&CK index build is believed here.
+
+    This is the process where the build actually happens, so it is the process
+    the operator's ``validation.index_retry_seconds`` has to reach. It arrives
+    as ``MALJAN_INDEX_RETRY_SECONDS`` because a sidecar reads its environment
+    and never the settings store; an unset or unreadable value leaves the
+    module's own default alone.
+    """
+    raw = os.environ.get(knowledge_tools.INDEX_RETRY_ENV, "").strip()
+    if not raw:
+        return
+    try:
+        knowledge_tools.set_index_retry_after(int(raw))
+    except ValueError:
+        pass
+
+
+_apply_index_retry()
 
 # The two retrievals over a vector store need its client; every other lookup
 # reads the vendored catalogues.
@@ -82,12 +104,20 @@ def attck_validate(ids: list[str]) -> dict[str, Any]:
 
 
 @mcp.tool()
-def api_capability(api_names: list[str]) -> dict[str, Any]:
+def api_capability(api_names: list[str], platform: str = "windows") -> dict[str, Any]:
     """Look up what named APIs do and which techniques the catalogue associates them with.
 
-    A reference association, not an observation of the technique.
+    A reference association, not an observation of the technique. ``platform``
+    is the vocabulary to ask: "windows" for a PE's imports, "linux" for an
+    ELF's dynamic symbols. The two share names, so the wrong one answers about
+    the wrong system.
     """
-    return _guard("api_capability", knowledge_tools.api_capability, api_names=api_names)
+    return _guard(
+        "api_capability",
+        knowledge_tools.api_capability,
+        api_names=api_names,
+        platform=platform,
+    )
 
 
 @mcp.tool()

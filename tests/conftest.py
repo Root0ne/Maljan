@@ -65,6 +65,28 @@ def close_the_sidecars_a_test_opened() -> Iterator[None]:
             handle._forget_attachment()
 
 
+@pytest.fixture(autouse=True)
+def remove_the_staging_a_test_left() -> Iterator[None]:
+    """A test's staging directory goes with the test, as a job's goes with the job.
+
+    A test that drives a sandbox fetch or a sidecar without a job id of its own
+    composes one from this process, and there is no worker ``finally`` behind
+    it to take the directory away — so a suite run left `job-cli-<pid>`
+    directories, one of them holding a capture, in the real staging base. Only
+    what this test composed is removed: the record is read before it runs and
+    the difference afterwards is what it made.
+    """
+    from maljan.tools import staging
+
+    before = {job: set(paths) for job, paths in staging._COMPOSED.items()}
+    yield
+    for job in [key for key in staging._COMPOSED if key not in before]:
+        staging.remove_job_staging(job)
+    for job, paths in before.items():
+        for path in set(staging._COMPOSED.get(job, ())) - paths:
+            staging.remove_tree(path)
+
+
 @pytest.fixture
 def mock_maljan_app() -> MaljanApp:
     """MaljanApp in mock mode for fast facade-level tests."""

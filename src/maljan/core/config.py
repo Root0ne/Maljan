@@ -761,7 +761,11 @@ class MCPServerConfig(BaseModel):
 # one that loses ``MALJAN_STAGING_DIR`` writes its uploads somewhere the rest
 # of the deployment does not look, and one that loses
 # ``MALJAN_STAGING_TTL_HOURS`` silently keeps live malware on disk for the
-# default day instead of the hours the deployment chose.
+# default day instead of the hours the deployment chose. ``knowledge`` is the
+# process where the ATT&CK index is actually built, so one that loses
+# ``MALJAN_INDEX_RETRY_SECONDS`` keeps re-attempting a fifty-megabyte download
+# every fifteen minutes on a deployment that set the interval to zero to stop
+# exactly that.
 #
 # Everything else a built-in ships with is a default an operator may take
 # away. ``threatintel``'s ``VIRUSTOTAL_API_KEY`` and ``ABUSEIPDB_API_KEY`` are
@@ -770,6 +774,7 @@ class MCPServerConfig(BaseModel):
 REQUIRED_ENV_ALLOW: dict[str, tuple[str, ...]] = {
     "analysis": ("MALJAN_STAGING_DIR", "MALJAN_STAGING_TTL_HOURS", "MALJAN_SAMPLE_ROOTS"),
     "network": ("MALJAN_STAGING_DIR", "MALJAN_SAMPLE_ROOTS"),
+    "knowledge": ("MALJAN_INDEX_RETRY_SECONDS",),
 }
 
 
@@ -783,7 +788,9 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
     ``analysis``
     sees environment variables of its own — ``MALJAN_STAGING_DIR`` and
     ``MALJAN_STAGING_TTL_HOURS``, which say where its ``put_sample`` uploads
-    land and how long they are kept. Both file-reading sidecars also see
+    land and how long they are kept, and ``knowledge`` sees
+    ``MALJAN_INDEX_RETRY_SECONDS``, which is how long it believes a failed
+    ATT&CK index build. Both file-reading sidecars also see
     ``MALJAN_SAMPLE_ROOTS``: the directories they may read a path argument in,
     on top of the staging directory. The worker exports the mirror it copies
     a sample into; without it a sidecar reads only what it staged itself.
@@ -828,6 +835,7 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
             command=sys.executable,
             args=["services/knowledge-mcp/server.py"],
             cwd="services/knowledge-mcp",
+            env_allow=["MALJAN_INDEX_RETRY_SECONDS"],
             agents=[],
             label="Knowledge MCP",
         ),
@@ -2703,10 +2711,15 @@ class ValidationConfig(BaseModel):
     sets. With it on, a claim is questioned when its id scores under
     ``alignment_threshold`` — the paper's gate — and an in-scope candidate from
     another tactic beats that score by ``alignment_margin``.
+
+    ``index_retry_seconds`` is how long a failed index build is believed before
+    another is attempted. A worker used to remember one network blip for its
+    whole life, so every later job in it ran without the index; 0 restores that.
     """
 
     alignment_gate: Literal["auto", "off"] = "auto"
     alignment_gate_build: bool = False
+    index_retry_seconds: Annotated[int, Field(ge=0)] = 900
     alignment_threshold: Annotated[float, Field(ge=0.0, le=1.0)] = 0.05
     alignment_margin: Annotated[float, Field(ge=0.0, le=1.0)] = 0.20
     weak_alignment: bool = False

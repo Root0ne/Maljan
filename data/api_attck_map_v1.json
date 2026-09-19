@@ -506,6 +506,7 @@
     {
       "technique_id": "T1685",
       "name": "Disable or Modify Tools",
+      "rule": "scanning and tracing provider calls",
       "min_apis": 2,
       "confidence_base": 0.5,
       "confidence_max": 0.65,
@@ -524,7 +525,8 @@
     },
     {
       "technique_id": "T1685",
-      "name": "Disable or Modify Tools: indicator blocking",
+      "name": "Disable or Modify Tools",
+      "rule": "tracing provider calls and the event log",
       "min_apis": 2,
       "confidence_base": 0.46,
       "confidence_max": 0.62,
@@ -917,6 +919,39 @@
       ],
       "platforms": [
         "windows"
+      ]
+    },
+    {
+      "technique_id": "T1055.008",
+      "name": "Ptrace System Calls",
+      "rule": "attaching to another process and reading or writing its memory",
+      "ordinary_use": "a debugger, a tracer and a crash reporter reach into another process with exactly this pair",
+      "platforms": [
+        "linux"
+      ],
+      "min_apis": 2,
+      "confidence_base": 0.5,
+      "confidence_max": 0.65,
+      "apis": [
+        "process_vm_readv",
+        "process_vm_writev",
+        "ptrace"
+      ]
+    },
+    {
+      "technique_id": "T1620",
+      "name": "Reflective Code Loading",
+      "rule": "executing an anonymous file that was never written to disk",
+      "ordinary_use": "a language runtime, a just-in-time compiler and a sandbox launcher execute anonymous memory the same way",
+      "platforms": [
+        "linux"
+      ],
+      "min_apis": 2,
+      "confidence_base": 0.5,
+      "confidence_max": 0.65,
+      "apis": [
+        "fexecve",
+        "memfd_create"
       ]
     }
   ]

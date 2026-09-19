@@ -20,6 +20,7 @@ added is never the evidence the run was measured on.
 from __future__ import annotations
 
 import asyncio
+import sys
 import threading
 import weakref
 from collections.abc import Callable
@@ -185,9 +186,8 @@ def _abandon_handles_on(loop: asyncio.AbstractEventLoop) -> None:
     writing a log line after the interpreter had closed the stream under it.
     Every child is signalled first, the grace is waited out once, and the
     survivors are killed; the whole set is one log line rather than one per
-    handle.
+    handle. A process already shutting down is left to the operating system.
     """
-    import sys
     import time
 
     if sys.is_finalizing():
@@ -769,12 +769,14 @@ class ServerHandle:
         The first half of a reap, on its own so a caller with many handles to
         release can signal all of them before waiting out a single grace period
         rather than paying one per handle.
+
+        No finalisation check of its own: both callers that can reach it from
+        the watchdog thread stand down before this, and a reap that began in
+        time is entitled to finish its SIGTERM — it is the *kill*, after the
+        grace, that a finalising interpreter must not reach.
         """
         import signal
-        import sys
 
-        if sys.is_finalizing():
-            return []
         pids = self._live_children()
         if pids:
             self._signal_children(pids, signal.SIGTERM)
@@ -785,9 +787,13 @@ class ServerHandle:
 
         Returns the pids it killed. ``say=False`` for a caller releasing many
         handles at once, which says it once for all of them instead.
+
+        Not once the interpreter is finalising: this is reached from a daemon
+        thread after a grace period long enough for a process to have decided
+        to exit inside it, and the line it logs would be written to a stream
+        that is already closed.
         """
         import signal
-        import sys
 
         if sys.is_finalizing():
             return []
@@ -818,8 +824,13 @@ class ServerHandle:
         self._kill_survivors(pids)
 
     def _reap_children(self) -> None:
-        """``_areap_children`` for the synchronous close path."""
-        import sys
+        """``_areap_children`` for the synchronous close path.
+
+        Reached from the retirement hook on a daemon thread, so it stands down
+        once the interpreter is going: the child is the operating system's to
+        collect by then, and what this would otherwise do is sleep through the
+        grace and log into a closed stream.
+        """
         import time
 
         if sys.is_finalizing():

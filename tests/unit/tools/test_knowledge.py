@@ -10,11 +10,22 @@ missing model turning "we could not look" into "we looked and found nothing".
 
 from __future__ import annotations
 
+import json
+import threading
+import time
+from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 from maljan.tools import knowledge
+
+_ELF_IMPORTS: dict[str, dict[str, list[str]]] = json.loads(
+    (Path(__file__).resolve().parents[2] / "fixtures" / "elf_import_lists.json").read_text(
+        encoding="utf-8"
+    )
+)
 
 
 class TestApiCapability:
@@ -43,10 +54,10 @@ class TestApiCapability:
 
     def test_a_missing_catalog_is_named_rather_than_silently_empty(self) -> None:
         result = knowledge.api_capability(["WriteProcessMemory"], behaviour_map="data/nope.json")
-        assert "not readable" in result["reason"]
+        assert "has no windows categories" in result["reason"]
 
     def test_an_empty_list_is_an_empty_answer(self) -> None:
-        assert knowledge.api_capability([]) == {"capabilities": []}
+        assert knowledge.api_capability([]) == {"capabilities": [], "platform": "windows"}
 
     def test_a_rule_fires_over_the_whole_set_and_each_api_it_matched_cites_it(self) -> None:
         """Every rule in the vendored map needs two or more APIs. Matched one
@@ -168,17 +179,6 @@ class TestLolbinLookup:
 
 
 class TestAttckLookup:
-    @pytest.fixture(autouse=True)
-    def _real_catalogue(self, real_attck_index: None) -> None:
-        """This asks the real ATT&CK catalogue for names and descriptions.
-
-        The unit tree holds the corpus download shut, and these are the tests
-        that want what is behind it. They read the loader's own disk cache when
-        one is there and fetch when it is not, which is what they did before
-        the door existed; the opt-out is here so the list of tests that pay
-        that cost is a list somebody can read.
-        """
-
     def test_a_real_technique_is_valid_and_carries_its_domain_and_platforms(self) -> None:
         result = knowledge.attck_lookup("T1055")
         assert result["valid"] is True
@@ -200,18 +200,54 @@ class TestAttckLookup:
         assert knowledge.attck_lookup("t1055")["technique_id"] == "T1055"
 
 
+class TestWhatTheLookupAnswersAboutAnId:
+    """The four fields the vendored table owns, pinned per domain.
+
+    The table itself is checked against the bundles elsewhere; this is the
+    tool's own output, which is what every consumer reads.
+    """
+
+    @pytest.mark.parametrize(
+        ("technique_id", "name", "domain", "tactic", "platform"),
+        [
+            ("T1055", "Process Injection", "enterprise", "privilege-escalation", "Windows"),
+            ("T1055.012", "Process Hollowing", "enterprise", "stealth", "Windows"),
+            ("T1583", "Acquire Infrastructure", "enterprise", "resource-development", "PRE"),
+            ("T1417", "Input Capture", "mobile", "credential-access", "Android"),
+            ("T1633", "Virtualization/Sandbox Evasion", "mobile", "defense-evasion", "iOS"),
+            ("T0800", "Activate Firmware Update Mode", "ics", "inhibit-response-function", None),
+        ],
+    )
+    def test_the_catalogue_entry_is_what_the_table_says(
+        self, technique_id: str, name: str, domain: str, tactic: str, platform: str | None
+    ) -> None:
+        answer = knowledge.attck_lookup(technique_id)
+        assert answer["valid"] is True
+        assert answer["name"] == name
+        assert answer["domain"] == domain
+        assert tactic in answer["tactics"]
+        assert answer["url"] == (
+            f"https://attack.mitre.org/techniques/{technique_id.replace('.', '/')}"
+        )
+        if platform is None:
+            assert answer["platforms"] == []
+        else:
+            assert platform in answer["platforms"]
+
+    def test_the_scope_the_two_tools_report_is_one_answer(self) -> None:
+        for technique_id in ("T1055", "T1417", "T0800", "T1583"):
+            lookup = knowledge.attck_lookup(technique_id)
+            scope = knowledge.attck_scope(technique_id)
+            assert (lookup["domain"], lookup["platforms"]) == (scope["domain"], scope["platforms"])
+
+    def test_a_retired_id_is_named_as_retired_and_carries_no_entry(self) -> None:
+        answer = knowledge.attck_lookup("T1562.001")
+        assert answer["valid"] is False
+        assert answer["retired_in"] == "19.2"
+        assert (answer["name"], answer["tactics"], answer["platforms"]) == ("", [], [])
+
+
 class TestAttckValidate:
-    @pytest.fixture(autouse=True)
-    def _real_catalogue(self, real_attck_index: None) -> None:
-        """This asks the real ATT&CK catalogue for names and descriptions.
-
-        The unit tree holds the corpus download shut, and these are the tests
-        that want what is behind it. They read the loader's own disk cache when
-        one is there and fetch when it is not, which is what they did before
-        the door existed; the opt-out is here so the list of tests that pay
-        that cost is a list somebody can read.
-        """
-
     def test_only_the_invalid_ids_come_back(self) -> None:
         result = knowledge.attck_validate(["T1055", "T9999.001", "T1547.001"])
         assert [row["id"] for row in result["invalid"]] == ["T9999.001"]
@@ -264,7 +300,10 @@ class TestDegradation:
     def test_an_unreachable_attck_index_leaves_resolve_technique_empty_with_a_reason(
         self, monkeypatch
     ) -> None:
+        import time
+
         monkeypatch.setattr(knowledge, "_HYBRID_FAILED", "the ATT&CK index is unavailable: offline")
+        monkeypatch.setattr(knowledge, "_HYBRID_FAILED_AT", time.monotonic())
         result = knowledge.resolve_technique("process injection")
         assert result["candidates"] == []
         assert "unavailable" in result["reason"]
@@ -288,6 +327,137 @@ class TestDegradation:
             knowledge.resolve_technique("process injection")
 
         assert len(attempts) == 1
+
+
+class TestAFailedIndexBuildIsRetried:
+    """One network blip used to cost a worker its index for the life of the
+    process: every later job in it ran without the hybrid index, and nothing
+    said why. The failure is now believed for an interval and no longer."""
+
+    @pytest.fixture(autouse=True)
+    def _cold(self) -> Iterator[None]:
+        knowledge.reset_indices()
+        knowledge.set_index_retry_after(900)
+        yield
+        knowledge.reset_indices()
+        knowledge.set_index_retry_after(900)
+
+    @staticmethod
+    def _broken(attempts: list[int]) -> Any:
+        class _Broken:
+            @classmethod
+            def from_loader(cls) -> Any:
+                attempts.append(1)
+                raise RuntimeError("offline")
+
+        return _Broken
+
+    def test_the_next_lookup_after_the_interval_attempts_another_build(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        attempts: list[int] = []
+        monkeypatch.setattr(
+            "maljan.memory.hybrid_attck_index.HybridATTCKIndex", self._broken(attempts)
+        )
+        knowledge.set_index_retry_after(60)
+
+        knowledge.resolve_technique("process injection")
+        knowledge.resolve_technique("process injection")
+        assert len(attempts) == 1
+
+        # The clock, not the lookup count, is what opens the door.
+        monkeypatch.setattr(knowledge, "_HYBRID_FAILED_AT", time.monotonic() - 61)
+        answer = knowledge.resolve_technique("process injection")
+        assert len(attempts) == 2
+        assert "unavailable" in answer["reason"]
+
+    def test_a_retry_that_succeeds_clears_the_reason(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        attempts: list[int] = []
+        monkeypatch.setattr(
+            "maljan.memory.hybrid_attck_index.HybridATTCKIndex", self._broken(attempts)
+        )
+        knowledge.set_index_retry_after(60)
+        knowledge.resolve_technique("process injection")
+        assert not knowledge.index_is_warm()
+
+        class _Working:
+            @classmethod
+            def from_loader(cls) -> Any:
+                return _Working()
+
+            @staticmethod
+            def search(_text: str, top_k: int = 5) -> list[Any]:
+                return []
+
+        monkeypatch.setattr("maljan.memory.hybrid_attck_index.HybridATTCKIndex", _Working)
+        monkeypatch.setattr(knowledge, "_HYBRID_FAILED_AT", time.monotonic() - 61)
+        assert knowledge.resolve_technique("process injection") == {"candidates": []}
+        assert knowledge.index_is_warm()
+
+    def test_an_interval_of_zero_is_the_old_behaviour(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        attempts: list[int] = []
+        monkeypatch.setattr(
+            "maljan.memory.hybrid_attck_index.HybridATTCKIndex", self._broken(attempts)
+        )
+        knowledge.set_index_retry_after(0)
+        knowledge.resolve_technique("process injection")
+        monkeypatch.setattr(knowledge, "_HYBRID_FAILED_AT", time.monotonic() - 86400)
+        knowledge.resolve_technique("process injection")
+        assert len(attempts) == 1
+
+    def test_lookups_arriving_together_start_one_build(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No retry storm: the attempt is claimed under the lock, so the
+        callers that arrive while a slow build runs are answered the standing
+        reason rather than starting builds of their own."""
+        attempts: list[int] = []
+        started = threading.Barrier(4)
+
+        class _Slow:
+            @classmethod
+            def from_loader(cls) -> Any:
+                attempts.append(1)
+                time.sleep(0.2)
+                raise RuntimeError("offline")
+
+        monkeypatch.setattr("maljan.memory.hybrid_attck_index.HybridATTCKIndex", _Slow)
+        knowledge.set_index_retry_after(60)
+        knowledge.resolve_technique("process injection")
+        assert len(attempts) == 1
+        monkeypatch.setattr(knowledge, "_HYBRID_FAILED_AT", time.monotonic() - 61)
+
+        def _ask() -> None:
+            started.wait(timeout=5)
+            knowledge.resolve_technique("process injection")
+
+        threads = [threading.Thread(target=_ask) for _ in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+        assert len(attempts) == 2
+
+    def test_the_background_warmer_arms_again_once_the_failure_is_stale(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        attempts: list[int] = []
+        monkeypatch.setattr(
+            "maljan.memory.hybrid_attck_index.HybridATTCKIndex", self._broken(attempts)
+        )
+        knowledge.set_index_retry_after(60)
+        assert knowledge.warm_index_in_background() is True
+        for _ in range(200):
+            if knowledge._HYBRID_FAILED:
+                break
+            time.sleep(0.02)
+        assert attempts == [1]
+        assert knowledge.warm_index_in_background() is False
+
+        monkeypatch.setattr(knowledge, "_HYBRID_FAILED_AT", time.monotonic() - 61)
+        assert knowledge.warm_index_in_background() is True
 
     def test_a_qdrant_free_box_reports_the_missing_client_rather_than_no_matches(
         self, monkeypatch
@@ -336,3 +506,157 @@ class TestTheCitationIsTheSameInEveryProcess:
             assert cited[name], f"{name} cites nothing"
         # Both spellings of a pair cite the rule, with the same matched list.
         assert cited["RegCreateKeyExA"] == cited["RegCreateKeyExW"]
+
+
+class TestTheLinuxVocabulary:
+    """An ELF's dynamic symbols are asked of the catalogue's Linux block. The
+    two blocks share names, so the platform is what keeps a libc symbol from
+    being answered about Win32."""
+
+    @pytest.fixture(autouse=True)
+    def _fresh_catalogues(self) -> Iterator[None]:
+        from maljan.analysis import api_capability_db
+
+        api_capability_db.reset_cache()
+        yield
+        api_capability_db.reset_cache()
+
+    def test_a_libc_symbol_reports_its_linux_category(self) -> None:
+        result = knowledge.api_capability(["ptrace", "process_vm_writev"], platform="linux")
+        by_api = {row["api"]: row for row in result["capabilities"]}
+        assert result["platform"] == "linux"
+        assert by_api["ptrace"]["category"] == "anti_debug"
+        assert by_api["process_vm_writev"]["category"] == "process_injection"
+
+    def test_the_pair_clears_the_ptrace_rule_and_cites_the_symbols_it_matched(self) -> None:
+        result = knowledge.api_capability(["ptrace", "process_vm_writev"], platform="linux")
+        hits = [hit for row in result["capabilities"] for hit in row["techniques"]]
+        assert {hit["technique_id"] for hit in hits} == {"T1055.008"}
+        # The row says what the pair is the mechanism of and who else uses it,
+        # so it cannot be read as an accusation on its own.
+        assert hits[0]["rule"] == "attaching to another process and reading or writing its memory"
+        assert "debugger" in hits[0]["ordinary_use"]
+
+    def test_a_windows_rule_cannot_fire_on_an_elf_s_symbols(self) -> None:
+        """``socket``, ``connect``, ``send`` and ``recv`` are in both blocks.
+
+        The Windows half pins what that block does today rather than endorsing
+        it: the same four names clear its Non-Application Layer Protocol rule,
+        which the Linux block deliberately does not have. Raising that bar is
+        its own change, against Windows evidence this branch does not carry.
+        """
+        names = ["socket", "connect", "send", "recv"]
+        linux = knowledge.api_capability(names, platform="linux")
+        assert [row["category"] for row in linux["capabilities"]] == ["network"] * 4
+        assert [hit for row in linux["capabilities"] for hit in row["techniques"]] == []
+        windows = knowledge.api_capability(names, platform="windows")
+        cleared = {
+            hit["technique_id"] for row in windows["capabilities"] for hit in row["techniques"]
+        }
+        assert "T1095" in cleared
+
+    def test_the_catalogue_says_nothing_about_ordinary_linux_tools(self) -> None:
+        """Real import lists, not a list picked to pass. Every one of these is
+        a program a Linux system ships and runs; the catalogue may describe
+        what they touch and may not label any of it."""
+        checked = 0
+        for tool, names in _ELF_IMPORTS["benign"].items():
+            result = knowledge.api_capability(names, platform="linux")
+            flagged = [row["api"] for row in result["capabilities"] if row["catalog_flags"]]
+            cleared = sorted(
+                {hit["technique_id"] for row in result["capabilities"] for hit in row["techniques"]}
+            )
+            assert flagged == [], f"{tool} carries {len(flagged)} labelled rows"
+            assert cleared == [], f"{tool} clears {cleared}"
+            checked += 1
+        assert checked >= 8
+
+    def test_an_ordinary_tool_still_gets_its_associations(self) -> None:
+        """Saying nothing is not the same as answering nothing: the rows are
+        there, they carry categories, and the ones that mean little alone name
+        what would give them weight."""
+        result = knowledge.api_capability(_ELF_IMPORTS["benign"]["su"], platform="linux")
+        rows = {row["api"]: row for row in result["capabilities"]}
+        assert rows["setuid"]["category"] == "privilege"
+        assert rows["setuid"]["catalog_flags"] == []
+        assert "ptrace" in rows["setuid"]["corroborated_by"]
+
+    def test_a_bot_shaped_import_list_still_produces_associations(self) -> None:
+        """The other half of the bar: a catalogue that says nothing about
+        anything is no catalogue.
+
+        Read for what it is. The list carries the exact symbols the surviving
+        rules are written on, so the rules clearing is arithmetic rather than
+        evidence that the block would catch an arbitrary bot — a canonical
+        Mirai shape, which traces nothing and executes no anonymous file,
+        produces associations and no technique row at all. What this pins is
+        that the categories still describe a sample's shape after the tiering
+        was taken almost entirely off, and that the two rules fire when their
+        own evidence is present.
+        """
+        bot = [
+            "__libc_start_main",
+            "close",
+            "connect",
+            "execve",
+            "fexecve",
+            "fork",
+            "getpid",
+            "kill",
+            "memfd_create",
+            "memcpy",
+            "open",
+            "personality",
+            "prctl",
+            "ptrace",
+            "read",
+            "recv",
+            "select",
+            "send",
+            "setsid",
+            "socket",
+            "strlen",
+            "system",
+            "unlink",
+            "write",
+        ]
+        result = knowledge.api_capability(bot, platform="linux")
+        rows = {row["api"]: row for row in result["capabilities"]}
+        assert {rows[n]["category"] for n in ("socket", "execve", "ptrace", "memfd_create")} == {
+            "network",
+            "execution",
+            "anti_debug",
+            "process_injection",
+        }
+        cleared = sorted(
+            {hit["technique_id"] for row in result["capabilities"] for hit in row["techniques"]}
+        )
+        assert cleared == ["T1620"]
+
+    def test_the_label_waits_for_what_would_give_it_weight(self) -> None:
+        """An anonymous file on its own is ordinary in the graphics and service
+        stacks; the same call beside one that reaches into another process is
+        not, and only then does the catalogue label the row."""
+        alone = knowledge.api_capability(["memfd_create"], platform="linux")
+        (row,) = alone["capabilities"]
+        assert row["category"] == "process_injection"
+        assert row["catalog_flags"] == []
+        assert "ptrace" in row["flagged_with"]
+
+        beside = knowledge.api_capability(["memfd_create", "ptrace"], platform="linux")
+        labelled = {r["api"]: r["catalog_flags"] for r in beside["capabilities"]}
+        assert labelled["memfd_create"] == ["suspicious"]
+
+    def test_the_windows_block_is_labelled_by_its_tier_as_before(self) -> None:
+        """The gate is data the Windows block does not carry, so nothing there
+        waits for a second name."""
+        result = knowledge.api_capability(["WriteProcessMemory"], platform="windows")
+        (row,) = result["capabilities"]
+        assert row["catalog_flags"] == ["suspicious"]
+        assert "flagged_with" not in row
+
+    def test_a_platform_the_catalogue_has_no_block_for_says_so(self) -> None:
+        result = knowledge.api_capability(["open"], platform="plan9")
+        assert result["platform"] == "plan9"
+        assert result["capabilities"][0]["category"] is None
+        assert "no plan9 categories" in result["reason"]

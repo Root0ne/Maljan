@@ -257,7 +257,6 @@ class TestTheReapPaysOneGraceForTheWholeSet:
 
             assert handle.signalled == []
             assert handle.inner._kill_survivors([9300]) == []
-            assert handle.inner._terminate_children() == []
         finally:
             loop.close()
 
