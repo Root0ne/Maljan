@@ -277,11 +277,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     grace = _grace_secret_state()
     if grace is not None:
+        kid = str(grace["key_id"])
+        standing = "accepted" if grace["accepted"] else "no longer accepted"
+        tense = "lapses" if grace["accepted"] else "lapsed"
         logger.info(
-            "A previous JWT signing secret (kid=%s) is %s and %s %s.",
-            grace["key_id"],
-            "accepted" if grace["accepted"] else "no longer accepted",
-            "lapses" if grace["accepted"] else "lapsed",
+            "A JWT rotation is in progress: sessions signed under kid=%s are %s, "
+            "and the window %s %s.",
+            kid,
+            standing,
+            tense,
             grace["not_after"],
             extra={"component": "lifecycle"},
         )
