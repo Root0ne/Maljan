@@ -21,14 +21,16 @@ is not responsible for.
 
 from __future__ import annotations
 
+import ast
+import pathlib
+import re
 from typing import Any
 
 from maljan.pipeline.validation import validate_verdict_bundle
 from maljan.reporting.builder import MalwareReportBuilder
 from maljan.reporting.models import MalwareReport, NetworkIOCs
 from maljan.reporting.renderers.stix_renderer import (
-    UNPUBLISHABLE_DOMAIN_CODE,
-    UNPUBLISHABLE_URL_CODE,
+    UNPUBLISHABLE_ENDPOINT_CODE,
     ExtendedSTIXRenderer,
 )
 from maljan.schemas.stix_models import Bundle
@@ -125,10 +127,10 @@ class TestTheFourValuesEveryOtherPathRefuses:
         )
 
         assert [code for code, _why in declined] == [
-            UNPUBLISHABLE_DOMAIN_CODE,
-            UNPUBLISHABLE_DOMAIN_CODE,
-            UNPUBLISHABLE_DOMAIN_CODE,
-            UNPUBLISHABLE_URL_CODE,
+            UNPUBLISHABLE_ENDPOINT_CODE,
+            UNPUBLISHABLE_ENDPOINT_CODE,
+            UNPUBLISHABLE_ENDPOINT_CODE,
+            UNPUBLISHABLE_ENDPOINT_CODE,
         ]
         for (_code, why), value in zip(
             declined, (INTERNAL, RESERVED, LOOPBACK, RESERVED), strict=True
@@ -197,7 +199,7 @@ class TestWhatTheJudgeMayStillPublish:
         exported, declined = _render("[ipv6-addr:value = '::1']")
 
         assert exported == []
-        assert [code for code, _why in declined] == [UNPUBLISHABLE_DOMAIN_CODE]
+        assert [code for code, _why in declined] == [UNPUBLISHABLE_ENDPOINT_CODE]
 
     def test_a_hash_indicator_is_not_an_endpoint_and_is_not_asked(self) -> None:
         pattern = "[file:hashes.'SHA-256' = '" + "e" * 64 + "']"
@@ -215,7 +217,7 @@ class TestAPatternIsNotOneComparison:
         exported, declined = _render(pattern)
 
         assert exported == []
-        assert [code for code, _why in declined] == [UNPUBLISHABLE_DOMAIN_CODE]
+        assert [code for code, _why in declined] == [UNPUBLISHABLE_ENDPOINT_CODE]
 
     def test_an_or_of_two_endpoints_that_both_pass_is_published(self) -> None:
         pattern = f"[domain-name:value = '{C2_DOMAIN}'] OR [ipv4-addr:value = '{C2_ADDRESS}']"
@@ -246,7 +248,7 @@ class TestAPatternIsNotOneComparison:
         exported, declined = _render(f"[DOMAIN-NAME:value = '{RESERVED}']")
 
         assert exported == []
-        assert [code for code, _why in declined] == [UNPUBLISHABLE_DOMAIN_CODE]
+        assert [code for code, _why in declined] == [UNPUBLISHABLE_ENDPOINT_CODE]
 
     def test_a_comparison_with_no_endpoint_in_it_says_that_is_why(self) -> None:
         """A regular expression is not an endpoint, and saying it is not a name
@@ -254,7 +256,7 @@ class TestAPatternIsNotOneComparison:
         exported, declined = _render(r"[url:value MATCHES '^https?://.*\\.evil\\.example/']")
 
         assert exported == []
-        assert declined[0][0] == UNPUBLISHABLE_URL_CODE
+        assert declined[0][0] == UNPUBLISHABLE_ENDPOINT_CODE
         assert "could not read the pattern's endpoint" in declined[0][1]
 
     def test_the_same_holds_for_a_wildcard_and_for_a_subnet(self) -> None:
@@ -266,6 +268,96 @@ class TestAPatternIsNotOneComparison:
 
             assert exported == [], pattern
             assert "could not read the pattern's endpoint" in declined[0][1], pattern
+
+    def test_an_endpoint_reached_through_a_reference_is_asked_the_same_question(self) -> None:
+        """``network-traffic:dst_ref.value`` carries an endpoint like any other.
+
+        The checked set was a list of object types, so this shape reached no
+        question at all and a judge-written loopback address in it exported
+        unasked and unrecorded.
+        """
+        for prop in ("dst_ref.value", "src_ref.value"):
+            exported, declined = _render(f"[network-traffic:{prop} = '{LOOPBACK}']")
+
+            assert exported == [], prop
+            assert [code for code, _why in declined] == [UNPUBLISHABLE_ENDPOINT_CODE], prop
+
+    def test_a_reference_to_real_infrastructure_survives(self) -> None:
+        pattern = f"[network-traffic:dst_ref.value = '{C2_ADDRESS}']"
+
+        exported, declined = _render(pattern)
+
+        assert exported == [pattern]
+        assert declined == []
+
+    def test_a_reference_carrying_a_name_is_asked_the_host_question(self) -> None:
+        """A ``*_ref.value`` is whichever of the two the judge wrote there."""
+        refused, declined = _render(f"[network-traffic:dst_ref.value = '{RESERVED}']")
+        kept, _ = _render(f"[domain-name:resolves_to_refs[*].value = '{C2_ADDRESS}']")
+
+        assert refused == []
+        assert declined[0][1].startswith("the endpoint indicator for")
+        assert kept == [f"[domain-name:resolves_to_refs[*].value = '{C2_ADDRESS}']"]
+
+    def test_a_reference_that_is_not_a_network_endpoint_is_carried_as_written(self) -> None:
+        """``email-message:from_ref.value`` is a mailbox, not a host.
+
+        The reference rule is scoped to the two object types whose references
+        carry an endpoint; asking a mailbox the host question would decline an
+        object for a reason that is not so.
+        """
+        pattern = "[email-message:from_ref.value = 'operator@example.org']"
+
+        exported, declined = _render(pattern)
+
+        assert exported == [pattern]
+        assert declined == []
+
+    def test_a_reference_at_something_that_is_not_an_endpoint_is_carried(self) -> None:
+        """``src_payload_ref`` points at an artefact, which has no host to ask about."""
+        pattern = "[network-traffic:src_payload_ref.value = 'localhost']"
+
+        exported, declined = _render(pattern)
+
+        assert exported == [pattern]
+        assert declined == []
+
+    def test_a_hardware_address_is_not_told_it_could_not_exist(self) -> None:
+        """A MAC is a legal ``dst_ref`` target and is not a host."""
+        pattern = "[network-traffic:dst_ref.value = '00:11:22:33:44:55']"
+
+        exported, declined = _render(pattern)
+
+        assert exported == [pattern]
+        assert declined == []
+
+    def test_a_hash_under_a_quoted_algorithm_is_not_read_as_a_file_name(self) -> None:
+        """The key inside the object path is the reader's business, not a heuristic."""
+        pattern = "[file:extensions['pe'].pe_imphash = '" + "f" * 32 + "']"
+
+        exported, declined = _render(pattern)
+
+        assert exported == [pattern]
+        assert declined == []
+
+    def test_a_pattern_whose_quote_never_closes_is_declined_rather_than_read(self) -> None:
+        exported, declined = _render(f"[domain-name:value = '{C2_DOMAIN}")
+
+        assert exported == []
+        assert "could not read the pattern's endpoint" in declined[0][1]
+
+    def test_a_qualifier_timestamp_is_not_read_as_an_endpoint(self) -> None:
+        """Asked of the question itself: a qualified pattern does not reach the
+        bundle at all, because the integrity pass wants a bracketed expression
+        and records that drop under its own reason."""
+        from maljan.reporting.renderers.stix_renderer import _judge_indicator_problem
+
+        indicator = _judge_bundle(
+            f"[ipv4-addr:value = '{C2_ADDRESS}'] "
+            "START '2026-01-01T00:00:00Z' STOP '2026-01-02T00:00:00Z'"
+        ).objects[0]
+
+        assert _judge_indicator_problem(indicator) is None
 
     def test_an_object_path_written_inside_a_url_is_not_one(self) -> None:
         """A URL's own text can look like a comparison, and is not."""
@@ -296,3 +388,89 @@ class TestTheOtherHalfOfTheAnswer:
         )
 
         assert "stix.ungrounded_indicator" not in [v.code for v in violations]
+
+
+class TestTheConsoleReadsTheseCodesAsTheExportsOwn:
+    """A row under one of these was the export's call, not a producer's.
+
+    The console draws an unresolved row as "{agent} left {code} unfixed" unless
+    the code is on its own list, and the list is the one place that knows which
+    codes those are. A code minted here and missing there reads as the judge's
+    failure to fix a decision this pipeline made about the judge's work.
+    """
+
+    SRC = pathlib.Path(__file__).resolve().parents[3] / "src" / "maljan"
+    ROWS = pathlib.Path(__file__).resolve().parents[3] / "apps/web/src/lib/validationRows.ts"
+
+    # A ``stix.`` code a producer really can fix, and that the console is right
+    # to draw as the producer's own unresolved finding: the judge was asked
+    # about the object and kept it.
+    PRODUCER_FIXABLE = frozenset({"stix.ungrounded_indicator", "stix.unknown_object"})
+
+    @classmethod
+    def _listed(cls) -> set[str]:
+        """The codes inside the console's own set, read as a set and not as text.
+
+        Parsed out of the literal rather than found anywhere in the file: a
+        mention in a comment satisfied the file-wide search while the set that
+        decides the wording had lost the code.
+        """
+        text = cls.ROWS.read_text(encoding="utf-8")
+        opened = text.index("EXPORT_DECIDED")
+        body = text[text.index("[", opened) : text.index("]", opened)]
+        return set(re.findall(r'"([^"]+)"', body))
+
+    @classmethod
+    def _minted(cls) -> dict[str, str]:
+        """Every ``stix.`` code this tree mints, and the module that mints it."""
+        found: dict[str, str] = {}
+        for path in sorted(cls.SRC.rglob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for node in tree.body:
+                if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Constant):
+                    continue
+                value = node.value.value
+                if not isinstance(value, str) or not value.startswith("stix."):
+                    continue
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id.endswith("_CODE"):
+                        found[value] = str(path.relative_to(cls.SRC))
+        return found
+
+    def test_the_scan_reads_more_than_one_module(self) -> None:
+        """The renderer is not the only place a run's export codes come from."""
+        minted = self._minted()
+
+        assert len(set(minted.values())) >= 2, minted
+        assert minted.get("stix.unlinked_technique") == "pipeline/nodes.py"
+
+    def test_every_code_the_export_declines_under_is_on_the_consoles_list(self) -> None:
+        listed = self._listed()
+        minted = {
+            code: module
+            for code, module in self._minted().items()
+            if code not in self.PRODUCER_FIXABLE
+        }
+
+        assert minted, "the scan found no decline code to check"
+        missing = {code: module for code, module in minted.items() if code not in listed}
+        assert not missing, missing
+
+    def test_a_code_a_producer_can_fix_is_not_drawn_as_the_exports_own(self) -> None:
+        listed = self._listed()
+
+        assert not (self.PRODUCER_FIXABLE & listed), sorted(self.PRODUCER_FIXABLE & listed)
+
+    def test_the_codes_a_stored_run_carries_are_still_read(self) -> None:
+        from maljan.reporting.renderers.stix_renderer import LEGACY_UNPUBLISHABLE_CODES
+
+        assert set(LEGACY_UNPUBLISHABLE_CODES) <= self._listed()
+
+    def test_a_mention_outside_the_set_does_not_satisfy_it(self) -> None:
+        """The scan passes trivially if it reads the whole file, so prove it does not."""
+        text = self.ROWS.read_text(encoding="utf-8")
+        opened = text.index("EXPORT_DECIDED")
+        body = text[text.index("[", opened) : text.index("]", opened)]
+
+        assert "stix.unpublishable_endpoint" in body
+        assert "EXPORT_DECIDED" not in body

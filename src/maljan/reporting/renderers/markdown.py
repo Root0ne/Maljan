@@ -1025,7 +1025,23 @@ class MarkdownRenderer:
 
 
 def _evidence_body(section: Any) -> list[str]:
-    """One evidence section's rows, in whichever shape it carries."""
+    """One evidence section's rows, in whichever shape it carries.
+
+    A section may carry both. Rows are what a tool found; the text beside them
+    is what this system has to say about how it got them — that the answer was
+    too big for the prompt and the table below is a page of it. It goes above
+    the rows, as prose rather than as a fenced block, because a reader has to
+    know a table is partial before they read it as complete. A section with
+    nothing but text is a tool's own output and keeps its fence.
+    """
+    rows = _evidence_rows(section)
+    if not rows:
+        return ["```", section.text, "```"] if section.text else []
+    return [section.text, ""] + rows if section.text else rows
+
+
+def _evidence_rows(section: Any) -> list[str]:
+    """The tabular or bulleted half of a section, or nothing."""
     if section.kind in {"table", "kv"} and section.rows:
         columns = section.columns or [f"Column {i + 1}" for i in range(len(section.rows[0]))]
         out = [
@@ -1039,8 +1055,6 @@ def _evidence_body(section: Any) -> list[str]:
         return out
     if section.kind == "list" and section.items:
         return [f"- {_truncate(item, 200)}" for item in section.items]
-    if section.text:
-        return ["```", section.text, "```"]
     return []
 
 

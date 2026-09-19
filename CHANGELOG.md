@@ -473,6 +473,36 @@ change landed on `main`.
   waiting and the setting it is waiting on, `api.enrichment_dedicated_worker`.
   Nothing is drawn where enrichment runs beside the analyses, where its worker
   is up, or against an API that does not answer with the field.
+- **An agent carries its own step and time budget.** `max_steps` and
+  `timeout_seconds` on an agent definition, drawn on its card in the console as
+  **Steps per loop** and **Seconds per loop**; blank inherits the deployment's
+  `react_agent_max_steps` / `react_agent_timeout`. The seeded lead's 40 steps
+  and 1800 s move onto its definition, so a clone of a team arrives with the
+  budget its agents need rather than with five specialists to ask and the
+  default ten steps to ask them in. Alembic revision `20260927000000` moves a
+  stored override onto the definition it belongs to — only a value the field
+  accepts, so a `0` or a negative left in an old override map stays there and
+  is named in the migration's log rather than making every later settings read
+  raise — and the save review names a budget edit like any other field. A
+  stored budget the field would refuse is read as absent, with the reason
+  logged, so one agent's number cannot take a deployment down.
+- **A JWT rotation's grace period can be given a written end.**
+  `JWT_PREVIOUS_SECRET_NOT_AFTER` is optional; when it is set it is enforced,
+  and past that moment a token signed with the previous secret is refused.
+  `GET /api/v1/system/status` reports the rotation to an admin caller under
+  `jwt_grace_secret` (the previous `kid`, when it lapses, whether it is still
+  accepted, and whether an end was written down at all), and the API says the
+  same at every start. A grace secret with no end is accepted as before and
+  warned about at every start; one whose window has run out is warned about
+  until both settings are cleared. `docs/deployment.md` has the three-step
+  runbook. Nothing rotates on its own.
+- **Per-tool-call timing, per agent.** The run summary carries `tool_latency`
+  — for each agent how many tool calls it made, what they cost together, and
+  the single slowest with the tool that answered it, computed from the clock
+  each ledger entry already carried — and the summary's header draws a **Tool
+  calls** line beside **Per stage**. The analyst-latency log line names that
+  slowest call, so a run that overran says whether the model was slow or a
+  tool was.
 - **A technique's name, tactics, domain and platforms are a file read.**
   `data/attck_techniques.json` ships beside the id catalogue, written from the
   same three bundles by
@@ -533,6 +563,45 @@ change landed on `main`.
   allowed to read and applies once at start-up.
 
 ### Changed
+
+- **A tool answer too big for the prompt is shortened, not cut in half.** A
+  JSON result over `preprocessing.max_tool_output_chars` was cut as text, which
+  ended the document mid-array: the model got a prefix with none of the
+  answer's own metadata (`total`, `next_offset`, `read_path`) and the ledger
+  got prose it could not parse, so `structured` was empty. Every reader of the
+  record — the evidence sections, corroboration, the triage pack — skips an
+  entry with no `structured`, so an analyst's *largest* answers, the ones that
+  found the most, contributed nothing to the report and nothing said so. Such
+  an answer is now shortened as a document: elements come off the end of its
+  largest lists until it fits, no key is ever dropped, `truncated` is set and
+  each shortened list says how many rows came back (`<key>_returned` beside a
+  `total` the tool already emits, otherwise `<key>_omitted`). **What changes
+  for a consumer:** a large result now reads as valid JSON with fewer rows and
+  a stated count rather than as a cut-off string, and `structured` is populated
+  for those entries for the first time — so evidence sections, corroboration
+  and the triage pack begin to see calls they have never seen, and a report
+  over the same sample can carry more than it did. A large **string** value is
+  shortened the same way, which is the decompilation shape. Bookkeeping goes
+  under one reserved top-level key, `shortened`, mapping each shortened value's
+  path to `kept`/`omitted` (or `kept_chars`/`omitted_chars`); nothing is written
+  into the tool's own vocabulary but the `truncated` flag it already has, and a
+  tool that already uses the name keeps it. Anything that is not a JSON object
+  (decompilation as plain text, any prose) reaches the `FunctionSummarizer` and
+  then the same character cut as before, byte for byte — but a JSON object no
+  longer reaches the summariser, because its answer is prose and prose is what
+  leaves the record with nothing structured in it. The run summary's truncation
+  block counts the new outcome as `tool_output_shortened`, and a shortening that
+  ran past its wall as `tool_output_shortening_timeouts`. The report says in a
+  sentence above the section's table, rather than as a row in it, that an
+  answer was shortened and by how much.
+
+- **Deprecated: `react_agent_max_steps_overrides` and
+  `react_agent_timeout_overrides`.** A budget belongs to the agent that spends
+  it, so it is set on the agent's definition now. Both maps are still read for
+  an agent whose definition sets neither, and a definition's own value wins
+  over them; move any budget you keep in them onto the agent's card, because a
+  later release drops them. The seeded entries for `lead` are already gone —
+  the lead's budget is on its definition.
 
 - **A run's watchers are no longer drawn as members of its team.** The
   mediator and the sycophancy detector publish as `pipeline` with
@@ -824,6 +893,30 @@ change landed on `main`.
   **Upgrading:** a consumer that expects every row from
   `GET /reports/{id}/iocs` must now ask for `include=all`, which returns
   exactly what the route returned before.
+
+- **One code for one export decision about an endpoint.** A URL, a name and an
+  address the host question refuses are one class of decline, and the run
+  summary recorded them under `stix.unpublishable_url` and
+  `stix.unpublishable_domain` — with the second of the two also covering
+  addresses, which is not what it is called. All three are now
+  `stix.unpublishable_endpoint`, and the sentence beside the row names the
+  kind. Nothing is migrated: a run stored before this keeps the code it wrote,
+  and the console reads all three as the export's own decision.
+  **Upgrading:** a consumer filtering `run_summary.validation` on
+  `stix.unpublishable_url` or `stix.unpublishable_domain` must also accept
+  `stix.unpublishable_endpoint` to keep seeing new runs.
+
+- **A `directory:path` indicator now needs the run's own evidence, not only a
+  filesystem anchor.** A directory whose literal began with one of the
+  OS-resource prefixes — `C:\`, `/data/`, `%TEMP%`, a registry hive — used to
+  be admitted on that alone, with no corpus question asked. Shape is not
+  evidence: the anchor now answers only whether the literal could be a place,
+  and the literal is then asked, as every other literal is, whether this run
+  recorded it. A judge that writes a real directory the run did not happen to
+  write down is told so and spends its one retry there.
+  **Upgrading:** a run whose evidence does not name a directory it claimed will
+  carry a `stix.ungrounded_indicator` row for it where it carried none before,
+  and the indicator is dropped after the retry rather than exported.
 
 ### Fixed
 
@@ -2504,15 +2597,109 @@ change landed on `main`.
   request from the stored report, so there is no second copy to go stale; a
   report stored before this keeps the figures it was stored with, and its
   run-summary column — what the console draws — was always the final one.
+- **A late event continues its job's numbering whoever publishes it.** The
+  per-job sequence counter lives 24 hours and the rows it numbers do not, so a
+  task publishing for an older job — enrichment was the only one, and it
+  carried its own seeding call — started again at 1, collided with that job's
+  first stored event and lost the row to a feed that never fails a run. The
+  seeding now happens in the publisher, once per job, before the first number
+  it hands out for a job whose feed is being persisted; no call site has to
+  remember it.
+- **An endpoint label keeps its IPv6 brackets.** `http://[::1]:8080/v1` was
+  named `http://::1:8080` in the submit gate's refusal and on the console — an
+  address that cannot be typed back in and whose port cannot be told from its
+  last group, so an operator could not find the failing pair. The label is now
+  re-bracketed; it still carries no userinfo, path or query.
+- **The model probe's five minutes covers the catalogue listing.** The budget
+  was taken after the provider's model list came back, so the real wall was
+  five minutes plus the listing per provider and the sentence naming untried
+  pairs understated it. The deadline is now taken as the probe begins.
+- **The Ollama probe's failure detail reads as two sentences.** It joined
+  "answered nothing" to the remedy with no separator.
+- **A carved-file answer names the file before anything a cut would take.** The
+  analysis sidecar puts `read_path` first in every answer to a `carved_path`
+  call. It was appended, so an answer wider than the caller's output guardrail
+  lost it: one measured run's `strings` over a carved PE came back with 150
+  rows, was cut at six thousand characters before anything recorded it, and
+  stored no `read_path` while its shorter siblings each carried one.
+- **The console reads the required environment names from the API.** The names
+  a built-in sidecar is always started with were written down a second time in
+  TypeScript with nothing pinning the two lists together, so a change on the
+  Python side would have left the editor drawing the wrong names as fixed and
+  silently restoring ones it had offered as removable. The server-map catalog
+  entry now carries `required_env`, resolved from `REQUIRED_ENV_ALLOW` the way
+  `choices` is resolved, and the console's copy is gone.
+
+- **One reader of a STIX pattern, and it reads an escaped quote.** The
+  validator and the STIX renderer each split a pattern on its quotes, and
+  neither undid an escape: `[file:name = 'it\'s.exe']` was read as the value
+  `it\`, the judge was told its own row appears nowhere in the evidence, and
+  it spent its one retry on that. They had also drifted about what a quoted key
+  is — one decided it structurally, the other from the property name. Both now
+  ask `schemas.stix_pattern.read_comparisons`, which gives the object path, the
+  operator and the literal of every quoted value, keeps `file:hashes.'MD5'` and
+  `file:extensions['pe']` as keys, leaves a `START '…' STOP '…'` qualifier's
+  timestamps out of the comparison before it, and reports what it cannot read
+  as unreadable so it is declined rather than guessed at. The digest check
+  (`malformed_hash_in`) reads through it too, and the dead fourth reader in
+  `judge_postprocess` is gone, so the pattern really is read in one place. That
+  check also reads `IN (…)`: `[file:hashes.'MD5' IN ('deadbeef', …)]` asserts
+  every member is an MD5, and the length rule used to ask the `=` form alone.
+
+- **An endpoint written through a reference is asked the host question.** A
+  judge-written `[network-traffic:dst_ref.value = '127.0.0.1']` reached no
+  check at all, so loopback, private and documentation addresses in that
+  pattern shape were exported with nothing in the run summary saying so.
+  `network-traffic:src_ref.value`, `dst_ref.value` and the
+  `resolves_to_refs[*].value` shapes are now asked the same question as the
+  four direct kinds, and asked whichever of host or address fits the value.
+
+- **A directory is asked whether it is a place, and then whether this run saw
+  one.** The grounding check put `directory:path` in the `file:name` branch, so
+  the judge read *"has no file extension, no filesystem anchor … so nothing
+  says it is a real path"* about a directory it had written, retried on it and
+  lost the row. A directory is now asked two questions and told which one it
+  failed. Validity: it has a root — a POSIX slash, a drive with either
+  separator, a share, an environment variable, a home tilde, a registry hive —
+  and at least one named step under it, every step written the way a name is
+  rather than as whitespace or as a format specifier the sample was compiled
+  with. `/tmp` passes where it used to be refused; `/`, `C:\`, `/%s/%s` and
+  `/ /` do not. Grounding: the literal is then asked the corpus question every
+  other literal is asked, as a whole value and under the spellings that mean
+  the same location, so a shape alone no longer stands in for evidence.
+
+- **A value is found at its own boundaries in the evidence.**
+  `whole_value_in` read `/`, `\` and `:` as part of a label, so a host written
+  inside a URL, a host written before its port, a mailbox after `mailto:` and
+  an address at the end of a sentence were all reported as appearing nowhere
+  and the row was withheld from the bundle with a sentence saying nothing
+  corroborates it. Those three characters join the parts of a compound value
+  rather than extend a part, so each of them now bounds a part, and a `.` that
+  nothing continues is the sentence's full stop. A `.` that something
+  continues is still the value's, so `168.1.1` is still not found inside
+  `192.168.1.1` and `evil.com` is still not found inside `notevil.com`,
+  `sub.evil.com` or `evil.com.br`.
+
+- **What the indicator cap orphans is counted.** The integrity pass runs a
+  second time after the cap to sweep the relationships it left pointing at
+  nothing, and that run was given no truncation ledger, so the aggregate
+  under-reported what had left the bundle and a reader could not reconcile the
+  object count. It reports now, under `cap_orphan` — its own reason, because it
+  is the cap's loss rather than a defect of anybody's bundle.
+
+- **The finding-row guard looks at every place a row is built.** It read the
+  `message=` keyword in `validation.py` alone, so seven `Violation`
+  constructions in four other modules were never inspected, a row written as
+  `Violation(code, message)` was invisible, and a local spelled like a message
+  builder was trusted for its name. It now walks every module in the tree that
+  builds one, matches positional arguments, resolves the constructor under an
+  import alias (the resolution shared with the sibling guard that already did
+  it), revokes a module-level name the moment a function binds that spelling
+  itself, trusts a local only for the value it was given, and fails if a sixth
+  module starts building rows.
 
 ### Removed
 
-- **`data/attck_platforms.json`.** `data/attck_techniques.json` replaces it and
-  carries everything it did — per technique id, its domain and its MITRE
-  platforms — beside the name and the tactic slugs it did not, plus the tactic
-  catalogue per domain. Nothing in the tree reads the old path; a deployment or
-  a script of your own that reads it by name must be pointed at the new file,
-  whose rows are keyed the same way and carry the same two keys.
 - **The static analyst's case-prior hint and its settings.**
   `StaticAnalyst._compute_attck_case_hint`, `analysis.attck_case_rag` and the
   five `preprocessing.attck_case_*` settings; alembic revision
@@ -2620,6 +2807,12 @@ change landed on `main`.
   phase labels. The reasoning stays, the bookkeeping goes
   ([#38](https://github.com/Root0ne/Maljan/pull/38)).
 
+- **`data/attck_platforms.json`.** `data/attck_techniques.json` replaces it and
+  carries everything it did — per technique id, its domain and its MITRE
+  platforms — beside the name and the tactic slugs it did not, plus the tactic
+  catalogue per domain. Nothing in the tree reads the old path; a deployment or
+  a script of your own that reads it by name must be pointed at the new file,
+  whose rows are keyed the same way and carry the same two keys.
 ### Upgrading
 
 An existing `.env` deployment is not migrated automatically. Move the bootstrap

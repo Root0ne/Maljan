@@ -133,6 +133,10 @@ DEFAULT_AGENTS = {
             "static_provider": None,
             "enabled": True,
             "data_sources": [],
+            # None of the five takes a budget of its own; the seeded lead does
+            # (pinned in tests/unit/agents/test_delegation.py).
+            "max_steps": None,
+            "timeout_seconds": None,
         },
         "dynamic": {
             "role": "dynamic",
@@ -142,6 +146,10 @@ DEFAULT_AGENTS = {
             "static_provider": None,
             "enabled": True,
             "data_sources": [],
+            # None of the five takes a budget of its own; the seeded lead does
+            # (pinned in tests/unit/agents/test_delegation.py).
+            "max_steps": None,
+            "timeout_seconds": None,
         },
         "network": {
             "role": "network",
@@ -151,6 +159,10 @@ DEFAULT_AGENTS = {
             "static_provider": None,
             "enabled": True,
             "data_sources": [],
+            # None of the five takes a budget of its own; the seeded lead does
+            # (pinned in tests/unit/agents/test_delegation.py).
+            "max_steps": None,
+            "timeout_seconds": None,
         },
         "judge": {
             "role": "judge",
@@ -160,6 +172,10 @@ DEFAULT_AGENTS = {
             "static_provider": None,
             "enabled": True,
             "data_sources": [],
+            # None of the five takes a budget of its own; the seeded lead does
+            # (pinned in tests/unit/agents/test_delegation.py).
+            "max_steps": None,
+            "timeout_seconds": None,
         },
         # The narrative/composer step as a definition: an LLM entry and a
         # prompt of its own instead of borrowing the judge's, and no tools —
@@ -172,6 +188,10 @@ DEFAULT_AGENTS = {
             "static_provider": None,
             "enabled": True,
             "data_sources": [],
+            # None of the five takes a budget of its own; the seeded lead does
+            # (pinned in tests/unit/agents/test_delegation.py).
+            "max_steps": None,
+            "timeout_seconds": None,
         },
     },
 }

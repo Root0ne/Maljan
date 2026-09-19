@@ -139,6 +139,28 @@ class TestHowAnEndpointIsNamedToAReader:
         assert endpoint_label("user:" + secret + "@llm.internal:8080/v1") == "llm.internal:8080"
         assert endpoint_label("//user:" + secret + "@host/v1") == "host"
 
+    def test_an_ipv6_host_keeps_its_brackets(self) -> None:
+        """Without them the label is an address nobody can type back in."""
+        from maljan.core.model_assignments import endpoint_label
+
+        assert endpoint_label("http://[::1]:8080/v1") == "http://[::1]:8080"
+        assert endpoint_label("http://[2001:db8::2]/v1") == "http://[2001:db8::2]"
+
+    def test_an_ipv6_host_behind_credentials_keeps_both_properties(self) -> None:
+        from maljan.core.model_assignments import endpoint_label
+
+        secret = "hunter2"
+        assert endpoint_label("http://user:" + secret + "@[::1]:8080/v1") == "http://[::1]:8080"
+        assert endpoint_label("user:" + secret + "@[::1]:8080/v1") == "[::1]:8080"
+
+    def test_a_label_can_be_looked_up_against_the_endpoint_it_names(self) -> None:
+        """The label and the folded endpoint spell one host one way."""
+        from maljan.core.model_assignments import endpoint_label, normalised_endpoint
+
+        endpoint = normalised_endpoint("http://[::1]:8080/v1")
+        assert endpoint == "http://[::1]:8080/v1"
+        assert endpoint.startswith(endpoint_label(endpoint))
+
     def test_a_vendor_api_is_its_own_label(self) -> None:
         from maljan.core.model_assignments import endpoint_label
 

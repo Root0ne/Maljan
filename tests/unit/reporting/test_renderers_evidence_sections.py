@@ -19,6 +19,83 @@ def _report(*sections: EvidenceSection) -> MalwareReport:
     )
 
 
+SAID = "This answer was shortened to fit the analyst's budget: /strings (221 rows not shown)."
+
+
+def _shortened(kind: str) -> EvidenceSection:
+    """A section that carries rows and a sentence about how it got them."""
+    return EvidenceSection(
+        key="strings",
+        title="Strings",
+        kind=kind,  # type: ignore[arg-type]
+        columns=["Offset", "Text"] if kind != "list" else [],
+        rows=[["0x4d", "a string"]] if kind != "list" else [],
+        items=["a string"] if kind == "list" else [],
+        text=SAID,
+        evidence_ids=["ev_0021"],
+    )
+
+
+class TestASectionThatCarriesBothRowsAndASentence:
+    """A table of a page of an answer says that it is a page of one.
+
+    The sentence is now the only place the report says an answer was
+    shortened — the bookkeeping is deliberately out of the key-value table —
+    and a body that returns as soon as it has rows never reaches it, so the
+    reader sees seventy-nine rows of a three-hundred-row answer with nothing
+    anywhere saying so.
+    """
+
+    def test_the_markdown_draws_it_above_the_table(self) -> None:
+        markdown = MarkdownRenderer().render(_report(_shortened("table")))
+
+        assert SAID in markdown
+        assert markdown.index(SAID) < markdown.index("| Offset | Text |")
+        assert "| 0x4d | a string |" in markdown
+
+    def test_the_markdown_draws_it_above_a_key_value_table(self) -> None:
+        markdown = MarkdownRenderer().render(_report(_shortened("kv")))
+
+        assert SAID in markdown
+        assert markdown.index(SAID) < markdown.index("| 0x4d | a string |")
+
+    def test_the_markdown_draws_it_above_a_list(self) -> None:
+        markdown = MarkdownRenderer().render(_report(_shortened("list")))
+
+        assert SAID in markdown
+        assert markdown.index(SAID) < markdown.index("- a string")
+
+    def test_it_is_prose_beside_a_table_and_a_fenced_block_on_its_own(self) -> None:
+        with_rows = MarkdownRenderer().render(_report(_shortened("table")))
+        alone = MarkdownRenderer().render(
+            _report(EvidenceSection(key="k", title="T", kind="text", text=SAID))
+        )
+
+        assert f"```\n{SAID}\n```" not in with_rows
+        assert f"```\n{SAID}\n```" in alone
+
+    def test_the_html_export_carries_it_too(self) -> None:
+        html = HtmlRenderer().render(_report(_shortened("table")))
+
+        assert "shortened to fit the analyst" in html
+        assert "<table" in html
+
+    def test_a_section_with_no_sentence_draws_no_empty_line_for_one(self) -> None:
+        plain = MarkdownRenderer().render(
+            _report(
+                EvidenceSection(
+                    key="strings",
+                    title="Strings",
+                    kind="table",
+                    columns=["Offset", "Text"],
+                    rows=[["0x4d", "a string"]],
+                )
+            )
+        )
+
+        assert "### Strings\n\n| Offset | Text |" in plain
+
+
 class TestMarkdown:
     def test_a_table_section_renders_as_a_table(self) -> None:
         markdown = MarkdownRenderer().render(

@@ -548,8 +548,16 @@ def _guard(tool: str, call: Any, **kwargs: Any) -> dict[str, Any]:
         # Which file was read, when it was not the sample. The ledger stores
         # the answer, so a run that analysed a carved payload says which one
         # rather than leaving a reader to infer it from the arguments.
+        #
+        # First, not appended. An answer wider than the caller's output
+        # guardrail is cut from the end before anything records it, and a key
+        # behind a long list is a key that does not survive the cut: one
+        # measured run's ``strings`` over a carved PE returned 150 rows, was
+        # cut at six thousand characters, and stored ``read_path`` nowhere
+        # while its shorter siblings all carried it. At the front it is in the
+        # part of the answer every reader keeps.
         if _asked_for_a_carved_file(kwargs):
-            answer.setdefault("read_path", asked.get("path", ""))
+            answer = {"read_path": answer.get("read_path") or asked.get("path", ""), **answer}
         return answer
     except PathOutsideRoots as refusal:
         # A ``carved_path`` refusal is answered in that argument's own words:

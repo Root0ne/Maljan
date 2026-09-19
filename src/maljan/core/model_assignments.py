@@ -106,6 +106,11 @@ def endpoint_label(endpoint: object) -> str:
     sentence. Something that is not an address at all — a vendor API's own
     name — is its own label, because that is the whole of what an address
     means there.
+
+    An IPv6 host keeps its brackets. ``urlsplit`` takes them off, and without
+    them ``http://[::1]:8080/v1`` reads ``http://::1:8080`` — an address that
+    cannot be typed back in and whose port cannot be told from its last
+    group, so an operator reading a refusal cannot find the pair that failed.
     """
     raw = str(endpoint or "")
     parts = urlsplit(raw)
@@ -114,7 +119,8 @@ def endpoint_label(endpoint: object) -> str:
     except ValueError:
         port = ""
     if parts.scheme and parts.hostname:
-        return f"{parts.scheme}://{parts.hostname}{port}"
+        host = f"[{parts.hostname}]" if ":" in parts.hostname else parts.hostname
+        return f"{parts.scheme}://{host}{port}"
     if not any(mark in raw for mark in "@/:"):
         return raw
     address = raw.rpartition("@")[2].lstrip("/")

@@ -104,6 +104,59 @@ test.describe("agent definitions and profiles", () => {
     });
   });
 
+  /* A budget is part of the definition, so it is edited on the agent's own
+     card and the save review has to name it — an edit the panel calls "0
+     agents changed" is an edit an admin will do twice or believe was a
+     no-op. The seeded map here carries no budget at all, which is also what
+     an API older than the fields answers with: both boxes read as blank. */
+  test("an agent's step and time budget is typed on its card, reviewed and applied", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto(AGENTS_PATH);
+
+    await page.locator('[data-agent="static"]').click();
+    await page.getByLabel("new agent name").fill("lead_local");
+    await page
+      .locator('[data-agent-detail="static"]')
+      .getByRole("button", { name: "Clone" })
+      .click();
+
+    const detail = page.locator('[data-agent-detail="lead_local"]');
+    const steps = detail.getByLabel("lead_local max steps");
+    const seconds = detail.getByLabel("lead_local timeout seconds");
+    await expect(steps).toHaveValue("");
+    await expect(seconds).toHaveValue("");
+
+    await steps.fill("40");
+    await seconds.fill("1800");
+
+    const patches: unknown[] = [];
+    await page.route("**/api/v1/settings", (r) => {
+      if (r.request().method() === "PATCH") {
+        patches.push(r.request().postDataJSON());
+        return r.fulfill({
+          json: { applied: ["core.agents.definitions"], applies: { next_job: 1 } },
+        });
+      }
+      return r.fallback();
+    });
+    await page.getByRole("button", { name: "Review" }).click();
+    await expect(page.getByText("steps per loop", { exact: false })).toBeVisible();
+    await page.getByRole("button", { name: "Confirm and apply" }).click();
+
+    const body = patches[0] as {
+      changes: {
+        "core.agents.definitions": Record<
+          string,
+          { max_steps?: number | null; timeout_seconds?: number | null }
+        >;
+      };
+    };
+    const sent = body.changes["core.agents.definitions"];
+    expect(sent.lead_local.max_steps).toBe(40);
+    expect(sent.lead_local.timeout_seconds).toBe(1800);
+  });
+
   test("a team is built stage by stage, set active and applied", async ({
     authenticatedPage: page,
   }) => {

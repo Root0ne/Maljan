@@ -1687,9 +1687,10 @@ ANNOTATIONS.update(
             "title": "Agent definitions",
             "description": (
                 "Every agent Maljan can run, keyed by a short name: its role, "
-                "its prompt, the tool servers it receives and the static "
-                "provider it reads. The built-ins are read-only apart from "
-                "their enabled switch; clone one to change it."
+                "its prompt, the tool servers it receives, the static "
+                "provider it reads and the step and time budget one of its "
+                "loops gets. The built-ins are read-only apart from their "
+                "enabled switch; clone one to change it."
             ),
             "group": "agents",
             "editor": "agent_definitions",

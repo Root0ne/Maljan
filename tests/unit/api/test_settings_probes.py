@@ -912,6 +912,64 @@ async def test_the_llm_probe_stops_at_its_own_budget_and_says_what_it_did_not_tr
 
 
 @pytest.mark.asyncio
+async def test_the_budget_covers_the_catalogue_listing_in_front_of_the_completions(monkeypatch):
+    """The wall an operator waits at starts when the probe does.
+
+    Listing a provider's models is a request of its own with its own ten
+    seconds, and per provider it comes before any completion. Measured from
+    after it, the documented five minutes was five minutes plus however long
+    the listing took, and the sentence naming the untried pairs understated
+    the wait.
+    """
+
+    class _Clock:
+        def __init__(self) -> None:
+            self.now = 0.0
+
+        def monotonic(self) -> float:
+            return self.now
+
+        def perf_counter(self) -> float:
+            return self.now
+
+    clock = _Clock()
+    listing = 100.0
+
+    def handler(req: httpx.Request):
+        if req.url.path.endswith("/api/generate"):
+            clock.now += probes.COMPLETION_TIMEOUT
+            return httpx.Response(200, json={"response": "OK"})
+        clock.now += listing
+        return httpx.Response(200, json={"models": [{"name": "qwen3:8b"}]})
+
+    monkeypatch.setattr(probes, "time", clock)
+    monkeypatch.setattr(
+        probes,
+        "_client",
+        lambda *_a, **_k: httpx.AsyncClient(transport=transport(handler), timeout=10),
+    )
+    r = await probes.probe_llm(
+        {
+            "provider": "ollama",
+            "ollama_base_url": "http://ollama:11434",
+            "ollama_expert_model": "qwen3:8b",
+            "ollama_judge_model": "qwen3:8b",
+            "agents": {
+                "a1": {"provider": "ollama", "model": "qwen3:1b"},
+                "a2": {"provider": "ollama", "model": "qwen3:2b"},
+                "a3": {"provider": "ollama", "model": "qwen3:3b"},
+            },
+        }
+    )
+
+    fits = int((probes.LLM_PROBE_BUDGET_SECONDS - listing) // probes.COMPLETION_TIMEOUT)
+    filed = [pair["model"] for pair in (r.details or {})["completions"]]
+    assert filed == ["qwen3:8b", "qwen3:1b", "qwen3:2b"][:fits]
+    assert clock.now <= probes.LLM_PROBE_BUDGET_SECONDS, "the probe ran past its documented wall"
+    assert "a3=qwen3:3b" in r.detail
+
+
+@pytest.mark.asyncio
 async def test_a_failing_pair_names_its_server_and_nothing_else(monkeypatch):
     """The sentence reaches the operator's screen and the stored row.
 
@@ -1146,6 +1204,9 @@ async def test_an_ollama_model_that_answered_nothing_names_the_setting(monkeypat
     assert ok is False
     assert probes.THINKING_SETTING in said
     assert "answered nothing" in said
+    # Two sentences, not one run-on: a live probe read
+    # "…answered nothing A reasoning model answers…".
+    assert "answered nothing. A reasoning model" in said
 
 
 @pytest.mark.asyncio

@@ -610,6 +610,33 @@ class TestTheSixSpellingsAModelWrote:
             answer = server.identify_file(path=str(sample), carved_path=asked)
             assert answer.get("read_path") == str(written), asked
 
+    def test_the_file_is_named_before_anything_a_cut_would_take(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An answer wider than the caller's guardrail is cut from the end.
+
+        A ``strings`` call over a carved PE came back with 150 rows, was cut
+        at six thousand characters before anything recorded it, and stored no
+        ``read_path`` at all while its shorter siblings each carried one — the
+        key sat behind the list. At the front of the answer it is inside every
+        cut, so the record says which file was read whatever the size of what
+        was found in it.
+        """
+        import json
+
+        sample, payload = self._carved(server, tmp_path, monkeypatch)
+        written = Path(payload["path"])
+
+        for tool, extra in (
+            (server.strings, {"min_len": 6}),
+            (server.identify_file, {}),
+            (server.pe_info, {}),
+        ):
+            answer = tool(path=str(sample), carved_path=f'"{payload["path"]}"', **extra)
+            assert next(iter(answer)) == "read_path", tool
+            cut = json.dumps(answer)[:200]
+            assert str(written) in cut, tool
+
 
 class TestReadingTheQuotesOffAValue:
     @staticmethod

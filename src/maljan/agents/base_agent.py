@@ -455,20 +455,80 @@ def hard_cap(timeout: float, ceiling: BudgetCeiling | None = None) -> float:
     return max(1.0, wall)
 
 
+def a_budget(value: Any) -> int | None:
+    """``value`` as a budget, or ``None`` when it is not one.
+
+    A whole number of at least one. ``True`` is an ``int`` to Python and is a
+    budget to nobody, so it is refused by name. Everything a budget is read
+    from goes through this: the definition's own fields, which the settings
+    model already holds to the same rule, and the two deprecated override
+    maps, which are plain ``dict[str, int]`` and hold anything an admin typed.
+    A loop given a zero or a negative recursion limit does not run at all, so
+    the fallback is the deployment's number rather than the stored one.
+    """
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        return None
+    return value
+
+
+def _definition_budget(cfg: Any, agent_name: str) -> tuple[int | None, int | None]:
+    """``(timeout_seconds, max_steps)`` this agent's definition sets, if any.
+
+    Read defensively: a settings stand-in may carry no definition map at all,
+    and a budget is not worth an exception on the path that starts every loop.
+    """
+    definitions = getattr(getattr(cfg, "agents", None), "definitions", None)
+    if not isinstance(definitions, dict):
+        return None, None
+    definition = definitions.get(agent_name)
+    return (
+        a_budget(getattr(definition, "timeout_seconds", None)),
+        a_budget(getattr(definition, "max_steps", None)),
+    )
+
+
+def slowest_call(entries: Any) -> str:
+    """`, slowest <tool> 12.3s`, or `""` when nothing in the loop was timed.
+
+    The loop's own elapsed time says a run was slow; it does not say whether
+    the model or a tool was. The ledger's per-call clock does, and the slowest
+    call is the one an operator looks for first. A clause rather than a line of
+    its own, so the three existing lines keep their shape.
+    """
+    slowest = None
+    for entry in entries or []:
+        try:
+            ms = int(getattr(entry, "duration_ms", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if ms > 0 and (slowest is None or ms > slowest[0]):
+            slowest = (ms, str(getattr(entry, "tool", "") or ""))
+    if slowest is None or not slowest[1]:
+        return ""
+    return f", slowest {slowest[1]} {slowest[0] / 1000.0:.1f}s"
+
+
 def loop_limits(agent_name: str, ceiling: BudgetCeiling | None = None) -> tuple[int, int]:
     """``(timeout, max_steps)`` for one loop of ``agent_name``.
 
-    The per-agent overrides for a loop of its own. A ceiling replaces both:
-    an agent answering an ask spends the delegation's budget, not its stage's
-    and not a leftover of its caller's. A module function rather than only a
-    method, so a duck-typed analyst that borrows one method reads the same
-    numbers.
+    The agent's own definition first, then the deprecated per-agent override
+    maps — each held to what a budget can be — then the deployment's defaults.
+    A budget is a property of the agent
+    — an operator cloning a team gets the definition, and used to get none of
+    its budget — so the definition wins over a map keyed by agent name
+    somewhere else in the settings. A ceiling replaces both: an agent
+    answering an ask spends the delegation's budget, not its stage's and not a
+    leftover of its caller's. A module function rather than only a method, so
+    a duck-typed analyst that borrows one method reads the same numbers.
     """
     cfg = get_settings()
+    own_timeout, own_steps = _definition_budget(cfg, agent_name)
     overrides = getattr(cfg, "react_agent_timeout_overrides", {}) or {}
-    timeout = int(overrides.get(agent_name, cfg.react_agent_timeout))
     step_overrides = getattr(cfg, "react_agent_max_steps_overrides", {}) or {}
-    max_steps = int(step_overrides.get(agent_name, cfg.react_agent_max_steps))
+    timeout = own_timeout or a_budget(overrides.get(agent_name)) or int(cfg.react_agent_timeout)
+    max_steps = (
+        own_steps or a_budget(step_overrides.get(agent_name)) or int(cfg.react_agent_max_steps)
+    )
     if ceiling is not None:
         max_steps = max(2, int(ceiling.steps))
         timeout = max(1, int(ceiling.seconds))
@@ -2693,40 +2753,43 @@ class BaseAnalyst(BudgetMeter, ABC):
             if getattr(_m, "type", "") == "ai":
                 record_response_usage(self.token_ledger, _m)
         elapsed = _time.monotonic() - _t0
-        # PERF-STATIC-ANALYST-LATENCY-01 minimal viable: emit a WARNING
-        # when the analyst either hit the configured timeout's 90%
-        # ceiling OR exceeded a hard per-run Ghidra budget. Operators get
-        # a single grep target instead of having to derive latency from
-        # raw timestamps. TODO(audit-2026-05-19): per-step timing in a
-        # deeper refactor — add a LangGraph callback that times each
-        # tool round-trip individually.
+        # A loop that overran is a slow model or a slow tool, and the loop's
+        # own elapsed time cannot tell them apart. Every ledger entry carries
+        # the clock of its own round trip, so the line names the single
+        # slowest call and the tool that answered it; the run summary carries
+        # the same three numbers per agent (``tool_latency``), and the ledger
+        # itself has every call.
+        slowest = slowest_call(recorder.entries)
         cfg_obj = get_settings()
         _budget = getattr(cfg_obj, "react_agent_tool_call_budget", 20)
         if tool_call_count > _budget:
             self.logger.warning(
-                "%s ReAct loop spent %d tool calls (budget=%d, elapsed=%.1fs).",
+                "%s ReAct loop spent %d tool calls (budget=%d, elapsed=%.1fs)%s.",
                 self.name,
                 tool_call_count,
                 _budget,
                 elapsed,
+                slowest,
             )
         elif elapsed > 0.9 * float(timeout):
             self.logger.warning(
                 "%s ReAct loop close to timeout: elapsed=%.1fs, "
-                "timeout=%ds, tool_calls=%d, messages=%d.",
+                "timeout=%ds, tool_calls=%d, messages=%d%s.",
                 self.name,
                 elapsed,
                 timeout,
                 tool_call_count,
                 len(msgs),
+                slowest,
             )
         else:
             self.logger.info(
-                "%s ReAct loop: elapsed=%.1fs, tool_calls=%d, messages=%d.",
+                "%s ReAct loop: elapsed=%.1fs, tool_calls=%d, messages=%d%s.",
                 self.name,
                 elapsed,
                 tool_call_count,
                 len(msgs),
+                slowest,
             )
 
         final_message = msgs[-1]

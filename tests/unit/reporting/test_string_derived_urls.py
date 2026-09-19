@@ -33,7 +33,7 @@ from maljan.reporting.builder import MalwareReportBuilder
 from maljan.reporting.ledger_projection import network_from_ledger
 from maljan.reporting.models import MalwareReport, NetworkURL, StaticAnalysis, StringIOC
 from maljan.reporting.renderers.stix_renderer import (
-    UNPUBLISHABLE_URL_CODE,
+    UNPUBLISHABLE_ENDPOINT_CODE,
     ExtendedSTIXRenderer,
     _indicator_for_url,
 )
@@ -318,7 +318,7 @@ class TestWhatTheBundleCarries:
         bundle = renderer.render(_report([]), base_bundle=base)
 
         assert not any("localho" in pattern for pattern in _patterns(bundle))
-        assert [code for code, _why in renderer.declined] == [UNPUBLISHABLE_URL_CODE]
+        assert [code for code, _why in renderer.declined] == [UNPUBLISHABLE_ENDPOINT_CODE]
         assert "http://localho" in renderer.declined[0][1]
 
     def test_the_judge_own_bundle_is_not_edited(self) -> None:
@@ -346,7 +346,7 @@ class TestWhatTheBundleCarries:
 
         renderer.render(report)
 
-        assert [code for code, _why in renderer.declined] == [UNPUBLISHABLE_URL_CODE]
+        assert [code for code, _why in renderer.declined] == [UNPUBLISHABLE_ENDPOINT_CODE]
         assert "not a name or address that could exist" in renderer.declined[0][1]
 
     def test_a_string_derived_url_held_back_is_not_a_finding(self) -> None:
@@ -378,7 +378,9 @@ class TestWhatTheBundleCarries:
 
             renderer.render(_report([NetworkURL(url="http://localho", source=source)]))
 
-            assert [code for code, _why in renderer.declined] == [UNPUBLISHABLE_URL_CODE], source
+            assert [code for code, _why in renderer.declined] == [UNPUBLISHABLE_ENDPOINT_CODE], (
+                source
+            )
 
     def test_a_string_sweep_cut_off_is_not_a_finding_anybody_can_act_on(self) -> None:
         """One report's forty of them would bury the rows a reader can act on."""

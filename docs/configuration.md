@@ -37,8 +37,9 @@ same contract in short form.
 | `JWT_ISSUER` | no | `maljan-api` | |
 | `JWT_AUDIENCE` | no | `maljan-clients` | |
 | `JWT_KEY_ID` | no | `v1` | `kid` stamped on new tokens. |
-| `JWT_PREVIOUS_SECRET_KEY` | no | — | Accepted alongside the current secret during a rotation window. |
+| `JWT_PREVIOUS_SECRET_KEY` | no | — | Accepted alongside the current secret during a rotation window; set `JWT_PREVIOUS_SECRET_NOT_AFTER` beside it to give that window an end. |
 | `JWT_PREVIOUS_KEY_ID` | no | `v0` | |
+| `JWT_PREVIOUS_SECRET_NOT_AFTER` | no | — | ISO-8601 moment (UTC when it carries no offset) after which a token signed with the previous secret is refused. Unset means the window has no end, which the startup check warns about at every start; a value that does not read as a moment is refused at startup. |
 | `APP_NAME` | no | `Maljan` | |
 | `APP_VERSION` | no | `0.1.0` | |
 | `DEBUG` | no | `false` | Also enables `/docs`, `/redoc` and `/openapi.json`. |
@@ -270,7 +271,9 @@ and asks to be run again once the model is warm.
 **What it costs.** The `llm` probe asks its pairs one after another — a single
 local server told to load several models at once is the failure this project
 has already diagnosed — with ninety seconds for each call and five minutes for
-the whole probe. A pair there was no room left to ask is named in the answer as
+the whole probe, counted from the moment the probe starts, so the catalogue
+listing in front of the calls comes out of the same five minutes rather than
+being added to them. A pair there was no room left to ask is named in the answer as
 not tried and files no row, exactly as a timeout does; pressing **Test** again
 asks it. In a failing pair's sentence an endpoint is printed as its scheme and
 host, so a base URL that carries credentials does not reach the screen or the
@@ -758,10 +761,17 @@ that reaches its step cap writes up what it gathered, the way an analyst at
 its own cap does.
 
 That makes the caller's stage timeout the thing that decides how many asks fit
-in one loop: the seeded `lead` has `react_agent_timeout_overrides` of 1800 s
-and `react_agent_max_steps_overrides` of 40, which is room for six asks and
+in one loop: the seeded `lead` carries `timeout_seconds: 1800` and
+`max_steps: 40` on its own definition, which is room for six asks and
 the turns to weigh them — 1800 s over the default 300 s per ask, and two steps
-per ask. The `ask_<key>` tool's description gives the model the same number,
+per ask. A budget is part of the definition, so a clone of a team carries the
+budget its agents need; the console draws the two as **Steps per loop** and
+**Seconds per loop** on the agent's card, and a blank box inherits the
+deployment's `react_agent_max_steps` / `react_agent_timeout`. The two
+`react_agent_*_overrides` maps are deprecated: they are still read for an
+agent whose definition sets neither, so a deployment that configured a budget
+there keeps it, and a definition's own value wins over them.
+The `ask_<key>` tool's description gives the model the same number,
 computed by `delegation._asks_that_fit` from the caller's own timeout rather
 than written down twice. See *Delegation* in [architecture.md](architecture.md) for
 what the ledger and the transcript record.

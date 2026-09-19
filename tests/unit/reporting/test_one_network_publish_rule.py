@@ -228,6 +228,32 @@ class TestThePredicateAnswersEveryKind:
             ), kind
 
 
+def _docstrings(tree: ast.AST) -> set[int]:
+    """The string constants that are prose rather than a value the code builds.
+
+    Only a docstring: a string standing alone as the first statement of a
+    module, a class or a function, which nothing reads and nothing mints from.
+    The module that explains what a pattern looks like has to write one out,
+    and a scan that reads its prose as a second minting path would be answered
+    by weakening the module's documentation. A statement that builds anything
+    — an assignment, a return, a call — is not a bare constant and is scanned
+    wherever it is written, including on the line after a docstring, which the
+    class below proves.
+    """
+    found: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        first = next(iter(node.body), None)
+        if (
+            isinstance(first, ast.Expr)
+            and isinstance(first.value, ast.Constant)
+            and isinstance(first.value.value, str)
+        ):
+            found.add(id(first.value))
+    return found
+
+
 class TestOnlyOnePlaceWritesOne:
     """A fifth minting path is a fifth place the rule could be forgotten."""
 
@@ -238,7 +264,8 @@ class TestOnlyOnePlaceWritesOne:
         A build carries a value: the literal has an assignment in it, or a
         substitution. A literal that is only a prefix — ``"[url:value"`` — is
         something reading a pattern somebody else wrote, which is not this
-        rule's business.
+        rule's business. Neither is a docstring: a module that explains what a
+        pattern looks like writes one out, and nothing is minted from prose.
         """
         found: list[tuple[str, str, int]] = []
         for path in sorted(SRC.rglob("*.py")):
@@ -248,7 +275,10 @@ class TestOnlyOnePlaceWritesOne:
                 for node in ast.walk(tree)
                 if isinstance(node, ast.FunctionDef)
             }
+            prose = _docstrings(tree)
             for node in ast.walk(tree):
+                if id(node) in prose:
+                    continue
                 if isinstance(node, ast.JoinedStr):
                     text = "".join(
                         part.value for part in node.values if isinstance(part, ast.Constant)
@@ -322,3 +352,47 @@ class TestTheStringRowsOfEveryKind:
         )
 
         assert not any("url:value" in p for p in _patterns(ExtendedSTIXRenderer().render(report)))
+
+
+class TestTheProseSkipDoesNotCoverABuilder:
+    """The scan skips a docstring, and nothing else that follows one."""
+
+    @staticmethod
+    def _builds(source: str) -> list[str]:
+        tree = ast.parse(source)
+        prose = _docstrings(tree)
+        found: list[str] = []
+        for node in ast.walk(tree):
+            if id(node) in prose:
+                continue
+            if isinstance(node, ast.JoinedStr):
+                text = "".join(p.value for p in node.values if isinstance(p, ast.Constant))
+                substitutes = any(isinstance(p, ast.FormattedValue) for p in node.values)
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                text, substitutes = node.value, False
+            else:
+                continue
+            if not any(prefix in text for prefix in NETWORK_PREFIXES):
+                continue
+            if substitutes or "= '" in text:
+                found.append(text)
+        return found
+
+    def test_a_docstring_that_writes_a_pattern_out_is_not_a_build(self) -> None:
+        source = (
+            'def read(value):\n    """Reads [url:value = \'x\'] and says so."""\n    return value\n'
+        )
+
+        assert self._builds(source) == []
+
+    def test_a_builder_on_the_line_after_a_docstring_still_is(self) -> None:
+        source = (
+            'def mint(value):\n    """Writes one."""\n    return f"[url:value = \'{value}\']"\n'
+        )
+
+        assert self._builds(source)
+
+    def test_a_builder_as_the_first_statement_still_is(self) -> None:
+        source = "def mint(value):\n    return f\"[url:value = '{value}']\"\n"
+
+        assert self._builds(source)

@@ -29,13 +29,89 @@ def _secret() -> str:
     return raw.get_secret_value() if isinstance(raw, SecretStr) else str(raw)
 
 
-def _previous_secret() -> str:
-    """Return the previous secret if one is configured, else empty string.
+def read_moment(value: object) -> datetime | None:
+    """An ISO-8601 moment as an aware ``datetime``, or ``None``.
 
-    During a key rotation window
-    the previous secret is kept as a fallback in ``decode_token`` so
-    in-flight tokens stay valid until they naturally expire.
+    A naive value is read as UTC: an operator writing a date in a bootstrap
+    file is writing the deployment's clock, and reading it as local time would
+    move the wall by the container's timezone. A date with no time is that
+    day's midnight.
+
+    Unparseable text gives ``None`` rather than raising — the setting is plain
+    text precisely so that nothing here can fail at import — and
+    ``app.bootstrap`` is what tells the operator their moment did not read.
     """
+    if isinstance(value, datetime):
+        moment = value
+    else:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        try:
+            moment = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
+
+
+def grace_secret_not_after() -> datetime | None:
+    """When the grace secret stops being accepted, as an aware moment."""
+    return read_moment(getattr(settings, "jwt_previous_secret_not_after", None))
+
+
+def grace_secret_configured() -> bool:
+    """Whether a previous signing secret is set at all.
+
+    The one place that looks at its value, and only to ask whether there is
+    one: a bool is what leaves here, and a bool is what every sentence about a
+    rotation is built from. Anything that read the secret for itself and then
+    handed out a dict would make every field of that dict something a reader —
+    or a scanner following the flow — has to trace back to the box before it
+    can say nothing escaped.
+    """
+    raw = getattr(settings, "jwt_previous_secret_key", None)
+    secret = raw.get_secret_value() if isinstance(raw, SecretStr) else str(raw or "")
+    return bool(secret)
+
+
+def grace_secret_is_live(now: datetime | None = None) -> bool:
+    """Whether a grace secret is configured and still accepted.
+
+    A window with no end is open. Only a moment somebody wrote down is
+    enforced: a deployment halfway through a rotation when this setting
+    arrived has the previous secret set and nothing else, and refusing that
+    secret would log out every session minted before the rotation — an upgrade
+    that breaks a running deployment, quietly. ``bootstrap`` says so out loud
+    at every start instead, and ``/system/status`` says the window is
+    unbounded.
+
+    Strictly before the moment, so a token is refused at it as well as after.
+    """
+    if not grace_secret_configured():
+        return False
+    # A moment that did not read is no moment. It is a bootstrap problem, so
+    # the operator is told; it is not a reason to stop honouring a secret they
+    # meant to keep honouring for a while longer.
+    not_after = grace_secret_not_after()
+    if not_after is None:
+        return True
+    return (now or datetime.now(UTC)) < not_after
+
+
+def _previous_secret() -> str:
+    """The previous secret while its window is open, else empty string.
+
+    During a key rotation the previous secret is kept as a fallback in
+    ``decode_token`` so tokens minted before the rotation stay valid until
+    they expire. The window has a written end: past
+    ``jwt_previous_secret_not_after`` the old secret signs nothing this API
+    accepts, so an operator who forgets to clear it is not running a
+    deployment where a retired key is honoured for good. A secret configured
+    with no end has no window to be past, and is accepted as it was before
+    the setting existed.
+    """
+    if not grace_secret_is_live():
+        return ""
     raw = getattr(settings, "jwt_previous_secret_key", None)
     if raw is None:
         return ""

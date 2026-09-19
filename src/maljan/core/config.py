@@ -20,6 +20,7 @@ Heterogeneous Model Ensemble:
 """
 
 import contextvars
+import logging
 import re
 import sys
 from collections.abc import Iterable, Mapping
@@ -44,6 +45,11 @@ from maljan.agents.prompts import (
     TRIAGE_PROMPT,
 )
 from maljan.core import virustotal
+
+# The stdlib logger rather than ``maljan.core.logger``: this module is imported
+# by almost everything, including the logging setup itself, and it has exactly
+# one thing to say — a stored value it had to fall back from.
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Per-provider LLM configs
@@ -1054,6 +1060,15 @@ def _without_the_empty_builtin_tool_list(entry: dict[str, Any]) -> dict[str, Any
     return entry
 
 
+def _is_a_budget(value: Any) -> bool:
+    """Whether ``value`` is a step or time budget a definition may carry.
+
+    A whole number of at least one. ``True`` is an ``int`` to Python and is not
+    a budget to anybody, so it is refused by name.
+    """
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+
+
 class AgentDefinition(BaseModel):
     """One agent, as configuration rather than as a class.
 
@@ -1079,6 +1094,15 @@ class AgentDefinition(BaseModel):
     # pointed at the sandbox behaviour log without also becoming a dynamic
     # analyst. Naming the sources makes that a two-word edit.
     data_sources: list[str] = Field(default_factory=list)
+    # How long one loop of this agent may run and how many steps it may take.
+    # ``None`` means the deployment-wide ``react_agent_timeout`` /
+    # ``react_agent_max_steps``, by way of the deprecated per-agent override
+    # maps. A budget is a property of the agent, not of the deployment: an
+    # operator who clones the lead gets a definition that asks six specialists
+    # and, without this, the default ten steps to do it in — the clone starves
+    # and nothing in the card they edited said why.
+    max_steps: Annotated[int, Field(ge=1)] | None = None
+    timeout_seconds: Annotated[int, Field(ge=1)] | None = None
 
     @model_validator(mode="after")
     def _data_sources_are_known(self) -> "AgentDefinition":
@@ -1637,6 +1661,17 @@ def _builtin_definitions() -> dict[str, AgentDefinition]:
             role="lead",
             label="Lead analyst",
             prompt=LEAD_PROMPT,
+            # A lead spends its steps on asks and on reading what comes back,
+            # and each ask is two of them — the turn that calls the tool and
+            # the node that runs it. Six asks and the turns to weigh them is
+            # forty, and at the default 300 s per ask 1800 s fits those six
+            # with the lead's own turns around them; that is the number
+            # ``delegation._asks_that_fit`` computes and the number the
+            # ``ask_<key>`` tool's description gives the model. The
+            # specialists' own budgets are their own and do not come out of
+            # these.
+            max_steps=40,
+            timeout_seconds=1800,
             tools=[
                 ToolRef(kind="agent", agent="static"),
                 ToolRef(kind="agent", agent="dynamic"),
@@ -2007,6 +2042,45 @@ class AgentsConfig(BaseModel):
     # most of it waiting for its own tool calls, and a lead with a long stage
     # timeout can still make several asks inside one loop.
     delegation_timeout_seconds: Annotated[int, Field(ge=1)] = 300
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_a_budget_the_field_would_refuse(cls, data: Any) -> Any:
+        """A stored budget outside the field's bound is read as absent.
+
+        The two deprecated override maps are plain ``dict[str, int]`` and
+        accept a zero or a negative through the settings PATCH, so a store
+        written before a budget belonged to a definition can hold one; the
+        migration that moves them leaves such a value where it is, and an
+        operator can still write one into the map by hand. Refusing the whole
+        document over it would take the API and the worker down for every
+        settings read — a build that raises is a deployment that cannot serve
+        — so the agent falls back to the deployment's budget and the reason
+        is logged once, where the fallback happens.
+        """
+        if not isinstance(data, dict):
+            return data
+        definitions = data.get("definitions")
+        if not isinstance(definitions, dict):
+            return data
+        cleaned: dict[Any, Any] = {}
+        for key, entry in definitions.items():
+            if not isinstance(entry, dict):
+                cleaned[key] = entry
+                continue
+            kept = dict(entry)
+            for field in ("max_steps", "timeout_seconds"):
+                if field in kept and kept[field] is not None and not _is_a_budget(kept[field]):
+                    logger.warning(
+                        "Agent %r has a stored %s of %r, which is not a whole number of at "
+                        "least one; the deployment's own budget is used instead.",
+                        key,
+                        field,
+                        kept[field],
+                    )
+                    kept[field] = None
+            cleaned[key] = kept
+        return {**data, "definitions": cleaned}
 
     @model_validator(mode="before")
     @classmethod
@@ -2741,6 +2815,10 @@ class Settings(BaseSettings):
     # ``REACT_AGENT_TOOL_CALL_BUDGET``.
     react_agent_tool_call_budget: Annotated[int, Field(ge=1)] = 20
 
+    # Deprecated: a budget belongs to the agent that spends it, so
+    # ``agents.definitions.<key>.timeout_seconds`` is where one is set now and
+    # a definition's own value wins. This map is still read, for one release,
+    # so a deployment that set a budget here keeps it.
     # Per-agent timeout overrides. The default ``react_agent_timeout`` is
     # tuned for the network/dynamic analysts (~1-3 tool calls). The
     # static analyst attaches the Ghidra MCP server with many tools, so
@@ -2777,14 +2855,6 @@ class Settings(BaseSettings):
             # safe_analyze_isr_chunked still tolerates a genuinely wedged chunk.
             # Override via ``REACT_AGENT_TIMEOUT_OVERRIDES__static=1500``.
             "static": 1500,
-            # A lead's stage has to hold several asks end to end. At the
-            # default 300 s per ask, 1800 fits six of them — which is the
-            # number ``delegation._asks_that_fit`` computes and the number the
-            # ``ask_<key>`` tool's description gives the model — with the
-            # lead's own turns around them; the per-ask timeout is what bounds
-            # any one specialist, and the refusal is what stops the last ask
-            # that would not fit.
-            "lead": 1800,
             # Judge budget bumped 300 → 600 for the same reason — the
             # final-verdict LLM call on Qwen 35B repeatedly bottlenecked
             # at 180-300s in the 2026-05-28 sequential live runs.
@@ -2799,6 +2869,10 @@ class Settings(BaseSettings):
         }
     )
 
+    # Deprecated, as ``react_agent_timeout_overrides`` is: set a step budget on
+    # the agent's own definition (``agents.definitions.<key>.max_steps``),
+    # which wins over this map. Read for one release so a deployment that set
+    # one here keeps it.
     # Per-agent ReAct recursion-step overrides. The default
     # ``react_agent_max_steps`` (10) suits the network/dynamic analysts (0-3
     # tool calls), but the static analyst runs a full Ghidra MCP ReAct loop
@@ -2842,12 +2916,6 @@ class Settings(BaseSettings):
         default_factory=lambda: {
             "static": 40,
             "network": 6,
-            # A lead spends its steps on asks and on reading what comes back,
-            # and each ask is two of them — the turn that calls the tool and
-            # the node that runs it. Six asks and the turns to weigh them is
-            # forty; the specialists' own steps are their own and do not come
-            # out of this.
-            "lead": 40,
         }
     )
 

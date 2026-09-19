@@ -722,14 +722,27 @@ class TestTheCeiling:
         from maljan.core.config import Settings
 
         seeded = Settings(_env_file=None)
+        lead = seeded.agents.definitions["lead"]
 
-        assert seeded.react_agent_max_steps_overrides["lead"] == 40
+        assert lead.max_steps == 40
         assert seeded.agents.delegation_steps == 12
         assert seeded.agents.delegation_timeout_seconds == 300
-        fits = seeded.react_agent_timeout_overrides["lead"] // (
-            seeded.agents.delegation_timeout_seconds
-        )
+        fits = lead.timeout_seconds // seeded.agents.delegation_timeout_seconds
         assert fits >= 5, "a lead's stage holds several asks end to end"
+
+    def test_the_lead_carries_its_budget_where_a_clone_of_it_would(self) -> None:
+        """The budget travels with the definition, not with the agent's name.
+
+        It used to sit in two maps keyed by agent name, away from the card an
+        operator edits, so a clone of the lead arrived with five specialists
+        to ask and the deployment's default ten steps to do it in.
+        """
+        from maljan.core.config import Settings
+
+        seeded = Settings(_env_file=None)
+
+        assert "lead" not in seeded.react_agent_max_steps_overrides
+        assert "lead" not in seeded.react_agent_timeout_overrides
 
     def test_the_lead_prompt_and_the_ask_tool_say_the_same_thing(self, team) -> None:
         """The prompt the lead reads first must not contradict its own tools.

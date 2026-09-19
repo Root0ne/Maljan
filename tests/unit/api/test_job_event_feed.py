@@ -40,6 +40,15 @@ class _FakeRedis:
         self.incr_fails = False
         self.xrange_fails = False
 
+    async def exists(self, key: str) -> int:
+        return 1 if key in self.counters else 0
+
+    async def set(self, key: str, value: int, **kwargs: Any) -> bool:
+        if kwargs.get("nx") and key in self.counters:
+            return False
+        self.counters[key] = int(value)
+        return True
+
     async def incr(self, key: str) -> int:
         if self.incr_fails:
             raise RuntimeError("READONLY")
@@ -65,8 +74,9 @@ class _FakeRedis:
 
 
 class _Rows:
-    def __init__(self, rows: list[Any]) -> None:
+    def __init__(self, rows: list[Any], scalar: Any = None) -> None:
         self._rows = rows
+        self._scalar = scalar
 
     def scalars(self) -> _Rows:
         return self
@@ -74,19 +84,23 @@ class _Rows:
     def all(self) -> list[Any]:
         return self._rows
 
+    def scalar(self) -> Any:
+        return self._scalar
+
 
 class _Session:
     """Answers every query with the same rows and records what it was asked."""
 
-    def __init__(self, rows: list[Any] | None = None) -> None:
+    def __init__(self, rows: list[Any] | None = None, highest_seq: int | None = None) -> None:
         self.rows = rows or []
+        self.highest_seq = highest_seq
         self.statements: list[Any] = []
         self.added: list[Any] = []
         self.commits = 0
 
     async def execute(self, statement: Any) -> _Rows:
         self.statements.append(statement)
-        return _Rows(self.rows)
+        return _Rows(self.rows, self.highest_seq)
 
     def add_all(self, rows: list[Any]) -> None:
         self.added.extend(rows)
@@ -183,6 +197,122 @@ class TestTheSequence:
         asyncio.run(run())
         numbers = [json.loads(m)["data"]["seq"] for _c, m in redis_conn.published]
         assert numbers == [1, 2, 3]
+
+
+class TestALatePublisherContinuesTheNumbering:
+    """The counter lives 24 hours; the rows it numbers live for good.
+
+    Whoever re-opens a stored job's feed has to start after the last number
+    that job's table holds, and nothing at a call site says so. The publisher
+    does it, so no caller can forget.
+    """
+
+    def test_the_first_event_after_the_counter_expired_follows_the_table(self) -> None:
+        session = _Session(highest_seq=70)
+        redis_conn = _FakeRedis()
+        job_id = str(uuid.uuid4())
+
+        async def run() -> None:
+            _start_event_feed(job_id, _factory(session))
+            await _publish_event(redis_conn, job_id, "enrichment_complete", {})
+            await stop_feed(job_id)
+
+        asyncio.run(run())
+        assert [row.seq for row in session.added] == [71]
+        assert _seqs([json.loads(m) for _c, m in redis_conn.published]) == [71]
+
+    def test_the_table_is_read_once_and_not_before_every_number(self) -> None:
+        session = _Session(highest_seq=70)
+        redis_conn = _FakeRedis()
+        job_id = str(uuid.uuid4())
+
+        async def run() -> None:
+            _start_event_feed(job_id, _factory(session))
+            for _ in range(3):
+                await _publish_event(redis_conn, job_id, "agent_message", {})
+            await stop_feed(job_id)
+
+        asyncio.run(run())
+        assert [row.seq for row in session.added] == [71, 72, 73]
+        assert len(session.statements) == 1, "the highest stored number is asked for once"
+
+    def test_a_run_in_flight_is_never_renumbered(self) -> None:
+        """The seed is ``NX`` and only for a counter Redis does not hold."""
+        session = _Session(highest_seq=70)
+        redis_conn = _FakeRedis()
+        job_id = str(uuid.uuid4())
+        redis_conn.counters[f"analysis:{job_id}:seq"] = 4
+
+        async def run() -> None:
+            _start_event_feed(job_id, _factory(session))
+            await _publish_event(redis_conn, job_id, "agent_message", {})
+            await stop_feed(job_id)
+
+        asyncio.run(run())
+        assert [row.seq for row in session.added] == [5]
+
+    def test_a_publish_with_no_feed_asks_the_table_nothing(self) -> None:
+        """Without a row being written there is nothing to collide with."""
+        session = _Session(highest_seq=70)
+        redis_conn = _FakeRedis()
+
+        async def run() -> None:
+            await _publish_event(redis_conn, str(uuid.uuid4()), "status_change", {})
+
+        asyncio.run(run())
+        assert session.statements == []
+        assert _seqs([json.loads(m) for _c, m in redis_conn.published]) == [1]
+
+    def test_every_publisher_reaches_the_seed_through_the_one_numbering_call(self) -> None:
+        """No call site carries the seed of its own, so none can omit it.
+
+        ``_publish_event`` is the only caller of ``_next_seq``, and
+        ``_next_seq`` is where the seeding happens — that is what makes the
+        guarantee hold for a publisher written next year.
+        """
+        import ast
+        import inspect
+
+        from app.worker import analysis_worker, enrich_worker
+
+        tree = ast.parse(inspect.getsource(analysis_worker))
+        numbering = next(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.AsyncFunctionDef) and node.name == "_next_seq"
+        )
+        assert any(
+            isinstance(call.func, ast.Name) and call.func.id == "_seed_seq_once"
+            for call in ast.walk(numbering)
+            if isinstance(call, ast.Call)
+        ), "the numbering seeds before it counts"
+
+        callers = {
+            node.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.AsyncFunctionDef)
+            and any(
+                isinstance(call.func, ast.Name) and call.func.id == "_next_seq"
+                for call in ast.walk(node)
+                if isinstance(call, ast.Call)
+            )
+        }
+        assert callers == {"_publish_event"}
+
+        seeding = {
+            node.name
+            for module in (analysis_worker, enrich_worker)
+            for node in ast.walk(ast.parse(inspect.getsource(module)))
+            if isinstance(node, ast.AsyncFunctionDef)
+            and any(
+                isinstance(call.func, ast.Name) and call.func.id == "seed_seq_from_the_table"
+                for call in ast.walk(node)
+                if isinstance(call, ast.Call)
+            )
+        }
+        assert seeding == {"_seed_seq_once"}, (
+            "a publisher seeds at its call site instead of leaving it to the numbering"
+        )
 
 
 class TestIncrementalPersistence:

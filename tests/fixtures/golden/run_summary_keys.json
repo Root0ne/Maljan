@@ -98,6 +98,7 @@
     "output_tokens": null,
     "total_tokens": null
   },
+  "tool_latency": null,
   "triage": {
     "duration_ms": null,
     "entries": null,
@@ -116,6 +117,8 @@
     "tool_output_chars_dropped": null,
     "tool_output_hard_truncated": null,
     "tool_output_over_limit": null,
+    "tool_output_shortened": null,
+    "tool_output_shortening_timeouts": null,
     "tool_output_summarised": null
   },
   "validation": {

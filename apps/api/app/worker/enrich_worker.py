@@ -401,15 +401,14 @@ async def enrich_threat_intel(
             _publish_event,
             _start_event_feed,
             _stop_event_feed,
-            seed_seq_from_the_table,
         )
 
         # The counter this event takes its number from lives 24 hours, and the
         # rows it numbers do not: enriching an older report would start again
         # at 1, collide with that job's first event and be dropped by a feed
-        # that never fails a run. Continue from the table when Redis has
-        # forgotten, before the feed hands out a number.
-        await seed_seq_from_the_table(redis_conn, db_session_factory, parent_job_id)
+        # that never fails a run. Registering the feed is all this task has to
+        # do about it — the publisher continues the numbering from the table
+        # before it hands out the first number for a job it is persisting.
         _start_event_feed(parent_job_id, db_session_factory)
         try:
             await _publish_event(
