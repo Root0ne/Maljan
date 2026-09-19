@@ -2446,6 +2446,14 @@ change landed on `main`.
   request from the stored report, so there is no second copy to go stale; a
   report stored before this keeps the figures it was stored with, and its
   run-summary column — what the console draws — was always the final one.
+- **A late event continues its job's numbering whoever publishes it.** The
+  per-job sequence counter lives 24 hours and the rows it numbers do not, so a
+  task publishing for an older job — enrichment was the only one, and it
+  carried its own seeding call — started again at 1, collided with that job's
+  first stored event and lost the row to a feed that never fails a run. The
+  seeding now happens in the publisher, once per job, before the first number
+  it hands out for a job whose feed is being persisted; no call site has to
+  remember it.
 
 ### Removed
 

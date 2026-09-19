@@ -360,7 +360,7 @@ class _JobEventBuffer:
 
     def __init__(self, job_id: str, db_session: async_sessionmaker) -> None:
         self.job_id = job_id
-        self._db_session = db_session
+        self.db_session = db_session
         self._pending: list[dict[str, Any]] = []
         self._last_flush = time.monotonic()
         self._lock = asyncio.Lock()
@@ -393,7 +393,7 @@ class _JobEventBuffer:
         try:
             from app.models.job_event import JobEvent
 
-            async with self._db_session() as db:
+            async with self.db_session() as db:
                 db.add_all([JobEvent(job_id=uuid.UUID(self.job_id), **row) for row in rows])
                 await db.commit()
         except Exception as exc:  # noqa: BLE001 — the feed never costs a run
@@ -463,6 +463,10 @@ async def seed_seq_from_the_table(
     rather than a plain ``SET``, so a live run's counter is never overwritten
     by a straggler. Returns the number it seeded with, or ``None`` when there
     was nothing to do.
+
+    Callers do not have to remember this: ``_next_seq`` runs it for every job
+    whose feed is being persisted, before it hands out that job's first number
+    in this process. This is the body it runs.
     """
     key = _seq_key(job_id)
     try:
@@ -491,8 +495,30 @@ async def seed_seq_from_the_table(
     return int(highest)
 
 
+async def _seed_seq_once(redis_conn: aioredis.Redis, job_id: str) -> None:
+    """Continue a stored job's numbering before its first number here.
+
+    Seeding belongs to whoever hands out the numbers, not to whoever happens
+    to publish late: a task that re-opens an old job's feed and forgets the
+    seed loses its event to the unique constraint, and there is no way to see
+    that from the call site. So the publisher does it, once per job per
+    process — the first number is the only one that can collide, every later
+    one comes from a counter this process advanced.
+
+    Only for a job whose feed is being persisted. Without a buffer there is no
+    row to collide with, and the query would buy nothing.
+    """
+    if job_id in _LAST_SEQ:
+        return
+    buffer = _EVENT_BUFFERS.get(job_id)
+    if buffer is None:
+        return
+    await seed_seq_from_the_table(redis_conn, buffer.db_session, job_id)
+
+
 async def _next_seq(redis_conn: aioredis.Redis, job_id: str) -> int:
     """The next sequence number for this job's feed. Never raises."""
+    await _seed_seq_once(redis_conn, job_id)
     try:
         seq = int(await redis_conn.incr(_seq_key(job_id)))
     except Exception as exc:  # noqa: BLE001 — a counter never costs a run
