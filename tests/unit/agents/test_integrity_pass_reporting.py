@@ -289,3 +289,80 @@ class _Named:
         self.obj = obj
         self.type = obj["type"]
         self.id = obj["id"]
+
+
+class TestWhoseRemovalsTheyAre:
+    """The judge path's passes are not the export's, and are not summed in.
+
+    ``postprocess_judge_bundle`` runs the same pass on the judge's own bundle,
+    on the run's one ledger, **once per verdict attempt** — a discarded retry
+    included — and over objects the export may never carry. Counted together
+    with the export's, the total reconciled with nothing a reader holds.
+    """
+
+    def test_a_judge_pass_is_counted_apart(self) -> None:
+        ledger = TruncationLedger()
+        objects = [
+            _indicator("indicator--1"),
+            _relationship("relationship--1", "indicator--1", "indicator--gone"),
+        ]
+
+        enforce_bundle_integrity(objects, ledger=ledger, whose="judge")
+
+        snapshot = ledger.snapshot()
+        assert snapshot["judge_integrity_invocations"] == 1
+        assert snapshot["judge_integrity_objects_removed"] == 1
+        assert snapshot["integrity_invocations"] == 0
+        assert snapshot["integrity_objects_removed"] == 0
+
+    def test_a_discarded_retry_does_not_move_what_the_export_reconciles(self) -> None:
+        """Two judge attempts, one export: the export's figures are the export's."""
+        from maljan.reporting.renderers.stix_renderer import _within_the_indicator_cap
+
+        ledger = TruncationLedger()
+        # Two verdict attempts, the first of them thrown away and retried.
+        for _attempt in range(2):
+            enforce_bundle_integrity(
+                [
+                    _indicator("indicator--1"),
+                    _indicator("indicator--2", pattern="   "),
+                    _relationship("relationship--1", "indicator--1", "indicator--gone"),
+                ],
+                ledger=ledger,
+                whose="judge",
+            )
+
+        # And the export, once, over the bundle that is published.
+        ids = [f"indicator--{index:02d}" for index in range(20)]
+        objects: list[Any] = [
+            _indicator(oid, pattern=f"[domain-name:value = 'h{index}.example.org']")
+            for index, oid in enumerate(ids)
+        ]
+        assembled = len(objects)
+        repaired = enforce_bundle_integrity(objects, ledger=ledger)
+        order = {oid: (1, 0, index) for index, oid in enumerate(ids)}
+        capped = _within_the_indicator_cap([_Named(o) for o in repaired], order, ledger=ledger)
+        final = enforce_bundle_integrity(
+            [named.obj for named in capped], ledger=ledger, dropped_as="cap_orphan"
+        )
+
+        snapshot = ledger.snapshot()
+        assert snapshot["judge_integrity_invocations"] == 2
+        assert snapshot["judge_integrity_objects_removed"] == 4
+        # The invariant a reader uses, unmoved by either judge attempt.
+        assert assembled - len(final) == (
+            int(snapshot["integrity_objects_removed"]) + int(snapshot["indicator_cap_removed"])
+        )
+
+    def test_the_reasons_are_kept_apart_too(self) -> None:
+        ledger = TruncationLedger()
+        enforce_bundle_integrity(
+            [_indicator("indicator--1", pattern="  ")], ledger=ledger, whose="judge"
+        )
+
+        snapshot = ledger.snapshot()
+        judge_dropped = snapshot["judge_integrity_dropped"]
+        export_dropped = snapshot["integrity_dropped"]
+        assert isinstance(judge_dropped, dict) and isinstance(export_dropped, dict)
+        assert judge_dropped["empty_pattern"] == 1
+        assert export_dropped["empty_pattern"] == 0

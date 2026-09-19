@@ -140,10 +140,13 @@ class TruncationMetrics:
     none of it was counted.
 
     The integrity and cap fields are not truncation: they record what left the
-    exported STIX bundle, because the claim that repairing beats rejecting needs
-    a number, and because everything a bundle loses should leave under a name —
-    the pass's own repairs, the references it trims out of a report or a note,
-    and the total indicator cap's own removals.
+    **exported** STIX bundle, because the claim that repairing beats rejecting
+    needs a number, and because everything a bundle loses should leave under a
+    name — the pass's own repairs, the references it trims out of a report or a
+    note, and the total indicator cap's own removals. Those three reconcile
+    with the bundle a reader holds. The ``judge_integrity_*`` fields are the
+    same pass on the judge's own bundle, once per verdict attempt including a
+    discarded retry, and are deliberately not part of that total.
     """
 
     tool_output_calls: int
@@ -171,6 +174,13 @@ class TruncationMetrics:
     # storage predates them.
     indicator_cap_invocations: int = 0
     indicator_cap_removed: int = 0
+    # The judge path's own integrity passes. Apart from the figures above, and
+    # never summed into them: that pass runs once per verdict *attempt*,
+    # discarded retries included, over a bundle the export may not carry, so a
+    # total holding both reconciles with nothing a reader has.
+    judge_integrity_invocations: int = 0
+    judge_integrity_objects_removed: int = 0
+    judge_integrity_dropped: dict[str, int] = field(default_factory=dict)
 
     @property
     def any_bound_hit(self) -> bool:
@@ -525,6 +535,8 @@ class RunSummary:
                 f"| STIX objects repaired away | {trunc.integrity_objects_removed} |",
                 f"| STIX indicators over the cap | {trunc.indicator_cap_removed} |",
                 f"| STIX references trimmed | {trunc.integrity_refs_trimmed} |",
+                f"| Judge bundles repaired | {trunc.judge_integrity_objects_removed}"
+                f" over {trunc.judge_integrity_invocations} attempt(s) |",
                 "",
             ]
             if any(trunc.integrity_dropped.values()):
@@ -622,6 +634,9 @@ class RunSummary:
                 "integrity_dropped": dict(t.integrity_dropped),
                 "indicator_cap_invocations": t.indicator_cap_invocations,
                 "indicator_cap_removed": t.indicator_cap_removed,
+                "judge_integrity_invocations": t.judge_integrity_invocations,
+                "judge_integrity_objects_removed": t.judge_integrity_objects_removed,
+                "judge_integrity_dropped": dict(t.judge_integrity_dropped),
                 "any_bound_hit": t.any_bound_hit,
             }
 
@@ -806,6 +821,7 @@ class RunSummaryBuilder:
         if not measured:
             return self
         dropped = snapshot.get("integrity_dropped")
+        judge_dropped = snapshot.get("judge_integrity_dropped")
         self._truncation = TruncationMetrics(
             tool_output_calls=int(snapshot.get("tool_output_calls", 0)),
             tool_output_over_limit=int(snapshot.get("tool_output_over_limit", 0)),
@@ -824,6 +840,11 @@ class RunSummaryBuilder:
             integrity_dropped=dict(dropped) if isinstance(dropped, dict) else {},
             indicator_cap_invocations=int(snapshot.get("indicator_cap_invocations", 0)),
             indicator_cap_removed=int(snapshot.get("indicator_cap_removed", 0)),
+            judge_integrity_invocations=int(snapshot.get("judge_integrity_invocations", 0)),
+            judge_integrity_objects_removed=int(snapshot.get("judge_integrity_objects_removed", 0)),
+            judge_integrity_dropped=(
+                dict(judge_dropped) if isinstance(judge_dropped, dict) else {}
+            ),
         )
         return self
 

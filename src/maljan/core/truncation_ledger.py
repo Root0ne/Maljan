@@ -55,6 +55,16 @@ INTEGRITY_REASONS = (
 INDICATOR_CAP_REASON = "indicator_cap"
 REFS_TRIMMED_REASON = "refs_trimmed"
 
+# Whose removals a run of the integrity pass is. The pass runs on two bundles
+# and the two do not add up to one number: the export's passes act on the
+# bundle that is published, while the judge path's run once per verdict
+# *attempt* — including an attempt whose bundle was discarded and retried, and
+# on objects the export may never carry. Summed together, the total could not
+# be reconciled with anything a reader holds. The export's figures are the ones
+# the run summary reconciles; the judge path's are kept under their own name.
+EXPORT_PASS = "export"
+JUDGE_PASS = "judge"
+
 
 def truncation_rate(over_limit: int, calls: int) -> float:
     """Fraction of calls that exceeded the bound. 0.0 when nothing was called.
@@ -228,6 +238,12 @@ class TruncationLedger:
         # judge's own would otherwise find unaccounted.
         self.integrity_refs_trimmed = 0
 
+        # The judge path's own passes, counted apart for the reason above.
+        self.judge_integrity_invocations = 0
+        self.judge_integrity_objects_in = 0
+        self.judge_integrity_objects_out = 0
+        self.judge_integrity_dropped: dict[str, int] = dict.fromkeys(INTEGRITY_REASONS, 0)
+
         # The total indicator cap (reporting/renderers/stix_renderer).
         self.indicator_cap_invocations = 0
         self.indicator_cap_removed = 0
@@ -300,6 +316,7 @@ class TruncationLedger:
         objects_out: int,
         dropped: dict[str, int] | None = None,
         refs_trimmed: int = 0,
+        whose: str = EXPORT_PASS,
     ) -> None:
         """Record one ``enforce_bundle_integrity`` invocation.
 
@@ -309,8 +326,21 @@ class TruncationLedger:
         ``refs_trimmed`` is counted apart from ``dropped``: the references step
         5 takes out of a report or a note remove no object, so adding them to a
         reason would stop the reasons totalling to what the pass removed.
+
+        ``whose`` says which bundle this pass ran on. Only :data:`EXPORT_PASS`
+        counts toward the figures the run summary reconciles with the published
+        bundle; :data:`JUDGE_PASS` runs once per verdict attempt, discarded
+        retries included, and is kept under its own name.
         """
         with self._lock:
+            if whose == JUDGE_PASS:
+                self.judge_integrity_invocations += 1
+                self.judge_integrity_objects_in += max(0, int(objects_in))
+                self.judge_integrity_objects_out += max(0, int(objects_out))
+                for reason, count in (dropped or {}).items():
+                    if reason in self.judge_integrity_dropped:
+                        self.judge_integrity_dropped[reason] += max(0, int(count))
+                return
             self.integrity_invocations += 1
             self.integrity_objects_in += max(0, int(objects_in))
             self.integrity_objects_out += max(0, int(objects_out))
@@ -374,6 +404,11 @@ class TruncationLedger:
                 "integrity_dropped": dict(self.integrity_dropped),
                 "indicator_cap_invocations": self.indicator_cap_invocations,
                 "indicator_cap_removed": self.indicator_cap_removed,
+                "judge_integrity_invocations": self.judge_integrity_invocations,
+                "judge_integrity_objects_removed": max(
+                    0, self.judge_integrity_objects_in - self.judge_integrity_objects_out
+                ),
+                "judge_integrity_dropped": dict(self.judge_integrity_dropped),
             }
 
     @property
