@@ -275,9 +275,9 @@ class TestOnlyOnePlaceWritesOne:
         elsewhere = [row for row in self._builds() if row[1] != THE_ONE_BUILDER]
 
         assert not elsewhere, (
-            "These build a STIX pattern for a network endpoint outside "
+            "These build a STIX pattern this platform mints outside "
             f"``{THE_ONE_BUILDER}``, which means they did not have to ask "
-            "``network_publish_reason`` first. Route them through it:\n  "
+            "``indicator_publish_reason`` first. Route them through it:\n  "
             + "\n  ".join(f"{name}:{line} in {owner}" for name, owner, line in elsewhere)
         )
 

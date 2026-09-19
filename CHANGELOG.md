@@ -2266,9 +2266,17 @@ change landed on `main`.
   the value has to be the thing it claims to be — a host that could exist, a
   mailbox whose domain part passes the host rule, a path that names a file
   rather than a directory — and something other than the sample's own bytes has
-  to know it: a sandbox observation, a persistence mechanism, an analyst's
-  artefact or finding, a reputation record. `indicator_pattern` is the one
-  place any of those patterns is written, and the guard test fails on a second.
+  to know it: a sandbox observation, a persistence mechanism, a reputation
+  record, or a ledger entry that is **not** the string sweep's and that an
+  analyst cited in an artefact or a finding — quoting the sweep's own table
+  back is one source said twice, and one analyst sentence carrying a parse
+  artefact out of embedded source would otherwise have published it. What
+  counts as present is a whole value, never a slice of a longer one. A mailbox
+  the sweep read out of a file answers one question more than one the judge
+  asserted: whether its domain part reads as a host at all, which is what tells
+  `openssh.com` from `D.setdefault` and `r.Regsvr`. `indicator_pattern` is the
+  one place any of those patterns is written, and the guard test fails on a
+  second.
   An uncorroborated address a person owns stays in the report and reaches
   neither the bundle, nor `/reports/{id}/iocs`, nor an enrichment lookup, nor
   an event.
@@ -2282,7 +2290,11 @@ change landed on `main`.
   sixteen of thirty-two characters, because the grounding check found the
   truncated prefix inside the real digest; it now matches a digest as a whole
   token and asks the length question first, and the export declines a
-  malformed one as `stix.malformed_hash`. A `file:name` naming a directory or
+  malformed one as `stix.malformed_hash`. Every check in that function is a
+  veto rather than an acceptance, asked of every comparison in the pattern
+  rather than of whichever one the pattern started with — a grounded digest
+  beside `[url:value = …]` used to turn off the URL denylist and the file-name
+  anchor rule for the whole expression. A `file:name` naming a directory or
   a root (`/Users/`) is declined as `stix.unpublishable_artefact`, as is an
   `email-addr` that is not a mailbox. The judge's own objects are declined and
   recorded, never rewritten; the platform mints none of them. Dedupe compares
@@ -2301,7 +2313,14 @@ change landed on `main`.
   carries `not_published` with the check's own sentence; the Findings table
   writes `claimed, not published` beside such an id; the summary counts "N
   claimed, M published"; and the console's ATT&CK tab draws from the capability
-  matrix so the claim is visible there, in words, with the reason under it.
+  matrix so the claim is visible there, in words, with the reason under it,
+  and its tactic columns count what was published with the rest named beside
+  it. An id that arrived on a finding and on no claim is printed everywhere and
+  **published nowhere**: a claim is questioned in its analyst's own loop and a
+  finding is not, so a finding citing no evidence and carrying no confidence
+  would otherwise have put a technique into `/mitre`, the STIX attack-patterns
+  and the report's ATT&CK section. The same id on a claim is judged as the
+  claim's.
 - **The sample's path is not the model's to give.** A static analyst typed it
   by hand, dropped three characters out of the sha256 in it, then spent its
   whole step budget guessing directories; nineteen of that run's thirty-five
@@ -2315,6 +2334,19 @@ change landed on `main`.
   archive) names something other than the sample and stays the model's. The
   delivery primitives `put_sample`, `put_sample_begin`, `put_sample_chunk` and
   `put_sample_finish` are not offered to the model at all.
+- **A file an earlier call produced can still be analysed.** Hiding the
+  sample's path would have taken the carved payloads with it: `carve_payloads`
+  writes each embedded payload under the staging directory and returns the
+  paths, and nothing was left to pass one to. `carved_path` is a new optional
+  argument on the fourteen analysis tools that read a file — `identify_file`,
+  `hashes`, `signing_info`, `strings`, `iocs_from_file`, `pe_info`, `elf_info`,
+  `macho_info`, `apk_info`, `carve_payloads`, `archive_list`, `document_info`,
+  `yara_scan`, `capa`. It is confined to the staging base alone, not to
+  `MALJAN_SAMPLE_ROOTS`: a relative value is a name inside it, an absolute one
+  must already be inside it, and a traversal, a path outside it or a symlink
+  out of it meets the existing `path_outside_roots` refusal. Given, that file
+  is read in place of the sample and the answer carries `read_path`; left out,
+  the sample is read. It is qualified, so the path pinning leaves it alone.
 - **The report composer shows each section the object it has to answer with.**
   Six runs on two unrelated models authored zero professional sections between
   them, answering every section with renamed or superset keys. On the

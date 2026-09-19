@@ -219,3 +219,32 @@ def malformed_hash_in(pattern: str) -> tuple[str, str] | None:
         if not hash_literal_is_wellformed(algorithm, literal):
             return (str(algorithm).strip().upper(), literal)
     return None
+
+
+# What can be part of one indicator value: the characters a host name, a path,
+# a mailbox, a digest or a registry key is written with. A value found in the
+# evidence between two of anything else is that value; one flanked by these is
+# a slice of a longer value and is not.
+_VALUE_CHARACTER_RE = re.compile(r"[A-Za-z0-9._\-@:/\\+%~]")
+
+
+def whole_value_in(literal: str, haystack: str) -> bool:
+    """Whether ``literal`` appears in ``haystack`` as a value of its own.
+
+    Containment by substring says a truncated MD5 is present whenever the whole
+    digest is, and says a short mutex name is present whenever some longer
+    token happens to spell it. Both are the same mistake: the run recorded
+    something else that this value is a slice of. Both arguments are compared
+    lowercased, because the corpus is.
+    """
+    lowered = str(literal or "").lower()
+    if not lowered:
+        return False
+    start = haystack.find(lowered)
+    while start != -1:
+        before = haystack[start - 1] if start else " "
+        after = haystack[start + len(lowered) : start + len(lowered) + 1] or " "
+        if not _VALUE_CHARACTER_RE.match(before) and not _VALUE_CHARACTER_RE.match(after):
+            return True
+        start = haystack.find(lowered, start + 1)
+    return False

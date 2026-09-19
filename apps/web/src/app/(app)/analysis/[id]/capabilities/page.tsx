@@ -13,6 +13,7 @@ import {
   isCorroborated,
   orderedTactics,
   parseTechniques,
+  tacticHeaderCount,
 } from "@/components/analysis/capabilityHeatmap";
 
 const SOURCE_COLORS: Record<string, string> = {
@@ -147,8 +148,7 @@ export default function AttackTab() {
                     {tactic.name}
                   </h3>
                   <p className="text-[11px] text-text-muted mt-0.5 font-mono">
-                    {tactic.id} &middot; {tactic.techniques.length} technique
-                    {tactic.techniques.length === 1 ? "" : "s"}
+                    {tactic.id} &middot; {tacticHeaderCount(tactic.techniques)}
                   </p>
                 </div>
 

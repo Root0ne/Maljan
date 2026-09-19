@@ -7,6 +7,7 @@ import {
   isCorroborated,
   orderedTactics,
   parseTechniques,
+  tacticHeaderCount,
   tacticOrder,
 } from "../capabilityHeatmap";
 
@@ -180,5 +181,25 @@ describe("a technique the run did not publish", () => {
   it("keeps the reason when the same id arrives twice", () => {
     const tech = only([row(), row({ not_published: "outside the sample's ATT&CK domain" })]);
     expect(tech.notPublished).toBe("outside the sample's ATT&CK domain");
+  });
+});
+
+describe("a tactic column's header", () => {
+  it("counts the techniques the run published", () => {
+    const [tactic] = parseTechniques([row(), row({ technique_id: "T1027" })]);
+    expect(tacticHeaderCount(tactic.techniques)).toBe("2 techniques");
+  });
+
+  it("says how many it claimed and did not publish", () => {
+    const [tactic] = parseTechniques([
+      row(),
+      row({ technique_id: "T1027", not_published: "outside the domain" }),
+    ]);
+    expect(tacticHeaderCount(tactic.techniques)).toBe("1 technique · 1 claimed, not published");
+  });
+
+  it("counts none published when the run published none", () => {
+    const [tactic] = parseTechniques([row({ not_published: "outside the domain" })]);
+    expect(tacticHeaderCount(tactic.techniques)).toBe("0 techniques · 1 claimed, not published");
   });
 });

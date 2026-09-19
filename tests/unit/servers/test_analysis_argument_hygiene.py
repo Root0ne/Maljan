@@ -99,11 +99,17 @@ class TestCarvedPayloadsLandUnderStaging:
 
         path, _digest = self._sample(tmp_path)
 
-        assert list(inspect.signature(server.carve_payloads).parameters) == ["path"]
+        # Two arguments, and neither is a place to write: the file to read,
+        # and the qualified way of naming one an earlier call produced.
+        assert list(inspect.signature(server.carve_payloads).parameters) == [
+            "path",
+            "carved_path",
+        ]
         with pytest.raises(TypeError):
             server.carve_payloads(path, out_dir=str(tmp_path))
-        with pytest.raises(TypeError):
-            server.carve_payloads(path, '""')
+        # A model writing a pair of quote characters means "not passing this
+        # one", and it is read as the absence rather than as a file name.
+        assert server.carve_payloads(path, '""') == {"payloads": [], "count": 0}
 
     def test_the_description_says_where_the_files_land(self, server: Any) -> None:
         assert "carved/<sha256 of the sample>/" in str(server.carve_payloads.__doc__)
@@ -237,3 +243,121 @@ class TestThePageAndItsSuccessor:
 
         assert "next_offset" in description
         assert "total_matched" in description
+
+
+class TestReadingAFileAnEarlierCallWrote:
+    """``carve_payloads`` hands back paths, and something has to read them.
+
+    The sample's own path left the schema a model binds to, which is what stops
+    a model typing it wrongly — and it took the carved payloads with it: the
+    tool returned a list of paths the model had nothing to pass to.
+    ``carved_path`` is the qualified argument that gives that back. It names a
+    file this run produced, so it is held to the staging base and to nothing
+    else: not the sample roots, which hold whatever the deployment put there.
+    """
+
+    @staticmethod
+    def _staged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, server: Any) -> Path:
+        staging = tmp_path / "staging"
+        monkeypatch.setenv("MALJAN_STAGING_DIR", str(staging))
+        return Path(server._staging_dir())
+
+    def test_a_carved_payload_is_read_through_it(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        base = self._staged(tmp_path, monkeypatch, server)
+        # A second-stage PE appended past the decoy, which is what carving
+        # finds: the signature the carver looks for, then enough body for it
+        # not to be four coincidental bytes.
+        payload = b"MZ\x90\x00" + b"\x00" * 2048 + b"CARVEDPAYLOADMARKER\x00"
+        sample = tmp_path / "dropper.bin"
+        sample.write_bytes(b"DECOY-HEADER\x00" + payload)
+
+        carved = server.carve_payloads(str(sample))
+        assert carved["count"] >= 1, carved
+        written = Path(carved["payloads"][0]["path"])
+        assert base in written.parents
+
+        answer = server.strings(
+            path=str(sample), carved_path=str(written.relative_to(base)), min_len=4
+        )
+
+        assert answer["read_path"] == str(written)
+        assert answer["strings"] != server.strings(path=str(sample), min_len=4)["strings"]
+
+    def test_an_absolute_path_inside_the_staging_base_is_read(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        base = self._staged(tmp_path, monkeypatch, server)
+        written = base / "carved" / "abc" / "payload_0.bin"
+        written.parent.mkdir(parents=True, exist_ok=True)
+        written.write_bytes(b"CARVED-PAYLOAD-CONTENT\x00")
+        sample = tmp_path / "s.bin"
+        sample.write_bytes(b"SAMPLE-CONTENT\x00")
+
+        answer = server.strings(path=str(sample), carved_path=str(written), min_len=4)
+
+        assert [row["text"] for row in answer["strings"]] == ["CARVED-PAYLOAD-CONTENT"]
+
+    def test_a_traversal_is_refused(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._staged(tmp_path, monkeypatch, server)
+        sample = tmp_path / "s.bin"
+        sample.write_bytes(b"SAMPLE\x00")
+
+        answer = server.strings(path=str(sample), carved_path="../../etc/passwd", min_len=4)
+
+        assert answer["error"]["code"] == "path_outside_roots"
+
+    def test_an_absolute_path_outside_the_staging_base_is_refused(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._staged(tmp_path, monkeypatch, server)
+        sample = tmp_path / "s.bin"
+        sample.write_bytes(b"SAMPLE\x00")
+
+        answer = server.identify_file(path=str(sample), carved_path="/etc/passwd")
+
+        assert answer["error"]["code"] == "path_outside_roots"
+
+    def test_a_sample_root_is_not_reachable_through_it(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A deployment's sample directory holds whatever it holds."""
+        self._staged(tmp_path, monkeypatch, server)
+        neighbour = tmp_path / "someone-elses.bin"
+        neighbour.write_bytes(b"NOT-THIS-ONE\x00")
+        sample = tmp_path / "s.bin"
+        sample.write_bytes(b"SAMPLE\x00")
+
+        answer = server.strings(path=str(sample), carved_path=str(neighbour), min_len=4)
+
+        assert answer["error"]["code"] == "path_outside_roots"
+
+    def test_a_symlink_out_of_the_staging_base_is_refused(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        base = self._staged(tmp_path, monkeypatch, server)
+        outside = tmp_path / "outside.txt"
+        outside.write_bytes(b"NOT-IN-STAGING\x00")
+        link = base / "escape.bin"
+        link.symlink_to(outside)
+        sample = tmp_path / "s.bin"
+        sample.write_bytes(b"SAMPLE\x00")
+
+        answer = server.strings(path=str(sample), carved_path="escape.bin", min_len=4)
+
+        assert answer["error"]["code"] == "path_outside_roots"
+
+    def test_the_absence_words_are_read_as_the_absence(
+        self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._staged(tmp_path, monkeypatch, server)
+        sample = tmp_path / "s.bin"
+        sample.write_bytes(b"SAMPLE-CONTENT\x00")
+
+        for absent in ("", "null", "None", "   ", '""'):
+            answer = server.strings(path=str(sample), carved_path=absent, min_len=4)
+            assert [row["text"] for row in answer["strings"]] == ["SAMPLE-CONTENT"], absent
+            assert "read_path" not in answer, absent

@@ -141,14 +141,21 @@ def canonical_path(value: Any) -> str:
     POSIX path keeps its case, because two POSIX paths differing in case are
     two files and folding them would remove one from the report with nothing
     saying it happened.
+
+    A UNC path keeps the two separators it opens with. Collapsing them and
+    folding the case rewrote ``\\\\SRV\\Share\\F`` into ``/srv/share/f``, which is
+    also what the POSIX path ``/srv/share/f`` canonicalises to — two locations
+    that cannot be the same file merging into one indicator row.
     """
     text = canonical_value(value, fold_case=False)
-    windows = bool(_WINDOWS_PATH_RE.search(text)) or ("\\" in text and "/" not in text)
+    unc = text.startswith("\\\\") or text.startswith("//")
+    windows = unc or bool(_WINDOWS_PATH_RE.search(text)) or ("\\" in text and "/" not in text)
     text = text.replace("\\", "/")
     if windows:
         text = text.lower()
     text = _RUNS_OF_SEPARATOR_RE.sub("/", text)
-    return text.rstrip("/") if len(text) > 1 else text
+    text = text.rstrip("/") if len(text) > 1 else text
+    return f"/{text}" if unc else text
 
 
 def indicator_fingerprint(kind: Any, value: Any) -> tuple[str, str]:

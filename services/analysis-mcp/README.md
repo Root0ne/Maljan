@@ -18,38 +18,38 @@ drops the reference really runs without these tools.
 
 | tool | arguments |
 | --- | --- |
-| `identify_file` | `path` |
-| `hashes` | `path` |
-| `signing_info` | `path`, `file_type` |
+| `identify_file` | `path`, `carved_path=""` |
+| `hashes` | `path`, `carved_path=""` |
+| `signing_info` | `path`, `carved_path=""`, `file_type` |
 
 ### Strings
 
 | tool | arguments |
 | --- | --- |
-| `strings` | `path`, `min_len=6`, `encodings=["ascii","utf16le"]`, `limit=2000`, `offset=0` |
+| `strings` | `path`, `carved_path=""`, `min_len=6`, `encodings=["ascii","utf16le"]`, `limit=2000`, `offset=0` |
 | `iocs_from_text` | `text`, `kinds=null` |
-| `iocs_from_file` | `path`, `kinds=null` |
+| `iocs_from_file` | `path`, `carved_path=""`, `kinds=null` |
 
 ### Structure
 
 | tool | arguments |
 | --- | --- |
-| `pe_info` | `path`, `sections`, `imports`, `exports`, `resources`, `overlay`, `pdb` |
-| `elf_info` | `path` |
-| `macho_info` | `path` |
-| `apk_info` | `path`, `manifest`, `permissions`, `certs`, `components`, `native_libs`, `dex_strings=false`, `limit=500` |
-| `carve_payloads` | `path` (carved files land in `<staging>/carved/<sha256>/`, never where the model says) |
-| `archive_list` | `path`, `limit=500` |
-| `document_info` | `path` |
+| `pe_info` | `path`, `carved_path=""`, `sections`, `imports`, `exports`, `resources`, `overlay`, `pdb` |
+| `elf_info` | `path`, `carved_path=""` |
+| `macho_info` | `path`, `carved_path=""` |
+| `apk_info` | `path`, `carved_path=""`, `manifest`, `permissions`, `certs`, `components`, `native_libs`, `dex_strings=false`, `limit=500` |
+| `carve_payloads` | `path`, `carved_path=""` (carved files land in `<staging>/carved/<sha256>/`, never where the model says) |
+| `archive_list` | `path`, `carved_path=""`, `limit=500` |
+| `document_info` | `path`, `carved_path=""` |
 
 ### Rules
 
 | tool | arguments |
 | --- | --- |
-| `yara_scan` | `path=""`, `text=""`, `ruleset="default"`, `timeout_s=60` |
+| `yara_scan` | `path=""`, `carved_path=""`, `text=""`, `ruleset="default"`, `timeout_s=60` |
 | `sigma_match` | `events`, `ruleset="default"` |
 | `sigma_match_sandbox` | `report`, `ruleset="default"` |
-| `capa` | `path`, `timeout_s=300`, `backend="auto"` |
+| `capa` | `path`, `carved_path=""`, `timeout_s=300`, `backend="auto"` |
 
 ### Sample delivery
 
@@ -76,7 +76,19 @@ behind an HTTP transport. See the "Tool servers on another host" section of
 Every `path` argument is resolved (symlinks followed) and refused unless it
 lands inside the staging directory or one of `MALJAN_SAMPLE_ROOTS`; `ruleset`
 is held the same way to the `data` tree and to `MALJAN_YARA_RULES_DIR` /
-`MALJAN_SIGMA_RULES_DIR`. A refusal is `{"error": {"code":
+`MALJAN_SIGMA_RULES_DIR`.
+
+`carved_path` is the one file argument a model chooses, and it is held to the
+**staging directory alone** — not `MALJAN_SAMPLE_ROOTS`, which hold whatever the
+deployment put there. A relative value is read as a name inside the staging
+directory, which is what a model pasting back the tail of a returned path
+means; an absolute one must already be inside it. Give it and that file is read
+in place of `path`, and the answer carries `read_path` saying which file it was;
+leave it out and the sample is read. It exists because `path` itself is not
+advertised to the model on this server (see *The sample's path is not the
+model's to give* in `docs/architecture.md`): the sample is the platform's to
+supply, and which of the payloads `carve_payloads` wrote is worth reading is an
+analysis decision. A refusal is `{"error": {"code":
 "path_outside_roots", ...}}` and names no host path. The worker exports the
 directories it puts samples in, so a default deployment sets nothing; see
 "Which directories a sidecar may read" in `docs/configuration.md`.

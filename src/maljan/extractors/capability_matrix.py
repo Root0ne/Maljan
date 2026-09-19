@@ -128,11 +128,14 @@ def build_capability_matrix(
         # report's ATT&CK section, its References, the STIX attack-patterns and
         # ``/reports/{id}/mitre`` are all built from it — and a technique a
         # check rejected is not one this run found.
-        not_published = (
-            "the ATT&CK catalogue has no entry for this id in any domain"
-            if not valid
-            else out_of_scope.get(tid, "")
-        )
+        if not valid:
+            not_published = "the ATT&CK catalogue has no entry for this id in any domain"
+        elif out_of_scope.get(tid):
+            not_published = out_of_scope[tid]
+        elif not info.get("claimed"):
+            not_published = FINDING_ONLY_REASON
+        else:
+            not_published = ""
         cells.append(
             CapabilityCell(
                 tactic=tactic_id or "TA0000",
@@ -182,6 +185,19 @@ def build_capability_matrix(
 # analysts rather than the sample, so counting it would turn one analyst's
 # claim into two agreeing sources.
 _JUDGE_SOURCE = "judge"
+
+# Why an id that reached the report on a finding alone is not published. A
+# claim is questioned in its analyst's own loop — its technique id is asked
+# whether the catalogue has it, whether the sample's domain can host it and
+# whether any evidence grounds it, and the analyst is shown the answer and
+# given a turn. A finding's ``technique_ids`` are read by the corroboration
+# metric and the report's Findings table and by nothing that asks a question,
+# so a finding citing no evidence at all and carrying no confidence would
+# otherwise publish a technique. It is printed everywhere, with this beside it,
+# and published nowhere.
+FINDING_ONLY_REASON = (
+    "it was named on a finding rather than on a claim, so no check asked what evidence holds it up"
+)
 
 
 def _out_of_scope(ids: list[str], sample: dict[str, Any] | None) -> dict[str, str]:
@@ -285,8 +301,14 @@ def _collect_techniques(
         # takes the max once, where a reader can see it happen; a row that
         # rewrites its own ``confidence`` key as it goes reads like the thing
         # this phase removed even when it is only accumulating.
+        # ``claimed`` is whether any producer put this id somewhere a check
+        # was asked about it: a judge attack-pattern, a judge relationship, an
+        # analyst claim. A finding's technique ids reach the report through a
+        # path no check has ever seen, so they leave this false and the caller
+        # marks the row unpublished.
         return techniques.setdefault(
-            tid, {"evidence": [], "confidences": [], "layers": [], "valid": True}
+            tid,
+            {"evidence": [], "confidences": [], "layers": [], "valid": True, "claimed": False},
         )
 
     # 1. The judge's bundle. An attack-pattern says the technique is in the
@@ -298,6 +320,7 @@ def _collect_techniques(
     unknown = _unknown_to_the_catalogue(judge_ids + [tid for tid, _c, _a in judge_relationships])
     for tid in judge_ids:
         row = _row(tid)
+        row["claimed"] = True
         if tid in unknown:
             row["valid"] = False
         # The judge is credited as the source. Without it an attack-pattern the
@@ -309,6 +332,7 @@ def _collect_techniques(
             row["layers"].append(_JUDGE_SOURCE)
     for tid, confidence, agents in judge_relationships:
         row = _row(tid)
+        row["claimed"] = True
         if tid in unknown:
             row["valid"] = False
         row["confidences"].append(confidence)
@@ -325,6 +349,10 @@ def _collect_techniques(
                 if not claim_tid:
                     continue
                 row = _row(str(claim_tid))
+                # The same id on a claim and on a finding is judged as the
+                # claim's: it was asked the questions, and the finding is a
+                # second mention of an answer that already stands.
+                row["claimed"] = True
                 # An id the catalogue does not have stays in the matrix and is
                 # marked. Dropping it deleted the analyst's answer from the one
                 # surface a reader looks at, which is the behaviour this whole
@@ -345,8 +373,10 @@ def _collect_techniques(
             # printed three enterprise-only techniques on an Android sample
             # with nothing saying they were not published. Collected here, they
             # are asked the domain question and the catalogue question with
-            # every other id, and the ones that fail carry the reason into the
-            # matrix.
+            # every other id. What they are not asked is what a claim is asked
+            # in its analyst's own loop — whether any evidence grounds them —
+            # so an id that arrived here and nowhere else is printed as claimed
+            # and published nowhere; see ``FINDING_ONLY_REASON``.
             for finding in getattr(isr, "findings", None) or []:
                 confidence = float(getattr(finding, "confidence", 0.0) or 0.0)
                 title = str(getattr(finding, "title", "") or "")

@@ -42,7 +42,7 @@ from maljan.tools.errors import (
     normalise_error,
     tool_error,
 )
-from maljan.tools.roots import PathOutsideRoots, resolve_under_roots
+from maljan.tools.roots import PathOutsideRoots, resolve_under, resolve_under_roots
 from maljan.tools.strings import DEFAULT_STRINGS_LIMIT
 
 mcp = FastMCP("AnalysisMCP")
@@ -191,6 +191,26 @@ def _read_absent_words(call: Any, kwargs: dict[str, Any]) -> dict[str, Any]:
 # having gone through the guard every tool here already goes through.
 _PATH_ARGUMENTS = ("path", "pcap_path")
 
+# The file a previous call in this run produced, rather than the sample. It is
+# the model's to name — which of the payloads ``carve_payloads`` wrote is worth
+# reading is an analysis decision — and the sample's own path is not, so this
+# argument is qualified for what it holds and the sample's is hidden from the
+# model entirely (``agents.tool_pinning``).
+#
+# Held to the staging base alone rather than to the sample roots: everything a
+# tool here writes lands there, and nothing else the model could name should be
+# reachable through an argument the model chose. A relative value is read as a
+# name inside the staging area, which is how a model that pastes back the tail
+# of a returned path is understood rather than refused.
+CARVED_ARGUMENT = "carved_path"
+
+# What every tool that takes it says about it, appended once so the fourteen
+# descriptions cannot come to disagree.
+CARVED_NOTE = (
+    "Give ``carved_path`` to read a file an earlier call in this run wrote — a payload "
+    "``carve_payloads`` returned — instead of the sample. Leave it out and the sample is read."
+)
+
 # The argument that names a rule corpus rather than a sample. It is a path
 # too, and it is chosen by the same model, but the directories it may name are
 # the rule directories rather than the sample ones — so it is held to
@@ -200,6 +220,17 @@ _CORPUS_ARGUMENT = "ruleset"
 _CORPUS_WORDS = ("", "default")
 
 
+def reads_a_carved_file(fn: Any) -> Any:
+    """Say once, in this tool's own description, what ``carved_path`` is for.
+
+    Applied under ``@mcp.tool()`` so the decorator that publishes the
+    description reads the amended one. The sentence is written in a single
+    place because fourteen copies of it would drift.
+    """
+    fn.__doc__ = f"{(fn.__doc__ or '').rstrip()}\n\n{CARVED_NOTE}"
+    return fn
+
+
 def _confined(kwargs: dict[str, Any]) -> dict[str, Any]:
     """``kwargs`` with every path argument resolved inside the allowed roots.
 
@@ -207,6 +238,10 @@ def _confined(kwargs: dict[str, Any]) -> dict[str, Any]:
     the file the check was made about rather than resolving the argument a
     second time. A ruleset is checked where it stands: the tool resolves that
     one itself, against the roots it was checked against.
+
+    ``carved_path`` is resolved against the staging base alone and becomes the
+    ``path`` the tool is called with, then leaves: the implementations take one
+    file argument, and which file it is is decided here.
     """
     out = dict(kwargs)
     for name in _PATH_ARGUMENTS:
@@ -214,6 +249,18 @@ def _confined(kwargs: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(value, str) or not value.strip():
             continue
         out[name] = str(resolve_under_roots(value, extra_roots=(_staging_base(),)))
+    # Read before the roots are consulted, because a model that writes "null"
+    # for an optional argument it is not passing means the absence — and this
+    # one is not a parameter of the implementation, so the general reading of
+    # those words above never sees it.
+    carved = out.pop(CARVED_ARGUMENT, None)
+    if isinstance(carved, str) and not _means_absent(carved):
+        # Resolved against the staging base and nowhere else, so a traversal, an
+        # absolute path outside it and a symlink planted under it all land where
+        # they really point and are refused there by the one rule.
+        base = _staging_base()
+        asked = Path(carved.strip())
+        out["path"] = str(resolve_under(asked if asked.is_absolute() else base / asked, (base,)))
     corpus = out.get(_CORPUS_ARGUMENT)
     if isinstance(corpus, str) and corpus not in _CORPUS_WORDS:
         resolve_under_roots(resolve_data(corpus), extra_roots=rule_tools.corpus_roots())
@@ -237,7 +284,16 @@ def _guard(tool: str, call: Any, **kwargs: Any) -> dict[str, Any]:
     may have been written by the sample's author.
     """
     try:
-        return dict(normalise_error(dict(call(**_confined(_read_absent_words(call, kwargs))))))
+        asked = _confined(_read_absent_words(call, kwargs))
+        answer = dict(normalise_error(dict(call(**asked))))
+        # Which file was read, when it was not the sample. The ledger stores
+        # the answer, so a run that analysed a carved payload says which one
+        # rather than leaving a reader to infer it from the arguments.
+        if isinstance(kwargs.get(CARVED_ARGUMENT), str) and not _means_absent(
+            kwargs[CARVED_ARGUMENT]
+        ):
+            answer.setdefault("read_path", asked.get("path", ""))
+        return answer
     except PathOutsideRoots as refusal:
         return tool_error(PATH_OUTSIDE_ROOTS, str(refusal), tool=tool)
     except Exception as exc:  # noqa: BLE001 — a tool server answers, it does not raise
@@ -261,19 +317,22 @@ def capabilities() -> dict[str, Any]:
 
 
 @mcp.tool()
-def identify_file(path: str) -> dict[str, Any]:
+@reads_a_carved_file
+def identify_file(path: str, carved_path: str = "") -> dict[str, Any]:
     """Detect a file's format, platform, mime type, size and magic bytes."""
-    return _guard("identify_file", identify_tools.identify_file, path=path)
+    return _guard("identify_file", identify_tools.identify_file, path=path, carved_path=carved_path)
 
 
 @mcp.tool()
-def hashes(path: str) -> dict[str, Any]:
+@reads_a_carved_file
+def hashes(path: str, carved_path: str = "") -> dict[str, Any]:
     """Compute md5, sha1, sha256 and any available fuzzy or import hash."""
-    return _guard("hashes", identify_tools.hashes, path=path)
+    return _guard("hashes", identify_tools.hashes, path=path, carved_path=carved_path)
 
 
 @mcp.tool()
-def signing_info(path: str, file_type: str = "") -> dict[str, Any]:
+@reads_a_carved_file
+def signing_info(path: str, file_type: str = "", carved_path: str = "") -> dict[str, Any]:
     """Report whether the file carries a code signature, for one format.
 
     ``file_type`` is the format the sample was routed as ("pe", "apk",
@@ -281,7 +340,11 @@ def signing_info(path: str, file_type: str = "") -> dict[str, Any]:
     that format alone — a PE is asked about Authenticode and nothing else.
     """
     return _guard(
-        "signing_info", identify_tools.signing_info, path=path, file_type=file_type or None
+        "signing_info",
+        identify_tools.signing_info,
+        path=path,
+        carved_path=carved_path,
+        file_type=file_type or None,
     )
 
 
@@ -291,8 +354,10 @@ def signing_info(path: str, file_type: str = "") -> dict[str, Any]:
 
 
 @mcp.tool()
+@reads_a_carved_file
 def strings(
     path: str,
+    carved_path: str = "",
     min_len: int = 6,
     encodings: list[str] | None = None,
     limit: int = DEFAULT_STRINGS_LIMIT,
@@ -318,6 +383,7 @@ def strings(
         "strings",
         string_tools.strings,
         path=path,
+        carved_path=carved_path,
         min_len=min_len,
         encodings=tuple(encodings or ("ascii", "utf16le")),
         limit=limit,
@@ -335,9 +401,18 @@ def iocs_from_text(text: str, kinds: list[str] | None = None) -> dict[str, Any]:
 
 
 @mcp.tool()
-def iocs_from_file(path: str, kinds: list[str] | None = None) -> dict[str, Any]:
+@reads_a_carved_file
+def iocs_from_file(
+    path: str, kinds: list[str] | None = None, carved_path: str = ""
+) -> dict[str, Any]:
     """Extract typed indicators from a file's ASCII and wide strings."""
-    return _guard("iocs_from_file", string_tools.iocs_from_file, path=path, kinds=kinds)
+    return _guard(
+        "iocs_from_file",
+        string_tools.iocs_from_file,
+        path=path,
+        carved_path=carved_path,
+        kinds=kinds,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -346,8 +421,10 @@ def iocs_from_file(path: str, kinds: list[str] | None = None) -> dict[str, Any]:
 
 
 @mcp.tool()
+@reads_a_carved_file
 def pe_info(
     path: str,
+    carved_path: str = "",
     sections: bool = True,
     imports: bool = True,
     exports: bool = True,
@@ -365,6 +442,7 @@ def pe_info(
         "pe_info",
         binary_tools.pe_info,
         path=path,
+        carved_path=carved_path,
         sections=sections,
         imports=imports,
         exports=exports,
@@ -375,21 +453,25 @@ def pe_info(
 
 
 @mcp.tool()
-def elf_info(path: str) -> dict[str, Any]:
+@reads_a_carved_file
+def elf_info(path: str, carved_path: str = "") -> dict[str, Any]:
     """Parse an ELF: sections, imports (listed without interpretation), exports, segments,
     interpreter, DT_NEEDED."""
-    return _guard("elf_info", binary_tools.elf_info, path=path)
+    return _guard("elf_info", binary_tools.elf_info, path=path, carved_path=carved_path)
 
 
 @mcp.tool()
-def macho_info(path: str) -> dict[str, Any]:
+@reads_a_carved_file
+def macho_info(path: str, carved_path: str = "") -> dict[str, Any]:
     """Parse a Mach-O: headers, load commands, dylibs, code-signature presence."""
-    return _guard("macho_info", binary_tools.macho_info, path=path)
+    return _guard("macho_info", binary_tools.macho_info, path=path, carved_path=carved_path)
 
 
 @mcp.tool()
+@reads_a_carved_file
 def apk_info(
     path: str,
+    carved_path: str = "",
     manifest: bool = True,
     permissions: bool = True,
     certs: bool = True,
@@ -403,6 +485,7 @@ def apk_info(
         "apk_info",
         binary_tools.apk_info,
         path=path,
+        carved_path=carved_path,
         manifest=manifest,
         permissions=permissions,
         certs=certs,
@@ -414,14 +497,15 @@ def apk_info(
 
 
 @mcp.tool()
-def carve_payloads(path: str) -> dict[str, Any]:
+@reads_a_carved_file
+def carve_payloads(path: str, carved_path: str = "") -> dict[str, Any]:
     """Write each embedded payload found in the file out as its own file.
 
     The carved files land under the sidecar's private staging directory, in
     carved/<sha256 of the sample>/, and the returned paths point there; the
     destination is not an argument.
     """
-    return _guard("carve_payloads", _carve_under_staging, path=path)
+    return _guard("carve_payloads", _carve_under_staging, path=path, carved_path=carved_path)
 
 
 def _carve_under_staging(path: str) -> dict[str, Any]:
@@ -449,15 +533,23 @@ def _carve_under_staging(path: str) -> dict[str, Any]:
 
 
 @mcp.tool()
-def archive_list(path: str, limit: int = 500) -> dict[str, Any]:
+@reads_a_carved_file
+def archive_list(path: str, limit: int = 500, carved_path: str = "") -> dict[str, Any]:
     """List a zip, 7z, tar or gzip archive's members without extracting them."""
-    return _guard("archive_list", binary_tools.archive_list, path=path, limit=limit)
+    return _guard(
+        "archive_list",
+        binary_tools.archive_list,
+        path=path,
+        carved_path=carved_path,
+        limit=limit,
+    )
 
 
 @mcp.tool()
-def document_info(path: str) -> dict[str, Any]:
+@reads_a_carved_file
+def document_info(path: str, carved_path: str = "") -> dict[str, Any]:
     """Inspect an OLE2, OOXML or PDF document for macros, parts and action markers."""
-    return _guard("document_info", binary_tools.document_info, path=path)
+    return _guard("document_info", binary_tools.document_info, path=path, carved_path=carved_path)
 
 
 # ---------------------------------------------------------------------------
@@ -466,8 +558,10 @@ def document_info(path: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+@reads_a_carved_file
 def yara_scan(
     path: str = "",
+    carved_path: str = "",
     text: str = "",
     ruleset: str = "default",
     timeout_s: int = YARA_TIMEOUT_S,
@@ -477,6 +571,7 @@ def yara_scan(
         "yara_scan",
         rule_tools.yara_scan,
         path=path or None,
+        carved_path=carved_path,
         text=text or None,
         ruleset=ruleset,
         timeout_s=_within(timeout_s, YARA_TIMEOUT_S),
@@ -498,12 +593,16 @@ def sigma_match_sandbox(report: dict[str, Any], ruleset: str = "default") -> dic
 
 
 @mcp.tool()
-def capa(path: str, timeout_s: int = CAPA_TIMEOUT_S, backend: str = "auto") -> dict[str, Any]:
+@reads_a_carved_file
+def capa(
+    path: str, timeout_s: int = CAPA_TIMEOUT_S, backend: str = "auto", carved_path: str = ""
+) -> dict[str, Any]:
     """Run capa and report the capabilities it finds, with ATT&CK and MBC metadata."""
     return _guard(
         "capa",
         rule_tools.capa,
         path=path,
+        carved_path=carved_path,
         timeout_s=_within(timeout_s, CAPA_TIMEOUT_S),
         backend=backend,
     )

@@ -31,8 +31,10 @@ from maljan.reporting.models import (
 from maljan.reporting.renderers.stix_renderer import (
     ExtendedSTIXRenderer,
     email_is_publishable,
+    indicator_publish_reason,
     minted_indicator_type,
     path_names_a_file,
+    reads_as_a_host_in_the_bytes,
 )
 
 # What PuTTY's string sweep typed as e-mail addresses. Ten of the eleven
@@ -46,10 +48,12 @@ PUTTY_ALGORITHMS = (
     "SSHCONNECTION@putty.projects.tartarus.org",
 )
 
-# What sample A's sweep typed as e-mail addresses. The third value is a parse
-# artefact out of embedded CPython source; the second stands in for the real
-# third party's address the recorded run published.
-SAMPLE_A_ADDRESSES = ("ping@lfw.org", "maintainer@example.org", "z@D.setdefault")
+# What sample A's sweep typed as e-mail addresses. Both mailboxes the recorded
+# run published belonged to real people whose addresses were in embedded
+# library source, so both are stood in for by made-up ones at ``example.org``;
+# the third value is a fragment of Python and is written as it was read,
+# because being a parse artefact is the whole point of it.
+SAMPLE_A_ADDRESSES = ("pinger@example.org", "maintainer@example.org", "z@D.setdefault")
 
 
 def _report(verdict: str, *iocs: StringIOC, **kwargs: Any) -> MalwareReport:
@@ -111,43 +115,94 @@ class TestWhatASecondSourceLooksLike:
 
         assert any("mutex:name = 'Global\\\\ZararliMutex'" in p for p in _patterns(report))
 
-    def test_an_address_an_analyst_established_is_published(self) -> None:
+    def test_an_analyst_citing_a_tool_that_saw_it_is_a_second_source(self) -> None:
         report = _report(
             "Malware",
             StringIOC(kind="email", value="operator@example.org"),
             sections=[
+                EvidenceSection(
+                    key="tool_sandbox_network",
+                    title="Sandbox channels",
+                    kind="list",
+                    items=["SMTP RCPT TO: operator@example.org"],
+                    evidence_ids=["ev_0007"],
+                    source="tool:sandbox_network",
+                ),
                 EvidenceSection(
                     key="findings",
                     title="Findings",
                     kind="table",
                     columns=["Agent", "Finding"],
-                    rows=[["static", "the drop mail is operator@example.org"]],
+                    rows=[["static", "the drop mail is the one the sandbox saw"]],
                     evidence_ids=["ev_0007"],
                     source="finding",
-                )
+                ),
             ],
         )
 
         assert any("email-addr:value = 'operator@example.org'" in p for p in _patterns(report))
 
-    def test_a_tool_s_own_section_corroborates_nothing(self) -> None:
-        """The string table arriving under another heading is not a second source."""
+    def test_an_analyst_quoting_the_string_sweep_is_not(self) -> None:
+        """One source said twice is one source."""
         report = _report(
             "Malware",
             StringIOC(kind="email", value="operator@example.org"),
             sections=[
                 EvidenceSection(
-                    key="tool_strings",
-                    title="Printable strings",
-                    kind="list",
-                    items=["operator@example.org"],
+                    key="iocs",
+                    title="Indicators recovered from the sample",
+                    kind="table",
+                    columns=["Kind", "Value"],
+                    rows=[["email", "operator@example.org"]],
                     evidence_ids=["ev_0003"],
-                    source="tool",
+                    source="tool:iocs_from_file",
+                ),
+                EvidenceSection(
+                    key="findings",
+                    title="Findings",
+                    kind="table",
+                    columns=["Agent", "Finding"],
+                    rows=[["static", "the strings table lists operator@example.org"]],
+                    evidence_ids=["ev_0003"],
+                    source="finding",
+                ),
+            ],
+        )
+
+        assert not [p for p in _patterns(report) if "email-addr" in p]
+
+    def test_a_tool_no_analyst_cited_corroborates_nothing(self) -> None:
+        """A claim is a second source when it points at the entry that saw it."""
+        report = _report(
+            "Malware",
+            StringIOC(kind="email", value="operator@example.org"),
+            sections=[
+                EvidenceSection(
+                    key="tool_sandbox_network",
+                    title="Sandbox channels",
+                    kind="list",
+                    items=["SMTP RCPT TO: operator@example.org"],
+                    evidence_ids=["ev_0007"],
+                    source="tool:sandbox_network",
                 )
             ],
         )
 
         assert not [p for p in _patterns(report) if "email-addr" in p]
+
+    def test_a_slice_of_a_longer_value_does_not_corroborate(self) -> None:
+        """Containment is a whole value, the way a digest already was."""
+        report = _report(
+            "Malware",
+            StringIOC(kind="mutex", value="Zararli"),
+            dynamic=DynamicBehavior(
+                process_tree=[
+                    ProcessNode(pid=1, name="x", command_line="--mutex Global\\ZararliMutex")
+                ]
+            ),
+        )
+
+        assert not [p for p in _patterns(report) if "mutex" in p]
 
 
 class TestTheValidityQuestions:
@@ -237,3 +292,39 @@ class TestTheNetworkBlockIsUnchanged:
         )
 
         assert any("domain-name:value = 'c2.example.com'" in p for p in _patterns(report))
+
+
+class TestANameLiftedOutOfTheBytes:
+    """The host rule's last-label test is a shape, and code is shaped like one.
+
+    ``setdefault`` matches ``^[a-z]{2,}$`` as squarely as ``com`` does, so
+    ``z@D.setdefault`` passed every validity question the export had and was
+    held back by corroboration alone. Capitalisation is the tell a byte image
+    carries and a model's prose does not: an attribute access capitalises the
+    thing it reaches into, and nothing capitalises a host name.
+    """
+
+    def test_a_python_attribute_chain_is_not_a_host(self) -> None:
+        assert reads_as_a_host_in_the_bytes("D.setdefault") is False
+        assert reads_as_a_host_in_the_bytes("r.Regsvr") is False
+
+    def test_a_real_name_is(self) -> None:
+        for name in ("openssh.com", "putty.projects.tartarus.org", "xn--80ak6aa92e.com"):
+            assert reads_as_a_host_in_the_bytes(name) is True, name
+
+    def test_a_single_label_is_not(self) -> None:
+        assert reads_as_a_host_in_the_bytes("localhost") is False
+
+    def test_the_two_recorded_artefacts_are_refused_on_validity_alone(self) -> None:
+        for value in ("z@D.setdefault", "ExcelS@r.Regsvr"):
+            assert (
+                indicator_publish_reason(
+                    "email", value, "strings", corroborated_by="the sandbox watched it"
+                )
+                is None
+            ), value
+
+    def test_an_observed_address_is_not_asked_about_its_case(self) -> None:
+        """A model or a sandbox writing ``Example.COM`` has written a host."""
+        assert indicator_publish_reason("email", "Bob@Example.COM", "sandbox") == "sandbox"
+        assert email_is_publishable("Bob@Example.COM") is True

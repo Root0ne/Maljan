@@ -34,6 +34,7 @@ from maljan.agents._indicator_denylists import (
     MAX_TOTAL_INDICATORS,
     URL_DENY_HOSTS,
     malformed_hash_in,
+    whole_value_in,
 )
 from maljan.core.logger import logger
 from maljan.extractors.network_extractor import (
@@ -683,12 +684,12 @@ class ExtendedSTIXRenderer:
                     name=f"{ioc.kind} {ioc.value[:32]}",
                     pattern=pattern,
                     pattern_type="stix",
-                    # What the row claims follows the verdict the run
-                    # publishes, like every other indicator this renderer
-                    # mints. A string-derived artefact is nobody's observation
-                    # of activity, so it is never the suspicious reading: under
-                    # Malware and Suspicious it is anomalous, under Benign it
-                    # is benign. It used to be minted ``malicious-activity``
+                    # The one type rule every indicator this renderer mints
+                    # goes through. A string-derived artefact is nobody's
+                    # observation of activity and is never flagged suspicious,
+                    # so it is ``anomalous-activity`` under every verdict —
+                    # ``benign`` is the sample's own word and is not lent to
+                    # anything else. It used to be minted ``malicious-activity``
                     # whatever the run concluded.
                     indicator_types=[minted_indicator_type(report.verdict)],
                 )
@@ -1085,6 +1086,36 @@ def email_is_publishable(value: Any) -> bool:
     return host_is_public(match.group(1))
 
 
+# A label of a name as a program writes one. Host names are written in lower
+# case wherever they are written — DNS does not distinguish case and nothing
+# capitalises one — and the last label of a name that could exist is letters or
+# a punycode label.
+_LOWER_LABEL_RE = re.compile(r"^[a-z0-9-]+$")
+_LAST_LABEL_RE = re.compile(r"^(?:[a-z]{2,}|xn--[a-z0-9-]+)$")
+
+
+def reads_as_a_host_in_the_bytes(domain: Any) -> bool:
+    """Whether a name lifted out of a file reads as a host rather than as code.
+
+    Asked only of a value the string sweep produced, where the capitalisation
+    is the program's own and therefore says something. ``D.setdefault`` and
+    ``r.Regsvr`` are attribute accesses in embedded source; ``openssh.com`` and
+    ``crl.sectigo.com`` are names. The host rule cannot tell them apart — its
+    last-label test is deliberately a shape rather than a list of TLDs, and
+    ``setdefault`` is shaped exactly like one — and this can: an identifier
+    capitalises the thing it is reaching into, and a host name never does.
+
+    Not asked of a name anybody observed, and not asked of the judge's own
+    objects: a model writing ``Example.COM`` has written a host, and refusing
+    it would be this rule answering a question about capitalisation that only
+    means something in a byte image.
+    """
+    labels = str(domain or "").strip().split(".")
+    if len(labels) < 2 or not all(_LOWER_LABEL_RE.match(label) for label in labels):
+        return False
+    return _LAST_LABEL_RE.match(labels[-1]) is not None
+
+
 def path_names_a_file(value: Any) -> bool:
     """Whether this literal names a file rather than a directory or a root.
 
@@ -1131,8 +1162,18 @@ def indicator_publish_reason(
         return ip_corroboration_reason(value, source, reputation)
     if kind == "url":
         return url_corroboration_reason(value, source, reputation)
-    if kind == "email" and not email_is_publishable(value):
-        return None
+    if kind == "email":
+        if not email_is_publishable(value):
+            return None
+        # A mailbox the string sweep read out of the file answers one question
+        # more than one the judge asserted: whether its domain part reads as a
+        # host at all. The capitalisation in a byte image is the program's own,
+        # and an attribute access capitalises what it reaches into.
+        if str(source or "").strip().lower() in (
+            "",
+            "strings",
+        ) and not reads_as_a_host_in_the_bytes(str(value).rsplit("@", 1)[-1]):
+            return None
     if kind == "path" and not path_names_a_file(value):
         return None
     if kind not in STRING_IOC_KINDS or indicator_pattern(kind, value) is None:
@@ -1173,17 +1214,47 @@ def _publishable_domains(report: Any) -> frozenset[str]:
 # section built from a tool's output is the string sweep's own table arriving
 # under another heading, and reading those would let every string corroborate
 # itself.
+# Where a second source for a string row is looked for. A section built from
+# an analyst's own artefact or finding is a claim; the ledger entries it cites
+# are what the claim stands on, and only the entries of a tool that is not the
+# string sweep can hold a value up. A section built from the sweep's own output
+# is the thing being corroborated, and reading it would let every string
+# corroborate itself.
 _ANALYST_SECTION_SOURCES = ("artifact:", "finding", "agent")
+
+# The tools whose output *is* the string sweep. An analyst quoting one of these
+# in a finding has quoted the sweep's own table back, which is one source said
+# twice.
+_STRING_SWEEP_TOOLS = ("strings", "iocs_from_file", "iocs_from_text")
+
+
+def _section_text(section: Any) -> list[str]:
+    """Everything one evidence section prints, as plain strings."""
+    parts = [str(getattr(section, "text", "") or "")]
+    parts.extend(str(item) for item in (getattr(section, "items", None) or []))
+    for row in getattr(section, "rows", None) or []:
+        parts.extend(str(cell) for cell in row)
+    return parts
 
 
 def _corroborating_values(report: Any) -> str:
-    """Everything some producer other than the string sweep wrote down, lowercased.
+    """Everything a second source in this run recorded, lowercased, built once.
 
-    One haystack, searched by containment, and deliberately narrow about what
-    goes into it: what a sandbox watched, what a persistence mechanism names,
-    and what an analyst established in an artefact or a finding. The report's
-    own string tables are not in it — they are the thing being corroborated,
-    and a haystack holding them would answer yes to everything.
+    One haystack per render, searched for whole values rather than by
+    containment, and deliberately narrow about what goes into it:
+
+    * what a sandbox watched — the process tree, the registry modifications,
+      the file operations, the notable API rows;
+    * what a persistence mechanism names;
+    * the output of a ledger entry that is **not** the string sweep's and that
+      an analyst cited in an artefact or a finding.
+
+    The third is the one that had to be narrowed. Reading the analyst's own
+    prose corroborated anything an analyst quoted, and analysts quote the
+    strings table — one sentence carrying a parse artefact out of embedded
+    source published it as an indicator. A claim is a second source only when
+    it points at an entry that saw the value, and the sweep's own entries are
+    not that.
     """
     parts: list[str] = []
     dynamic = getattr(report, "dynamic", None)
@@ -1201,14 +1272,22 @@ def _corroborating_values(report: Any) -> str:
     for mechanism in list(getattr(report, "persistence", None) or []):
         parts.append(str(getattr(mechanism, "target", "") or ""))
         parts.append(str(getattr(mechanism, "payload", "") or ""))
-    for section in list(getattr(report, "sections", None) or []):
+
+    sections = list(getattr(report, "sections", None) or [])
+    cited: set[str] = set()
+    for section in sections:
         origin = str(getattr(section, "source", "") or "").strip().lower()
-        if not origin.startswith(_ANALYST_SECTION_SOURCES):
+        if origin.startswith(_ANALYST_SECTION_SOURCES):
+            cited.update(str(eid) for eid in (getattr(section, "evidence_ids", None) or []))
+    for section in sections:
+        origin = str(getattr(section, "source", "") or "").strip().lower()
+        if not origin.startswith("tool:"):
             continue
-        parts.append(str(getattr(section, "text", "") or ""))
-        parts.extend(str(item) for item in (getattr(section, "items", None) or []))
-        for row in getattr(section, "rows", None) or []:
-            parts.extend(str(cell) for cell in row)
+        if origin.removeprefix("tool:") in _STRING_SWEEP_TOOLS:
+            continue
+        if not cited.intersection(str(eid) for eid in (section.evidence_ids or [])):
+            continue
+        parts.extend(_section_text(section))
     return " ".join(part for part in parts if part).lower()
 
 
@@ -1271,8 +1350,13 @@ def _accept_string_ioc(
         if not _looks_like_real_path(value):
             return False
 
+    # Whole value, never a slice of a longer one: a short mutex name or a bare
+    # file name is otherwise "corroborated" by any token that happens to spell
+    # it, which is the mistake the digest rule already fixed one kind at a time.
     corroborated = (
-        "a second source in this run records it" if value and value.lower() in corroborating else ""
+        "a second source in this run records it"
+        if value and whole_value_in(value, corroborating)
+        else ""
     )
     return (
         indicator_publish_reason(ioc.kind, value, "strings", corroborated_by=corroborated)

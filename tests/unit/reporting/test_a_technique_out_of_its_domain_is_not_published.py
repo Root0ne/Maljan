@@ -25,7 +25,7 @@ from typing import Any
 
 import pytest
 
-from maljan.extractors.capability_matrix import build_capability_matrix
+from maljan.extractors.capability_matrix import FINDING_ONLY_REASON, build_capability_matrix
 from maljan.reporting.builder import MalwareReportBuilder
 from maljan.reporting.renderers.markdown import MarkdownRenderer
 from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
@@ -324,9 +324,92 @@ class TestAFindingsOwnTechniqueIdsAreAsked:
         assert "Claims that were not published as techniques" in rendered
         assert ENTERPRISE in rendered
 
-    def test_a_windows_sample_publishes_the_same_ids(self) -> None:
-        _cells, mappings = build_capability_matrix(
+    def test_a_windows_sample_does_not_publish_them_either(self) -> None:
+        """A finding's id is asked fewer questions than a claim's, so it is printed
+        and not published whatever the sample's domain says."""
+        cells, mappings = build_capability_matrix(
             stix_output={"objects": []}, isr_reports=_findings_only_isr(), sample=WINDOWS
         )
 
-        assert {m.technique_id for m in mappings} == {ENTERPRISE, "T1055"}
+        assert mappings == []
+        assert {cell.technique_id for cell in cells} == {ENTERPRISE, "T1055"}
+        for cell in cells:
+            assert cell.not_published == FINDING_ONLY_REASON, cell.technique_id
+
+    def test_a_sample_the_router_could_not_type_does_not_publish_them(self) -> None:
+        """The domain check falls open, and this rule does not depend on it."""
+        _cells, mappings = build_capability_matrix(
+            stix_output={"objects": []}, isr_reports=_findings_only_isr(), sample=None
+        )
+
+        assert mappings == []
+
+    def test_a_finding_citing_nothing_at_all_publishes_nothing(self) -> None:
+        """Zero evidence ids, zero confidence — the shape that used to publish."""
+        isr = {
+            "static": AgentISR.model_validate(
+                {
+                    "agent_id": "static",
+                    "domain": "static",
+                    "claims": [],
+                    "findings": [
+                        {
+                            "title": "Possible injection",
+                            "confidence": 0.0,
+                            "technique_ids": ["T1055"],
+                            "evidence_ids": [],
+                        }
+                    ],
+                }
+            )
+        }
+
+        cells, mappings = build_capability_matrix(
+            stix_output={"objects": []}, isr_reports=isr, sample=WINDOWS
+        )
+
+        assert mappings == []
+        assert [cell.not_published for cell in cells] == [FINDING_ONLY_REASON]
+
+    def test_the_same_id_on_a_claim_is_judged_as_the_claim_s(self) -> None:
+        """A finding repeating a claim's id does not demote the claim."""
+        isr = {
+            "static": AgentISR.model_validate(
+                {
+                    "agent_id": "static",
+                    "domain": "static",
+                    "claims": [
+                        {
+                            "claim": "the imports describe injection",
+                            "evidence_ref": "[ev_0004] pe_info",
+                            "confidence": 0.8,
+                            "technique_id": "T1055",
+                        }
+                    ],
+                    "findings": [
+                        {
+                            "title": "Native Code Presence",
+                            "confidence": 0.9,
+                            "technique_ids": ["T1055"],
+                            "evidence_ids": ["ev_0004"],
+                        }
+                    ],
+                }
+            )
+        }
+
+        _cells, mappings = build_capability_matrix(
+            stix_output={"objects": []}, isr_reports=isr, sample=WINDOWS
+        )
+
+        assert [m.technique_id for m in mappings] == ["T1055"]
+
+    def test_the_judge_s_own_technique_is_still_published(self) -> None:
+        """The judge has no later loop, and its attack-patterns are claims here."""
+        _cells, mappings = build_capability_matrix(
+            stix_output={"objects": [_attack_pattern(ENTERPRISE, 0)]},
+            isr_reports=_findings_only_isr(),
+            sample=WINDOWS,
+        )
+
+        assert [m.technique_id for m in mappings] == [ENTERPRISE]

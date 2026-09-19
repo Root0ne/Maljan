@@ -121,6 +121,13 @@ class TestOnePathIsOneRow:
     def test_duplicate_separators_collapse(self) -> None:
         assert canonical_path("/tmp//a///b") == "/tmp/a/b"
 
+    def test_a_unc_path_is_not_a_posix_path(self) -> None:
+        """Folding the leading pair merged two locations that cannot be one file."""
+        assert canonical_path(r"\\SRV\Share\F") != canonical_path("/srv/share/f")
+
+    def test_a_unc_path_still_folds_its_own_case(self) -> None:
+        assert canonical_path(r"\\SRV\Share\F") == canonical_path(r"\\srv\share\f")
+
     def test_the_bundle_carries_the_path_once(self) -> None:
         judge = Bundle(
             objects=[_indicator(f"[file:name = '{DIST}']"), _indicator(f"[file:name = '{DIST}/']")]
@@ -149,3 +156,51 @@ def _rendered(judge: Bundle) -> Bundle:
         executive_summary="",
     )
     return ExtendedSTIXRenderer().render(report, base_bundle=judge)
+
+
+# A pattern is not one comparison. The judge writes ``[a] AND [b]``, an ``IN``
+# list, a compound over two object paths — and every check in the grounding
+# function keyed on what the *pattern* started with, so the first comparison
+# was asked and no other. Then the digest rule above was added in front of all
+# of them and returned "no problem" for the whole expression as soon as one
+# quoted literal was a grounded digest, which turned the URL denylist and the
+# file-name anchor rule off for any pattern carrying a hash.
+GROUNDED_SHA256 = "a1b2c3d4" * 8
+
+# What each kind is refused for, paired with a grounded digest in both orders.
+REFUSED_BESIDE_A_DIGEST = (
+    ("[url:value = 'https://pypi.org/simple/requests/']", "vendor infrastructure"),
+    ("[url:value = 'http://nowhere-in-the-evidence.example.com/x']", "appears nowhere"),
+    ("[file:name = '/home/builder/toolchain/lib/libc.so']", "compiler or toolchain artefact"),
+    ("[file:name = 'no-anchor-here']", "no file extension"),
+)
+
+
+class TestEveryComparisonIsAsked:
+    @staticmethod
+    def _problem(pattern: str) -> list[str]:
+        bundle = Bundle(objects=[_indicator(pattern)])
+        return [
+            v.message
+            for v in validate_verdict_bundle(bundle, evidence_corpus={f"sha256: {GROUNDED_SHA256}"})
+        ]
+
+    def test_a_grounded_digest_does_not_answer_for_the_comparison_beside_it(self) -> None:
+        digest = f"[file:hashes.'SHA-256' = '{GROUNDED_SHA256}']"
+        for comparison, why in REFUSED_BESIDE_A_DIGEST:
+            for pattern in (f"{comparison} AND {digest}", f"{digest} AND {comparison}"):
+                found = self._problem(pattern)
+                assert found, f"{pattern} raised nothing; expected {why}"
+                assert why in found[0], f"{pattern}: {found[0]}"
+
+    def test_the_digest_alone_is_still_grounded(self) -> None:
+        assert self._problem(f"[file:hashes.'SHA-256' = '{GROUNDED_SHA256}']") == []
+
+    def test_a_clean_pair_raises_nothing(self) -> None:
+        pattern = f"[file:name = 'dropper.exe'] AND [file:hashes.'SHA-256' = '{GROUNDED_SHA256}']"
+
+        assert self._problem(pattern) == []
+
+    def test_an_algorithm_name_is_not_read_as_a_value(self) -> None:
+        """``file:hashes.'MD5'`` quotes the algorithm beside the digest."""
+        assert self._problem(f"[file:hashes.'SHA-256' = '{GROUNDED_SHA256}']") == []

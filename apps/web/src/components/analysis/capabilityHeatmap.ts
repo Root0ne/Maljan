@@ -102,6 +102,20 @@ export function isCorroborated(technique: Technique): boolean {
 }
 
 /**
+ * What a tactic column's header counts, in the same shape the run summary uses.
+ *
+ * A column that reads "3 techniques" over three the run declined to publish
+ * says the same thing "TTPs: 3 named" said before it became "3 claimed, 0
+ * published". The published ones are the count; the rest are named beside it.
+ */
+export function tacticHeaderCount(techniques: Technique[]): string {
+  const published = techniques.filter((t) => !t.notPublished).length;
+  const head = `${published} technique${published === 1 ? "" : "s"}`;
+  const claimed = techniques.length - published;
+  return claimed > 0 ? `${head} · ${claimed} claimed, not published` : head;
+}
+
+/**
  * Group a flat technique list into tactic buckets keyed by tactic id.
  *
  * The list arrives from one of two places: the cached report's

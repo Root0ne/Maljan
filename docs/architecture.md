@@ -975,6 +975,25 @@ not in the toolbox the model is shown. The same run called `put_sample` with
 `{"sha256": "null", "content_b64": ""}` and was told, correctly, that the empty
 string's digest is not the sample's.
 
+**A file an earlier call produced is still the model's to name.** Hiding the
+sample's path would otherwise have taken the carved payloads with it:
+`carve_payloads` writes each embedded payload under the staging directory and
+returns the paths, and with `path` gone there was nothing left to pass one to.
+`carved_path` is the qualified argument that gives that back, on the fourteen
+analysis tools that read a file — `identify_file`, `hashes`, `signing_info`,
+`strings`, `iocs_from_file`, `pe_info`, `elf_info`, `macho_info`, `apk_info`,
+`carve_payloads`, `archive_list`, `document_info`, `yara_scan` and `capa`. It
+is held to the **staging base alone**, not to `MALJAN_SAMPLE_ROOTS`: a relative
+value is read as a name inside it, an absolute one must already be inside it,
+and a traversal, a path outside it and a symlink out of it all land where they
+really point and meet the existing remediation-bearing refusal. Given, it is
+read in place of the sample and the answer carries `read_path` saying which
+file that was; left out, the sample is read. `pin_paths` needs no rule for it —
+a qualified name is not in `SAMPLE_ARG_NAMES`, which is what the naming rule
+was built for. No tool extracts an archive member anywhere today, so a member
+stays the business of the tools that already take a member name; when one does,
+it writes to the same staging directory and the same argument serves it.
+
 ## Providers
 
 The provider layer (`src/maljan/providers/`) puts one interface in front of
