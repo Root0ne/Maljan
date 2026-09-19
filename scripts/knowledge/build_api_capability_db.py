@@ -33,6 +33,7 @@ _ROOT = Path(__file__).resolve().parents[2]
 _BEHAVIOUR_OUT = _ROOT / "data" / "api_behaviour_map_v1.json"
 _ATTCK_OUT = _ROOT / "data" / "api_attck_map_v1.json"
 _VALID_IDS = _ROOT / "data" / "attck_valid_ids.json"
+_RETIRED_IDS = _ROOT / "data" / "attck_retired_ids.json"
 
 # ---------------------------------------------------------------------------
 # Tiers
@@ -1444,8 +1445,12 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
         ],
     },
     {
+        # ATT&CK 19.2 folded this and Indicator Blocking below into T1685, and
+        # the builder follows the vendored set's revoked-by to it. The id here
+        # is the one the rule was curated against; the name is what the current
+        # catalogue calls the behaviour.
         "technique_id": "T1562.001",
-        "name": "Impair Defenses: Disable or Modify Tools",
+        "name": "Disable or Modify Tools",
         "min_apis": 2,
         "confidence_base": 0.50,
         "confidence_max": 0.65,
@@ -1461,7 +1466,7 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
     },
     {
         "technique_id": "T1562.006",
-        "name": "Impair Defenses: Indicator Blocking",
+        "name": "Disable or Modify Tools: indicator blocking",
         "min_apis": 2,
         "confidence_base": 0.46,
         "confidence_max": 0.62,
@@ -1787,27 +1792,80 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
 _CONFIDENCE_CEILING = 0.65
 
 
-def _validate() -> list[str]:
+def _vendored_ids() -> set[str]:
+    """Every active technique id the vendored catalogue carries."""
+    try:
+        raw = json.loads(_VALID_IDS.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    if isinstance(raw, list):
+        return {str(tid) for tid in raw}
+    if "technique_ids" in raw:
+        return {str(tid) for tid in raw["technique_ids"]}
+    # One id list per ATT&CK domain.
+    return {str(tid) for ids in raw.values() if isinstance(ids, list) for tid in ids}
+
+
+def _vendored_replacements() -> dict[str, str]:
+    """``{retired id: the id ATT&CK says replaced it}`` from the vendored set.
+
+    The bundle's own ``revoked-by`` relationship is the only authority. A
+    retired id it names no successor for is not in this map, and the entry
+    keyed on it is dropped rather than pointed somewhere plausible.
+    """
+    try:
+        raw = json.loads(_RETIRED_IDS.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {
+        str(tid): str(row["revoked_by"])
+        for tid, row in raw.items()
+        if isinstance(row, dict) and not str(tid).startswith("_") and row.get("revoked_by")
+    }
+
+
+def _retargeted(
+    techniques: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[tuple[str, str]], list[str]]:
+    """The technique rules against the current release, plus what moved and what went.
+
+    A curated id the release retired is followed to its replacement where the
+    vendored set names one; where it does not, the rule is dropped. Neither is
+    a judgement call this file gets to make, which is the point: the source
+    keeps the id it was written against and the catalogue decides what that id
+    is called now.
+    """
+    valid = _vendored_ids()
+    replacements = _vendored_replacements()
+    kept: list[dict[str, Any]] = []
+    moved: list[tuple[str, str]] = []
+    dropped: list[str] = []
+    for tech in techniques:
+        tid = str(tech["technique_id"])
+        if not valid or tid in valid:
+            kept.append(tech)
+            continue
+        replacement = replacements.get(tid)
+        if replacement and replacement in valid:
+            kept.append({**tech, "technique_id": replacement})
+            moved.append((tid, replacement))
+        else:
+            dropped.append(tid)
+    return kept, moved, dropped
+
+
+def _validate(techniques: list[dict[str, Any]]) -> list[str]:
     """Return a list of problems; empty means the tables are internally sound."""
     problems: list[str] = []
 
     # Every ATT&CK id must exist in the vendored catalog.
-    try:
-        valid_raw = json.loads(_VALID_IDS.read_text(encoding="utf-8"))
-        if isinstance(valid_raw, list):
-            valid_ids = set(valid_raw)
-        elif "technique_ids" in valid_raw:
-            valid_ids = set(valid_raw["technique_ids"])
-        else:
-            # One id list per ATT&CK domain.
-            valid_ids = {tid for ids in valid_raw.values() for tid in ids}
-    except (OSError, ValueError) as exc:
-        problems.append(f"cannot read {_VALID_IDS}: {exc}")
-        valid_ids = set()
+    valid_ids = _vendored_ids()
+    if not valid_ids:
+        problems.append(f"cannot read {_VALID_IDS}")
 
     known_apis = {api for _tier, apis in WINDOWS_CATEGORIES.values() for api in apis}
 
-    for tech in ATTCK_TECHNIQUES:
+    for tech in techniques:
         tid = tech["technique_id"]
         if valid_ids and tid not in valid_ids:
             problems.append(f"{tid} is not in attck_valid_ids.json")
@@ -1824,11 +1882,17 @@ def _validate() -> list[str]:
             if api not in known_apis:
                 problems.append(f"{tid} references unknown API {api!r}")
 
-    seen: set[str] = set()
-    for tid in (t["technique_id"] for t in ATTCK_TECHNIQUES):
-        if tid in seen:
-            problems.append(f"duplicate technique {tid}")
-        seen.add(tid)
+    # Two rules on one id are allowed and one rule twice is not: a release that
+    # folds two sub-techniques into one technique — 19.2 folded Disable or
+    # Modify Tools and Indicator Blocking into T1685 — leaves two distinct
+    # evidence rules pointing at the same id, and each keeps its own APIs, its
+    # own min_apis and its own confidence. A repeated (id, name) is the copy
+    # the duplicate check exists to catch.
+    seen: set[tuple[str, str]] = set()
+    for rule in ((str(t["technique_id"]), str(t["name"])) for t in techniques):
+        if rule in seen:
+            problems.append(f"duplicate technique {rule[0]} {rule[1]!r}")
+        seen.add(rule)
 
     # An API in two categories has no defined tier. The consumer is a reverse
     # index — one dict, one entry per name — so whichever category is built last
@@ -1860,7 +1924,12 @@ def _block(category: str) -> dict[str, object]:
 
 
 def main() -> int:
-    problems = _validate()
+    techniques, moved, dropped = _retargeted(ATTCK_TECHNIQUES)
+    for old, new in moved:
+        print(f"retargeted {old} -> {new} (the vendored set names it as the replacement)")
+    for old in dropped:
+        print(f"dropped {old}: the release retired it and names no replacement")
+    problems = _validate(techniques)
     if problems:
         for p in problems:
             print(f"ERROR: {p}", file=sys.stderr)
@@ -1875,8 +1944,7 @@ def main() -> int:
         "schema": "maljan-api-attck/v1",
         "version": "1.0",
         "techniques": [
-            {**t, "platforms": ["windows"], "apis": sorted(set(t["apis"]))}
-            for t in ATTCK_TECHNIQUES
+            {**t, "platforms": ["windows"], "apis": sorted(set(t["apis"]))} for t in techniques
         ],
     }
 
@@ -1888,7 +1956,7 @@ def main() -> int:
         f"wrote {_BEHAVIOUR_OUT.relative_to(_ROOT)}: "
         f"{len(WINDOWS_CATEGORIES)} categories, {total_apis} APIs"
     )
-    print(f"wrote {_ATTCK_OUT.relative_to(_ROOT)}: {len(ATTCK_TECHNIQUES)} techniques")
+    print(f"wrote {_ATTCK_OUT.relative_to(_ROOT)}: {len(techniques)} techniques")
     return 0
 
 

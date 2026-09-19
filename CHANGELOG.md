@@ -487,6 +487,13 @@ change landed on `main`.
   `data/attck_retired_ids.json` gains `revoked_by` per row where the bundle
   names a successor, which is what lets a data builder retarget a retired id
   mechanically.
+- **The API capability builder regenerates its own data file.** Its curated
+  source still named two ids ATT&CK 19.2 retired, and its own check refused
+  them, so `data/api_attck_map_v1.json` had no working generator. A retired id
+  is now followed to the id the vendored set's `revoked_by` names, or dropped
+  and listed when it names none, and two rules may share an id where a release
+  folded two sub-techniques into one. `make prepare-api-db` reproduces both
+  shipped data files byte for byte.
 - **A failed ATT&CK index build is retried.** It is remembered with the moment
   it happened and re-attempted after `validation.index_retry_seconds` (default
   900; 0 never re-attempts, which is the previous behaviour). One unreachable
