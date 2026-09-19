@@ -22,6 +22,7 @@ from datetime import UTC, datetime
 from cryptography.fernet import Fernet
 from pydantic import SecretStr
 
+from app.auth.jwt import read_moment
 from app.config import (
     _PLACEHOLDER_JWT_SECRETS,
     _PLACEHOLDER_MINIO_KEYS,
@@ -101,21 +102,30 @@ def validate_bootstrap(s: APISettings) -> BootstrapReport:
 
     # A grace-period signing secret with no end is a retired key this API
     # accepts for the life of the deployment, which is the thing rotating was
-    # meant to remove. The end is written down or the secret is not set.
+    # meant to remove. Loud at every start rather than refused: a deployment
+    # halfway through a rotation when the setting arrived has no end written
+    # down, and neither refusing to start nor refusing the old secret is
+    # something an upgrade may do to it.
     grace_secret = _secret_value(getattr(s, "jwt_previous_secret_key", "")).strip()
-    if grace_secret:
-        lapses = getattr(s, "jwt_previous_secret_not_after", None)
-        if lapses is None:
-            problems.append(
-                "JWT_PREVIOUS_SECRET_KEY is set with no JWT_PREVIOUS_SECRET_NOT_AFTER; "
-                "give the grace period an end (an ISO-8601 moment, UTC when it carries "
-                "no offset) or clear the previous secret"
-            )
-        elif (lapses if lapses.tzinfo else lapses.replace(tzinfo=UTC)) <= datetime.now(UTC):
-            warnings.append(
-                "JWT_PREVIOUS_SECRET_KEY is past JWT_PREVIOUS_SECRET_NOT_AFTER and is no "
-                "longer accepted; clear both to finish the rotation."
-            )
+    written = str(getattr(s, "jwt_previous_secret_not_after", "") or "").strip()
+    lapses = read_moment(written)
+    # A moment that does not read is a typo an operator can fix in a second,
+    # and one they must be told about: left alone it reads as "no end at all",
+    # which is the opposite of what they were writing down. A refusal here can
+    # only reach a deployment that set this variable itself.
+    if written and lapses is None:
+        problems.append(f"JWT_PREVIOUS_SECRET_NOT_AFTER is not an ISO-8601 moment: {written!r}")
+    elif grace_secret and lapses is None:
+        warnings.append(
+            "JWT_PREVIOUS_SECRET_KEY is accepted with no end; set "
+            "JWT_PREVIOUS_SECRET_NOT_AFTER (an ISO-8601 moment, UTC when it carries "
+            "no offset) or clear the previous secret."
+        )
+    elif grace_secret and lapses is not None and lapses <= datetime.now(UTC):
+        warnings.append(
+            "JWT_PREVIOUS_SECRET_KEY is past JWT_PREVIOUS_SECRET_NOT_AFTER and is no "
+            "longer accepted; clear both to finish the rotation."
+        )
 
     encryption_key = _secret_value(s.settings_encryption_key).strip()
     if not encryption_key:

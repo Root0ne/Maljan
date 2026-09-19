@@ -278,17 +278,28 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     grace = _grace_secret_state()
     if grace is not None:
         kid = str(grace["key_id"])
-        standing = "accepted" if grace["accepted"] else "no longer accepted"
-        tense = "lapses" if grace["accepted"] else "lapsed"
-        logger.info(
-            "A JWT rotation is in progress: sessions signed under kid=%s are %s, "
-            "and the window %s %s.",
-            kid,
-            standing,
-            tense,
-            grace["not_after"],
-            extra={"component": "lifecycle"},
-        )
+        if not grace["bounded"]:
+            # No end was written down, so nothing will ever end it. Warning,
+            # not info: this is the line that has to be noticed.
+            logger.warning(
+                "A JWT rotation has no end: sessions signed under kid=%s are accepted "
+                "indefinitely. Set JWT_PREVIOUS_SECRET_NOT_AFTER or clear the previous "
+                "secret.",
+                kid,
+                extra={"component": "lifecycle"},
+            )
+        else:
+            standing = "accepted" if grace["accepted"] else "no longer accepted"
+            tense = "lapses" if grace["accepted"] else "lapsed"
+            logger.info(
+                "A JWT rotation is in progress: sessions signed under kid=%s are %s, "
+                "and the window %s %s.",
+                kid,
+                standing,
+                tense,
+                grace["not_after"],
+                extra={"component": "lifecycle"},
+            )
 
     logger.info(
         f"Maljan API v{settings.app_version} started successfully",

@@ -13,7 +13,6 @@ whichever import built the settings singleton first.
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any
 
 from pydantic import Field, SecretStr, field_validator, model_validator
@@ -147,7 +146,12 @@ class APISettings(BaseSettings):
     jwt_key_id: str = "v1"
     jwt_previous_secret_key: SecretStr = SecretStr("")
     jwt_previous_key_id: str = "v0"
-    jwt_previous_secret_not_after: datetime | None = None
+    # Typed as text and parsed where it is read, not by pydantic: this module
+    # never raises on construction (see ``app.bootstrap``), and a mistyped
+    # moment must reach an operator as the one bootstrap report naming every
+    # problem rather than as a traceback from whichever import built the
+    # settings singleton first.
+    jwt_previous_secret_not_after: str = ""
 
     # Secure flag on the HttpOnly refresh cookie. Left unset by default so it
     # can default to the inverse of ``debug`` (true outside debug, so the

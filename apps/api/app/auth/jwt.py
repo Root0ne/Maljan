@@ -29,28 +29,59 @@ def _secret() -> str:
     return raw.get_secret_value() if isinstance(raw, SecretStr) else str(raw)
 
 
-def grace_secret_not_after() -> datetime | None:
-    """When the grace secret stops being accepted, as an aware moment.
+def read_moment(value: object) -> datetime | None:
+    """An ISO-8601 moment as an aware ``datetime``, or ``None``.
 
     A naive value is read as UTC: an operator writing a date in a bootstrap
     file is writing the deployment's clock, and reading it as local time would
-    move the wall by the container's timezone.
+    move the wall by the container's timezone. A date with no time is that
+    day's midnight.
+
+    Unparseable text gives ``None`` rather than raising — the setting is plain
+    text precisely so that nothing here can fail at import — and
+    ``app.bootstrap`` is what tells the operator their moment did not read.
     """
-    moment = getattr(settings, "jwt_previous_secret_not_after", None)
-    if not isinstance(moment, datetime):
-        return None
+    if isinstance(value, datetime):
+        moment = value
+    else:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        try:
+            moment = datetime.fromisoformat(text)
+        except ValueError:
+            return None
     return moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
 
 
+def grace_secret_not_after() -> datetime | None:
+    """When the grace secret stops being accepted, as an aware moment."""
+    return read_moment(getattr(settings, "jwt_previous_secret_not_after", None))
+
+
 def grace_secret_is_live(now: datetime | None = None) -> bool:
-    """Whether a grace secret is configured and still inside its window."""
+    """Whether a grace secret is configured and still accepted.
+
+    A window with no end is open. Only a moment somebody wrote down is
+    enforced: a deployment halfway through a rotation when this setting
+    arrived has the previous secret set and nothing else, and refusing that
+    secret would log out every session minted before the rotation — an upgrade
+    that breaks a running deployment, quietly. ``bootstrap`` says so out loud
+    at every start instead, and ``/system/status`` says the window is
+    unbounded.
+
+    Strictly before the moment, so a token is refused at it as well as after.
+    """
     raw = getattr(settings, "jwt_previous_secret_key", None)
     secret = raw.get_secret_value() if isinstance(raw, SecretStr) else str(raw or "")
     if not secret:
         return False
+    # A moment that did not read is no moment. It is a bootstrap problem, so
+    # the operator is told; it is not a reason to stop honouring a secret they
+    # meant to keep honouring for a while longer.
     not_after = grace_secret_not_after()
     if not_after is None:
-        return False
+        return True
     return (now or datetime.now(UTC)) < not_after
 
 
@@ -63,7 +94,8 @@ def _previous_secret() -> str:
     ``jwt_previous_secret_not_after`` the old secret signs nothing this API
     accepts, so an operator who forgets to clear it is not running a
     deployment where a retired key is honoured for good. A secret configured
-    with no end is refused at startup, so it cannot reach here.
+    with no end has no window to be past, and is accepted as it was before
+    the setting existed.
     """
     if not grace_secret_is_live():
         return ""

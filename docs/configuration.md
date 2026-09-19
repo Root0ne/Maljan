@@ -37,8 +37,9 @@ same contract in short form.
 | `JWT_ISSUER` | no | `maljan-api` | |
 | `JWT_AUDIENCE` | no | `maljan-clients` | |
 | `JWT_KEY_ID` | no | `v1` | `kid` stamped on new tokens. |
-| `JWT_PREVIOUS_SECRET_KEY` | no | — | Accepted alongside the current secret during a rotation window. |
+| `JWT_PREVIOUS_SECRET_KEY` | no | — | Accepted alongside the current secret during a rotation window; set `JWT_PREVIOUS_SECRET_NOT_AFTER` beside it to give that window an end. |
 | `JWT_PREVIOUS_KEY_ID` | no | `v0` | |
+| `JWT_PREVIOUS_SECRET_NOT_AFTER` | no | — | ISO-8601 moment (UTC when it carries no offset) after which a token signed with the previous secret is refused. Unset means the window has no end, which the startup check warns about at every start; a value that does not read as a moment is refused at startup. |
 | `APP_NAME` | no | `Maljan` | |
 | `APP_VERSION` | no | `0.1.0` | |
 | `DEBUG` | no | `false` | Also enables `/docs`, `/redoc` and `/openapi.json`. |

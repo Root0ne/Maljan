@@ -77,12 +77,15 @@ class SystemStatusResponse(BaseModel):
     jwt_grace_secret: dict[str, object] | None = Field(
         default=None,
         description=(
-            "The signing-secret rotation in progress, if any: whether a "
-            "previous secret is configured, the moment it stops being "
-            "accepted, and whether that moment has passed. A rotation nobody "
-            "finishes leaves a retired key accepted, so it is on the status "
-            "an operator reads. Admin callers only — omitted for anonymous "
-            "requests, and omitted entirely when no previous secret is set."
+            "The signing-secret rotation in progress, if any: the previous "
+            "key id, the moment it stops being accepted, whether it is still "
+            "accepted, and whether an end was written down at all. An "
+            "unbounded window is accepted and never ends, which is a "
+            "different state from a lapsed one and is why `bounded` is here "
+            "beside `accepted`. A rotation nobody finishes leaves a retired "
+            "key accepted, so it is on the status an operator reads. Admin "
+            "callers only — omitted for anonymous requests, and omitted "
+            "entirely when no previous secret is set."
         ),
     )
 
@@ -131,7 +134,8 @@ def _grace_secret_state() -> dict[str, object] | None:
     A rotation is two steps and a wait, and the wait is where one is forgotten.
     Naming the moment here is what lets an operator see, without reading a
     bootstrap file, that the deployment is still carrying a retired key and
-    when it stops carrying it.
+    when it stops carrying it — or that nobody said when, which is the state
+    ``bounded`` exists to tell apart from a window that has run out.
     """
     from app.auth.jwt import grace_secret_is_live, grace_secret_not_after
 
@@ -144,6 +148,7 @@ def _grace_secret_state() -> dict[str, object] | None:
         "key_id": str(getattr(settings, "jwt_previous_key_id", "")),
         "not_after": not_after.isoformat() if not_after else None,
         "accepted": grace_secret_is_live(),
+        "bounded": not_after is not None,
     }
 
 
